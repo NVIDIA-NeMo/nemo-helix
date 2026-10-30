@@ -9,7 +9,7 @@
  *   vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect', async () =>
  *     (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
  *   );
- *   vi.mock('@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview', async (orig) =>
+ *   vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', async (orig) =>
  *     (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(await orig(), ROW)
  *   );
  *
@@ -17,7 +17,7 @@
  * to pick that file. The preview answers every picked ref with the given row.
  */
 
-import type { DatasetPreview } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
+import type { DatasetPreview } from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 import { type UseControllerProps, useController } from 'react-hook-form';
 
 export const datasetFileSelectMock = () => ({

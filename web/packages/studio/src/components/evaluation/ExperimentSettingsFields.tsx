@@ -4,7 +4,7 @@
 import { Accordion, FormField, Stack, TextArea } from '@nvidia/foundations-react-core';
 import { DefaultSortControl } from '@studio/components/DefaultSortControl';
 import { DEFAULT_SORT } from '@studio/components/DefaultSortControl/util';
-import type { ExperimentSettingsFieldNames } from '@studio/components/evaluation/shared/experimentSettings';
+import type { ExperimentSettingsFieldNames } from '@studio/components/evaluation/experimentSettings';
 import { ExperimentFlagSwitch } from '@studio/components/ExperimentFlagSwitch';
 import { Controller, type Control, type FieldValues } from 'react-hook-form';
 

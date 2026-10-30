@@ -30,16 +30,11 @@ vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSele
   (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
 );
 
-vi.mock(
-  '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview',
-  async (importOriginal) =>
-    (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(
-      await importOriginal(),
-      {
-        prompt: 'hi',
-        expected: 'hi',
-      }
-    )
+vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', async (importOriginal) =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(await importOriginal(), {
+    prompt: 'hi',
+    expected: 'hi',
+  })
 );
 
 // The fixture filesets hold no eval config, so the real check would report every run as unusable.
