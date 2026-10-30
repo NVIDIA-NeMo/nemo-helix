@@ -4,8 +4,9 @@
 """A request-validation handler that always answers 422.
 
 FastAPI's default handler echoes each invalid value back in the error's ``input``. Python's JSON parser accepts
-``NaN``, ``Infinity`` and lone surrogates, but a response can't encode them, so a request carrying one got 500.
-This handler keeps the default body and drops ``input`` and ``ctx`` only when that body can't be encoded.
+``NaN``, ``Infinity`` and lone surrogates, and a non-JSON body arrives as raw bytes that may not be UTF-8, but a
+response can't encode any of them, so a request carrying one got 500. This handler keeps the default body and drops
+``input`` and ``ctx`` only when that body can't be encoded.
 """
 
 from fastapi import FastAPI, Request
@@ -23,14 +24,19 @@ async def request_validation_error_handler(request: Request, exc: Exception) -> 
     """Answer 422 with FastAPI's default body, minus the fields that can't be encoded when there are any."""
     if not isinstance(exc, RequestValidationError):
         raise exc
-    errors = jsonable_encoder(exc.errors())
+    # Encoding fails on non-UTF-8 bytes (UnicodeDecodeError); rendering fails on NaN or a lone surrogate.
     try:
-        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": errors})
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(exc.errors())}
+        )
     except (ValueError, UnicodeEncodeError):
-        encodable = [
-            {field: value for field, value in error.items() if field not in _UNENCODABLE_FIELDS} for error in errors
+        errors = [
+            {field: value for field, value in error.items() if field not in _UNENCODABLE_FIELDS}
+            for error in exc.errors()
         ]
-        return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": encodable})
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(errors)}
+        )
 
 
 def register_validation_exception_handler(app: FastAPI) -> None:

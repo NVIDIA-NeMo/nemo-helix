@@ -28,9 +28,9 @@ def _app(*, with_handler: bool) -> FastAPI:
     return app
 
 
-def _post(app: FastAPI, content: str):
+def _post(app: FastAPI, content: str | bytes, content_type: str = "application/json"):
     return TestClient(app, raise_server_exceptions=False).post(
-        "/", content=content, headers={"Content-Type": "application/json"}
+        "/", content=content, headers={"Content-Type": content_type}
     )
 
 
@@ -53,20 +53,27 @@ def test_an_encodable_error_keeps_fastapis_default_body(content):
 
 
 @pytest.mark.parametrize(
-    "content",
+    ("content", "content_type"),
     [
-        pytest.param('{"count": 1, "ratio": NaN}', id="NaN"),
-        pytest.param('{"count": 1, "ratio": Infinity}', id="infinity"),
-        pytest.param('{"count": -Infinity, "ratio": 2}', id="negative infinity beside an encodable error"),
-        pytest.param(r'{"count": "\ud800", "ratio": 0.5}', id="lone surrogate"),
-        pytest.param(r'{"count": 1, "ratio": 0.5, "attributes": ["\udfff"]}', id="lone surrogate in a nested input"),
+        pytest.param('{"count": 1, "ratio": NaN}', "application/json", id="NaN"),
+        pytest.param('{"count": 1, "ratio": Infinity}', "application/json", id="infinity"),
+        pytest.param(
+            '{"count": -Infinity, "ratio": 2}', "application/json", id="negative infinity beside an encodable error"
+        ),
+        pytest.param(r'{"count": "\ud800", "ratio": 0.5}', "application/json", id="lone surrogate"),
+        pytest.param(
+            r'{"count": 1, "ratio": 0.5, "attributes": ["\udfff"]}',
+            "application/json",
+            id="lone surrogate in a nested input",
+        ),
+        pytest.param(b"\xff", "application/octet-stream", id="non-JSON body that isn't UTF-8"),
     ],
 )
-def test_an_error_echoing_an_unencodable_value_is_422_without_the_echo(content):
-    """Python's JSON parser accepts these, but a response can't carry them, so FastAPI's default answered 500."""
-    response = _post(_app(with_handler=True), content)
+def test_an_error_echoing_an_unencodable_value_is_422_without_the_echo(content, content_type):
+    """A response can't carry these values, so FastAPI's default answered 500."""
+    response = _post(_app(with_handler=True), content, content_type)
 
-    assert _post(_app(with_handler=False), content).status_code == 500
+    assert _post(_app(with_handler=False), content, content_type).status_code == 500
     assert response.status_code == 422
     errors = response.json()["detail"]
     assert errors
