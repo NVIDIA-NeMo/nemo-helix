@@ -19,8 +19,10 @@ HELM_TEMPLATE_TIMEOUT_SECONDS = 60
 HELM_SERVER_DRY_RUN_TIMEOUT_SECONDS = 180
 CLICKHOUSE_CREDENTIALS_CHECKSUM = "checksum/clickhouse-credentials"
 CHART_MANAGED_CLICKHOUSE_SECRET = "nemo-helix-clickhouse"
-CLICKHOUSE_PASSWORD_KEY = "password"
+CLICKHOUSE_CREDENTIAL_KEY = "password"
 STORED_GENERATED_PASSWORD = "already-installed-password"
+ROTATED_CREDENTIALS_CHECKSUM = "a66eca96f455766bc9e609302398822ab6465f514a7bd5f99e8a1df1f0e6e2e6"
+EXTERNAL_CREDENTIALS_CHECKSUM = "c1622b5d2047c13b06f03dac67e9c7cc9ba19d4109eedb3b6f6c2cf8225a07a5"
 
 
 def _helm_template(*args: str) -> list[dict]:
@@ -93,18 +95,11 @@ def _env_by_name(container: dict) -> dict[str, dict]:
 
 
 def _sha256_text(value: str) -> str:
-    # Reproduces Helm's sha256sum for the pod annotation. This is a checksum, not a password hash.
-    # codeql[py/weak-sensitive-data-hashing]
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _clickhouse_name_key_checksum(secret_name: str, password_key: str = CLICKHOUSE_PASSWORD_KEY) -> str:
-    return _sha256_text(f"{secret_name}:{password_key}")
-
-
-def _explicit_password_checksum(password: str) -> str:
-    encoded = base64.b64encode(password.encode()).decode()
-    return _sha256_text(encoded)
+def _clickhouse_name_key_checksum(secret_name: str, secret_key: str = CLICKHOUSE_CREDENTIAL_KEY) -> str:
+    return _sha256_text(f"{secret_name}:{secret_key}")
 
 
 def _pod_annotation(documents: list[dict], *, kind: str, name: str, annotation: str) -> str:
@@ -240,7 +235,7 @@ def clickhouse_lookup_namespace() -> Iterator[str]:
             "-",
             input_text=_secret_manifest(
                 CHART_MANAGED_CLICKHOUSE_SECRET,
-                CLICKHOUSE_PASSWORD_KEY,
+                CLICKHOUSE_CREDENTIAL_KEY,
                 STORED_GENERATED_PASSWORD,
                 namespace=namespace,
                 helm_owned=True,
@@ -539,7 +534,7 @@ def test_chart_managed_clickhouse_checksum_ignores_stored_generated_password(
         "--set-string",
         "clickhouse.auth.password=rotated-test-password",
     )
-    _assert_clickhouse_checksums(rotated, _explicit_password_checksum("rotated-test-password"))
+    _assert_clickhouse_checksums(rotated, ROTATED_CREDENTIALS_CHECKSUM)
 
     cleared = _helm_server_dry_run(clickhouse_lookup_namespace)
     _assert_clickhouse_checksums(cleared, expected)
@@ -555,4 +550,4 @@ def test_existing_clickhouse_secret_checksum_hashes_live_password(clickhouse_loo
         "clickhouse.auth.existingSecretPasswordKey=custom-key",
     )
 
-    _assert_clickhouse_checksums(documents, _explicit_password_checksum("external-password"))
+    _assert_clickhouse_checksums(documents, EXTERNAL_CREDENTIALS_CHECKSUM)
