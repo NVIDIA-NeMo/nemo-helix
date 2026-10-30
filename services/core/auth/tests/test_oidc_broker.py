@@ -165,7 +165,7 @@ def test_pkce_s256_is_stable() -> None:
 def _confidential_auth_config(
     *,
     authorization_endpoint: str = "https://idp.example.com/authorize",
-    bearer_token_source: Literal["access_token", "id_token"] = "access_token",
+    bearer_token_source: Literal["access_token"] = "access_token",
 ) -> AuthConfig:
     return AuthConfig(
         enabled=True,
@@ -342,14 +342,12 @@ def _start_web_session_login(
 
 @pytest.mark.parametrize("client_name", ["public", "confidential"])
 @pytest.mark.parametrize("flow", ["browser", "cli"])
-@pytest.mark.parametrize("token_source", ["access_token", "id_token"])
 @pytest.mark.parametrize("selected_token", ["valid", "missing", "invalid"])
 def test_callback_validates_selected_client_bearer(
     broker_app,
     monkeypatch: pytest.MonkeyPatch,
     client_name: str,
     flow: str,
-    token_source: Literal["access_token", "id_token"],
     selected_token: str,
 ) -> None:
     client, _transactions, credentials = broker_app
@@ -357,12 +355,7 @@ def test_callback_validates_selected_client_bearer(
     public = _public_broker_auth_config().oidc.public_client
     assert public is not None
     assert config.oidc.confidential_client is not None
-    # Give the other client the opposite setting to detect global/default selection.
     config.oidc.public_client = public
-    config.oidc.public_client.bearer_token_source = "access_token" if token_source == "id_token" else "id_token"
-    config.oidc.confidential_client.bearer_token_source = config.oidc.public_client.bearer_token_source
-    selected = config.oidc.public_client if client_name == "public" else config.oidc.confidential_client
-    selected.bearer_token_source = token_source
     Configuration.set_override(config)
     validated = []
 
@@ -378,11 +371,11 @@ def test_callback_validates_selected_client_bearer(
 
     monkeypatch.setattr("nhx.core.auth.oidc_broker.routes.resolve_bearer_token", resolve_selected)
     tokens = {"access_token": "opaque-access-token", "id_token": "unselected-id-token"}
-    tokens[token_source] = "selected-signed-jwt"
+    tokens["access_token"] = "selected-signed-jwt"
     if selected_token == "missing":
-        del tokens[token_source]
+        del tokens["access_token"]
     elif selected_token == "invalid":
-        tokens[token_source] = "invalid-jwt"
+        tokens["access_token"] = "invalid-jwt"
     with respx.mock:
         respx.post("https://idp.example.com/token").respond(200, json=tokens)
         if flow == "browser":
@@ -724,48 +717,32 @@ def test_token_endpoint_returns_opaque_refresh_handle_and_refresh_uses_provider_
         assert reused.json() == {"detail": "Refresh token was not found"}
 
 
-def test_confidential_broker_returns_configured_id_token_bearer(broker_app) -> None:
-    client, transactions, _credentials = broker_app
-    Configuration.set_override(_confidential_auth_config(bearer_token_source="id_token"))
+@pytest.mark.parametrize(
+    "refresh_payload",
+    [{"id_token": "provider-id"}, {"access_token": "", "id_token": "provider-id"}],
+)
+def test_refresh_rejects_missing_access_token_without_rotating_handle(
+    broker_app, refresh_payload: dict[str, str]
+) -> None:
+    client, _transactions, credentials = broker_app
     with respx.mock:
-        respx.post("https://idp.example.com/token").mock(
+        token_route = respx.post("https://idp.example.com/token").mock(
             side_effect=[
                 httpx.Response(
                     200,
-                    json={
-                        "access_token": "provider-access",
-                        "id_token": "provider-id",
-                        "refresh_token": "provider-refresh",
-                        "expires_in": 900,
-                    },
+                    json={"access_token": "provider-access", "refresh_token": "provider-refresh"},
                 ),
-                httpx.Response(
-                    200,
-                    json={
-                        "id_token": "provider-id-2",
-                        "refresh_token": "provider-refresh-2",
-                        "expires_in": 900,
-                    },
-                ),
+                httpx.Response(200, json=refresh_payload),
+                httpx.Response(200, json={"access_token": "renewed-access"}),
             ]
         )
-        start = client.post(
-            "/apis/auth/v2/authorize",
-            json={
-                "redirect_uri": "http://127.0.0.1:54321/callback",
-                "code_challenge": _CLI_CODE_CHALLENGE,
-                "state": _CLI_STATE,
-            },
-        )
-        transaction_id = start.json()["transaction_id"]
-        assert transaction_id in transactions.rows
+        state, _redirect = _start_cli_authorization(client)
         callback = client.get(
             "/apis/auth/v2/login/callback",
-            params={"code": "auth-code", "state": transaction_id},
+            params={"code": "auth-code", "state": state},
             follow_redirects=False,
         )
         one_time_code = parse_qs(urlparse(callback.headers["location"]).query)["code"][0]
-
         exchanged = client.post(
             "/apis/auth/v2/token",
             json={
@@ -774,15 +751,43 @@ def test_confidential_broker_returns_configured_id_token_bearer(broker_app) -> N
                 "code_verifier": _CLI_CODE_VERIFIER,
             },
         )
-
         assert exchanged.status_code == 200
-        assert exchanged.json()["access_token"] == "provider-id"
-        refreshed = client.post(
+        refresh_handle = exchanged.json()["refresh_token"]
+        original_record = credentials.rows[("broker_refresh", refresh_handle)]
+
+        rejected = client.post(
             "/apis/auth/v2/token",
-            json={"grant_type": "refresh_token", "refresh_token": exchanged.json()["refresh_token"]},
+            json={"grant_type": "refresh_token", "refresh_token": refresh_handle},
         )
-        assert refreshed.status_code == 200
-        assert refreshed.json()["access_token"] == "provider-id-2"
+        assert rejected.status_code == 502
+        assert rejected.json() == {"detail": "Identity provider token response did not include access_token"}
+        assert credentials.rows == {("broker_refresh", refresh_handle): original_record}
+
+        retried = client.post(
+            "/apis/auth/v2/token",
+            json={"grant_type": "refresh_token", "refresh_token": refresh_handle},
+        )
+        assert retried.status_code == 200
+        assert retried.json()["access_token"] == "renewed-access"
+        assert retried.json()["refresh_token"] != refresh_handle
+        assert ("broker_refresh", refresh_handle) not in credentials.rows
+        assert token_route.calls[-1].request.content == b"grant_type=refresh_token&refresh_token=provider-refresh"
+
+
+def test_broker_response_uses_access_token_and_never_falls_back_to_id_token() -> None:
+    from fastapi import HTTPException
+    from nhx.core.auth.oidc_broker.routes import _token_response
+
+    response = _token_response(
+        {"access_token": "provider-access", "id_token": "provider-id", "expires_in": 900},
+        refresh_handle=None,
+    )
+    assert response["access_token"] == "provider-access"
+    with pytest.raises(HTTPException, match="access_token"):
+        _token_response(
+            {"id_token": "provider-id"},
+            refresh_handle=None,
+        )
 
 
 def test_token_endpoint_rejects_wrong_cli_code_verifier(broker_app) -> None:

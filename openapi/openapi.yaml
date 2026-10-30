@@ -12909,9 +12909,7 @@ components:
           title: Default
         bearer_token_source:
           type: string
-          enum:
-          - access_token
-          - id_token
+          const: access_token
           title: Bearer Token Source
           default: access_token
         default_scopes:
@@ -21545,9 +21543,7 @@ components:
           title: Default
         bearer_token_source:
           type: string
-          enum:
-          - access_token
-          - id_token
+          const: access_token
           title: Bearer Token Source
           default: access_token
         default_scopes:

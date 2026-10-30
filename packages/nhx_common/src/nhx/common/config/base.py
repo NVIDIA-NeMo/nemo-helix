@@ -76,7 +76,7 @@ class OIDCPublicClientConfig(BaseSettings):
     authorization_endpoint: str | None = None
     token_endpoint: str | None = None
     device_authorization_endpoint: str | None = None
-    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
+    bearer_token_source: Literal["access_token"] = "access_token"
     default_scopes: str = "openid profile email offline_access"
     scope_prefix: str | None = None
     device_authorization_requires_device_id: bool = False
@@ -92,7 +92,7 @@ class OIDCConfidentialClientConfig(BaseSettings):
     login_redirect_uri: str
     authorization_endpoint: str | None = None
     token_endpoint: str | None = None
-    bearer_token_source: Literal["access_token", "id_token"] = "access_token"
+    bearer_token_source: Literal["access_token"] = "access_token"
     default_scopes: str = "openid profile email offline_access"
     scope_prefix: str | None = None
 

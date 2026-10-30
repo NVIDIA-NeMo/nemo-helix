@@ -50,6 +50,7 @@ describe('useChatCompletion authentication', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it('uses the access token by default', async () => {
@@ -62,14 +63,16 @@ describe('useChatCompletion authentication', () => {
     );
   });
 
-  it('uses the ID token when configured', async () => {
+  it('does not send an ID token from an unsupported legacy source setting', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.stubEnv('VITE_AUTH_BEARER_TOKEN_SOURCE', 'id_token');
     const { result } = renderHook(() => useChatCompletion(), { wrapper: createWrapper() });
 
     await result.current.mutateAsync(request);
 
-    expect(mocks.create.mock.calls[0]?.[1]?.headers?.Authorization).toBe(
-      `Bearer ${mocks.user.id_token}`
+    expect(mocks.create.mock.calls[0]?.[1]?.headers?.Authorization).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith(
+      'Warning: No access token provided. Authentication may be required.'
     );
   });
 
