@@ -527,7 +527,7 @@ password. Do not hash lookup data for this path. Replacing that Secret outside
 Helm, including deleting it so the chart writes a new password, does not change
 this checksum. Both workloads read the password from the Secret when their pods
 start, so restart only one of them after that replacement and they can disagree.
-Set auth.password or auth.existingSecret to roll both together.
+Set auth.password, or set auth.existingSecret to a separate, pre-created Secret, to roll both together. Do not set auth.existingSecret to the chart-managed Secret name: the chart stops rendering that Secret, and Helm deletes it.
 
 Existing and external Secrets are not rendered by this chart. Their checksum
 follows lookup data and falls back to the name and key until that data exists.

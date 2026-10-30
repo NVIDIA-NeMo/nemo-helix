@@ -480,7 +480,7 @@ clickhouse:
   auth:
     # -- ClickHouse username used by Intake.
     username: nemo
-    # -- ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password and keeps it across upgrades. Replacing that generated Secret outside Helm does not roll the API or ClickHouse; set this password or auth.existingSecret to roll both together.
+    # -- ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password and keeps it across upgrades. Replacing that generated Secret outside Helm does not roll the API or ClickHouse; set this password, or set auth.existingSecret to a separate, pre-created Secret, to roll both together. Do not set auth.existingSecret to the chart-managed Secret name.
     password: null
     # -- ClickHouse database used by Intake.
     database: intake
