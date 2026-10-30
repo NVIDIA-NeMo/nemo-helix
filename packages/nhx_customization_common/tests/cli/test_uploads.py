@@ -23,6 +23,7 @@ from nhx.customization_common.cli.uploads import (
     fileset_name_for,
     find_conflicts,
     is_huggingface_id,
+    require_new_filesets,
     write_refs,
 )
 
@@ -563,3 +564,18 @@ class TestCreateDatasetFileset:
 
         assert report.reused == ["ws/sft-data"]
         assert files.uploaded == []
+
+
+class TestRequireNewFilesets:
+    def test_passes_when_every_fileset_is_free(self) -> None:
+        require_new_filesets(_FakeFiles(), names=["sft-data", "sft-data-test"], workspace="ws")
+
+    def test_names_every_fileset_that_is_taken(self) -> None:
+        files = _FakeFiles(existing={"sft-data", "sft-data-test"})
+
+        with pytest.raises(UploadError, match="^ws/sft-data and ws/sft-data-test already exist. Pass --exist-ok"):
+            require_new_filesets(files, names=["sft-data", "sft-data-test"], workspace="ws")
+        with pytest.raises(UploadError, match="^ws/sft-data-test already exists."):
+            require_new_filesets(
+                _FakeFiles(existing={"sft-data-test"}), names=["sft-data", "sft-data-test"], workspace="ws"
+            )

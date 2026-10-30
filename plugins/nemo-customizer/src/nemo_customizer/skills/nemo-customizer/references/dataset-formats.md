@@ -35,9 +35,9 @@ Pick `--format` for the backend from the plan; the command does not guess it:
 
 **Not GRPO.** GRPO trains on NeMo Gym rows built per environment: the **nemo-gym-environments** skill.
 
-Other column names: `--prompt-column`, `--response-column`, `--system-column` (chat, preference), `--messages-column`, `--chosen-column`, `--rejected-column`, `--query-column`, `--positive-column`, `--negatives-column`, `--text-column`. A flag the format does not use, or a column the table lacks, fails before anything is uploaded, and the error lists the table's columns. Every format writes `train.jsonl` and `validation.jsonl` (no `validation.jsonl` with `--val-fraction 0`: training then holds out its own); the frozen test split goes to `<fileset>-test` (`--test-fraction`: 0 for `preference`, else 0.1). Same `--seed`, same split.
+Other column names: `--prompt-column`, `--response-column`, `--system-column` (chat, preference), `--messages-column`, `--chosen-column`, `--rejected-column`, `--query-column`, `--positive-column`, `--negatives-column`, `--text-column`. A flag the format does not use, or a column the table lacks, fails before anything is uploaded, and the error lists the table's columns. Every format writes `train.jsonl` and `validation.jsonl` (no `validation.jsonl` with `--val-fraction 0`: training then holds out its own); the frozen test split goes to `<fileset>-test` (`--test-fraction`: 0 for `preference`, else 0.1). Same `--seed`, same split; a fraction above 0 gets at least one row.
 
-Stdout is JSON: `dataset` (the training ref), `test_dataset` when there is a test split, `format`, `trained_by`, the `columns` it read, `rows` per split, and `dropped` (rows with an empty field). Use `dataset` in the job JSON and `test_dataset` for evaluation. Like `--upload-dataset`, an existing fileset fails unless `--exist-ok`, which reuses it without replacing its files: prepare changed data under a new name.
+Stdout is JSON: `dataset` (the training ref), `test_dataset` when there is a test split, `format`, `trained_by`, the `columns` it read, `rows` per split, `dropped` (rows with an empty required field), and `reused` when `--exist-ok` reused a fileset. Use `dataset` in the job JSON and `test_dataset` for evaluation. Like `--upload-dataset`, an existing fileset fails unless `--exist-ok`, which reuses it without replacing its files, so `format`, `columns` and `rows` then describe this run's rows, not the reused fileset's: prepare changed data under a new name. Without `--exist-ok`, both filesets are checked before anything is uploaded.
 
 ## Automodel
 
@@ -73,12 +73,13 @@ For **CUSTOM**, placeholders in `prompt_template` must match column names exactl
 
 ## Unsloth
 
-Unsloth has no schema auto-detection — the row shape is controlled by two `dataset` fields in the job JSON. The training driver hands rows to `trl.SFTTrainer`, which only reads one column (`text_field`) per row.
+Unsloth has no schema auto-detection — the row shape is controlled by two `dataset` fields in the job JSON. With `apply_chat_template: true`, the training driver renders each row's `messages` into `text_field`; otherwise `trl.SFTTrainer` reads the row as it is: the `text_field` column, or a `prompt`/`completion` pair.
 
 | Mode | `dataset.apply_chat_template` | Required JSONL shape | What the trainer sees |
 |------|------------------------------|----------------------|----------------------|
 | **Messages (preferred)** | `true` | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` (same as automodel CHAT) | Each row's `messages` is rendered through `tokenizer.apply_chat_template(...)` at training time; the rendered string is written into `text_field` (default `"text"`). |
 | **Pre-rendered text** | `false` (default) | `{"text": "<one fully-formed training string>"}` | The string in `text_field` is fed to SFTTrainer verbatim. |
+| **Prompt-completion** | `false` (default) | `{"prompt": "...", "completion": "..."}` (same as automodel SFT) | TRL's prompt-completion format: raw text with no chat template, so for base models. |
 
 Job JSON snippets:
 

@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import pytest
 import typer
 from nhx.customization_common.cli.dataset_prepare import add_dataset_commands
+from nhx.customization_common.cli.uploads import UploadError
 from typer.testing import CliRunner, Result
 
 _MODULE = "nhx.customization_common.cli.dataset_prepare"
@@ -41,17 +42,32 @@ def _parquet(path: Path, rows: list[dict]) -> Path:
     return path
 
 
-def _run(*args: str) -> tuple[Result, dict[str, dict[str, list[dict[str, Any]]]]]:
-    """Run the command; return its result and, per fileset uploaded, each file's rows."""
+def _run(
+    *args: str, existing: frozenset[str] = frozenset()
+) -> tuple[Result, dict[str, dict[str, list[dict[str, Any]]]]]:
+    """Run the command; return its result and, per fileset uploaded, each file's rows.
+
+    *existing* names the filesets the platform already has: they are reused, not uploaded to.
+    """
     uploaded: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
-    def create(files: object, *, name: str, source: Path, workspace: str, **_: object) -> str:
-        uploaded[name] = {
-            path.name: [json.loads(line) for line in path.read_text().splitlines()] for path in source.iterdir()
-        }
+    def require_new(files: object, *, names: list[str], workspace: str) -> None:
+        if taken := [name for name in names if name in existing]:
+            raise UploadError(f"{' and '.join(taken)} already exists.")
+
+    def create(files: object, *, name: str, source: Path, workspace: str, report: Any, **_: object) -> str:
+        if name in existing:
+            report.reused.append(f"{workspace}/{name}")
+        else:
+            uploaded[name] = {
+                path.name: [json.loads(line) for line in path.read_text().splitlines()] for path in source.iterdir()
+            }
         return f"{workspace}/{name}"
 
-    with patch(f"{_MODULE}.create_dataset_fileset", side_effect=create):
+    with (
+        patch(f"{_MODULE}.require_new_filesets", side_effect=require_new),
+        patch(f"{_MODULE}.create_dataset_fileset", side_effect=create),
+    ):
         result = CliRunner().invoke(_app(), ["dataset", "prepare", *args])
     return result, uploaded
 
@@ -183,5 +199,29 @@ def test_all_rows_empty_is_an_error_not_an_empty_dataset(tmp_path: Path) -> None
     result, uploaded = _run(str(source), "--name", "sft-data", "--format", "chat")
 
     assert result.exit_code == 1
-    assert "All 3 rows have an empty field" in result.output
+    assert "All 3 rows have an empty required field" in result.output
     assert uploaded == {}
+
+
+def test_a_taken_test_fileset_fails_before_the_dataset_is_uploaded(tmp_path: Path) -> None:
+    source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
+
+    result, uploaded = _run(
+        str(source), "--name", "sft-data", "--format", "chat", existing=frozenset({"sft-data-test"})
+    )
+
+    assert result.exit_code == 1
+    assert "sft-data-test already exists" in result.output
+    assert uploaded == {}
+
+
+def test_exist_ok_reports_the_filesets_it_reused(tmp_path: Path) -> None:
+    source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
+
+    result, uploaded = _run(
+        str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=frozenset({"sft-data"})
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["reused"] == ["default/sft-data"]
+    assert sorted(uploaded) == ["sft-data-test"]
