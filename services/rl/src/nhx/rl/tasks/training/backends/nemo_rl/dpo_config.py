@@ -17,7 +17,7 @@ The full config is generated here in one place — there is no external base fil
 to merge against. Fields driven by the job spec (model, batch sizes, parallelism,
 schedule, DPO hyperparameters, optimizer/scheduler, integrations) are computed
 from ``TrainingStepConfig``; every other key NeMo-RL's schema requires
-(``policy.megatron_cfg``, ``dtensor_cfg.lora_cfg``, ``fp8_cfg``,
+(``policy.megatron_cfg``, ``automodel_cfg.lora_cfg``, ``fp8_cfg``,
 ``dpo.val_at_end``, ``checkpointing.save_optimizer``, the logger subsections, …)
 is set explicitly to a known-good default. The Megatron backend block is inert
 (``enabled: False``) since training runs on DTensor, but must still be fully
@@ -207,10 +207,12 @@ def compile_dpo_config(
         "max_total_sequence_length": customizer_config.model.max_seq_length,
         "precision": precision,
         "offload_optimizer_for_logprob": False,
-        # Training runs on the DTensor backend. We propagate tensor / sequence /
+        "offload_policy_before_refit": False,
+        "offload_optimizer_for_refit": True,
+        # Training runs on Automodel. We propagate tensor / sequence /
         # context parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).
-        "dtensor_cfg": {
+        "automodel_cfg": {
             "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
             "enabled": True,
             "cpu_offload": False,

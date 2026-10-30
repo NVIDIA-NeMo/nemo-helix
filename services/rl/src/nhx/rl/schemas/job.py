@@ -315,11 +315,12 @@ class GRPOTraining(_TrainingBase):
     )
     policy_backend: PolicyBackend | None = Field(
         default=None,
-        description="NeMo-RL policy worker that trains the model. `lora` requires `automodel` "
-        "(NeMo Automodel + Transformer Engine, Hopper or newer; the only backend with expert "
-        "parallelism and automodel_kwargs). `all_weights` defaults to `dtensor` (stock HuggingFace "
-        "on PyTorch FSDP2, also the pre-Hopper option) and may be set to `automodel` for a "
-        "consolidated HuggingFace export. Omit it to get the default for the finetuning type.",
+        description="NeMo-RL policy worker that trains the model. Both values compile "
+        "policy.automodel_cfg for AutomodelPolicyWorker. `lora` requires `automodel` "
+        "(NeMo Automodel + Transformer Engine, Hopper or newer; the backend that accepts expert "
+        "parallelism and automodel_kwargs). `all_weights` defaults to `dtensor`, which compiles the "
+        "same block and rejects LoRA, expert parallelism, and automodel_kwargs at submit. Omit it "
+        "to get the default for the finetuning type.",
     )
     v4_compatible: bool = Field(
         default=True,
@@ -512,7 +513,7 @@ class GRPOTraining(_TrainingBase):
     # --- Per-architecture backend settings ---
     automodel_kwargs: dict[str, Any] | None = Field(
         default=None,
-        description="Passed to policy.dtensor_cfg.automodel_kwargs; requires policy_backend='automodel'. "
+        description="Passed to policy.automodel_cfg.automodel_kwargs; requires policy_backend='automodel'. "
         "{'force_hf': true} loads the stock HuggingFace modules; a {'backend': {...}} block picks "
         "the Transformer-Engine / DeepEP MoE implementation. Unset means Automodel auto-detects.",
     )
@@ -544,7 +545,7 @@ class GRPOTraining(_TrainingBase):
     )
     moe_parallelizer: dict[str, Any] | None = Field(
         default=None,
-        description="Merged over policy.dtensor_cfg.moe_parallelizer, which controls how MoE experts "
+        description="Merged over policy.automodel_cfg.moe_parallelizer, which controls how MoE experts "
         "are sharded and checkpointed. The platform already sets ignore_router_for_ac when expert "
         "parallelism and activation checkpointing are both on; this reaches the rest.",
     )
@@ -553,6 +554,12 @@ class GRPOTraining(_TrainingBase):
         gt=0,
         description="Tensor parallel size for the vLLM rollout engine, independent of the policy's. "
         "Defaults to min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node).",
+    )
+    vllm_expert_parallel_size: int = Field(
+        default=1,
+        gt=0,
+        description="Expert parallel size for the vLLM rollout engine, independent of the policy's. "
+        "Defaults to 1. Super VL recipes set this to 4 alongside tensor_parallel_size 4.",
     )
     vllm_gpu_memory_utilization: float = Field(
         default=0.5,
@@ -874,6 +881,16 @@ class RlJobOutput(RlSchema):
                     raise ValueError(
                         f"Total GPUs ({total_gpus}) must be divisible by vllm_tensor_parallel_size ({vllm_tp})."
                     )
+            vllm_ep = training.vllm_expert_parallel_size
+            if vllm_ep > p.num_gpus_per_node:
+                raise ValueError(
+                    f"vllm_expert_parallel_size ({vllm_ep}) cannot exceed num_gpus_per_node "
+                    f"({p.num_gpus_per_node}); a single vLLM engine does not shard across nodes."
+                )
+            if total_gpus % vllm_ep != 0:
+                raise ValueError(
+                    f"Total GPUs ({total_gpus}) must be divisible by vllm_expert_parallel_size ({vllm_ep})."
+                )
             # The rollout batch is num_prompts_per_step * num_generations_per_prompt, and
             # NeMo-RL shards it by the train batch. When num_prompts_per_step is derived,
             # the floor division can leave the two out of step (e.g. 32 // 5 = 6 -> 30 vs
