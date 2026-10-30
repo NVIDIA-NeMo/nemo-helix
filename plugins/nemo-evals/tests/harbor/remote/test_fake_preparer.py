@@ -47,9 +47,9 @@ async def test_check_is_scripted_separately(fake_preparer, sandbox_policy, harbo
     first, second = harbor_spec.tasks
     fake_preparer.reject = {first.id: "gpu_unsupported"}
     clients = PreparationClients(client=MagicMock(), files=MagicMock())
-    rejected = await fake_preparer.check(first, policy=sandbox_policy, clients=clients)
+    rejected = (await fake_preparer.check(first, policy=sandbox_policy, clients=clients)).error
     assert rejected is not None and rejected.code == "gpu_unsupported"
-    assert await fake_preparer.check(second, policy=sandbox_policy, clients=clients) is None
+    assert (await fake_preparer.check(second, policy=sandbox_policy, clients=clients)).error is None
     assert fake_preparer.checked == [first.id, second.id] and fake_preparer.calls == []
 
 

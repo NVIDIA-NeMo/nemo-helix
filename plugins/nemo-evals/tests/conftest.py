@@ -36,6 +36,7 @@ from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparation,
     ImageType,
+    PreparationCheck,
     PreparationClients,
     PreparationErrorCode,
     PreparationErrorInfo,
@@ -351,7 +352,7 @@ class FakePreparer:
     """Stand-in for ``prepare_task_images``: prebuilt images only, deterministic, no network.
 
     Satisfies ``ImagePreparer``. Keep it in step with the real preparer when M3 story 7 lands.
-    ``reject`` scripts ``check``; ``fail`` scripts the preparation call.
+    ``reject`` and ``notices`` script ``check``; ``fail`` scripts the preparation call.
     ``ready_at_once=True`` skips step A and returns ``ready`` on the first call, as the MVP body does.
     """
 
@@ -360,12 +361,14 @@ class FakePreparer:
         *,
         fail: Mapping[str, PreparationErrorCode] | None = None,
         reject: Mapping[str, PreparationErrorCode] | None = None,
+        notices: Mapping[str, list[str]] | None = None,
         stay_pending: AbstractSet[str] = frozenset(),
         with_verifier: AbstractSet[str] = frozenset(),
         ready_at_once: bool = False,
     ) -> None:
         self.fail = dict(fail or {})
         self.reject = dict(reject or {})
+        self.notices = dict(notices or {})
         self.checked: list[str] = []
         self.stay_pending = stay_pending
         self.with_verifier = with_verifier
@@ -374,11 +377,11 @@ class FakePreparer:
 
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
-    ) -> PreparationErrorInfo | None:
+    ) -> PreparationCheck:
         self.checked.append(task.id)
         if task.id in self.reject:
-            return PreparationErrorInfo(code=self.reject[task.id], detail="scripted")
-        return None
+            return PreparationCheck(error=PreparationErrorInfo(code=self.reject[task.id], detail="scripted"))
+        return PreparationCheck(notices=self.notices.get(task.id, []))
 
     async def __call__(
         self,

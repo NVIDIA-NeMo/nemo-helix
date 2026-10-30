@@ -285,6 +285,23 @@ def test_main_settings(tmp_path: Path) -> None:
     }
 
 
+def test_net_admin_on_main_is_accepted_but_not_granted(tmp_path: Path) -> None:
+    # Tasks ask for it to firewall themselves, as CyberGym's do; granting it would let the agent rewrite the pod's
+    # network rules, so it's left out, and submit tells the user so.
+    task = _parsed(tmp_path, "services:\n  main:\n    cap_add: [SYS_PTRACE, NET_ADMIN]\n")
+    assert task.main.add_capabilities == ["SYS_PTRACE"]
+    assert task.notices == [
+        "services.main.cap_add: NET_ADMIN isn't granted; the sandbox's egress policy controls outbound traffic instead"
+    ]
+    assert _parsed(tmp_path / "plain", "services:\n  main:\n    cap_add: [SYS_PTRACE]\n").notices == []
+
+
+def test_net_admin_on_a_service_is_still_unsupported(tmp_path: Path) -> None:
+    error = _error(tmp_path, "services:\n  db:\n    image: redis\n    cap_add: [NET_ADMIN]\n")
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("services.db.cap_add",)
+
+
 @pytest.mark.parametrize(
     ("dockerfile", "why"),
     [
@@ -1068,7 +1085,7 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
         services:
           main:
             privileged: true
-            cap_add: [SYS_PTRACE, NET_ADMIN]
+            cap_add: [SYS_PTRACE, SYS_ADMIN]
             network_mode: host
             shm_size: 1gb
           a:
@@ -1094,7 +1111,7 @@ def test_every_unsupported_feature_is_listed(tmp_path: Path) -> None:
     assert error.code == "compose_unsupported"
     assert set(error.paths) >= {
         "services.main.privileged",
-        "services.main.cap_add: NET_ADMIN",
+        "services.main.cap_add: SYS_ADMIN",
         "services.main.network_mode",
         "services.main.shm_size",
         "services.a.privileged",
