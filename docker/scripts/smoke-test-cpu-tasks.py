@@ -19,6 +19,7 @@ Run inside the image:
 """
 
 import importlib
+import importlib.metadata
 import importlib.util
 import pathlib
 import subprocess
@@ -80,6 +81,18 @@ def check_evaluator_imports() -> list[str]:
     if not failures:
         print("evaluator/gym imports:", resolved)
     return failures
+
+
+def check_opensandbox_version() -> list[str]:
+    """Reject a task image that still carries the SDK with broken multi-tenant proxy authentication."""
+    try:
+        installed = importlib.metadata.version("opensandbox")
+    except importlib.metadata.PackageNotFoundError:
+        return ["opensandbox: not installed"]
+    if installed != "1.2.0":
+        return [f"opensandbox: expected 1.2.0, found {installed}"]
+    print(f"opensandbox: {installed}")
+    return []
 
 
 def check_task_entrypoints() -> list[str]:
@@ -186,6 +199,7 @@ def check_bundled_harness_clis() -> list[str]:
 
 CHECKS = (
     check_evaluator_imports,
+    check_opensandbox_version,
     check_task_entrypoints,
     check_fabric_adapters,
     check_bundled_harness_clis,
