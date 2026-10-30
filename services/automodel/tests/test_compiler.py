@@ -16,7 +16,7 @@ from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.deployment import DeploymentParams, ToolCallParams
 from nemo_helix_plugin.jobs.providers import DistributedGPUExecutionProvider, GPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.models.types import ModelEntity
+from nemo_helix_plugin.models.types import ModelEntity, ModelSpec, MoEConfig
 from nhx.automodel.adapter import automodel_spec_to_compiler_output
 from nhx.automodel.api.v2.jobs.schemas import (
     CustomizationJobOutput,
@@ -24,10 +24,11 @@ from nhx.automodel.api.v2.jobs.schemas import (
     ExportParams,
     LoRAParams,
     OutputResponse,
+    ParallelismParams,
     RetrievalParams,
     SFTTraining,
 )
-from nhx.automodel.app.jobs.compiler import _build_file_download_config
+from nhx.automodel.app.jobs.compiler import _build_file_download_config, _resolve_moe_parallelism
 from nhx.automodel.compile import platform_job_config_compiler
 from nhx.automodel.entities.values import CheckpointSelection, OutputNameType
 from nhx.automodel.images import get_tasks_image, get_training_image
@@ -1059,3 +1060,94 @@ def test_packed_sequence_size_requires_sequence_packing() -> None:
         SFTTraining(packed_sequence_size=2048)
 
     assert SFTTraining(sequence_packing=True, packed_sequence_size=2048).packed_sequence_size == 2048
+
+
+class TestMoEParallelism:
+    @staticmethod
+    def _moe_entity(num_experts: int = 128) -> ModelEntity:
+        me = _make_mock_model_entity()
+        me.spec = ModelSpec(
+            checkpoint_model_name="NemotronHForCausalLM",
+            family="nemotron",
+            num_layers=52,
+            hidden_size=2688,
+            num_attention_heads=32,
+            num_kv_heads=2,
+            ffn_hidden_size=1856,
+            vocab_size=131072,
+            tied_embeddings=False,
+            gated_mlp=False,
+            base_num_parameters=30_000_000_000,
+            precision="bf16",
+            moe_config=MoEConfig(num_experts=num_experts, num_experts_per_tok=6, num_expert_layers=23),
+        )
+        return me
+
+    @staticmethod
+    def _job(**parallelism: int) -> CustomizationJobOutput:
+        job = _make_job_output()
+        training = job.training.model_copy(update={"parallelism": ParallelismParams.model_validate(parallelism)})
+        return job.model_copy(update={"training": training})
+
+    def test_unset_expert_parallel_size_defaults_to_the_largest_valid_value(self) -> None:
+        job = _resolve_moe_parallelism(self._job(num_gpus_per_node=4), self._moe_entity())
+        assert job.training.parallelism.expert_parallel_size == 4
+
+    def test_default_divides_the_expert_count(self) -> None:
+        job = _resolve_moe_parallelism(self._job(num_gpus_per_node=4), self._moe_entity(num_experts=6))
+        assert job.training.parallelism.expert_parallel_size == 2
+
+    def test_valid_explicit_expert_parallel_size_is_kept(self) -> None:
+        job = _resolve_moe_parallelism(self._job(num_gpus_per_node=4, expert_parallel_size=2), self._moe_entity())
+        assert job.training.parallelism.expert_parallel_size == 2
+
+    @pytest.mark.parametrize("ep", [1, 3])
+    def test_invalid_expert_parallel_size_lists_the_valid_values(self, ep: int) -> None:
+        with pytest.raises(HelixJobCompilationError, match=r"must be one of \[2, 4\], got " + str(ep)):
+            _resolve_moe_parallelism(self._job(num_gpus_per_node=4, expert_parallel_size=ep), self._moe_entity())
+
+    def test_tensor_parallelism_is_rejected(self) -> None:
+        with pytest.raises(HelixJobCompilationError, match="does not support tensor parallelism"):
+            _resolve_moe_parallelism(self._job(num_gpus_per_node=4, tensor_parallel_size=2), self._moe_entity())
+
+    def test_no_fitting_value_is_rejected(self) -> None:
+        with pytest.raises(HelixJobCompilationError, match="no value fits"):
+            _resolve_moe_parallelism(self._job(num_gpus_per_node=3), self._moe_entity(num_experts=128))
+
+    def test_single_gpu_is_untouched(self) -> None:
+        job = self._job(num_gpus_per_node=1)
+        assert _resolve_moe_parallelism(job, self._moe_entity()) is job
+
+    def test_model_without_a_spec_is_untouched(self) -> None:
+        job = self._job(num_gpus_per_node=4)
+        assert _resolve_moe_parallelism(job, _make_mock_model_entity()) is job
+
+    def test_dense_model_is_untouched(self) -> None:
+        me = _make_mock_model_entity()
+        me.spec = Mock(moe_config=None)
+        job = self._job(num_gpus_per_node=4)
+        assert _resolve_moe_parallelism(job, me) is job
+
+    @pytest.mark.asyncio
+    async def test_compiler_trains_with_the_defaulted_value(
+        self, platform_clients: AsyncCustomizationHelixClients, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+            AsyncMock(return_value=self._moe_entity()),
+        )
+        spec = await platform_job_config_compiler(self._job(num_gpus_per_node=4), "default", platform_clients)
+        assert spec.steps[1].config["parallelism"]["expert_parallel_size"] == 4
+
+    @pytest.mark.asyncio
+    async def test_compiler_rejects_an_invalid_value_at_submit(
+        self, platform_clients: AsyncCustomizationHelixClients, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "nhx.automodel.app.jobs.compiler.fetch_model_entity",
+            AsyncMock(return_value=self._moe_entity(num_experts=6)),
+        )
+        with pytest.raises(HelixJobCompilationError, match=r"must be one of \[2\], got 4"):
+            await platform_job_config_compiler(
+                self._job(num_gpus_per_node=4, expert_parallel_size=4), "default", platform_clients
+            )
