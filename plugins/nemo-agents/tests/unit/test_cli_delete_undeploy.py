@@ -122,6 +122,7 @@ def _recording_deployment_pages_handler(requests: list[httpx.Request], pages: li
 
 
 class TestDeleteConfirmation:
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_delete_prompts_when_no_yes_flag(self, app) -> None:
         """Without --yes, the user is prompted; answering 'y' proceeds."""
         with patch(f"{_PATCH_PREFIX}._delete_agent_entity") as mock_delete:
@@ -135,12 +136,22 @@ class TestDeleteConfirmation:
         )
         assert "deleted" in result.output.lower()
 
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_delete_aborts_when_user_declines(self, app) -> None:
         """Without --yes, answering 'n' aborts without calling the API."""
         with patch(f"{_PATCH_PREFIX}._delete_agent_entity") as mock_delete:
             result = runner.invoke(app, ["delete", "my-agent"], input="n\n")
 
         assert result.exit_code != 0
+        mock_delete.assert_not_called()
+
+    def test_delete_without_a_terminal_requires_yes(self, app) -> None:
+        """Off a terminal, a missing --yes is a usage error and nothing is deleted."""
+        with patch(f"{_PATCH_PREFIX}._delete_agent_entity") as mock_delete:
+            result = runner.invoke(app, ["delete", "my-agent"])
+
+        assert result.exit_code == 2
+        assert "--yes" in result.stderr
         mock_delete.assert_not_called()
 
     @pytest.mark.parametrize("flag", ["--yes", "-y"])
@@ -196,6 +207,7 @@ def _mock_deployments_response(
 
 
 class TestUndeployConfirmation:
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_undeploy_single_prompts_confirmation(self, app) -> None:
         """Undeploying a single deployment prompts for confirmation."""
         requests: list[httpx.Request] = []
@@ -205,6 +217,7 @@ class TestUndeployConfirmation:
         assert result.exit_code == 0, result.output
         assert [request.method for request in requests] == ["DELETE"]
 
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_undeploy_single_aborts_on_decline(self, app) -> None:
         """Declining the prompt does not call the API."""
         requests: list[httpx.Request] = []
@@ -223,6 +236,7 @@ class TestUndeployConfirmation:
         assert result.exit_code == 0, result.output
         assert [request.method for request in requests] == ["DELETE"]
 
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_undeploy_by_agent_prompts_with_count(self, app) -> None:
         """Undeploying by --agent lists deployments, shows count in prompt, and deletes on 'y'."""
         requests: list[httpx.Request] = []
@@ -237,6 +251,7 @@ class TestUndeployConfirmation:
         assert result.exit_code == 0, result.output
         assert [request.method for request in requests].count("DELETE") == 2
 
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_undeploy_by_agent_aborts_on_decline(self, app) -> None:
         """Declining the prompt after listing does not delete anything."""
         requests: list[httpx.Request] = []
@@ -297,6 +312,7 @@ class TestUndeployConfirmation:
 
 
 class TestDeploymentsDeleteConfirmation:
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_deployments_delete_prompts_without_yes(self, app) -> None:
         """deployments delete prompts for confirmation."""
         requests: list[httpx.Request] = []
@@ -306,6 +322,7 @@ class TestDeploymentsDeleteConfirmation:
         assert result.exit_code == 0, result.output
         assert [request.method for request in requests] == ["DELETE"]
 
+    @pytest.mark.usefixtures("interactive_stdin")
     def test_deployments_delete_aborts_on_decline(self, app) -> None:
         """Declining aborts without calling the API."""
         requests: list[httpx.Request] = []

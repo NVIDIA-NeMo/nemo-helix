@@ -169,11 +169,12 @@ def test_sessions_get_prints_full_session_json(app, make_cli_state) -> None:
     ]
 
 
+@pytest.mark.usefixtures("interactive_stdin")
 def test_sessions_close_requires_confirmation(app) -> None:
     result = runner.invoke(app, ["sessions", "close", "debug-auth"], input="n\n")
 
     assert result.exit_code == 1
-    assert "cannot be resumed" in result.stdout
+    assert "cannot be resumed" in result.stderr
 
 
 def test_sessions_close_accepts_yes_and_calls_close_endpoint(app, make_cli_state) -> None:
