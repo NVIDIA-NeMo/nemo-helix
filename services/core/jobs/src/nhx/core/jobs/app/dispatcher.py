@@ -1312,6 +1312,23 @@ class JobDispatcher:
         step_spec_name = get_step_spec_name(saved_step.config, saved_step.name) or saved_step.name
 
         if (
+            saved_step.status == HelixJobStatus.QUEUED
+            and attempt.status == HelixJobStatus.CREATED
+            and step_spec_name == attempt.platform_spec.steps[0].name
+        ):
+            # Only the first step queues the attempt. A later step waiting for capacity must not
+            # move an attempt that is already pending, active, or otherwise past created.
+            new_attempt_status = HelixJobStatus.QUEUED
+            logger.info(
+                "Job is queued",
+                extra={
+                    "job": attempt.job,
+                    "attempt": attempt.id,
+                    "step": saved_step.id,
+                    "workspace": attempt.workspace,
+                },
+            )
+        elif (
             saved_step.status == HelixJobStatus.PENDING
             and attempt.status != HelixJobStatus.PENDING
             and step_spec_name == attempt.platform_spec.steps[0].name

@@ -19,8 +19,13 @@ from nhx.common.controller import Controller, HeartbeatMixin
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import start_span_with_ctx
 from nhx.core.jobs.app.ctx import JobBackendContext, JobContext
+from nhx.core.jobs.controllers.admission import AdmissionController, AlwaysAdmit
 from nhx.core.jobs.controllers.backends import JobUpdate, extract_provider_profile
-from nhx.core.jobs.controllers.backends.exceptions import ResourceAllocationError, SchedulingDeferred
+from nhx.core.jobs.controllers.backends.exceptions import (
+    AdmissionDeferred,
+    ResourceAllocationError,
+    SchedulingDeferred,
+)
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
 from opentelemetry import metrics, trace
@@ -39,8 +44,10 @@ class JobScheduler(HeartbeatMixin, Controller):
         backend_registry: BackendRegistry,
         nemo_client: NemoClient,
         stop_signal: threading.Event | None = None,
+        admission: AdmissionController | None = None,
     ) -> None:
         self._backend_registry = backend_registry
+        self._admission = admission or AlwaysAdmit()
         self._nemo_client = nemo_client
         # Typed Jobs client sharing the platform client's transport; every call passes
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
@@ -95,6 +102,9 @@ class JobScheduler(HeartbeatMixin, Controller):
             ):
                 try:
                     schedule_started_at = time.monotonic()
+                    decision = self._admission.check(step)
+                    if not decision.admitted:
+                        raise AdmissionDeferred(decision.reason or "Waiting for capacity")
                     update = self.schedule_step(step)
                     logger.debug(
                         "Scheduled job step",
@@ -161,11 +171,19 @@ class JobScheduler(HeartbeatMixin, Controller):
                             "reason": e.message,
                         },
                     )
+                    deferred_status = self._deferred_status(step, e)
+                    if (
+                        HelixJobStatus(step.status) == deferred_status
+                        and (step.status_details or {}).get("message") == e.message
+                    ):
+                        # Already recorded on an earlier pass; skip the write so API and DB load
+                        # does not grow with queue depth times poll frequency.
+                        continue
                     try:
                         self._update_step_status_with_timing(
                             step=step,
                             phase="scheduling_deferred",
-                            status=HelixJobStatus(step.status),
+                            status=deferred_status,
                             status_details={"message": e.message},
                         )
                     except Exception:
@@ -197,6 +215,18 @@ class JobScheduler(HeartbeatMixin, Controller):
                     # Working through the queue is progress whether or not an
                     # individual step could be scheduled.
                     self.emit_heartbeat()
+
+    @staticmethod
+    def _deferred_status(step: HelixJobStepWithContext, error: SchedulingDeferred) -> HelixJobStatus:
+        """Status to persist for a deferred step.
+
+        Admission deferrals queue the step. Backend deferrals, and steps with no valid
+        transition to ``queued`` (e.g. ``resuming``), keep their current status.
+        """
+        current = HelixJobStatus(step.status)
+        if isinstance(error, AdmissionDeferred) and current.can_transition_to(HelixJobStatus.QUEUED):
+            return HelixJobStatus.QUEUED
+        return current
 
     def _update_step_status_with_timing(
         self,
@@ -255,13 +285,15 @@ class JobScheduler(HeartbeatMixin, Controller):
         set of pending steps as our queue for what to schedule next.
         """
         # The steps-list route parses ``filter`` as a deepObject query param, so
-        # the status list is sent as ``filter[status]=created,resuming`` (comma
-        # form), which the server splits back into a list.
+        # the schedulable statuses are sent as a comma-joined list (comma form),
+        # which the server splits back into a list.
         steps = []
         query = cast(
             ListStepsQueryParams,
             {
-                "filter[status]": f"{HelixJobStatus.CREATED.value},{HelixJobStatus.RESUMING.value}",
+                "filter[status]": ",".join(
+                    s.value for s in (HelixJobStatus.CREATED, HelixJobStatus.QUEUED, HelixJobStatus.RESUMING)
+                ),
                 "sort": "created_at",
             },
         )

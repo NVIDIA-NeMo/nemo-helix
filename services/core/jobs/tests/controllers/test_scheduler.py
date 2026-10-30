@@ -7,6 +7,7 @@ import httpx
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.controllers.admission import AdmissionDecision
 from nhx.core.jobs.controllers.backends.exceptions import ResourceAllocationError, SchedulingDeferred
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.backends.test import MockDockerCPUJobBackend
@@ -59,7 +60,7 @@ def test_does_schedule_job(
         workspace="-",
         name="-",
         query_params={
-            "filter[status]": "created,resuming",
+            "filter[status]": "created,queued,resuming",
             "sort": "created_at",
         },
     )
@@ -261,3 +262,159 @@ def test_scheduler_marks_itself_unhealthy_after_transport_failure(
     job_scheduler.step()
 
     assert not job_scheduler.is_healthy
+
+
+class _DeferringAdmission:
+    """Admission stub that defers steps by name and records the order of checks."""
+
+    def __init__(self, deferred_names: set[str]) -> None:
+        self._deferred_names = deferred_names
+        self.checked: list[str] = []
+
+    def check(self, step: HelixJobStepWithContext) -> AdmissionDecision:
+        self.checked.append(step.name)
+        if step.name in self._deferred_names:
+            return AdmissionDecision.defer("waiting for capacity")
+        return AdmissionDecision.admit()
+
+
+def test_default_admission_dispatches_every_ready_step(
+    job_scheduler: JobScheduler,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    queued_step = test_step_created.model_copy(
+        update={"id": "queued-step-id", "name": "queued-step", "status": HelixJobStatus.QUEUED}
+    )
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created, queued_step])
+
+    with patch.object(job_scheduler, "schedule_step", wraps=job_scheduler.schedule_step) as schedule_step:
+        job_scheduler.step()
+
+    assert schedule_step.call_count == 2
+
+
+def test_admission_deferral_queues_step_without_dispatching(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created])
+    admission = _DeferringAdmission({test_step_created.name})
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=admission)
+
+    with patch.object(scheduler, "schedule_step") as schedule_step:
+        scheduler.step()
+
+    schedule_step.assert_not_called()
+    mock_jobs_client.update_job_step_status.assert_called_once()
+    body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.QUEUED
+    assert body.status_details == {"message": "waiting for capacity"}
+
+
+def test_admission_deferral_keeps_resuming_step_resuming(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_resuming: HelixJobStepWithContext,
+):
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_resuming])
+    scheduler = JobScheduler(
+        backend_registry, mock_nemo_client, admission=_DeferringAdmission({test_step_resuming.name})
+    )
+
+    scheduler.step()
+
+    body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.RESUMING
+    assert body.status_details == {"message": "waiting for capacity"}
+
+
+def test_admission_checks_in_fifo_order_and_deferral_does_not_block_later_steps(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    next_step = test_step_created.model_copy(update={"id": "next-step-id", "name": "next-step", "job": "next-job"})
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created, next_step])
+    admission = _DeferringAdmission({test_step_created.name})
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=admission)
+
+    with patch.object(scheduler, "schedule_step", wraps=scheduler.schedule_step) as schedule_step:
+        scheduler.step()
+
+    assert admission.checked == [test_step_created.name, "next-step"]
+    schedule_step.assert_called_once_with(next_step)
+
+
+def test_queued_step_is_dispatched_once_admitted(
+    job_scheduler: JobScheduler,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    queued_step = test_step_created.model_copy(update={"status": HelixJobStatus.QUEUED})
+    mock_jobs_client.list_steps.return_value = paginated_response([queued_step])
+
+    job_scheduler.step()
+
+    body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.PENDING
+
+
+def test_admission_deferral_status_write_failure_does_not_skip_later_steps(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    next_step = test_step_created.model_copy(update={"id": "next-step-id", "name": "next-step", "job": "next-job"})
+    mock_jobs_client.list_steps.return_value = paginated_response([test_step_created, next_step])
+    mock_jobs_client.update_job_step_status.side_effect = [RuntimeError("persist failed"), data_response(None)]
+    admission = _DeferringAdmission({test_step_created.name, "next-step"})
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=admission)
+
+    scheduler.step()
+
+    assert admission.checked == [test_step_created.name, "next-step"]
+    assert mock_jobs_client.update_job_step_status.call_count == 2
+
+
+def test_admission_deferral_skips_write_when_step_already_queued_with_same_message(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    queued_step = test_step_created.model_copy(
+        update={"status": HelixJobStatus.QUEUED, "status_details": {"message": "waiting for capacity"}}
+    )
+    mock_jobs_client.list_steps.return_value = paginated_response([queued_step])
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=_DeferringAdmission({queued_step.name}))
+
+    scheduler.step()
+
+    mock_jobs_client.update_job_step_status.assert_not_called()
+
+
+def test_admission_deferral_rewrites_when_reason_changes(
+    backend_registry: BackendRegistry,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_created: HelixJobStepWithContext,
+):
+    queued_step = test_step_created.model_copy(
+        update={"status": HelixJobStatus.QUEUED, "status_details": {"message": "an older reason"}}
+    )
+    mock_jobs_client.list_steps.return_value = paginated_response([queued_step])
+    scheduler = JobScheduler(backend_registry, mock_nemo_client, admission=_DeferringAdmission({queued_step.name}))
+
+    scheduler.step()
+
+    body = mock_jobs_client.update_job_step_status.call_args.kwargs["body"]
+    assert body.status == HelixJobStatus.QUEUED
+    assert body.status_details == {"message": "waiting for capacity"}
