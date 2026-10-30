@@ -410,6 +410,7 @@ nemo-evals-plugin = [
   "nemo-builder-plugin",
   "nhx-evals-sdk[harbor]",
   "nemo-helix-plugin",
+  "opentelemetry-proto>=1.27.0",
   "pydantic>=2.12.0",
   "typer>=0.20.0",
 ]
@@ -752,7 +753,9 @@ garak = "nemo_garak.docs:get_docs_path"
 [project.entry-points."nemo.inference_middleware"]
 nemo-guardrails = "nemo_guardrails_plugin.middleware:GuardrailsMiddleware"
 nemo-switchyard = "nemo_switchyard.middleware:SwitchyardMiddleware"
-nemo-evals-closed-book = "nemo_evals.closed_book:ClosedBookMiddleware"
+nemo-evals-closed-book = "nemo_evals.gateway.middleware.closed_book:ClosedBookMiddleware"
+nemo-evals-access = "nemo_evals.gateway.middleware.evals_access:EvalsAccessMiddleware"
+nemo-evals-trial-recording = "nemo_evals.gateway.middleware.trial_recording:TrialRecordingMiddleware"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.jobs"]

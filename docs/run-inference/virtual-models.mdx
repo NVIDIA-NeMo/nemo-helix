@@ -329,15 +329,23 @@ The `nemo-evals-closed-book` middleware closes that path for the request the gat
 - It refuses with `403` a Responses request that continues provider-stored history through
   `previous_response_id` or `conversation`, since that history may hold search results it cannot
   see. Send the conversation history in the request instead.
+- It refuses with `403` a model whose provider calls models back through the gateway with a
+  platform credential, such as a router registered as a model provider with a platform access key,
+  since it can't see the calls that provider makes. A model provider's own API key isn't a platform
+  credential and passes.
 
-It takes no settings. Add it last in `request_middleware`, so it sees the model a routing
-middleware selected:
+Add it last in `request_middleware`, so it sees the model a routing middleware selected:
 
 ```bash
 nemo inference virtual-models create closed-book-model \
   --default-model-entity default/<model-entity> \
   --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
 ```
+
+By default it applies to every call. With `"config": {"apply": "closed_credential"}` it applies only to
+calls made with a closed evaluation trial token, and passes every other call through unchanged, so one
+virtual model serves open and closed-book evaluations alike. A trial token whose signature can't be
+checked right now gets `503` rather than an open call.
 
 Point the model or agent under evaluation at `closed-book-model`; for each kind of evaluation
 target, see
