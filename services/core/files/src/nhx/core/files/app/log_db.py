@@ -456,6 +456,13 @@ class DuckDBLogRepository:
 
     @classmethod
     def _count_rows(cls, conn: duckdb.DuckDBPyConnection, base_table: str, where_clause: str, params: list[str]) -> int:
+        """Total rows for the filters, read in a separate statement from the page.
+
+        A writer can append between this count and the page query, so for a job that is still logging
+        the page may include rows newer than ``total``. Pinning one file list for both statements would
+        close that gap, but an explicit file list makes DuckDB HEAD every object (measured ~3x slower on
+        269 small S3 objects), so the gap is accepted: ``total`` is a moving value for a live job anyway.
+        """
         query = cls._build_count_query(base_table, where_clause)
         cls._ensure_single_statement(query)
         with tracer.start_as_current_span("logs.duckdb.count") as span:
