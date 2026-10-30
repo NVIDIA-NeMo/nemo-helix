@@ -369,14 +369,15 @@ those calls too. The router needs no closed-book or evaluation settings of its o
 nemo inference providers create switchyard --host-url http://switchyard:4002 --forward-caller-credential
 ```
 
-On the virtual model that serves a router's route, list the virtual models the router calls back with
-`--callback-models`, such as its targets and judge. A caller held to that virtual model, such as an
-evaluation trial, may also call those:
+On the virtual model that serves a router's route, list the virtual models the router calls back,
+such as its targets and judge, in its trial-recording middleware's `routes_to`. An evaluation trial
+held to that virtual model may also call those:
 
 ```bash
 nemo inference virtual-models create routed \
   --default-model-entity default/classified \
-  --callback-models default/strong --callback-models default/weak --callback-models default/judge
+  --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {"routes_to": ["default/strong", "default/weak", "default/judge"]}}]' \
+  --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
 ```
 
 To serve open and closed-book evaluations through the same targets, give each target the closed-book
@@ -421,8 +422,9 @@ cost, still counts from it. The evaluation marks the trace only when every model
 virtual model that records trials. If one isn't, the session counts both the agent's trace and the
 gateway's spans.
 
-It takes no settings. Add it to `request_middleware`, so a call's span starts when the call arrives,
-and to `response_middleware`, where each call is recorded:
+Add it to `request_middleware`, so a call's span starts when the call arrives, and to
+`response_middleware`, where each call is recorded. Its only setting, `routes_to`, is for a virtual
+model served by a router; see [Route Through a Router That Calls Back](#route-through-a-router-that-calls-back).
 
 ```bash
 nemo inference virtual-models create recorded-model \
@@ -446,9 +448,9 @@ refuses: the gateway stops those before the response middleware that records the
 ### Hold Trials to Their Models
 
 A trial token lists the virtual models the trial's agent was configured with: the one a built-in
-agent's `model` names, or every gateway model a registered agent's config names, and the
-`callback_models` each of those lists. The token is closed when the evaluation is labelled
-`closed_book`. The `nemo-evals-access` middleware, which comes with the evals plugin and which no
+agent's `model` names, or every gateway model a registered agent's config names, and the virtual
+models each of those routes to, as its trial-recording middleware's `routes_to` lists them. The token
+is closed when the evaluation is labelled `closed_book`. The `nemo-evals-access` middleware, which comes with the evals plugin and which no
 virtual model lists, checks every call made with a trial token, on every route and before any
 virtual model's middleware runs. It refuses:
 

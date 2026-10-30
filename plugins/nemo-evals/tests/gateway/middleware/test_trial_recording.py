@@ -358,3 +358,17 @@ async def test_a_call_to_an_ordinary_provider_keeps_the_callers_traceparent() ->
     forwarded = await middleware.process_request(ctx, ctx.original_request, TrialRecordingConfig())
 
     assert forwarded.headers["traceparent"] == caller
+
+
+async def test_config_lists_the_virtual_models_a_router_routes_to() -> None:
+    config = await TrialRecordingMiddleware().validate_middleware_config(
+        "trial_recording", {"routes_to": ["ws/strong", "ws/judge"]}
+    )
+
+    assert config.routes_to == ("ws/strong", "ws/judge")
+
+
+@pytest.mark.parametrize("ref", ["strong", "ws/", "ws/strong/extra"])
+async def test_config_refuses_a_route_that_is_not_a_workspace_and_name(ref: str) -> None:
+    with pytest.raises(ValueError, match="routes_to entry"):
+        await TrialRecordingMiddleware().validate_middleware_config("trial_recording", {"routes_to": [ref]})

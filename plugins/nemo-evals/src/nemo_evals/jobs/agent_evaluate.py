@@ -771,7 +771,7 @@ def _trial_credential_issuer(
             routes[model.root] = check_trial_route(platform_client, model)
         return routes[model.root]
 
-    reachable = _with_callback_models(models, route_of) if models is not None else None
+    reachable = _with_routed_models(models, route_of) if models is not None else None
     closed = isinstance(spec.target, HarborRunnerTarget) and spec.target.closed_book
     if closed:
         _require_closed_book_capable(reachable, route_of)
@@ -793,12 +793,12 @@ def _trial_credential_issuer(
     )
 
 
-def _with_callback_models(models: list[ModelRef], route_of: Callable[[ModelRef], TrialRoute]) -> list[ModelRef]:
-    """``models``, then the VirtualModels their providers call back through the gateway, each once."""
+def _with_routed_models(models: list[ModelRef], route_of: Callable[[ModelRef], TrialRoute]) -> list[ModelRef]:
+    """``models``, then the VirtualModels their routers call back through the gateway, each once."""
     reachable = list(models)
     for model in models:
-        for callback in route_of(model).callback_models:
-            ref = ModelRef(callback)
+        for routed in route_of(model).routes_to:
+            ref = ModelRef(routed)
             if all(existing.root != ref.root for existing in reachable):
                 reachable.append(ref)
     return reachable

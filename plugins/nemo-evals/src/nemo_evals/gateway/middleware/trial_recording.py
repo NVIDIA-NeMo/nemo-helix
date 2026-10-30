@@ -30,7 +30,8 @@ from nemo_helix_plugin.inference_middleware import (
     InferenceResponse,
     NemoInferenceMiddleware,
 )
-from pydantic import BaseModel, ConfigDict
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MIDDLEWARE_NAME = "nemo-evals-trial-recording"
 CONFIG_TYPE = "trial_recording"
@@ -44,6 +45,20 @@ MAX_HEADER_VALUE_LENGTH = 1024
 
 class TrialRecordingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    routes_to: tuple[str, ...] = Field(
+        default=(),
+        description="For a VirtualModel whose provider is a router that calls models back through the gateway as "
+        "its caller: the `workspace/name` of each VirtualModel it can route to. An evaluation lets its trials call "
+        "these, and holds them to the run's closed-book requirement.",
+    )
+
+    @field_validator("routes_to")
+    @classmethod
+    def _workspace_name_refs(cls, routes_to: tuple[str, ...]) -> tuple[str, ...]:
+        for ref in routes_to:
+            parse_workspace_name_ref(ref, label="routes_to entry")
+        return routes_to
 
 
 class _ObservedCall:

@@ -19,7 +19,7 @@ from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.gateway.middleware.closed_book import ends_closed_book
-from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME
+from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME, TrialRecordingConfig
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource, registered_agent_config
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
@@ -259,7 +259,7 @@ async def require_closed_book_route(
 
     A run is closed-book when its target says so or a task's agent runs with no network: a no-network sandbox can
     still reach the model route. ``tasks`` are (task id, task.toml config) pairs. Each of the agent's gateway models,
-    and each VirtualModel its provider calls back (its ``callback_models``), must end its request middleware with
+    and each VirtualModel it routes to (its recording middleware's ``routes_to``), must end its request middleware with
     the closed-book middleware.
 
     Raises:
@@ -309,7 +309,7 @@ def _gateway_models(target: object) -> list[ModelRef]:
 async def _require_closed_book_model(
     model: ModelRef, why: str, *, async_sdk: AsyncHelixClient, authorize: SourceReadAuthorizer | None
 ) -> list[str]:
-    """Refuse ``model`` unless it is closed-book capable; return the VirtualModels its provider calls back."""
+    """Refuse ``model`` unless it is closed-book capable; return the VirtualModels it routes to."""
     workspace, name = parse_workspace_name_ref(model.root, label="Gateway model")
     await authorize_source_read(authorize, "virtual_model", workspace, name)
     try:
@@ -325,7 +325,7 @@ async def _require_closed_book_model(
             f"closed_book_required: {why} need a closed-book model route, and {model.root} isn't one: make "
             f"`{CLOSED_BOOK_MIDDLEWARE}` the last entry of its VirtualModel's request_middleware"
         )
-    return list(virtual_model.callback_models)
+    return list(routes_to(virtual_model))
 
 
 def gateway_model_id(model: ModelRef) -> str:
@@ -407,10 +407,19 @@ def trial_recording_gap(virtual_model: VirtualModel) -> str | None:
     return None
 
 
+def routes_to(virtual_model: VirtualModel) -> tuple[str, ...]:
+    """The VirtualModels ``virtual_model``'s router calls back, as its trial-recording middleware's config lists them."""
+    refs: dict[str, None] = {}
+    for call in (*virtual_model.request_middleware, *virtual_model.response_middleware):
+        if call.name == MIDDLEWARE_NAME and call.config:
+            refs.update(dict.fromkeys(TrialRecordingConfig.model_validate(call.config).routes_to))
+    return tuple(refs)
+
+
 class TrialRoute(NamedTuple):
     closed_book: bool
     records_calls: bool
-    callback_models: tuple[str, ...] = ()
+    routes_to: tuple[str, ...] = ()
 
 
 def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: ModelRef) -> TrialRoute:
@@ -418,7 +427,7 @@ def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: Model
 
     The route is closed-book capable when its VirtualModel ends its request middleware with the closed-book
     middleware, records calls when it lists the trial-recording middleware in its response middleware, and leads to
-    its ``callback_models``. A VirtualModel that can't be read offers none of these.
+    the VirtualModels that middleware's ``routes_to`` lists. A VirtualModel that can't be read offers none of these.
     """
     workspace, name = parse_workspace_name_ref(gateway_model.root, label="Gateway model")
 
@@ -445,5 +454,5 @@ def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: Model
     return TrialRoute(
         closed_book=ends_closed_book(virtual_model.request_middleware),
         records_calls=any(call.name == MIDDLEWARE_NAME for call in virtual_model.response_middleware),
-        callback_models=tuple(virtual_model.callback_models),
+        routes_to=routes_to(virtual_model),
     )

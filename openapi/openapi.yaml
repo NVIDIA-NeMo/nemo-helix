@@ -13783,14 +13783,6 @@ components:
           description: Model entity references used by this VirtualModel. A per-entry
             backend_format overrides the referenced ModelEntity backend_format when
             IGW resolves the backend format for a request.
-        callback_models:
-          items:
-            type: string
-          type: array
-          title: Callback Models
-          description: VirtualModels, in "workspace/name" format, that the provider
-            serving this VirtualModel calls back through the gateway, such as a router's
-            targets. A caller held to this VirtualModel may also call them.
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'
@@ -23828,14 +23820,6 @@ components:
           description: Model entity references used by this VirtualModel. A per-entry
             backend_format overrides the referenced ModelEntity backend_format when
             IGW resolves the backend format for a request.
-        callback_models:
-          items:
-            type: string
-          type: array
-          title: Callback Models
-          description: VirtualModels, in "workspace/name" format, that the provider
-            serving this VirtualModel calls back through the gateway, such as a router's
-            targets. A caller held to this VirtualModel may also call them.
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'
@@ -24062,11 +24046,6 @@ components:
             $ref: '#/components/schemas/VirtualModelInferenceConfig'
           type: array
           title: Models
-        callback_models:
-          items:
-            type: string
-          type: array
-          title: Callback Models
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'

@@ -2922,7 +2922,7 @@ def test_a_trial_may_also_call_the_models_its_routers_call_back(monkeypatch: pyt
         agent_evaluate,
         "check_trial_route",
         lambda _client, model: TrialRoute(
-            closed_book=True, records_calls=True, callback_models=callbacks.get(model.root, ())
+            closed_book=True, records_calls=True, routes_to=callbacks.get(model.root, ())
         ),
     )
 

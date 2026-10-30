@@ -487,6 +487,24 @@ async def test_a_gateway_model_that_is_not_closed_book_is_refused(
         await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
 
 
+async def test_a_model_a_closed_book_router_routes_to_must_be_closed_book_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The router calls its targets as the trial, so a target that isn't closed-book would open the run."""
+    routes = MiddlewareCall(
+        name="nemo-evals-trial-recording", config_type="trial_recording", config={"routes_to": ["ws/open-target"]}
+    )
+    by_name = {
+        "cb-gpt": VirtualModel(name="cb-gpt", workspace="ws", request_middleware=[routes, _CLOSED_BOOK]),
+        "open-target": VirtualModel(name="open-target", workspace="ws"),
+    }
+    get = AsyncMock(side_effect=lambda name, **_: SimpleNamespace(data=lambda: by_name[name]))
+    monkeypatch.setattr(gateway_models, "client_from_platform", lambda *_: SimpleNamespace(get_virtual_model=get))
+
+    with pytest.raises(ValueError, match=r"ws/open-target isn't one"):
+        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+
+
 @pytest.mark.parametrize(
     "target",
     [
@@ -671,6 +689,15 @@ _CLOSED_BOOK_CALL = {"name": "nemo-evals-closed-book", "config_type": "closed_bo
             None,
             TrialRoute(closed_book=False, records_calls=True),
             id="closed-book not last",
+        ),
+        pytest.param(
+            _virtual_model(
+                [{**_RECORDING, "config": {"routes_to": ["ws/strong", "ws/judge"]}}],
+                [{**_RECORDING, "config": {"routes_to": ["ws/judge", "ws/weak"]}}],
+            ),
+            None,
+            TrialRoute(closed_book=False, records_calls=True, routes_to=("ws/strong", "ws/judge", "ws/weak")),
+            id="a router's targets",
         ),
         pytest.param(
             _virtual_model([], []),
