@@ -68,6 +68,14 @@ async def task_job_request(
     )
 
 
+def member_environment(plan: TasksetRunPlan, member: TasksetRunMemberEntity) -> PreparedHarborEnvironment:
+    """The images ``member``'s task Job runs on: the plan's, with its agent layer as the agent image when it has one."""
+    environment = plan.task_environments[member.task_index]
+    if member.agent_layer is None:
+        return environment
+    return environment.model_copy(update={"agent": member.agent_layer, "agent_preinstalled": True})
+
+
 def runs_request(job: HelixJobResponse, body: CreateHelixJobRequest) -> bool:
     """True when ``job`` has ``body``'s ``source``, ``spec`` and ``platform_spec``: it runs what ``body`` asks for.
 
@@ -167,7 +175,7 @@ async def register_member(
         NemoEntityConflictError: A member write lost to another write; the next cycle re-reads it.
         Exception: Member writes that fail; the member keeps its intent, so the next cycle resolves it.
     """
-    request = await task_job_request(plan, run, member.task_index, plan.task_environments[member.task_index])
+    request = await task_job_request(plan, run, member.task_index, member_environment(plan, member))
     assert request.name is not None
     first_post = member.task_job is None
     overwritten = member.create_sent_at

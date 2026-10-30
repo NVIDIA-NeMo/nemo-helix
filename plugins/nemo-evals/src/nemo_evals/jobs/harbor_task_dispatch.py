@@ -279,7 +279,8 @@ def configure_runtime(
         "sandbox_expires_at": deadline.isoformat(),
         "trusted_allowed_hosts": [*policy.egress_allow, *policy.request_egress_allow],
         AGENT_CHANNEL_HOSTS_KWARG: list(policy.agent_channel),
-        "agent_setup_hosts": list(policy.agent_setup_egress),
+        # A trial on its agent layer finds the agent installed: its setup reaches no setup host.
+        "agent_setup_hosts": [] if spec.environment.agent_preinstalled else list(policy.agent_setup_egress),
         "egress_verification": policy.egress_verification,
         "enforce_disk_limit": policy.enforce_disk_limit,
         "max_disk_mb": policy.max_disk_mb,
@@ -298,7 +299,9 @@ def configure_runtime(
     environment = HarborEnvironmentConfig(import_path=OPENSANDBOX_ENVIRONMENT, kwargs=kwargs)
     update: dict[str, Any] = {"environment": environment, "n_concurrent_trials": 1}
     agent = config.agent_import_path or config.agent_name or "oracle"
-    if policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
+    if spec.environment.agent_preinstalled:
+        logger.info("Agent %s starts from its agent layer: setup runs without the agent setup egress window", agent)
+    elif policy.agent_setup_egress and (config.agent_dir is not None or agent in UNWRAPPED_AGENTS):
         reason = "a loose agent file (agent_dir)" if config.agent_dir is not None else "it installs nothing"
         logger.info("Agent %s runs setup without the agent setup egress window: %s", agent, reason)
     elif policy.agent_setup_egress:

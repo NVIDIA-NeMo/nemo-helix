@@ -142,7 +142,7 @@ async def _build(
                     image.error = f"no result from Builder within {int(timeout)} seconds"
             break
         await sleep(poll_interval)
-        if await _refresh(builder, build.images):
+        if await refresh_images(builder, build.images):
             build = await entities.update(build)
 
     failed = [image for image in build.images if image.status == "failed"]
@@ -180,8 +180,8 @@ async def read_task_archive(files: AsyncFilesClient, source: HarborArchiveSource
     Raises:
         ImagePlanError: The archive is unsafe, or its compose file can't run as sandbox services.
     """
-    async with _downloaded(files, source) as path:
-        return replace(await _read_archive(path), path=None)
+    async with downloaded_archive(files, source) as path:
+        return replace(await read_archive(path), path=None)
 
 
 async def _plan(
@@ -194,11 +194,11 @@ async def _plan(
         _choose_platforms(images, build.platform)
         return images
 
-    async with _downloaded(files, definition.source) as path:
-        return await asyncio.to_thread(plan, await _read_archive(path))
+    async with downloaded_archive(files, definition.source) as path:
+        return await asyncio.to_thread(plan, await read_archive(path))
 
 
-async def _read_archive(path: Path) -> TaskArchive:
+async def read_archive(path: Path) -> TaskArchive:
     """List a downloaded archive's files; a task with a compose file is also extracted next to it and parsed.
 
     The compose file is parsed once, here, so everything downstream reads it as the parser does.
@@ -220,7 +220,7 @@ async def _read_archive(path: Path) -> TaskArchive:
 
 
 @asynccontextmanager
-async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> AsyncGenerator[Path]:
+async def downloaded_archive(files: AsyncFilesClient, source: HarborArchiveSource) -> AsyncGenerator[Path]:
     """A task archive downloaded to a scratch file, its digest checked, for as long as the context lasts."""
     with tempfile.TemporaryDirectory(prefix="task-image-build-") as scratch:
         path = Path(scratch) / "task_archive"
@@ -247,7 +247,7 @@ async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTa
         return
     image.builder_image = builder_image.name
     image.build_job = builder_image.provenance.job.rpartition("/")[2]
-    _apply(image, builder_image)
+    apply_builder_image(image, builder_image)
 
 
 async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerImage:
@@ -280,7 +280,7 @@ async def _submit_build(builder: ImageBuilder, image: BuildImage, definition: Ha
     )
 
 
-async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
+async def refresh_images(builder: ImageBuilder, images: list[BuildImage]) -> bool:
     """Read each unfinished image's Builder record; True when any image changed."""
     changed = False
     for image in images:
@@ -313,12 +313,12 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
             changed = True
             continue
         before = image.status
-        _apply(image, current)
+        apply_builder_image(image, current)
         changed = changed or image.status != before
     return changed
 
 
-def _apply(image: BuildImage, builder_image: ContainerImage) -> None:
+def apply_builder_image(image: BuildImage, builder_image: ContainerImage) -> None:
     """Copy where ``builder_image``'s build stands onto ``image``: its reference and how it starts, once ready."""
     if builder_image.status == "ready":
         image.status = "ready"

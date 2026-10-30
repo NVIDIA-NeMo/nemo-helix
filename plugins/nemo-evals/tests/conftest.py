@@ -308,9 +308,10 @@ SANDBOX_DOMAIN = "opensandbox.opensandbox-system.svc.cluster.local"
 
 
 def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
-    """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
+    """An operator ``evals.runs.harbor`` block with the MVP's two profiles; agent layers off unless overridden."""
     data: dict[str, object] = {
         "dispatcher_image": DISPATCHER_IMAGE,
+        "agent_layers": False,
         "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
         "sandbox_profiles": {
             "harbor-standard": {"egress_allow": ["igw.svc.cluster.local"]},

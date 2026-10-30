@@ -130,21 +130,18 @@ async def adopt_or_build(
     source: FileSetSource | ImageSource,
     dockerfile: str | None,
     platform: str | None = None,
+    built_after: datetime | None = None,
 ) -> ContainerImage:
     """The newest usable build of ``name``, submitting one only when there is none.
 
     ``name`` is keyed by content (:func:`builder_name`), so another task, run or user may already have built it:
-    a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one gets the next
-    revision. Builder refuses a revision another request holds, so a submit that loses that race reads the
-    winner's build instead.
+    a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one, or one made
+    before ``built_after``, gets the next revision. Builder refuses a revision another request holds, so a submit
+    that loses that race reads the winner's build instead.
     """
     for _ in range(_ADOPT_ATTEMPTS):
-        newest: ContainerImage | None = None
-        revision = 1
-        while (image := await builder.get_image(f"{name}-{revision}")) is not None:
-            newest = image
-            revision += 1
-        if newest is not None and not await _abandoned(builder, newest):
+        newest, revision = await _newest(builder, name)
+        if newest is not None and not await _unusable(builder, newest, built_after):
             return newest
         try:
             submitted = await builder.submit(
@@ -155,6 +152,37 @@ async def adopt_or_build(
             continue
         return submitted.images[0]
     raise RuntimeError(f"Builder build {name} kept being submitted by other requests; try again")
+
+
+async def usable_build(
+    builder: ImageBuilder, name: str, *, built_after: datetime | None = None
+) -> ContainerImage | None:
+    """The newest build of ``name`` that is ready, or still building; None when there is none to use.
+
+    What :func:`adopt_or_build` would use without submitting, so a caller can skip preparing a source it won't need.
+    """
+    newest, _ = await _newest(builder, name)
+    return newest if newest is not None and not await _unusable(builder, newest, built_after) else None
+
+
+async def _newest(builder: ImageBuilder, name: str) -> tuple[ContainerImage | None, int]:
+    """The newest revision of ``name`` and the next revision number."""
+    newest: ContainerImage | None = None
+    revision = 1
+    while (image := await builder.get_image(f"{name}-{revision}")) is not None:
+        newest = image
+        revision += 1
+    return newest, revision
+
+
+async def _unusable(builder: ImageBuilder, image: ContainerImage, built_after: datetime | None) -> bool:
+    if built_after is not None and (image.created_at is None or _utc(image.created_at) < built_after):
+        return True
+    return await _abandoned(builder, image)
+
+
+def _utc(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
 async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:
@@ -171,9 +199,7 @@ async def job_gone(builder: ImageBuilder, image: ContainerImage, *, now: datetim
     created = image.created_at
     if created is None:
         return True
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    return (now or datetime.now(timezone.utc)) - created > JOB_GRACE
+    return (now or datetime.now(timezone.utc)) - _utc(created) > JOB_GRACE
 
 
 class HttpImageBuilder:

@@ -339,6 +339,21 @@ def test_setup_hosts_reach_the_environment_and_wrap_a_builtin_agent(task_spec, t
     }
 
 
+@pytest.mark.parametrize("agent", ["claude-code", "codex"])
+def test_a_trial_on_its_agent_layer_reaches_no_setup_host(task_spec, tmp_path, agent):
+    """The layer already holds the install: setup only checks it, so the window stays shut and the agent unwrapped."""
+    spec = task_spec.model_copy(
+        update={"environment": task_spec.environment.model_copy(update={"agent_preinstalled": True})}
+    )
+    configured = _configured_with_setup_hosts(
+        spec, tmp_path, ("registry.npmjs.org",), agent_name=agent, agent_kwargs={"version": "2.1.0"}
+    )
+    assert configured.environment is not None
+    assert configured.environment.kwargs["agent_setup_hosts"] == []
+    assert configured.agent_import_path is None and configured.agent_name == agent
+    assert configured.agent_kwargs == {"version": "2.1.0"}
+
+
 def _harbor_setup_timeout_sec(configured: HarborRuntimeConfig) -> float:
     """The setup timeout Harbor gives the trial: its agent class's default times the setup multiplier."""
     agent_class = AgentFactory.get_agent_class_from_config(AgentConfig(import_path=configured.agent_import_path))
