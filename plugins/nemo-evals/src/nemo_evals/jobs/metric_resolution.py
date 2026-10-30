@@ -115,18 +115,16 @@ def require_resolved_model_refs(metrics: list[Metric], *, subject: str) -> None:
         raise ValueError(f"{subject} metric models must be resolved before run: {', '.join(unresolved)}")
 
 
-def _calls_gateway_unkeyed(model: Model) -> bool:
-    """Whether ``model`` calls an Inference Gateway route with no credential of its own.
+def _calls_platform_unkeyed(endpoint: Model | AgentBase) -> bool:
+    """Whether ``endpoint`` calls a platform route with no credential of its own.
 
-    A model with ``api_key_secret`` is called as configured: its owner chose the credential.
+    A model matches Inference Gateway routes; an agent matches those and agent routes. An endpoint with
+    ``api_key_secret`` is called as configured: its owner chose the credential.
     """
-    return model.api_key_secret is None and urlsplit(model.url).path.startswith(_GATEWAY_PATH_PREFIX)
-
-
-def _calls_platform_unkeyed(target: Model | AgentBase) -> bool:
-    """Whether ``target`` calls a platform gateway or agent route with no credential of its own."""
-    prefixes = (_GATEWAY_PATH_PREFIX, _AGENTS_PATH_PREFIX) if isinstance(target, AgentBase) else (_GATEWAY_PATH_PREFIX,)
-    return target.api_key_secret is None and urlsplit(target.url).path.startswith(prefixes)
+    prefixes = (
+        (_GATEWAY_PATH_PREFIX, _AGENTS_PATH_PREFIX) if isinstance(endpoint, AgentBase) else (_GATEWAY_PATH_PREFIX,)
+    )
+    return endpoint.api_key_secret is None and urlsplit(endpoint.url).path.startswith(prefixes)
 
 
 def _bundle_resolved_metric(metric: Metric, source_bundle: MetricBundle) -> MetricBundle:
@@ -361,7 +359,7 @@ def _gateway_models(metric: MetricWithModels) -> dict[str, Model]:
     return {
         field: model
         for field in model_ref_fields(metric)
-        if isinstance(model := getattr(metric, field, None), Model) and _calls_gateway_unkeyed(model)
+        if isinstance(model := getattr(metric, field, None), Model) and _calls_platform_unkeyed(model)
     }
 
 
@@ -380,11 +378,11 @@ def _rebind_models(metric: MetricWithModels, models: dict[str, Model]) -> None:
     run_sync(lambda: metric.resolve_models(_BoundModels(parked)))
 
 
-def _via_proxy[EndpointT: Model | AgentBase](model: EndpointT, origin: str) -> EndpointT:
-    """A copy of ``model`` that calls the same platform path on the proxy ``origin``."""
+def _via_proxy[EndpointT: Model | AgentBase](endpoint: EndpointT, origin: str) -> EndpointT:
+    """A copy of ``endpoint`` that calls the same platform path on the proxy ``origin``."""
     proxy = urlsplit(origin)
-    return model.model_copy(
-        update={"url": urlsplit(model.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
+    return endpoint.model_copy(
+        update={"url": urlsplit(endpoint.url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()}
     )
 
 
@@ -392,7 +390,7 @@ def _via_proxy[EndpointT: Model | AgentBase](model: EndpointT, origin: str) -> E
 def gateway_models_as_job[TargetT: Model | AgentBase](
     metrics: Sequence[Metric], target: TargetT | None = None
 ) -> Generator[TargetT | None]:
-    """Call Inference Gateway from the metrics' models and the target as this job, for the duration of the block.
+    """Call platform routes from the metrics' models and the target as this job, for the duration of the block.
 
     A ``ModelRef`` is resolved at submit to a gateway route on the API's own platform URL, with no
     credential: the job's identity is not known yet, and the job may reach the platform at a different
@@ -406,22 +404,29 @@ def gateway_models_as_job[TargetT: Model | AgentBase](
 
     An agent target on the platform's agents route is proxied the same way. Studio builds its URL from
     the browser's origin, which a job pod may not reach (the public hostname can hairpin to a plain-HTTP
-    listener), and the agents service needs the caller's identity anyway.
+    listener), and the agents service needs the caller's identity anyway. Agent routes are matched by
+    path on any host too: a key-less ``https://other-host/apis/agents/...`` target is sent to this
+    platform, whose agents route checks that the submitter may invoke that agent.
+
+    Proxied calls are also bounded by the proxy's per-read timeout (``NHX_AUTH_PROXY_READ_TIMEOUT``,
+    300 s by default), the same default as the agents gateway's. A run whose ``request_timeout`` and
+    gateway timeout are raised past it needs the proxy's raised too.
 
     Yields:
         The target to call: a proxied copy of ``target`` when it calls the gateway or an agent route
         with no key of its own, else ``target`` itself, which is never changed.
 
-    Does nothing when no model calls the gateway, or when the job has no identity to forward
-    (an auth-disabled platform), which is how those models were called before.
+    Does nothing when neither a metric's model nor the target calls a platform route with no key of
+    its own, or when the job has no identity to forward (an auth-disabled platform), which is how they
+    were called before.
     """
     bound = [
         (metric, models)
         for metric in metrics
         if isinstance(metric, MetricWithModels) and (models := _gateway_models(metric))
     ]
-    gateway_target = target if target is not None and _calls_platform_unkeyed(target) else None
-    if not bound and gateway_target is None:
+    platform_target = target if target is not None and _calls_platform_unkeyed(target) else None
+    if not bound and platform_target is None:
         yield target
         return
     with platform_auth_proxy() as origin:
@@ -431,7 +436,7 @@ def gateway_models_as_job[TargetT: Model | AgentBase](
         try:
             for metric, models in bound:
                 _rebind_models(metric, {field: _via_proxy(model, origin) for field, model in models.items()})
-            yield _via_proxy(gateway_target, origin) if gateway_target is not None else target
+            yield _via_proxy(platform_target, origin) if platform_target is not None else target
         finally:
             for metric, models in bound:
                 _rebind_models(metric, models)

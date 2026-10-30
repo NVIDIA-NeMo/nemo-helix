@@ -707,6 +707,42 @@ def test_platform_resolved_target_calls_the_gateway_as_the_job(
     assert "127.0.0.1" not in saved and job_identity not in saved
 
 
+def test_platform_agent_target_calls_the_agents_route_as_the_job(
+    tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
+) -> None:
+    """Studio's agent URL names the public host; the job calls its agents route through the proxy instead."""
+    route = "/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+    submitted_url = f"https://nhx.invalid{route}"  # nothing answers there
+    authorizations = serve_gateway_completion(route, "Paris")
+    config = EvaluateSpec.model_validate(
+        {
+            "metrics": [
+                _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"))
+            ],
+            "dataset": [{"question": "Capital of France?", "expected": "Paris"}],
+            "target": GenericAgent(
+                url=submitted_url,
+                name="triage",
+                format=AgentFormat.GENERIC,
+                body={"messages": [{"role": "user", "content": "{{question}}"}]},
+                response_path="$.choices[0].message.content",
+            ),
+            "params": RunConfigOnline(),
+            "prompt_template": {"question": "{{item.question}}"},
+        }
+    ).model_dump(mode="json")
+    ctx = _make_job_context(tmp_path)
+
+    run_result = _run_evaluate_job(config, tmp_path, ctx=ctx)
+
+    payload = _load_artifact_payload(run_result)
+    assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+    assert authorizations and set(authorizations) == {f"Bearer {job_identity}"}
+    assert config["target"]["url"] == submitted_url
+    saved = "".join(path.read_text(errors="ignore") for path in ctx.storage.persistent.rglob("*") if path.is_file())
+    assert "127.0.0.1" not in saved and job_identity not in saved
+
+
 async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

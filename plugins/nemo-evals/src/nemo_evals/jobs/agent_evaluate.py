@@ -636,6 +636,8 @@ class _AgentEvalJobBase(NemoJob):
                         tasks=tasks, trials=spec.trials, target=called_target or target, config=run_config
                     )
                 )
+        # Only the run's target is restored. A streaming agent's trials keep the address actually called in
+        # their ``endpoint`` metadata, as failed trials' errors do.
         if endpoint is not None and called_target is not endpoint and result.metadata.target is not None:
             result.metadata.target.config["url"] = endpoint.url
 
