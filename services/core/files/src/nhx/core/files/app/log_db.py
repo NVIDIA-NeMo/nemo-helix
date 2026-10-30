@@ -384,13 +384,24 @@ class DuckDBLogRepository:
             emitted_boundary_rows=emitted_boundary_rows,
         ).encode()
 
+    @staticmethod
+    def _total_count_sql(base_table: str, where_clause: str) -> str:
+        """Total row count as an uncorrelated scalar subquery.
+
+        Avoid ``COUNT(*) OVER()``: over ``read_parquet`` it makes DuckDB fetch files one at a time,
+        so latency grows linearly with file count on object storage. The subquery scans in parallel
+        and warms the connection's file cache for the main query. Its ``?`` placeholders come first
+        in the SQL text, so callers must pass the filter params twice.
+        """
+        return f"(SELECT COUNT(*) FROM {base_table} WHERE {where_clause})"
+
     @classmethod
     def _build_tail_query(cls, base_table: str, where_clause: str) -> str:
         return f"""
             SELECT
                 {cls.SELECT_LOG_COLUMNS_SQL},
                 {cls.ROW_HASH_SQL} AS row_hash,
-                COUNT(*) OVER() as _total_count
+                {cls._total_count_sql(base_table, where_clause)} as _total_count
             FROM {base_table}
             WHERE {where_clause}
             ORDER BY timestamp DESC, row_hash DESC
@@ -404,7 +415,7 @@ class DuckDBLogRepository:
                 SELECT
                     {cls.SELECT_LOG_COLUMNS_SQL},
                     {cls.ROW_HASH_SQL} AS row_hash,
-                    COUNT(*) OVER() as _total_count
+                    {cls._total_count_sql(base_table, where_clause)} as _total_count
                 FROM {base_table}
                 WHERE {where_clause}
             ),
@@ -431,9 +442,6 @@ class DuckDBLogRepository:
     ) -> HelixJobLogPage:
         """Query the legacy page-number cursor mode.
 
-        Uses a window function (COUNT(*) OVER()) to get total count in a single
-        query pass, avoiding the overhead of a separate COUNT query.
-
         Optimizes glob pattern by pushing partition filters into the path,
         reducing filesystem scanning when filtering by job/attempt/step/task.
         """
@@ -444,19 +452,18 @@ class DuckDBLogRepository:
             query_direction = "ASC" if direction == PaginationDirection.FORWARD else "DESC"
             offset = (current_page - 1) * page_size
 
-            # Single query with window function for total count.
             # Fetch page_size + 1 to check if there are more results.
             query = f"""
                 SELECT
                     {cls.SELECT_LOG_COLUMNS_SQL},
-                    COUNT(*) OVER() as _total_count
+                    {cls._total_count_sql(base_table, where_clause)} as _total_count
                 FROM {base_table}
                 WHERE {where_clause}
                 ORDER BY timestamp {query_direction}
                 LIMIT ? OFFSET ?
             """
             cls._ensure_single_statement(query)
-            query_params: list[DuckDBQueryParam] = [*params, page_size + 1, offset]
+            query_params: list[DuckDBQueryParam] = [*params, *params, page_size + 1, offset]
             logs = cls._run_query(conn, query, query_params, mode="offset")
 
             # Extract total count from first row (all rows have same _total_count).
@@ -512,7 +519,7 @@ class DuckDBLogRepository:
             base_table, where_clause, params = cls._prepare_query(base_path, filters)
             query = cls._build_tail_query(base_table, where_clause)
             cls._ensure_single_statement(query)
-            query_params: list[DuckDBQueryParam] = [*params, page_size + 1]
+            query_params: list[DuckDBQueryParam] = [*params, *params, page_size + 1]
             rows = cls._run_query(conn, query, query_params, mode="tail")
 
             total_count = rows[0].total_count if rows else 0
@@ -556,6 +563,7 @@ class DuckDBLogRepository:
                 conn,
                 query,
                 [
+                    *params,
                     *params,
                     cursor.boundary_timestamp,
                     cursor.boundary_timestamp,

@@ -324,6 +324,35 @@ async def test_query_logs_prev_page_deduplicates_tail_boundary(log_storage, loca
     assert len(combined_messages) == len(set(combined_messages))
 
 
+async def test_query_logs_tail_and_prev_page_apply_where_filters_to_rows_and_total(log_storage, local_storage):
+    """Filters that cannot be pushed into the partition path bind correctly in the rows and the total."""
+    entries = [
+        LogEntry(
+            workspace="default",
+            job="j",
+            job_attempt="1",
+            job_step=step,
+            job_task="t",
+            log_message=f"{step}-{i}",
+            timestamp=datetime(2026, 9, 2, 12, 0, i),
+        )
+        for step in ["keep", "drop"]
+        for i in range(5)
+    ]
+    await log_storage.insert_logs(local_storage, entries)
+    # job_attempt is skipped, so job_step is applied in WHERE rather than in the path glob.
+    filters = {"job": "j", "job_step": "keep"}
+
+    tail_page = await log_storage.query_logs(local_storage, filters=filters, page_size=3, tail=3)
+    previous_page = await log_storage.query_logs(
+        local_storage, filters=filters, page_size=3, page_cursor=tail_page.prev_page
+    )
+
+    assert tail_page.total == 5
+    assert previous_page.total == 5
+    assert [log.message for log in previous_page.data + tail_page.data] == [f"keep-{i}" for i in range(5)]
+
+
 async def test_query_logs_prev_page_preserves_identical_boundary_row_count(log_storage, local_storage):
     """The emitted-boundary count preserves identical rows without returning the same count twice."""
     timestamp = datetime(2026, 9, 2, 12, 0, 0)
