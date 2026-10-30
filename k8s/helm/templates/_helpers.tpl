@@ -513,24 +513,44 @@ password
 {{- end -}}
 
 {{/*
-Checksum of the ClickHouse password used by Intake. Prefer an explicitly
-configured password for a chart-managed Secret, then the live Secret value, so
-credential changes roll both API and ClickHouse pods together. During first
-install with a generated password, use a deterministic fallback until the
-Secret exists.
+Resolve the chart-managed password once per render. All consumers must share
+this value, including on install before the generated Secret exists. Cache on
+Values because Helm gives each template its own root context but shares Values.
+*/}}
+{{- define "nemo-common.clickhouse.passwordData" -}}
+{{- if not (hasKey .Values "_nemoClickhousePasswordData") -}}
+{{- $secretName := include "nemo-common.clickhouse.secretName" . -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
+{{- $passwordData := get ($secret.data | default dict) "password" | default "" -}}
+{{- if .Values.clickhouse.auth.password -}}
+{{- $passwordData = .Values.clickhouse.auth.password | toString | b64enc -}}
+{{- else if not $passwordData -}}
+{{- $passwordData = randAlphaNum 32 | b64enc -}}
+{{- end -}}
+{{- $_ := set .Values "_nemoClickhousePasswordData" $passwordData -}}
+{{- end -}}
+{{- .Values._nemoClickhousePasswordData -}}
+{{- end -}}
+
+{{/*
+Hash the same password data written to a chart-managed Secret. For an external
+Secret, hash its live value when available, with a name/key fallback for offline
+renders. Credential changes roll API and ClickHouse pods together.
 */}}
 {{- define "nemo-common.clickhouse.credentialsChecksum" -}}
 {{- $_ := include "nemo-common.clickhouse.url" . -}}
 {{- $secretName := include "nemo-common.clickhouse.secretName" . -}}
 {{- $passwordKey := include "nemo-common.clickhouse.passwordKey" . -}}
+{{- if and .Values.clickhouse.enabled (not .Values.clickhouse.auth.existingSecret) -}}
+{{- include "nemo-common.clickhouse.passwordData" . | sha256sum -}}
+{{- else -}}
 {{- $secret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
 {{- $passwordData := get ($secret.data | default dict) $passwordKey | default "" -}}
-{{- if and .Values.clickhouse.enabled (not .Values.clickhouse.auth.existingSecret) .Values.clickhouse.auth.password -}}
-{{- .Values.clickhouse.auth.password | toString | b64enc | sha256sum -}}
-{{- else if $passwordData -}}
+{{- if $passwordData -}}
 {{- $passwordData | sha256sum -}}
 {{- else -}}
 {{- printf "%s:%s" $secretName $passwordKey | sha256sum -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
 
