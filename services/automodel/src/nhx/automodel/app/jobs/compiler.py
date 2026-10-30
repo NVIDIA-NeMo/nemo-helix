@@ -398,49 +398,47 @@ async def _validate_deployment_config(
             )
 
 
-def _resolve_moe_parallelism(job_spec: CustomizationJobOutput, me: ModelEntity) -> CustomizationJobOutput:
-    """Validate expert parallelism for multi-GPU MoE training, defaulting it when unset.
+def _validate_moe_parallelism(job_spec: CustomizationJobOutput, me: ModelEntity) -> None:
+    """Reject expert parallelism the training container would fail on, before the job starts.
 
-    Automodel's MoE parallelizer rejects tensor parallelism and needs experts sharded across
-    ranks, so a multi-GPU MoE run with no expert_parallel_size fails in the training container.
-    Checking here turns that into a submit-time error, or a working default.
+    Automodel's MoE implementation for Nemotron-H rejects tensor parallelism and needs experts
+    sharded across ranks, so without this a bad multi-GPU layout only fails after dataset
+    preparation. Other MoE architectures are left to the training container.
     """
-    moe = me.spec.moe_config if me.spec else None
+    spec = me.spec
+    if spec is None or spec.moe_config is None or spec.checkpoint_model_name != "NemotronHForCausalLM":
+        return
+    moe = spec.moe_config
+    if moe.num_experts <= 1:
+        return
     p = job_spec.training.parallelism
     total_gpus = p.num_nodes * p.num_gpus_per_node
-    if moe is None or moe.num_experts <= 1 or total_gpus <= 1:
-        return job_spec
+    if total_gpus <= 1:
+        return
 
+    model = f"'{job_spec.model}' is a Mixture-of-Experts model ({moe.num_experts} experts)"
     if p.tensor_parallel_size > 1:
         raise HelixJobCompilationError(
-            f"'{job_spec.model}' is a Mixture-of-Experts model ({moe.num_experts} experts), which does not "
-            f"support tensor parallelism (tensor_parallel_size={p.tensor_parallel_size}). "
+            f"{model} and does not support tensor parallelism (tensor_parallel_size={p.tensor_parallel_size}). "
             "Set tensor_parallel_size to 1 and use expert_parallel_size instead."
         )
 
     # EP shards experts across the data x context parallel ranks, so it must divide both
     # that group and the expert count.
-    dp_cp = total_gpus // p.pipeline_parallel_size
+    model_parallel = p.tensor_parallel_size * p.pipeline_parallel_size * p.context_parallel_size
+    dp_cp = total_gpus // model_parallel * p.context_parallel_size
     valid = [ep for ep in range(2, dp_cp + 1) if dp_cp % ep == 0 and moe.num_experts % ep == 0]
     if not valid:
         raise HelixJobCompilationError(
-            f"'{job_spec.model}' is a Mixture-of-Experts model ({moe.num_experts} experts) and multi-GPU "
-            f"training needs expert_parallel_size > 1, but no value fits {total_gpus} GPUs with "
-            f"pipeline_parallel_size={p.pipeline_parallel_size}. Change the GPU count or pipeline parallelism."
+            f"{model}; multi-GPU training needs expert_parallel_size > 1, but no value fits {total_gpus} GPUs "
+            f"with pipeline_parallel_size={p.pipeline_parallel_size} and "
+            f"context_parallel_size={p.context_parallel_size}."
         )
-
-    ep = p.expert_parallel_size
-    if ep is None:
-        logger.info("Defaulting expert_parallel_size to %d for MoE model %s", valid[-1], job_spec.model)
-        parallelism = p.model_copy(update={"expert_parallel_size": valid[-1]})
-        training = job_spec.training.model_copy(update={"parallelism": parallelism})
-        return job_spec.model_copy(update={"training": training})
-    if ep not in valid:
+    if p.expert_parallel_size not in valid:
         raise HelixJobCompilationError(
-            f"'{job_spec.model}' is a Mixture-of-Experts model ({moe.num_experts} experts). With {total_gpus} GPUs, "
-            f"expert_parallel_size must be one of {valid}, got {ep}."
+            f"{model}; with {total_gpus} GPUs, expert_parallel_size must be one of {valid}, "
+            f"got {p.expert_parallel_size}."
         )
-    return job_spec
 
 
 async def platform_job_config_compiler(
@@ -464,7 +462,7 @@ async def platform_job_config_compiler(
 
     # Fetch the primary model entity
     me = await fetch_model_entity(transformed_spec.model, workspace, platform)
-    transformed_spec = _resolve_moe_parallelism(transformed_spec, me)
+    _validate_moe_parallelism(transformed_spec, me)
 
     # For distillation jobs, also fetch the teacher model entity
     teacher_me: ModelEntity | None = None
