@@ -7,8 +7,6 @@ import {
   type DeploymentModeAvailabilityMode as DeploymentMode,
 } from '@nemo/sdk/generated/agents/schema/DeploymentModeAvailabilityMode';
 import type { DeploymentModeList } from '@nemo/sdk/generated/agents/schema/DeploymentModeList';
-import { useJobsGetExecutionProfiles } from '@nemo/sdk/generated/platform/jobs';
-import { useImageBuildsUnsupported } from '@studio/api/agents/useImageBuildsUnsupported';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
@@ -31,19 +29,9 @@ export const useDeploymentModes = (
   queryOptions?: Partial<UseQueryOptions<DeploymentModeList>>
 ): DeploymentModes => {
   const { data, isError } = useAgentsListDeploymentModes(workspace, { query: queryOptions });
-  const { isPending: profilesPending } = useJobsGetExecutionProfiles();
-  const subprocessUnreachable = useImageBuildsUnsupported();
   return useMemo<DeploymentModes>(() => {
     if (data) {
-      if (profilesPending) {
-        return { status: 'loading' };
-      }
-      const enabled = data.data.filter((mode) => {
-        if (subprocessUnreachable && mode.mode === DeploymentModeAvailabilityMode.subprocess) {
-          return false;
-        }
-        return mode.enabled;
-      });
+      const enabled = data.data.filter((mode) => mode.enabled);
       return {
         status: 'ready',
         enabled: enabled.map((mode) => mode.mode),
@@ -51,7 +39,7 @@ export const useDeploymentModes = (
       };
     }
     return isError ? { status: 'unknown' } : { status: 'loading' };
-  }, [data, isError, profilesPending, subprocessUnreachable]);
+  }, [data, isError]);
 };
 
 export const enabledImageModes = (modes: DeploymentModes): readonly DeploymentMode[] =>

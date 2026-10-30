@@ -14,8 +14,6 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
   DEPLOYMENT_MODES_URL,
   deploymentModesResponse,
-  EXECUTION_PROFILES_URL,
-  executionProfilesResponse,
 } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
@@ -325,18 +323,15 @@ describe('CreateDeploymentModal', () => {
     );
   });
 
-  it('holds Deploy on a Kubernetes install until the runtimes are known', async () => {
-    mockEnabledModes('subprocess', 'k8s');
-    let releaseProfiles = () => {};
-    const profilesReleased = new Promise<void>((resolve) => {
-      releaseProfiles = resolve;
+  it('holds Deploy until the runtimes are known when subprocess is off', async () => {
+    let releaseModes = () => {};
+    const modesReleased = new Promise<void>((resolve) => {
+      releaseModes = resolve;
     });
     server.use(
-      http.get(EXECUTION_PROFILES_URL, async () => {
-        await profilesReleased;
-        return HttpResponse.json(
-          executionProfilesResponse([{ profile: 'default', backend: 'kubernetes_job' }])
-        );
+      http.get(DEPLOYMENT_MODES_URL, async () => {
+        await modesReleased;
+        return HttpResponse.json(deploymentModesResponse(['k8s']));
       })
     );
     renderModal();
@@ -345,7 +340,7 @@ describe('CreateDeploymentModal', () => {
     const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
     expect(deploy).toBeDisabled();
 
-    releaseProfiles();
+    releaseModes();
     await waitFor(() => expect(deploy).toBeEnabled());
     await waitFor(() =>
       expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
@@ -388,22 +383,6 @@ describe('CreateDeploymentModal', () => {
       const dialog = await getDeploymentDialog();
       const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
       await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
-      await user.click(runtime);
-
-      const options = await screen.findAllByRole('option');
-      expect(options.map((option) => option.textContent)).toEqual(['Kubernetes']);
-    });
-
-    it('offers only Kubernetes on a Kubernetes install the server still offers subprocess on', async () => {
-      mockEnabledModes('subprocess', 'k8s');
-      mockExecutionProfiles([{ profile: 'default', backend: 'kubernetes_job' }]);
-      const user = userEvent.setup();
-      renderModal();
-
-      const dialog = await getDeploymentDialog();
-      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
-      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
-      expect(runtime).toBeVisible();
       await user.click(runtime);
 
       const options = await screen.findAllByRole('option');
