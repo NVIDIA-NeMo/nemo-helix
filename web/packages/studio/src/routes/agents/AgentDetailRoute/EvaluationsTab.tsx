@@ -1,14 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SegmentedControl, Stack } from '@nvidia/foundations-react-core';
+import type { Agent } from '@nemo/sdk/generated/agents/schema';
+import { Button, Flex, SegmentedControl, Stack } from '@nvidia/foundations-react-core';
 import type { EvalJobRow } from '@studio/api/evaluation/utils';
+import { PersonaTestSetModal } from '@studio/components/agents/PersonaTestSet/PersonaTestSetModal';
+import { personaTestSetAgent } from '@studio/components/agents/PersonaTestSet/personaTestSetRequest';
+import { PERSONA_TEST_SETS_ENABLED } from '@studio/constants/environment';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import { ExperimentsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/ExperimentsTable';
 import { groupByExperiment } from '@studio/routes/agents/AgentDetailRoute/evaluations/groupByExperiment';
 import { VIEW_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { type FC, useCallback, useMemo } from 'react';
+import { type FC, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 const VIEW_EVALUATIONS = 'evaluations';
@@ -23,6 +27,7 @@ interface EvaluationsTabProps {
   workspace: string;
   /** The agent whose evaluations these are, seeded into a re-run started from a row. */
   agentName?: string;
+  agent?: Agent;
   evals: AgentEvaluationRow[];
   jobs: EvalJobRow[];
 }
@@ -30,8 +35,15 @@ interface EvaluationsTabProps {
 /** Two readings of the same work — flat evaluations or rolled up by experiment. The flat view takes
  *  both datasets because a run in flight is only a job: it has no published evaluation to show
  *  until it finishes, so `EvaluationsTable` merges the two rather than losing it. */
-export const EvaluationsTab: FC<EvaluationsTabProps> = ({ workspace, agentName, evals, jobs }) => {
+export const EvaluationsTab: FC<EvaluationsTabProps> = ({
+  workspace,
+  agentName,
+  agent,
+  evals,
+  jobs,
+}) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [personaTestSetOpen, setPersonaTestSetOpen] = useState(false);
   const view =
     searchParams.get(VIEW_SEARCH_PARAM) === VIEW_EXPERIMENTS ? VIEW_EXPERIMENTS : VIEW_EVALUATIONS;
   const setView = useCallback(
@@ -52,13 +64,20 @@ export const EvaluationsTab: FC<EvaluationsTabProps> = ({ workspace, agentName, 
 
   return (
     <Stack gap="density-lg" className="w-full">
-      <SegmentedControl
-        className="w-fit"
-        aria-label="Evaluation view"
-        value={view}
-        onValueChange={setView}
-        items={VIEW_ITEMS}
-      />
+      <Flex align="center" justify="between" gap="density-md">
+        <SegmentedControl
+          className="w-fit"
+          aria-label="Evaluation view"
+          value={view}
+          onValueChange={setView}
+          items={VIEW_ITEMS}
+        />
+        {PERSONA_TEST_SETS_ENABLED && agentName ? (
+          <Button kind="secondary" onClick={() => setPersonaTestSetOpen(true)}>
+            Generate persona test set
+          </Button>
+        ) : null}
+      </Flex>
       {view === VIEW_EXPERIMENTS && (
         <ExperimentsTable workspace={workspace} experiments={experiments} />
       )}
@@ -70,6 +89,14 @@ export const EvaluationsTab: FC<EvaluationsTabProps> = ({ workspace, agentName, 
           jobs={jobs}
         />
       )}
+      {PERSONA_TEST_SETS_ENABLED && agentName ? (
+        <PersonaTestSetModal
+          open={personaTestSetOpen}
+          onClose={() => setPersonaTestSetOpen(false)}
+          workspace={workspace}
+          agent={personaTestSetAgent(agentName, agent)}
+        />
+      ) : null}
     </Stack>
   );
 };

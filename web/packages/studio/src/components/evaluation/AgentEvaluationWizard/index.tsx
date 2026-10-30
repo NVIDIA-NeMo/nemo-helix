@@ -50,6 +50,7 @@ import {
   inspectDatasetFiles,
   type StoredDatasetFile,
 } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
+import type { WizardDataset } from '@studio/components/evaluation/AgentEvaluationWizard/types';
 import { useEvaluationSources } from '@studio/components/evaluation/AgentEvaluationWizard/useEvaluationSources';
 import {
   type EvaluationMode,
@@ -241,18 +242,20 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
 
 const makeDefaultValues = (
   agent?: string,
-  sourceEvaluation?: string
+  sourceEvaluation?: string,
+  dataset?: WizardDataset
 ): SubmitEvaluationFormData => ({
   agent: agent ?? '',
   judgeModel: '',
-  // Provisional: the preselect effect corrects this once the evaluation list resolves.
-  mode: MODE_EXPERIMENT,
+  // Provisional: the preselect effect corrects this once the evaluation list resolves. A handed-in
+  // dataset is only read by a new experiment, so it starts there.
+  mode: dataset ? MODE_DEFAULT : MODE_EXPERIMENT,
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
-  datasetFileset: '',
-  datasetFile: '',
-  datasetBatchGlob: '',
+  datasetFileset: dataset?.fileset ?? '',
+  datasetFile: dataset?.file ?? '',
+  datasetBatchGlob: dataset?.batchGlob ?? '',
   configFileset: '',
   configFile: '',
   parallelism: DEFAULT_PARALLELISM,
@@ -295,6 +298,9 @@ interface AgentEvaluationWizardProps {
   /** Name of an evaluation to start from. Opens the wizard on its last step with that run already
    *  chosen, which is how "New evaluation from this configuration" hands a row's config over. */
   sourceEvaluation?: string;
+  /** A dataset in this workspace to evaluate on, such as a generated persona test set. Preselects
+   *  the new-experiment path with the dataset already picked from its fileset. */
+  dataset?: WizardDataset;
 }
 
 interface SeededEntities {
@@ -419,6 +425,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   workspace,
   agent: agentProp,
   sourceEvaluation,
+  dataset,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -435,7 +442,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   const [step, setStep] = useState<WizardStep>(sourceEvaluation ? 'evaluation' : 'start');
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [datasetPick, setDatasetPick] = useState<InspectedDataset | null>(null);
-  const [datasetSource, setDatasetSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
+  const [datasetSource, setDatasetSource] = useState<FileSource>(
+    dataset ? FILE_SOURCE_FILESET : FILE_SOURCE_UPLOAD
+  );
   const [configPick, setConfigPick] = useState<ConfigPick | null>(null);
   const [configSource, setConfigSource] = useState<FileSource>(FILE_SOURCE_UPLOAD);
 
@@ -446,7 +455,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
-    defaultValues: makeDefaultValues(agentProp, sourceEvaluation),
+    defaultValues: makeDefaultValues(agentProp, sourceEvaluation, dataset),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });

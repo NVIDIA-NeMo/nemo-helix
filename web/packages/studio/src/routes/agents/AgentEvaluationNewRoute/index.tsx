@@ -12,12 +12,22 @@ import { getAgentDetailRoute, getAgentsListRoute } from '@studio/routes/utils';
 import type { FC } from 'react';
 import { Navigate, useParams, useSearchParams } from 'react-router';
 
-/** `/workspaces/:workspace/agents/:agentName/evaluations/new[?source=<evaluation>]` */
+/** `/workspaces/:workspace/agents/:agentName/evaluations/new[?source=<evaluation> | ?datasetFileset=<name>&datasetFile=<path>]` */
 export const AgentEvaluationNewRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { [ROUTE_PARAMS.agentName]: agentName = '' } = useParams<{ agentName: string }>();
   const [searchParams] = useSearchParams();
   const sourceEvaluation = searchParams.get('source') ?? undefined;
+  const datasetFileset = searchParams.get('datasetFileset');
+  const datasetFile = searchParams.get('datasetFile');
+  const dataset =
+    datasetFileset && datasetFile
+      ? {
+          fileset: datasetFileset,
+          file: datasetFile,
+          batchGlob: searchParams.get('datasetBatchGlob') ?? undefined,
+        }
+      : undefined;
   const { data: agent, isPending } = useAgentsGetAgent(workspace, agentName, {
     query: { enabled: !!agentName },
   });
@@ -38,10 +48,11 @@ export const AgentEvaluationNewRoute: FC = () => {
 
   return (
     <AgentEvaluationWizard
-      key={`${agentName}/${sourceEvaluation ?? ''}`}
+      key={`${agentName}/${sourceEvaluation ?? ''}/${datasetFileset ?? ''}#${datasetFile ?? ''}`}
       workspace={workspace}
       agent={agentName}
       sourceEvaluation={sourceEvaluation}
+      dataset={dataset}
     />
   );
 };

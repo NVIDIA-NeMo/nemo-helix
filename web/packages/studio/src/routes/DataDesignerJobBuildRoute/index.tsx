@@ -7,6 +7,7 @@ import { DEFAULT_LARGE_PAGE_SIZE } from '@nemo/common/src/constants/api';
 import { useDataDesignerCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import { Flex, Stack } from '@nvidia/foundations-react-core';
+import { PERSONA_TEST_SET_AGENT_FIELD } from '@studio/components/agents/PersonaTestSet/personaTestSetRequest';
 import { findTemplate } from '@studio/components/CreateFilesetStart/templates';
 import { usePreview } from '@studio/components/NewDataDesignerJobForm/usePreview';
 import { getCloneJobRequestFromState } from '@studio/components/NewDataDesignerJobForm/utils';
@@ -85,13 +86,14 @@ export const DataDesignerJobBuildRoute: FC = () => {
     return generatedRequest?.spec ? seedFromJobRequest(generatedRequest) : null;
   }, [locationState]);
 
-  const heading = cloneSeed
-    ? `Clone of ${cloneSeed.name}`
-    : generatedSeed
-      ? 'Describe with AI'
-      : template
-        ? template.title
-        : 'Build from scratch';
+  const personaAgent = generatedSeed?.customFields?.[PERSONA_TEST_SET_AGENT_FIELD];
+  const heading =
+    [
+      cloneSeed && `Clone of ${cloneSeed.name}`,
+      typeof personaAgent === 'string' && `Persona test set for ${personaAgent}`,
+      generatedSeed && 'Describe with AI',
+      template?.title,
+    ].find(Boolean) || 'Build from scratch';
 
   useBreadcrumbs({
     items: [
@@ -101,7 +103,8 @@ export const DataDesignerJobBuildRoute: FC = () => {
     ],
   });
 
-  const builder = useJobBuilder(template, workspace, cloneSeed ?? generatedSeed);
+  const seed = cloneSeed ?? generatedSeed;
+  const builder = useJobBuilder(template, workspace, seed);
   const { data: providersPage } = useModelsListProviders(
     workspace,
     { page_size: DEFAULT_LARGE_PAGE_SIZE },
@@ -182,6 +185,8 @@ export const DataDesignerJobBuildRoute: FC = () => {
         workspace,
         data: {
           name,
+          description: seed?.description,
+          custom_fields: seed?.customFields,
           spec: {
             num_records: Number(rows),
             config: buildDataDesignerConfig(columns, models, servedModelNames),
@@ -197,7 +202,7 @@ export const DataDesignerJobBuildRoute: FC = () => {
       setIsDetailsOpen(true);
       // Error surfaced via createJob.error / submitError below.
     }
-  }, [validateAndCollectErrors, builder, createJob, workspace, servedModelNames, navigate]);
+  }, [validateAndCollectErrors, builder, createJob, workspace, seed, servedModelNames, navigate]);
 
   const toggleDetails = useCallback(() => setIsDetailsOpen((open) => !open), []);
   const togglePreviewExpanded = useCallback(

@@ -67,6 +67,8 @@ export const seedFromJobRequest = (jobRequest: DataDesignerJobRequest): JobBuild
   rows: String(jobRequest.spec?.num_records ?? DEFAULT_GENERATED_ROWS),
   columns: buildColumnsFromConfig(jobRequest.spec.config),
   models: buildModelsFromConfig(jobRequest.spec.config.model_configs),
+  description: jobRequest.description,
+  customFields: jobRequest.custom_fields,
 });
 
 /** The model that drafted the config, carried through so the columns generate with it too. */

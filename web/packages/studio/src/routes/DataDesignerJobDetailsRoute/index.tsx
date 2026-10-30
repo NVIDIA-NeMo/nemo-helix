@@ -6,6 +6,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { ArrowLeft } from '@nemo/icons/icons';
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import {
   Banner,
   Button,
@@ -17,20 +18,23 @@ import {
   TabsTrigger,
   Text,
 } from '@nvidia/foundations-react-core';
+import { PERSONA_TEST_SET_AGENT_FIELD } from '@studio/components/agents/PersonaTestSet/personaTestSetRequest';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
 import { DataDesignerTransformModal } from '@studio/components/DataDesignerTransformModal';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { Loading } from '@studio/components/Layouts/Loading';
+import { PERSONA_TEST_SETS_ENABLED } from '@studio/constants/environment';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { BUILDER_CONFIG_FILENAME } from '@studio/routes/DataDesignerJobDetailsRoute/builderConfig';
 import { DataDesignerConfigPanel } from '@studio/routes/DataDesignerJobDetailsRoute/DataDesignerConfigPanel';
 import { DatasetProfilerSection } from '@studio/routes/DataDesignerJobDetailsRoute/DatasetProfilerSection';
+import { evaluationDatasetFromOutput } from '@studio/routes/DataDesignerJobDetailsRoute/evaluationDataset';
 import { JobDatasetEditorSection } from '@studio/routes/DataDesignerJobDetailsRoute/JobDatasetEditorSection';
 import { JobLogsSection } from '@studio/routes/DataDesignerJobDetailsRoute/JobLogsSection';
 import { JobOutputFilesetSection } from '@studio/routes/DataDesignerJobDetailsRoute/JobOutputFilesetSection';
 import { useDataDesignerArtifactsFileset } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerArtifactsFileset';
 import { useDataDesignerJobFromRoute } from '@studio/routes/DataDesignerJobDetailsRoute/useDataDesignerJobFromRoute';
-import { getDataDesignerJobListRoute } from '@studio/routes/utils';
+import { getAgentEvaluateDatasetRoute, getDataDesignerJobListRoute } from '@studio/routes/utils';
 import { formatDateTime } from '@studio/util/date';
 import { useRef, useState, type FC } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -72,6 +76,20 @@ export const DataDesignerJobDetailsRoute: FC = () => {
     (path) => !path.endsWith(BUILDER_CONFIG_FILENAME)
   );
   const canTransform = Boolean(filesetWorkspace && filesetName) && transformFileOptions.length > 0;
+
+  // A persona test set hands its output to the agent it was generated for. The wizard reads
+  // datasets from its own workspace only, so output written elsewhere is left to pick by hand.
+  const personaAgent = job?.custom_fields?.[PERSONA_TEST_SET_AGENT_FIELD];
+  const evaluationDataset =
+    PERSONA_TEST_SETS_ENABLED &&
+    typeof personaAgent === 'string' &&
+    job?.status === HelixJobStatus.completed &&
+    filesetWorkspace === workspace
+      ? evaluationDatasetFromOutput(
+          filesetName,
+          files.map((file) => file.path)
+        )
+      : undefined;
 
   useBreadcrumbs({
     items: [
@@ -122,6 +140,15 @@ export const DataDesignerJobDetailsRoute: FC = () => {
               {job.status ? <StatusBadge status={job.status} /> : null}
             </Flex>
             <Flex gap="density-md" align="center">
+              {evaluationDataset && typeof personaAgent === 'string' ? (
+                <Button asChild color="brand">
+                  <Link
+                    to={getAgentEvaluateDatasetRoute(workspace, personaAgent, evaluationDataset)}
+                  >
+                    Evaluate {personaAgent}
+                  </Link>
+                </Button>
+              ) : null}
               <DataDesignerJobActionsMenu
                 job={job}
                 variant="labeled"

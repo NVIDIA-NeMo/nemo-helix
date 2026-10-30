@@ -55,6 +55,7 @@ export const MODEL_DETAILS_ENABLED = featureFlags.modelDetailsEnabled !== false;
 export const MODEL_EVALUATION_FORM_ENABLED = featureFlags.modelEvaluationFormEnabled !== false;
 export const MONITOR_ENABLED = featureFlags.monitorEnabled !== false;
 export const OPTIMIZER_ENABLED = featureFlags.optimizerEnabled !== false;
+export const PERSONA_TEST_SETS_ENABLED = featureFlags.personaTestSetsEnabled === true;
 export const GUARDRAILS_ENABLED = featureFlags.guardrailsEnabled !== false;
 export const VIRTUAL_MODELS_ROUTE_ENABLED = GUARDRAILS_ENABLED || AGENT_OPTIMIZATIONS_ENABLED;
 export const FLAG_OVERRIDES_ENABLED = featureFlags.flagOverridesEnabled === true;

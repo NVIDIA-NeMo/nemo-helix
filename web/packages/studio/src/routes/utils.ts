@@ -6,6 +6,7 @@ import {
   FILTERS_SEARCH_PARAM,
 } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
 import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import type { WizardDataset } from '@studio/components/evaluation/AgentEvaluationWizard/types';
 import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   ANONYMIZER_ENABLED,
@@ -678,6 +679,21 @@ export const getAgentRunEvaluationRoute = (
 ) => {
   const path = generatePath(ROUTES.workspace.agentEvaluationNew, { workspace, agentName });
   return sourceEvaluation ? `${path}?${new URLSearchParams({ source: sourceEvaluation })}` : path;
+};
+
+/** Run Evaluation with a dataset from a fileset in `workspace` already picked. */
+export const getAgentEvaluateDatasetRoute = (
+  workspace: string,
+  agentName: string,
+  dataset: WizardDataset
+) => {
+  const path = generatePath(ROUTES.workspace.agentEvaluationNew, { workspace, agentName });
+  const params = new URLSearchParams({
+    datasetFileset: dataset.fileset,
+    datasetFile: dataset.file,
+  });
+  if (dataset.batchGlob) params.set('datasetBatchGlob', dataset.batchGlob);
+  return `${path}?${params}`;
 };
 
 /** The Optimizations tab with the Optimize agent modal open on arrival. */
