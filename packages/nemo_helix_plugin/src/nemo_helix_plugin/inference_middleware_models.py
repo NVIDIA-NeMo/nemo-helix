@@ -119,6 +119,10 @@ class VirtualModel(NemoEntity, entity_type="virtual_model"):
     ``backend_format`` overrides the referenced ModelEntity value for requests
     resolved through this VirtualModel."""
 
+    callback_models: list[str] = Field(default_factory=list)
+    """VirtualModels, as ``"workspace/name"``, that the provider serving this VirtualModel calls back through the
+    gateway, such as a router's targets."""
+
     request_middleware: list[MiddlewareCall] = []
     """Ordered list of middleware plugins applied before proxying."""
 
