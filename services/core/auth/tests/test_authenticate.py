@@ -293,6 +293,49 @@ def test_ext_authz_accepts_original_request_methods_and_returns_principal_header
     resolver.assert_awaited_once()
 
 
+@pytest.mark.parametrize(
+    ("path", "accepted"),
+    [
+        ("/ext-authz/apis/inference-gateway/v2/workspaces/default/anthropic/-/v1/messages", True),
+        ("/ext-authz/apis/entities/v2/workspaces/default", False),
+    ],
+    ids=["model route", "other route"],
+)
+def test_ext_authz_reads_x_api_key_only_for_model_routes(tmp_path, path: str, accepted: bool):
+    """Anthropic-style clients send their key as `x-api-key`; the gateway accepts it only where they call models."""
+    config = AuthConfig(
+        enabled=True,
+        token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
+        access_keys=AccessKeyConfig(enabled=True),
+    )
+    (tmp_path / "private.pem").write_bytes(_private_key_pem())
+    claims = TokenClaims(
+        subject="writer@example.com",
+        email=None,
+        groups=[],
+        scopes=["inference"],
+        raw_claims={"jti": "ak_writer", "nhx_token_type": "access_key"},
+    )
+    resolved = ResolvedBearerToken(claims=claims, token_kind="access_key")
+    with (
+        _test_client(config) as client,
+        patch(
+            "nhx.core.auth.api.v2.authenticate.resolve_bearer_token",
+            new=AsyncMock(return_value=resolved),
+        ) as resolver,
+    ):
+        response = client.post(path, headers={"x-api-key": "signed.jwt.token"})
+
+    if accepted:
+        assert response.status_code == 200
+        assert response.headers["X-NHX-Principal-Id"] == "writer@example.com"
+        assert resolver.await_args.args[1] == "signed.jwt.token"
+    else:
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Missing bearer token"
+        resolver.assert_not_awaited()
+
+
 def _web_session_config(tmp_path) -> AuthConfig:
     return AuthConfig(
         enabled=True,
