@@ -407,9 +407,9 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
         uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
     fi
     # GHSA-8mcc-hrx5-hvxc, GHSA-7833-fr7j-v32q, GHSA-284h-m62q-gf8w (Critical). Same floor as the
-    # nhx-gym-tasks lock's gitpython>=3.1.62 constraint (BDSA-2026-{30097,30098,31388}).
+    # nhx-gym-tasks lock's gitpython>=3.2.1 constraint (BDSA-2026-{30097,30098,31388}).
     if "${py}" -c 'import importlib.metadata as m; m.version("gitpython")' >/dev/null 2>&1; then
-        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.1.62"
+        uv pip install --python "${py}" --no-deps --upgrade-package gitpython "gitpython>=3.2.1"
     fi
     if "${py}" -c 'import importlib.metadata as m; m.version("transformers")' >/dev/null 2>&1; then
         uv pip install --directory /tmp --python "${py}" \

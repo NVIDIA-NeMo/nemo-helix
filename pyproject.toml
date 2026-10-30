@@ -319,11 +319,12 @@ environments = [
 ]
 
 constraint-dependencies = [
-  "GitPython>=3.1.60",
+  "GitPython>=3.2.1",
   "Mako>=1.3.12",
   "Pygments>=2.20.0",
   "aiohttp>=3.14.1",                               # High/Medium/Low OOS – nhx-garak-tasks + customizer
-  "authlib>=1.6.11",
+  "authlib>=1.9.1",
+  "dnspython>=2.9.1",
   "black>=26.3.1",
   "bleach>=6.4.0",
   "certifi>=2026.10.19", # eMudhra CA key compromise
@@ -371,7 +372,7 @@ constraint-dependencies = [
   "sqlfluff>=4.2.2",
   "sqlparse>=0.6.0,<0.7",
   "starlette>=1.3.1",
-  "urllib3>=2.7.0",
+  "urllib3>=2.8.0",
   "uv>=0.13.4",
   "wandb>=0.30.0",
 ]
@@ -390,13 +391,13 @@ override-dependencies = [
   # todo(dn-v2): unpin these. this was originally causing tests to fail.
   "aiodns==3.5.0",
   "pycares==4.11.0",
-  "authlib>=1.6.9",           # Critical – nhx-api/core/cpu-tasks/gpu-tasks
+  "authlib>=1.9.1",           # Critical – nhx-api/core/cpu-tasks/gpu-tasks
   "aiohttp>=3.14.1",          # High/Medium/Low OOS – nhx-garak-tasks + customizer
   "jaraco-context>=6.1.0",    # High OOS – nhx-garak-tasks + customizer
   "joserfc>=1.7.2",
   "pyasn1>=0.6.4",            # High OOS – nhx-garak-tasks + customizer
   "setuptools>=78.1.1",       # High OOS – nhx-tasks/gpu-tasks/customizer-tasks
-  "urllib3>=2.7.0",           # High OOS – nhx-garak-tasks + customizer
+  "urllib3>=2.8.0",           # High OOS – nhx-garak-tasks + customizer
   "wheel>=0.46.2",            # High OOS – widespread
   "cbor2>=5.9.0",             # High – customizer + nhx-gpu-tasks
   "simpleeval>=1.0.5",        # High – nhx-api + nhx-gpu-tasks
@@ -410,7 +411,9 @@ override-dependencies = [
   "python-dotenv>=1.2.2",
   "openai>=2.26.0",
   "nltk>=3.10.3",             # GHSA-8mgp-746c-j5xp and CVE-2026-7{1513,8680,8681,8682,9657,9674,9675} + CVE-2026-8{1722,1726,1727}
-  "gitpython>=3.1.62",        # BDSA-2026-{30097,30098,31388}
+  "gitpython>=3.2.1",         # BDSA-2026-{30097,30098,31388}
+  "oauthlib>=4.0.0",          # CVE remediation (pulse-20261030)
+  "pyjwt>=2.15.1",            # CVE remediation (pulse-20261030)
   "accelerate>=1.15.0",       # CVE-2026-69112
 
 ]

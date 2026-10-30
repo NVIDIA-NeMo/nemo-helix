@@ -49,7 +49,7 @@ catalog:
   '@vitest/eslint-plugin': ^1.6.15
   'eslint-plugin-jsx-a11y': ^6.10.2
   '@vitest/ui': 4.1.10
-  axios: 1.18.0
+  axios: 1.21.0
   classnames: ^2.5.1
   concurrently: ^10.0.3
   date-fns: ^4.1.0

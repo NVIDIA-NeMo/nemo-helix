@@ -207,7 +207,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /opt/docker/preserve_base_torch.txt \
     "aiohttp>=3.14.3,<4" \
-    "urllib3>=2.7.0,<3" \
+    "urllib3>=2.8.0,<3" \
     "grpcio>=1.81.1,<2" \
     "mistune>=3.3.3,<4" \
     "pillow>=12.3.0,<13" \

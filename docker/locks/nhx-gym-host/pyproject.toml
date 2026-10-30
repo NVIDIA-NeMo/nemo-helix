@@ -28,6 +28,10 @@ constraint-dependencies = [
     "mlflow-skinny>=3.15.0,<3.16.0",
     "sqlparse>=0.6.0,<0.7",
     "wandb>=0.30.0",
+    "gitpython>=3.2.1",
+    "pyjwt>=2.15.1",
+    "urllib3>=2.8.0",
+    "virtualenv>=21.14.9",
 ]
 required-version = ">=0.13.4"
 environments = [

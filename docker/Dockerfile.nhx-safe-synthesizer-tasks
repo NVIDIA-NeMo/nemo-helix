@@ -18,7 +18,7 @@ ARG SAFE_SYNTHESIZER_RUNTIME_PACKAGE="nemo-safe-synthesizer[engine,cu129]==0.1.1
 ARG FLASHINFER_CUBIN_INDEX_URL="https://flashinfer.ai/whl/"
 ARG FLASHINFER_CU129_INDEX_URL="https://flashinfer.ai/whl/cu129"
 ARG PYTORCH_CU129_INDEX_URL="https://download.pytorch.org/whl/cu129"
-ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.27.0/cu129"
+ARG VLLM_CU129_INDEX_URL="https://wheels.vllm.ai/0.32.0/cu129"
 
 # =============================================================================
 # uv binary
@@ -134,7 +134,7 @@ RUN printf '%s\n' \
         'aiohttp>=3.14.3,<4' \
         'cryptography>=50.0.0,<51' \
         'pyarrow>=23.0.1,<24' \
-        'vllm==0.27.0+cu129' \
+        'vllm==0.32.0' \
         'flashinfer-python==0.6.16.post4' \
         'flashinfer-cubin==0.6.16.post4' \
         'flashinfer-jit-cache==0.6.16.post4+cu129' \

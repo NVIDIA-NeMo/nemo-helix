@@ -6,8 +6,8 @@
 #
 # Pass to pip/uv with:  pip install <pkg> -c constraints.txt
 #                        uv pip install <pkg> -c constraints.txt
-GitPython>=3.1.50
-PyJWT>=2.13.0
+GitPython>=3.2.1
+PyJWT>=2.15.1
 Pygments>=2.20.0
 aiohttp>=3.14.0
 cbor2>=5.9.0
@@ -29,7 +29,7 @@ python-multipart>=0.0.27
 requests>=2.33.0
 starlette>=1.0.1
 tornado>=6.5.5
-urllib3>=2.7.0
+urllib3>=2.8.0
 
 # Runtime compatibility constraints.
 boto3>=1.40.46,<1.40.62

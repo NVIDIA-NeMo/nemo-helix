@@ -125,7 +125,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --reinstall-package wandb \
     "aiohttp>=3.13.3,<4" \
     "black>=26.3.1,<27" \
-    "GitPython>=3.1.62,<4" \
+    "GitPython>=3.2.1,<4" \
     "jaraco-context>=6.1.0,<7" \
     "jupyter-server>=2.20.0,<3" \
     "jupyterlab>=4.6.1,<5" \
@@ -139,7 +139,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "msgpack>=1.2.1,<2" \
     "cryptography>=50.0.0,<51" \
     "tornado>=6.5.5,<7" \
-    "urllib3>=2.7.0,<3" \
+    "urllib3>=2.8.0,<3" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7" \
     "grpcio>=1.81.1,<2" \
