@@ -243,6 +243,47 @@ class TestIAMRoleBindings:
         )
         assert response.status_code == 409
 
+    def test_regrant_revoked_binding_succeeds(self, http_client: TestClient):
+        """Granting a revoked principal/workspace/role again reactivates it; active duplicates still 409."""
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        binding_data = {
+            "principal": f"regrant-user-{uuid.uuid4().hex[:8]}@example.com",
+            "workspace": DEFAULT_WORKSPACE,
+            "role": "Viewer",
+        }
+        create_url = f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false"
+
+        first = http_client.post(create_url, json=binding_data, headers=headers)
+        assert first.status_code == 200, first.text
+        first_body = first.json()
+        name = first_body["name"]
+
+        revoke = http_client.delete(f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers)
+        assert revoke.status_code == 200, revoke.text
+
+        regrant_headers = {"X-NHX-Principal-Id": "service:jobs"}
+        regrant = http_client.post(create_url, json=binding_data, headers=regrant_headers)
+        assert regrant.status_code == 200, regrant.text
+        regrant_body = regrant.json()
+        assert regrant_body["name"] == name
+        assert regrant_body["id"] == first_body["id"]
+        assert regrant_body["revoked_at"] is None
+        assert regrant_body["granted_by"] == "service:jobs"
+        assert regrant_body["granted_at"] != first_body["granted_at"]
+
+        fetched = http_client.get(f"{IAM_ROLE_BINDINGS_PATH}/{name}", headers=headers)
+        assert fetched.status_code == 200
+        assert fetched.json()["revoked_at"] is None
+
+        # Now active again: a further grant is a duplicate, and it can be revoked and re-granted once more.
+        duplicate = http_client.post(create_url, json=binding_data, headers=headers)
+        assert duplicate.status_code == 409
+        revoke_again = http_client.delete(
+            f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers
+        )
+        assert revoke_again.status_code == 200, revoke_again.text
+        assert http_client.post(create_url, json=binding_data, headers=headers).status_code == 200
+
     def test_list_role_bindings_with_pagination(self, http_client: TestClient):
         """Test listing role bindings with pagination."""
         headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
