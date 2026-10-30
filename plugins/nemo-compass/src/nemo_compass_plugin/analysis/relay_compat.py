@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Temporary NOOA 0.0.10 tool-result bridge for Relay 0.9.
+"""Temporary NOOA 0.0.10 tool-result bridge for Relay 0.10.
 
 Remove this module once Helix requires a NOOA release whose Relay tool
 middleware returns ToolExecutionResult. Never patch Relay or NOOA globally.
