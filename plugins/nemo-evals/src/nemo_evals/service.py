@@ -12,7 +12,6 @@ from nemo_evals.api.v2 import image_builds as image_builds_routes
 from nemo_evals.api.v2 import live as live_routes
 from nemo_evals.api.v2 import metrics as metrics_routes
 from nemo_evals.api.v2 import results as results_routes
-from nemo_evals.api.v2 import router_keys as router_key_routes
 from nemo_evals.api.v2 import tasks as tasks_routes
 from nemo_evals.api.v2 import taskset_runs as taskset_run_routes
 from nemo_evals.api.v2 import tasksets as tasksets_routes
@@ -160,13 +159,6 @@ class EvaluatorPluginService(NemoService):
                 router=live_routes.router,
                 tag="Evals Plugin Live Evaluation Route",
                 description="Single-row evaluation run in-process, without creating a job.",
-                prefix="/v2/workspaces/{workspace}",
-            ),
-            RouterSpec(
-                # POST /apis/evals/v2/workspaces/{workspace}/router-keys.
-                router=router_key_routes.router,
-                tag="Evals Plugin Router Key Routes",
-                description="Closed credentials for routers that call models back through the Inference Gateway.",
                 prefix="/v2/workspaces/{workspace}",
             ),
             RouterSpec(

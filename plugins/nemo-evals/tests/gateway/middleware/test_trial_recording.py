@@ -21,7 +21,12 @@ from nemo_evals.gateway.middleware.trial_recording import (
 )
 from nemo_evals.gateway.policy import ModelAccess
 from nemo_evals.gateway.recorder import CallRecorder
-from nemo_evals.gateway.spans import GATEWAY_CALL_ATTRIBUTE, trial_root_span_id, trial_trace_id
+from nemo_evals.gateway.spans import (
+    GATEWAY_CALL_ATTRIBUTE,
+    OPENINFERENCE_SPAN_KIND,
+    trial_root_span_id,
+    trial_trace_id,
+)
 from nemo_evals.gateway.tokens import TrialClaims, TrialTokenReader, unsigned_token
 from nemo_evals.intake.mapping import SESSION_ID_ATTRIBUTE, TEST_CASE_NAME_ATTRIBUTE
 from nemo_helix_plugin.client.oidc import decode_jwt_claims
@@ -92,17 +97,20 @@ def _reader(*tokens: str) -> TrialTokenReader:
 SERVED_MODELS = {"default/agent-model": "meta/llama-3.3-70b"}
 
 
-def _target(model_entity_id: str, append_v1_suffix: bool = True) -> ModelProviderInferenceTarget:
-    return ModelProviderInferenceTarget(
-        model_provider_gateway_url="http://igw/provider", served_model_name=SERVED_MODELS[model_entity_id]
-    )
-
-
-def _middleware(reader: TrialTokenReader, sink: Sink) -> TrialRecordingMiddleware:
+def _middleware(reader: TrialTokenReader, sink: Sink, *, routed: bool = False) -> TrialRecordingMiddleware:
+    """The middleware, with every model served by a provider that calls models back as its caller when ``routed``."""
     middleware = TrialRecordingMiddleware()
     middleware._recorder = CallRecorder(reader, sink, flush_interval_sec=60)
+
+    def target(model_entity_id: str, append_v1_suffix: bool = True) -> ModelProviderInferenceTarget:
+        return ModelProviderInferenceTarget(
+            model_provider_gateway_url="http://igw/provider",
+            served_model_name=SERVED_MODELS.get(model_entity_id, "route"),
+            forwards_caller_credential=routed,
+        )
+
     cache = MagicMock(spec=InferenceMiddlewareCacheAccessor)
-    cache.get_inference_url_and_model.side_effect = _target
+    cache.get_inference_url_and_model.side_effect = target
     middleware._inject_cache(cache)
     return middleware
 
@@ -356,3 +364,39 @@ async def test_the_span_starts_when_the_gateway_received_the_call() -> None:
 
     [(_, span)] = _spans(sink.sent)
     assert span.start_time_unix_nano == int(received.timestamp() * 1_000_000_000)
+
+
+async def test_a_call_to_a_router_that_calls_back_as_the_trial_is_a_routing_span_its_callbacks_nest_under() -> None:
+    """The router's own calls carry the trial's usage; recording the routed call as a model call would count it twice."""
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink, routed=True)
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}"})
+    config = TrialRecordingConfig()
+    original = ctx.original_request
+
+    forwarded = await middleware.process_request(
+        ctx, InferenceRequest(body=dict(original.body), headers=dict(original.headers), path=original.path), config
+    )
+    await middleware.process_response(
+        ctx, InferenceResponse(result={"usage": {"prompt_tokens": 7}}, headers={}), config
+    )
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    attributes = _attributes(span)
+    assert forwarded.headers["traceparent"] == f"00-{trial_trace_id(TRIAL)}-{span.span_id.hex()}-01"
+    assert attributes[OPENINFERENCE_SPAN_KIND] == "CHAIN"
+    assert GATEWAY_CALL_ATTRIBUTE not in attributes
+    assert span.parent_span_id.hex() == trial_root_span_id(TRIAL)
+
+
+async def test_a_call_to_an_ordinary_provider_keeps_the_callers_traceparent() -> None:
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink)
+    caller = "00-01a182ecbd457d118e02830498804285-9fe2c6bed0c1c48c-01"
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}", "traceparent": caller})
+
+    forwarded = await middleware.process_request(ctx, ctx.original_request, TrialRecordingConfig())
+
+    assert forwarded.headers["traceparent"] == caller
