@@ -95,6 +95,20 @@ class PreparationErrorInfo(BaseModel):
     )
 
 
+class PreparationCheck(BaseModel):
+    """What submit learns from checking one task: why a run can't take it, if it can't, and what to tell the user."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    error: PreparationErrorInfo | None = Field(
+        default=None, description="Why a run can't take the task; None if it can."
+    )
+    notices: list[str] = Field(
+        default_factory=list,
+        description="What the task asks for that the run does differently, for submit to show; the task still runs.",
+    )
+
+
 class ImagePreparation(BaseModel):
     """Progress of one image (agent or verifier).
 
@@ -155,8 +169,9 @@ class ImagePreparer(Protocol):
 
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
-    ) -> PreparationErrorInfo | None:
-        """Why a run can't take the task, or None. No side effects: submit checks every task before any build."""
+    ) -> PreparationCheck:
+        """Why a run can't take the task, if it can't, and notices for submit. No side effects: submit checks every
+        task before any build."""
         ...
 
     async def __call__(
@@ -183,32 +198,30 @@ class ImageBuildPreparer:
 
     async def check(
         self, task: ResolvedTask, *, policy: ResolvedHarborSandboxPolicy, clients: PreparationClients
-    ) -> PreparationErrorInfo | None:
+    ) -> PreparationCheck:
         """Reject non-Harbor, GPU (agent or separate verifier) and compose tasks, and tasks whose sandboxes exceed
-        the profile's ceilings.
+        the profile's ceilings. A compose file's notices are returned with an accepted task.
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
         """
         if not isinstance(task.spec, ResolvedHarborTaskDefinition):
-            return PreparationErrorInfo(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
+            return _rejected(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
         try:
             task_config = parse_task_config(task.spec.config)
             verifier = resolve_effective_verifier_env_config(task_config, None)
             if task_config.environment.gpus or (verifier is not None and verifier.gpus):
-                return PreparationErrorInfo(
-                    code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet"
-                )
+                return _rejected(code="gpu_unsupported", detail="GPU tasks aren't supported on Kubernetes runs yet")
             if (violation := task_resources_violation(task_config, policy)) is not None:
-                return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
+                return _rejected(code="resources_exceed_policy", detail=violation)
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
-            return _plan_error(exc)
+            return PreparationCheck(error=_plan_error(exc))
         except NemoHTTPError as exc:
             raise ImagePreparationUnavailableError(f"could not read task {task.id}'s archive: {exc}") from exc
         if archive.compose_task is not None:
             return _check_compose(archive.compose_task, policy)
-        return None
+        return PreparationCheck()
 
     async def __call__(
         self,
@@ -258,18 +271,24 @@ class ImageBuildPreparer:
         return _from_build(build, definition)
 
 
-def _check_compose(task: ComposeTask, policy: ResolvedHarborSandboxPolicy) -> PreparationErrorInfo | None:
+def _check_compose(task: ComposeTask, policy: ResolvedHarborSandboxPolicy) -> PreparationCheck:
     """Reject a compose task that can't run as a pod, or whose services declare more than the policy allows.
 
-    The parser's own message is the detail, so users see which key of which file is the problem.
+    The parser's own message is the detail, so users see which key of which file is the problem. An accepted task
+    carries the parser's notices.
     """
     try:
         services = check_compose_task(task)
     except ComposeError as exc:
-        return PreparationErrorInfo(code="invalid_compose_file", detail=str(exc))
+        return _rejected(code="invalid_compose_file", detail=str(exc))
     if (violation := compose_resources_violation(services, policy)) is not None:
-        return PreparationErrorInfo(code="resources_exceed_policy", detail=violation)
-    return None
+        return _rejected(code="resources_exceed_policy", detail=violation)
+    return PreparationCheck(notices=task.notices)
+
+
+def _rejected(*, code: PreparationErrorCode, detail: str) -> PreparationCheck:
+    """A check that refuses the task with ``code``."""
+    return PreparationCheck(error=PreparationErrorInfo(code=code, detail=detail))
 
 
 prepare_task_images = ImageBuildPreparer()

@@ -166,6 +166,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         services=services,
         main=main,
         volumes=[*_mounted_volumes(resolved.document, services, main), *log_volumes],
+        notices=service_parser.notices,
     )
 
 
@@ -183,6 +184,8 @@ class ServiceParser:
         self._declared_volumes = declared_volumes
         self._interpolator = interpolator
         self._problems = problems
+        # What the file asks for that the sandbox does differently without refusing the task, for submit to show.
+        self.notices: list[str] = []
 
     def service(self, name: str, raw_service: dict[str, Any], *, prebuilt: bool) -> ComposeService | None:
         """Read service ``name`` (any service but ``main``) of a task that is ``prebuilt`` or not.
@@ -260,7 +263,7 @@ class ServiceParser:
             depends_on=parse_dependency_conditions(raw_main.get("depends_on"), f"{path}.depends_on", self._problems),
             env=environment,
             readiness=parse_readiness(raw_main.get("healthcheck"), f"{path}.healthcheck", self._problems),
-            add_capabilities=parse_capabilities(raw_main, path, self._problems),
+            add_capabilities=parse_capabilities(raw_main, path, self._problems, self.notices),
             volume_mounts=self._volume_mounts(raw_main, path),
             entrypoint=entrypoint,
             ports=parse_ports(raw_main, path, self._problems),

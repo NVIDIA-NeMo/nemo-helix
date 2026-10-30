@@ -254,3 +254,10 @@ class ComposeTask(BaseModel):
         default_factory=list,
         description="The declared volumes something mounts, in file order. Each becomes an empty pod volume.",
     )
+    notices: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the file asks for that the sandbox does differently, without refusing the task, such as a "
+            "capability it doesn't grant. Submit shows each one."
+        ),
+    )
