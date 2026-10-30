@@ -34,6 +34,11 @@ data:
                   typed_config:
                     "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
                     stat_prefix: ingress_http
+                    # Normalize before route matching so encoded paths (/apis/auth/ext%2Dauthz)
+                    # cannot slip past the ext-authz prefix fence.
+                    normalize_path: true
+                    merge_slashes: true
+                    path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT
                     stream_idle_timeout: {{ .Values.envoyProxy.timeouts.streamIdle | quote }}
                     request_headers_timeout: {{ .Values.envoyProxy.timeouts.requestHeaders | quote }}
                     request_timeout: {{ .Values.envoyProxy.timeouts.request | quote }}
@@ -55,6 +60,13 @@ data:
                         - name: backend
                           domains: ["*"]
                           routes:
+                            # The ext-authz callout is for gateways that call it internally, never for
+                            # clients. Answer it at the edge so a session cookie cannot be converted into a
+                            # bearer token through this public listener.
+                            - match:
+                                prefix: "/apis/auth/ext-authz"
+                              direct_response:
+                                status: 404
                             - match:
                                 prefix: "/"
                               route:
