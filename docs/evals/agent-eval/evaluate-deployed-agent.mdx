@@ -74,6 +74,9 @@ class _AgentHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return  # keep the demo output quiet
+
+httpd = ThreadingHTTPServer(("127.0.0.1", 8000), _AgentHandler)
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
 ```
 
 ## 3. Run the evaluation
@@ -97,8 +100,14 @@ async def run_evaluation() -> None:
     for aggregate in result.summary.scores.scores:
         print(f"{aggregate.name}: {aggregate.mean}")
 
-asyncio.run(run_evaluation())
+try:
+    asyncio.run(run_evaluation())
+finally:
+    httpd.shutdown()
+    httpd.server_close()
 ```
+
+The `finally` block stops the local stand-in and releases port 8000, including if evaluation fails.
 
 ## Point at your real agent
 
@@ -244,6 +253,7 @@ async def main() -> None:
         )
     finally:
         httpd.shutdown()
+        httpd.server_close()
 
     for aggregate in result.summary.scores.scores:
         print(f"{aggregate.name}: {aggregate.mean}")

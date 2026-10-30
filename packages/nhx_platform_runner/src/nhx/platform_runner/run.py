@@ -261,7 +261,7 @@ def _display_banner(
     platform_version = get_platform_version()
     if otel_settings.log_format != "plain":
         logger.info(
-            "Nemo Helix starting",
+            "NeMo Helix starting",
             extra={
                 "version": platform_version,
                 "url": url,
@@ -288,7 +288,7 @@ def _display_banner(
     auth_status = "enabled" if auth_config.enabled else "disabled"
 
     banner_text = Text()
-    banner_text.append("Nemo Helix\n", style="bold cyan")
+    banner_text.append("NeMo Helix\n", style="bold cyan")
     banner_text.append(f"v{platform_version}\n\n", style="dim")
     banner_text.append("URL: ", style="bold")
     banner_text.append(f"{url}\n", style=f"green link {url}")

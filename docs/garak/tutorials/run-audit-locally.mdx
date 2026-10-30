@@ -28,7 +28,7 @@ This tutorial takes approximately **10 minutes** to complete, plus however long 
 
 - Install and start NeMo Helix using the [Setup guide](/documentation/get-started).
 - Install garak in a Python virtual environment so the plugin can shell out to it. By default the plugin invokes `~/.garak/.venv/bin/python -m garak`. Override the interpreter path with `NEMO_GARAK_PYTHON` if your install lives elsewhere.
-- Configure at least one Inference Gateway provider — this tutorial uses the `system/nvidia-build` provider for NVIDIA Build (`https://integrate.api.nvidia.com/v1`), with a Build API key authorized to call the selected model. Any chat-completion-compatible provider works, but its model identifiers and credentials must match that provider. Step 3 lists registered providers and checks completion access before running garak. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
+- Configure at least one Inference Gateway provider — this tutorial uses the `default/nvidia-build` provider configured with `nemo setup` in the `default` workspace for NVIDIA Build (`https://integrate.api.nvidia.com/v1`), with a Build API key authorized to call the selected model. Any chat-completion-compatible provider works, but its model identifiers and credentials must match that provider. Step 3 lists registered providers and checks completion access before running garak. See [Inference Gateway](/documentation/vulnerability-scanning/targets/inference-gateway) for details on the `nhx_uri_spec` block used below.
 
 ---
 
@@ -101,12 +101,12 @@ For the full set of options on each sub-block, see [Configuration Schema](/docum
 First, list the providers registered in your deployment so you can pick one that exists:
 
 ```python
-providers = client.models.list_providers(workspace="system")
+providers = client.models.list_providers(workspace="default")
 for provider in providers.items():
     print(provider.name, provider.host_url)
 ```
 
-This example uses `system/nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Set `NVIDIA_MODEL` only to an exact catalog ID served by that provider's configured endpoint; it changes the model ID, not the provider route. To use a different provider from the list, change both the preflight and target routes below. Do not infer IDs by adding or removing prefixes: the endpoint, model ID, and credentials must match.
+This example uses `default/nvidia-build` with the Build model ID `nvidia/nemotron-3.5-lightning-30b-a3b`. Set `NVIDIA_MODEL` only to an exact catalog ID served by that provider's configured endpoint; it changes the model ID, not the provider route. To use a different provider from the list, change both the preflight and target routes below. Do not infer IDs by adding or removing prefixes: the endpoint, model ID, and credentials must match.
 
 Before creating the target, send one chat completion through the same provider route that garak will use. A READY provider or a model listed in its catalog does not guarantee that your API key has completion access:
 
@@ -118,7 +118,7 @@ from nemo_helix_plugin.inference_gateway.types import JsonBody
 MODEL_ID = os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b")
 
 completion = InferenceGatewayClient.from_client(client).provider_post(
-    workspace="system",
+    workspace="default",
     name="nvidia-build",
     trailing_uri="v1/chat/completions",
     body=JsonBody({
@@ -135,7 +135,7 @@ print(content)
 
 If this request fails, resolve the provider/model or credential issue before starting the audit; see Troubleshooting below.
 
-Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `system/nvidia-build` provider:
+Define the model under test. This example uses garak's `nim.NVOpenAIChat` generator pointed at the `default/nvidia-build` provider:
 
 ```python
 target = garak.targets.create(
@@ -148,7 +148,7 @@ target = garak.targets.create(
             "max_tokens": 1024,
             "nhx_uri_spec": {
                 "inference_gateway": {
-                    "workspace": "system",
+                    "workspace": "default",
                     "provider": "nvidia-build",
                 },
             },
@@ -252,7 +252,7 @@ Report artifacts are left in place under the scheduler's temporary directory; th
 : The plugin couldn't find a garak install. Either install garak at `~/.garak/.venv/bin/python`, or set `NEMO_GARAK_PYTHON` to the absolute path of a Python interpreter that has garak installed.
 
 **`RuntimeError: Failed to resolve inference gateway provider '<workspace>/<provider>'`**
-: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List providers in the workspace named by that reference: this tutorial uses `client.models.list_providers(workspace="system")` for `system/nvidia-build`. Update the reference to an existing provider in that workspace. The audit target remains in `default`; its workspace is separate from the provider's workspace.
+: The `nhx_uri_spec` block in your target's options references an Inference Gateway provider that doesn't exist. List providers in the workspace named by that reference: this tutorial uses `client.models.list_providers(workspace="default")` for `default/nvidia-build`. Update the reference to an existing provider in that workspace. The audit target remains in `default`; a provider can be registered in a different workspace, but its reference must name that workspace.
 
 **HTTP 403, 404, or 424 during the completion preflight**
 : Check the provider, its API base URL, the exact model ID in its served-model catalog, and the provider's configured API key. An upstream 403 (`Authorization failed` or `key_model_access_denied`) indicates an authorization/access failure; confirm both the model ID and the key's access with that provider. An upstream 404 can indicate an incorrect model ID, such as a duplicated `nvidia/` prefix on NVIDIA Build. The platform may wrap an upstream failure as HTTP 424; inspect the response body for the upstream status and error. Do not retry the audit until the completion preflight succeeds.

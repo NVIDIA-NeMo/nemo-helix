@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from nhx.common.api.common import ErrorResponse
 from nhx.common.auth.token_resolver import resolve_bearer_token
 from nhx.common.config import get_auth_config, get_platform_config
 from nhx.common.config.base import OIDCConfidentialClientConfig, OIDCPublicClientConfig
@@ -393,7 +394,14 @@ _REDIRECT_RESPONSES: dict[int | str, dict[str, Any]] = {
     "/v2/login",
     status_code=302,
     response_class=RedirectResponse,
-    responses=_REDIRECT_RESPONSES,
+    responses={
+        **_REDIRECT_RESPONSES,
+        503: {
+            "model": ErrorResponse,
+            "description": "OIDC server-side login is not configured or is unavailable",
+            "content": {"application/json": {}},
+        },
+    },
 )
 async def start_web_session_login(
     store: LoginStore,
@@ -517,7 +525,11 @@ async def logout(request: Request, credential_store: CredentialStore) -> Respons
     return response
 
 
-@router.get("/v2/session", response_model=WebSessionResponse)
+@router.get(
+    "/v2/session",
+    response_model=WebSessionResponse,
+    responses={401: {"model": ErrorResponse, "description": "Missing or invalid web session"}},
+)
 async def web_session(request: Request, credential_store: CredentialStore) -> WebSessionResponse:
     principal = await resolve_web_session(request, credential_store)
     if principal is None or principal.account_id is None:

@@ -351,13 +351,11 @@ def list_models_deployments(
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
 ) -> None:
-    """Get Latest ModelDeployment's Model Entities from Entity Store.
+    """Retrieve the model list for the latest deployment.
 
-    This provides the
-    API contract that NIMs expect from Entity Store today, for pulling LoRAs, but
-    enables us to enforce AuthZ boundaries.
-
-    TODO: Implement model entity retrieval based on deployment config."""
+    The model list is currently empty; this command does not yet discover models
+    or LoRA adapters from the deployment configuration.
+    """
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
