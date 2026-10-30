@@ -16068,6 +16068,103 @@ components:
         Provides configuration for running jobs on GPU resources with
 
         resource requests and limits.'
+    GatewayCredentialConfig:
+      properties:
+        gateway_id:
+          type: string
+          minLength: 1
+          title: Gateway Id
+        registration_key_file:
+          type: string
+          format: path
+          title: Registration Key File
+        profiles:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayInjectionProfile'
+          type: object
+          minProperties: 1
+          title: Profiles
+        renewal_mode:
+          type: string
+          enum:
+          - gateway
+          - helix
+          title: Renewal Mode
+          description: Use gateway-managed renewal, or Helix controller updates for
+            active sandboxes, including idle ones.
+          default: gateway
+        renewal_interval_seconds:
+          type: integer
+          maximum: 15.0
+          minimum: 1.0
+          title: Renewal Interval Seconds
+          description: Minimum time between Helix provider updates; allow controller
+            polling and propagation within the configured driver cache lifetime.
+          default: 10
+        credential_refresh_verified:
+          type: boolean
+          title: Credential Refresh Verified
+          description: Operator attestation that the selected renewal mode refreshes
+            expiring external credentials and preserves running placeholders on this
+            gateway build.
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - gateway_id
+      - registration_key_file
+      - profiles
+      title: GatewayCredentialConfig
+      description: 'Configure backend provider registration: gateway identity, signing
+        key and profiles.'
+    GatewayInjectionProfile:
+      properties:
+        workspaces:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Workspaces
+        credential_keys:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Credential Keys
+        profile_workspace:
+          type: string
+          title: Profile Workspace
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - workspaces
+      - credential_keys
+      title: GatewayInjectionProfile
+      description: Limit a provider profile to approved Helix workspaces and credential
+        slots.
+    GatewayProviderBinding:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          title: Profile
+        credentials:
+          additionalProperties:
+            type: string
+          type: object
+          minProperties: 1
+          title: Credentials
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     GenerationLog:
       properties:
         activated_rails:
@@ -17503,6 +17600,18 @@ components:
           type: object
           title: Config
           description: Configuration for the step
+        gateway_providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Gateway Providers
+        gateway_read_filesets:
+          items:
+            type: string
+          type: array
+          title: Gateway Read Filesets
+          description: Input filesets readable by a provider-bearing sandbox; authorized
+            at job creation.
         lifecycle:
           allOf:
           - $ref: '#/components/schemas/StepLifecycle'
@@ -20913,6 +21022,8 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        gateway_credentials:
+          $ref: '#/components/schemas/GatewayCredentialConfig'
         gateway_endpoint:
           type: string
           title: Gateway Endpoint

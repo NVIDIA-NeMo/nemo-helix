@@ -238,7 +238,9 @@ async def _resolve_deployment_environment(
 
 def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline | None) -> MergedEnvironment:
     try:
-        return merge_environment_spec_into_agent_config(config, env_spec)
+        merged = merge_environment_spec_into_agent_config(config, env_spec)
+        merged.require_runtime_support()
+        return merged
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
         raise HTTPException(status_code=422, detail=str(exc)) from exc

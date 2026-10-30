@@ -613,6 +613,36 @@ class TestCreateDeployment:
         # Only the agent lookup hit the entity store; inline specs need no deref.
         assert mock_entity_client.get.await_count == 1
 
+    def test_create_rejects_provider_fulfillments_before_saving_deployment(self) -> None:
+        entity_client = AsyncMock()
+        entity_client.get.return_value = _make_agent()
+        client = _test_client(entity_client)
+        resp = client.post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "environment": {
+                    "environment_spec": {
+                        "secrets": {"SERVICE_SECRET": "default/service-token"},
+                        "settings": {
+                            "openshell": {
+                                "providers": {
+                                    "service": {
+                                        "profile": "service-read",
+                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                    }
+                                }
+                            }
+                        },
+                    },
+                },
+            },
+        )
+        assert resp.status_code == 422
+        assert "require a configured OpenShell execution backend" in resp.json()["detail"]
+        entity_client.create.assert_not_awaited()
+
     def test_create_rejects_missing_environment_ref(self) -> None:
         agent = _make_agent()
         mock_entity_client = AsyncMock()

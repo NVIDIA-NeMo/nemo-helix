@@ -4788,7 +4788,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4836,6 +4836,7 @@ components:
           title: Mcp
           description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
             MCP dependency.
+      additionalProperties: false
       type: object
       title: EnvironmentSpecInline
       description: 'Inline environment spec - the dependencies and configuration an

@@ -3296,7 +3296,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -3813,7 +3813,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -3865,6 +3865,7 @@ components:
           type: string
           title: Name
           description: Unique environment-spec name within the workspace.
+      additionalProperties: false
       type: object
       required:
       - name
@@ -4028,7 +4029,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4076,6 +4077,7 @@ components:
           title: Mcp
           description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
             MCP dependency.
+      additionalProperties: false
       type: object
       title: EnvironmentSpecInline
       description: 'Inline environment spec - the dependencies and configuration an
@@ -4506,6 +4508,15 @@ components:
             type: string
           type: object
           title: Secrets
+        providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Providers
+        stage_ethos_fileset:
+          type: boolean
+          title: Stage Ethos Fileset
+          default: true
         post_run_action:
           $ref: '#/components/schemas/PostRunActionConfig'
       type: object
@@ -4770,6 +4781,26 @@ components:
       enum:
       - fileset
       title: FileStorageType
+    GatewayProviderBinding:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          title: Profile
+        credentials:
+          additionalProperties:
+            type: string
+          type: object
+          minProperties: 1
+          title: Credentials
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     HTTPValidationError:
       properties:
         detail:

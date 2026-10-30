@@ -61,7 +61,7 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import FilesetRef
-from pydantic import BaseModel, Field, PrivateAttr, computed_field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 
 class SessionStatus(StrEnum):
@@ -231,6 +231,8 @@ class AgentEnvironmentSpec(NemoEntity, EnvironmentSpecInline, entity_type="agent
     Entity type: ``agent_environment_spec``
     Referenced by an AgentEnvironment's ``environment_spec`` (by name or inline).
     """
+
+    model_config = ConfigDict(extra="ignore")
 
 
 class AgentEnvironment(NemoEntity, AgentEnvironmentInline, entity_type="agent_environment"):
