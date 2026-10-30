@@ -24,13 +24,13 @@ from nemo_evals.harbor.archive_io import download_verified_async
 from nemo_evals.harbor.compose.models import ComposeError
 from nemo_evals.harbor.compose.parser import parse_compose
 from nemo_evals.image_builds.builder import (
-    ENDED_JOB_STATUSES,
     ImageBuilder,
     adopt_or_build,
     archive_source,
     builder_name,
     copy_builder_name,
     ensure_build,
+    job_gone,
 )
 from nemo_evals.image_builds.models import (
     TERMINAL_BUILD_STATUSES,
@@ -289,11 +289,12 @@ async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:
         try:
             current = await builder.get_image(image.builder_image)
             if current is not None and current.status == "pending" and image.build_job is not None:
-                status = await builder.job_status(image.build_job)
-                if status in ENDED_JOB_STATUSES or status is None:
+                # A build another task submitted may not have its job yet: Builder creates it after the row.
+                if await job_gone(builder, current):
                     # Builder never fails a row whose build failed: read it once more, after its job ended.
                     current = await builder.get_image(image.builder_image)
                     if current is not None and current.status == "pending":
+                        status = await builder.job_status(image.build_job)
                         image.status = "failed"
                         image.error = f"Builder job {image.build_job} ended ({status or 'gone'}) without the image"
                         changed = True

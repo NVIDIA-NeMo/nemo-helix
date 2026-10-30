@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import httpx
@@ -318,3 +320,85 @@ def test_a_platform_is_its_own_builder_build_set() -> None:
     assert copy_builder_name("docker.io/library/ubuntu:24.04", "linux/arm64") != copy_builder_name(
         "docker.io/library/ubuntu:24.04"
     )
+
+
+class _RacingBuilder:
+    """Builder's submit as it runs: the row is created atomically, then the job, with a pause in between.
+
+    A request for an existing ``(name, revision)`` with another source is refused (409), as Builder refuses another
+    request's revision; the same request rejoins it. A job exists once its submit has created it.
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, tuple[str, ContainerImage]] = {}
+        self.jobs: set[str] = set()
+        self.builds: list[str] = []
+
+    async def get_image(self, name: str) -> ContainerImage | None:
+        row = self.rows.get(name)
+        return row[1] if row is not None else None
+
+    async def job_status(self, job: str) -> str | None:
+        return "active" if job in self.jobs else None
+
+    async def submit(
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
+    ) -> SubmitBuildResponse:
+        image_name, request = f"{name}-{revision}", source.model_dump_json()
+        if image_name in self.rows:
+            if self.rows[image_name][0] != request:
+                raise ConflictError(httpx.Response(409, json={"detail": "belongs to a different request"}))
+        else:
+            row = _container_image(image_name, "pending")
+            row._created_at = datetime.now(timezone.utc)
+            self.rows[image_name] = (request, row)
+            self.builds.append(image_name)
+            await asyncio.sleep(0.01)  # the job is created after the row: concurrent readers see no job yet
+        self.jobs.add(f"builder-{image_name}")
+        return SubmitBuildResponse(job=f"builder-{image_name}", images=[self.rows[image_name][1]])
+
+    async def image_platforms(self, image: str) -> list[str]:
+        return []
+
+
+async def test_a_hundred_tasks_sharing_one_context_submitted_at_once_make_one_build() -> None:
+    """Every task's archive is a different source, so all but one submit are refused; each uses the one build."""
+    builder = _RacingBuilder()
+    sources = [
+        FileSetSource(fileset="default/harbor-tasks", archive=f"task-{i}/abc/task_archive", context_path="env")
+        for i in range(100)
+    ]
+
+    images = await asyncio.gather(
+        *(adopt_or_build(builder, name="harbor-env-0123456789ab", source=s, dockerfile="Dockerfile") for s in sources)
+    )
+
+    assert builder.builds == ["harbor-env-0123456789ab-1"]
+    assert {image.name for image in images} == {"harbor-env-0123456789ab-1"}
+
+
+@pytest.mark.parametrize(("age", "submitted"), [(timedelta(seconds=5), []), (timedelta(minutes=10), [2])])
+async def test_a_pending_build_without_a_job_yet_is_used_until_its_job_is_overdue(
+    age: timedelta, submitted: list[int]
+) -> None:
+    """Builder creates the job after the row: a young row without one is another submit in flight, not abandoned."""
+    builder = _Builder(["pending"], job=None)
+    created = datetime.now(timezone.utc) - age
+
+    async def row(name: str) -> ContainerImage | None:
+        if name.endswith("-1"):
+            image = _container_image(name, "pending")
+            image._created_at = created
+            return image
+        return None
+
+    builder.get_image = row  # ty: ignore[invalid-assignment]
+    await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == submitted

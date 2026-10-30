@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from filesets import parse_fileset_ref
@@ -27,6 +28,10 @@ _BUILDER_NAME_PREFIX = "harbor-env-"
 _COPY_NAME_PREFIX = "harbor-img-"
 #: Builder job statuses after which the job writes nothing more to its images.
 ENDED_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
+#: How long a pending image may have no job before it counts as abandoned. Builder writes an image's row first and
+#: creates its job after, so a request that reads the row in between (any of many tasks sharing one build) sees no
+#: job yet. Longer than any submit takes; short enough that a submit that died between the two is retried soon.
+JOB_GRACE = timedelta(minutes=2)
 
 
 class ImageBuilder(Protocol):
@@ -155,8 +160,20 @@ async def adopt_or_build(
 async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:
     if image.status != "pending":
         return image.status == "failed"
+    return await job_gone(builder, image)
+
+
+async def job_gone(builder: ImageBuilder, image: ContainerImage, *, now: datetime | None = None) -> bool:
+    """Whether a pending image's job has ended, or never appeared within :data:`JOB_GRACE` of its row."""
     status = await builder.job_status(image.provenance.job.rpartition("/")[2])
-    return status is None or status in ENDED_JOB_STATUSES
+    if status is not None:
+        return status in ENDED_JOB_STATUSES
+    created = image.created_at
+    if created is None:
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - created > JOB_GRACE
 
 
 class HttpImageBuilder:
