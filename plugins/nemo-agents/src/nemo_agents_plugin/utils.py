@@ -31,10 +31,10 @@ _ENV_VAR_PATTERN = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Z
 # validatable through the platform VirtualModels API.
 _IGW_LLM_TYPES = frozenset({"openai", "nim"})
 
-# Fabric model providers that speak through Platform's OpenAI-compatible IGW
-# endpoint. Native providers such as Anthropic should keep their own adapter
-# defaults unless the config explicitly supplies a base_url.
-_FABRIC_IGW_MODEL_PROVIDERS = frozenset({"openai", "nvidia", "openai-compatible"})
+# Fabric model providers bound to the IGW, with the path their clients append API routes to:
+# OpenAI clients add ``/chat/completions`` to a ``/v1`` base, Anthropic clients add ``/v1/messages``.
+# Other providers keep their adapter defaults unless the config supplies a base_url.
+_FABRIC_IGW_MODEL_PROVIDERS = {"openai": "/v1", "nvidia": "/v1", "openai-compatible": "/v1", "anthropic": ""}
 
 # Regex used to skip LLM ``model_name`` values that still contain unexpanded
 # ``$VAR`` / ``${VAR}`` placeholders.  These were left in place by
@@ -255,7 +255,7 @@ def inject_fabric_gateway_url(
     """Deep-copy a Platform agent config and bind its models to the Inference Gateway."""
     if base_url is None:
         base_url = get_base_url()
-    gateway_url = f"{base_url.rstrip('/')}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-/v1"
+    gateway_url = f"{base_url.rstrip('/')}/apis/inference-gateway/v2/workspaces/{workspace}/openai/-"
 
     resolved = copy.deepcopy(config)
     model_configs: list[Any] = []
@@ -282,7 +282,7 @@ def inject_fabric_gateway_url(
         provider = model_config.get("provider")
         if not isinstance(provider, str) or provider.lower() not in _FABRIC_IGW_MODEL_PROVIDERS:
             continue
-        model_config["base_url"] = gateway_url
+        model_config["base_url"] = gateway_url + _FABRIC_IGW_MODEL_PROVIDERS[provider.lower()]
 
     rebind_intake_ingest_workspace(resolved, workspace)
 

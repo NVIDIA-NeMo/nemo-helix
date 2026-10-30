@@ -120,6 +120,29 @@ if preflight succeeds but runner lookup fails.
 For persisted Relay v3-to-v4 compatibility and ATIF/OTLP gateway rewriting, see
 [Fabric upgrade and telemetry routing](/documentation/agents/fabric-upgrade).
 
+## Capture Relay's trace
+
+When the config has a `relay` block, each trial also brings back Relay's OpenTelemetry trace. A
+[registered agent](#run-a-registered-agent) gets one when its definition sets `telemetry.enabled: true`.
+
+- Setup installs the `nemo-relay` CLI the Codex and Claude adapters launch, unless one is already on
+  `PATH`. It downloads the release matching the `nemo-relay` package in the task's Fabric environment
+  from [NVIDIA/NeMo-Relay](https://github.com/NVIDIA/NeMo-Relay/releases), for the image's C library,
+  checks its published `sha256`, and makes sure it runs. A failed download is retried a few times.
+- Relay sends model credentials only over HTTPS or to a loopback address. When a model's gateway URL is
+  plain HTTP, as it is from a task container, the agent calls it through a forwarder on `127.0.0.1`
+  that passes requests through unchanged.
+- During the run, Relay exports its spans to a receiver beside the harness. They are saved as
+  `agent/traces/relay.jsonl` in the trial, and evaluation publishes that OTLP trace to Intake in place
+  of the ATIF trajectory.
+- Relay sends a W3C `traceparent` on each model call. When the trial calls a gateway model whose
+  virtual model [records evaluation trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials),
+  the gateway's span for each call lands beneath Relay's span for it, in the same trace.
+
+The download needs `github.com` and `release-assets.githubusercontent.com` during setup. For tasks
+without network access, add both to the sandbox profile's `agent_setup_egress`, or install the CLI in
+the task image.
+
 ## Run on task images without Python
 
 `NemoFabricAgent` installs Fabric with the task image's own `python3`, so it requires an image that
