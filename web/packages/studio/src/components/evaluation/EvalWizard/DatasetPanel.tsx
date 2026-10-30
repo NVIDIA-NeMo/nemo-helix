@@ -24,9 +24,8 @@ import {
   messagesShape,
   useDatasetPreview,
 } from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
-import { useMessagesBinding } from '@studio/components/evaluation/EvalWizard/useMessagesBinding';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { FC, ReactNode, useEffect, useMemo, useState } from 'react';
+import { FC, ReactNode, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const asText = (value: unknown): string =>
@@ -71,10 +70,8 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
     dataset ?? null
   );
 
-  useMessagesBinding();
-
-  const [rowIndex, setRowIndex] = useState(0);
-  useEffect(() => setRowIndex(0), [dataset]);
+  const [rowPick, setRowPick] = useState({ dataset, index: 0 });
+  const rowIndex = rowPick.dataset === dataset ? rowPick.index : 0;
   const { row: previewRow, rowCount, isPartial } = useDatasetPreview(dataset ?? null, rowIndex);
   const fileName = dataset ? parseFilesetLocation(dataset)?.objectPath.split('/').pop() : null;
 
@@ -143,7 +140,9 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
           allowMultipleUpload={allowMultipleUpload}
           autoSelectFirstAcceptable
           formFieldProps={slotLabel ? { slotLabel } : undefined}
-          onFileSelected={() => setValue('fieldMapping', EMPTY_FIELD_MAPPING)}
+          onFileSelected={
+            showMapping ? () => setValue('fieldMapping', EMPTY_FIELD_MAPPING) : undefined
+          }
         />
 
         {error ? (
@@ -210,7 +209,7 @@ export const DatasetPanel: FC<DatasetPanelProps> = ({
                 rowIndex={rowIndex}
                 rowCount={rowCount}
                 isPartial={isPartial}
-                onChange={setRowIndex}
+                onChange={(index) => setRowPick({ dataset, index })}
               />
             ) : null}
           </Stack>
