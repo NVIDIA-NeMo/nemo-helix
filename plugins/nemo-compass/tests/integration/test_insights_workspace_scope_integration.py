@@ -24,9 +24,6 @@ from nhx.testing import ClientContext, create_test_client
 
 pytestmark = pytest.mark.integration
 
-# The routes load Insights by id alone today. Strict, so the fix has to drop it.
-_unscoped = pytest.mark.xfail(strict=True, reason="Insight routes do not yet check the Insight's workspace")
-
 OWNER = "team-owner"
 OTHER = "team-other"
 
@@ -71,14 +68,12 @@ def test_an_insight_is_readable_in_its_own_workspace(http: TestClient, insight: 
     assert response.json()["workspace"] == OWNER
 
 
-@_unscoped
 def test_another_workspace_cannot_read_an_insight(http: TestClient, insight: dict[str, Any]) -> None:
     response = http.get(_insights_url(OTHER, insight["id"]))
 
     assert response.status_code == 404, response.text
 
 
-@_unscoped
 def test_another_workspace_cannot_update_an_insight(http: TestClient, insight: dict[str, Any]) -> None:
     response = http.patch(_insights_url(OTHER, insight["id"]), json={"description": "overwritten"})
 
@@ -86,7 +81,6 @@ def test_another_workspace_cannot_update_an_insight(http: TestClient, insight: d
     assert http.get(_insights_url(OWNER, insight["id"])).json()["description"] == "d"
 
 
-@_unscoped
 def test_another_workspace_cannot_delete_an_insight(http: TestClient, insight: dict[str, Any]) -> None:
     response = http.delete(_insights_url(OTHER, insight["id"]))
 

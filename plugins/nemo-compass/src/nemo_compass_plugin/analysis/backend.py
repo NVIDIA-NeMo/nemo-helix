@@ -556,8 +556,8 @@ class RemoteCompassBackend(CompassBackend):
         updated_date: datetime | None = None,
     ) -> Insight:
         current = await self._get(workspace=workspace, insight_id=insight_id)
-        if current.workspace != workspace or current.agent != agent:
-            raise ValueError(f"Insight {insight_id!r} no longer belongs to this workspace and agent")
+        if current.agent != agent:
+            raise ValueError(f"Insight {insight_id!r} no longer belongs to agent {agent!r}")
         try:
             return await self._insights.update(
                 workspace=workspace,
