@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
@@ -15,14 +16,59 @@ import {
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
+  expertParallelError,
+  expertParallelExpertCount,
+  validExpertParallelSizes,
+} from '@studio/util/forms/expertParallel';
+import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
-import { useFormContext } from 'react-hook-form';
+import { useEffect, useRef } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
+
+const EXPERT_PARALLEL_FIELD = 'automodel.parallelism.expert_parallel_size';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
-  const { control } = useFormContext<CustomizationFormFields>();
+  const { control, setValue } = useFormContext<CustomizationFormFields>();
+  const modelUrn = useWatch({ control, name: 'automodel.model' });
+  const parallelism = useWatch({ control, name: 'automodel.parallelism' }) ?? {};
+  const numExperts = expertParallelExpertCount(useModelEntity(modelUrn));
+  const validSizes = validExpertParallelSizes(numExperts, parallelism);
+  const expertParallelSize = parallelism.expert_parallel_size;
+
+  // The value this effect last filled in. Anything else came from the user or a template,
+  // and is left for validation to flag rather than overwritten.
+  const autoFilledSize = useRef<number | undefined>(undefined);
+  const defaultSize = validSizes?.at(-1);
+  useEffect(() => {
+    const isAutoFilled =
+      expertParallelSize === undefined || expertParallelSize === autoFilledSize.current;
+    if (!isAutoFilled || expertParallelSize === defaultSize) return;
+    if (defaultSize === undefined && autoFilledSize.current === undefined) return;
+    autoFilledSize.current = defaultSize;
+    setValue(EXPERT_PARALLEL_FIELD, defaultSize, { shouldValidate: true });
+  }, [defaultSize, expertParallelSize, setValue]);
+
+  const expertParallelField = (
+    <ControlledSliderWithTextInput
+      useControllerProps={{ name: EXPERT_PARALLEL_FIELD, control }}
+      formFieldProps={{
+        slotLabel: 'Expert Parallel Size',
+        slotInfo: validSizes
+          ? `This model routes each token to a few of its ${numExperts} experts. Training it on more than one GPU shards the experts across GPUs, so each holds only its share — the value must divide both the expert count and the data-parallel GPUs.`
+          : 'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
+        slotError: expertParallelError(numExperts, parallelism),
+      }}
+      {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
+      min={1}
+      max={Math.max(8, ...(validSizes ?? []))}
+      step={1}
+      disabled={disabled}
+    />
+  );
+
   return (
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
@@ -46,6 +92,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         step={1}
         disabled={disabled}
       />
+      {validSizes && expertParallelField}
       <AccordionRoot multiple>
         <AccordionItem value="advanced-parallelism" className="border-b-0">
           <AccordionTrigger>
@@ -96,19 +143,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 step={1}
                 disabled={disabled}
               />
-              <ControlledSliderWithTextInput
-                useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
-                formFieldProps={{
-                  slotLabel: 'Expert Parallel Size',
-                  slotInfo:
-                    'Expert parallel size for MoE models. Must divide data_parallel_size × context_parallel_size, and tensor parallel size must be 1 when this is above 1.',
-                }}
-                {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
-                min={1}
-                max={8}
-                step={1}
-                disabled={disabled}
-              />
+              {!validSizes && expertParallelField}
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
                 formFieldProps={{
