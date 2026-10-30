@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
@@ -38,29 +35,7 @@ from nhx.core.auth.app.access_keys import (
 
 from . import schemas
 
-
-class _RejectedInputNotEchoedRoute(APIRoute):
-    """Answers a request that fails validation with 422 and without the rejected input, which may not be JSON."""
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        handler = super().get_route_handler()
-
-        async def handle(request: Request) -> Response:
-            try:
-                return await handler(request)
-            except RequestValidationError as exc:
-                errors = [
-                    {key: value for key, value in error.items() if key not in ("input", "ctx")}
-                    for error in exc.errors()
-                ]
-                return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(errors)}
-                )
-
-        return handle
-
-
-router = APIRouter(tags=["Scoped Access Keys"], route_class=_RejectedInputNotEchoedRoute)
+router = APIRouter(tags=["Scoped Access Keys"])
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
