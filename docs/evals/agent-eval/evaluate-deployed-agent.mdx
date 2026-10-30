@@ -84,6 +84,10 @@ threading.Thread(target=httpd.serve_forever, daemon=True).start()
 With an agent target and no inference function supplied, `run()` generates answers by making real HTTP
 calls to the agent's `url`.
 
+If you skipped the local stand-in in section 2, run `asyncio.run(run_evaluation())` directly instead
+of the `try`/`finally` block below. Do not call `httpd.shutdown()` or `httpd.server_close()` when
+using your own endpoint: there is no local server to clean up.
+
 ```python
 import asyncio
 
@@ -111,7 +115,8 @@ The `finally` block stops the local stand-in and releases port 8000, including i
 
 ## Point at your real agent
 
-To evaluate your own deployed agent, change three things and drop the local server:
+To evaluate your own deployed agent, skip section 2 and omit the local-server cleanup in section 3
+as described above. Change these three settings:
 
 1. **`url`** → your agent's endpoint.
 2. **`body`** → the request your agent expects (reference the task's inputs, e.g. `{{ instruction }}`).
