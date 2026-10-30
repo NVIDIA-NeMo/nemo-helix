@@ -34,6 +34,11 @@ from opentelemetry._logs.severity import SeverityNumber
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.environment_variables import (
+    OTEL_BLRP_MAX_EXPORT_BATCH_SIZE,
+    OTEL_BLRP_MAX_QUEUE_SIZE,
+    OTEL_BLRP_SCHEDULE_DELAY,
+)
 from opentelemetry.sdk.resources import Resource
 
 logger = logging.getLogger(__name__)
@@ -41,6 +46,15 @@ logger = logging.getLogger(__name__)
 NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
 NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH"
 NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR = "NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT"
+# Each OTLP export becomes at least one parquet file per job task in Files, so export cadence
+# drives file count (and tail-read latency) for long jobs. The OTEL SDK default of 5s/512
+# records produces many tiny files; these settings are overridable via the job env.
+NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR = "NHX_JOB_LOG_EXPORT_INTERVAL_MS"
+NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR = "NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE"
+DEFAULT_LOG_EXPORT_INTERVAL_MS = 5_000
+DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE = 2048
+# The batch size comes from the job env but the logger runs in the controller; the queue is 4x this.
+MAX_LOG_EXPORT_MAX_BATCH_SIZE = 8192
 SERVICE_JOBS_BEARER_HEADERS = {"Authorization": "Bearer service:jobs"}
 
 
@@ -330,9 +344,73 @@ def create_otel_logger(
         }
     )
     logger_provider = LoggerProvider(resource=resource)
-    logger_provider.add_log_record_processor(BatchLogRecordProcessor(_build_otlp_log_exporter(env, endpoint)))
+    logger_provider.add_log_record_processor(
+        BatchLogRecordProcessor(_build_otlp_log_exporter(env, endpoint), **_batch_processor_kwargs(env))
+    )
     logger.info("Created local OTEL logger", extra={"endpoint": endpoint, "job": job, "step": step})
     return SubprocessOtelLogger(logger_provider.get_logger("nhx.jobs.subprocess"), logger_provider)
+
+
+def _batch_processor_kwargs(env: dict[str, str]) -> dict[str, int]:
+    """Batch processor tuning, resolved per setting.
+
+    Precedence for each setting: a valid ``NHX_JOB_LOG_EXPORT_*`` override from the job env, then an explicit
+    ``OTEL_BLRP_*`` value in the controller environment (left out of the kwargs so the SDK reads it), then
+    our low-file-count default. An explicitly configured queue size is never replaced, so a batch size that
+    would not fit in it is reduced to the queue size.
+    """
+    kwargs: dict[str, int] = {}
+
+    nhx_interval = _positive_int_env(env, NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR, 0)
+    if nhx_interval:
+        kwargs["schedule_delay_millis"] = nhx_interval
+    elif _explicit_otel_int(OTEL_BLRP_SCHEDULE_DELAY) is None:
+        kwargs["schedule_delay_millis"] = DEFAULT_LOG_EXPORT_INTERVAL_MS
+
+    otel_batch = _explicit_otel_int(OTEL_BLRP_MAX_EXPORT_BATCH_SIZE)
+    otel_queue = _explicit_otel_int(OTEL_BLRP_MAX_QUEUE_SIZE)
+    nhx_batch = _positive_int_env(env, NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR, 0)
+    batch: int | None
+    if nhx_batch:
+        batch = min(nhx_batch, MAX_LOG_EXPORT_MAX_BATCH_SIZE)
+    elif otel_batch is None:
+        batch = DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+    else:
+        batch = None
+    if batch is not None:
+        if otel_queue is not None:
+            batch = min(batch, otel_queue)
+        kwargs["max_export_batch_size"] = batch
+
+    if otel_queue is None:
+        # Queue must be >= batch size; leave headroom for bursts between less frequent exports.
+        effective_batch = batch or otel_batch or DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+        kwargs["max_queue_size"] = max(effective_batch * 4, DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE)
+    return kwargs
+
+
+def _explicit_otel_int(name: str) -> int | None:
+    """A positive integer OTEL_BLRP_* value from the controller environment, or None if unset or invalid."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _positive_int_env(env: dict[str, str], key: str, default: int) -> int:
+    raw = env.get(key, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value <= 0:
+        logger.warning("Ignoring invalid log export setting", extra={"env": key, "value": raw})
+        return default
+    return value
 
 
 def _build_otlp_log_exporter(env: dict[str, str], endpoint: str) -> OTLPLogExporter:

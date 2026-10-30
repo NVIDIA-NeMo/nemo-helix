@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,21 @@ const (
 
 	launcherOTLPLogsEndpointEnv = "NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT"
 	otlpHTTPLogExportTimeout    = 10 * time.Second
+
+	// Each OTLP export becomes at least one parquet file per job task in Files, so the
+	// export cadence directly drives file count (and tail-read latency) for long jobs.
+	// The OTEL SDK default of 1s/512 records produced thousands of tiny files per job.
+	logExportIntervalEnv     = "NHX_JOB_LOG_EXPORT_INTERVAL_MS"
+	logExportMaxBatchSizeEnv = "NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE"
+	defaultLogExportInterval = 3 * time.Second
+	defaultLogExportBatch    = 2048
+	// Cap on the env-provided batch size; the queue is 4x this.
+	maxLogExportBatch = 8192
+
+	// OTEL SDK batch processor env vars, honored when no NHX_JOB_LOG_EXPORT_* override is set.
+	otelBLRPScheduleDelayEnv      = "OTEL_BLRP_SCHEDULE_DELAY"
+	otelBLRPMaxExportBatchSizeEnv = "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE"
+	otelBLRPMaxQueueSizeEnv       = "OTEL_BLRP_MAX_QUEUE_SIZE"
 )
 
 var (
@@ -106,10 +122,53 @@ func newLoggerProvider(ctx context.Context, res *resource.Resource) (*log.Logger
 	}
 
 	loggerProvider := log.NewLoggerProvider(
-		log.WithProcessor(log.NewBatchProcessor(logExporter)),
+		log.WithProcessor(log.NewBatchProcessor(logExporter, batchProcessorOptions()...)),
 		log.WithResource(res),
 	)
 	return loggerProvider, nil
+}
+
+// batchProcessorOptions returns the batch processor tuning. Each NHX_JOB_LOG_EXPORT_* setting
+// wins when set; otherwise an explicit OTEL_BLRP_* value is left for the SDK to read, and only
+// then do our low-file-count defaults apply. Remaining records are flushed on provider
+// shutdown regardless of the interval.
+func batchProcessorOptions() []log.BatchProcessorOption {
+	var opts []log.BatchProcessorOption
+
+	if ms := positiveIntEnv(logExportIntervalEnv); ms > 0 {
+		opts = append(opts, log.WithExportInterval(time.Duration(ms)*time.Millisecond))
+	} else if os.Getenv(otelBLRPScheduleDelayEnv) == "" {
+		opts = append(opts, log.WithExportInterval(defaultLogExportInterval))
+	}
+
+	if n := min(positiveIntEnv(logExportMaxBatchSizeEnv), maxLogExportBatch); n > 0 {
+		opts = append(opts, log.WithExportMaxBatchSize(n))
+		// The queue must be at least the batch size; keep headroom so bursts between exports
+		// are not dropped now that exports are less frequent.
+		if os.Getenv(otelBLRPMaxQueueSizeEnv) == "" {
+			opts = append(opts, log.WithMaxQueueSize(max(n*4, defaultLogExportBatch)))
+		}
+	} else if os.Getenv(otelBLRPMaxExportBatchSizeEnv) == "" {
+		opts = append(opts, log.WithExportMaxBatchSize(defaultLogExportBatch))
+		if os.Getenv(otelBLRPMaxQueueSizeEnv) == "" {
+			opts = append(opts, log.WithMaxQueueSize(defaultLogExportBatch*4))
+		}
+	}
+	return opts
+}
+
+// positiveIntEnv returns the env var as a positive int, or 0 if unset or invalid.
+func positiveIntEnv(key string) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		slog.Warn("ignoring invalid log export setting", "env", key, "value", raw)
+		return 0
+	}
+	return n
 }
 
 func newLogExporter(ctx context.Context) (log.Exporter, error) {
