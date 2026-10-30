@@ -168,7 +168,7 @@ auth:
   embedded_pdp_memory_limit_mb: 256
   # Fail-mode for a plugin that contributes invalid HTTP authz. | default: 'hard_fail' | values: 'deny_route' | 'quarantine' | 'hard_fail'
   on_invalid_plugin: hard_fail
-  # Additional service principal names allowed for stable account materialization. Built-in Helix services and installed plugin services are allowed automatically.
+  # Additional service principal names allowed for stable account materialization. Built-in Helix services, plugin services, and inference middleware installed where the auth service runs (and passing the plugin allowlist there) are allowed automatically. When the inference gateway runs separately from auth, add each middleware entry-point name here.
   allowed_service_principals: []
 ```
 
