@@ -21,8 +21,8 @@ _DEFAULT_AUTH_HEADER_FORMAT = "Authorization: Bearer <auth_secret>"
 # validator (``nhx.core.models.schemas._validate_auth_header_format``).
 _AUTH_SECRET_PLACEHOLDER_RE = re.compile(r"<auth_secret>|\{\{[ \t]*auth_secret[ \t]*\}\}")
 _AUTH_HEADER_FORBIDDEN_CHARS = frozenset("{}\r\n")
-# The only scope a forwarded caller credential may carry: it reaches inference and nothing else on the platform.
-_FORWARDABLE_SCOPES = frozenset({"inference"})
+# The only scope family a forwarded caller credential may carry: it reaches inference and nothing else on the platform.
+_FORWARDABLE_SCOPE_FAMILY = "inference"
 
 
 def render_auth_header(secret_value: str, auth_header_format: str | None) -> tuple[str, str]:
@@ -64,7 +64,7 @@ def upstream_credential(provider: ModelProvider, secret_value: str | None, heade
         return credential
     resolved = auth_client.resolved_bearer_token
     scopes = resolved.scopes if resolved is not None else lowered.get("x-nhx-scopes", "").split()
-    if not scopes or not set(scopes) <= _FORWARDABLE_SCOPES:
+    if not scopes or any(scope.split(":", 1)[0] != _FORWARDABLE_SCOPE_FAMILY for scope in scopes):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
