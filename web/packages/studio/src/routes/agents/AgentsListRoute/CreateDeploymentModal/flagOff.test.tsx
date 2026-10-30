@@ -8,7 +8,7 @@ vi.hoisted(() => {
 });
 
 import { workspace1 } from '@studio/mocks/entity-store/projects';
-import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { CreateDeploymentModal } from '@studio/routes/agents/AgentsListRoute/CreateDeploymentModal';
 import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 

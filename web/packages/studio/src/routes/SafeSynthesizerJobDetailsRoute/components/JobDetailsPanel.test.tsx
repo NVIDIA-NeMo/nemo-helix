@@ -6,7 +6,6 @@ import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import * as safeSynthesizerApi from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
-import * as useDatastoreFileContentModule from '@studio/api/datasets/useDatastoreFileContent';
 import { JobDetailsPanel } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobDetailsPanel';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
@@ -165,7 +164,6 @@ const createMockJob = (overrides?: Partial<GenerateJob>): GenerateJob => ({
 });
 
 describe('JobDetailsPanel', () => {
-  const mockRefetchSourceFile = vi.fn();
   const mockRefetchSyntheticData = vi.fn();
 
   beforeEach(() => {
@@ -182,12 +180,6 @@ describe('JobDetailsPanel', () => {
             { artifact_url: 'fileset://test-namespace/results/synthetic_data.csv' },
           ],
         },
-      })
-    );
-    vi.spyOn(useDatastoreFileContentModule, 'useDatastoreFileContent').mockImplementation(
-      vi.fn().mockReturnValue({
-        data: 'source file content',
-        refetch: mockRefetchSourceFile,
       })
     );
 

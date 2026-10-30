@@ -16,7 +16,7 @@ import {
   deploymentModesResponse,
 } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
-import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
+import { CreateDeploymentModal } from '@studio/routes/agents/AgentsListRoute/CreateDeploymentModal';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import {
   mockEnabledModes,
