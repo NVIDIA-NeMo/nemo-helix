@@ -27,6 +27,8 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from nhx_sandbox.core.errors import ExecInterrupted
+
 LOGGER = logging.getLogger(__name__)
 
 # Sandbox metadata label shared by every sandbox one create call made, including its retries.
@@ -429,8 +431,16 @@ class OpenSandboxDriver:
         # The SDK infers the exit code of a foreground command. ``error.value`` is free text, so
         # only fall back to a generic failure when the SDK found no code at all.
         exit_code = execution.exit_code
+        if exit_code is None and execution.error is None:
+            # The SDK reports 0 only once execd confirms the command completed, so neither a code
+            # nor an error means the output stream ended first, as it does when the sandbox's
+            # container is killed under the command. Its outcome is unknown, not success.
+            raise ExecInterrupted(
+                f"OpenSandbox sandbox {sandbox_id(sandbox)}: the command's output ended before it reported an "
+                "exit code; the sandbox may have stopped"
+            )
         if exit_code is None:
-            exit_code = 1 if execution.error is not None else 0
+            exit_code = 1
         return CommandResult(
             stdout=join_output(execution.logs.stdout),
             stderr=join_output(execution.logs.stderr),

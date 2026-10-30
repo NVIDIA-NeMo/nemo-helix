@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.harbor_opensandbox_driver import (
     CREATE_ATTEMPT_METADATA_KEY,
     CREATE_ATTEMPTS,
@@ -357,14 +358,22 @@ async def test_run_without_a_uid_sends_none(server: Server) -> None:
     assert "uid" not in sandbox.commands.runs[-1][1]
 
 
-@pytest.mark.parametrize(("error", "expected"), [(None, 0), ("boom", 1)])
-async def test_run_infers_a_missing_exit_code(server: Server, error: str | None, expected: int) -> None:
-    """With no exit code from the SDK, a reported error means 1 and none means 0."""
+async def test_run_reports_an_error_without_an_exit_code_as_1(server: Server) -> None:
     driver = _driver(server)
     sandbox = await driver.create(_request())
-    sandbox.commands.results["x"] = execution(exit_code=None, error=error)
+    sandbox.commands.results["x"] = execution(exit_code=None, error="boom")
 
-    assert (await driver.run(sandbox, "x")).exit_code == expected
+    assert (await driver.run(sandbox, "x")).exit_code == 1
+
+
+async def test_run_raises_when_the_output_ends_without_an_exit_code(server: Server) -> None:
+    """What the SDK returns when the sandbox's container is OOM-killed or evicted under the command: it never succeeded."""
+    driver = _driver(server)
+    sandbox = await driver.create(_request())
+    sandbox.commands.results["x"] = execution(stderr=["400+0 records out"], exit_code=None)
+
+    with pytest.raises(ExecInterrupted, match="ended before it reported an exit code"):
+        await driver.run(sandbox, "x")
 
 
 async def test_run_keeps_line_breaks_including_blank_lines(server: Server) -> None:

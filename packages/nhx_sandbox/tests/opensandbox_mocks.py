@@ -40,6 +40,13 @@ class Server:
         self.readback = True
         # States get_info reports, one per call; the last one repeats.
         self.states: list[str] = ["Running"]
+        # The reason and message every status read reports with the state.
+        self.status_reason: str | None = None
+        self.status_message: str | None = "image pull failed"
+        # Sandbox IDs the server no longer knows; reading their status answers 404.
+        self.gone: set[str] = set()
+        # What the runtime events route reports as its text content; None answers it with a 500.
+        self.events_content: str | None = ""
         self.healthy = True
         # How many health probes raise before they start answering.
         self.health_errors = 0
@@ -78,6 +85,44 @@ class Server:
             return self.endpoint_answer
         sandbox_id, port = match.groups()
         return httpx.Response(200, json={"endpoint": f"{self.pod_ip(sandbox_id)}:{port}"})
+
+    def next_status(self) -> dict[str, str | None]:
+        """The next state from ``states``, with ``status_reason`` and ``status_message``."""
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return {"state": state, "reason": self.status_reason, "message": self.status_message}
+
+    def sandbox_route(self, request: httpx.Request) -> httpx.Response | None:
+        """Answer ``GET /v1/sandboxes/{id}`` with the sandbox's status, or the server's 404 once it is gone.
+
+        Returns ``None`` for any other route, so a test's own handler can answer it.
+        """
+        match = re.fullmatch(r"/v1/sandboxes/([^/]+)", request.url.path)
+        if match is None or request.method != "GET":
+            return None
+        if match[1] in self.gone:
+            return httpx.Response(404, json={"code": "KUBERNETES::SANDBOX_NOT_FOUND", "message": "not found"})
+        return httpx.Response(200, json={"id": match[1], "status": self.next_status()})
+
+    def events_route(self, request: httpx.Request) -> httpx.Response | None:
+        """Answer ``GET /v1/sandboxes/{id}/diagnostics/events?scope=runtime`` as server 1.1's stable descriptor.
+
+        Returns ``None`` for any other route, so a test's own handler can answer it.
+        """
+        match = re.fullmatch(r"/v1/sandboxes/([^/]+)/diagnostics/events", request.url.path)
+        if match is None or request.url.params.get("scope") != "runtime":
+            return None
+        if self.events_content is None:
+            return httpx.Response(500, json={"code": "KUBERNETES::EVENTS_UNAVAILABLE", "message": "unavailable"})
+        return httpx.Response(
+            200,
+            json={
+                "sandboxId": match[1],
+                "kind": "events",
+                "scope": "runtime",
+                "delivery": "inline",
+                "content": self.events_content,
+            },
+        )
 
     def kill(self, sandbox_id: str) -> None:
         """Record a kill, or raise for a sandbox listed in ``unkillable``."""
@@ -208,10 +253,8 @@ class Sandbox:
         return SimpleNamespace(default_action=default, egress=rules)
 
     async def get_info(self) -> SimpleNamespace:
-        """The next state from ``Server.states``, with a failure message for terminal states."""
-        states = self._server.states
-        state = states.pop(0) if len(states) > 1 else states[0]
-        return SimpleNamespace(status=SimpleNamespace(state=state, message="image pull failed"))
+        """The next state from ``Server.states``, with the server's reason and message."""
+        return SimpleNamespace(status=SimpleNamespace(**self._server.next_status()))
 
     async def is_healthy(self) -> bool:
         """Raise for the first ``Server.health_errors`` probes, then report ``Server.healthy``."""
