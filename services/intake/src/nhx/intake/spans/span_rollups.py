@@ -9,8 +9,9 @@ tokens and cost two or three times. Instead, each trace sums a metric over the f
 1. Inference Gateway call spans (``GATEWAY_CALL_ATTRIBUTE``): the usage the provider reported for each call the
    gateway served. An agent that sends a ``traceparent`` gets them beneath its own spans for the same calls, which
    then don't count again. They win for a metric only when every gateway call span in the trace recorded usage and
-   one reports the metric; otherwise the trace counts the agent's own spans and none of the gateway's, so a call
-   whose response carried no usage is neither dropped nor counted twice.
+   one reports the metric, and either every one reports it or no other span in the trace does. Otherwise the trace
+   counts the agent's own spans and none of the gateway's, so a call whose response carried no usage, or no cost, is
+   neither dropped nor counted twice.
 2. Model calls: non-root ``LLM`` and ``EMBEDDING`` spans, other non-root spans of unknown kind, and every ATIF
    span. ATIF ingest already reconciles step and trajectory usage, so an ATIF root only carries a metric when no
    step reported it. A root model span is not a second call: it is the publisher total in the next tier.
@@ -22,6 +23,8 @@ A metric that no span in the trace reports is NULL. A stored 0 counts as reporte
 A session adds up its traces, except for a trace marked ``USAGE_SUPERSEDED_ATTRIBUTE``: the gateway recorded its calls
 in another trace of the session, so once any trace totals a metric from gateway call spans, marked traces don't add
 that metric again. The marked trace keeps its own totals, and a metric the gateway doesn't report still counts from it.
+When some trace holds gateway calls that no span counted for a metric, the session counts that metric from its marked
+traces instead, and drops the traces that totalled it from gateway call spans.
 Queries apply the rule at three levels:
 
 - Per span: select ``usage_sql().span_columns`` beside the span's own columns.
@@ -63,9 +66,16 @@ multiIf(
     minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 4, sumIf({metric}_value, usage_tier = 4),
     NULL
 )"""
-# Per trace and metric: whether its total came from gateway call spans; and per trace, whether it is marked.
+# Per trace and metric: whether its total came from gateway call spans; whether it holds gateway call spans that
+# nothing in the trace counted; and per trace, whether it is marked.
 _GATEWAY_COVERS = (
-    "(countIf(usage_tier = 1 AND reports_{metric}) > 0 AND countIf(usage_tier = 1 AND NOT reports_usage) = 0)"
+    "(countIf(usage_tier = 1 AND reports_{metric}) > 0 AND countIf(usage_tier = 1 AND NOT reports_usage) = 0"
+    " AND (countIf(usage_tier = 1 AND NOT reports_{metric}) = 0 OR minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 0))"
+)
+_GATEWAY_UNCOUNTED = (
+    "(countIf(usage_tier = 1) > 0 AND minIf(usage_tier, reports_{metric} AND usage_tier > 1) = 0"
+    " AND (countIf(usage_tier = 1 AND reports_{metric}) = 0 OR countIf(usage_tier = 1 AND NOT reports_usage) > 0))"
+    " AS {metric}_gateway_uncounted"
 )
 # Per span: whether it reports any token usage at all. Reads the input and output token keys.
 _REPORTS_USAGE = (
@@ -85,9 +95,10 @@ class UsageSql:
     They read the span's ``source_format``, ``kind``, ``external_parent_span_id``, ``attributes_bool`` and
     ``attributes_number`` without a table alias."""
     trace_columns: str
-    """For each metric, the trace's total named after it, or NULL, and ``<metric>_from_gateway``: whether that total
-    came from gateway call spans. Then ``usage_superseded``: whether the trace is marked. ``summed_metric_columns``
-    reads them all."""
+    """For each metric, the trace's total named after it, or NULL; ``<metric>_from_gateway``: whether that total
+    came from gateway call spans; and ``<metric>_gateway_uncounted``: whether the trace holds gateway call spans that
+    nothing in it counted. Then ``usage_superseded``: whether the trace is marked. ``summed_metric_columns`` reads
+    them all."""
     parameters: dict[str, Any]
     """Each metric's attribute name, bound as ``%(<metric>_key)s``."""
 
@@ -129,7 +140,11 @@ def usage_sql(metrics: tuple[str, ...] = _ALL_METRICS, *, scaled: bool = True) -
         total = _TRACE_TOTAL.format(metric=metric, from_gateway=from_gateway)
         if scaled:
             total = _scaled(total, metric)
-        trace_columns += [f"{total} AS {metric}", _FROM_GATEWAY.format(metric=metric, from_gateway=from_gateway)]
+        trace_columns += [
+            f"{total} AS {metric}",
+            _FROM_GATEWAY.format(metric=metric, from_gateway=from_gateway),
+            _GATEWAY_UNCOUNTED.format(metric=metric),
+        ]
     trace_columns.append(_SUPERSEDED)
 
     return UsageSql(
@@ -154,12 +169,19 @@ def summed_metric_columns(source_alias: str, metrics: tuple[str, ...] = _ALL_MET
 def session_total(source_alias: str, metric: str) -> str:
     """Per session: one metric's unscaled total over the trace rows of ``source_alias``, or NULL.
 
-    Marked traces don't count once any trace totals the metric from gateway call spans.
+    Marked traces don't count once any trace totals the metric from gateway call spans, unless some trace holds
+    gateway calls nothing counted and a marked trace reports the metric: then the traces totalled from gateway call
+    spans don't count instead.
     """
     column = f"{source_alias}.{metric}"
-    counted = f"{source_alias}.{metric}_from_gateway OR NOT {source_alias}.usage_superseded"
+    from_gateway = f"{source_alias}.{metric}_from_gateway"
+    marked_covers_uncounted = (
+        f"countIf({source_alias}.{metric}_gateway_uncounted) > 0 "
+        f"AND countIf({source_alias}.usage_superseded AND isNotNull({column})) > 0"
+    )
     return (
-        f"multiIf(countIf({source_alias}.{metric}_from_gateway) > 0, sumIf({column}, {counted}), "
+        f"multiIf({marked_covers_uncounted}, sumIf({column}, NOT {from_gateway}), "
+        f"countIf({from_gateway}) > 0, sumIf({column}, {from_gateway} OR NOT {source_alias}.usage_superseded), "
         f"countIf(isNotNull({column})) = 0, NULL, sum({column}))"
     )
 

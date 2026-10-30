@@ -515,6 +515,22 @@ def test_a_marked_trajectory_still_counts_when_the_gateway_missed_a_calls_usage(
     assert (session["input_tokens"], session["output_tokens"]) == (295, 30)
 
 
+def test_gateway_cost_on_only_some_calls_leaves_the_agents_cost_for_the_trace(
+    client: TestClient, make_otlp_request
+) -> None:
+    """Summing the one priced gateway call would drop the other call's cost; the agent priced both."""
+    session_id = "gateway-partial-cost"
+    spans = _trial_with_linked_gateway_calls(session_id)
+    spans[2]["attributes"]["llm.cost.total"] = 0.03
+    spans[3]["attributes"]["llm.cost.total"] = 0.05
+    spans[4]["attributes"]["llm.cost.total"] = 0.01
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(46), spans=spans)
+
+    trace = _trace(client, session_id)
+    assert trace["input_tokens"] == 300
+    assert trace["cost_usd"] == pytest.approx(0.08)
+
+
 def test_a_gateway_span_reporting_zero_tokens_still_wins(client: TestClient, make_otlp_request) -> None:
     """A stored 0 is a report: the provider billed nothing, so the agent's estimate doesn't stand in for it."""
     session_id = "gateway-zero"
@@ -659,6 +675,35 @@ def test_evaluation_views_count_a_marked_sessions_calls_once(client: TestClient,
     evaluation = client.get(f"{EVALUATIONS}/{evaluation_name}")
     assert evaluation.status_code == 200, evaluation.text
     assert evaluation.json()["tokens"]["sum"] == pytest.approx(330)
+
+
+def test_a_marked_trajectory_counts_when_another_trace_holds_gateway_calls_nothing_counted(
+    client: TestClient, make_otlp_request
+) -> None:
+    """Excluding the trajectory because one trace's calls came from the gateway would lose the uncounted call."""
+    session_id = "gateway-uncounted-marked"
+    linked = [
+        _span(name="codex-turn", span_id=21, session_id=session_id, kind="AGENT"),
+        _span(name="chat", span_id=22, parent_span_id=21, session_id=session_id, kind="LLM", input_tokens=98),
+        _span(
+            name="responses",
+            span_id=23,
+            parent_span_id=22,
+            session_id=session_id,
+            input_tokens=100,
+            gateway_call=True,
+        ),
+    ]
+    uncounted = [
+        _span(name="trial", span_id=31, session_id=session_id),
+        _span(name="responses", span_id=32, parent_span_id=31, session_id=session_id, gateway_call=True),
+    ]
+    _, agent = _gateway_and_agent_traces(session_id, marked=True)
+    for number, spans in ((47, linked), (48, uncounted), (49, agent)):
+        _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(number), spans=spans)
+
+    assert _session(client, session_id)["input_tokens"] == 295
+    assert _trace_metrics(client, session_id)["input_tokens"]["sum"] == 295
 
 
 def test_a_marked_trace_with_its_own_gateway_calls_still_counts_them(client: TestClient, make_otlp_request) -> None:
