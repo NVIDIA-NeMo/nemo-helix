@@ -375,7 +375,6 @@ export const AgentDetailRoute: FC = () => {
             <EvaluationsTab
               workspace={workspace}
               agentName={agentName}
-              agent={agent}
               evals={agentEvals}
               jobs={agentJobs}
             />

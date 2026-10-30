@@ -19,6 +19,9 @@ export const NEMOTRON_PERSONAS_LOCALES = [
   'pt_BR',
 ] as const;
 
+export const isNemotronPersonasLocale = (locale: string): locale is NemotronPersonasLocale =>
+  (NEMOTRON_PERSONAS_LOCALES as readonly string[]).includes(locale);
+
 /** The person sampler reads each locale from this workspace; see `data_designer_nemo.nemotron_personas`. */
 export const NEMOTRON_PERSONAS_WORKSPACE = 'system';
 

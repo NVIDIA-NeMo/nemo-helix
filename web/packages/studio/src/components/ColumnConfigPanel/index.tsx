@@ -9,8 +9,15 @@ import { Trash, Close } from '@nemo/icons/icons';
 import { SamplerType } from '@nemo/sdk/generated/data-designer/schema';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { ICON_COLOR_CLASS } from '@studio/components/AddColumnPalette/constants';
+import {
+  isNemotronPersonasLocale,
+  NEMOTRON_PERSONAS_LOCALES,
+} from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
+import type { NemotronPersonasLocale } from '@studio/components/agents/PersonaTestSet/types';
+import { useNemotronPersonasSetup } from '@studio/components/agents/PersonaTestSet/useNemotronPersonasSetup';
 import { SeedDatasetConfig } from '@studio/components/ColumnConfigPanel/SeedDatasetConfig';
 import { CardIconBadge } from '@studio/components/common/SelectableCard';
+import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import {
   type ColumnField,
   getColumnFields,
@@ -116,23 +123,38 @@ export interface ColumnConfigPanelProps {
   onClose: () => void;
 }
 
-const PersonSamplerNote: FC = () => (
-  <Banner kind="inline" status="info" title="Requires a managed dataset">
-    <Text kind="body/regular/sm">
-      The person sampler reads from downloaded Nemotron Personas datasets. Before it can preview or
-      build:
-    </Text>
-    <ol className="list-decimal pl-density-lg">
-      <li>
-        Download the Nemotron Personas dataset for your locale into the managed assets directory.
-      </li>
-      <li>
-        Set <Text kind="body/bold/sm">Locale</Text> below to a supported value (e.g. en_US, en_IN,
-        fr_FR, ja_JP, ko_KR, pt_BR).
-      </li>
-    </ol>
-  </Banner>
-);
+const PersonasDatasetCheck: FC<{ locale: NemotronPersonasLocale }> = ({ locale }) => {
+  const workspace = useWorkspaceFromPath();
+  const { banner, secretModal } = useNemotronPersonasSetup(workspace, locale);
+  return (
+    <>
+      {banner}
+      {secretModal}
+    </>
+  );
+};
+
+/** Shown only when the person sampler can't read its locale's Nemotron Personas dataset. */
+const PersonSamplerNote: FC<{ columnIndex: number }> = ({ columnIndex }) => {
+  const { control } = useFormContext<JobBuilderFormValues>();
+  // Data Designer samples en_US when no locale is set.
+  const locale =
+    useWatch({ control, name: `columns.${columnIndex}.values.locale` })?.trim() || 'en_US';
+
+  return isNemotronPersonasLocale(locale) ? (
+    <PersonasDatasetCheck key={locale} locale={locale} />
+  ) : (
+    <Banner kind="inline" status="warning" className="shrink-0">
+      <Stack gap="density-xs">
+        <Text kind="body/bold/sm">No Nemotron Personas dataset for {locale}</Text>
+        <Text kind="body/regular/sm">
+          Set <Text kind="body/bold/sm">Locale</Text> to one of{' '}
+          {NEMOTRON_PERSONAS_LOCALES.join(', ')}.
+        </Text>
+      </Stack>
+    </Banner>
+  );
+};
 
 /** Right-hand config panel for one selected column. */
 export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({ columnId, onRemove, onClose }) => {
@@ -179,7 +201,9 @@ export const ColumnConfigPanel: FC<ColumnConfigPanelProps> = ({ columnId, onRemo
       </Flex>
 
       <Stack gap="density-lg" padding="density-lg" className="min-h-0 flex-1 overflow-y-auto">
-        {option.samplerType === SamplerType.person ? <PersonSamplerNote /> : null}
+        {option.samplerType === SamplerType.person ? (
+          <PersonSamplerNote columnIndex={columnIndex} />
+        ) : null}
         <ColumnNameControl columnIndex={columnIndex} />
         {option.columnType === 'seed-dataset' ? (
           <SeedDatasetConfig columnIndex={columnIndex} />

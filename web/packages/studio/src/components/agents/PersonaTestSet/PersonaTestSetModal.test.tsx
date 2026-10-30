@@ -121,4 +121,25 @@ describe('PersonaTestSetModal', () => {
       }),
     ]);
   });
+
+  it('creates the NGC API key secret from the dropdown and selects it', async () => {
+    mockPersonasFileset(false);
+    const user = userEvent.setup();
+    renderModal();
+
+    await screen.findByText("Nemotron Personas for en_US isn't set up");
+    await user.click(screen.getByRole('combobox', { name: /NGC API key secret/ }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New Secret' }));
+
+    const dialog = within(await screen.findByRole('dialog', { name: 'Create Secret' }));
+    await user.type(await dialog.findByRole('textbox', { name: 'Name' }), 'ngc-key');
+    await user.type(await dialog.findByLabelText('Value', { selector: 'input' }), 'nvapi-value');
+    await user.click(await dialog.findByRole('button', { name: 'Create' }));
+
+    // The mock names every created secret `test-secret`.
+    expect(await screen.findByRole('combobox', { name: /NGC API key secret/ })).toHaveTextContent(
+      'test-secret'
+    );
+    expect(screen.getByRole('button', { name: 'Register dataset' })).toBeEnabled();
+  });
 });

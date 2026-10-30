@@ -4,7 +4,6 @@
 import type { Agent } from '@nemo/sdk/generated/agents/schema';
 import type { LLMTextColumnConfig } from '@nemo/sdk/generated/data-designer/schema';
 import {
-  ANSWER_COLUMN,
   buildPersonaTestSetRequest,
   PERSONA_TEST_SET_AGENT_FIELD,
   personaTestSetAgent,
@@ -26,7 +25,6 @@ const options: PersonaTestSetOptions = {
   },
   locale: 'ja_JP',
   rows: 25,
-  answerStyle: 'rubric',
 };
 
 const columnNamed = (request: ReturnType<typeof buildPersonaTestSetRequest>, name: string) =>
@@ -51,11 +49,16 @@ describe('buildPersonaTestSetRequest', () => {
     expect(request.name).toBe('calculator-agent-persona-tests');
   });
 
-  it('writes question and answer columns the agent evaluation reads', () => {
+  it('writes only the persona messages, leaving answers to the agent', () => {
     const request = buildPersonaTestSetRequest(options);
 
     expect(columnNamed(request, QUESTION_COLUMN)).toMatchObject({ column_type: 'llm-text' });
-    expect(columnNamed(request, ANSWER_COLUMN)).toMatchObject({ column_type: 'llm-text' });
+    expect(request.spec.config.columns.map((column) => column.name)).toEqual([
+      'person',
+      'phrasing_style',
+      'intent',
+      QUESTION_COLUMN,
+    ]);
   });
 
   it('keeps agent text out of Jinja rendering', () => {
@@ -69,31 +72,16 @@ describe('buildPersonaTestSetRequest', () => {
     );
   });
 
-  it('computes arithmetic answers instead of asking an LLM for them', () => {
-    const request = buildPersonaTestSetRequest({ ...options, answerStyle: 'arithmetic' });
+  it('loads into the Data Designer builder without losing columns', () => {
+    const request = buildPersonaTestSetRequest(options);
+    const seed = seedFromJobRequest(request);
 
-    expect(columnNamed(request, 'a')).toMatchObject({ sampler_type: 'uniform', convert_to: 'int' });
-    expect(columnNamed(request, 'expected')).toMatchObject({ column_type: 'expression' });
-    expect(columnNamed(request, ANSWER_COLUMN)).toEqual({
-      name: ANSWER_COLUMN,
-      column_type: 'expression',
-      expr: 'Answer must contain {{ expected }}',
-    });
+    expect(validateColumns(seed.columns)).toEqual([]);
+    expect(seed.customFields).toEqual(request.custom_fields);
+    expect(
+      buildDataDesignerConfig(seed.columns, seed.models).columns.map((column) => column.name)
+    ).toEqual(expect.arrayContaining(request.spec.config.columns.map((column) => column.name)));
   });
-
-  it.each(['rubric', 'arithmetic'] as const)(
-    'loads into the Data Designer builder without losing columns (%s)',
-    (answerStyle) => {
-      const request = buildPersonaTestSetRequest({ ...options, answerStyle });
-      const seed = seedFromJobRequest(request);
-
-      expect(validateColumns(seed.columns)).toEqual([]);
-      expect(seed.customFields).toEqual(request.custom_fields);
-      expect(
-        buildDataDesignerConfig(seed.columns, seed.models).columns.map((column) => column.name)
-      ).toEqual(expect.arrayContaining(request.spec.config.columns.map((column) => column.name)));
-    }
-  );
 });
 
 describe('personaTestSetAgent', () => {
