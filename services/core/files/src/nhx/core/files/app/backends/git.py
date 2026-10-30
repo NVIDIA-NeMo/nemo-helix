@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import json
 import logging
@@ -14,16 +15,26 @@ import re
 import shlex
 import shutil
 import signal
+import stat
+import subprocess
 import tempfile
 import time
 import weakref
 from collections import OrderedDict
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Coroutine, Iterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Coroutine, Generator, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import aclosing, contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
 
+from dulwich.client import SSHGitClient, SSHVendor, StrangeHostname, SubprocessWrapper
+from dulwich.errors import GitProtocolError, NotGitRepository, NotTreeError
+from dulwich.object_store import BaseObjectStore, iter_tree_contents, tree_lookup_path
+from dulwich.objects import Blob, Commit, ObjectID
+from dulwich.protocol import DEFAULT_GIT_PROTOCOL_VERSION_FETCH
+from dulwich.refs import Ref
+from dulwich.repo import Repo
 from nemo_helix_plugin.config import nhx_user_data_dir
 from nemo_helix_plugin.files.storage_config import is_commit_sha
 from nhx.common.files.storage_config import GitStorageConfig as GitStorageConfig
@@ -48,10 +59,9 @@ logger = logging.getLogger(__name__)
 _repo_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
 # Git's regular-file blob modes; directories, submodules and symlinks are not served as files.
-_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+_REGULAR_FILE_MODES = frozenset({0o100644, 0o100755})
 
-# File streams are not counted.
-_GIT_SLOTS = asyncio.Semaphore(16)
+_GIT_POOL = ThreadPoolExecutor(max_workers=16, thread_name_prefix="nhx-git")
 
 
 class GitBackendError(StorageBackendError):
@@ -59,7 +69,7 @@ class GitBackendError(StorageBackendError):
 
 
 class GitServerFault(StorageServerFault):
-    """Raised when git cannot run on this server, such as a missing binary or a full disk."""
+    """Raised when git cannot run on this server, such as a missing ssh binary or a full disk."""
 
 
 class GitAccessError(StorageAccessError):
@@ -117,9 +127,12 @@ _NETWORK_FAILURES = (
     "Operation timed out",
     "not responding",
     "remote end hung up",
+    "unexpectedly closed the connection",
     "Broken pipe",
     "early EOF",
 )
+
+_SERVER_FAULT_ERRNOS = frozenset({errno.ENOSPC, errno.EDQUOT, errno.EROFS, errno.EACCES, errno.EPERM})
 
 
 def _failure_detail(stderr: str) -> str:
@@ -143,6 +156,18 @@ def _classify_failure(stderr: str, subject: str) -> Exception:
     if any(marker in stderr for marker in _NETWORK_FAILURES):
         return GitUnavailableError(f"Could not reach {subject}: {detail}")
     return GitBackendError(f"git failed reading {subject}: {detail}")
+
+
+_GIT_FAILURES = (GitProtocolError, NotGitRepository, OSError)
+
+
+def _translate_failure(exc: Exception, subject: str, stderr: str = "") -> Exception:
+    if isinstance(exc, GitProtocolError):
+        # ssh's and the remote's stderr say why the connection ended; dulwich's own message rarely does.
+        return _classify_failure(f"{stderr}\n{exc}", subject)
+    if isinstance(exc, OSError) and exc.errno in _SERVER_FAULT_ERRNOS:
+        return GitServerFault(f"git could not write its files on this server reading {subject}: {exc}")
+    return GitBackendError(f"git failed reading {subject}: {exc}")
 
 
 _PEM_BLOCK = re.compile(r"-----BEGIN ([A-Z0-9 ]+)-----(.*?)-----END \1-----", re.DOTALL)
@@ -175,49 +200,97 @@ def _pick_ref(refs: dict[str, str], revision: str) -> str | None:
 
 
 _GRACE_SECONDS = 2.0
+_MAX_STDERR_BYTES = 64 * 1024
 
 
-async def stop_process_group(proc: asyncio.subprocess.Process) -> None:
-    """Stop *proc*, started in its own session, with every child it spawned, such as ssh."""
-    # SIGTERM first so git removes its lock files, such as shallow.lock in the shared cache.
+async def stop_process_group(proc: subprocess.Popen[bytes]) -> None:
+    """Stop *proc*, started in its own session, with every child it spawned."""
     for sig in (signal.SIGTERM, signal.SIGKILL):
         # macOS answers EPERM, not ESRCH, when the group's only member has exited but is not yet reaped.
         with suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, sig)
-        with suppress(TimeoutError):
-            await asyncio.wait_for(proc.wait(), _GRACE_SECONDS)
+        deadline = time.monotonic() + _GRACE_SECONDS
+        while proc.poll() is None and time.monotonic() < deadline:
+            await asyncio.sleep(0.05)
+        if proc.returncode is not None:
             return
 
 
-async def communicate_within(proc: asyncio.subprocess.Process, timeout: float) -> tuple[bytes, bytes]:
-    """Wait for *proc*, stopping its whole process group if it overruns *timeout* or the caller is cancelled."""
-    try:
-        return await asyncio.wait_for(proc.communicate(), timeout)
-    except (TimeoutError, asyncio.CancelledError):
-        await asyncio.shield(stop_process_group(proc))
-        raise
+class SessionSSHVendor(SSHVendor):
+    """Runs ssh in a session of its own and keeps it, so a call that overruns can stop ssh from outside its thread."""
+
+    def __init__(self, env: dict[str, str]) -> None:
+        self._env = env
+        self.processes: list[subprocess.Popen[bytes]] = []
+        # dulwich closes a stderr pipe unread, and an undrained one can fill and stall ssh.
+        self._stderr_files: list[IO[bytes]] = []
+
+    def run_command(
+        self,
+        host: str,
+        command: bytes,
+        username: str | None = None,
+        port: int | None = None,
+        password: str | None = None,
+        key_filename: str | None = None,
+        ssh_command: str | None = None,
+        protocol_version: int | None = None,
+    ) -> SubprocessWrapper:
+        args = [*shlex.split(ssh_command or "ssh"), "-x"]
+        if port:
+            args.extend(["-p", str(port)])
+        version = DEFAULT_GIT_PROTOCOL_VERSION_FETCH if protocol_version is None else protocol_version
+        if version > 0:
+            args.extend(["-o", f"SetEnv GIT_PROTOCOL=version={version}"])
+        destination = f"{username}@{host}" if username else host
+        if destination.startswith("-"):
+            raise StrangeHostname(hostname=destination)
+        errors = tempfile.TemporaryFile()
+        self._stderr_files.append(errors)
+        try:
+            proc = subprocess.Popen(
+                [*args, destination, os.fsdecode(command)],
+                bufsize=0,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=errors,
+                env=self._env,
+                start_new_session=True,
+            )
+        except FileNotFoundError as exc:
+            raise GitServerFault("ssh is not installed in the files service") from exc
+        self.processes.append(proc)
+        return SubprocessWrapper(proc)
+
+    async def stop(self) -> None:
+        await asyncio.gather(*(stop_process_group(proc) for proc in self.processes))
+
+    def stderr(self) -> str:
+        """What ssh and the remote wrote to stderr, once each ssh has exited."""
+        for proc in self.processes:
+            with suppress(subprocess.TimeoutExpired):
+                proc.wait(_GRACE_SECONDS)
+        chunks: list[str] = []
+        for errors in self._stderr_files:
+            errors.seek(0)
+            chunks.append(errors.read(_MAX_STDERR_BYTES).decode(errors="replace"))
+        return "\n".join(chunks)
+
+    def close(self) -> None:
+        for errors in self._stderr_files:
+            errors.close()
 
 
-@dataclass(frozen=True)
-class _TreeEntry:
-    path: str
-    blob: str
-    size: int
-
-
-def _tree_entries(ls_tree_output: bytes) -> Iterator[_TreeEntry]:
-    for raw_entry in ls_tree_output.split(b"\0"):
-        if not raw_entry:
+def _regular_files(store: BaseObjectStore, tree_id: ObjectID) -> Iterator[tuple[str, ObjectID]]:
+    for entry in iter_tree_contents(store, tree_id):
+        if entry.mode not in _REGULAR_FILE_MODES:
             continue
         try:
-            entry = raw_entry.decode()
+            path = entry.path.decode()
         except UnicodeDecodeError:
             logger.debug("Skipping a non-UTF-8 file name in a git tree")
             continue
-        meta, _, path = entry.partition("\t")
-        mode, kind, blob, size = meta.split()
-        if kind == "blob" and mode in _REGULAR_FILE_MODES:
-            yield _TreeEntry(path=path, blob=blob, size=int(size))
+        yield path, entry.sha
 
 
 def default_git_cache_root() -> Path:
@@ -236,7 +309,7 @@ _DURABLE_PREFIX = "cache/git"
 _LISTING_VERSION = 1
 _MAX_LISTED_FILES = 100_000
 _FETCH_REPOSITORY_IDLE_SECONDS = 7 * 24 * 60 * 60
-_LATEST_REF = "refs/nhx/latest"
+_LATEST_REF = Ref(b"refs/nhx/latest")
 
 Snapshot = dict[str, tuple[str, int]]
 
@@ -347,13 +420,20 @@ async def _slice(stream: AsyncGenerator[bytes], byte_range: ByteRange | None) ->
                 return
 
 
+@dataclass(frozen=True)
+class _Remote:
+    client: SSHGitClient
+    path: str
+    vendor: SessionSSHVendor
+
+
 @dataclass
 class GitStorageImpl(StorageImpl):
     config: GitStorageConfig
     secrets: dict[str, str] = field(repr=False)
     cache_root: Path = field(default_factory=default_git_cache_root)
     durable: StorageImpl | None = None
-    allowed_protocols: str = "ssh"
+    ssh_binary: str = "ssh"
     timeout_seconds: float = 120.0
     _resolved_sha: str | None = field(default=None, init=False, repr=False)
     _snapshot_memo: Snapshot | None = field(default=None, init=False, repr=False)
@@ -380,27 +460,8 @@ class GitStorageImpl(StorageImpl):
         scope = f"{self.config.url}#{self.config.path}" if self.config.path else self.config.url
         return f"{scope} at {self.config.revision}"
 
-    def _base_env(self) -> dict[str, str]:
-        return {
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": os.environ.get("HOME", "/"),
-            "LC_ALL": "C",
-            "GIT_TERMINAL_PROMPT": "0",
-            "GIT_ALLOW_PROTOCOL": self.allowed_protocols,
-            "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_CONFIG_GLOBAL": os.devnull,
-            # A path such as ":!x" would otherwise be read as pathspec magic rather than a file name.
-            "GIT_LITERAL_PATHSPECS": "1",
-            # A detached auto-gc would hold lock files in the fetch repository after its command returned.
-            "GIT_CONFIG_COUNT": "2",
-            "GIT_CONFIG_KEY_0": "gc.auto",
-            "GIT_CONFIG_VALUE_0": "0",
-            "GIT_CONFIG_KEY_1": "maintenance.auto",
-            "GIT_CONFIG_VALUE_1": "false",
-        }
-
     @contextmanager
-    def _ssh_env(self) -> Iterator[dict[str, str]]:
+    def _remote(self) -> Generator[_Remote]:
         key = self.secrets.get("ssh_key", "")
         if not key.strip():
             raise GitConfigError(f"The SSH key secret for {self.config.url} is empty")
@@ -415,7 +476,7 @@ class GitStorageImpl(StorageImpl):
 
             ssh_command = shlex.join(
                 [
-                    "ssh",
+                    self.ssh_binary,
                     "-F",
                     os.devnull,
                     "-i",
@@ -440,51 +501,50 @@ class GitStorageImpl(StorageImpl):
                     "ServerAliveCountMax=3",
                 ]
             )
-            yield {**self._base_env(), "GIT_SSH_COMMAND": ssh_command}
+            vendor = SessionSSHVendor(
+                {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "/"), "LC_ALL": "C"}
+            )
+            remote = self.config.remote
+            client = SSHGitClient(
+                remote.host, port=remote.port, username=remote.user, vendor=vendor, ssh_command=ssh_command
+            )
+            try:
+                # git reads an scp-style path relative to the login directory and an ssh:// path from the root.
+                yield _Remote(client, remote.path if remote.scp else f"/{remote.path}", vendor)
+            finally:
+                vendor.close()
 
-    async def _run(self, *args: str, env: dict[str, str]) -> tuple[int, bytes, str]:
-        async with _GIT_SLOTS:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "git",
-                    *args,
-                    env=env,
-                    stdin=asyncio.subprocess.DEVNULL,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    start_new_session=True,
-                )
-            except FileNotFoundError as exc:
-                raise GitServerFault("git is not installed in the files service") from exc
-            try:
-                stdout, stderr = await communicate_within(proc, self.timeout_seconds)
-            except TimeoutError:
+    async def _call[T](self, work: Callable[[], T], subject: str, vendor: SessionSSHVendor | None = None) -> T:
+        future = asyncio.get_running_loop().run_in_executor(_GIT_POOL, work)
+        try:
+            return await asyncio.wait_for(asyncio.shield(future), self.timeout_seconds)
+        except (TimeoutError, asyncio.CancelledError) as exc:
+            if vendor is not None:
+                await asyncio.shield(vendor.stop())
+            # The thread holds the repository until it returns, so the caller's lock has to outlast it.
+            with suppress(Exception):
+                await asyncio.shield(future)
+            if isinstance(exc, TimeoutError):
                 raise GitUnavailableError(
                     f"git timed out after {self.timeout_seconds:.0f}s reading {self._subject()}"
                 ) from None
-        return proc.returncode or 0, stdout, stderr.decode(errors="replace")
+            raise
+        except _GIT_FAILURES as exc:
+            stderr = await asyncio.to_thread(vendor.stderr) if vendor is not None else ""
+            raise _translate_failure(exc, subject, stderr) from exc
 
-    async def _git(self, *args: str, env: dict[str, str], subject: str) -> bytes:
-        returncode, stdout, stderr = await self._run(*args, env=env)
-        if returncode != 0:
-            raise _classify_failure(stderr, subject)
-        return stdout
-
-    async def _remote_git(self, *args: str, subject: str) -> bytes:
-        with self._ssh_env() as env:
-            return await self._git(*args, env=env, subject=subject)
+    async def _remote_refs(self) -> dict[str, str]:
+        with self._remote() as remote:
+            result = await self._call(
+                lambda: remote.client.get_refs(remote.path.encode()), self.config.url, remote.vendor
+            )
+        if result.object_format == "sha256":
+            raise GitConfigError(f"{self.config.url} uses SHA-256 object ids, which are not supported")
+        return {name.decode(errors="replace"): sha.decode() for name, sha in result.refs.items() if sha is not None}
 
     async def _ls_remote(self) -> str:
         revision = self.config.revision
-        # A bare tag pattern does not match the peeled `^{}` line that names an annotated tag's commit.
-        patterns = [revision, f"{revision}^{{}}"]
-        output = await self._remote_git("ls-remote", "--", self.config.url, *patterns, subject=self.config.url)
-
-        refs: dict[str, str] = {}
-        for line in output.decode(errors="replace").splitlines():
-            sha, _, name = line.partition("\t")
-            refs[name] = sha
-        sha = _pick_ref(refs, revision)
+        sha = _pick_ref(await self._remote_refs(), revision)
         if sha is None:
             raise GitConfigError(
                 f"{self.config.url} has no branch or tag named {revision!r}; abbreviated SHAs are not supported"
@@ -501,34 +561,36 @@ class GitStorageImpl(StorageImpl):
         return self._resolved_sha
 
     async def _has_commit(self, repo: Path, sha: str) -> bool:
-        returncode, _, _ = await self._run("-C", str(repo), "cat-file", "-e", f"{sha}^{{commit}}", env=self._base_env())
-        return returncode == 0
+        def check() -> bool:
+            with Repo(str(repo)) as local:
+                oid = ObjectID(sha.encode())
+                return oid in local.object_store and local.object_store[oid].type_num == Commit.type_num
+
+        return await self._call(check, str(repo))
 
     async def _fetch(self, repo: Path, sha: str) -> None:
-        await self._remote_git(
-            "-C",
-            str(repo),
-            "fetch",
-            "--quiet",
-            "--depth=1",
-            "--no-tags",
-            "--no-recurse-submodules",
-            "--no-write-fetch-head",
-            "--",
-            self.config.url,
-            sha,
-            subject=f"{self.config.url} at {sha}",
-        )
+        wanted = ObjectID(sha.encode())
+
+        def only_the_commit(refs: Mapping[Ref, ObjectID], depth: int | None = None) -> list[ObjectID]:
+            return [wanted]
+
+        with self._remote() as remote:
+
+            def fetch() -> None:
+                with Repo(str(repo)) as local:
+                    remote.client.fetch(remote.path, local, determine_wants=only_the_commit, depth=1)
+
+            await self._call(fetch, f"{self.config.url} at {sha}", remote.vendor)
 
     async def _ensure_commit(self, repo: Path, sha: str, *, ask_remote: bool = False) -> None:
         fetched = False
         async with _repo_lock(repo):
             if not await asyncio.to_thread((repo / "HEAD").exists):
                 try:
-                    await asyncio.to_thread(repo.parent.mkdir, parents=True, exist_ok=True)
+                    await asyncio.to_thread(repo.mkdir, parents=True, exist_ok=True)
                 except OSError as exc:
                     raise GitServerFault(f"The git cache at {repo.parent} is not writable: {exc}") from exc
-                await self._git("init", "--bare", "--quiet", str(repo), env=self._base_env(), subject=str(repo))
+                await self._call(lambda: Repo.init_bare(str(repo)).close(), str(repo))
             present = await self._has_commit(repo, sha)
             if present and ask_remote:
                 await self._fetch(repo, sha)
@@ -536,10 +598,13 @@ class GitStorageImpl(StorageImpl):
                 await self._fetch(repo, sha)
                 if not await self._has_commit(repo, sha):
                     raise GitConfigError(f"{self.config.url} has no commit {sha}")
+
+                def mark_latest() -> None:
+                    with Repo(str(repo)) as local:
+                        local.refs[_LATEST_REF] = ObjectID(sha.encode())
+
                 # Keeps the newest commit's objects, so the next fetch of this repository is a delta.
-                await self._git(
-                    "-C", str(repo), "update-ref", _LATEST_REF, sha, env=self._base_env(), subject=str(repo)
-                )
+                await self._call(mark_latest, str(repo))
                 fetched = True
             _fetched_commits.setdefault(str(repo), set()).add(sha)
             with suppress(OSError):
@@ -587,20 +652,35 @@ class GitStorageImpl(StorageImpl):
         _remember_listing(key, snapshot)
         return snapshot
 
-    async def _materialize(self, sha: str, key: str) -> Snapshot:
-        tree = f"{sha}:{self.config.path}" if self.config.path else sha
+    def _list_tree(self, sha: str) -> Snapshot:
+        with Repo(str(self._repo_dir)) as local:
+            store = local.object_store
+            commit = store[ObjectID(sha.encode())]
+            if not isinstance(commit, Commit):
+                raise GitConfigError(f"{sha} of {self.config.url} is not a commit")
+            tree_id = commit.tree
+            if self.config.path:
+                try:
+                    mode, tree_id = tree_lookup_path(store.__getitem__, tree_id, self.config.path.encode())
+                except (KeyError, NotTreeError):
+                    mode = None
+                if mode is None or not stat.S_ISDIR(mode):
+                    raise GitConfigError(f"{self._subject()} has no directory {self.config.path!r}")
 
+            snapshot: Snapshot = {}
+            for path, blob in _regular_files(store, tree_id):
+                if len(snapshot) == _MAX_LISTED_FILES:
+                    raise GitConfigError(
+                        f"{self._subject()} has more than {_MAX_LISTED_FILES} files; point the fileset at a directory"
+                    )
+                # Packs record only the compressed size, so each blob is inflated once per commit to measure it.
+                _type, body = store.get_raw(blob)
+                snapshot[path] = (blob.decode(), len(body))
+            return snapshot
+
+    async def _materialize(self, sha: str, key: str) -> Snapshot:
         await self._prepare_repository()
-        output = await self._git(
-            "-C", str(self._repo_dir), "ls-tree", "-r", "-l", "-z", tree, env=self._base_env(), subject=self._subject()
-        )
-        snapshot: Snapshot = {}
-        for entry in _tree_entries(output):
-            if len(snapshot) == _MAX_LISTED_FILES:
-                raise GitConfigError(
-                    f"{self._subject()} has more than {_MAX_LISTED_FILES} files; point the fileset at a directory"
-                )
-            snapshot[entry.path] = (entry.blob, entry.size)
+        snapshot = await self._call(lambda: self._list_tree(sha), self._subject())
 
         listing = {
             "version": _LISTING_VERSION,
@@ -623,60 +703,28 @@ class GitStorageImpl(StorageImpl):
         return (await self._snapshot()).get(wanted)
 
     async def _open_blob(self, repo: Path, blob: str, size: int) -> AsyncGenerator[bytes]:
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "-C",
-                str(repo),
-                "cat-file",
-                "blob",
-                blob,
-                env=self._base_env(),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
-            )
-        except FileNotFoundError as exc:
-            raise GitServerFault("git is not installed in the files service") from exc
-        assert proc.stdout is not None and proc.stderr is not None
+        subject = f"{blob} of {self._subject()}"
+
+        def read() -> bytes:
+            with Repo(str(repo)) as local:
+                try:
+                    type_num, body = local.object_store.get_raw(ObjectID(blob.encode()))
+                except KeyError:
+                    raise GitBackendError(f"The fetch repository for {self.config.url} has no {subject}") from None
+            if type_num != Blob.type_num:
+                raise GitBackendError(f"{subject} is not a file")
+            return body
+
+        body = await self._call(read, subject)
+        if len(body) != size:
+            raise GitBackendError(f"{subject} is {len(body)} bytes, not the {size} its listing records")
+        # Reads count as use, so idle pruning does not remove a repository that is still being read.
+        await _touch(repo)
         chunk_size = self.config.read_chunk_size
-        try:
-            # Read before returning, so a missing object fails before the response starts.
-            first = (
-                await asyncio.wait_for(proc.stdout.read(min(chunk_size, size)), self.timeout_seconds) if size else b""
-            )
-            if size and not first:
-                stderr = (await communicate_within(proc, self.timeout_seconds))[1].decode(errors="replace")
-                failure = _classify_failure(stderr, f"{blob} of {self._subject()}")
-                if isinstance(failure, GitServerFault):
-                    raise failure
-                raise GitBackendError(f"The fetch repository for {self.config.url} could not read {blob}: {failure}")
-            # Reads count as use, so idle pruning does not remove a repository that is still being read.
-            await _touch(repo)
-        except BaseException as exc:
-            await asyncio.shield(stop_process_group(proc))
-            if isinstance(exc, TimeoutError):
-                raise GitBackendError(
-                    f"git sent nothing of {blob} of {self._subject()} for {self.timeout_seconds:.0f}s"
-                ) from None
-            raise
 
         async def stream() -> AsyncGenerator[bytes]:
-            assert proc.stdout is not None
-            remaining = size - len(first)
-            try:
-                if first:
-                    yield first
-                while remaining:
-                    chunk = await proc.stdout.read(min(chunk_size, remaining))
-                    if not chunk:
-                        raise GitBackendError(f"git ended {blob} of {self._subject()} early")
-                    remaining -= len(chunk)
-                    yield chunk
-            finally:
-                if proc.returncode is None:
-                    await asyncio.shield(stop_process_group(proc))
+            for start in range(0, len(body), chunk_size):
+                yield body[start : start + chunk_size]
 
         return stream()
 

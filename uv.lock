@@ -1637,6 +1637,30 @@ wheels = [
 ]
 
 [[package]]
+name = "dulwich"
+version = "1.2.20"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/18/92/e47acfff672d6219d1bba1c210f902c1ad4a58d8c68eb89fe0b786f00a68/dulwich-1.2.20.tar.gz", hash = "sha256:28e1f48098d2cb157e722588466070cbefdfe8093c2a141c568b01362296c0f3", size = 1443547, upload-time = "2026-10-26T21:42:03.075Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/18/2e/4b2737b08cfa21f936bf9bbf1faee9b087d118511f9da7ea45b2e3e550cc/dulwich-1.2.20-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:da4b7680adb8dbedbbeaf4ea353e4896e9280c107125abf1fa9d3ec12e7de5a8", size = 1420036, upload-time = "2026-10-26T21:40:58.437Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/c5/0fbce61daca1e8756dcc7aecb5c6c99ec31e8fb44d81ad1d81d59180aba2/dulwich-1.2.20-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:ea6ea35c8b4fd24d386694863e1366e309e317b0e4d3696bcdbfdf5d0c014732", size = 1556566, upload-time = "2026-10-26T21:40:59.827Z" },
+    { url = "https://files.pythonhosted.org/packages/77/30/28f195c80fef25a5160db928366421ff0c3be3ae166510b9b6cdf687f431/dulwich-1.2.20-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:2ffd41bca7ac53b8a719311209f29641c26dfcbd466bd73adc6e465221f3ed17", size = 1531577, upload-time = "2026-10-26T21:41:01.351Z" },
+    { url = "https://files.pythonhosted.org/packages/66/94/00ef87119a285bd021e4ad1c0f3a6c852d74ab48a087d2516c262e0aec60/dulwich-1.2.20-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:e4f106df568ea65c1f7de06ebd8feb4590e6fb54f44980b5f6889508696cb90d", size = 1420421, upload-time = "2026-10-26T21:41:11.061Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/df/d01e41150f4c92779ab75660d2316e7a524b8be3e0de79e1d820e5160290/dulwich-1.2.20-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:9c721d3e6f40202fac0394fb7a607d853e35362ea1cbf00b7382763310837803", size = 1556008, upload-time = "2026-10-26T21:41:12.417Z" },
+    { url = "https://files.pythonhosted.org/packages/de/03/731c30afa8feec744e88c678598f796b9adeef162371eecedfbad143c4e4/dulwich-1.2.20-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:b32ff0020b0a4230380883173eff078f64af72ddaaf5b3abbba81170bf99f11a", size = 1531641, upload-time = "2026-10-26T21:41:13.739Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/e1/f136f9171727a6d9b380dbefd1f673a426cf876ee35881e3ad041aeb7b25/dulwich-1.2.20-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:b281c75d6a7d2cde5206af349564e20124511895c2766a89c901a4addb4aea80", size = 1424821, upload-time = "2026-10-26T21:41:22.078Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/30/09492157eac271c4d3cb7101b9b2e7870699c0603ca2b2550d39a72b6cf3/dulwich-1.2.20-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:a3d8092beaafe801d0d4221ae5173fed0d2d67c65f290679f456ff606a78fe51", size = 1559645, upload-time = "2026-10-26T21:41:23.448Z" },
+    { url = "https://files.pythonhosted.org/packages/56/86/6e22635bdd9a361c5c274449dbf1322023ed6b622d652a6f64de37c150a6/dulwich-1.2.20-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:e983fa6a8aeb5026e8b7c7086f3b60604895d218a36d56792065d6288a3839c3", size = 1535342, upload-time = "2026-10-26T21:41:24.819Z" },
+    { url = "https://files.pythonhosted.org/packages/57/1e/67b571aab9895fc2c82d7b85354302d28842584974e5230edb553ed44c47/dulwich-1.2.20-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:16675b9502ce7fb30def56359aef8f1df450037646c1b5dd2f03976982425bab", size = 1422252, upload-time = "2026-10-26T21:41:31.824Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/7d/2f17e2f3e80da9726a26893956e91fc6f0c8b9cca075b5dded1ebd44cf0b/dulwich-1.2.20-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:bf60e8590bd2fa466d9412617d96d61e16b3cc02b5bd5b8059297977086ee82a", size = 1556477, upload-time = "2026-10-26T21:41:33.473Z" },
+    { url = "https://files.pythonhosted.org/packages/69/0c/e9859aa442a15900fff7a273ecfb490e0e990ae2d0d69621dba2eac94fee/dulwich-1.2.20-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:774e5c4e7856ca1e39b5684603a4de53f1a5d8baf70eacad7d432ac5bb1e1d95", size = 1535383, upload-time = "2026-10-26T21:41:34.899Z" },
+    { url = "https://files.pythonhosted.org/packages/08/c8/217841f8ae98909dd2045cfd9e9060791ae1dc9c0d2239672ae318b28796/dulwich-1.2.20-py3-none-any.whl", hash = "sha256:ab521391c3475e7c507f14aeacad0cdf26e97ba5050d8010a1ff34e417c9a842", size = 758582, upload-time = "2026-10-26T21:42:01.525Z" },
+]
+
+[[package]]
 name = "dunamai"
 version = "1.26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -5001,6 +5025,7 @@ all = [
     { name = "datasets" },
     { name = "docker" },
     { name = "duckdb" },
+    { name = "dulwich" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastmcp" },
     { name = "filesets" },
@@ -5128,6 +5153,7 @@ core-service = [
     { name = "base58" },
     { name = "docker" },
     { name = "duckdb" },
+    { name = "dulwich" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastmcp" },
     { name = "filesets" },
@@ -5183,6 +5209,7 @@ files-service = [
     { name = "aiohttp" },
     { name = "anyio" },
     { name = "duckdb" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "ngcsdk" },
@@ -5829,6 +5856,7 @@ services = [
     { name = "datasets" },
     { name = "docker" },
     { name = "duckdb" },
+    { name = "dulwich" },
     { name = "fastapi", extra = ["standard"] },
     { name = "fastmcp" },
     { name = "filesets" },
@@ -6053,6 +6081,10 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'jobs-service'", specifier = ">=1.1.3,<2.0.0" },
     { name = "duckdb", marker = "extra == 'services'", specifier = ">=1.1.3" },
     { name = "duckdb", marker = "extra == 'services'", specifier = ">=1.1.3,<2.0.0" },
+    { name = "dulwich", marker = "extra == 'all'", specifier = ">=1.2.20" },
+    { name = "dulwich", marker = "extra == 'core-service'", specifier = ">=1.2.20" },
+    { name = "dulwich", marker = "extra == 'files-service'", specifier = ">=1.2.20" },
+    { name = "dulwich", marker = "extra == 'services'", specifier = ">=1.2.20" },
     { name = "fastapi", marker = "extra == 'all'" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.100.0" },
     { name = "fastapi", marker = "extra == 'all'", specifier = ">=0.109.0" },
@@ -8586,6 +8618,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "anyio" },
     { name = "duckdb" },
+    { name = "dulwich" },
     { name = "fastapi" },
     { name = "filesets" },
     { name = "ngcsdk" },
@@ -8618,6 +8651,7 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.1" },
     { name = "anyio", specifier = ">=4.0.0" },
     { name = "duckdb", specifier = ">=1.1.3" },
+    { name = "dulwich", specifier = ">=1.2.20" },
     { name = "fastapi", specifier = ">=0.115.8" },
     { name = "filesets", editable = "packages/filesets" },
     { name = "ngcsdk", specifier = ">=4.9.10" },

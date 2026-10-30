@@ -15,7 +15,8 @@ import time
 from pathlib import Path
 
 import pytest
-from nemo_helix_plugin.files.storage_config import SshRemote
+from dulwich.object_store import MemoryObjectStore
+from dulwich.objects import Blob, Tree
 from nhx.common.api.common import SecretRef
 from nhx.common.files.storage_config import LocalStorageConfig
 from nhx.core.files.app.backends import git as git_backend
@@ -29,15 +30,15 @@ from nhx.core.files.app.backends.git import (
     GitStorageConfig,
     GitStorageImpl,
     GitUnavailableError,
+    SessionSSHVendor,
     _classify_failure,
     _fetched_commits,
     _last_touched,
     _listings,
     _pick_ref,
     _prune_fetch_repositories,
+    _regular_files,
     _repo_lock,
-    _tree_entries,
-    communicate_within,
     normalize_private_key,
     stop_process_group,
 )
@@ -85,11 +86,35 @@ def remote(tmp_path: Path) -> dict[str, str]:
     _git(repo, "tag", "-a", "v1", "-m", "v1")
     (repo / "README.md").write_text("changed\n")
     _git(repo, "commit", "--quiet", "-am", "second")
-    return {"url": f"file://{repo}", "dir": str(repo), "first": first, "main": _git(repo, "rev-parse", "HEAD")}
+    return {"url": f"ssh://localhost{repo}", "dir": str(repo), "first": first, "main": _git(repo, "rev-parse", "HEAD")}
+
+
+# Stands in for ssh: runs the requested git service on this machine with the protocol version ssh would send.
+_FAKE_SSH = """\
+import os, sys
+args = sys.argv[1:]
+env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+for option, value in zip(args, args[1:]):
+    if option == "-o" and value.startswith("SetEnv "):
+        name, _, setting = value.removeprefix("SetEnv ").partition("=")
+        env[name] = setting
+command = args[-1].replace("git-upload-pack", "git upload-pack", 1)
+os.execvpe("sh", ["sh", "-c", command], env)
+"""
+
+
+def _executable(path: Path, body: str) -> str:
+    path.write_text(body)
+    path.chmod(0o700)
+    return str(path)
+
+
+def _fake_ssh(directory: Path) -> str:
+    return _executable(directory / "fake-ssh", f"#!{sys.executable}\n{_FAKE_SSH}")
 
 
 def _config(url: str, **overrides) -> GitStorageConfig:
-    # file:// fails the SSH-only validator; tests reach a local repository instead.
+    # localhost fails the external-host allowlist; tests reach a local repository through a fake ssh.
     return GitStorageConfig.model_construct(
         url=url,
         revision=overrides.pop("revision", "main"),
@@ -105,13 +130,15 @@ def _durable(root: Path) -> LocalStorageImpl:
     return LocalStorageImpl(LocalStorageConfig(path=str(root)))
 
 
-def _impl(config: GitStorageConfig, cache_root: Path, secrets: dict[str, str] | None = None) -> GitStorageImpl:
+def _impl(
+    config: GitStorageConfig, cache_root: Path, secrets: dict[str, str] | None = None, ssh_binary: str | None = None
+) -> GitStorageImpl:
     return GitStorageImpl(
         config,
         SECRETS if secrets is None else secrets,
         cache_root=cache_root,
         durable=_durable(cache_root.parent / "durable"),
-        allowed_protocols="file",
+        ssh_binary=ssh_binary or _fake_ssh(cache_root.parent),
     )
 
 
@@ -279,20 +306,30 @@ class TestSshCredentials:
             {"ssh_key": "line1\r\nline2"},
             cache_root=tmp_path,
         )
-        with impl._ssh_env() as env:
-            command = env["GIT_SSH_COMMAND"]
+        with impl._remote() as remote:
+            command = remote.client.ssh_command
             key_path = Path(command.split(" -i ")[1].split(" ")[0])
             assert key_path.read_text() == "line1\nline2\n"
             assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
             assert "StrictHostKeyChecking=yes" in command
             assert "ServerAliveInterval=15" in command
-            assert env["GIT_ALLOW_PROTOCOL"] == "ssh"
-            assert env["GIT_LITERAL_PATHSPECS"] == "1"
-            assert (env["GIT_CONFIG_KEY_0"], env["GIT_CONFIG_VALUE_0"]) == ("gc.auto", "0")
         assert not key_path.exists()
 
+    @pytest.mark.parametrize(
+        ("url", "path"),
+        [
+            ("git@host.example:org/repo.git", "org/repo.git"),
+            ("git@host.example:/srv/git/repo.git", "/srv/git/repo.git"),
+            ("ssh://git@host.example/org/repo.git", "/org/repo.git"),
+        ],
+    )
+    def test_the_remote_path_is_read_as_git_reads_it(self, tmp_path, url, path):
+        config = GitStorageConfig(url=url, ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS)
+        with GitStorageImpl(config, SECRETS, cache_root=tmp_path)._remote() as remote:
+            assert (remote.client.host, remote.client.username, remote.path) == ("host.example", "git", path)
+
     def test_repr_leaves_out_the_private_key(self, tmp_path):
-        impl = GitStorageImpl(_config("file:///x"), {"ssh_key": "SECRET-KEY-MATERIAL"}, cache_root=tmp_path)
+        impl = GitStorageImpl(_config("ssh://localhost/x"), {"ssh_key": "SECRET-KEY-MATERIAL"}, cache_root=tmp_path)
         assert "SECRET-KEY-MATERIAL" not in repr(impl)
 
     def test_a_key_pasted_into_a_single_line_input_is_rewrapped(self):
@@ -363,43 +400,57 @@ class TestProcessGroups:
             "pathlib.Path(sys.argv[2]).touch()\n"
             "time.sleep(30)\n"
         )
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-c", cleanup, str(marker), str(ready), start_new_session=True
-        )
+        proc = subprocess.Popen([sys.executable, "-c", cleanup, str(marker), str(ready)], start_new_session=True)
         while not ready.exists():
             await asyncio.sleep(0.05)
         await stop_process_group(proc)
         assert marker.exists()
 
-    async def test_a_timeout_stops_children_holding_the_pipes(self):
-        proc = await asyncio.create_subprocess_exec(
-            "sh",
-            "-c",
-            "sleep 30 & sleep 30",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
-        started = time.monotonic()
-        with pytest.raises(TimeoutError):
-            await communicate_within(proc, 0.5)
-        assert time.monotonic() - started < 10
+    @pytest.fixture
+    def hung_ssh(self, tmp_path, monkeypatch) -> tuple[str, list[subprocess.Popen[bytes]]]:
+        started: list[subprocess.Popen[bytes]] = []
+        run_command = SessionSSHVendor.run_command
 
-    async def test_a_cancelled_request_stops_its_process(self):
-        proc = await asyncio.create_subprocess_exec(
-            "sh",
-            "-c",
-            "sleep 30 & sleep 30",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
-        task = asyncio.create_task(communicate_within(proc, 60))
-        await asyncio.sleep(0.2)
+        def recording(self, *args, **kwargs):
+            wrapper = run_command(self, *args, **kwargs)
+            started.append(wrapper.proc)
+            return wrapper
+
+        monkeypatch.setattr(SessionSSHVendor, "run_command", recording)
+        return _executable(tmp_path / "hung-ssh", "#!/bin/sh\nsleep 30 & sleep 30\n"), started
+
+    async def test_a_timeout_stops_ssh_and_its_children(self, remote, tmp_path, hung_ssh):
+        ssh, started = hung_ssh
+        impl = _impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=ssh)
+        impl.timeout_seconds = 0.5
+        began = time.monotonic()
+        with pytest.raises(GitUnavailableError, match="timed out"):
+            await impl.resolve_config()
+        assert time.monotonic() - began < 10
+        assert started and all(proc.poll() is not None for proc in started)
+
+    async def test_a_cancelled_request_stops_ssh(self, remote, tmp_path, hung_ssh):
+        ssh, started = hung_ssh
+        task = asyncio.create_task(_impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=ssh).resolve_config())
+        while not started:
+            await asyncio.sleep(0.05)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
-        assert proc.returncode is not None
+            await asyncio.wait_for(task, 10)
+        assert all(proc.poll() is not None for proc in started)
+
+    async def test_ssh_refusing_the_key_is_an_access_error(self, remote, tmp_path):
+        refusing = _executable(
+            tmp_path / "refusing-ssh", "#!/bin/sh\necho 'git@h: Permission denied (publickey).' >&2\nexit 255\n"
+        )
+        with pytest.raises(GitAccessError, match="rejected"):
+            await _impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=refusing).resolve_config()
+
+    async def test_a_missing_ssh_binary_is_a_server_fault(self, remote, tmp_path):
+        with pytest.raises(GitServerFault, match="ssh is not installed"):
+            await _impl(
+                _config(remote["url"]), tmp_path / "cache", ssh_binary=str(tmp_path / "no-ssh")
+            ).resolve_config()
 
 
 class TestRefResolution:
@@ -444,10 +495,10 @@ class TestRefResolution:
         assert resolved.tracked_revision is None
 
     async def test_a_sha256_repository_is_refused(self, remote, tmp_path, monkeypatch):
-        async def sha256_refs(self, *_args, **_kwargs):
-            return f"{'a' * 64}\trefs/heads/main\n".encode()
+        async def sha256_refs(self):
+            return {"refs/heads/main": "a" * 64}
 
-        monkeypatch.setattr(GitStorageImpl, "_remote_git", sha256_refs)
+        monkeypatch.setattr(GitStorageImpl, "_remote_refs", sha256_refs)
         with pytest.raises(GitConfigError, match="SHA-256"):
             await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").resolve_config()
 
@@ -457,7 +508,7 @@ class TestRefResolution:
 
     async def test_missing_repository_is_a_config_error(self, tmp_path):
         with pytest.raises(GitConfigError):
-            await _impl(_config(f"file://{tmp_path}/missing"), tmp_path / "cache").resolve_config()
+            await _impl(_config(f"ssh://localhost{tmp_path}/missing"), tmp_path / "cache").resolve_config()
 
     async def test_empty_key_secret_is_a_config_error(self, remote, tmp_path):
         with pytest.raises(GitConfigError, match="SSH key secret"):
@@ -501,8 +552,13 @@ class TestReads:
             await _read(_impl(_config(remote["url"]), tmp_path / "cache"), "link.md")
 
     def test_tree_listing_skips_names_that_are_not_utf8(self):
-        output = b"100644 blob abc       5\tok.txt\x00100644 blob def       5\tbad-\xff.txt\x00"
-        assert [entry.path for entry in _tree_entries(output)] == ["ok.txt"]
+        store = MemoryObjectStore()
+        blob = Blob.from_string(b"x")
+        tree = Tree()
+        tree.add(b"ok.txt", 0o100644, blob.id)
+        tree.add(b"bad-\xff.txt", 0o100644, blob.id)
+        store.add_objects([(blob, None), (tree, None)])
+        assert [path for path, _blob in _regular_files(store, tree.id)] == ["ok.txt"]
 
 
 class TestListings:
@@ -516,7 +572,7 @@ class TestListings:
         async def no_git(*_args, **_kwargs):
             raise AssertionError("listing a materialized commit ran git")
 
-        monkeypatch.setattr(GitStorageImpl, "_run", no_git)
+        monkeypatch.setattr(GitStorageImpl, "_call", no_git)
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 3
 
     async def test_listing_stores_no_file_contents(self, remote, tmp_path):
@@ -661,22 +717,18 @@ class TestDownloads:
         impl = _impl(_config(remote["url"], path="agents/support"), tmp_path / "cache")
         assert await _read(impl, "prompt.md", ByteRange(start=start, end=end)) == b"0123456789"[start : end + 1]
 
-    async def test_a_read_runs_one_git_process_without_waiting_for_the_repository(self, remote, tmp_path, monkeypatch):
+    async def test_a_read_neither_waits_for_the_repository_nor_contacts_the_remote(self, remote, tmp_path, monkeypatch):
         cache = tmp_path / "cache"
         impl = _impl(_config(remote["url"], revision=remote["main"]), cache)
         await impl.list_files()
-        started: list[tuple[str, ...]] = []
-        spawn = asyncio.create_subprocess_exec
 
-        async def recording(*args, **kwargs):
-            started.append(args)
-            return await spawn(*args, **kwargs)
+        def no_ssh(*_args, **_kwargs):
+            raise AssertionError("a read started ssh")
 
-        monkeypatch.setattr(asyncio, "create_subprocess_exec", recording)
+        monkeypatch.setattr(SessionSSHVendor, "run_command", no_ssh)
         async with _repo_lock(_fetch_repository(cache)):
             content = await asyncio.wait_for(_read(impl, "README.md"), 10)
         assert content == b"changed\n"
-        assert [args[3] for args in started] == ["cat-file"]
 
     async def test_a_removed_fetch_repository_is_fetched_again_on_read(self, remote, tmp_path):
         impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
@@ -755,7 +807,7 @@ class TestServerFaults:
         locked.chmod(0o500)
         try:
             with pytest.raises(GitServerFault, match="not writable"):
-                await _impl(_config(remote["url"]), locked / "cache").list_files()
+                await _impl(_config(remote["url"]), locked / "cache", ssh_binary=_fake_ssh(tmp_path)).list_files()
         finally:
             locked.chmod(0o700)
 
@@ -772,7 +824,6 @@ class TestAccess:
         self, remote, tmp_path, monkeypatch, pinned
     ):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         revision = remote["main"] if pinned else "main"
         await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").list_files()
         keys: list[str] = []
@@ -792,7 +843,6 @@ class TestAccess:
         self, remote, tmp_path, monkeypatch
     ):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         checks = 0
         has_commit = GitStorageImpl._has_commit
 
@@ -808,7 +858,6 @@ class TestAccess:
 
     async def test_registering_a_pinned_commit_skips_ls_remote(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
 
         async def no_ls_remote(self):
             raise AssertionError("ls-remote ran for a pinned commit")
@@ -825,7 +874,7 @@ class TestAccess:
         async def no_git(*_args, **_kwargs):
             raise AssertionError("git ran for a host outside the allowlist")
 
-        monkeypatch.setattr(GitStorageImpl, "_run", no_git)
+        monkeypatch.setattr(GitStorageImpl, "_call", no_git)
         config = GitStorageConfig(
             url="git@elsewhere.example:org/repo.git", ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS
         )
@@ -834,7 +883,6 @@ class TestAccess:
 
     async def test_a_key_the_remote_refuses_cannot_register_a_cached_commit(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         config = _config(remote["url"], revision=remote["main"])
         await _impl(config, tmp_path / "cache").list_files()
 
@@ -855,13 +903,11 @@ class TestRegistration:
 
     async def test_validate_storage_refuses_a_pinned_commit_the_remote_lacks(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         with pytest.raises(GitConfigError):
             await _impl(_config(remote["url"], revision="a" * 40), tmp_path / "cache").validate_storage()
 
     async def test_validate_storage_does_not_fetch_a_branch(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        monkeypatch.setattr(GitStorageConfig, "remote", property(lambda _self: SshRemote(None, "h", None, "p")))
         await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").validate_storage()
         assert not (tmp_path / "cache").exists()
 
