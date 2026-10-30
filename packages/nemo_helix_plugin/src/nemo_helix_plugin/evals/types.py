@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedD
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import validate_output_location
 from nemo_helix_plugin.schema import Page
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, StrictBool, field_validator, model_validator
 
 FlatQueryParams: TypeAlias = dict[str, str | int | bool | None]
 
@@ -387,6 +387,7 @@ class BundledMetricOutputSpec(BaseModel):
     name: str
     description: str | None = None
     value_json_schema: dict[str, JsonValue]
+    required: StrictBool = Field(default=True, exclude_if=lambda value: value is True)
 
 
 class MetricSecretRef(RootModel[str]):

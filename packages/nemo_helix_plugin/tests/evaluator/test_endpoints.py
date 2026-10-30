@@ -352,6 +352,27 @@ def test_metric_endpoint_shapes() -> None:
     assert endpoints.delete_metric(workspace="team-a", name="accuracy").response_type is None
 
 
+def test_metric_create_serializes_optional_output() -> None:
+    body = _metric_create_request()
+    body.outputs.append(
+        BundledMetricOutputSpec(name="confidence", value_json_schema={"type": "number"}, required=False)
+    )
+
+    metric_create = endpoints.create_metric(workspace="team-a", name="accuracy", body=body)
+
+    assert isinstance(metric_create.content, bytes)
+    assert json.loads(metric_create.content)["outputs"] == [
+        {"name": "score", "value_json_schema": {"type": "number"}},
+        {"name": "confidence", "value_json_schema": {"type": "number"}, "required": False},
+    ]
+
+
+@pytest.mark.parametrize("extra", [{"required": "false"}, {"optional": True}])
+def test_bundled_metric_output_spec_rejects_invalid_fields(extra: dict[str, JsonValue]) -> None:
+    with pytest.raises(ValidationError):
+        BundledMetricOutputSpec.model_validate({"name": "score", "value_json_schema": {"type": "number"}, **extra})
+
+
 def test_task_endpoint_shapes() -> None:
     created = endpoints.create_task(
         workspace="team-a",
