@@ -425,7 +425,7 @@ class PackageAgentJob(NemoJob):
         staged = build_dir / ".dockerignore"
         if not staged.exists():
             return
-        logger.warning("Discarding .dockerignore from the Ethos fileset; the managed one is used instead.")
+        logger.warning("Discarding .dockerignore from the source fileset; the managed one is used instead.")
         staged.unlink()
 
     @staticmethod
