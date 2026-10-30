@@ -36,11 +36,12 @@ export const useDeploymentModes = (
   return useMemo<DeploymentModes>(() => {
     if (data) {
       if (profilesPending) return { status: 'loading' };
-      const enabled = data.data.filter(
-        (mode) =>
-          mode.enabled &&
-          !(subprocessUnreachable && mode.mode === DeploymentModeAvailabilityMode.subprocess)
-      );
+      const enabled = data.data.filter((mode) => {
+        if (subprocessUnreachable && mode.mode === DeploymentModeAvailabilityMode.subprocess) {
+          return false;
+        }
+        return mode.enabled;
+      });
       return {
         status: 'ready',
         enabled: enabled.map((mode) => mode.mode),
