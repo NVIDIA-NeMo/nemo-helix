@@ -19,7 +19,12 @@ import httpx
 
 
 class SandboxApiException(Exception):
-    """Same name as the SDK's transient API error, so the driver retries it."""
+    """Same name as the SDK's transient API error, so the driver retries it; carries the HTTP status like the SDK's."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        """An API error with the server's HTTP status, when it answered with one."""
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class Server:
@@ -125,7 +130,9 @@ class Server:
         )
 
     def kill(self, sandbox_id: str) -> None:
-        """Record a kill, or raise for a sandbox listed in ``unkillable``."""
+        """Record a kill; a 404 for a sandbox in ``gone``, and an error for one in ``unkillable``."""
+        if sandbox_id in self.gone:
+            raise SandboxApiException(f"Kill sandbox {sandbox_id} failed: not found", status_code=404)
         if sandbox_id in self.unkillable:
             raise SandboxApiException(f"kill {sandbox_id} failed")
         self.killed.append(sandbox_id)

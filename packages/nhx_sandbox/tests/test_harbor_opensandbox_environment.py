@@ -30,6 +30,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
+from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.core.termination import TERMINATION_GLOB
 from nhx_sandbox.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver, SandboxExpiredError
@@ -925,6 +926,39 @@ async def test_unreadable_events_still_record_the_stop(tmp_path: Path, server: S
 
     [termination] = _terminations(tmp_path)
     assert (termination["cause"], termination["evidence"]["events"]) == ("unknown", [])
+
+
+async def test_an_oom_kill_the_server_still_reports_running_is_waited_for(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seen on dev-blue: stop ran 2s after a command's sandbox was OOM-killed, while the server still said Running."""
+    monkeypatch.setattr(environment_module, "TERMINATION_POLL_INTERVAL_SEC", 0)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    _sandbox(environment).commands.results["python3 hog.py"] = execution(exit_code=None)
+    server.states = ["Running", "Running", "Pending"]
+    server.status_reason, server.status_message = "CREATING", "Sandbox is being created"
+
+    with pytest.raises(ExecInterrupted):
+        await environment.exec("python3 hog.py")
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "unknown"
+    assert termination["evidence"]["state"] == "Pending"
+
+
+async def test_stop_of_a_sandbox_already_gone_does_not_raise(tmp_path: Path, server: Server) -> None:
+    """Harbor records an error from stop as the trial's, so a sandbox gone after the trial finished must not fail it."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    server.gone.add(sandbox.id)
+
+    await environment.stop(delete=True)
+
+    assert sandbox.closed
+    assert environment._sandbox is None
 
 
 async def test_a_failed_status_read_records_nothing_and_still_stops(

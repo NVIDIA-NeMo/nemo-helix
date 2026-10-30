@@ -157,6 +157,8 @@ SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 # ``stop`` asks the server whether the sandbox stopped early; the check gives up after this long in all.
 TERMINATION_CHECK_BUDGET_SEC = 10
+# After a command was cut off, how often stop asks again until the server reports the sandbox stopped.
+TERMINATION_POLL_INTERVAL_SEC = 1.0
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -872,7 +874,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._record_stopped()
         try:
             if delete:
-                await self._sandbox.kill()
+                await self._driver.kill(self._sandbox)
         finally:
             try:
                 await self._sandbox.close()
@@ -888,6 +890,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             role=sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
             budget_sec=TERMINATION_CHECK_BUDGET_SEC,
             logger=self.logger,
+            # A command cut off mid-output usually means the sandbox died, and the server's status lags that.
+            wait_for_stop=self._driver.exec_interrupted,
+            poll_interval_sec=TERMINATION_POLL_INTERVAL_SEC,
         )
         if termination is None:
             return

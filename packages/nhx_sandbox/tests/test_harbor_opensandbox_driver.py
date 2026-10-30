@@ -332,6 +332,24 @@ async def test_safe_kill_never_raises_and_still_closes(server: Server) -> None:
     assert server.live() == {sandbox.id}
 
 
+async def test_kill_of_a_sandbox_already_gone_succeeds(server: Server) -> None:
+    """A sandbox whose lifetime ended or that something deleted has nothing left to kill; raising would fail a finished trial."""
+    driver = _driver(server)
+    sandbox = await driver.create(_request())
+    server.gone.add(sandbox.id)
+
+    await driver.kill(sandbox)
+
+
+async def test_kill_still_raises_any_other_failure(server: Server) -> None:
+    driver = _driver(server)
+    sandbox = await driver.create(_request())
+    server.unkillable = {sandbox.id}
+
+    with pytest.raises(SandboxApiException):
+        await driver.kill(sandbox)
+
+
 async def test_run_passes_options_and_joins_output(server: Server) -> None:
     """``run`` sends cwd, env, timeout and uid, and returns both streams and the exit code."""
     driver = _driver(server)
@@ -372,8 +390,12 @@ async def test_run_raises_when_the_output_ends_without_an_exit_code(server: Serv
     sandbox = await driver.create(_request())
     sandbox.commands.results["x"] = execution(stderr=["400+0 records out"], exit_code=None)
 
+    assert not driver.exec_interrupted
+
     with pytest.raises(ExecInterrupted, match="ended before it reported an exit code"):
         await driver.run(sandbox, "x")
+
+    assert driver.exec_interrupted
 
 
 async def test_run_keeps_line_breaks_including_blank_lines(server: Server) -> None:

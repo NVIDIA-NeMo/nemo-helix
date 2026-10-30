@@ -110,22 +110,35 @@ async def check_termination(
     role: str | None,
     budget_sec: float,
     logger: logging.Logger,
+    wait_for_stop: bool = False,
+    poll_interval_sec: float = 1.0,
 ) -> SandboxTermination | None:
     """Whether ``sandbox_id`` already stopped, and why; ``None`` while it is alive or when the backend can't say.
 
+    With ``wait_for_stop``, for a caller that saw the sandbox die (a command's output cut off),
+    an alive answer is asked again every ``poll_interval_sec``: a backend's status lags a dead
+    sandbox by seconds, and the caller releases it as soon as the error reaches it. A sandbox
+    still alive at the end is recorded as nothing, since a dropped connection cuts output off too.
+
     Never raises and gives up after ``budget_sec``, so a caller releasing the sandbox always goes on.
     """
-    observed_at = datetime.now(UTC)
     try:
         async with asyncio.timeout(budget_sec):
-            diagnosis = await diagnostics.diagnose_termination(sandbox_id)
+            while (diagnosis := await diagnostics.diagnose_termination(sandbox_id)) is None and wait_for_stop:
+                await asyncio.sleep(poll_interval_sec)
     except SandboxNotFound:
-        diagnosis = diagnose_gone(ends_at=ends_at, now=observed_at)
+        diagnosis = diagnose_gone(ends_at=ends_at, now=datetime.now(UTC))
+    except TimeoutError:
+        logger.warning(
+            "Sandbox %s was not reported stopped within %gs; recording no cause", sandbox_id, budget_sec, exc_info=True
+        )
+        return None
     except Exception:
         logger.warning("Could not check whether sandbox %s stopped early", sandbox_id, exc_info=True)
         return None
     if diagnosis is None:
         return None
+    observed_at = datetime.now(UTC)
     return SandboxTermination(
         backend=diagnostics.backend,
         sandbox_id=sandbox_id,

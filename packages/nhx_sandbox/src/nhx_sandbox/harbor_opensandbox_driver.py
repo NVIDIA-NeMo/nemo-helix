@@ -184,6 +184,8 @@ class OpenSandboxDriver:
         self._sdk = dict(sdk) if sdk is not None else None
         self._logger = logger or LOGGER
         self._retry_wait = retry_wait or harbor_backoff_sec
+        # Set once a command's output is cut off, which is usually its sandbox dying under it.
+        self.exec_interrupted = False
 
     @property
     def sdk(self) -> dict[str, Any]:
@@ -328,6 +330,20 @@ class OpenSandboxDriver:
             return f"OpenSandbox sandbox {sandbox_id(sandbox)} entered {state} before becoming ready: {message}"
         return None
 
+    async def kill(self, sandbox: Any) -> None:
+        """Kill the sandbox; one the server no longer has counts as killed, since nothing is left to stop.
+
+        A sandbox can be gone by the time its caller releases it: its lifetime ended, or something
+        deleted it. Raising then would turn a trial that finished into a failed one.
+        """
+        try:
+            await sandbox.kill()
+        except Exception as exc:
+            # The SDK's API error carries the server's HTTP status.
+            if getattr(exc, "status_code", None) != 404:
+                raise
+            self._logger.info("OpenSandbox sandbox %s was already gone; nothing to kill", sandbox_id(sandbox))
+
     async def safe_kill(self, sandbox: Any) -> None:
         """Best-effort kill and close; never raises, so it can't mask the error that led here."""
         try:
@@ -435,6 +451,7 @@ class OpenSandboxDriver:
             # The SDK reports 0 only once execd confirms the command completed, so neither a code
             # nor an error means the output stream ended first, as it does when the sandbox's
             # container is killed under the command. Its outcome is unknown, not success.
+            self.exec_interrupted = True
             raise ExecInterrupted(
                 f"OpenSandbox sandbox {sandbox_id(sandbox)}: the command's output ended before it reported an "
                 "exit code; the sandbox may have stopped"

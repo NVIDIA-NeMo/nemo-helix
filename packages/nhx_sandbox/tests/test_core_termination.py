@@ -19,6 +19,7 @@ from nhx_sandbox.core.termination import (
     SandboxTermination,
     TerminationCause,
     TerminationDiagnosis,
+    TerminationDiagnostics,
     check_termination,
     diagnose_gone,
     termination_filename,
@@ -45,7 +46,7 @@ class FakeDiagnostics:
         return self._answer
 
 
-async def _check(diagnostics: FakeDiagnostics, *, ends_at: datetime | None = None) -> SandboxTermination | None:
+async def _check(diagnostics: TerminationDiagnostics, *, ends_at: datetime | None = None) -> SandboxTermination | None:
     return await check_termination(diagnostics, "sbx-1", ends_at=ends_at, role="agent", budget_sec=1, logger=LOGGER)
 
 
@@ -92,6 +93,65 @@ async def test_a_slow_backend_gives_up_at_the_budget() -> None:
 
     assert termination is None
     assert asyncio.get_running_loop().time() - started < 5
+
+
+class LaggingDiagnostics:
+    """A backend whose status reports the sandbox alive for ``alive_reads`` reads after it died."""
+
+    backend = "fake"
+
+    def __init__(self, alive_reads: int) -> None:
+        self.alive_reads = alive_reads
+        self.reads = 0
+
+    async def diagnose_termination(self, sandbox_id: str) -> TerminationDiagnosis | None:
+        self.reads += 1
+        if self.reads <= self.alive_reads:
+            return None
+        return TerminationDiagnosis(TerminationCause.UNKNOWN, "stopped")
+
+
+async def test_waiting_for_a_stop_asks_again_until_the_backend_catches_up() -> None:
+    """A sandbox OOM-killed under a command reads Running for a few seconds; the caller releases it sooner."""
+    diagnostics = LaggingDiagnostics(alive_reads=2)
+
+    termination = await check_termination(
+        diagnostics,
+        "sbx-1",
+        ends_at=None,
+        role=None,
+        budget_sec=5,
+        logger=LOGGER,
+        wait_for_stop=True,
+        poll_interval_sec=0,
+    )
+
+    assert termination is not None and termination.cause is TerminationCause.UNKNOWN
+    assert diagnostics.reads == 3
+
+
+async def test_without_waiting_an_alive_sandbox_is_asked_once() -> None:
+    diagnostics = LaggingDiagnostics(alive_reads=2)
+
+    assert await _check(diagnostics) is None
+    assert diagnostics.reads == 1
+
+
+async def test_a_sandbox_still_alive_when_the_wait_ends_records_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    """A dropped connection cuts a command's output off too, so an alive sandbox is never recorded as stopped."""
+    termination = await check_termination(
+        LaggingDiagnostics(alive_reads=10**6),
+        "sbx-1",
+        ends_at=None,
+        role=None,
+        budget_sec=0.05,
+        logger=LOGGER,
+        wait_for_stop=True,
+        poll_interval_sec=0.01,
+    )
+
+    assert termination is None
+    assert "was not reported stopped within" in caplog.text
 
 
 def test_gone_with_no_known_lifetime_was_deleted() -> None:
