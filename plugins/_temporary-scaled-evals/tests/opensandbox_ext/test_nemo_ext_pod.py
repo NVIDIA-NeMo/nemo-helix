@@ -272,7 +272,7 @@ def test_main_s_own_logs_and_solution_mounts_replace_the_template_s() -> None:
     assert pod_spec["containers"][0]["volumeMounts"] == [
         {"name": "harbor-installed-agent", "mountPath": "/installed-agent"},
         {"name": "nemo-vol-main-anon-0", "mountPath": "/logs", "readOnly": False},
-        {"name": "nemo-t0-sandbox", "mountPath": "/solution/"},
+        {"name": "nemo-t0-sandbox", "mountPath": "/solution"},
     ]
 
 
@@ -289,7 +289,7 @@ def test_main_s_mounts_elsewhere_leave_the_template_s_alone() -> None:
     ]
 
 
-@pytest.mark.parametrize("path", ["/installed-agent", "/installed-agent/bin"])
+@pytest.mark.parametrize("path", ["/installed-agent", "/installed-agent/bin", "//installed-agent"])
 def test_main_cannot_mount_over_the_agent_s_install(path: str) -> None:
     with pytest.raises(ValueError, match="the agent is installed in /installed-agent"):
         add_services(

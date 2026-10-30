@@ -40,11 +40,12 @@ images that can't install them, such as images with a non-root ``USER``.
 
 from __future__ import annotations
 
+import posixpath
 from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The create request's extensions key. The stock server copies keys with this prefix onto the
 # sandbox pod as the annotation below, which is how the extension reads the spec back.
@@ -90,7 +91,19 @@ Capability = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$", max_length=64)]
 # The most tmpfs mounts one container takes, so each one's volume name, ``nemo-t<n>-<name>``, has a single digit.
 MAX_TMPFS_MOUNTS = 10
 Port = Annotated[int, Field(ge=1, le=65535)]
-AbsolutePath = Annotated[str, Field(pattern=r"^/", max_length=4096)]
+
+
+def _clean_path(path: str) -> str:
+    """``path`` spelled one way for each folder: ``/tmp/`` becomes ``/tmp``, and ``//installed-agent`` ``/installed-agent``.
+
+    Checks on mount paths compare strings, so two spellings of one folder would pass as two folders: a second mount at
+    ``/tmp/`` would hide the one at ``/tmp``, and ``//installed-agent`` would get past the guard on the agent's install.
+    ``normpath`` alone keeps a leading ``//``, which POSIX leaves to the system but Linux reads as ``/``.
+    """
+    return "/" + posixpath.normpath(path).lstrip("/")
+
+
+AbsolutePath = Annotated[str, Field(pattern=r"^/", max_length=4096), AfterValidator(_clean_path)]
 Quantity = Annotated[str, Field(pattern=r"^[0-9]+(\.[0-9]+)?(m|k|Ki|M|Mi|G|Gi|T|Ti)?$")]
 EnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")]
 # CRI-O resolves no short names, so a service image must name its registry.

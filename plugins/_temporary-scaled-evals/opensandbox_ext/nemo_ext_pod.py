@@ -272,8 +272,8 @@ def _make_room_for_main_mounts(sandbox_container: dict[str, Any], main: Main) ->
     One at or inside ``/installed-agent`` is refused, since the agent is installed there and must stay read-only, as
     is one at any other path the sandbox already mounts, which OpenSandbox itself may need.
     """
-    # Where the task mounts its own folders in main. Paths are normalized, so `/logs/` and `/logs` count as the same.
-    task_mount_paths = {posixpath.normpath(mount.mount_path) for mount in [*main.volume_mounts, *main.tmpfs]}
+    # Where the task mounts its own folders in main. The spec already cleans these paths, so `/logs/` reads `/logs`.
+    task_mount_paths = {mount.mount_path for mount in [*main.volume_mounts, *main.tmpfs]}
 
     # Nothing may be mounted over the agent's install, or inside it: a writable folder there would let the agent's
     # files be replaced.

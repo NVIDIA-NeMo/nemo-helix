@@ -100,6 +100,20 @@ def test_rejects_duplicate_mount_paths_within_a_container() -> None:
         parse_compose_services(_spec(service, volumes=["a"]))
 
 
+@pytest.mark.parametrize(
+    ("path", "cleaned"),
+    [("/tmp/", "/tmp"), ("//installed-agent", "/installed-agent"), ("/a/../b/./c", "/b/c"), ("/", "/")],
+)
+def test_mount_paths_are_cleaned(path: str, cleaned: str) -> None:
+    services = parse_compose_services(_spec(main={"tmpfs": [{"mount_path": path}]}))
+    assert services.main.tmpfs[0].mount_path == cleaned
+
+
+def test_rejects_two_spellings_of_one_mount_path() -> None:
+    with pytest.raises(ValidationError, match="main: mount_path '/tmp' is used by more than one"):
+        parse_compose_services(_spec(main={"tmpfs": [{"mount_path": "/tmp"}, {"mount_path": "/tmp/"}]}))
+
+
 def test_allows_the_same_mount_path_in_different_containers() -> None:
     parse_compose_services(
         _spec(
