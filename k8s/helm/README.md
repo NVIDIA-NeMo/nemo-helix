@@ -70,10 +70,10 @@ secrets will not decrypt with a new key.
 ## Intake and ClickHouse
 
 Intake is included in the platform API service group. By default, the chart
-deploys a single-node embedded ClickHouse 26.3 LTS service, and Intake creates
+deploys a single-node ClickHouse 26.3 LTS service, and Intake creates
 and migrates its own `intake` database on first use.
 
-The embedded image is pinned by tag and digest (`clickhouse.image.tag` and
+The default image is pinned by tag and digest (`clickhouse.image.tag` and
 `clickhouse.image.digest`) to ClickHouse 26.3.62.3 or later, which fixes
 CVE-2026-116366. If you mirror the image, mirror that digest, or override both
 values together. The chart does not patch an external ClickHouse: run a fixed
