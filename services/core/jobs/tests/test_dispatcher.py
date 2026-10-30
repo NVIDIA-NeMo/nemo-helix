@@ -54,6 +54,7 @@ from nhx.core.jobs.app.dispatcher import (
     JobDeletionConflictError,
     JobDispatcher,
     JobOperationConflictError,
+    JobSecretValidationError,
     JobStatusUpdateSkippedError,
     JobStorageReclaimPendingError,
     generate_job_name,
@@ -4149,3 +4150,13 @@ async def test_a_delete_that_fails_after_queueing_leaves_a_job_rerun_refuses(
 
     with pytest.raises(JobOperationConflictError, match="storage has been reclaimed"):
         await mock_dispatcher.rerun_job(job.name, DEFAULT_WORKSPACE)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS", "X=default/a,NHX_PRINCIPAL"])
+async def test_validate_job_secrets_rejects_reserved_or_malformed_env_names(name):
+    dispatcher = JobDispatcher.__new__(JobDispatcher)
+    spec = SimpleNamespace(steps=[SimpleNamespace(environment=[SimpleNamespace(name=name, from_secret=None)])])
+
+    with pytest.raises(JobSecretValidationError):
+        await dispatcher.validate_job_secrets(spec, "default")
