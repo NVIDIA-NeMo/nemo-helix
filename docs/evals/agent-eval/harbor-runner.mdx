@@ -794,10 +794,18 @@ An agent that declares no model connection, or a provider the gateway doesn't se
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
 
-A taskset run on Kubernetes enforces this for tasks whose agent runs with `network_mode = "no-network"`,
-whether set under `[environment]`, `[agent]` or one of the task's steps. Their sandbox still reaches
-the agent's model route, so the run is refused at submit, naming those tasks, unless every model the
-agent calls through the gateway is a virtual model whose `request_middleware` ends with
+Label the run closed-book with `closed_book: true` on the target (`HarborRunnerTarget(closed_book=True, ...)`).
+Each trial's token is then closed: the gateway holds the trial to closed-book capable virtual models,
+and closed-book middleware set to `apply: closed_credential` applies to its calls. The job fails
+before any trial runs unless every virtual model the agent can reach, including the `callback_models`
+of a router's virtual model, ends its `request_middleware` with `nemo-evals-closed-book`. Without the
+label, the same virtual models serve the run open.
+
+A taskset run on Kubernetes labels the run closed-book itself for tasks whose agent runs with
+`network_mode = "no-network"`, whether set under `[environment]`, `[agent]` or one of the task's
+steps. Their sandbox still reaches the agent's model route, so a closed-book run, labelled or not, is
+refused at submit, naming those tasks, unless every model the agent calls through the gateway, and
+each of those models' `callback_models`, is a virtual model whose `request_middleware` ends with
 `nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
 `model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
 is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a

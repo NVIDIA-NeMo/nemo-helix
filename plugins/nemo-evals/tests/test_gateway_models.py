@@ -15,7 +15,6 @@ import pytest
 from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
 from nemo_evals.api.fields import AgentRef
-from nemo_evals.gateway.policy import ModelAccess
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer
 from nemo_evals.jobs import agent_compiler, gateway_agents, gateway_models
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
@@ -656,45 +655,51 @@ _CLOSED_BOOK_CALL = {"name": "nemo-evals-closed-book", "config_type": "closed_bo
     ("virtual_model", "warning", "route"),
     [
         pytest.param(
-            _virtual_model([_RECORDING], [_RECORDING]), None, TrialRoute(ModelAccess.OPEN, True), id="recorded"
+            _virtual_model([_RECORDING], [_RECORDING]),
+            None,
+            TrialRoute(closed_book=False, records_calls=True),
+            id="recorded",
         ),
         pytest.param(
             _virtual_model([_RECORDING, _CLOSED_BOOK_CALL], [_RECORDING]),
             None,
-            TrialRoute(ModelAccess.CLOSED, True),
+            TrialRoute(closed_book=True, records_calls=True),
             id="closed-book",
         ),
         pytest.param(
             _virtual_model([_CLOSED_BOOK_CALL, _RECORDING], [_RECORDING]),
             None,
-            TrialRoute(ModelAccess.OPEN, True),
+            TrialRoute(closed_book=False, records_calls=True),
             id="closed-book not last",
         ),
         pytest.param(
             _virtual_model([], []),
             "won't be recorded in their trials",
-            TrialRoute(ModelAccess.OPEN, False),
+            TrialRoute(closed_book=False, records_calls=False),
             id="not listed",
         ),
         pytest.param(
             _virtual_model([_RECORDING], []),
             "won't be recorded in their trials",
-            TrialRoute(ModelAccess.OPEN, False),
+            TrialRoute(closed_book=False, records_calls=False),
             id="request only",
         ),
         pytest.param(
             _virtual_model([], [_RECORDING]),
             "span starts when the gateway has the reply",
-            TrialRoute(ModelAccess.OPEN, True),
+            TrialRoute(closed_book=False, records_calls=True),
             id="response only",
         ),
         pytest.param(
-            None, "Couldn't read virtual model models/agent-model", TrialRoute(ModelAccess.OPEN, False), id="unreadable"
+            None,
+            "Couldn't read virtual model models/agent-model",
+            TrialRoute(closed_book=False, records_calls=False),
+            id="unreadable",
         ),
     ],
 )
 @pytest.mark.parametrize("color", ["sync", "async"])
-def test_the_job_reads_its_trials_policy_from_the_route_and_warns_when_it_wont_record_them(
+def test_the_job_reads_what_the_route_offers_trials_and_warns_when_it_wont_record_them(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     virtual_model: dict | None,

@@ -20,7 +20,6 @@ from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.gateway.middleware.closed_book import ends_closed_book
 from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME
-from nemo_evals.gateway.policy import ModelAccess
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget, RegisteredAgentSource, registered_agent_config
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.metric_resolution import HelixMetricModelResolver
@@ -242,6 +241,13 @@ def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dic
 MODEL_FREE_HARBOR_AGENTS = frozenset({"oracle", "nop"})
 
 
+def closed_book_run(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> bool:
+    """Whether a run is closed-book: its target is labelled so, or some task's agent runs with no network."""
+    if isinstance(target, HarborRunnerTarget) and target.agent_name in MODEL_FREE_HARBOR_AGENTS:
+        return False
+    return (isinstance(target, HarborRunnerTarget) and target.closed_book) or bool(no_network_task_ids(tasks))
+
+
 async def require_closed_book_route(
     target: object,
     tasks: Iterable[tuple[str, Mapping[str, Any]]],
@@ -249,34 +255,44 @@ async def require_closed_book_route(
     async_sdk: AsyncHelixClient | None,
     authorize: SourceReadAuthorizer | None,
 ) -> None:
-    """Refuse no-network tasks unless the agent's model calls go through a closed-book VirtualModel.
+    """Refuse a closed-book run unless every VirtualModel its agent can reach is closed-book capable.
 
-    A no-network task's sandbox can still reach the model route, so the run is only closed-book if that route is.
-    ``tasks`` are (task id, task.toml config) pairs. The VirtualModel must end its request middleware with the
-    closed-book middleware, so the model it checks is the one the request is sent to.
+    A run is closed-book when its target says so or a task's agent runs with no network: a no-network sandbox can
+    still reach the model route. ``tasks`` are (task id, task.toml config) pairs. Each of the agent's gateway models,
+    and each VirtualModel its provider calls back (its ``callback_models``), must end its request middleware with
+    the closed-book middleware.
 
     Raises:
-        ValueError: Some task is no-network, and the agent's model route isn't a closed-book VirtualModel.
+        ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable.
     """
-    no_network = no_network_task_ids(tasks)
-    if not no_network or (isinstance(target, HarborRunnerTarget) and target.agent_name in MODEL_FREE_HARBOR_AGENTS):
+    if not closed_book_run(target, tasks):
         return
+    why = _closed_book_reason(target, tasks)
     try:
         models = _gateway_models(target)
     except ValueError as exc:
-        raise ValueError(
-            f"closed_book_required: no-network tasks {no_network} need a closed-book model route: {exc}"
-        ) from exc
+        raise ValueError(f"closed_book_required: {why} need a closed-book model route: {exc}") from exc
     if not models:
         raise ValueError(
-            f"closed_book_required: no-network tasks {no_network} need the agent's model calls to go through a "
-            f'closed-book VirtualModel: give a built-in agent one as `model: {{"ref": ...}}`, or point a registered '
-            "agent's models at one through the Inference Gateway"
+            f"closed_book_required: {why} need the agent's model calls to go through a closed-book VirtualModel: "
+            f'give a built-in agent one as `model: {{"ref": ...}}`, or point a registered agent\'s models at one '
+            "through the Inference Gateway"
         )
     if async_sdk is None:
         raise ValueError("checking a closed-book model route requires a platform client")
-    for model in models:
-        await _require_closed_book_model(model, no_network, async_sdk=async_sdk, authorize=authorize)
+    checked: set[str] = set()
+    pending = [model.root for model in models]
+    while pending:
+        ref = pending.pop(0)
+        if ref in checked:
+            continue
+        checked.add(ref)
+        pending.extend(await _require_closed_book_model(ModelRef(ref), why, async_sdk=async_sdk, authorize=authorize))
+
+
+def _closed_book_reason(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> str:
+    no_network = no_network_task_ids(tasks)
+    return f"no-network tasks {no_network}" if no_network else "closed_book runs"
 
 
 def _gateway_models(target: object) -> list[ModelRef]:
@@ -291,8 +307,9 @@ def _gateway_models(target: object) -> list[ModelRef]:
 
 
 async def _require_closed_book_model(
-    model: ModelRef, no_network: list[str], *, async_sdk: AsyncHelixClient, authorize: SourceReadAuthorizer | None
-) -> None:
+    model: ModelRef, why: str, *, async_sdk: AsyncHelixClient, authorize: SourceReadAuthorizer | None
+) -> list[str]:
+    """Refuse ``model`` unless it is closed-book capable; return the VirtualModels its provider calls back."""
     workspace, name = parse_workspace_name_ref(model.root, label="Gateway model")
     await authorize_source_read(authorize, "virtual_model", workspace, name)
     try:
@@ -305,9 +322,10 @@ async def _require_closed_book_model(
         virtual_model = None
     if virtual_model is None or not ends_closed_book(virtual_model.request_middleware):
         raise ValueError(
-            f"closed_book_required: no-network tasks {no_network} need a closed-book model route, and {model.root} "
-            f"isn't one: make `{CLOSED_BOOK_MIDDLEWARE}` the last entry of its VirtualModel's request_middleware"
+            f"closed_book_required: {why} need a closed-book model route, and {model.root} isn't one: make "
+            f"`{CLOSED_BOOK_MIDDLEWARE}` the last entry of its VirtualModel's request_middleware"
         )
+    return list(virtual_model.callback_models)
 
 
 def gateway_model_id(model: ModelRef) -> str:
@@ -390,16 +408,17 @@ def trial_recording_gap(virtual_model: VirtualModel) -> str | None:
 
 
 class TrialRoute(NamedTuple):
-    model_access: ModelAccess
+    closed_book: bool
     records_calls: bool
+    callback_models: tuple[str, ...] = ()
 
 
 def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: ModelRef) -> TrialRoute:
-    """What the gateway model's route gives trials, warning when it won't record their calls.
+    """What the gateway model's route offers trials, warning when it won't record their calls.
 
-    The route is closed-book when its VirtualModel ends its request middleware with the closed-book middleware, and
-    records calls when it lists the trial-recording middleware in its response middleware. A VirtualModel that can't
-    be read is open and records nothing.
+    The route is closed-book capable when its VirtualModel ends its request middleware with the closed-book
+    middleware, records calls when it lists the trial-recording middleware in its response middleware, and leads to
+    its ``callback_models``. A VirtualModel that can't be read offers none of these.
     """
     workspace, name = parse_workspace_name_ref(gateway_model.root, label="Gateway model")
 
@@ -420,10 +439,11 @@ def check_trial_route(client: NemoClient | AsyncNemoClient, gateway_model: Model
             gateway_model.root,
             e,
         )
-        return TrialRoute(ModelAccess.OPEN, records_calls=False)
+        return TrialRoute(closed_book=False, records_calls=False)
     if (gap := trial_recording_gap(virtual_model)) is not None:
         logger.warning("Virtual model %s: %s", gateway_model.root, gap)
     return TrialRoute(
-        ModelAccess.CLOSED if ends_closed_book(virtual_model.request_middleware) else ModelAccess.OPEN,
+        closed_book=ends_closed_book(virtual_model.request_middleware),
         records_calls=any(call.name == MIDDLEWARE_NAME for call in virtual_model.response_middleware),
+        callback_models=tuple(virtual_model.callback_models),
     )

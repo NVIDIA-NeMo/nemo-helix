@@ -29,6 +29,7 @@ from typing import Any, ClassVar, Literal
 
 import nemo_evals.agent_seeds  # noqa: F401 - registers the platform 'fileset' workspace-seed handler
 from nemo_evals.config import get_config
+from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer, gateway_job_scope
@@ -770,11 +771,14 @@ def _trial_credential_issuer(
             routes[model.root] = check_trial_route(platform_client, model)
         return routes[model.root]
 
-    closed = models is not None and all(route_of(model).model_access is ModelAccess.CLOSED for model in models)
+    reachable = _with_callback_models(models, route_of) if models is not None else None
+    closed = isinstance(spec.target, HarborRunnerTarget) and spec.target.closed_book
+    if closed:
+        _require_closed_book_capable(reachable, route_of)
     records_calls = (
-        models is not None
+        reachable is not None
         and _calls_only_gateway_models(spec.target)
-        and all(route_of(model).records_calls for model in models)
+        and all(route_of(model).records_calls for model in reachable)
     )
     return TrialCredentialIssuer(
         async_client,
@@ -783,10 +787,40 @@ def _trial_credential_issuer(
         evaluation_name=publication.evaluation_id if publication is not None else None,
         policy=ModelPolicy(
             model_access=ModelAccess.CLOSED if closed else ModelAccess.OPEN,
-            models=tuple(gateway_model_id(model) for model in models) if models is not None else None,
+            models=tuple(gateway_model_id(model) for model in reachable) if reachable is not None else None,
         ),
         records_calls=records_calls,
     )
+
+
+def _with_callback_models(models: list[ModelRef], route_of: Callable[[ModelRef], TrialRoute]) -> list[ModelRef]:
+    """``models``, then the VirtualModels their providers call back through the gateway, each once."""
+    reachable = list(models)
+    for model in models:
+        for callback in route_of(model).callback_models:
+            ref = ModelRef(callback)
+            if all(existing.root != ref.root for existing in reachable):
+                reachable.append(ref)
+    return reachable
+
+
+def _require_closed_book_capable(reachable: list[ModelRef] | None, route_of: Callable[[ModelRef], TrialRoute]) -> None:
+    """Refuse a closed-book run whose trials could reach a VirtualModel that can't keep them closed-book.
+
+    Raises:
+        ValueError: The agent's models can't all be named, or one it can reach isn't closed-book capable.
+    """
+    if reachable is None:
+        raise ValueError(
+            "closed_book: the agent's config names a gateway model evals can't read, so the run can't be held "
+            "closed-book"
+        )
+    open_models = [model.root for model in reachable if not route_of(model).closed_book]
+    if open_models:
+        raise ValueError(
+            f"closed_book: {', '.join(open_models)} can't keep trials closed-book; end each one's "
+            f"request_middleware with {CLOSED_BOOK_MIDDLEWARE}"
+        )
 
 
 def _trial_models(target: Target | None, primary: ModelRef) -> list[ModelRef] | None:

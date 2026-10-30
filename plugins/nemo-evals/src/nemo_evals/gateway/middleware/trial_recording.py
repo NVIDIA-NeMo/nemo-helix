@@ -13,15 +13,17 @@ with any other credential is not recorded.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from nemo_evals.gateway.recorder import CallRecorder, FinishedCall, intake_sink
-from nemo_evals.gateway.spans import CallerSpan
-from nemo_evals.gateway.tokens import claims_a_trial, platform_token_reader
+from nemo_evals.gateway.spans import CallerSpan, trial_trace_id
+from nemo_evals.gateway.tokens import TrialClaims, claims_a_trial, platform_token_reader
 from nemo_evals.gateway.usage import CallApi, TokenUsage, model_from_payload, usage_from_payload
 from nemo_helix_plugin.auth import inference_gateway_credential
+from nemo_helix_plugin.client.oidc import decode_jwt_claims
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareContext,
     InferenceRequest,
@@ -33,6 +35,7 @@ from pydantic import BaseModel, ConfigDict
 MIDDLEWARE_NAME = "nemo-evals-trial-recording"
 CONFIG_TYPE = "trial_recording"
 STARTED_AT_STATE_KEY = "started_at"
+ROUTING_SPAN_STATE_KEY = "routing_span"
 
 AGENT_HEADERS = ("x-claude-code-session-id", "session_id", "session-id", "x-codex-turn-metadata", "x-codex-window-id")
 AGENT_HEADER_ATTRIBUTE_PREFIX = "nemo.agent.header."
@@ -65,7 +68,7 @@ class _ObservedCall:
             self.usage.merge(usage)
         self.response_model = model_from_payload(payload) or self.response_model
 
-    def finished(self, started_at: datetime, *, cancelled: bool) -> FinishedCall:
+    def finished(self, started_at: datetime, *, cancelled: bool, routing_span: str | None = None) -> FinishedCall:
         proxied = self.ctx.proxied_request
         model = (proxied.body if proxied is not None else self.ctx.original_request.body).get("model")
         attributes: dict[str, object] = {
@@ -87,6 +90,8 @@ class _ObservedCall:
             cancelled=cancelled,
             attributes=attributes,
             caller=self.caller,
+            span_id=routing_span,
+            routing=routing_span is not None,
         )
 
 
@@ -124,7 +129,28 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         middleware_config: TrialRecordingConfig,
     ) -> InferenceRequest:
         ctx.state(MIDDLEWARE_NAME).set(STARTED_AT_STATE_KEY, datetime.now(UTC))
+        if (routing_span := self._routing_span(request)) is not None:
+            trace_id, span_id = routing_span
+            request.headers["traceparent"] = f"00-{trace_id}-{span_id}-01"
+            ctx.state(MIDDLEWARE_NAME).set(ROUTING_SPAN_STATE_KEY, span_id)
         return request
+
+    def _routing_span(self, request: InferenceRequest) -> tuple[str, str] | None:
+        """The trace and a fresh span id for a trial's call to a provider that calls models back as the trial."""
+        credential = inference_gateway_credential(request.headers)
+        model = request.body.get("model")
+        if credential is None or not isinstance(model, str):
+            return None
+        trial = TrialClaims.from_token_claims(decode_jwt_claims(credential))
+        if trial is None:
+            return None
+        try:
+            if not self.get_inference_url_and_model(model).forwards_caller_credential:
+                return None
+        except KeyError:
+            return None
+        caller = CallerSpan.from_headers(request.headers.get("traceparent"), request.headers.get("tracestate"))
+        return (caller.trace_id if caller is not None else trial_trace_id(trial)), os.urandom(8).hex()
 
     async def process_response(
         self,
@@ -138,16 +164,21 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
             return response
         call = _ObservedCall(ctx, credential)
         started_at = ctx.state(MIDDLEWARE_NAME).get(STARTED_AT_STATE_KEY) or datetime.now(UTC)
+        routing_span = ctx.state(MIDDLEWARE_NAME).get(ROUTING_SPAN_STATE_KEY)
         if isinstance(response.result, Mapping):
             call.observe(response.result)
-            recorder.record(call.finished(started_at, cancelled=False))
+            recorder.record(call.finished(started_at, cancelled=False, routing_span=routing_span))
             return response
-        response.result = _follow(response.result, call, recorder, started_at)
+        response.result = _follow(response.result, call, recorder, started_at, routing_span)
         return response
 
 
 async def _follow(
-    chunks: AsyncIterator[dict[str, Any]], call: _ObservedCall, recorder: CallRecorder, started_at: datetime
+    chunks: AsyncIterator[dict[str, Any]],
+    call: _ObservedCall,
+    recorder: CallRecorder,
+    started_at: datetime,
+    routing_span: str | None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Pass the stream through, recording the call when the caller has all of it or stops reading."""
     cancelled = True
@@ -157,4 +188,4 @@ async def _follow(
             yield chunk
         cancelled = False
     finally:
-        recorder.record(call.finished(started_at, cancelled=cancelled))
+        recorder.record(call.finished(started_at, cancelled=cancelled, routing_span=routing_span))

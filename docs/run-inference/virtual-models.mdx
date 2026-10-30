@@ -333,7 +333,8 @@ The `nemo-evals-closed-book` middleware closes that path for the request the gat
 - It refuses with `403` a model whose provider calls models back through the gateway with a
   platform credential, such as a router registered as a model provider with a platform access key,
   since it can't see the calls that provider makes. A model provider's own API key isn't a platform
-  credential and passes.
+  credential and passes. A router that calls back as its caller is served only to closed evaluation
+  trials; see [Route Through a Router That Calls Back](#route-through-a-router-that-calls-back).
 
 Add it last in `request_middleware`, so it sees the model a routing middleware selected:
 
@@ -356,26 +357,43 @@ Responses, and Anthropic Messages requests, streaming or not. It does not cover 
 another middleware makes on its own, such as the judge calls of the `nemo-switchyard`
 `llm_classifier` router.
 
-### Close a Router's Own Model Calls
+### Route Through a Router That Calls Back
 
-A router registered as a model provider, such as a Switchyard server, picks a model for each call
-and calls it back through the gateway with the credential its provider holds. Give that provider a
-router key: a credential that reaches only the closed-book virtual models you name, whatever the
-router's own configuration says. The router needs no closed-book settings of its own.
+A router registered as a model provider, such as a Switchyard server, picks a model for each call and
+calls it back through the gateway. Register it so that it calls back as its caller: the gateway sends
+the router each call's credential instead of a stored key, the router forwards that credential with
+its own calls (Switchyard's `forward_auth`), and every policy that applied to the caller applies to
+those calls too. The router needs no closed-book or evaluation settings of its own.
 
 ```bash
-nemo evals router-keys create --secret switchyard-closed-key   --model default/cb-strong --model default/cb-weak --model default/cb-judge
+nemo inference providers create switchyard --host-url http://switchyard:4002 --forward-caller-credential
 ```
 
-Each `--model` must be a closed-book virtual model with a `default_model_entity`; list the router's
-targets and judges. The command stores the key in the platform secret you name and prints the
-secret, the models, and when the key expires (30 days unless you pass `--expires-in-days`), never
-the key itself. Register the router as a model provider with that secret as its
-`api_key_secret_name`, and make it send the credential back with each call (Switchyard's
-`forward_auth`). Every call through that registration is then held to the key, so serve open
-evaluations from a separate router deployment with differently named routes. With platform auth on,
-the key is a Scoped Access Key the platform signs, so
-[Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) must be enabled.
+On the virtual model that serves a router's route, list the virtual models the router calls back with
+`--callback-models`, such as its targets and judge. A caller held to that virtual model, such as an
+evaluation trial, may also call those:
+
+```bash
+nemo inference virtual-models create routed \
+  --default-model-entity default/classified \
+  --callback-models default/strong --callback-models default/weak --callback-models default/judge
+```
+
+To serve open and closed-book evaluations through the same targets, give each target the closed-book
+middleware with `"config": {"apply": "closed_credential"}`: a closed evaluation's calls through the
+router are closed-book, and every other call passes through unchanged.
+
+The forwarded credential is limited:
+
+- With platform auth on, the gateway forwards only a credential limited to the `inference` scope,
+  such as an evaluation trial's key or an access key you mint with that scope, and refuses any other
+  call to the provider with `403`. A user's session token is never forwarded.
+- The gateway never writes the forwarded credential into its logs or error responses.
+- Switchyard's `fallback_client` forwards any request it doesn't route, with the caller's headers, to
+  its own upstream. Give a router registered this way no `fallback_client`, or one that points at the
+  gateway, or the caller's credential leaves the platform.
+- Closed-book refuses a model served by such a provider unless the caller is a closed evaluation
+  trial, since only then are the router's own calls held closed-book.
 
 ## Record Evaluation Trials
 
@@ -428,10 +446,10 @@ refuses: the gateway stops those before the response middleware that records the
 ### Hold Trials to Their Models
 
 A trial token lists the virtual models the trial's agent was configured with: the one a built-in
-agent's `model` names, or every gateway model a registered agent's config names. The token is
-closed when every one of them is closed-book. A router key lists the models it was minted for and is
-always closed. The `nemo-evals-access` middleware, which comes with the evals plugin and which no
-virtual model lists, checks every call made with either credential, on every route and before any
+agent's `model` names, or every gateway model a registered agent's config names, and the
+`callback_models` each of those lists. The token is closed when the evaluation is labelled
+`closed_book`. The `nemo-evals-access` middleware, which comes with the evals plugin and which no
+virtual model lists, checks every call made with a trial token, on every route and before any
 virtual model's middleware runs. It refuses:
 
 | Call | Status |

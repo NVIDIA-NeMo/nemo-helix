@@ -22,6 +22,7 @@ from opentelemetry.proto.resource.v1.resource_pb2 import Resource
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span, Status
 
 SERVICE_NAME = "nemo-evals"
+OPENINFERENCE_SPAN_KIND = "openinference.span.kind"
 
 _SCOPE = InstrumentationScope(name="nemo_evals.gateway.spans")
 
@@ -108,11 +109,17 @@ def call_span(
     error: bool,
     attributes: Mapping[str, object],
     caller: CallerSpan | None = None,
+    span_id: str | None = None,
+    routing: bool = False,
 ) -> ResourceSpans:
-    """One model call the gateway served the trial: a child of the caller's span, else of the trial's root."""
+    """One call the gateway served the trial: a child of the caller's span, else of the trial's root.
+
+    A ``routing`` call went to a provider that calls models back through the gateway as the trial. It is a ``CHAIN``
+    span rather than a model call, so the calls it makes, recorded as model calls beneath it, carry the usage.
+    """
     span = Span(
         trace_id=bytes.fromhex(caller.trace_id if caller is not None else trial_trace_id(trial)),
-        span_id=os.urandom(8),
+        span_id=bytes.fromhex(span_id) if span_id is not None else os.urandom(8),
         parent_span_id=bytes.fromhex(caller.span_id if caller is not None else trial_root_span_id(trial)),
         trace_state=caller.trace_state if caller is not None else "",
         name=name,
@@ -121,10 +128,8 @@ def call_span(
         end_time_unix_nano=_nanos(ended_at),
         status=Status(code=Status.STATUS_CODE_ERROR if error else Status.STATUS_CODE_OK),
     )
-    return _resource_spans(
-        span,
-        {**attributes, GATEWAY_CALL_ATTRIBUTE: True, **_trial_attributes(trial)},
-    )
+    kind = {OPENINFERENCE_SPAN_KIND: "CHAIN"} if routing else {GATEWAY_CALL_ATTRIBUTE: True}
+    return _resource_spans(span, {**attributes, **kind, **_trial_attributes(trial)})
 
 
 def trial_root_span(trial: TrialClaims, *, started_at: datetime, ended_at: datetime, failed: bool) -> ResourceSpans:

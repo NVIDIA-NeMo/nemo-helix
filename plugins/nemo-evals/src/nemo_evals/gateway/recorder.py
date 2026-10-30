@@ -45,6 +45,8 @@ class FinishedCall:
     attributes: Mapping[str, object] = field(default_factory=dict)
     caller: CallerSpan | None = None
     error: bool = False
+    span_id: str | None = None
+    routing: bool = False
 
 
 SpanSink = Callable[[str, list[ResourceSpans]], Awaitable[int]]
@@ -173,6 +175,8 @@ class CallRecorder:
             error=call.error,
             attributes=attributes,
             caller=call.caller,
+            span_id=call.span_id,
+            routing=call.routing,
         )
         return trial.intake_workspace, span
 

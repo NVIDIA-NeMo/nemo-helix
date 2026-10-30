@@ -50,6 +50,7 @@ from nemo_evals.jobs.agent_spec import (
     ResolvedTask,
     Target,
 )
+from nemo_evals.jobs.gateway_models import TrialRoute
 from nemo_evals.jobs.gym_sandbox import (
     GYM_SANDBOX_PLAN_ENVVAR,
     SandboxPlan,
@@ -2861,48 +2862,73 @@ def test_a_registered_fabric_agent_on_the_gateway_gets_trial_tokens_in_its_model
 _IGW_WS = "http://h/apis/inference-gateway/v2/workspaces/ws"
 
 
-@pytest.mark.parametrize(
-    ("harness_access", "policy"),
-    [
-        pytest.param(
-            "closed",
-            ModelPolicy(model_access=ModelAccess.CLOSED, models=("ws/cb", "ws/cb-harness")),
-            id="every model closed-book",
-        ),
-        pytest.param(
-            "open",
-            ModelPolicy(model_access=ModelAccess.OPEN, models=("ws/cb", "ws/cb-harness")),
-            id="one model open",
-        ),
-    ],
-)
-def test_a_registered_agents_trials_may_call_every_gateway_model_it_names_and_are_closed_only_if_all_are(
-    monkeypatch: pytest.MonkeyPatch, harness_access: str, policy: ModelPolicy
-) -> None:
-    """The agent switching between its own models is allowed; any model outside its config is not."""
-    access = {"ws/cb": ModelAccess.CLOSED, "ws/cb-harness": ModelAccess(harness_access)}
-    monkeypatch.setattr(
-        agent_evaluate,
-        "check_trial_route",
-        lambda _client, model: SimpleNamespace(model_access=access[model.root], records_calls=True),
-    )
-    target = HarborRunnerTarget(
+def _registered_target(*, closed_book: bool = False, harness_model: dict | None = None) -> HarborRunnerTarget:
+    return HarborRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        closed_book=closed_book,
         agent_kwargs={
             "fabric_config": {
                 "models": {"default": {"base_url": f"{_IGW_WS}/openai/-/v1", "model": "cb"}},
-                "harnesses": {"codex": {"model": {"base_url": f"{_IGW_WS}/model/cb-harness/-/v1"}}},
+                "harnesses": {"codex": {"model": harness_model or {"base_url": f"{_IGW_WS}/model/cb-harness/-/v1"}}},
             }
         },
     )
-    spec = SimpleNamespace(target=target, publication=None)
 
-    issuer = agent_evaluate._trial_credential_issuer(
-        cast(Any, spec), cast(Any, SimpleNamespace(workspace="evals")), MagicMock(), MagicMock(), "run-1"
+
+def _issuer(target: HarborRunnerTarget) -> Any:
+    return agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
     )
 
-    assert issuer is not None
-    assert issuer._policy == policy
+
+@pytest.mark.parametrize("closed_book", [True, False], ids=["labelled closed-book", "unlabelled"])
+def test_a_trials_policy_is_closed_exactly_when_the_run_is_labelled_closed_book(
+    monkeypatch: pytest.MonkeyPatch, closed_book: bool
+) -> None:
+    """Closed-book is the run's choice: the same closed-book capable models serve open runs too."""
+    monkeypatch.setattr(
+        agent_evaluate, "check_trial_route", lambda _client, model: TrialRoute(closed_book=True, records_calls=True)
+    )
+
+    issuer = _issuer(_registered_target(closed_book=closed_book))
+
+    assert issuer._policy == ModelPolicy(
+        model_access=ModelAccess.CLOSED if closed_book else ModelAccess.OPEN, models=("ws/cb", "ws/cb-harness")
+    )
+
+
+def test_a_closed_book_run_that_can_reach_a_model_that_cant_keep_it_closed_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capable = {"ws/cb": True, "ws/cb-harness": False}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(closed_book=capable[model.root], records_calls=True),
+    )
+
+    with pytest.raises(ValueError, match="ws/cb-harness can't keep trials closed-book"):
+        _issuer(_registered_target(closed_book=True))
+
+
+def test_a_trial_may_also_call_the_models_its_routers_call_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A router behind a listed VirtualModel calls its targets as the trial, so the trial's list must include them."""
+    callbacks = {"ws/cb": ("ws/strong", "ws/judge")}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(
+            closed_book=True, records_calls=True, callback_models=callbacks.get(model.root, ())
+        ),
+    )
+
+    issuer = _issuer(_registered_target(closed_book=True))
+
+    assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/strong", "ws/judge")
 
 
 @pytest.mark.parametrize(
@@ -2935,7 +2961,7 @@ def test_a_registered_agents_traces_are_superseded_only_when_the_gateway_records
     monkeypatch.setattr(
         agent_evaluate,
         "check_trial_route",
-        lambda _client, model: SimpleNamespace(model_access=ModelAccess.OPEN, records_calls=model.root in recording),
+        lambda _client, model: TrialRoute(closed_book=False, records_calls=model.root in recording),
     )
     target = HarborRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
@@ -2965,7 +2991,7 @@ def test_trials_of_an_agent_whose_models_cannot_all_be_named_get_an_open_policy_
     monkeypatch.setattr(
         agent_evaluate,
         "check_trial_route",
-        lambda *_: SimpleNamespace(model_access=ModelAccess.CLOSED, records_calls=True),
+        lambda *_: TrialRoute(closed_book=True, records_calls=True),
     )
     target = HarborRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef("ws/coder")),

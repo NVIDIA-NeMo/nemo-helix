@@ -365,6 +365,13 @@ class HarborRunnerTarget(BaseModel):
     reward_key: str = Field(
         default="reward", description="Key read from Harbor's per-trial rewards mapping to score against."
     )
+    closed_book: bool = Field(
+        default=False,
+        description="Run the trials closed-book. Each trial's gateway calls are held to closed-book capable "
+        "VirtualModels (ones whose request_middleware ends with nemo-evals-closed-book), and the closed-book "
+        "middleware applies to them. Every VirtualModel the agent can reach, a router's callback_models included, "
+        "must be closed-book capable. Taskset runs set it for tasks whose agent runs with no network.",
+    )
     agent_setup_timeout_multiplier: float | None = Field(
         default=None,
         gt=0,

@@ -85,6 +85,7 @@ def test_harbor_configuration_survives_submission_without_local_storage(tmp_path
         "kind": "harbor",
         "source": {"import_path": "custom_agent:Agent", "model_name": "model"},  # the import path wins
         **HARBOR_CARRIED_VALUES,
+        "closed_book": False,
     }
 
 
