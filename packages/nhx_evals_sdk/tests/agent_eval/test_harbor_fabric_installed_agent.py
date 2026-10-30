@@ -22,6 +22,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgen
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
     DEFAULT_FABRIC_MAX_TURNS,
     DEFAULT_UV_VERSION,
+    INSTALL_MARKER,
     FabricInstalledAgent,
 )
 
@@ -54,9 +55,11 @@ class _RecordingEnvironment:
     default_user = "agent"
     session_id = "hello-world__aaa"
 
-    def __init__(self) -> None:
+    def __init__(self, marker: str | None = None) -> None:
         self.commands: list[tuple[str, str | int | None]] = []
         self.uploaded_dirs: list[tuple[Path, str]] = []
+        #: What a finished install left in the venv's marker, or None when nothing is installed.
+        self.marker = marker
 
     async def exec(
         self,
@@ -68,6 +71,8 @@ class _RecordingEnvironment:
     ) -> _ExecResult:
         del env, cwd, timeout_sec
         self.commands.append((command, user))
+        if command.startswith("cat ") and INSTALL_MARKER in command:
+            return _ExecResult(stdout=self.marker or "", return_code=0 if self.marker is not None else 1)
         return _ExecResult()
 
     async def upload_dir(self, source_path: Path, target_path: str) -> None:
@@ -193,7 +198,7 @@ async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> 
     await agent.install(cast(BaseEnvironment, environment))
 
     install = _ran(environment, "astral.sh/uv")
-    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.5.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+    assert """'nemo-fabric[deepagents,relay]==0.5.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'; """ in install
 
 
 async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:
@@ -431,3 +436,46 @@ def test_every_attribute_harbor_assigns_on_an_agent_is_classified() -> None:
         f"Harbor now assigns {sorted((a, assigned[a]) for a in unclassified)} onto an agent. "
         "Forward it in _HARBOR_ASSIGNED_ATTRIBUTES, or explain the exclusion in _NOT_OUR_AGENT_STATE."
     )
+
+
+async def test_a_finished_install_records_what_it_installed_last(tmp_path: Path) -> None:
+    agent = _agent(tmp_path)
+    environment = _RecordingEnvironment()
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    install = _ran(environment, "astral.sh/uv")
+    assert install.endswith(f"> /tmp/nemo-fabric-venv/{INSTALL_MARKER}")
+    assert install.index("uv pip install") < install.index(INSTALL_MARKER)
+
+
+async def test_an_image_with_this_install_already_skips_it(tmp_path: Path) -> None:
+    """An image with the agent installed (or a retried setup) installs nothing, but still gets this agent's config."""
+    agent = _agent(tmp_path, fabric_config_bundle=tmp_path)
+    environment = _RecordingEnvironment(marker=agent.install_spec)
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    ran = [command for command, _ in environment.commands]
+    assert not any("apt-get" in c or "astral.sh" in c or "uv pip" in c for c in ran), ran
+    assert any("mkdir -p" in c for c in ran)
+    assert environment.uploaded_dirs == [(tmp_path, agent.fabric.fabric_config_target)]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"fabric_package": "nemo-fabric[codex,relay]==0.5.0"},
+        {"fabric_python_version": "3.13"},
+        {"fabric_uv_version": "0.13.0"},
+    ],
+    ids=["package", "python", "uv"],
+)
+async def test_an_install_of_something_else_installs_again(tmp_path: Path, change: dict[str, str]) -> None:
+    installed = _agent(tmp_path).install_spec
+    agent = _agent(tmp_path, **change)
+    environment = _RecordingEnvironment(marker=installed)
+
+    await agent.install(cast(BaseEnvironment, environment))
+
+    _ran(environment, "astral.sh/uv")
