@@ -14,6 +14,7 @@ from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.image_builds.builder import (
     HttpImageBuilder,
+    adopt_or_build,
     archive_source,
     builder_name,
     copy_builder_name,
@@ -121,25 +122,61 @@ async def test_ensure_build_moves_past_a_revision_builder_holds_for_another_requ
     assert submitted.job == "builder-harbor-env-0123456789ab-2"
 
 
-def test_builder_name_depends_on_every_build_input() -> None:
-    base = {
-        "archive": "default/harbor-tasks#sort/abc/task_archive",
-        "archive_digest": "a" * 64,
-        "context_path": "sort/environment",
-        "dockerfile": "Dockerfile",
-    }
+def test_builder_name_depends_on_the_contexts_contents_and_dockerfile() -> None:
+    base = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
     name = builder_name(**base)
 
     assert name == builder_name(**base)
     assert name.startswith("harbor-env-") and len(name) == len("harbor-env-") + 12
-    for field, other in [
-        # Builder fingerprints the source location too: one name for two locations would conflict there.
-        ("archive", "team/harbor-tasks#sort/abc/task_archive"),
-        ("archive_digest", "b" * 64),
-        ("context_path", "sort/tests"),
-        ("dockerfile", "D2"),
-    ]:
+    for field, other in [("context_digest", "b" * 64), ("dockerfile", "D2")]:
         assert builder_name(**{**base, field: other}) != name
+
+
+@pytest.mark.parametrize(
+    ("existing", "submitted", "revision"),
+    [
+        ([], [1], 1),
+        (["pending"], [], 1),
+        (["ready"], [], 1),
+        (["failed"], [2], 2),
+        (["failed", "ready"], [], 2),
+        (["ready", "failed"], [3], 3),
+    ],
+    ids=["none", "pending", "ready", "failed", "failed-then-ready", "newest-failed"],
+)
+async def test_adopt_or_build_uses_a_usable_build_and_submits_only_without_one(
+    existing: list[Literal["pending", "ready", "failed"]], submitted: list[int], revision: int
+) -> None:
+    builder = _Builder(existing)
+
+    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == submitted
+    assert image.name == f"harbor-env-0123456789ab-{revision}"
+
+
+async def test_adopt_or_build_resubmits_a_pending_build_whose_job_ended() -> None:
+    builder = _Builder(["pending"], job="error")
+
+    await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [2]
+
+
+async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() -> None:
+    """Another task submitted the same content first: Builder refuses ours, and theirs is read and used."""
+    builder = _Builder([], conflicting=frozenset({1}))
+
+    async def race(name: str) -> ContainerImage | None:
+        # The winner's revision appears once our submit has lost to it.
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "pending") if revision == 1 and builder.submitted else None
+
+    builder.get_image = race  # ty: ignore[invalid-assignment]
+    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [1]
+    assert image.name == "harbor-env-0123456789ab-1"
 
 
 def test_archive_source_splits_a_fileset_reference() -> None:
@@ -274,12 +311,7 @@ async def test_a_pending_revision_whose_job_ended_or_never_ran_is_replaced(job: 
 
 def test_a_platform_is_its_own_builder_build_set() -> None:
     """Builder refuses one revision of a set for two requests, so each platform needs its own name."""
-    built = {
-        "archive": "default/harbor-tasks#sort/abc/task_archive",
-        "archive_digest": "a" * 64,
-        "context_path": "sort/environment",
-        "dockerfile": "Dockerfile",
-    }
+    built = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
 
     assert builder_name(**built, platform="linux/arm64") != builder_name(**built)
     assert builder_name(**built, platform="linux/arm64") != builder_name(**built, platform="linux/amd64")
