@@ -107,6 +107,7 @@ from nhx_evals_sdk.agent_eval.trials import (
     AgentEvalTrial,
     AgentEvalTrialStatus,
     AgentOutput,
+    RunnerInfo,
     TrialError,
     TrialMeasurements,
 )
@@ -114,7 +115,15 @@ from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
-from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nhx_evals_sdk.values import (
+    Agent,
+    AgentBase,
+    GenericAgent,
+    Model,
+    RunConfigOnline,
+    RunConfigOnlineModel,
+    SecretRef,
+)
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
@@ -357,6 +366,82 @@ def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_
     [recorded] = fake.received_tasks[0].metrics
     assert isinstance(recorded, LLMJudgeMetric) and isinstance(recorded.model, Model)
     assert recorded.model.url == resolved
+
+
+_PUBLIC_GATEWAY_URL = "https://nhx.example.test/apis/inference-gateway/v2/workspaces/default/model/m/-/v1"
+_PUBLIC_AGENT_URL = "https://nhx.example.test/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+_PLATFORM_ENDPOINT_TARGETS = [
+    ModelTarget(model=Model(url=_PUBLIC_GATEWAY_URL, name="m"), params=RunConfigOnlineModel()),
+    AgentTarget(
+        agent=GenericAgent(url=_PUBLIC_AGENT_URL, name="triage", body={}, response_path="$.choices[0].message.content"),
+        params=RunConfigOnline(),
+    ),
+]
+
+
+class _ProvenanceEvaluator(_FakeEvaluator):
+    """Records the endpoint it called as the run's ``metadata.target``, as ``AgentEvaluator`` does."""
+
+    def run_sync(self, *, target: AgentEvalTarget | None = None, **kwargs: Any) -> AgentEvalResult:
+        result = super().run_sync(target=target, **kwargs)
+        assert isinstance(target, Model | AgentBase)
+        kind = "model" if isinstance(target, Model) else "agent"
+        result.metadata.target = RunnerInfo(name=target.name, kind=kind, config={"url": target.url})
+        return result
+
+
+def _submitted_url(target: Target) -> str:
+    assert isinstance(target, ModelTarget | AgentTarget)
+    return target.model.url if isinstance(target, ModelTarget) else target.agent.url
+
+
+def _run_metadata(ctx: JobContext) -> dict[str, Any]:
+    return json.loads((ctx.storage.persistent / AGENT_BUNDLE_DIR / "metadata.json").read_text())
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+@pytest.mark.usefixtures("job_identity")
+def test_a_key_less_platform_endpoint_is_called_through_the_job_proxy_and_recorded_as_submitted(
+    target: Target, failed: bool, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """With a job identity, the run calls the proxy; ``metadata.json`` still names the submitted URL."""
+    fake = _ProvenanceEvaluator(failed=failed)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    called = urlsplit(getattr(fake.received_target, "url", ""))
+    assert (called.hostname, called.path) == ("127.0.0.1", urlsplit(_submitted_url(target)).path)
+    recorded = _run_metadata(ctx)["target"]
+    assert recorded["config"]["url"] == _submitted_url(target)
+    assert "127.0.0.1" not in json.dumps(recorded)
+
+
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+def test_without_a_job_identity_a_platform_endpoint_is_called_as_submitted(
+    target: Target, tmp_path: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An auth-disabled platform has no identity to forward, so there is no proxy and nothing to restore."""
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    fake = _ProvenanceEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert getattr(fake.received_target, "url", None) == _submitted_url(target)
+    assert _run_metadata(ctx)["target"]["config"]["url"] == _submitted_url(target)
 
 
 def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
