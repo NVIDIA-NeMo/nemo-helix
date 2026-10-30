@@ -19,8 +19,9 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/agent-hardener/python \
 COPY docker/locks/nhx-agent-hardener-tasks /opt/agent-hardener-lock
 # The agent-hardener venv installs from its committed lock. The garak venv comes from agent-hardener's own
 # provisioner, as on a host after `nemo agent-hardener setup`, so its garak pin stays the single source of truth.
+# Use uv's compatibility tar backend for the managed Python download under QEMU.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv venv --python 3.12 /opt/agent-hardener/venv && \
+    UV_LEGACY_TAR_BACKEND=1 uv venv --python 3.12 /opt/agent-hardener/venv && \
     UV_PROJECT_ENVIRONMENT=/opt/agent-hardener/venv uv sync \
         --project /opt/agent-hardener-lock \
         --locked \
