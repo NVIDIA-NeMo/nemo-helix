@@ -372,3 +372,12 @@ def test_a_separate_validation_fileset_is_rejected() -> None:
 
 def test_the_validation_split_defaults_like_automodel() -> None:
     assert UnslothJobInput.model_validate(_minimal_payload()).schedule.validation_split == 0.1
+
+
+@pytest.mark.parametrize("validation_path", [None, "default/val"])
+def test_a_stored_job_with_the_removed_validation_path_still_renders(validation_path: str | None) -> None:
+    """Jobs stored before ``dataset.validation_path`` was removed carry it, as null or a reference."""
+    stored = _run_transform(UnslothJobInput.model_validate(_minimal_payload())).model_dump(mode="json")
+    stored["dataset"]["validation_path"] = validation_path
+
+    assert "validation_path" not in UnslothJobOutput.model_validate(stored).dataset.model_dump()

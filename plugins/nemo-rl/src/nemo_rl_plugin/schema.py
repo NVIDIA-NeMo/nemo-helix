@@ -66,8 +66,9 @@ class RlJobInput(RlSchema):
     dataset: str = Field(
         description=(
             "Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file "
-            "and, optionally, a validation file, named like train*.jsonl and val*.jsonl (training.jsonl, "
-            "validation.jsonl). Without a validation file, 10% of the training rows are held out, "
+            "and, optionally, a validation file, named like train*.jsonl and val*.jsonl or dev*.jsonl "
+            "(training.jsonl, validation.jsonl), or placed directly in train/ (or training/) and val/ "
+            "(or validation/, dev/). Without a validation file, 10% of the training rows are held out, "
             "except in a sandboxed GRPO run, which skips validation."
         ),
     )

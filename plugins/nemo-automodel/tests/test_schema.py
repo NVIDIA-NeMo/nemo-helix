@@ -5,7 +5,7 @@ import json
 
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
-from nemo_automodel_plugin.schema import AutomodelJobInput, DeploymentParams, ExportSpec
+from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, DeploymentParams, ExportSpec
 from pydantic import ValidationError
 
 
@@ -489,3 +489,20 @@ def test_a_separate_validation_fileset_is_rejected() -> None:
                 "training": {"training_type": "sft"},
             },
         )
+
+
+@pytest.mark.parametrize("validation", [None, "default/val"])
+def test_a_stored_job_with_the_removed_validation_field_still_renders(validation: str | None) -> None:
+    """Jobs stored before ``dataset.validation`` was removed carry it, as null or a reference."""
+    stored = {
+        "model": "default/base",
+        "dataset": {"training": "default/train", "validation": validation},
+        "training": {"training_type": "sft"},
+        "schedule": {"epochs": 1},
+        "batch": {"global_batch_size": 4, "micro_batch_size": 1},
+        "optimizer": {},
+        "parallelism": {},
+        "output": {"name": "out", "type": "adapter", "fileset": "out-fs"},
+    }
+
+    assert "validation" not in AutomodelJobOutput.model_validate(stored).dataset.model_dump()

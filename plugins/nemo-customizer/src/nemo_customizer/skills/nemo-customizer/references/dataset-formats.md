@@ -88,7 +88,7 @@ EMBEDDING and CUSTOM (automodel-only schemas) are not supported by unsloth today
 
 ## NeMo-RL (DPO) — preference data
 
-DPO trains on **preference pairs**, not prompt→completion examples. The `rl` backend takes a **single** dataset fileset, referenced by one `dataset` string, holding a training file and, optionally, a validation file at the fileset root (named like `train*.jsonl` and `val*.jsonl`, such as `training.jsonl` and `validation.jsonl`). Without a validation file, 10% of the training rows are held out for validation.
+DPO trains on **preference pairs**, not prompt→completion examples. The `rl` backend takes a **single** dataset fileset, referenced by one `dataset` string, holding a training file and, optionally, a validation file, named like `train*.jsonl` and `val*.jsonl` or `dev*.jsonl` (such as `training.jsonl` and `validation.jsonl`), or placed directly in `train/` (or `training/`) and `val/` (or `validation/`, `dev/`). Without a validation file, 10% of the training rows are held out for validation.
 
 The dataset-preparation step **auto-detects the row schema from the first line** and selects the matching NeMo-RL loader. **Three preference formats are supported** (platform schemas `BinaryPreferenceDatasetItemSchema` / `HelpSteer3DatasetItemSchema` / `Tulu3PreferenceDatasetItemSchema`):
 

@@ -5,7 +5,7 @@
 
 GRPO has **no labelled completions**. A row is a prompt plus enough routing information for the environment to run a rollout against it and score the result. The reward comes from the environment, not the file.
 
-The dataset FileSet holds a training file (required) and optionally a validation file, named like `train*.jsonl` and `val*.jsonl`, such as `training.jsonl` and `validation.jsonl`, referenced by the single `dataset` string. The environment is a **separate** FileSet.
+The dataset FileSet holds a training file (required) and optionally a validation file, named like `train*.jsonl` and `val*.jsonl` or `dev*.jsonl` (such as `training.jsonl` and `validation.jsonl`), or placed directly in `train/` (or `training/`) and `val/` (or `validation/`, `dev/`), referenced by the single `dataset` string. The environment is a **separate** FileSet.
 
 ## Row schema
 

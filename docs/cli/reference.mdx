@@ -9848,8 +9848,9 @@ create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
 fileset, so point `--upload-dataset` at a local directory holding a training file
-and, optionally, a validation file, named like train*.jsonl and val*.jsonl
-(training.jsonl, validation.jsonl). Without a validation file, 10% of the
+and, optionally, a validation file, named like train*.jsonl and val*.jsonl or
+dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or
+training/) and val/ (or validation/, dev/). Without a validation file, 10% of the
 training rows are held out. For GRPO, `--upload-environment` takes the environment
 directory. Build and validate that package first; the job command only uploads it.
 
@@ -10177,7 +10178,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Model entity reference ('name' or 'workspace/name').
-* `--dataset`: Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file and, optionally, a validation file, named like train*.jsonl and val*.jsonl (training.jsonl, validation.jsonl). Without a validation file, 10% of the training rows are held out, except in a sandboxed GRPO run, which skips validation.
+* `--dataset`: Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file and, optionally, a validation file, named like train*.jsonl and val*.jsonl or dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or training/) and val/ (or validation/, dev/). Without a validation file, 10% of the training rows are held out, except in a sandboxed GRPO run, which skips validation.
 * `--environment`: Environment fileset reference (required when training.type is grpo).
 * `--integrations.wandb.project`: W&B project name (groups related runs). Defaults to output.name if not set.
 * `--integrations.wandb.name`: W&B run name. Defaults to job_id if not provided.

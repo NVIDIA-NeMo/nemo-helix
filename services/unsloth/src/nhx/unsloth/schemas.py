@@ -353,6 +353,18 @@ class UnslothJobOutput(UnslothSchema):
         description=DEPLOYMENT_CONFIG_DESCRIPTION,
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_fields(cls, data: object) -> object:
+        """Drop ``dataset.validation_path`` from jobs stored before it was removed, so they still render.
+
+        ``UnslothJobInput`` still rejects it: the dataset fileset holds the validation files.
+        """
+        if isinstance(data, dict) and isinstance(data.get("dataset"), dict) and "validation_path" in data["dataset"]:
+            dataset = {key: value for key, value in data["dataset"].items() if key != "validation_path"}
+            return {**data, "dataset": dataset}
+        return data
+
     @model_validator(mode="after")
     def _resolve_learning_rate(self) -> Self:
         self.optimizer = resolve_learning_rate(self.training, self.optimizer)
