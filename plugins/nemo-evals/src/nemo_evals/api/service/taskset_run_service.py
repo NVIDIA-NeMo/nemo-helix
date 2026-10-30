@@ -358,7 +358,7 @@ class TasksetRunService:
         snapshot = source.files if source is not None else None
         acceptance_started = False
         try:
-            if policy.enforce_closed_book:
+            if harbor.sandbox_profiles[policy.profile].enforce_closed_book:
                 configs = [
                     (t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)
                 ]

@@ -66,7 +66,8 @@ def resolve_sandbox_policy(
         protocol=protocol,
     )
     return ResolvedHarborSandboxPolicy(
-        **profile.model_dump(exclude={"connection"}),
+        # enforce_closed_book is a submit check only, so task Jobs never parse it.
+        **profile.model_dump(exclude={"connection", "enforce_closed_book"}),
         profile=profile_name,
         connection=connection,
         resource_overrides=overrides,

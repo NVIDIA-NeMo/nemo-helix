@@ -93,10 +93,6 @@ class ResolvedHarborSandboxPolicy(BaseModel):
     agent_setup_egress: tuple[str, ...] = Field(
         default=(), description="Hosts the sandbox may also reach during the agent's setup() only (operator config)."
     )
-    enforce_closed_book: bool = Field(
-        default=False,
-        description="Refuse no-network tasks at submit without a closed-book model route (operator config).",
-    )
     override_task_egress: bool = False
     allow_task_egress_extension: bool = False
     resource_overrides: ResourceOverrides = ResourceOverrides()

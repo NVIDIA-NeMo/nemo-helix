@@ -219,10 +219,10 @@ def test_resolver_freezes_ceilings_and_disk_limit(harbor_config, sandbox_platfor
     assert policy.enforce_disk_limit is False and policy.max_disk_mb is None
 
 
-def test_resolver_freezes_enforce_closed_book_default_off(harbor_config, sandbox_platform):
-    assert resolve_sandbox_policy(harbor_config, sandbox_platform).enforce_closed_book is False
-    config = with_profile(harbor_config, enforce_closed_book=True)
-    assert resolve_sandbox_policy(config, sandbox_platform).enforce_closed_book is True
+def test_resolver_leaves_enforce_closed_book_out_of_the_policy(harbor_config, sandbox_platform):
+    assert harbor_config.sandbox_profiles["harbor-standard"].enforce_closed_book is False
+    policy = resolve_sandbox_policy(with_profile(harbor_config, enforce_closed_book=True), sandbox_platform)
+    assert "enforce_closed_book" not in policy.model_dump()
 
 
 @pytest.mark.parametrize(
