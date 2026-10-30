@@ -2277,7 +2277,7 @@ nemo inference deployments [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new ModelDeployment (version 1).
 * `delete`: Delete all versions of a ModelDeployment.
 * `list`: List ModelDeployments for a specific workspace.
-* `list-models`: Get Latest ModelDeployment's Model Entities from Entity...
+* `list-models`: Retrieve the model list for the latest deployment.
 * `get`: Get the latest version of a ModelDeployment.
 * `update`: Update a ModelDeployment (creates a new immutable version).
 * `update-status`: Update the status of a ModelDeployment (mutable operation).
@@ -2424,13 +2424,10 @@ Filter deployments by workspace, project, status, config, model_provider_id, nam
 
 ##### nemo inference deployments list-models
 
-Get Latest ModelDeployment's Model Entities from Entity Store.
+Retrieve the model list for the latest deployment.
 
-This provides the
-API contract that NIMs expect from Entity Store today, for pulling LoRAs, but
-enables us to enforce AuthZ boundaries.
-
-TODO: Implement model entity retrieval based on deployment config.
+The model list is currently empty; this command does not yet discover models
+or LoRA adapters from the deployment configuration.
 
 **Usage:**
 

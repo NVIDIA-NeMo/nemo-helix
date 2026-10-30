@@ -172,7 +172,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        logger.info("Starting Nemo Helix server")
+        logger.info("Starting NeMo Helix server")
         controller_threads = []
         thread_by_name: dict[str, threading.Thread] = {}
         platform_seed_task: asyncio.Task[None] | None = None
@@ -255,11 +255,11 @@ def create_app(
         )
 
         await close_shared_http_clients()
-        logger.info("Shutting down Nemo Helix API server")
+        logger.info("Shutting down NeMo Helix API server")
 
     app = QueryParamSchemaFastAPI(
-        title="Nemo Helix API",
-        description="API for Nemo Helix services",
+        title="NeMo Helix API",
+        description="API for NeMo Helix services",
         version="0.0.1",
         lifespan=lifespan,
     )

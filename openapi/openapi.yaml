@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Nemo Helix API
-  description: API for Nemo Helix services
+  title: NeMo Helix API
+  description: API for NeMo Helix services
   version: 0.0.0
 paths:
   /apis/auth/authenticate:
@@ -1050,6 +1050,12 @@ paths:
               description: Redirect target
               schema:
                 type: string
+        '503':
+          description: OIDC server-side login is not configured or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -1135,6 +1141,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebSessionResponse'
+        '401':
+          description: Missing or invalid web session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /apis/auth/v2/token:
     post:
       tags:
@@ -2306,6 +2318,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2533,6 +2551,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -3849,6 +3873,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenAIModelResp'
+        '404':
+          description: Virtual model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8235,6 +8265,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Adapter'
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8693,6 +8729,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeploymentConfig'
+        '404':
+          description: Deployment configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9150,6 +9192,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeployment'
+        '404':
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9260,15 +9308,12 @@ paths:
       tags:
       - ModelDeployments
       summary: Get Latest ModelDeployment's Model Entities
-      description: 'Get Latest ModelDeployment''s Model Entities from Entity Store.
-
-        This provides the API contract that NIMs expect from Entity Store today, for
-        pulling LoRAs,
-
-        but enables us to enforce AuthZ boundaries.
+      description: 'Return the workspace, name, and model list for the latest deployment.
 
 
-        TODO: Implement model entity retrieval based on deployment config.'
+        The model list is currently empty; this endpoint does not yet discover models
+
+        or LoRA adapters from the deployment configuration.'
       operationId: get_deployment_models_apis_models_v2_workspaces__workspace__deployments__name__models_get
       parameters:
       - name: workspace
@@ -9747,6 +9792,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10047,6 +10098,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Prompt'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10363,6 +10420,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelProvider'
+        '404':
+          description: Model provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -10653,6 +10716,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixSecretResponse'
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -14393,6 +14462,17 @@ components:
       - name
       title: EnvironmentMetadataContent
       description: Content for environment-type filesets (GRPO Gym packages).
+    ErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+          description: A human-readable error message describing what went wrong.
+          example: Error message
+      type: object
+      required:
+      - detail
+      title: ErrorResponse
     EvaluationContext:
       properties:
         evaluation_name:

@@ -6,7 +6,7 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.openapi.models import Example
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -164,6 +164,7 @@ async def create_deployment_config(
 @router.get(
     "/v2/workspaces/{workspace}/deployment-configs/{name}",
     summary="Get Latest ModelDeploymentConfig Version",
+    responses={404: {"model": ErrorResponse, "description": "Deployment configuration not found"}},
     response_description="Return the latest version of a model deployment configuration",
     status_code=status.HTTP_200_OK,
 )

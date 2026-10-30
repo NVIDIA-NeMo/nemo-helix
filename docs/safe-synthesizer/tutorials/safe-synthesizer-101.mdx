@@ -128,7 +128,7 @@ import os
 
 # Use the pre-configured NVIDIA Build model provider
 # This provider is set up during platform deployment
-provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "system/nvidia-build")
+provider_name = os.environ.get("NSS_CLASSIFY_MODEL_PROVIDER", "default/nvidia-build")
 if "/" in provider_name:
     provider_workspace, provider_id = provider_name.split("/", 1)
     client.models.get_provider(name=provider_id, workspace=provider_workspace)
