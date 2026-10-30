@@ -506,7 +506,10 @@ class CreateDeploymentRequest(BaseModel):
     )
     image: str = Field(
         default="",
-        description="Container image for docker/k8s/openshell modes. Ignored for subprocess.",
+        description=(
+            "Container image for docker/k8s/openshell modes. When omitted, uses the agent's "
+            "reference.container_image, then deployments.default_image. Ignored for subprocess."
+        ),
     )
     use_image_entrypoint: bool = Field(
         default=False,
