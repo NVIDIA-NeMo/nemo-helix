@@ -9735,7 +9735,7 @@ nemo customization dataset [OPTIONS] COMMAND [ARGS]...
 
 Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
 
-Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format `--format` names, drops rows with an empty field, and splits the rest with a seeded shuffle. Then uploads the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, validation.jsonl), and the test split, when there is one, as a second fileset, NAME-test (test.jsonl). Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.
+Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format `--format` names, drops rows with an empty required field, and splits the rest with a seeded shuffle. Then uploads the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, and validation.jsonl unless `--val-fraction` is 0), and the test split, unless `--test-fraction` is 0, as a second fileset, NAME-test (test.jsonl). Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.
 
 Formats (`--format`), and the backends that train on each:
 - chat: automodel, training.training_type sft or distillation; or unsloth, with dataset.apply_chat_template: true.
@@ -9763,7 +9763,7 @@ nemo customization dataset prepare [OPTIONS] SOURCE
 * `--name`: Dataset fileset to create on the platform and upload the splits to. The test split goes to NAME-test.
 * `--format <CHOICE>`: Row format to write; it decides which backends can train on the dataset. [possible values: chat, preference, prompt-completion, embedding, text]
 * `--input-format <CHOICE>`: Format of the source files. Default: from the file extensions, which must all be the same. [possible values: parquet, csv, jsonl]
-* `--val-fraction <FLOAT>`: Share of rows for validation. [default: 0.1]
+* `--val-fraction <FLOAT>`: Share of rows for validation. 0 writes no validation.jsonl; training then holds out its own. [default: 0.1]
 * `--test-fraction <FLOAT>`: Share of rows held out for evaluation. Default: 0 for preference, else 0.1.
 * `--seed <INTEGER>`: Shuffle seed. The same seed gives the same split. [default: 42]
 * `--exist-ok`: Reuse a fileset that already exists. Its files are left as they are.

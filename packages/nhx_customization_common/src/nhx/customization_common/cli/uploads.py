@@ -310,6 +310,16 @@ def create_dataset_fileset(
     return f"{workspace}/{name}"
 
 
+def require_new_filesets(files: FilesUploadClient, *, names: Iterable[str], workspace: str) -> None:
+    """Refuse when any fileset in *names* already exists, before the caller creates or uploads anything."""
+    taken = [f"{workspace}/{name}" for name in names if _fileset_exists(files, name=name, workspace=workspace)]
+    if taken:
+        raise UploadError(
+            f"{' and '.join(taken)} already exist{'s' if len(taken) == 1 else ''}. Pass --exist-ok to reuse "
+            "what exists as it is, or delete it if you want it rebuilt from the local source."
+        )
+
+
 def _create_fileset_from_source(
     source: str,
     *,

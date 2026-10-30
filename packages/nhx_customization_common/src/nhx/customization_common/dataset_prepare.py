@@ -230,7 +230,7 @@ def _columns(available: set[str]) -> str:
 
 
 def to_training_rows(rows: Sequence[dict[str, Any]], mapping: ColumnMapping) -> tuple[list[dict[str, Any]], int]:
-    """Convert *rows* to training rows; return them and how many were dropped for an empty field.
+    """Convert *rows* to training rows; return them and how many were dropped for an empty required field.
 
     A generated column can be empty where generation failed. Such a row cannot train,
     so it is dropped and counted rather than written. A cell of the wrong shape, such as
@@ -320,17 +320,24 @@ def _present(*values: str) -> bool:
 
 
 def split_rows(rows: Sequence[dict[str, Any]], *, val_fraction: float, test_fraction: float, seed: int) -> Splits:
-    """Shuffle *rows* with *seed* and cut validation and test off the front; the same seed gives the same split."""
+    """Shuffle *rows* with *seed* and cut validation and test off the front; the same seed gives the same split.
+
+    A fraction above 0 gets at least one row, so a small table still has every split it asks for.
+    """
     if not 0 <= val_fraction < 1 or not 0 <= test_fraction < 1 or val_fraction + test_fraction >= 1:
         raise DatasetPrepareError("The validation and test fractions must each be in [0, 1) and sum to less than 1.")
     shuffled = list(rows)
     random.Random(seed).shuffle(shuffled)
-    n_test = round(len(shuffled) * test_fraction)
-    n_val = round(len(shuffled) * val_fraction)
+    n_test = _split_size(len(shuffled), test_fraction)
+    n_val = _split_size(len(shuffled), val_fraction)
     test, validation, train = shuffled[:n_test], shuffled[n_test : n_test + n_val], shuffled[n_test + n_val :]
     if not train:
         raise DatasetPrepareError(f"{len(rows)} rows leave none to train on. Lower the validation and test fractions.")
     return Splits(train=train, validation=validation, test=test)
+
+
+def _split_size(n_rows: int, fraction: float) -> int:
+    return max(1, round(n_rows * fraction)) if fraction > 0 else 0
 
 
 def write_split(rows: Sequence[dict[str, Any]], path: Path) -> None:

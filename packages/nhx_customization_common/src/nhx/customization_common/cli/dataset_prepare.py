@@ -19,7 +19,12 @@ from nemo_helix_plugin.cli_state import resolve_cli_workspace
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.commands import resolve_submit_auth_headers, resolve_submit_base_url
 from nemo_helix_plugin.files.client import FilesClient
-from nhx.customization_common.cli.uploads import UploadError, UploadReport, create_dataset_fileset
+from nhx.customization_common.cli.uploads import (
+    UploadError,
+    UploadReport,
+    create_dataset_fileset,
+    require_new_filesets,
+)
 from nhx.customization_common.dataset_prepare import (
     SPLIT_FILES,
     TRAINED_BY,
@@ -59,9 +64,10 @@ _GROUP_HELP = (
 _PREPARE_HELP = (
     f"{_SHORT_HELP}\n\n"
     "Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format "
-    "--format names, drops rows with an empty field, and splits the rest with a seeded shuffle. Then uploads "
-    "the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, "
-    "validation.jsonl), and the test split, when there is one, as a second fileset, NAME-test (test.jsonl). "
+    "--format names, drops rows with an empty required field, and splits the rest with a seeded shuffle. "
+    "Then uploads the training and validation splits to the platform as a new dataset fileset, NAME "
+    "(train.jsonl, and validation.jsonl unless --val-fraction is 0), and the test split, unless "
+    "--test-fraction is 0, as a second fileset, NAME-test (test.jsonl). "
     "Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.\n\n"
     f"{_FORMATS_HELP}\n\n{_GRPO_HELP}\n\n"
     "Data Designer output: download the job's artifacts result (nemo jobs results download artifacts "
@@ -93,7 +99,11 @@ def add_dataset_commands(app: typer.Typer) -> None:
             "--input-format",
             help="Format of the source files. Default: from the file extensions, which must all be the same.",
         ),
-        val_fraction: float = typer.Option(0.1, "--val-fraction", help="Share of rows for validation."),
+        val_fraction: float = typer.Option(
+            0.1,
+            "--val-fraction",
+            help="Share of rows for validation. 0 writes no validation.jsonl; training then holds out its own.",
+        ),
         test_fraction: float | None = typer.Option(
             None,
             "--test-fraction",
@@ -246,10 +256,14 @@ def _prepare(
     mapping = map_columns(dataset_format, rows[0].keys(), named)
     training_rows, dropped = to_training_rows(rows, mapping)
     if not training_rows:
-        raise DatasetPrepareError(f"All {dropped} rows have an empty field; none is left to train on.")
+        raise DatasetPrepareError(f"All {dropped} rows have an empty required field; none is left to train on.")
     if test_fraction is None:
         test_fraction = 0.0 if dataset_format is DatasetFormat.PREFERENCE else 0.1
     splits = split_rows(training_rows, val_fraction=val_fraction, test_fraction=test_fraction, seed=seed)
+    test_name = f"{name}-test"
+    if not exist_ok:
+        # Check both filesets first, so a taken test fileset does not leave the dataset uploaded on its own.
+        require_new_filesets(files, names=[name, test_name] if splits.test else [name], workspace=workspace)
 
     write_split(splits.train, out / name / SPLIT_FILES["train"])
     if splits.validation:
@@ -261,7 +275,6 @@ def _prepare(
         ),
     }
     if splits.test:
-        test_name = f"{name}-test"
         write_split(splits.test, out / test_name / SPLIT_FILES["test"])
         result["test_dataset"] = create_dataset_fileset(
             files, name=test_name, source=out / test_name, workspace=workspace, exist_ok=exist_ok, report=report
@@ -272,8 +285,10 @@ def _prepare(
     result["rows"] = {"train": len(splits.train), "validation": len(splits.validation), "test": len(splits.test)}
     if dropped:
         result["dropped"] = dropped
-        typer.echo(f"Dropped {dropped} rows with an empty field.", err=True)
+        typer.echo(f"Dropped {dropped} rows with an empty required field.", err=True)
     if report.reused:
+        # A reused fileset keeps its files, so format, columns and rows describe these rows, not its files.
+        result["reused"] = list(report.reused)
         typer.echo(
             f"Reused {', '.join(report.reused)} as it is: its files were not replaced with these rows.", err=True
         )

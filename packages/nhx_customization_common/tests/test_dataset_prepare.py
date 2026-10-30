@@ -271,3 +271,12 @@ def test_fractions_out_of_range_fail(val: float, test: float) -> None:
 def test_a_split_that_leaves_nothing_to_train_fails() -> None:
     with pytest.raises(DatasetPrepareError, match="none to train on"):
         split_rows([{"i": i} for i in range(3)], val_fraction=0.5, test_fraction=0.4, seed=0)
+
+
+def test_a_split_asked_for_gets_a_row_even_from_a_small_table() -> None:
+    """Rounding 5 rows x 0.1 would give 0; a split with a fraction above 0 still gets a row."""
+    splits = split_rows([{"i": i} for i in range(5)], val_fraction=0.1, test_fraction=0.1, seed=0)
+    assert (len(splits.train), len(splits.validation), len(splits.test)) == (3, 1, 1)
+
+    no_test = split_rows([{"i": i} for i in range(5)], val_fraction=0.1, test_fraction=0.0, seed=0)
+    assert (len(no_test.train), len(no_test.validation), len(no_test.test)) == (4, 1, 0)
