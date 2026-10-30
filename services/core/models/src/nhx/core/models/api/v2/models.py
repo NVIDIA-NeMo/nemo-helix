@@ -20,7 +20,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import HelixJobSpec as HelixJobSpecModel
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -226,6 +226,7 @@ async def list_models(
     "/v2/workspaces/{workspace}/models/{name}",
     summary="Get Model by Workspace and Name",
     response_description="Return model details",
+    responses={404: {"model": ErrorResponse, "description": "Model not found"}},
     status_code=status.HTTP_200_OK,
     response_model=ModelEntity,
 )

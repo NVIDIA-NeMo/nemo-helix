@@ -51,7 +51,7 @@ def test_database_display_logs_parse_failures(caplog: pytest.LogCaptureFixture) 
     assert records[0].exc_info is not None
 
 
-def test_display_banner_skips_database_resolution_without_services(monkeypatch, tmp_path) -> None:
+def test_display_banner_skips_database_resolution_without_services(monkeypatch, tmp_path, capsys) -> None:
     # Service-less (sidecar-only) runs must not touch the default SQLite dir.
     monkeypatch.setenv("NHX_DATA_DIR", str(tmp_path / "unwritable" / "data"))
     monkeypatch.setattr(runner.otel_settings, "log_format", "plain")
@@ -70,6 +70,17 @@ def test_display_banner_skips_database_resolution_without_services(monkeypatch, 
     runner._display_banner(services=[], controllers=[], sidecars=["auth-proxy"], host="127.0.0.1", port=8080)
 
     assert not (tmp_path / "unwritable").exists()
+    output = capsys.readouterr().out
+    assert "NeMo Helix" in output
+    assert "Nemo Helix" not in output
+
+
+def test_structured_startup_message_uses_product_name(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(runner.otel_settings, "log_format", "json")
+    monkeypatch.setattr(runner, "get_platform_version", lambda: "0.0.0")
+    with caplog.at_level(logging.INFO, logger="nhx.platform_runner.run"):
+        runner._display_banner(services=[], controllers=[], sidecars=[], host="127.0.0.1", port=8080)
+    assert "NeMo Helix starting" in caplog.messages
 
 
 def test_run_platform_marks_loaded_services_local_before_starting_controllers(monkeypatch):
