@@ -54,7 +54,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
   const [modalSecret, setModalSecret] = useState<HelixSecretResponse>();
   const [modalOpen, setModalOpen] = useState<ModalState>('none');
 
-  const { data, refetch, isLoading, error } = useSecretsListSecrets(
+  const { data, refetch, isLoading, isPlaceholderData, error } = useSecretsListSecrets(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -182,7 +182,7 @@ export const SecretsDataView: FC<SecretsDataViewProps> = ({ workspace, onCreate,
           DataViewRoot: {
             data: secretsWithId,
             totalCount: pagination?.total_results,
-            requestStatus: getRequestStatus({ error, isLoading }),
+            requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
           },
           DataViewTableContent: {
             renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>

@@ -159,6 +159,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     data: modelsResponse,
     refetch,
     isLoading,
+    isPlaceholderData,
     isError,
   } = useModelsListModels(
     workspace,
@@ -497,7 +498,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           DataViewRoot: {
             data: tableData,
             totalCount: modelsResponse?.pagination?.total_results,
-            requestStatus: getRequestStatus({ error: isError, isLoading }),
+            requestStatus: getRequestStatus({ error: isError, isLoading, isPlaceholderData }),
             reactTableOptions: {
               getRowCanExpand: (row: { original: ModelTableRow }) =>
                 Boolean(row.original.adapters?.length),

@@ -134,7 +134,7 @@ export const ExperimentRoute: FC = () => {
     [filter, favoritesTruncated]
   );
 
-  const { data, isLoading, error, refetch } = useListExperiments(
+  const { data, isLoading, isPlaceholderData, error, refetch } = useListExperiments(
     workspace,
     { page, page_size: pageSize, filter: listFilter },
     { query: { placeholderData: keepPreviousData } }
@@ -175,7 +175,7 @@ export const ExperimentRoute: FC = () => {
             DataViewRoot: {
               data: experiments,
               totalCount: totalResults,
-              requestStatus: getRequestStatus({ error, isLoading }),
+              requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
             },
             DataViewSearchBar: { placeholder: 'Search experiments...' },
           }}
