@@ -28,6 +28,7 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     parse_secret_references,
     start_log_capture,
 )
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
 
 def test_parse_secret_references():
@@ -260,6 +261,107 @@ def test_create_otel_logger_ignores_invalid_batching_env(bad_value):
 
     assert kwargs["schedule_delay_millis"] == DEFAULT_LOG_EXPORT_INTERVAL_MS
     assert kwargs["max_export_batch_size"] == DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+
+
+_BLRP_ENVVARS = ("OTEL_BLRP_SCHEDULE_DELAY", "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "OTEL_BLRP_MAX_QUEUE_SIZE")
+
+
+def _real_processor_settings(env: dict[str, str]) -> tuple[float, int, int]:
+    """Build the logger with the real SDK processor and return (interval ms, batch size, queue size)."""
+    created: list[BatchLogRecordProcessor] = []
+
+    def _capture(*args, **kwargs):
+        processor = BatchLogRecordProcessor(*args, **kwargs)
+        created.append(processor)
+        return processor
+
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs", **env}
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter"),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.BatchLogRecordProcessor", side_effect=_capture),
+    ):
+        otel_logger = create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    assert otel_logger is not None
+    try:
+        batch_processor = created[0]._batch_processor
+        return (
+            batch_processor._schedule_delay_millis,
+            batch_processor._max_export_batch_size,
+            batch_processor._max_queue_size,
+        )
+    finally:
+        otel_logger.close()
+
+
+@pytest.mark.parametrize(
+    ("otel_env", "nhx_env", "expected"),
+    [
+        # No overrides anywhere: our defaults.
+        ({}, {}, (5000, 2048, 8192)),
+        # Each OTEL_BLRP_* setting alone is honored; the others keep our defaults.
+        ({"OTEL_BLRP_SCHEDULE_DELAY": "30000"}, {}, (30000, 2048, 8192)),
+        ({"OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096"}, {}, (5000, 4096, 16384)),
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "16384"}, {}, (5000, 2048, 16384)),
+        # All three together.
+        (
+            {
+                "OTEL_BLRP_SCHEDULE_DELAY": "30000",
+                "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096",
+                "OTEL_BLRP_MAX_QUEUE_SIZE": "16384",
+            },
+            {},
+            (30000, 4096, 16384),
+        ),
+        # An NHX override wins for its own setting without suppressing the unrelated OTEL settings.
+        (
+            {"OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096", "OTEL_BLRP_MAX_QUEUE_SIZE": "16384"},
+            {NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR: "1500"},
+            (1500, 4096, 16384),
+        ),
+        (
+            {"OTEL_BLRP_SCHEDULE_DELAY": "30000", "OTEL_BLRP_MAX_QUEUE_SIZE": "1024"},
+            {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "100"},
+            (30000, 100, 1024),
+        ),
+        (
+            {"OTEL_BLRP_SCHEDULE_DELAY": "30000", "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096"},
+            {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "100"},
+            (30000, 100, 2048),
+        ),
+        # An explicitly configured queue is kept, and a batch that would not fit in it is reduced.
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "1024"}, {}, (5000, 1024, 1024)),
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "1024"}, {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "4096"}, (5000, 1024, 1024)),
+        # Invalid OTEL values fall back to our defaults.
+        ({"OTEL_BLRP_SCHEDULE_DELAY": "abc", "OTEL_BLRP_MAX_QUEUE_SIZE": "0"}, {}, (5000, 2048, 8192)),
+    ],
+)
+def test_create_otel_logger_resolves_batching_per_setting_with_real_processor(monkeypatch, otel_env, nhx_env, expected):
+    for name in _BLRP_ENVVARS:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in otel_env.items():
+        monkeypatch.setenv(name, value)
+
+    assert _real_processor_settings(nhx_env) == expected
+
+
+def test_create_otel_logger_honors_short_otel_schedule_delay(monkeypatch):
+    """A controller-configured 20 ms OTEL_BLRP_SCHEDULE_DELAY must still export a lone record promptly."""
+    for name in _BLRP_ENVVARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "20")
+    exported = threading.Event()
+    exporter = MagicMock()
+    exporter.export.side_effect = lambda batch: exported.set() or MagicMock()
+
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs"}
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter", return_value=exporter):
+        otel_logger = create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    assert otel_logger is not None
+    try:
+        otel_logger.emit("one record", "stdout")
+        assert exported.wait(timeout=2)
+    finally:
+        otel_logger.close()
 
 
 def test_create_otel_logger_close_flushes_buffered_records_before_interval():
