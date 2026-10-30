@@ -35,7 +35,9 @@ export const useDeploymentModes = (
   const subprocessUnreachable = useImageBuildsUnsupported();
   return useMemo<DeploymentModes>(() => {
     if (data) {
-      if (profilesPending) return { status: 'loading' };
+      if (profilesPending) {
+        return { status: 'loading' };
+      }
       const enabled = data.data.filter((mode) => {
         if (subprocessUnreachable && mode.mode === DeploymentModeAvailabilityMode.subprocess) {
           return false;
