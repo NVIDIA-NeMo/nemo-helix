@@ -52,10 +52,6 @@ app = create_typer_app(name="virtual_models", help="Manage virtual_models")
 
 _AUTOPROVISIONED_HELP = "Marks this VirtualModel as controller-managed. The Models controller will delete it once no ModelProvider serves the matching entity. Setting this manually opts the VirtualModel into that cleanup behavior."
 _DEFAULT_MODEL_ENTITY_HELP = 'Model entity to route to, in "workspace/name" format. Written into request["model"] before the request middleware pipeline runs. If omitted, a request middleware plugin must handle backend routing itself. Set to null to clear an existing value.'
-_CALLBACK_MODELS_HELP = (
-    "A VirtualModel, workspace/name, that the provider serving this VirtualModel calls back through the gateway, "
-    "such as a router's target. A caller held to this VirtualModel may also call it. Repeat for each."
-)
 _MODELS_HELP = "Model entity references used by this VirtualModel. A per-entry backend_format overrides the referenced ModelEntity backend_format when IGW resolves the backend format for a request. (JSON string)"
 _OVERRIDE_PROXY_HELP = 'Plugin-provided proxy implementation for IGW to use instead of its default aiohttp proxy. Format: "plugin-name.proxy-name". Leave unset to use the default IGW proxy. Set to null to clear an existing value.'
 _POST_RESPONSE_MIDDLEWARE_HELP = "Ordered list of middleware plugins invoked after the response has been returned to the caller. Intended for fire-and-forget work (logging, analytics) that must not block or modify the response. (JSON string)"
@@ -78,7 +74,6 @@ def create_virtual_models(
         str | None, typer.Option("--default-model-entity", help=_DEFAULT_MODEL_ENTITY_HELP)
     ] = None,
     models: Annotated[str | None, typer.Option("--models", help=_MODELS_HELP)] = None,
-    callback_models: Annotated[list[str] | None, typer.Option("--callback-models", help=_CALLBACK_MODELS_HELP)] = None,
     override_proxy: Annotated[str | None, typer.Option("--override-proxy", help=_OVERRIDE_PROXY_HELP)] = None,
     post_response_middleware: Annotated[
         str | None, typer.Option("--post-response-middleware", help=_POST_RESPONSE_MIDDLEWARE_HELP)
@@ -130,8 +125,6 @@ def create_virtual_models(
         input_payload["default_model_entity"] = default_model_entity
     if models is not None:
         input_payload["models"] = read_payload("models", models)
-    if callback_models:
-        input_payload["callback_models"] = callback_models
     if override_proxy is not None:
         input_payload["override_proxy"] = override_proxy
     if post_response_middleware is not None:
@@ -323,7 +316,6 @@ def patch_virtual_models(
         str | None, typer.Option("--default-model-entity", help=_DEFAULT_MODEL_ENTITY_HELP)
     ] = None,
     models: Annotated[str | None, typer.Option("--models", help=_MODELS_HELP)] = None,
-    callback_models: Annotated[list[str] | None, typer.Option("--callback-models", help=_CALLBACK_MODELS_HELP)] = None,
     override_proxy: Annotated[str | None, typer.Option("--override-proxy", help=_OVERRIDE_PROXY_HELP)] = None,
     post_response_middleware: Annotated[
         str | None, typer.Option("--post-response-middleware", help=_POST_RESPONSE_MIDDLEWARE_HELP)
@@ -365,8 +357,6 @@ def patch_virtual_models(
         input_payload["default_model_entity"] = default_model_entity
     if models is not None:
         input_payload["models"] = read_payload("models", models)
-    if callback_models:
-        input_payload["callback_models"] = callback_models
     if override_proxy is not None:
         input_payload["override_proxy"] = override_proxy
     if post_response_middleware is not None:

@@ -264,7 +264,6 @@ async def create_virtual_model(
         default_model_entity=body.default_model_entity,
         autoprovisioned=body.autoprovisioned,
         models=body.models,
-        callback_models=body.callback_models,
         request_middleware=body.request_middleware,
         response_middleware=body.response_middleware,
         post_response_middleware=body.post_response_middleware,

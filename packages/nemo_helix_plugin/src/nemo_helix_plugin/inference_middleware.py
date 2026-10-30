@@ -554,9 +554,6 @@ class VirtualModel(Protocol):
     def models(self) -> Sequence[VirtualModelInferenceConfig]: ...
 
     @property
-    def callback_models(self) -> Sequence[str]: ...
-
-    @property
     def request_middleware(self) -> Sequence[MiddlewareCall]: ...
 
     @property

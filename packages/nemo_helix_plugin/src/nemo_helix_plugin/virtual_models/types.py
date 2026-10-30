@@ -23,7 +23,7 @@ from nemo_helix_plugin.inference_middleware_models import (
     VirtualModel,
     VirtualModelInferenceConfig,
 )
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 __all__ = [
     "CreateVirtualModelRequest",
@@ -58,13 +58,6 @@ class _VirtualModelFields(BaseModel):
             "ModelEntity backend_format when IGW resolves the backend format for a request."
         ),
     )
-    callback_models: list[str] = Field(
-        default_factory=list,
-        description=(
-            'VirtualModels, in "workspace/name" format, that the provider serving this VirtualModel calls back '
-            "through the gateway, such as a router's targets. A caller held to this VirtualModel may also call them."
-        ),
-    )
     request_middleware: list[MiddlewareCall] = Field(
         default_factory=list,
         description=(
@@ -96,15 +89,6 @@ class _VirtualModelFields(BaseModel):
             "Set to null to clear an existing value."
         ),
     )
-
-    @field_validator("callback_models")
-    @classmethod
-    def _callback_models_are_virtual_model_refs(cls, value: list[str]) -> list[str]:
-        for ref in value:
-            workspace, _, name = ref.partition("/")
-            if not workspace or not name or "/" in name:
-                raise ValueError(f"callback model {ref!r} must be a VirtualModel reference of the form workspace/name")
-        return value
 
 
 class CreateVirtualModelRequest(_VirtualModelFields):
