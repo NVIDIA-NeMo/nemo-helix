@@ -362,6 +362,22 @@ describe('CreateDeploymentModal', () => {
       const options = await screen.findAllByRole('option');
       expect(options.map((option) => option.textContent)).toEqual(['Kubernetes']);
     });
+
+    it('offers only Kubernetes on a Kubernetes install the server still offers subprocess on', async () => {
+      mockEnabledModes('subprocess', 'k8s');
+      mockExecutionProfiles([{ profile: 'default', backend: 'kubernetes_job' }]);
+      const user = userEvent.setup();
+      renderModal();
+
+      const dialog = await getDeploymentDialog();
+      const runtime = within(dialog).getByRole('combobox', { name: 'Runtime' });
+      await waitFor(() => expect(runtime).toHaveTextContent('Kubernetes'));
+      expect(runtime).toBeVisible();
+      await user.click(runtime);
+
+      const options = await screen.findAllByRole('option');
+      expect(options.map((option) => option.textContent)).toEqual(['Kubernetes']);
+    });
   });
 
   it('explains and blocks deploying when no runtime is enabled', async () => {

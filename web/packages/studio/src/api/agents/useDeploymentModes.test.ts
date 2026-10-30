@@ -3,9 +3,16 @@
 
 import { useAgentsListDeploymentModes } from '@nemo/sdk/generated/agents/agent-deployments';
 import { enabledImageModes, useDeploymentModes } from '@studio/api/agents/useDeploymentModes';
-import { DEPLOYMENT_MODES_URL as modesUrl } from '@studio/mocks/handlers/agentDeploymentCapabilities';
+import {
+  executionProfilesResponse,
+  DEPLOYMENT_MODES_URL as modesUrl,
+  EXECUTION_PROFILES_URL as profilesUrl,
+} from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
-import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
+import {
+  mockEnabledModes,
+  mockExecutionProfiles,
+} from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -58,6 +65,65 @@ describe('useDeploymentModes', () => {
       enabled: ['subprocess', 'k8s'],
       withoutImage: ['subprocess'],
     });
+  });
+
+  it('leaves subprocess out on a Kubernetes install', async () => {
+    mockEnabledModes('subprocess', 'k8s');
+    mockExecutionProfiles([{ profile: 'default', backend: 'kubernetes_job' }]);
+    const { result } = renderHook(() => useDeploymentModes('default'), {
+      wrapper: TestProviders,
+    });
+
+    await waitFor(() =>
+      expect(result.current).toEqual({ status: 'ready', enabled: ['k8s'], withoutImage: [] })
+    );
+  });
+
+  it('keeps subprocess when the profiles cannot be read', async () => {
+    mockEnabledModes('subprocess', 'k8s');
+    server.use(http.get(profilesUrl, () => HttpResponse.json({}, { status: 403 })));
+    const { result } = renderHook(() => useDeploymentModes('default'), {
+      wrapper: TestProviders,
+    });
+
+    await waitFor(() =>
+      expect(result.current).toEqual({
+        status: 'ready',
+        enabled: ['subprocess', 'k8s'],
+        withoutImage: ['subprocess'],
+      })
+    );
+  });
+
+  it('stays loading until the profiles arrive', async () => {
+    mockEnabledModes('subprocess', 'k8s');
+    let releaseProfiles = () => {};
+    const profilesReleased = new Promise<void>((resolve) => {
+      releaseProfiles = resolve;
+    });
+    server.use(
+      http.get(profilesUrl, async () => {
+        await profilesReleased;
+        return HttpResponse.json(
+          executionProfilesResponse([{ profile: 'default', backend: 'kubernetes_job' }])
+        );
+      })
+    );
+    const { result } = renderHook(
+      () => ({
+        modes: useDeploymentModes('default'),
+        query: useAgentsListDeploymentModes('default'),
+      }),
+      { wrapper: TestProviders }
+    );
+
+    await waitFor(() => expect(result.current.query.isSuccess).toBe(true));
+    expect(result.current.modes).toEqual({ status: 'loading' });
+
+    releaseProfiles();
+    await waitFor(() =>
+      expect(result.current.modes).toEqual({ status: 'ready', enabled: ['k8s'], withoutImage: [] })
+    );
   });
 });
 
