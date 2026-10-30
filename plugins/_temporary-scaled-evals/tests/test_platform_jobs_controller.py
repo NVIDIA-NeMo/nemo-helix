@@ -15,6 +15,7 @@ import anyio.to_thread
 import httpx
 import pytest
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.iam.types import AuthzResponse
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 pytest.importorskip("scaled_evals")
@@ -455,16 +456,30 @@ def test_submitter_stores_immutable_launch_inputs_once(monkeypatch: pytest.Monke
     submitter._write_inputs("eval_1", 3, "job-e3")
 
 
-def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("auth_enabled", [True, False])
+def test_private_workspace_is_created_by_the_service_or_refused(
+    monkeypatch: pytest.MonkeyPatch, auth_enabled: bool
+) -> None:
     import scaled_evals.api.entity_store as entity_store
 
     monkeypatch.undo()  # the conftest fake replaces private_workspace
     workspaces = MagicMock()
+    iam = MagicMock(spec=entity_store.IAMClient)
+    iam.evaluate_authorization.return_value.data.return_value = AuthzResponse(result={"has_role": True})
+    monkeypatch.setattr(entity_store, "platform_auth_enabled", lambda: auth_enabled)
     monkeypatch.setattr(entity_store, "get_nemo_client", lambda **_: object())
     monkeypatch.setattr(entity_store.WorkspacesClient, "from_client", lambda _client: workspaces)
+    monkeypatch.setattr(entity_store.IAMClient, "from_client", lambda _client: iam)
     entity_store.private_workspace.cache_clear()
     assert entity_store.private_workspace() == settings.entity_store_private_workspace
     assert workspaces.create_workspace.call_args.kwargs["body"].name == settings.entity_store_private_workspace
+    grant = workspaces.create_workspace_member.call_args.kwargs
+    assert grant["workspace"] == settings.entity_store_private_workspace
+    assert grant["body"].principal == "service:scaled-evals"
+    assert grant["body"].roles == ["Admin", "ServiceEntityStore"]
+    assert entity_store.private_workspace() == settings.entity_store_private_workspace
+    assert workspaces.create_workspace_member.call_count == 1
+    assert iam.evaluate_authorization.call_count == int(auth_enabled)
 
     # An existing workspace is reused only when this service created it.
     workspaces.create_workspace.side_effect = ConflictError(
@@ -474,7 +489,87 @@ def test_private_workspace_is_created_by_the_service_or_refused(monkeypatch: pyt
     entity_store.private_workspace.cache_clear()
     assert entity_store.private_workspace() == settings.entity_store_private_workspace
     workspaces.get_workspace.return_value.data.return_value.created_by = "mallory@example.com"
+    workspaces.create_workspace_member.reset_mock()
+    iam.evaluate_authorization.reset_mock()
     entity_store.private_workspace.cache_clear()
     with pytest.raises(RuntimeError, match="mallory"):
         entity_store.private_workspace()
+    workspaces.create_workspace_member.assert_not_called()
+    iam.evaluate_authorization.assert_not_called()
     entity_store.private_workspace.cache_clear()
+
+
+def test_private_workspace_retries_failed_role_assignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scaled_evals.api.entity_store as entity_store
+
+    monkeypatch.undo()
+    monkeypatch.setattr(entity_store, "platform_auth_enabled", lambda: False)
+    workspaces = MagicMock(spec=entity_store.WorkspacesClient)
+    workspaces.create_workspace.side_effect = [
+        MagicMock(),
+        ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://entities"))),
+    ]
+    workspaces.get_workspace.return_value.data.return_value.created_by = "service:scaled-evals"
+    workspaces.create_workspace_member.side_effect = [RuntimeError("role grant failed"), MagicMock()]
+    monkeypatch.setattr(entity_store, "get_nemo_client", lambda **_: object())
+    monkeypatch.setattr(entity_store.WorkspacesClient, "from_client", lambda _client: workspaces)
+    entity_store.private_workspace.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="role grant failed"):
+            entity_store.private_workspace()
+        assert entity_store.private_workspace() == settings.entity_store_private_workspace
+        assert workspaces.create_workspace.call_count == 2
+        assert workspaces.create_workspace_member.call_count == 2
+    finally:
+        entity_store.private_workspace.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "pending_result",
+    [
+        AuthzResponse(result={"has_role": False}),
+        AuthzResponse(result={}),
+        AuthzResponse(result={"has_role": "true"}),
+    ],
+    ids=["absent-role", "missing-decision", "non-boolean-decision"],
+)
+def test_private_workspace_retries_until_storage_role_propagates(
+    monkeypatch: pytest.MonkeyPatch, pending_result: AuthzResponse
+) -> None:
+    import scaled_evals.api.entity_store as entity_store
+
+    monkeypatch.undo()
+    workspaces = MagicMock(spec=entity_store.WorkspacesClient)
+    workspaces.create_workspace.side_effect = [
+        MagicMock(),
+        ConflictError(httpx.Response(409, request=httpx.Request("POST", "http://entities"))),
+    ]
+    workspaces.get_workspace.return_value.data.return_value.created_by = "service:scaled-evals"
+    iam = MagicMock(spec=entity_store.IAMClient)
+    iam.evaluate_authorization.return_value.data.side_effect = [
+        pending_result,
+        AuthzResponse(result={"has_role": True}),
+    ]
+    monkeypatch.setattr(entity_store, "platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(entity_store, "get_nemo_client", lambda **_: object())
+    monkeypatch.setattr(entity_store.WorkspacesClient, "from_client", lambda _client: workspaces)
+    monkeypatch.setattr(entity_store.IAMClient, "from_client", lambda _client: iam)
+    entity_store.private_workspace.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="role has not propagated"):
+            entity_store.private_workspace()
+        workspaces.create_workspace_member.return_value.data.assert_called_once()
+        assert entity_store.private_workspace.cache_info().currsize == 0
+        assert entity_store.private_workspace() == settings.entity_store_private_workspace
+        assert entity_store.private_workspace() == settings.entity_store_private_workspace
+        assert workspaces.create_workspace_member.call_count == 2
+        assert iam.evaluate_authorization.call_count == 2
+        decision = iam.evaluate_authorization.call_args.kwargs
+        assert decision["entrypoint"] == "has_role"
+        assert decision["body"].input == {
+            "principal_id": "service:scaled-evals",
+            "workspace": settings.entity_store_private_workspace,
+            "role": "ServiceEntityStore",
+        }
+    finally:
+        entity_store.private_workspace.cache_clear()
