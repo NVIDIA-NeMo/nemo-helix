@@ -48,7 +48,7 @@ from nhx.core.inference_gateway.api.middleware_registry import (
     execute_response_middleware,
 )
 from nhx.core.inference_gateway.api.mock_provider import handle_mock_request, is_mock_provider
-from nhx.core.inference_gateway.api.provider_request import render_auth_header
+from nhx.core.inference_gateway.api.provider_request import render_auth_header, upstream_credential
 from nhx.core.inference_gateway.api.typed_request import build_inference_request
 from pydantic import BaseModel
 
@@ -1263,7 +1263,11 @@ async def virtual_model_proxy(
                 request,
                 host_url=resolved_model_provider_info.model_provider.host_url,
                 trailing_uri=proxy_path,
-                auth_token=resolved_model_provider_info.secret_value,
+                auth_token=upstream_credential(
+                    resolved_model_provider_info.model_provider,
+                    resolved_model_provider_info.secret_value,
+                    request.headers,
+                ),
                 auth_header_format=resolved_model_provider_info.model_provider.auth_header_format,
                 body=json_body,
                 default_extra_body=resolved_model_provider_info.model_provider.default_extra_body,

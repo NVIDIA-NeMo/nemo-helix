@@ -89,6 +89,7 @@ def _make_model_provider_info(workspace: str, name: str, host_url: str = "http:/
     provider.host_url = host_url
     provider.api_key_secret_name = None
     provider.auth_header_format = None
+    provider.forward_caller_credential = False
     provider.default_extra_body = {}
     provider.required_extra_body = {}
     provider.default_extra_headers = {}

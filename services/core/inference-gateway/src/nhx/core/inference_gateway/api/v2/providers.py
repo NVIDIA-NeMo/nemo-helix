@@ -26,6 +26,7 @@ from nhx.core.inference_gateway.api.mock_provider import (
     is_mock_request,
 )
 from nhx.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.api.provider_request import upstream_credential
 from nhx.core.inference_gateway.api.proxy import PROXY_OPENAPI_EXTRA, build_next_request, proxy_request
 from nhx.core.inference_gateway.api.validation import validate_workspace_and_name
 
@@ -167,7 +168,7 @@ async def provider_proxy(
         request,
         host_url=model_info.model_provider.host_url,
         trailing_uri=trailing_uri,
-        auth_token=model_info.secret_value,
+        auth_token=upstream_credential(model_info.model_provider, model_info.secret_value, request.headers),
         auth_header_format=model_info.model_provider.auth_header_format,
         default_extra_body=model_info.model_provider.default_extra_body,
         default_extra_headers=model_info.model_provider.default_extra_headers,

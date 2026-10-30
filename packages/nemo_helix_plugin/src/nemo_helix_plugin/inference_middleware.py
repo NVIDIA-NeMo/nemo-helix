@@ -464,6 +464,10 @@ class ModelProviderInferenceTarget:
     missing_secret_name: str | None = None
     """Required provider secret missing from the cache, if any."""
 
+    forwards_caller_credential: bool = False
+    """Whether the provider is sent each call's caller credential instead of a stored key, as a router that calls
+    models back through the gateway as its caller is."""
+
 
 @dataclass
 class OpenAICompatibleInferenceTarget:
@@ -548,6 +552,9 @@ class VirtualModel(Protocol):
 
     @property
     def models(self) -> Sequence[VirtualModelInferenceConfig]: ...
+
+    @property
+    def callback_models(self) -> Sequence[str]: ...
 
     @property
     def request_middleware(self) -> Sequence[MiddlewareCall]: ...

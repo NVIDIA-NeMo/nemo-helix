@@ -13684,6 +13684,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - name
@@ -13774,6 +13783,14 @@ components:
           description: Model entity references used by this VirtualModel. A per-entry
             backend_format overrides the referenced ModelEntity backend_format when
             IGW resolves the backend format for a request.
+        callback_models:
+          items:
+            type: string
+          type: array
+          title: Callback Models
+          description: VirtualModels, in "workspace/name" format, that the provider
+            serving this VirtualModel calls back through the gateway, such as a router's
+            targets. A caller held to this VirtualModel may also call them.
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'
@@ -20242,6 +20259,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - name
@@ -23802,6 +23828,14 @@ components:
           description: Model entity references used by this VirtualModel. A per-entry
             backend_format overrides the referenced ModelEntity backend_format when
             IGW resolves the backend format for a request.
+        callback_models:
+          items:
+            type: string
+          type: array
+          title: Callback Models
+          description: VirtualModels, in "workspace/name" format, that the provider
+            serving this VirtualModel calls back through the gateway, such as a router's
+            targets. A caller held to this VirtualModel may also call them.
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'
@@ -23926,6 +23960,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - host_url
@@ -24019,6 +24062,11 @@ components:
             $ref: '#/components/schemas/VirtualModelInferenceConfig'
           type: array
           title: Models
+        callback_models:
+          items:
+            type: string
+          type: array
+          title: Callback Models
         request_middleware:
           items:
             $ref: '#/components/schemas/MiddlewareCall'

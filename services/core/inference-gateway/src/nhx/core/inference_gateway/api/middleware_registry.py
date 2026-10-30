@@ -161,7 +161,7 @@ class InferenceMiddlewareCacheAccessorImpl:
         outbound_headers = CIMultiDict(provider.default_extra_headers or {})
         for key, value in (provider.required_extra_headers or {}).items():
             outbound_headers[key] = value
-        if provider_info.secret_value:
+        if provider_info.secret_value and not provider.forward_caller_credential:
             header_name, header_value = render_auth_header(provider_info.secret_value, provider.auth_header_format)
             outbound_headers[header_name] = header_value
 
@@ -174,6 +174,7 @@ class InferenceMiddlewareCacheAccessorImpl:
             missing_secret_name=provider.api_key_secret_name
             if provider.api_key_secret_name and not provider_info.secret_value
             else None,
+            forwards_caller_credential=provider.forward_caller_credential,
         )
 
     def get_backend_format(self, virtual_model_id: str, model_entity_id: str) -> BackendFormat | None:
