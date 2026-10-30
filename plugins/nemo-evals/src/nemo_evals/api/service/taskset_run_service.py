@@ -358,13 +358,16 @@ class TasksetRunService:
         snapshot = source.files if source is not None else None
         acceptance_started = False
         try:
-            configs = [(t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)]
-            try:
-                await require_closed_book_route(
-                    spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
-                )
-            except ValueError as exc:
-                raise TasksetRunResolutionError(str(exc)) from exc
+            if harbor.sandbox_profiles[policy.profile].enforce_closed_book:
+                configs = [
+                    (t.id, t.spec.config) for t in spec.tasks if isinstance(t.spec, ResolvedHarborTaskDefinition)
+                ]
+                try:
+                    await require_closed_book_route(
+                        spec.target, configs, async_sdk=self._async_client, authorize=self._authorizer
+                    )
+                except ValueError as exc:
+                    raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             plan = TasksetRunPlan(

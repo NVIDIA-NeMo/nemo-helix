@@ -43,6 +43,14 @@ class HarborSandboxProfileConfig(BaseModel):
             "killed. Empty adds nothing to the task's policy during setup."
         ),
     )
+    enforce_closed_book: bool = Field(
+        default=False,
+        description=(
+            "Refuse no-network tasks at submit unless the agent's model is a gateway ref to a VirtualModel whose "
+            "request_middleware ends with nemo-evals-closed-book. Off lets the agent call any model its "
+            "agent_channel reaches."
+        ),
+    )
     egress_verification: Literal["default_action", "strict"] = "strict"
     max_sandbox_lifetime_s: int = Field(
         default=8 * 3600 + 30 * 60, ge=1, description="OpenSandbox TTL backstop: longest trial plus margin."
