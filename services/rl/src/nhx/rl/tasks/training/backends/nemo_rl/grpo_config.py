@@ -224,7 +224,7 @@ def _jsonl_has_image(path: Path) -> bool:
 
 def _value_has_image(value: Any) -> bool:
     if isinstance(value, dict):
-        if value.get("type") in {"image_url", "image"}:
+        if value.get("type") in {"image_url", "image", "input_image"}:
             return True
         return any(_value_has_image(child) for child in value.values())
     if isinstance(value, list):

@@ -1782,6 +1782,33 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
     assert "image_url" in (dataset / "training.jsonl").read_text(encoding="utf-8")
 
 
+def test_grpo_input_image_rows_count_as_images(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(tmp_path, has_vision_tower=True)
+    row = {
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": "data:image/png;base64,aa", "detail": "auto"},
+                        {"type": "input_text", "text": "how many cubes?"},
+                    ],
+                }
+            ]
+        },
+        "agent_ref": {"type": "responses_api_agents", "name": "clevr_cogent_simple_agent"},
+        "expected_answer": "3",
+    }
+    (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 2}
+
+
 def test_grpo_text_rows_on_a_vision_model_limit_images_to_one(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
