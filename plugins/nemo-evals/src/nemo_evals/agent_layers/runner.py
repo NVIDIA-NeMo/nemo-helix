@@ -27,7 +27,7 @@ from nemo_evals.agent_layers.dockerfile import AGENT_DIR, AGENT_FILE, INSTALLER_
 from nemo_evals.agent_layers.models import AgentLayerEntity, layer_entity_name
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
-from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build
+from nemo_evals.image_builds.builder import ImageBuilder, adopt_or_build, usable_build
 from nemo_evals.image_builds.models import TERMINAL_BUILD_STATUSES, TERMINAL_IMAGE_STATUSES, BuildImage
 from nemo_evals.image_builds.planning import MAIN_SERVICE, ImagePlanError, TaskArchive, parse_task_config, plan_images
 from nemo_evals.image_builds.runner import apply_builder_image, downloaded_archive, refresh_images
@@ -118,26 +118,37 @@ async def _submit(
     builder: ImageBuilder,
     installer: Path,
 ) -> BuildImage:
-    """Make the layer's context and have Builder build it, or use the build of the same layer another task made."""
+    """Use the build of the same layer another task made, or make the layer's context and have Builder build it.
+
+    The build's name comes from the task's plan alone, so a task whose layer another task already built or is
+    building uploads nothing: across a taskset, one task per environment does.
+    """
     user = parse_task_config(definition.config).agent.user
     with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as scratch:
         context = Path(scratch) / CONTEXT_ROOT
         async with downloaded_archive(files, definition.source) as path:
             # The listing alone: a compose task, which ``read_archive`` would extract and parse, gets no layer.
             archive = await asyncio.to_thread(TaskArchive.read, path)
-            main, environment_dockerfile = await asyncio.to_thread(_stage_environment, definition, archive, context)
-        base_image = None if environment_dockerfile is not None else str(normalize_reference(main.image or ""))
-        (context / LAYER_DOCKERFILE).write_text(
-            layer_dockerfile(environment_dockerfile=environment_dockerfile, base_image=base_image), encoding="utf-8"
-        )
-        (context / AGENT_DIR).mkdir()
-        agent = {**layer.agent.model_dump(mode="json"), "user": user}
-        (context / AGENT_DIR / AGENT_FILE).write_text(json.dumps(agent), encoding="utf-8")
-        await asyncio.to_thread(_unpack, installer, context / INSTALLER_DIR)
-        what = main.context_digest if environment_dockerfile is not None else base_image
-        name = layer_builder_name(environment=what or "", agent_key=spec.agent_key, platform=main.platform)
-        source = await _upload_context(files, spec.workspace, name, Path(scratch))
-    built = await adopt_or_build(builder, name=name, source=source, dockerfile=LAYER_DOCKERFILE, platform=main.platform)
+            main = await asyncio.to_thread(_plan_main, definition, archive)
+            base_image = str(normalize_reference(main.image)) if main.image is not None else None
+            environment = main.context_digest if base_image is None else base_image
+            name = layer_builder_name(environment=environment or "", agent_key=spec.agent_key, platform=main.platform)
+            built = await usable_build(builder, name)
+            if built is None:
+                environment_dockerfile = await asyncio.to_thread(_stage_environment, main, archive, context)
+        if built is None:
+            (context / LAYER_DOCKERFILE).write_text(
+                layer_dockerfile(environment_dockerfile=environment_dockerfile, base_image=base_image),
+                encoding="utf-8",
+            )
+            (context / AGENT_DIR).mkdir()
+            agent = {**layer.agent.model_dump(mode="json"), "user": user}
+            (context / AGENT_DIR / AGENT_FILE).write_text(json.dumps(agent), encoding="utf-8")
+            await asyncio.to_thread(_unpack, installer, context / INSTALLER_DIR)
+            source = await _upload_context(files, spec.workspace, name, Path(scratch))
+            built = await adopt_or_build(
+                builder, name=name, source=source, dockerfile=LAYER_DOCKERFILE, platform=main.platform
+            )
     image = BuildImage(
         type=MAIN_SERVICE,
         source="dockerfile",
@@ -158,27 +169,28 @@ def layer_builder_name(*, environment: str, agent_key: str, platform: str | None
     return f"{_BUILDER_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
 
 
-def _stage_environment(
-    definition: HarborTaskDefinition, archive: TaskArchive, context: Path
-) -> tuple[BuildImage, str | None]:
-    """Copy the main image's build context into ``context``; returns its plan and its Dockerfile, None if prebuilt."""
+def _plan_main(definition: HarborTaskDefinition, archive: TaskArchive) -> BuildImage:
+    """The task's main image as its image build plans it; a compose task gets no layer."""
     if archive.compose is not None:
         raise ImagePlanError("compose_unsupported", "a task with a compose file isn't given an agent layer")
     images = plan_images(definition.config, archive, allowed_registries=[])
-    main = next(image for image in images if image.type == MAIN_SERVICE)
+    return next(image for image in images if image.type == MAIN_SERVICE)
+
+
+def _stage_environment(main: BuildImage, archive: TaskArchive, context: Path) -> str | None:
+    """Copy the main image's build context into ``context``; returns its Dockerfile, or None for a prebuilt image."""
     context.mkdir(parents=True)
     if main.source == "prebuilt":
-        return main, None
+        return None
     assert main.context_path is not None and main.dockerfile is not None and archive.path is not None
     prefix = f"{main.context_path}/"
     with tarfile.open(archive.path, "r:*") as tar:
         for member in tar.getmembers():
             if not member.name.startswith(prefix) or not (member.isfile() or member.isdir() or member.issym()):
                 continue
-            relative = member.name.removeprefix(prefix)
-            member.name = relative
+            member.name = member.name.removeprefix(prefix)
             tar.extract(member, context, filter="data")
-    return main, (context / main.dockerfile).read_text(encoding="utf-8")
+    return (context / main.dockerfile).read_text(encoding="utf-8")
 
 
 def _unpack(installer: Path, target: Path) -> None:
