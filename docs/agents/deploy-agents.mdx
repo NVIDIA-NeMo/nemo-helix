@@ -239,8 +239,16 @@ To build an agent that is already registered, run the build as a platform job:
 nemo agents package-agent --agent calculator-agent --tag calculator-agent:1.0.0 --registry nvcr.io/my-org
 ```
 
-The job builds from the agent's stored config and `<name>-ethos` fileset on the platform host, so it
-needs a `subprocess` execution profile and, to push, a host that is logged in to the registry. Images are
+The job builds from the agent's stored config and uses its `reference.fileset` for
+source files. Set it through `helix_registration.reference.fileset` when
+[registering the agent](/documentation/agents/register-agents#register-with-references).
+Without a reference, the job looks for `<name>-ethos`; if that fileset is absent, it can build from
+the stored config alone when no supporting files are required. An explicit reference that is missing
+or inaccessible fails packaging without falling back. The stored config takes precedence over any
+`agent.yaml` in the fileset.
+
+The build runs on the platform host and needs a `subprocess` execution profile and, to push, a host
+that is logged in to the registry. Images are
 tagged `nemo-agents/<workspace>/<tag>`; read the final reference from the job's `package_result`
 result.
 
