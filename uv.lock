@@ -4507,6 +4507,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -4550,6 +4551,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'data-designer-nemo'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic-settings", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.8.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-plugin'", specifier = ">=6.0.2" },
@@ -4567,6 +4569,7 @@ dependencies = [
     { name = "nemo-helix-plugin" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
@@ -4604,6 +4607,7 @@ requires-dist = [
     { name = "protobuf", marker = "extra == 'openshell'", specifier = ">=6.31.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "sqlalchemy", specifier = ">=2.0.0" },
 ]
 provides-extras = ["docker", "k8s", "openshell"]
 
@@ -5550,6 +5554,7 @@ nemo-deployments-plugin = [
     { name = "nemo-helix-plugin" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "sqlalchemy" },
 ]
 nemo-evals-plugin = [
     { name = "cloudpickle" },
@@ -5602,6 +5607,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -5791,6 +5797,7 @@ plugins = [
     { name = "pyyaml" },
     { name = "referencing" },
     { name = "requests" },
+    { name = "sqlalchemy" },
     { name = "typer" },
     { name = "tzdata" },
     { name = "uvicorn" },
@@ -6746,6 +6753,7 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.6.1,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.8.1" },
     { name = "pydantic-settings", marker = "extra == 'unsloth-service'", specifier = ">=2.6.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'nhx-common'", specifier = ">=2.13.0" },
     { name = "pyleak", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "pyleak", marker = "extra == 'services'", specifier = ">=0.1.0" },
@@ -6825,7 +6833,9 @@ requires-dist = [
     { name = "sqlalchemy", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'core-service'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'entities-service'", specifier = ">=2.0.0" },
+    { name = "sqlalchemy", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'nhx-common'", specifier = ">=2.0.0" },
+    { name = "sqlalchemy", marker = "extra == 'plugins'", specifier = ">=2.0.0" },
     { name = "sqlalchemy", marker = "extra == 'services'", specifier = ">=2.0.0" },
     { name = "sqlmodel", marker = "extra == 'all'", specifier = ">=0.0.22" },
     { name = "sqlmodel", marker = "extra == 'core-service'", specifier = ">=0.0.22" },
@@ -6984,6 +6994,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -7062,6 +7073,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.10.6" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytrec-eval-terrier", marker = "extra == 'nhx-evals-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-ext'", specifier = ">=6.0.0" },
@@ -7312,6 +7324,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -7345,6 +7358,7 @@ requires-dist = [
     { name = "pydantic", extras = ["email"], specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
     { name = "pydantic-settings", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.8.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "python-multipart", specifier = "~=0.0.9" },
