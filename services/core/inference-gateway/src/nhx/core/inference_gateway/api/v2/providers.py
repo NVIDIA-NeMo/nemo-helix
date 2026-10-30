@@ -2,17 +2,24 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import uuid
 from typing import Annotated
 
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from nemo_helix_plugin.inference_middleware import InferenceAccessRequest
 from nhx.core.inference_gateway.api.authz import (
     PROVIDER_EXEC_PERMISSION,
     PROVIDER_READ_PERMISSION,
     enforce_delegated_workspace_access,
 )
-from nhx.core.inference_gateway.api.dependencies import global_http_client, global_model_cache
+from nhx.core.inference_gateway.api.dependencies import (
+    global_http_client,
+    global_middleware_registry,
+    global_model_cache,
+)
 from nhx.core.inference_gateway.api.errors import raise_unresolved_provider_secret
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, execute_access_checks
 from nhx.core.inference_gateway.api.mock_provider import (
     handle_mock_request,
     is_mock_provider,
@@ -116,6 +123,7 @@ async def provider_proxy(
     trailing_uri: str,
     http_client: Annotated[ClientSession, Depends(global_http_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
+    registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
 ) -> Response:
     """
     Proxy requests to provider inference endpoints.
@@ -130,6 +138,16 @@ async def provider_proxy(
     if is_mock_request(request):
         return await handle_mock_request(request=request, trailing_uri=trailing_uri)
 
+    await execute_access_checks(
+        registry.plugins,
+        InferenceAccessRequest(
+            request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            workspace=workspace,
+            path=trailing_uri,
+            headers=dict(request.headers),
+            provider_name=name,
+        ),
+    )
     model_info = model_cache.get_from_provider(workspace, name)
     if model_info is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Model provider not found for {workspace}/{name}")

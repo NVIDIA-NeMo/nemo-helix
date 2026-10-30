@@ -18,11 +18,24 @@ Automodel detects schema from the **first JSONL line**.
 | Schema | JSONL shape | Job JSON |
 |--------|-------------|----------|
 | **CHAT** (preferred when model has chat template) | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` | (none) |
+| **MULTIMODAL** | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
 | **SFT** | `{"prompt": "...", "completion": "..."}` | (none) |
 | **CUSTOM** | Any two columns, e.g. `{"input": "...", "output": "..."}` | `"prompt_template": "{input} {output}"` on `dataset` |
 | **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | `training.recipe: bi_encoder` or `cross_encoder`. `neg_doc` must be a **non-empty** list; convert-only retrieval Stage 1 emits `[]` and training crashes unless you mine first. |
 
-**Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it.
+**Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it. String `content` stays CHAT. A row with an image saves that file next to the JSONL and sets the user message to an `image_url` part followed by a text part; that part list is MULTIMODAL (`hf-conversion.md` § Image rows). `scripts/import_cord.py` and `scripts/import_finance.py` are examples of that conversion (CORD-v2, and finance OCR, reasoning, and code). Upload the directory that is already this shape; Automodel does not convert the Hugging Face dataset.
+
+MULTIMODAL rows are the fileset to upload. Automodel detects a `messages` row as CHAT, and `ChatDataset` requires string `content`, so an image row fails validation until multimodal training support lands.
+
+```json
+{"messages": [
+  {"role": "user", "content": [
+    {"type": "image_url", "image_url": {"url": "images/receipt.png"}},
+    {"type": "text", "text": "Describe this image."}
+  ]},
+  {"role": "assistant", "content": "<s_menu><s_nm>"}
+]}
+```
 
 **Why CHAT for chat models:** SFT (and CUSTOM) rows train as plain text, `prompt + completion`, with no chat template and no end-of-sequence token. A chat model trained that way barely changes through `/v1/chat/completions`, and `/v1/completions` output runs past the answer. Put the exact user prompt you will send at inference in the `user` turn.
 
@@ -60,7 +73,7 @@ Optional fields on the unsloth `dataset` block:
 
 **Conversion guidance:**
 
-- If the model has a chat template (`hf-conversion.md` § **Chat-template check**), use the same `to_chat` converter from `references/hf-conversion.md` and set `apply_chat_template: true`. This is the recommended path for instruction-tuned models.
+- If the model has a chat template (`hf-conversion.md` § **Chat-template check**), use the same `to_chat` converter from `references/hf-conversion.md` and set `apply_chat_template: true`. This is the recommended path for instruction-tuned models. Unsloth stays on string `content` or pre-rendered `text`. Do not emit image parts on this path.
 - If the model has **no** chat template, render each example to a single training string yourself (e.g. `f"{prompt}\n{completion}"`) and emit `{"text": "..."}` rows. Then set `apply_chat_template: false` and keep `text_field: "text"`.
 - The automodel SFT format `{"prompt": "...", "completion": "..."}` is **not** directly consumable by unsloth — unsloth has no built-in `prompt`/`completion` concatenation. Convert to either messages or pre-rendered text before upload.
 

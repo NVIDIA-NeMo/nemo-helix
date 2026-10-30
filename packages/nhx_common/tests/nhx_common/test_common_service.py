@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Body, Depends, FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client as plugin_get_nemo_client
@@ -128,6 +128,25 @@ class TestServiceBase:
         assert app is not None
         assert app.title == service.title
         assert app.version == service.version
+
+    def test_service_app_answers_an_unencodable_invalid_body_with_422(self):
+        """Every service app gets the shared validation handler, so NaN in a body is a 422, not a 500."""
+
+        class BodyService(MockService):
+            def get_routers(self) -> List[RouterConfig]:
+                router = APIRouter()
+
+                @router.post("/ratio")
+                async def set_ratio(ratio: float = Body(embed=True, le=1)) -> dict[str, float]:
+                    return {"ratio": ratio}
+
+                return [RouterConfig(router, tag="Test", description="Test endpoints")]
+
+        response = TestClient(BodyService().create_app(), raise_server_exceptions=False).post(
+            "/ratio", content='{"ratio": NaN}', headers={"Content-Type": "application/json"}
+        )
+
+        assert response.status_code == 422
 
     def test_service_app_property_caches(self):
         """Test app property returns cached instance."""

@@ -46,6 +46,25 @@ NeMo Helix provides human-facing roles for interactive users and a separate work
 - Does not include Viewer, Editor, or Admin permissions
 - Should be granted alongside the minimum human-facing role the workload needs, such as Viewer when the workload only reads workspace resources
 
+## Service Entity Storage
+
+`ServiceEntityStore` grants direct service principals `entities.create`,
+`entities.read`, `entities.update` and `entities.delete` in the bound workspace.
+It does not grant workspace metadata, IAM or dependency-service permissions.
+Human roles and the creator default are unchanged: every authenticated
+workspace creator receives Admin.
+
+Applications configure their own additional roles through the workspace member
+API. Scaled Evals adds Admin and ServiceEntityStore in its private workspace,
+preserving other existing bindings. Admin supplies workspace reads and role
+management; the plugin owns the storage assignment on creation and restart.
+The member API is idempotent and uses the existing role-propagation option.
+There is no core backfill or database migration.
+
+Raw role-binding and access-key entities require IAM permissions in addition
+to entity permissions. This role does not change legacy service fallback in
+other workspaces or establish ownership isolation inside shared workspaces.
+
 ## Role Hierarchy
 
 The human-facing roles include all permissions of the roles below them. JobRunner is intentionally outside this hierarchy.

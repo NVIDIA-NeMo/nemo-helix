@@ -102,20 +102,20 @@ has_specific_permission(principal, workspace, required_perm) if {
 	base_permission := parts[1]
 
 	some role in effective_roles(principal, target_workspace)
-	role_permissions := get_role_permissions(role)
+	role_permissions := get_role_permissions_for_principal(role, principal)
 	permission_satisfied(role_permissions, base_permission)
 } else if {
 	# No explicit workspace - use context workspace (existing behavior)
 	not contains(required_perm, "/")
 	some role in effective_roles(principal, workspace)
-	role_permissions := get_role_permissions(role)
+	role_permissions := get_role_permissions_for_principal(role, principal)
 	permission_satisfied(role_permissions, required_perm)
 } else if {
 	# Fallback: check if wildcard principal "*" has this permission in the workspace
 	# This enables public/shared access via role bindings for "*"
 	not contains(required_perm, "/")
 	some role in data.authz.principals["*"].workspaces[workspace]
-	role_permissions := get_role_permissions(role)
+	role_permissions := get_role_permissions_for_principal(role, "*")
 	permission_satisfied(role_permissions, required_perm)
 }
 
@@ -129,6 +129,25 @@ all_permissions_satisfied(required_permissions, role_permissions) if {
 
 	# All permissions are satisfied if the count matches
 	count(satisfied) == count(required_permissions)
+}
+
+role_applies_to_principal(role_name, principal) if {
+	not object.get(data.authz.roles[role_name], "service_only", false)
+} else if {
+	valid_service_principal(principal)
+	principal == extract_principal_id
+	request_caller_kind == "service_principal"
+	extract_on_behalf_of_principal_id == ""
+}
+
+get_role_permissions_for_principal(role_name, principal) := permissions if {
+	all_roles := get_all_roles_in_chain(role_name)
+	permissions := {permission |
+		some inherited_role in all_roles
+		role_applies_to_principal(inherited_role, principal)
+		role := data.authz.roles[inherited_role]
+		some permission in object.get(role, "permissions", [])
+	}
 }
 
 # Get all permissions for a role (including inherited)

@@ -46,6 +46,7 @@ from nemo_agents_plugin.fabric.session_manager import (
 )
 from nemo_agents_plugin.fabric.session_registry import FabricSessionNotFoundError, FabricSessionRegistry
 from nemo_agents_plugin.fabric.streaming import (
+    extract_output_reasoning,
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
@@ -107,7 +108,10 @@ def _to_chat_completion_response(result: FabricRuntimeResult) -> ChatCompletionR
         id=result.invocation_id or result.request_id or result.runtime_id or f"chatcmpl-{uuid.uuid4().hex}",
         choices=[
             ChatCompletionChoice(
-                message=ChatCompletionResponseMessage(content=result.response),
+                message=ChatCompletionResponseMessage(
+                    content=result.response,
+                    reasoning_content=extract_output_reasoning(result.output),
+                ),
             )
         ],
         usage=usage,

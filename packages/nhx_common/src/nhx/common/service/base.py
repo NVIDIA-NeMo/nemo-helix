@@ -562,6 +562,11 @@ class Service(ABC, Generic[TConfig]):
 
         register_sdk_exception_handlers(app)
 
+        # Invalid request bodies get 422, even when they hold values a response can't encode (NaN, lone surrogates)
+        from nhx.common.errors.validation_exception_handler import register_validation_exception_handler
+
+        register_validation_exception_handler(app)
+
         # Include service-specific routers, tagging any routes that have no tags yet
         for rc in router_configs:
             for route_context in iter_route_contexts(rc.router.routes):

@@ -71,7 +71,6 @@ RUN --mount=from=causal-conv1d-wheel-src,target=/tmp/causal-conv1d-wheel-src,rea
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/customizer/no_override_requirements.txt \
-
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nemo_helix_ext \
@@ -123,9 +122,9 @@ RUN bash /usr/local/bin/collect-apt-sources.sh \
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python /usr/local/bin/collect-python-sdists.py \
-        --python ${VIRTUAL_ENV}/bin/python \
-        --output /usr/share/nemo-helix/source-distributions/nhx-customizer-tasks \
-        --label app-venv
+    --python ${VIRTUAL_ENV}/bin/python \
+    --output /usr/share/nemo-helix/source-distributions/nhx-customizer-tasks \
+    --label app-venv
 
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 ENTRYPOINT ["/opt/venv/bin/python"]

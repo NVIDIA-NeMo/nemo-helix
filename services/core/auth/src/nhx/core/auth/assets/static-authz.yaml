@@ -13,16 +13,12 @@ authz:
     entities:
       create:
         description: "Create entities"
-        has_role: false
       delete:
         description: "Delete entities"
-        has_role: false
       read:
         description: "Read entities"
-        has_role: false
       update:
         description: "Update entities"
-        has_role: false
     filesets:
       create:
         description: "Create filesets"
@@ -407,6 +403,14 @@ authz:
       - workspaces.members.delete
       - models.trust-remote-code.set
       - models.tool-call-plugin.set
+    ServiceEntityStore:
+      description: "Internal service access to operational entities in the bound workspace"
+      service_only: true
+      permissions:
+      - entities.create
+      - entities.read
+      - entities.update
+      - entities.delete
     WorkspaceCreator:
       description: "Create new workspaces and read deletion status for workspaces they created"
       permissions:
