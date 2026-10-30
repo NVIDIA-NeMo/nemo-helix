@@ -3,7 +3,7 @@
 
 import { User } from 'oidc-client-ts';
 
-export type OidcBearerTokenSource = 'access_token' | 'id_token';
+export type OidcBearerTokenSource = 'access_token';
 
 interface OidcUserStorage {
   getItem(key: string): string | null;
@@ -14,33 +14,10 @@ const parseBearerTokenSource = (
   configuredSource: string | undefined
 ): OidcBearerTokenSource | undefined => {
   if (!configuredSource) return 'access_token';
-  if (configuredSource === 'access_token' || configuredSource === 'id_token') {
+  if (configuredSource === 'access_token') {
     return configuredSource;
   }
   return undefined;
-};
-
-export const getOidcIdTokenExpiresAt = (token: string | undefined): number | undefined => {
-  if (!token) return undefined;
-
-  const segments = token.split('.');
-  if (segments.length !== 3 || !segments[1]) return undefined;
-
-  try {
-    const payload = segments[1].replace(/-/g, '+').replace(/_/g, '/');
-    const paddedPayload = payload.padEnd(Math.ceil(payload.length / 4) * 4, '=');
-    const claims = JSON.parse(globalThis.atob(paddedPayload)) as unknown;
-    if (typeof claims !== 'object' || claims === null || !('exp' in claims)) return undefined;
-    const expiresAt = (claims as { exp?: unknown }).exp;
-    return typeof expiresAt === 'number' ? expiresAt : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-const isUnexpiredIdToken = (token: string): boolean => {
-  const expiresAt = getOidcIdTokenExpiresAt(token);
-  return expiresAt !== undefined && expiresAt > Date.now() / 1000;
 };
 
 export const selectOidcBearerToken = (
@@ -51,11 +28,10 @@ export const selectOidcBearerToken = (
 
   const source = parseBearerTokenSource(configuredSource);
   if (!source) return undefined;
-  if (source === 'access_token' && user.expired) return undefined;
+  if (user.expired) return undefined;
 
-  const token = user[source];
+  const token = user.access_token;
   if (!token) return undefined;
-  if (source === 'id_token' && !isUnexpiredIdToken(token)) return undefined;
   return token;
 };
 

@@ -16,7 +16,6 @@ from nemo_helix_ext.auth import device_flow
 from nemo_helix_ext.auth.confidential_login import login_with_oidc_broker
 from nemo_helix_ext.auth.helpers import (
     AuthError,
-    BearerTokenSource,
     NHXOIDCConfig,
     build_effective_scope,
     decode_jwt_claims,
@@ -179,7 +178,6 @@ def _authenticate_public_client(
     granted_scopes = _granted_scopes(
         token_response=token_response,
         claims=claims,
-        bearer_token_source=client.bearer_token_source,
     )
     if granted_scopes.raw_was_available:
         validate_requested_scopes_granted(effective_scope, list(granted_scopes.raw), scope_prefix)
@@ -306,10 +304,9 @@ def _granted_scopes(
     *,
     token_response: device_flow.TokenResponse,
     claims: dict[str, object],
-    bearer_token_source: BearerTokenSource,
 ) -> _GrantedScopes:
     raw_granted_scopes: object = token_response.scope
-    if raw_granted_scopes is None and bearer_token_source == "access_token":
+    if raw_granted_scopes is None:
         raw_granted_scopes = claims.get("scp") or claims.get("scope") or []
 
     granted_scopes: tuple[str, ...] = ()

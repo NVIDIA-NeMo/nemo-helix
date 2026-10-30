@@ -10,7 +10,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_AUTH_DISCOVERY_SCOPES = "openid profile email offline_access"
-BearerTokenSource = Literal["access_token", "id_token"]
+BearerTokenSource = Literal["access_token"]
 
 
 class AuthDiscoveryBearerTokenSourceError(Exception):
@@ -21,9 +21,7 @@ def parse_bearer_token_source(value: object) -> BearerTokenSource:
     """Validate a bearer-token response field received from discovery."""
     if value == "access_token":
         return "access_token"
-    if value == "id_token":
-        return "id_token"
-    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+    raise ValueError("OIDC bearer_token_source must be 'access_token'; ID-token API bearers are no longer supported")
 
 
 class OidcAdvertisedClientBase(BaseModel):

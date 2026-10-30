@@ -16,11 +16,12 @@ Verify your IdP meets these requirements:
 - [ ] Supports **OpenID Connect** (not just OAuth2)
 - [ ] Exposes a `.well-known/openid-configuration` discovery document
 - [ ] Supports the **device authorization grant** (required for `nemo auth login`)
-- [ ] Issues signed JWT bearer tokens, or signed ID tokens if you configure `bearer_token_source: "id_token"`
-- [ ] Includes **email** (or equivalent claim) in the selected bearer token
-- [ ] If you use group-based role bindings, includes group or entitlement values in a JWT claim that can be configured as `groups_claim`
-- [ ] If you use API-scope restrictions during OIDC login, can expose and return NeMo Helix API scopes such as `platform:read` and `platform:write`
-- [ ] Supports **JWKS** for token signature validation
+- [ ] Issues access tokens that NeMo Helix can validate
+- [ ] Includes **email** (or equivalent claim) in the access token or introspection response
+- [ ] If you use group-based role bindings, includes the claim selected by `groups_claim` in the access token or introspection response
+- [ ] If you use API-scope restrictions, includes NeMo Helix API scopes such as `platform:read` and `platform:write` in the `scope` or `scp` claim of the access token or introspection response
+- [ ] For signed tokens, uses `RS256` or `ES256` and provides **JWKS** for signature validation
+- [ ] For opaque tokens, provides an introspection endpoint and any required client credentials
 
 ## Configuration Template
 
@@ -43,6 +44,8 @@ auth:
 ```
 
 Keep short NeMo Helix API scope names in `public_client.default_scopes`. When the IdP expects `api://<client-id>/platform:read`, set `public_client.scope_prefix` to `api://<client-id>/`. Clients add that prefix to the API scopes they request, and discovery returns it on the interactive client. Omit the `platform:*` scopes when the login token should not restrict API access. Role bindings still apply.
+
+For opaque access tokens, add `introspect_opaque_tokens: true` under `auth.oidc`. Set `introspection_endpoint` if discovery does not provide it. If the endpoint requires client authentication, set `introspection_client_id` and `introspection_client_secret_env_var` to the client ID and the name of the environment variable containing its secret.
 
 ## Claim Mapping Reference
 
