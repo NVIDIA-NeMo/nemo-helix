@@ -54,13 +54,9 @@ class TokenResponse:
     @property
     def token_for_nhx(self) -> str:
         """Return the token to use for NeMo Helix authentication."""
-        source = parse_bearer_token_source(self.bearer_token_source)
-        if source == "id_token":
-            if not self.id_token:
-                raise DeviceFlowError(
-                    "The cluster requires an ID token for API authentication, but the identity provider did not return one"
-                )
-            return self.id_token
+        parse_bearer_token_source(self.bearer_token_source)
+        if not self.access_token:
+            raise DeviceFlowError("The identity provider did not return an access token for API authentication")
         return self.access_token
 
 

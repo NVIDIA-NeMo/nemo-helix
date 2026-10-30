@@ -399,12 +399,20 @@ def _public_discovery_config(
     )
 
 
+@pytest.mark.parametrize("source", ["id_token", "refresh_token"])
+def test_sdk_rejects_unsupported_bearer_sources(source: object) -> None:
+    from nemo_helix_plugin.client.oidc import parse_bearer_token_source
+
+    with pytest.raises(ValueError, match="ID-token API bearers are no longer supported"):
+        parse_bearer_token_source(source)
+
+
 class TestOIDCRefreshSettings:
     def test_provider_refresh_uses_public_client_settings(self):
         config = _public_discovery_config(
             client_id="public-client",
             token_endpoint="https://idp.example.com/token",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
         settings = resolve_refresh_settings(config, None)
@@ -413,7 +421,7 @@ class TestOIDCRefreshSettings:
         assert settings.client_id == "public-client"
         assert settings.refresh_kind == "provider"
         assert settings.refresh_scope == "openid profile email offline_access"
-        assert settings.bearer_token_source == "id_token"
+        assert settings.bearer_token_source == "access_token"
 
     def test_broker_refresh_uses_matching_broker_client_settings(self):
         broker_url = "https://nemo.example.com/apis/auth/v2/token"
@@ -569,14 +577,14 @@ class TestOIDCTokenProvider:
         assert result == new_token
         mock_grant.assert_called_once()
 
-    def test_refresh_selects_configured_id_token(self):
+    def test_refresh_selects_access_token_when_id_token_is_present(self):
         expired_token = _make_jwt(exp=time.time() - 100)
         new_id_token = _make_jwt(exp=time.time() + 3600)
         provider = OIDCTokenProvider(
             token_endpoint="https://idp/token",
             client_id="client",
             tokens=TokenSet(access_token=expired_token, refresh_token="refresh-me", expires_at=time.time() - 100),
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
         with patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant:
@@ -587,10 +595,10 @@ class TestOIDCTokenProvider:
             }
             result = provider.get_access_token()
 
-        assert result == new_id_token
+        assert result == "opaque-access-token"
         assert provider.tokens.refresh_token == "rotated-refresh"
 
-    @pytest.mark.parametrize("token_source", ["access_token", "id_token"])
+    @pytest.mark.parametrize("token_source", ["access_token"])
     def test_broker_refresh_consumes_canonical_bearer_and_persists_two_rotations(self, token_source):
         expired_token = _make_jwt(exp=time.time() - 100)
         new_token = _make_jwt(exp=time.time() + 3600)
@@ -619,20 +627,20 @@ class TestOIDCTokenProvider:
                 assert persisted[-1].refresh_token == f"handle-{rotation}"
         assert len(persisted) == 2
 
-    def test_refresh_requires_configured_id_token(self):
+    def test_refresh_does_not_fall_back_to_id_token(self):
         expired_token = _make_jwt(exp=time.time() - 100)
         provider = OIDCTokenProvider(
             token_endpoint="https://idp/token",
             client_id="client",
             tokens=TokenSet(access_token=expired_token, refresh_token="refresh-me", expires_at=time.time() - 100),
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
         with (
             patch("nemo_helix_plugin.client.oidc.refresh_token_grant") as mock_grant,
-            pytest.raises(RuntimeError, match="configured id_token"),
+            pytest.raises(RuntimeError, match="configured access_token"),
         ):
-            mock_grant.return_value = {"access_token": "opaque-access-token"}
+            mock_grant.return_value = {"id_token": "signed-id-token"}
             provider.get_access_token()
 
     def test_persists_rotated_tokens(self):
@@ -1071,14 +1079,14 @@ class TestFromConfig:
 
         with patch("nemo_helix_plugin.client.oidc_factory._discover_oidc_client_settings") as mock_discover:
             mock_discover.return_value = _public_discovery_config(
-                client_id="cli-client", bearer_token_source="id_token"
+                client_id="cli-client", bearer_token_source="access_token"
             )
             client = NemoClient.from_config(config_path=config_file)
 
         assert client.base_url == "http://localhost:9090"
         assert isinstance(client._auth, OIDCTokenProvider)
         assert client._auth.client_id == "cli-client"
-        assert client._auth.bearer_token_source == "id_token"
+        assert client._auth.bearer_token_source == "access_token"
 
     def test_from_config_restores_opaque_token_expiry(self, tmp_path):
         expires_at = time.time() + 3600

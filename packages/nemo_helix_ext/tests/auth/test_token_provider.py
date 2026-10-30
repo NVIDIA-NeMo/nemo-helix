@@ -231,7 +231,7 @@ class TestOIDCTokenProvider:
         assert call_kwargs[1]["data"]["refresh_token"] == "old_refresh"
 
     @patch("nemo_helix_plugin.client.oidc.httpx.post")
-    def test_refresh_selects_configured_id_token(self, mock_post):
+    def test_refresh_selects_access_token_when_id_token_is_present(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         new_id_token = _make_jwt({"exp": int(time.time()) + 3600})
         mock_response = MagicMock()
@@ -247,28 +247,28 @@ class TestOIDCTokenProvider:
             client_id="client",
             tokens=TokenSet.from_access_token(old_token, refresh_token="old-refresh"),
             refresh_margin_seconds=0,
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
-        assert provider.get_access_token() == new_id_token
+        assert provider.get_access_token() == "opaque-access-token"
         assert provider.tokens.refresh_token == "rotated-refresh"
 
     @patch("nemo_helix_plugin.client.oidc.httpx.post")
-    def test_refresh_requires_configured_id_token(self, mock_post):
+    def test_refresh_does_not_fall_back_to_id_token(self, mock_post):
         old_token = _make_jwt({"exp": int(time.time()) - 100})
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"access_token": "opaque-access-token"}
+        mock_response.json.return_value = {"id_token": "signed-id-token"}
         mock_post.return_value = mock_response
         provider = OIDCTokenProvider(
             token_endpoint="https://idp/token",
             client_id="client",
             tokens=TokenSet.from_access_token(old_token, refresh_token="old-refresh"),
             refresh_margin_seconds=0,
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
-        with pytest.raises(RuntimeError, match="configured id_token"):
+        with pytest.raises(RuntimeError, match="configured access_token"):
             provider.get_access_token()
 
     @patch("nemo_helix_plugin.client.oidc.httpx.post")
