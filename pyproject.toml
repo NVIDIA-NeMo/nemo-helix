@@ -357,6 +357,7 @@ constraint-dependencies = [
   "nemo-fabric-runtime>=0.5.0,<0.6.0",
   "nbconvert>=7.17.1",
   "nltk>=3.10.3",
+  "opensandbox==1.2.0",                          # Authenticates proxied SDK requests on multi-tenant servers.
   "pillow>=12.3.0",
   "postcss>=8.5.10",
   "pyasn1>=0.6.4",

@@ -1232,13 +1232,32 @@ jobs:
             uv venv --python 3.12 "$venv"
             # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
             # install to the workspace .venv.
-            uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
+            # Ignore workspace overrides: these environments must carry their declared Harbor release.
+            uv --no-config pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
+            "$venv/bin/python" -c \
+              'import sys, opensandbox; from importlib.metadata import version; assert version("harbor") == sys.argv[1]; assert version("opensandbox") == "1.2.0"' \
+              "$version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
-              tests/test_harbor_opensandbox_compose_services.py
+              tests/test_harbor_opensandbox_compose_services.py tests/test_harbor_opensandbox_cleanup.py \
+              tests/test_opensandbox_sdk_compatibility.py
             echo "::endgroup::"
           done
+      # The shipping nhx-tasks image uses the workspace lock rather than the legacy runner requirements.
+      # Exercise its SDK with both Harbor and Gym so a shared dependency upgrade cannot pass on mocks alone.
+      - name: Run shipping OpenSandbox SDK compatibility tests
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/opensandbox-cpu-tasks
+        run: |
+          uv run --frozen --group cpu-tasks python -c \
+            'import opensandbox; from importlib.metadata import version; assert version("opensandbox") == "1.2.0"'
+          uv run --frozen --group cpu-tasks pytest --import-mode=importlib -v \
+            packages/nhx_sandbox/tests \
+            packages/sandboxed_gym/tests/test_opensandbox_driver.py \
+            packages/sandboxed_gym/tests/test_opensandbox_host_provider.py \
+            plugins/nemo-evals/tests/harbor/test_agent_setup_egress.py \
+            plugins/nemo-evals/tests/jobs/test_harbor_task_dispatch.py
 
   # WHY THIS JOB EXISTS (it looks redundant, it isn't): `--extra fabric` appears nowhere else in this
   # file and there is no `--all-extras`, so no other job installs nemo-fabric. Every other Fabric test

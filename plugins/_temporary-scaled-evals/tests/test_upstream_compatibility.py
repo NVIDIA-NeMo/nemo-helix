@@ -79,7 +79,7 @@ def test_harbor_opensandbox_runners_carry_the_sdk() -> None:
     for version in HARBOR_OPENSANDBOX_HARBOR_VERSIONS:
         assert version in supported_harbor_versions()
         lines = (HARBOR_RUNNERS_DIR / f"{version}.txt").read_text().splitlines()
-        assert "opensandbox==0.1.16" in lines, version
+        assert "opensandbox==1.2.0" in lines, version
 
 
 def test_generic_harbor_020_patches_cover_langgraph_and_pi(tmp_path: Path) -> None:

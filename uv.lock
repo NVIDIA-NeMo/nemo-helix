@@ -117,6 +117,7 @@ constraints = [
     { name = "nemo-fabric-collector", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-fabric-runtime", specifier = ">=0.5.0,<0.6.0" },
     { name = "nltk", specifier = ">=3.10.3" },
+    { name = "opensandbox", specifier = "==1.2.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pip", specifier = ">=26.2.2" },
     { name = "postcss", specifier = ">=8.5.10" },
@@ -9837,18 +9838,20 @@ wheels = [
 
 [[package]]
 name = "opensandbox"
-version = "0.1.16"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "httpx-sse" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/15/3db0638f9a4f2ace097e8ebfc9a592eff5a864f36933ee0579fce88350b5/opensandbox-0.1.16.tar.gz", hash = "sha256:b9253a58eb9f01bff522fccf317746b464805893c56a6ad447e0f1cc7f37276c", size = 253711, upload-time = "2026-08-26T04:07:41.242Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/2f/6682d18a69043b5ad29e8a411e969e2ee4216127dbc2257752690f502287/opensandbox-1.2.0.tar.gz", hash = "sha256:e7936d0bf3f7defa4e26571b0634089b4c3eb15d023909f6da9d940b95736c54", size = 329030, upload-time = "2026-10-27T12:36:39.214Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/a3/5431e516c1ed4027c4b011b1969b46b7ec6754c47e2b5a1427a99f8827a6/opensandbox-0.1.16-py3-none-any.whl", hash = "sha256:2e3b7e18e52f69f9696cb563713e2581e10a727d4dc83edc0ec27b1c725c3ce0", size = 583522, upload-time = "2026-08-26T04:07:39.503Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/18/2de1578aead2e5da094c352e2c1610d750c399070769feac02cb42ff8941/opensandbox-1.2.0-py3-none-any.whl", hash = "sha256:15a0f3c3245018afa43b75fb14e892a64c2c8807276a0fdaf2a1a469f5e214ea", size = 744130, upload-time = "2026-10-27T12:36:37.805Z" },
 ]
 
 [[package]]
