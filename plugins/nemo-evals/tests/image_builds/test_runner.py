@@ -152,7 +152,7 @@ def _serve_archive(monkeypatch, files: dict[str, bytes]) -> None:
 @pytest.fixture
 def archive(monkeypatch) -> None:
     _serve_archive(
-        monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n", "tests/Dockerfile": b"FROM python:3.12\n"}
+        monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n", "tests/Dockerfile": b"FROM python:3.12-slim\n"}
     )
 
 
@@ -419,21 +419,14 @@ async def test_the_requested_platform_builds_every_image(entity_store, store_tas
 
 
 async def test_without_a_platform_builder_builds_for_its_default(entity_store, store_task, archive) -> None:
-    """The names are the ones builds had before a build could name a platform, so those builds are found again."""
+    """A build for the deployment's default platform is named by its context's contents and Dockerfile alone."""
     spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
     builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
 
-    await _run(entity_store, spec, builder)
+    build = await _run(entity_store, spec, builder)
 
-    source = (await _stored_task_definition(entity_store, spec)).source
     assert builder.platforms == {
-        builder_name(
-            archive=source.fileset_ref,
-            archive_digest=source.files_hash,
-            context_path=f"sort-task/{part}",
-            dockerfile="Dockerfile",
-        ): None
-        for part in ("environment", "tests")
+        builder_name(context_digest=image.context_digest or "", dockerfile="Dockerfile"): None for image in build.images
     }
 
 
@@ -499,3 +492,57 @@ def test_build_recorded_with_role_still_loads() -> None:
 
     assert image.type == "service/db"
     assert "role" not in image.model_dump()
+
+
+async def _build_named(entity_store, store_task, name: str, builder: _Builder) -> TaskImageBuildEntity:
+    """Store task ``name`` and run its first image build over the archive being served."""
+    digest = await store_task(name)
+    await ImageBuildService(entity_store, _Jobs(), _allow).request_build("default", name, digest, ImageBuildRequest())
+    spec = TaskImageBuildSpec(workspace="default", task=name, revision_digest=digest, attempt=1)
+    return await _run(entity_store, spec, builder)
+
+
+def _two_tasks_archive(instruction: bytes, dockerfile: bytes = b"FROM python:3.12\n") -> dict[str, bytes]:
+    return {"instruction.md": instruction, "environment/Dockerfile": dockerfile, "environment/setup.sh": b"echo hi\n"}
+
+
+async def test_a_task_whose_context_holds_the_same_files_uses_the_existing_build(
+    entity_store, store_task, monkeypatch
+) -> None:
+    """Tasks that differ only outside their build context share one Builder build."""
+    builder = _Builder({"sort-task/environment": "ready"})
+    _serve_archive(monkeypatch, _two_tasks_archive(b"Sort the list.\n"))
+    first = await _build_named(entity_store, store_task, "sort-a", builder)
+
+    _serve_archive(monkeypatch, _two_tasks_archive(b"Sort the list in reverse.\n"))
+    second = await _build_named(entity_store, store_task, "sort-b", builder)
+
+    assert len(builder.submits) == 1
+    assert first.status == second.status == "ready"
+    assert first.images[0].image_ref == second.images[0].image_ref
+    assert first.images[0].builder_image == second.images[0].builder_image
+
+
+async def test_a_context_with_different_files_gets_its_own_build(entity_store, store_task, monkeypatch) -> None:
+    builder = _Builder({"sort-task/environment": "ready"})
+    _serve_archive(monkeypatch, _two_tasks_archive(b"Sort.\n"))
+    first = await _build_named(entity_store, store_task, "sort-a", builder)
+
+    _serve_archive(monkeypatch, _two_tasks_archive(b"Sort.\n", dockerfile=b"FROM python:3.13\n"))
+    second = await _build_named(entity_store, store_task, "sort-b", builder)
+
+    assert len(builder.submits) == 2
+    assert first.images[0].context_digest != second.images[0].context_digest
+
+
+async def test_main_and_verifier_with_identical_contexts_share_one_build(entity_store, store_task, monkeypatch) -> None:
+    _serve_archive(
+        monkeypatch, {"environment/Dockerfile": b"FROM python:3.12\n", "tests/Dockerfile": b"FROM python:3.12\n"}
+    )
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+
+    build = await _run(entity_store, await _start(entity_store, store_task, config=_SEPARATE_VERIFIER), builder)
+
+    assert build.status == "ready"
+    assert len(builder.submits) == 1
+    assert build.images[0].image_ref == build.images[1].image_ref

@@ -467,3 +467,47 @@ def test_a_compose_service_pins_an_architecture_alias_as_buildkit_names_it() -> 
         ("main", "linux/amd64"),
         ("service/cache", "linux/arm64"),
     ]
+
+
+def _archive_with(tmp_path, files: dict[str, tuple[bytes, int]], name: str = "task.tar") -> TaskArchive:
+    """A task archive holding ``files`` as ``path: (content, mode)`` under ``sort-task/``."""
+    path = tmp_path / name
+    with tarfile.open(path, "w") as archive:
+        for relative, (content, mode) in files.items():
+            info = tarfile.TarInfo(f"sort-task/{relative}")
+            info.size, info.mode = len(content), mode
+            archive.addfile(info, io.BytesIO(content))
+    return TaskArchive.read(path)
+
+
+_CONTEXT = {"environment/Dockerfile": (b"FROM python:3.12\n", 0o644), "environment/run.sh": (b"echo\n", 0o755)}
+
+
+def test_a_context_digest_ignores_files_outside_the_context(tmp_path) -> None:
+    one = _archive_with(tmp_path, {**_CONTEXT, "instruction.md": (b"Sort.\n", 0o644)}, "one.tar")
+    two = _archive_with(tmp_path, {**_CONTEXT, "instruction.md": (b"Reverse.\n", 0o644)}, "two.tar")
+
+    assert one.context_digest("environment") == two.context_digest("environment")
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"environment/run.sh": (b"echo changed\n", 0o755)},
+        {"environment/run.sh": (b"echo\n", 0o644)},
+        {"environment/extra.txt": (b"x", 0o644)},
+    ],
+    ids=["content", "mode", "added-file"],
+)
+def test_a_context_digest_changes_with_the_contexts_files(tmp_path, changed) -> None:
+    base = _archive_with(tmp_path, _CONTEXT, "base.tar")
+    other = _archive_with(tmp_path, {**_CONTEXT, **changed}, "other.tar")
+
+    assert base.context_digest("environment") != other.context_digest("environment")
+
+
+def test_a_context_digest_is_none_without_the_archive(tmp_path) -> None:
+    archive = _archive_with(tmp_path, _CONTEXT)
+
+    assert archive.context_digest("environment") is not None
+    assert replace(archive, path=None).context_digest("environment") is None

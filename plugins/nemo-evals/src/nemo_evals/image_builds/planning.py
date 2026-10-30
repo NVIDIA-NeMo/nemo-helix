@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import posixpath
 import re
 import tarfile
@@ -67,6 +69,36 @@ class TaskArchive:
 
     def has(self, relative_path: str) -> bool:
         return f"{self.root}/{relative_path}" in self.files
+
+    def context_digest(self, context_path: str) -> str | None:
+        """A digest of everything under ``context_path``: each entry's path, kind, mode, link target and contents.
+
+        Two tasks whose build contexts hold the same files get the same digest, whatever else their archives hold,
+        so they can share one build. None when the archive can't be read here.
+        """
+        if self.path is None:
+            return None
+        prefix = f"{self.root}/{context_path}/"
+        entries = []
+        with tarfile.open(self.path, "r:*") as archive:
+            for member in archive.getmembers():
+                if not member.name.startswith(prefix):
+                    continue
+                content = ""
+                if member.isfile():
+                    handle = archive.extractfile(member)
+                    content = hashlib.sha256(handle.read() if handle is not None else b"").hexdigest()
+                entries.append(
+                    [
+                        member.name.removeprefix(prefix),
+                        member.type.decode(),
+                        member.mode & 0o7777,
+                        member.linkname,
+                        content,
+                    ]
+                )
+        entries.sort()
+        return hashlib.sha256(json.dumps(entries, separators=(",", ":")).encode()).hexdigest()
 
     def text(self, relative_path: str) -> str | None:
         """A file of the task as text, or None when the archive can't be read here or the file isn't text."""
@@ -266,5 +298,6 @@ def _dockerfile_image(image_type: str, archive: TaskArchive, context_path: str, 
         source="dockerfile",
         context_path=f"{archive.root}/{context_path}",
         dockerfile=dockerfile,
+        context_digest=archive.context_digest(context_path),
         platform=dockerfile_pin(text) if text is not None else None,
     )
