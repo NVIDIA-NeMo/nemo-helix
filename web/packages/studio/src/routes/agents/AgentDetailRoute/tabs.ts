@@ -21,6 +21,16 @@ export const DETAIL_TABS = [
 
 export type AgentDetailTab = (typeof DETAIL_TABS)[number];
 
+/** Tabs that render evaluations; the page skips fetching and polling them elsewhere. */
+export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
+  'overview',
+  'evaluations',
+  'optimizations',
+]);
+
+/** Tabs that show deployment status, so deployments keep polling there while idle. */
+export const DEPLOYMENT_STATUS_TABS: ReadonlySet<AgentDetailTab> = new Set(['deployments', 'logs']);
+
 export const DEFAULT_TAB: AgentDetailTab = AGENT_OVERVIEW_ENABLED ? 'overview' : 'deployments';
 
 /**

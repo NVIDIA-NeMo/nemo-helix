@@ -58,12 +58,18 @@ interface UseAgentPanelParams {
   workspace: string;
   agentName?: string;
   selectedDeploymentName?: string;
+  /** Fetch and poll evaluations; off for tabs that don't show them. */
+  evalsEnabled?: boolean;
+  /** Keep polling deployments while idle; transitional deployments are polled regardless. */
+  pollDeployments?: boolean;
 }
 
 export const useAgentDetails = ({
   workspace,
   agentName,
   selectedDeploymentName,
+  evalsEnabled = true,
+  pollDeployments = true,
 }: UseAgentPanelParams) => {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -76,27 +82,28 @@ export const useAgentDetails = ({
     query: { enabled: !!agentName && !!workspace },
   });
 
-  const { data: deploymentsResponse, isLoading: isDeploymentsLoading } = useAgentsListDeployments(
-    workspace,
-    undefined,
-    {
-      query: {
-        enabled: !!agentName,
-        // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
-        // so the panel reflects controller-side progress; fall back to the long interval
-        // otherwise to match the agents table.
-        refetchInterval: (query) => {
-          const deployments = query.state.data?.data ?? [];
-          const transitional = deployments.some(
-            (d) =>
-              d.agent === agentName &&
-              (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
-          );
-          return transitional ? JOB_POLLING_INTERVAL_MS : JOB_POLLING_INTERVAL_LONG;
-        },
+  const {
+    data: deploymentsResponse,
+    isLoading: isDeploymentsLoading,
+    refetch: refetchDeployments,
+  } = useAgentsListDeployments(workspace, undefined, {
+    query: {
+      enabled: !!agentName,
+      // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
+      // so the panel reflects controller-side progress; fall back to the long interval
+      // otherwise to match the agents table.
+      refetchInterval: (query) => {
+        const deployments = query.state.data?.data ?? [];
+        const transitional = deployments.some(
+          (d) =>
+            d.agent === agentName &&
+            (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
+        );
+        if (transitional) return JOB_POLLING_INTERVAL_MS;
+        return pollDeployments ? JOB_POLLING_INTERVAL_LONG : false;
       },
-    }
-  );
+    },
+  });
 
   const deploymentsData = deploymentsResponse?.data;
 
@@ -109,7 +116,7 @@ export const useAgentDetails = ({
     },
     {
       query: {
-        enabled: !!agentName && !!workspace,
+        enabled: evalsEnabled && !!agentName && !!workspace,
         // The jobs query stops polling once nothing is live, which is when a run's results are
         // still on their way to Intake, so this one has to keep looking on its own.
         refetchInterval: JOB_POLLING_INTERVAL_LONG,
@@ -124,7 +131,7 @@ export const useAgentDetails = ({
         const matched = all.filter((job) => targetNameForEvalJob(job) === agentName).length;
         return matched >= RECENT_EVAL_LIMIT;
       }),
-    enabled: !!agentName && !!workspace,
+    enabled: evalsEnabled && !!agentName && !!workspace,
     refetchInterval: (query) => {
       const rows = (query.state.data ?? []).map(toEvalJobRow);
       const live = rows.some((row) => !TERMINAL_JOB_STATUSES.has(row.status ?? ''));
@@ -156,7 +163,7 @@ export const useAgentDetails = ({
       );
       return settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []));
     },
-    enabled: !!workspace && pendingEvaluationNames.length > 0,
+    enabled: evalsEnabled && !!workspace && pendingEvaluationNames.length > 0,
     refetchInterval: JOB_POLLING_INTERVAL_LONG,
   });
 
@@ -197,7 +204,7 @@ export const useAgentDetails = ({
   const { data: experimentsById } = useQuery({
     queryKey: ['experiments-by-id', workspace, experimentIds] as const,
     queryFn: ({ signal }) => fetchExperimentsByIds(workspace, experimentIds, signal),
-    enabled: !!workspace && experimentIds.length > 0,
+    enabled: evalsEnabled && !!workspace && experimentIds.length > 0,
   });
 
   const agentEvals: AgentEvaluationRow[] = useMemo(() => {
@@ -247,6 +254,7 @@ export const useAgentDetails = ({
 
   return {
     isDeploymentsLoading,
+    refetchDeployments,
     agent,
     isAgentLoading,
     isAgentPending,
