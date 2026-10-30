@@ -22,11 +22,6 @@ on:
         required: false
         type: boolean
         default: true
-      run_studio_e2e:
-        description: Run the Studio browser E2E suite for this manual run.
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   actions: read
@@ -2253,7 +2248,7 @@ jobs:
 
   web-studio-e2e:
     name: Studio UI E2E tests
-    if: github.event_name == 'workflow_dispatch' && inputs.run_studio_e2e
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     defaults:
       run:
