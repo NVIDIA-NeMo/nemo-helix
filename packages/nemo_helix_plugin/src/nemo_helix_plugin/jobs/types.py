@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, NotRequired, Optional, Self, TypedDict
 
+from nemo_helix_plugin.entities.types import HTTPValidationError
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.types import MAX_LENGTH as FILESET_NAME_MAX_LENGTH
 from nemo_helix_plugin.files.types import NAME_PATTERN as FILESET_NAME_PATTERN
@@ -234,6 +235,35 @@ class JobControl(BaseModel):
         "keeps the current value. Changing this value does not move the start time.",
         json_schema_extra={"nullable": True},
     )
+
+
+class JobDryRunCheck(BaseModel):
+    """One check a dry run (create with ``?dry_run=true``) made."""
+
+    name: str = Field(description="What was checked.")
+    passed: bool
+    message: str = Field(description="What the check found; on failure, what to fix.")
+
+
+class JobDryRunFailureDetail(BaseModel):
+    """What a dry run whose checks fail returns in ``detail``."""
+
+    message: str = Field(description="The checks that failed.")
+    checks: list[JobDryRunCheck] = Field(description="Every check the dry run made, passed and failed.")
+
+
+class JobDryRunFailure(BaseModel):
+    """The 422 body of a dry run whose checks fail."""
+
+    detail: JobDryRunFailureDetail
+
+
+class JobDryRunValidationErrorResponse(RootModel[HTTPValidationError | JobDryRunFailure]):
+    """Request validation error, or a dry run whose checks fail.
+
+    Create routes that take ``?dry_run=true`` declare this for 422. Declaring any 422 model
+    replaces FastAPI's request-validation schema, so the union keeps both shapes.
+    """
 
 
 class HelixJobResponse(BaseModel):

@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nemo_unsloth_plugin.schema import UnslothJobInput
 
 _JOB_JSON_HELP = "Path to Unsloth job JSON (UnslothJobInput schema)."
@@ -96,4 +97,5 @@ def apply_unsloth_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=UnslothJob,
     )

@@ -54,6 +54,31 @@ for p in json.load(sys.stdin):
 
 Do not run `nemo customization --help` unless submit returns unknown plugin.
 
+## GPUs and training image
+
+Check both before any data work, after `SKILL.md`'s platform check passes. Neither shows in `nemo jobs list-execution-profiles`, which lists a profile's `backend` and config (`node_selector`, `resources`) but not its GPUs. Where you check depends on where the jobs run, which is not the agent machine when the platform is remote (same rule as **Platform unreachable**). When you cannot check, ask the user; never assume.
+
+**GPUs of the training profile.** You need the model and count, and the compute capability when the plan needs a generation (Hopper is 9.0, Blackwell 10.0 and up; Nemotron and GRPO LoRA need one of them).
+
+| Profile `backend` | Check |
+|-------------------|-------|
+| `docker`, local platform (default URL) | `nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader` on this machine. Fewer GPUs than the plan needs, or `nvidia-smi` missing, means the job cannot train here. |
+| `kubernetes_job` / `volcano_job`, with `kubectl` access to the cluster | `kubectl get nodes -l <key>=<value>,… -o custom-columns='NODE:.metadata.name,GPU:.metadata.labels.nvidia\.com/gpu\.product,MAJOR:.metadata.labels.nvidia\.com/gpu\.compute\.major,COUNT:.status.allocatable.nvidia\.com/gpu'`, with the profile's `node_selector` as the label selector (drop `-l` when it is empty). No node with a `COUNT` means no GPU a job can use. |
+| Remote platform, no host or cluster access | Ask the user which GPUs the profile runs on, and how many. |
+
+**Training image.** The platform resolves each backend's image when it starts, from its environment:
+
+- `NHX_<BACKEND>_TRAINING_IMAGE` (`NHX_AUTOMODEL_…`, `NHX_UNSLOTH_…`, `NHX_RL_…`), if set, is the image verbatim.
+- Otherwise it is `<registry>/nhx-<backend>-training:<tag>`: `<registry>` is `NHX_<BACKEND>_IMAGE_REGISTRY`, else `NHX_IMAGE_REGISTRY`; `<tag>` is `NHX_IMAGE_TAG`. With neither set, a local platform uses `my-registry` and `local`, which exist only if built on that host. A Helm install uses `nvcr.io/nvidia/nemo-helix` and the chart's app version. The CPU steps' image is resolved the same way, as `nhx-customizer-tasks` for automodel and rl and `nhx-unsloth-tasks` for unsloth, with `NHX_<BACKEND>_TASKS_IMAGE` as its override.
+
+When you do not know the platform's environment (you did not start it), ask the user for the image or its registry and tag. Then check it:
+
+| Platform | Check |
+|----------|-------|
+| Local platform with the `docker` backend | `docker image inspect <image>` finds it on this daemon. If it does not, `docker manifest inspect <image>` finds it in its registry, which the job pulls from when it starts. Neither: **Missing training images** below. |
+| `kubernetes_job` / `volcano_job` | `docker manifest inspect <image>` (logged in to the registry with the credentials the cluster's image pull secrets hold). Not found: the job will fail to pull it. |
+| Remote `docker` platform | The image must be on that host or pullable from it; checking your own daemon proves nothing. Ask the user to confirm it. |
+
 ## Gated HuggingFace models
 
 Commands for the gated-model rule in `SKILL.md` § **Pre-flight**.

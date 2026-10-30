@@ -23,12 +23,16 @@ from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_rl_plugin.schema import RlJobInput
 from nemo_rl_plugin.transform import transform_input_to_output
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_distributed_runtime
+from nhx.customization_common.dry_run import DatasetRows
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
 )
 from nhx.rl.compile import platform_job_config_compiler
+from nhx.rl.entities.values import TrainingType
 from nhx.rl.schemas import RlJobOutput
+from nhx.rl.tasks.training.datasets.preparation import select_dataset_files
+from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 from pydantic import BaseModel
 
 
@@ -52,6 +56,19 @@ class RlJob(BaseSubmitJob[RlJobInput, RlJobOutput]):
     @classmethod
     def _job_input_schema(cls) -> type[RlJobInput]:
         return RlJobInput
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: RlJobOutput, workspace: str) -> list[DatasetRows]:
+        del workspace
+        validator = DatasetValidator(training_type=TrainingType(spec.training.type))
+        return [
+            DatasetRows(
+                name="training dataset",
+                fileset=spec.dataset,
+                select_files=lambda paths: [file for split in select_dataset_files(paths) for file in split],
+                validate_lines=validator.validate_lines,
+            )
+        ]
 
     @classmethod
     async def _transform(

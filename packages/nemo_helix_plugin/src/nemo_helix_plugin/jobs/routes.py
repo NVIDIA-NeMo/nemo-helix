@@ -56,6 +56,7 @@ from nemo_helix_plugin.jobs.api_factory import (
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.profile import stamp_profile
+from nemo_helix_plugin.jobs.spec import HelixJobSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -142,6 +143,7 @@ def add_job_routes(
         generate_job_name=generate_job_name,
         authz=authz,
         jobs_list_filter=job_cls.jobs_list_filter,
+        dry_run_checks=_adapt_dry_run_checks(job_cls),
     )
     return _rebase_job_collection_routes(router, job_collection_path_for(job_cls))
 
@@ -313,3 +315,16 @@ def _adapt_compile(
         return result
 
     return compile_adapter
+
+
+def _adapt_dry_run_checks(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
+    """Bridge ``NemoJob.dry_run_checks`` to the factory's ``dry_run_checks`` shape."""
+
+    async def dry_run_checks_adapter(
+        transformed_spec: Any, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+    ) -> Any:
+        return await job_cls.dry_run_checks(
+            transformed_spec, platform_spec=platform_spec, workspace=workspace, async_sdk=async_client
+        )
+
+    return dry_run_checks_adapter

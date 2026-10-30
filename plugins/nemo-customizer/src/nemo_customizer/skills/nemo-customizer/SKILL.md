@@ -107,7 +107,7 @@ fi
 5. Else any profile with `provider: gpu` or `gpu_distributed` → **`automodel`** (default).
 6. Else stop and tell the user GPU customization is unavailable.
 
-**`rl` runtime gate:** before submitting rl, confirm the `cpu`/`gpu` profiles report `backend: kubernetes_job` (or `volcano_job`). If they report `docker`/`subprocess`, **stop**: tell the user DPO and GRPO need a Kubernetes-runtime platform. Do **not** start or reuse a docker-runtime platform and do **not** fall back to automodel/unsloth, which train neither. To configure one: `references/rl-kubernetes-runtime.md`.
+**Platform check, before any data work.** Use the profiles from step 1; a connection error there is the **Platform URL** case above. The plugin needs a profile with `provider: gpu` or `gpu_distributed` (the one the user named, when they named one), and `rl` needs that profile's `backend` to be `kubernetes_job` or `volcano_job`. If none qualifies, stop and show the user the configured profiles as `provider/profile (backend)`; do not convert or upload data. Then, still before any data work, check that the profile you will train on has GPUs, of the generation the plan needs, and that the backend's training image exists where the jobs run: `references/troubleshooting.md` § **GPUs and training image**. The profile list shows neither. When you cannot check one (a remote platform you have no access to), ask the user to confirm it instead of assuming. For `rl` on a Docker or subprocess platform, tell the user DPO and GRPO need a Kubernetes-runtime platform: do **not** start or reuse a Docker-runtime platform, and do **not** fall back to automodel/unsloth, which train neither. To configure one: `references/rl-kubernetes-runtime.md`.
 
 ## Plan the job
 
@@ -117,7 +117,7 @@ Settle the plan before any data work, and confirm it with the user in one messag
 - **Fine-tuning type.** LoRA by default, since it is much cheaper. Use full weights when the user asks for them or needs a standalone model. DPO trains full weights only. GRPO LoRA needs Hopper or newer GPUs, so plan full-weight GRPO on older ones (`references/hyperparameters-rl.md` § **`policy_backend`**).
 - **Model, when the user names none.** SFT: `Qwen/Qwen3-1.7B`. It is ungated, Apache-2.0 and has a chat template, and it fits LoRA and full SFT on one GPU. For LoRA on **4 or more Hopper/Blackwell GPUs**, use `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` instead (`references/recipes.md`); full SFT stays on Qwen3-1.7B. Both are thinking models, so short-answer eval turns thinking off (`references/post-training-eval.md`). DPO and GRPO: `references/defaults.md`.
 - **Dataset, when the user names none.** SFT: `tau/commonsense_qa`, converted to CHAT rows (`references/hf-conversion.md`). DPO: `nvidia/HelpSteer3` preference pairs (`references/defaults.md`). GRPO: the environment supplies the rows (**GRPO** below).
-- **User-supplied values win.** When the user gives hyperparameters or a job JSON, keep their values. Only validate them (`explain`, batch divisibility, the `rl` runtime gate), and tell the user every field you changed and why.
+- **User-supplied values win.** When the user gives hyperparameters or a job JSON, keep their values. Only validate them (`explain`, `--dry-run`, batch divisibility, the platform check), and tell the user every field you changed and why.
 
 ## Workflow
 
@@ -128,9 +128,10 @@ Commands and job JSON for each backend: `references/fast-path-sft.md` (automodel
 3. **Register the model.** HF weights fileset + model entity, if missing (gated repos: see Pre-flight). Submit without polling `nemo models get`; the model spec fills in asynchronously. To create the model and dataset during submit instead: `references/fast-path-sft.md` § **Create resources at submit**.
 4. **Score the base model** on the test split, before training: serve it (LoRA: with `lora_enabled: true`) and hand off to **nemo-evals** (`references/post-training-eval.md` § **2. Serve the base model and score it**). SFT and LoRA only; GRPO compares validation reward inside the job. **LoRA:** if the base is already deployed without LoRA, ask the user before deploying it again (same file, § **Base already deployed without LoRA**).
 5. **Write the job JSON.** For a named model, start from its recipe in `references/recipes.md`; otherwise use **Defaults** below. Set `deployment_config` so the job serves its output when training finishes. **Do not add `max_steps` to a real run**: it overrides `epochs` and can stop mid-epoch. Test fixtures set it only so smoke tests finish fast. The live schema, `nemo customization <plugin> explain`, outranks this skill and its references.
-6. **Submit and read the job id.** Parse **stdout only**: `submit`, `explain` and `-f json` write JSON on stdout and warnings on stderr, so `2>&1` into `json.load` fails even when the job was created, and re-submitting after that parse error is the usual cause of duplicate jobs. If submit output does not parse, check `nemo jobs list` before submitting again. The job id is the `"name"` field, already prefixed (`automodel-…`, `unsloth-…`, `rl-…`); pass it verbatim. `rl` has no `--name` flag, and the newest `rl-*` in `nemo jobs list` may be someone else's job.
+6. **Dry-run, then submit and read the job id.** First run the submit command with `--dry-run`. It checks the job JSON, the model and dataset references, the execution profile, and the first 10 rows of every dataset file training reads, prints one `OK`/`FAIL` line per check, and creates nothing. With `--upload-model`, `--upload-dataset` or `--upload-environment` it checks only the job JSON and the local `--upload-dataset` rows; submit checks the rest after the upload (`references/fast-path-sft.md` § **Create resources at submit**). Fix every `FAIL` line, then submit. Parse **stdout only**: `submit`, `explain` and `-f json` write JSON on stdout and warnings on stderr, so `2>&1` into `json.load` fails even when the job was created, and re-submitting after that parse error is the usual cause of duplicate jobs. If submit output does not parse, check `nemo jobs list` before submitting again. The job id is the `"name"` field, already prefixed (`automodel-…`, `unsloth-…`, `rl-…`); pass it verbatim. `rl` has no `--name` flag, and the newest `rl-*` in `nemo jobs list` may be someone else's job.
 
    ```bash
+   nemo customization automodel --job-json /tmp/job.json --workspace default --dry-run
    nemo customization automodel --job-json /tmp/job.json --workspace default > /tmp/submit.json
    JOB=$(python3 -c "import json;print(json.load(open('/tmp/submit.json'))['name'])")
    ```
@@ -181,7 +182,7 @@ Unsloth, rl DPO and rl GRPO defaults: `references/defaults.md`. Worked examples 
 | Field glossary, JSON templates, distillation, W&B/MLflow fields | `references/hyperparameters.md` → `references/hyperparameters-automodel.md`, `references/hyperparameters-unsloth.md`, `references/hyperparameters-rl.md` |
 | Batch sizing, multi-GPU, OOM / throughput | `references/batch-sizing.md` |
 | Reporting template | `references/reporting.md` |
-| Errors: platform unreachable, profiles, images, gated HF | `references/troubleshooting.md` |
+| Before submit: GPUs and training image. Errors: platform unreachable, profiles, images, gated HF | `references/troubleshooting.md` |
 | rl Kubernetes runtime, sandboxed Gym | `references/rl-kubernetes-runtime.md` |
 | W&B secret, MLflow, jobs-launcher | `references/integrations-setup.md` |
 | Evaluation: frozen test split, base vs tuned, model IDs | `references/post-training-eval.md` |
