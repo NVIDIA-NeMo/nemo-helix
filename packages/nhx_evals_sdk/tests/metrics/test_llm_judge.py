@@ -1336,7 +1336,7 @@ class TestGenerateStructuredOutput:
         assert request["extra_body"]["nvext"]["max_thinking_tokens"] == 256
         assert "guided_json" in request["extra_body"]["nvext"]
 
-    def test_render_request_offline_default_serializes_item_as_json_content(self):
+    def test_render_request_offline_default_frames_item_as_untrusted_data(self):
         metric = LLMJudgeMetric(
             model=_make_model(),
             scores=[_make_metric_score()],
@@ -1347,7 +1347,8 @@ class TestGenerateStructuredOutput:
 
         request = metric._render_request(item, {})
 
-        assert json.loads(request["messages"][-1]["content"]) == item
+        content = request["messages"][-1]["content"]
+        assert f"<untrusted_dataset_row>\n{item}\n</untrusted_dataset_row>" in content
 
     def test_render_request_keeps_content_parts_lists(self):
         parts = [{"type": "text", "text": "Rate this answer."}]
