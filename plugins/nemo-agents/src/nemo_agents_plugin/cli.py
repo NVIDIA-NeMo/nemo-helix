@@ -1179,7 +1179,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None,
             "--image",
             "-i",
-            help="Container image for docker/k8s/openshell modes (falls back to deployments.default_image).",
+            help=(
+                "Container image for docker/k8s/openshell modes. Falls back to the agent's "
+                "reference.container_image, then deployments.default_image."
+            ),
         ),
         use_image_entrypoint: bool = typer.Option(
             False,

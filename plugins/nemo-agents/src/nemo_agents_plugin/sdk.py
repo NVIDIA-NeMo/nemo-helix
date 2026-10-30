@@ -398,9 +398,9 @@ class _DeploymentResource:
                 ``"docker"``, ``"k8s"``, or ``"openshell"``. Container modes run the agent as a
                 durable container through the deployments plugin and require a
                 configured executor.
-            image: Container image for container modes. Falls back to
-                ``agents.deployments.default_image`` when omitted. Rejected in
-                ``subprocess`` mode.
+            image: Container image for container modes. When omitted, uses the
+                agent's ``reference.container_image``, then
+                ``agents.deployments.default_image``. Rejected in ``subprocess`` mode.
             use_image_entrypoint: For ``docker``/``k8s`` modes, preserve the
                 image ENTRYPOINT/CMD instead of injecting the platform-owned
                 agent server command.

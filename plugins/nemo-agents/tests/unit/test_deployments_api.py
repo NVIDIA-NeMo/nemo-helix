@@ -30,6 +30,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_deployments_plugin.config import DeploymentsConfig, ExecutorConfigEntry
 from nemo_deployments_plugin.entities import Deployment
+from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
@@ -284,9 +285,13 @@ class TestCreateDeployment:
         assert "functions" not in created_deployment.config
         assert "workflow" not in created_deployment.config
 
-    def test_create_snapshots_image_entrypoint_mode(self) -> None:
+    @pytest.mark.parametrize("use_reference", [False, True])
+    def test_create_snapshots_image_entrypoint_mode(self, use_reference: bool) -> None:
+        agent = _make_agent()
+        if use_reference:
+            agent.reference = ReferenceConfig(container_image="hand-built-agent:latest")
         mock_entity_client = AsyncMock()
-        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        mock_entity_client.get = AsyncMock(return_value=agent)
 
         async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
             deployment._id = f"deployment-{deployment.name}-id"
@@ -302,7 +307,7 @@ class TestCreateDeployment:
                 "agent": "fabric-agent",
                 "name": "fabric-dep",
                 "deployment_mode": "docker",
-                "image": "hand-built-agent:latest",
+                "image": "" if use_reference else "hand-built-agent:latest",
                 "use_image_entrypoint": True,
             },
         )
@@ -384,18 +389,35 @@ class TestCreateDeployment:
         assert "deployments.default_image" in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
-    def test_create_allows_container_deployment_without_image_when_a_default_is_configured(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("mode", ["docker", "k8s", "openshell"])
+    @pytest.mark.parametrize(
+        ("request_image", "reference_image", "expected_image"),
+        [
+            ("", None, ""),
+            ("", "registry.example/agent:registered", "registry.example/agent:registered"),
+            ("registry.example/agent:override", "registry.example/agent:registered", "registry.example/agent:override"),
+        ],
+    )
+    def test_create_resolves_container_image(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mode: str,
+        request_image: str,
+        reference_image: str | None,
+        expected_image: str,
     ) -> None:
         _configure_deployments(
             monkeypatch,
-            executors={"local": "docker"},
+            executors={"local": mode},
             default_executor="local",
             default_image="registry.example/agent:pinned",
         )
 
+        agent = _make_agent()
+        if reference_image is not None:
+            agent.reference = ReferenceConfig(container_image=reference_image)
         mock_entity_client = AsyncMock()
-        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        mock_entity_client.get = AsyncMock(return_value=agent)
 
         async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
             deployment._id = f"deployment-{deployment.name}-id"
@@ -407,12 +429,12 @@ class TestCreateDeployment:
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/deployments",
-            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker"},
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": mode, "image": request_image},
         )
 
         assert resp.status_code == 201
         created_deployment: AgentDeployment = mock_entity_client.create.call_args[0][0]
-        assert created_deployment.image == ""
+        assert created_deployment.image == expected_image
 
     def test_create_ignores_raw_auth_context_headers(self) -> None:
         mock_entity_client = AsyncMock()
@@ -482,9 +504,12 @@ class TestCreateDeployment:
         assert created_deployment.auth_context.principal_email == "bearer@example.com"
         assert created_deployment.auth_context.principal_groups == ["runtime"]
 
-    def test_create_allows_subprocess_deployment_without_an_image(self) -> None:
+    @pytest.mark.parametrize("reference_image", [None, "registry.example/agent:registered"])
+    def test_create_allows_subprocess_deployment_without_an_image(self, reference_image: str | None) -> None:
+        agent = _make_agent()
+        agent.reference = ReferenceConfig(container_image=reference_image)
         mock_entity_client = AsyncMock()
-        mock_entity_client.get = AsyncMock(return_value=_make_agent())
+        mock_entity_client.get = AsyncMock(return_value=agent)
 
         async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
             deployment._id = f"deployment-{deployment.name}-id"
@@ -500,6 +525,7 @@ class TestCreateDeployment:
         )
 
         assert resp.status_code == 201
+        assert mock_entity_client.create.call_args[0][0].image == ""
 
     def test_create_rejects_image_entrypoint_for_subprocess(self) -> None:
         mock_entity_client = AsyncMock()
@@ -635,14 +661,17 @@ class TestCreateDeployment:
             ({**_fabric_agent_config(), "default_harness": "missing"}, "Invalid agent config"),
         ],
     )
-    def test_create_rejects_invalid_platform_agent_config(self, config: dict[str, Any], error: str) -> None:
+    @pytest.mark.parametrize("mode", ["subprocess", "docker"])
+    def test_create_rejects_invalid_platform_agent_config(self, config: dict[str, Any], error: str, mode: str) -> None:
+        agent = _make_agent(config=config)
+        agent.reference = ReferenceConfig(container_image="registry.example/agent:registered")
         mock_entity_client = AsyncMock()
-        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+        mock_entity_client.get = AsyncMock(return_value=agent)
         client = _test_client(mock_entity_client)
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/deployments",
-            json={"agent": "fabric-agent", "name": "fabric-dep"},
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": mode},
         )
 
         assert resp.status_code == 400
@@ -678,12 +707,16 @@ class TestCreateDeployment:
         mock_entity_client.create.assert_not_called()
 
     @pytest.mark.usefixtures("installed_adapter_manifests")
-    def test_create_leaves_adapter_ids_to_a_requested_image(self) -> None:
+    @pytest.mark.parametrize("use_reference", [False, True])
+    def test_create_leaves_adapter_ids_to_an_agent_image(self, use_reference: bool) -> None:
         """The API can't see a custom image's adapters, so the container checks harness kinds itself."""
         config = _fabric_agent_config()
         config["harnesses"]["hermes"]["kind"] = "acme.custom.native"
+        agent = _make_agent(config=config)
+        if use_reference:
+            agent.reference = ReferenceConfig(container_image="acme-agent:1")
         mock_entity_client = AsyncMock()
-        mock_entity_client.get = AsyncMock(return_value=_make_agent(config=config))
+        mock_entity_client.get = AsyncMock(return_value=agent)
 
         async def _save_deployment(deployment: AgentDeployment) -> AgentDeployment:
             deployment._id = f"deployment-{deployment.name}-id"
@@ -695,7 +728,12 @@ class TestCreateDeployment:
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/deployments",
-            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker", "image": "acme-agent:1"},
+            json={
+                "agent": "fabric-agent",
+                "name": "fabric-dep",
+                "deployment_mode": "docker",
+                "image": "" if use_reference else "acme-agent:1",
+            },
         )
 
         assert resp.status_code == 201

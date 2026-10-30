@@ -24,6 +24,7 @@ from nemo_deployments_plugin.entities import ConfigFile
 from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import FilesetRef
 
 
 def _fabric_config(*, skills_paths: list[str] | None = None) -> dict[str, Any]:
@@ -351,7 +352,17 @@ async def test_stage_fabric_ethos_config_files_rejects_missing_skill_path() -> N
 
 @pytest.mark.usefixtures("patched_download_fileset")
 @pytest.mark.asyncio
-async def test_stage_fabric_ethos_dir_stages_sibling_artifacts(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("source_fileset", "expected_workspace", "expected_fileset"),
+    [
+        (None, "default", "fabric-agent-ethos"),
+        (FilesetRef("agent-source"), "default", "agent-source"),
+        (FilesetRef("sources/agent-source"), "sources", "agent-source"),
+    ],
+)
+async def test_stage_fabric_ethos_dir_stages_sibling_artifacts(
+    tmp_path: Path, source_fileset: FilesetRef | None, expected_workspace: str, expected_fileset: str
+) -> None:
     async def _fake_download(*, local_path: str, fileset: str | None, workspace: str | None) -> None:
         del fileset, workspace
         root = Path(local_path)
@@ -370,13 +381,16 @@ async def test_stage_fabric_ethos_dir_stages_sibling_artifacts(tmp_path: Path) -
         agent_config=_fabric_config(skills_paths=["skills/review"]),
         base_dir=tmp_path,
         files_client=files_client,
+        source_fileset=source_fileset,
     )
 
     assert (tmp_path / "mcps" / "calculator.py").read_text(encoding="utf-8") == "print(1)\n"
     assert (tmp_path / "skills" / "review" / "SKILL.md").exists()
     await_args = files_client.download.await_args
     assert await_args is not None
-    assert await_args.kwargs["fileset"] == "fabric-agent-ethos"
+    assert await_args.kwargs["fileset"] == expected_fileset
+    assert await_args.kwargs["workspace"] == expected_workspace
+    files_client.download.assert_awaited_once()
     assert Path(await_args.kwargs["local_path"]) != tmp_path
 
 
@@ -395,6 +409,40 @@ async def test_stage_fabric_ethos_dir_missing_fileset_is_not_fatal(tmp_path: Pat
     )
 
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.usefixtures("patched_download_fileset")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [_plugin_not_found(), PermissionError("access denied")])
+async def test_stage_fabric_ethos_dir_explicit_fileset_failure_does_not_fall_back(
+    tmp_path: Path, error: Exception
+) -> None:
+    files_client = AsyncMock()
+    files_client.download = AsyncMock(side_effect=error)
+
+    with pytest.raises((FabricArtifactStagingError, PermissionError), match="not found|access denied"):
+        await stage_fabric_ethos_dir(
+            workspace="default",
+            agent_name="fabric-agent",
+            agent_config=_fabric_config(),
+            base_dir=tmp_path,
+            files_client=files_client,
+            source_fileset=FilesetRef("sources/agent-source"),
+        )
+
+    files_client.download.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_stage_fabric_ethos_dir_explicit_fileset_requires_client(tmp_path: Path) -> None:
+    with pytest.raises(FabricArtifactStagingError, match="Files client is required"):
+        await stage_fabric_ethos_dir(
+            workspace="default",
+            agent_name="fabric-agent",
+            agent_config=_fabric_config(),
+            base_dir=tmp_path,
+            source_fileset=FilesetRef("sources/agent-source"),
+        )
 
 
 @pytest.mark.usefixtures("patched_download_fileset")
