@@ -102,11 +102,8 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
   const queryClient = useQueryClient();
   const imageBuildsUnsupported = useImageBuildsUnsupported();
   const deploymentModes = useDeploymentModes(workspace, { enabled: open });
-  // An image's runtime depends on the modes, so deploying it waits for them; a failed read falls back to all modes.
-  const awaitingModesForImage =
-    Boolean(initialImage) &&
-    AGENT_CONTAINER_DEPLOYMENTS_ENABLED &&
-    deploymentModes.status === 'loading';
+  // The runtime depends on the modes, so deploying waits for them; a failed read falls back to all modes.
+  const awaitingModes = deploymentModes.status === 'loading';
   const availableModes = deployableModes(deploymentModes);
   const noDeployableMode = availableModes.length === 0;
   const hasImageMode = availableModes.some((mode) => mode !== 'subprocess');
@@ -261,7 +258,7 @@ export const CreateDeploymentModal: FC<CreateDeploymentModalProps> = ({
       onSubmit={handleSubmit(onSubmit)}
       disabled={isPending}
       loading={isPending}
-      submitDisabled={awaitingModesForImage || noDeployableMode || awaitingAgentForImageBuild}
+      submitDisabled={awaitingModes || noDeployableMode || awaitingAgentForImageBuild}
       errorText={errorMessage}
     >
       <Stack gap="density-xl">
