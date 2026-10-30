@@ -2762,6 +2762,13 @@ components:
             `nat-workflow-v1` is the default legacy NAT workflow format; `nemo-agents-spec-v1`
             identifies the Platform-owned agent.yaml spec format.
           default: nat-workflow-v1
+        context_schema:
+          title: Context Schema
+          description: 'JSON Schema the per-run `context` of an execute job must match.
+            Checked when the job is created; set `additionalProperties: false` to
+            reject unknown keys. Omit to accept any context.'
+          additionalProperties: true
+          type: object
         name:
           type: string
           title: Name
@@ -2776,6 +2783,21 @@ components:
           title: Project
           description: The name of the project associated with this entity.
           type: string
+        default_input:
+          title: Default Input
+          description: Prompt an execute job uses when its request omits `input`.
+          type: string
+        post_run_actions:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Post Run Actions
+          description: Post-run action kinds an execute job of this agent may choose.
+            A job that names none runs 'agents.noop' when it is in the set, or the
+            only member when there is one; otherwise the job must choose. List installed
+            kinds with `nemo agents post-run-actions list`.
         reference:
           allOf:
           - $ref: '#/components/schemas/ReferenceConfigOutput'
@@ -3428,6 +3450,13 @@ components:
             `nat-workflow-v1` is the default legacy NAT workflow format; `nemo-agents-spec-v1`
             identifies the Platform-owned agent.yaml spec format.
           default: nat-workflow-v1
+        context_schema:
+          title: Context Schema
+          description: 'JSON Schema the per-run `context` of an execute job must match.
+            Checked when the job is created; set `additionalProperties: false` to
+            reject unknown keys. Omit to accept any context.'
+          additionalProperties: true
+          type: object
       type: object
       title: AgentInline
       description: "Inline Agent - an agent definition without entity identity.\n\n\
@@ -4393,17 +4422,19 @@ components:
           description: 'Agent to execute: an Agent entity name or workspace/name ref,
             or an inline agent definition for a config composed at request time.'
         input:
-          type: string
           title: Input
-          description: Prompt to pass to the agent.
+          description: Prompt to pass to the agent. Omit to use the Agent entity's
+            default_input; required for an inline agent or an entity that declares
+            none.
+          type: string
         context:
           additionalProperties: true
           type: object
           title: Context
           description: 'Per-run parameters handed to the agent as the top level of
-            the Fabric request context. The ''nemo_helix'' key is reserved for platform
-            fields. Stored on the job spec in plaintext: pass parameters here, not
-            secrets.'
+            the Fabric request context. Must match the agent''s context_schema when
+            it declares one. The ''nemo_helix'' key is reserved for platform fields.
+            Stored on the job spec in plaintext: pass parameters here, not secrets.'
         environment:
           anyOf:
           - type: string
@@ -4446,11 +4477,13 @@ components:
           allOf:
           - $ref: '#/components/schemas/PostRunActionConfig'
           description: Plugin-provided action to run after a successful agent invocation,
-            inside the execute step; its failure fails the job. Defaults to 'agents.noop'.
+            inside the execute step; its failure fails the job. An Agent entity limits
+            the kinds to its post_run_actions; when omitted, the job runs 'agents.noop'
+            if the entity allows it, or the entity's only kind. An inline agent may
+            name any installed kind and defaults to 'agents.noop'.
       type: object
       required:
       - agent
-      - input
       title: ExecuteAgentJobConfig
     ExecuteAgentStepConfig:
       properties:
@@ -4458,6 +4491,9 @@ components:
           $ref: '#/components/schemas/ExecuteAgentJobConfig'
         agent:
           $ref: '#/components/schemas/ResolvedAgentConfig'
+        input:
+          type: string
+          title: Input
         agent_ref:
           title: Agent Ref
           type: string
@@ -4476,6 +4512,7 @@ components:
       required:
       - request
       - agent
+      - input
       title: ExecuteAgentStepConfig
     ExecuteJob:
       properties:
@@ -5803,6 +5840,28 @@ components:
           type: object
           title: Config
           description: Agent config dict interpreted according to config_format.
+        context_schema:
+          title: Context Schema
+          description: 'JSON Schema the per-run `context` of an execute job must match.
+            Checked when the job is created; set `additionalProperties: false` to
+            reject unknown keys. Omit to accept any context.'
+          additionalProperties: true
+          type: object
+        default_input:
+          title: Default Input
+          description: Prompt an execute job uses when its request omits `input`.
+          type: string
+        post_run_actions:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Post Run Actions
+          description: Post-run action kinds an execute job of this agent may choose.
+            A job that names none runs 'agents.noop' when it is in the set, or the
+            only member when there is one; otherwise the job must choose. List installed
+            kinds with `nemo agents post-run-actions list`.
         config_format:
           type: string
           title: Config Format

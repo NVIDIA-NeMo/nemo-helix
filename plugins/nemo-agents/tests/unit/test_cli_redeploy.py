@@ -169,7 +169,7 @@ def test_redeploy_checks_fileset_before_teardown(
     tmp_path: Path, make_cli_state, fileset: str, fileset_workspace: str, status: int
 ) -> None:
     config = _write_config(tmp_path)
-    config.write_text(config.read_text() + f"reference:\n  fileset: {fileset}\n")
+    config.write_text(config.read_text() + f"helix_registration:\n  reference:\n    fileset: {fileset}\n")
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
     fileset_path = f"/apis/files/v2/workspaces/{fileset_workspace}/filesets/source"
 

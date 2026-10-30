@@ -18,7 +18,9 @@ from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, vali
 from nemo_agents_plugin.api.v2._perms import AgentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
+from nemo_agents_plugin.context_schema import check_context_schema
 from nemo_agents_plugin.entities import Agent, AgentDeployment
+from nemo_agents_plugin.jobs.post_run_actions import validate_post_run_action_kinds
 from nemo_agents_plugin.schema import (
     AgentFilter,
     AgentPage,
@@ -65,6 +67,7 @@ async def register_agent(
 ) -> Agent:
     """Register an agent."""
     config = _validate_agent_config_for_register(body)
+    _validate_run_declarations(body)
     reference = await _resolve_agent_reference(body.reference, workspace=workspace, files_client=files_client)
 
     agent = Agent(
@@ -74,6 +77,9 @@ async def register_agent(
         labels=body.labels,
         config=config,
         config_format=body.config_format,
+        context_schema=body.context_schema,
+        default_input=body.default_input,
+        post_run_actions=body.post_run_actions,
         reference=reference,
     )
     try:
@@ -240,4 +246,18 @@ def _validate_agent_config_for_register(body: RegisterAgentRequest) -> dict[str,
     try:
         return validate_agent_config(body.config_format, body.config)
     except AgentConfigFormatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _validate_run_declarations(body: RegisterAgentRequest) -> None:
+    """Check what the agent declares about its runs before it is stored.
+
+    A bad schema or an uninstalled action kind would otherwise surface only
+    when a job is created, against an agent that looked valid.
+    """
+    try:
+        if body.context_schema is not None:
+            check_context_schema(body.context_schema)
+        validate_post_run_action_kinds(body.post_run_actions)
+    except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

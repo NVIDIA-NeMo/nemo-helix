@@ -29,6 +29,10 @@ dependencies = [
     "botocore>=1.40.46,<1.40.62",
     "httpx>=0.27",
     "pyyaml>=6.0",
+    # context_schema validation passes registry= to block remote $refs, which
+    # jsonschema added in 4.18 along with its referencing dependency.
+    "jsonschema>=4.23.0",
+    "referencing>=0.28.4",
     # Base, not optional: the generated nemo-helix extra mirrors this list only,
     # and the plugin advertises `agents.package-agent` unconditionally.
     "jinja2>=3.1",

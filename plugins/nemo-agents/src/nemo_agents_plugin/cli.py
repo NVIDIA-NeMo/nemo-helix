@@ -58,6 +58,7 @@ import click
 import httpx
 import typer
 import yaml
+from nemo_agents_plugin.agent_config import AgentRegistration
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
     AGENT_SPEC_FILENAME,
@@ -92,7 +93,6 @@ from nemo_helix_plugin.agents.types import (
     Labels,
     ListAgentsQueryParams,
     ListSessionsQueryParams,
-    ReferenceConfig,
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.cli import NemoCLI
@@ -1087,7 +1087,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """Register an agent on the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=name)
+        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=name)
         labels = _parse_labels(label)
         resp = _register_agent_from_validated_config(
             name=name,
@@ -1095,7 +1095,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             labels=labels,
             config_dict=config_dict,
             config_format=config_format,
-            reference=reference,
+            registration=registration,
             agent_config=agent_config,
             workspace=workspace,
             base_url=base_url,
@@ -1383,8 +1383,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         # 1. Fail-fast: validate the new config client-side, before any teardown.
         #    A bad config aborts here with zero side effects.
-        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=agent)
+        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=agent)
 
+        reference = registration.reference
         if reference is not None and reference.fileset is not None:
             ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
             files_client = shared_cli_client(FilesClient)
@@ -1504,7 +1505,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 labels=labels,
                 config_dict=config_dict,
                 config_format=config_format,
-                reference=reference,
+                registration=registration,
                 agent_config=agent_config,
                 workspace=workspace,
                 base_url=base_url,
@@ -2439,7 +2440,7 @@ def _local_fabric_invoke(config: dict[str, Any], inputs: list[Any], *, base_dir:
     from nemo_agents_plugin.fabric.translator import FabricTranslationError
 
     try:
-        agent_config = AgentConfig.model_validate({key: value for key, value in config.items() if key != "reference"})
+        agent_config = AgentConfig.model_validate(config)
         results = asyncio.run(invoke_agent_config_once(agent_config, inputs, base_dir=base_dir))
     except (FabricRuntimeExecutionError, FabricTranslationError, ValidationError) as error:
         typer.echo(f"Error: Fabric invocation failed: {error}", err=True)
@@ -3127,10 +3128,10 @@ def _redeploy_recovery_hint(
 
 def _validate_agent_config_for_register(
     agent_config: Path | None, *, name: str
-) -> tuple[dict[str, Any], str, ReferenceConfig | None]:
+) -> tuple[dict[str, Any], str, AgentRegistration]:
     """Load and validate an agent config **client-side**, with zero network calls.
 
-    Returns the resolved ``(config_dict, config_format, reference)`` ready to POST, or raises
+    Returns the resolved ``(config_dict, config_format, registration)`` ready to POST, or raises
     ``typer.Exit`` on any problem. This is the exact validation the ``register``
     command runs before it touches the API; ``redeploy`` reuses it as a
     fail-fast gate so a bad config aborts before any destructive teardown.
@@ -3138,14 +3139,19 @@ def _validate_agent_config_for_register(
     from nemo_agents_plugin.utils import inject_default_model
 
     if agent_config is None:
-        return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, None
+        return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, AgentRegistration()
 
     config_dict = _load_yaml(agent_config)
     if not isinstance(config_dict, dict):
         typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
         raise typer.Exit(code=1)
-    reference = config_dict.pop("reference", None)
-    payload: dict[str, Any] = {"name": name, "config": config_dict, "reference": reference}
+    # The registration block becomes the agent's own fields, never part of its stored config.
+    try:
+        registration = AgentRegistration.model_validate(config_dict.pop("helix_registration", None) or {})
+    except ValidationError as error:
+        typer.echo(f"Error: invalid registration in agent config {agent_config}: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    payload: dict[str, Any] = {"name": name, "config": config_dict, **_registration_fields(registration)}
     if config_dict.keys() <= {"name", "description", "config_format"}:
         payload["config"] = {}
         if "config_format" in config_dict:
@@ -3160,7 +3166,7 @@ def _validate_agent_config_for_register(
         typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
         raise typer.Exit(code=1)
     if not config_dict:
-        return config_dict, config_format, request.reference
+        return config_dict, config_format, registration
     # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
     # no user context at deploy time.
     config_dict = inject_default_model(config_dict)
@@ -3176,7 +3182,12 @@ def _validate_agent_config_for_register(
         config_dict = _validate_platform_agent_config_for_cli(config_dict, base_dir=agent_config.parent)
         for line in _spec_package_warning(name, agent_config):
             typer.echo(line, err=True)
-    return config_dict, config_format, request.reference
+    return config_dict, config_format, registration
+
+
+def _registration_fields(registration: AgentRegistration) -> dict[str, Any]:
+    """Return the request fields agent.yaml set, leaving the rest to the API's defaults."""
+    return registration.model_dump(mode="json", exclude_none=True)
 
 
 def _parse_labels(values: list[str]) -> dict[str, str]:
@@ -3202,7 +3213,7 @@ def _register_agent_from_validated_config(
     labels: dict[str, str],
     config_dict: dict[str, Any],
     config_format: str,
-    reference: ReferenceConfig | None,
+    registration: AgentRegistration,
     agent_config: Path | None,
     workspace: str,
     base_url: str,
@@ -3216,8 +3227,7 @@ def _register_agent_from_validated_config(
     payload: dict[str, Any] = {"name": name}
     if description:
         payload["description"] = description
-    if reference is not None:
-        payload["reference"] = reference
+    payload.update(_registration_fields(registration))
     if labels:
         payload["labels"] = labels
     if agent_config is not None:

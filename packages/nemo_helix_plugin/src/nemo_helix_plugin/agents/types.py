@@ -19,7 +19,15 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    field_validator,
+    model_validator,
+)
 
 JsonMap: TypeAlias = dict[str, Any]
 JsonObject: TypeAlias = JsonMap
@@ -38,6 +46,8 @@ AgentJobCollection: TypeAlias = Literal[
 
 NAT_WORKFLOW_CONFIG_FORMAT = "nat-workflow-v1"
 NEMO_AGENTS_SPEC_CONFIG_FORMAT = "nemo-agents-spec-v1"
+# The post-run action a job runs when it names none: do nothing.
+NOOP_POST_RUN_ACTION_KIND = "agents.noop"
 
 # Label keys follow Kubernetes (an optional ``prefix/`` plus a name) except that
 # neither part may contain a dot: list filters address a label as
@@ -64,6 +74,32 @@ def _validate_labels(labels: StringMap) -> StringMap:
 
 
 Labels: TypeAlias = Annotated[StringMap, AfterValidator(_validate_labels)]
+
+# Serialized as a sorted array so a stored or returned agent reads the same
+# every time; a set has no order of its own. The schema keywords are spelled
+# out because the serializer's ``list[str]`` would drop them from the response
+# schema.
+PostRunActionKinds: TypeAlias = Annotated[
+    set[str],
+    Field(min_length=1, json_schema_extra={"minItems": 1, "uniqueItems": True}),
+    PlainSerializer(sorted, return_type=list[str], when_used="json"),
+]
+
+CONTEXT_SCHEMA_DESCRIPTION = (
+    "JSON Schema the per-run `context` of an execute job must match. Checked when the job is "
+    "created; set `additionalProperties: false` to reject unknown keys. Omit to accept any context."
+)
+DEFAULT_INPUT_DESCRIPTION = "Prompt an execute job uses when its request omits `input`."
+POST_RUN_ACTIONS_DESCRIPTION = (
+    "Post-run action kinds an execute job of this agent may choose. A job that names none runs "
+    f"{NOOP_POST_RUN_ACTION_KIND!r} when it is in the set, or the only member when there is one; "
+    "otherwise the job must choose. List installed kinds with `nemo agents post-run-actions list`."
+)
+
+
+def _default_post_run_actions() -> set[str]:
+    return {NOOP_POST_RUN_ACTION_KIND}
+
 
 LABELS_DESCRIPTION = (
     "Key/value labels for filtering and display, never for authorization. Keys are '<name>' or "
@@ -263,6 +299,7 @@ class AgentInline(BaseModel):
         default=NAT_WORKFLOW_CONFIG_FORMAT,
         description="Agent config schema tag.",
     )
+    context_schema: JsonMap | None = Field(default=None, description=CONTEXT_SCHEMA_DESCRIPTION)
 
 
 class ReferenceConfig(BaseModel):
@@ -294,6 +331,10 @@ class ReferenceConfig(BaseModel):
 class Agent(EntityMetadata, AgentInline):
     """An agent definition stored in the Agents service."""
 
+    default_input: str | None = Field(default=None, description=DEFAULT_INPUT_DESCRIPTION)
+    post_run_actions: PostRunActionKinds = Field(
+        default_factory=_default_post_run_actions, description=POST_RUN_ACTIONS_DESCRIPTION
+    )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
 
@@ -368,6 +409,11 @@ class RegisterAgentRequest(BaseModel):
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
     config: JsonMap = Field(
         default_factory=dict, description="Agent config dict interpreted according to config_format."
+    )
+    context_schema: JsonMap | None = Field(default=None, description=CONTEXT_SCHEMA_DESCRIPTION)
+    default_input: str | None = Field(default=None, description=DEFAULT_INPUT_DESCRIPTION)
+    post_run_actions: PostRunActionKinds = Field(
+        default_factory=_default_post_run_actions, description=POST_RUN_ACTIONS_DESCRIPTION
     )
     config_format: str = Field(
         default_factory=lambda data: (

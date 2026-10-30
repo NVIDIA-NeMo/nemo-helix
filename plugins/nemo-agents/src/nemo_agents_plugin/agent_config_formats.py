@@ -79,9 +79,18 @@ class _NemoAgentsSpecConfigHandler:
     @staticmethod
     def _normalize(config: dict[str, Any]) -> dict[str, Any]:
         try:
-            return AgentConfig.model_validate(config).model_dump(exclude_none=True)
+            agent_config = AgentConfig.model_validate(config)
         except ValidationError as error:
             raise InvalidAgentConfigError(f"Invalid agent config: {error}") from error
+        # Accepted in agent.yaml, where the CLI lifts it into request fields. In
+        # a stored or inline config nothing reads it, so a caller who put it
+        # there would silently get the defaults instead.
+        if agent_config.helix_registration is not None:
+            raise InvalidAgentConfigError(
+                "Invalid agent config: 'helix_registration' belongs in agent.yaml only. Over the API, set "
+                "reference, context_schema, default_input, and post_run_actions as fields of the agent."
+            )
+        return agent_config.model_dump(exclude_none=True)
 
 
 _AGENT_CONFIG_FORMAT_HANDLERS: dict[str, AgentConfigFormatHandler] = {
