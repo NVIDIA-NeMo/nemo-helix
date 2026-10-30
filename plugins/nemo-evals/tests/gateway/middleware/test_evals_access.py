@@ -21,7 +21,6 @@ from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME as REC
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.gateway.spans import GATEWAY_CALL_ATTRIBUTE
 from nemo_evals.gateway.tokens import (
-    RouterKeyClaims,
     TrialClaims,
     TrialTokenReader,
     unsigned_token,
@@ -187,15 +186,6 @@ async def test_a_trial_that_switches_models_is_refused_and_the_refusal_is_report
     assert [(credential, entry.reason) for credential, entry in refused] == [
         (TRIAL_TOKEN, RefusalReason.UNLISTED_MODEL)
     ]
-
-
-async def test_a_router_key_is_held_to_its_policy_like_a_trial() -> None:
-    router_key = unsigned_token(RouterKeyClaims(model_access=ModelAccess.CLOSED, models=(CB,)))
-    enforcer, _ = _enforcer(auth_enabled=True, signed=Signed(router_key))
-
-    await enforcer.check(_request(token=router_key))
-    with pytest.raises(InferenceMiddlewareError):
-        await enforcer.check(_request(provider="nvidia", token=router_key))
 
 
 async def test_an_evals_policy_the_platform_did_not_sign_is_refused() -> None:

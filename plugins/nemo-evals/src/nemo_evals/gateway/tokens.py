@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Evals credentials: the tokens trials and routers call the Inference Gateway with, and the model policy they carry.
+"""Trial tokens: the credentials evaluation trials call the Inference Gateway with, and the model policy they carry.
 
-A trial token names an evaluation trial and the models its agent may call. A router key carries only a model policy,
-for a router such as a Switchyard deployment that calls models back through the gateway on a trial's behalf.
+A trial token names an evaluation trial and the models its agent may call.
 
-With platform auth on, either is a Scoped Access Key evals mints for a user. The auth service signs the claims into it
+With platform auth on, it is a Scoped Access Key evals mints for a user. The auth service signs the claims into it
 as the ``evals`` service's attributes, which no user can set. With auth off, it is an unsigned JWT from ``nemo-evals``
 carrying the same claim, which anyone can write.
 """
@@ -15,12 +14,12 @@ from __future__ import annotations
 
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from nemo_evals.gateway.policy import ModelPolicy
 from nemo_helix_plugin.auth import platform_auth_enabled, verified_access_key_claims
 from nemo_helix_plugin.client.oidc import decode_jwt_claims, decode_jwt_header, generate_unsigned_jwt
-from pydantic import ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import ConfigDict, Field, JsonValue, ValidationError
 
 SERVICE_ATTRIBUTES_CLAIM = "nhx_service_attributes"
 EVALS_SERVICE = "evals"
@@ -49,38 +48,18 @@ class TrialClaims(ModelPolicy):
     @classmethod
     def from_token_claims(cls, claims: Mapping[str, Any]) -> TrialClaims | None:
         """The trial a token's claims name, or ``None`` when they name none in a shape this reader knows."""
-        evals = evals_claims(claims)
-        return evals if isinstance(evals, TrialClaims) else None
+        attributes = claims.get(SERVICE_ATTRIBUTES_CLAIM)
+        evals = attributes.get(EVALS_SERVICE) if isinstance(attributes, Mapping) else None
+        if not isinstance(evals, Mapping):
+            return None
+        try:
+            return cls.model_validate(evals)
+        except ValidationError:
+            return None
 
 
-class RouterKeyClaims(ModelPolicy):
-    """A router's credential for the models it calls back through the gateway on its callers' behalf."""
-
-    v: Literal[1] = 1
-    kind: Literal["router"] = "router"
-
-    def service_attributes(self) -> dict[str, JsonValue]:
-        return self.model_dump(mode="json", exclude_none=True)
-
-
-EvalsClaims = Annotated[TrialClaims | RouterKeyClaims, Field(discriminator="kind")]
-_EVALS_CLAIMS: TypeAdapter[TrialClaims | RouterKeyClaims] = TypeAdapter(EvalsClaims)
-
-
-def evals_claims(claims: Mapping[str, Any]) -> TrialClaims | RouterKeyClaims | None:
-    """The evals credential a token's claims describe, or ``None`` when they describe none in a shape this reader knows."""
-    attributes = claims.get(SERVICE_ATTRIBUTES_CLAIM)
-    evals = attributes.get(EVALS_SERVICE) if isinstance(attributes, Mapping) else None
-    if not isinstance(evals, Mapping):
-        return None
-    try:
-        return _EVALS_CLAIMS.validate_python(evals)
-    except ValidationError:
-        return None
-
-
-def unsigned_token(claims: TrialClaims | RouterKeyClaims, *, expires_in_seconds: int = TOKEN_LIFETIME_SEC) -> str:
-    """An evals credential for a platform with auth off, which has no key to sign one."""
+def unsigned_token(claims: TrialClaims, *, expires_in_seconds: int = TOKEN_LIFETIME_SEC) -> str:
+    """A trial token for a platform with auth off, which has no key to sign one."""
     return generate_unsigned_jwt(
         UNSIGNED_TOKEN_ISSUER,
         issuer=UNSIGNED_TOKEN_ISSUER,
@@ -92,11 +71,6 @@ def unsigned_token(claims: TrialClaims | RouterKeyClaims, *, expires_in_seconds:
 def claims_a_trial(token: str) -> bool:
     """Whether ``token`` claims to be a trial's, before any check of who issued it."""
     return TrialClaims.from_token_claims(decode_jwt_claims(token)) is not None
-
-
-def claims_evals_credential(token: str) -> bool:
-    """Whether ``token`` claims to be an evals credential, before any check of who issued it."""
-    return evals_claims(decode_jwt_claims(token)) is not None
 
 
 TokenVerifier = Callable[[str], Awaitable[Mapping[str, Any] | None]]
@@ -115,7 +89,7 @@ def unsigned_token_claims(token: str, *, now: float) -> Mapping[str, Any] | None
 
 
 class TrialTokenReader:
-    """Reads the evals credential a token is, trusting only tokens ``verify`` accepts.
+    """Reads the trial a token names, trusting only tokens ``verify`` accepts.
 
     Without ``verify``, for a platform with auth off, it trusts unsigned tokens from ``nemo-evals`` instead, and
     no others. Each token's result is remembered until the token expires, or for a minute when it names no trial.
@@ -131,20 +105,10 @@ class TrialTokenReader:
         self._verify = verify
         self._max_cached_tokens = max_cached_tokens
         self._clock = clock
-        self._entries: dict[str, tuple[float, TrialClaims | RouterKeyClaims | None]] = {}
+        self._entries: dict[str, tuple[float, TrialClaims | None]] = {}
 
     async def trial(self, token: str) -> TrialClaims | None:
         """The trial ``token`` was issued to, or ``None``.
-
-        Raises:
-            Exception: Whatever ``verify`` raises when it can't decide, such as the platform's signing keys being
-                unreachable. Nothing is remembered then.
-        """
-        claims = await self.claims(token)
-        return claims if isinstance(claims, TrialClaims) else None
-
-    async def claims(self, token: str) -> TrialClaims | RouterKeyClaims | None:
-        """The evals credential ``token`` is, or ``None``.
 
         Raises:
             Exception: Whatever ``verify`` raises when it can't decide, such as the platform's signing keys being
@@ -155,14 +119,14 @@ class TrialTokenReader:
         if cached is not None and now < cached[0]:
             return cached[1]
         claims = await self._verify(token) if self._verify is not None else unsigned_token_claims(token, now=now)
-        evals = evals_claims(claims) if claims is not None else None
+        trial = TrialClaims.from_token_claims(claims) if claims is not None else None
         expires_at = claims.get("exp") if claims is not None else None
-        if evals is None or not isinstance(expires_at, int | float):
+        if trial is None or not isinstance(expires_at, int | float):
             expires_at = now + REJECTED_TOKEN_CACHE_SEC
-        self._remember(token, float(expires_at), evals, now)
-        return evals
+        self._remember(token, float(expires_at), trial, now)
+        return trial
 
-    def _remember(self, token: str, until: float, trial: TrialClaims | RouterKeyClaims | None, now: float) -> None:
+    def _remember(self, token: str, until: float, trial: TrialClaims | None, now: float) -> None:
         self._entries.pop(token, None)
         if len(self._entries) >= self._max_cached_tokens:
             self._entries = {key: entry for key, entry in self._entries.items() if now < entry[0]}

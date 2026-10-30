@@ -3,7 +3,7 @@
 
 """The models an evals credential may call through the Inference Gateway.
 
-A trial token or router key carries one (see :mod:`nemo_evals.gateway.tokens`), and the gateway's access check holds
+A trial token carries one (see :mod:`nemo_evals.gateway.tokens`), and the gateway's access check holds
 every call made with it to the policy (see :mod:`nemo_evals.gateway.middleware.evals_access`).
 """
 

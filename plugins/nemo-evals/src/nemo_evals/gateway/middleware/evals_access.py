@@ -3,7 +3,7 @@
 
 """``nemo-evals-access``: the Inference Gateway access check, refusing each call its caller's evals credential doesn't allow.
 
-A trial token or router key lists the VirtualModels it may call, and a closed policy requires each to be closed-book
+A trial token lists the VirtualModels it may call, and a closed policy requires each to be closed-book
 (see :mod:`nemo_evals.gateway.policy`). The gateway calls :meth:`ModelPolicyEnforcer.check` for every call on every
 route before any VirtualModel's middleware runs, so a caller can't reach a model by a route its policy doesn't name.
 """
@@ -23,7 +23,7 @@ from nemo_evals.gateway.middleware.trial_recording import MIDDLEWARE_NAME as REC
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.gateway.recorder import CallRecorder, FinishedCall, intake_sink
 from nemo_evals.gateway.spans import CallerSpan
-from nemo_evals.gateway.tokens import TrialTokenReader, claims_evals_credential, platform_token_reader
+from nemo_evals.gateway.tokens import TrialTokenReader, claims_a_trial, platform_token_reader
 from nemo_evals.gateway.usage import CallApi, TokenUsage
 from nemo_helix_plugin.auth import inference_gateway_credential, platform_auth_enabled
 from nemo_helix_plugin.inference_middleware import (
@@ -130,7 +130,7 @@ class ModelPolicyEnforcer:
         """
         credential = inference_gateway_credential(request.headers)
         model = request.virtual_model_id
-        if credential is None or not claims_evals_credential(credential):
+        if credential is None or not claims_a_trial(credential):
             if not self._auth_enabled and model is not None:
                 virtual_model = self._virtual_model(model)
                 if virtual_model is not None and self._records_trials(virtual_model):
@@ -146,7 +146,7 @@ class ModelPolicyEnforcer:
                     )
             return
         try:
-            claims = await self._reader.claims(credential)
+            claims = await self._reader.trial(credential)
         except Exception as exc:
             logger.warning("Couldn't verify an evals credential", exc_info=True)
             raise InferenceMiddlewareUnavailableError("The caller's evals credential couldn't be verified.") from exc
