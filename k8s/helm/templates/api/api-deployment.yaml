@@ -32,7 +32,6 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
         {{- include "nemo-helix.podAnnotations" . | nindent 8 }}
-        checksum/clickhouse-credentials: {{ include "nemo-common.clickhouse.credentialsChecksum" . }}
       labels:
         app.kubernetes.io/component: {{ .Values.api.componentLabel | quote }}
         {{- include "nemo-helix.labels" . | nindent 8 }}
