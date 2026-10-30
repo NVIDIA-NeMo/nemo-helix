@@ -171,11 +171,19 @@ class JobScheduler(HeartbeatMixin, Controller):
                             "reason": e.message,
                         },
                     )
+                    deferred_status = self._deferred_status(step, e)
+                    if (
+                        HelixJobStatus(step.status) == deferred_status
+                        and (step.status_details or {}).get("message") == e.message
+                    ):
+                        # Already recorded on an earlier pass; skip the write so API and DB load
+                        # does not grow with queue depth times poll frequency.
+                        continue
                     try:
                         self._update_step_status_with_timing(
                             step=step,
                             phase="scheduling_deferred",
-                            status=self._deferred_status(step, e),
+                            status=deferred_status,
                             status_details={"message": e.message},
                         )
                     except Exception:
