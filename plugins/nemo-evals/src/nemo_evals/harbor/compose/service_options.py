@@ -433,20 +433,26 @@ def _mount_entry(
     """Read one ``volumes`` entry as a mount of a named volume; bind mounts are refused.
 
     ``"data:/var/lib/db:ro"`` and ``{type: volume, source: data, target: /var/lib/db, read_only: true}`` both
-    mount ``data`` read-only. ``"/db"`` and ``{type: volume, target: /db}`` are anonymous volumes: Compose gives the
-    container a fresh volume of its own, so the mount gets ``anonymous_name``, which no other container mounts.
-    ``"./data:/db"`` is a bind mount.
+    mount ``data`` read-only. ``{type: volume, target: /db, volume: {nocopy: true}}`` is an anonymous volume:
+    Compose gives the container a fresh volume of its own, so the mount gets ``anonymous_name``, which no other
+    container mounts. ``"./data:/db"`` is a bind mount.
+
+    Docker fills a new anonymous volume with the image's files at its path, and a pod's volume starts empty, so an
+    anonymous volume is accepted only with ``nocopy``, which has Docker start it empty too. The short form ``"/db"``
+    can't say ``nocopy``, so it's unsupported.
     """
     source: Any
     target: Any
     read_only = False
+    nocopy = False
 
     # Short form `source:target[:ro]`, or long form `{type, source, target, read_only}`.
     if isinstance(entry, str):
         parts = entry.split(":")
-        # A lone path, such as "/data", asks Compose for a fresh unnamed volume there.
+        # A lone path, such as "/data", asks Compose for a fresh unnamed volume there, filled from the image.
         if len(parts) == 1:
-            return _anonymous_mount(parts[0], anonymous_name, False, path, problems)
+            problems.unsupported(_ANONYMOUS_WITHOUT_NOCOPY.format(path=path, target=parts[0]))
+            return None
         # The third part is a comma-separated list of options, such as "ro,z"; only `ro` changes anything here.
         source, target = parts[0], parts[1]
         read_only = len(parts) > 2 and "ro" in parts[2].split(",")
@@ -464,12 +470,16 @@ def _mount_entry(
             for option in options:
                 if option != "nocopy":
                     problems.unsupported(f"{path}.volume.{option}")
+            nocopy = bool(parse_boolean(options.get("nocopy"), f"{path}.volume.nocopy", problems))
     else:
         problems.invalid(path, "expected a string or a mapping")
         return None
 
     # A long-form volume with no source is anonymous, as a lone path is in the short form.
     if isinstance(entry, dict) and source is None:
+        if not nocopy:
+            problems.unsupported(_ANONYMOUS_WITHOUT_NOCOPY.format(path=path, target=target))
+            return None
         return _anonymous_mount(target, anonymous_name, read_only, path, problems)
     # What a pod can't do: an empty source (as `${UNSET}:/data` gives), a host path, or a volume the file never declared.
     if not isinstance(source, str) or not isinstance(target, str) or not source:
@@ -481,6 +491,13 @@ def _mount_entry(
     else:
         return ComposeVolumeMount(name=source, mount_path=target, read_only=read_only)
     return None
+
+
+# Why an anonymous volume without `nocopy` is refused, and how to write one that's accepted.
+_ANONYMOUS_WITHOUT_NOCOPY = (
+    "{path}: an anonymous volume without nocopy (Docker would fill it from the image; a pod starts it empty). "
+    "Write it as {{type: volume, target: {target}, volume: {{nocopy: true}}}}"
+)
 
 
 def _anonymous_mount(
@@ -572,6 +589,10 @@ def parse_capabilities(
 _NO_NEW_PRIVILEGES = re.compile(r"no-new-privileges(?:[:=](?P<value>true|false))?")
 
 
+# The largest uid or gid Linux allows: ids are 32-bit, and the top one, -1, means "none".
+_MAX_ID = 2**32 - 2
+
+
 def _parse_user(value: Any, path: str, problems: ComposeProblems) -> tuple[int | None, int | None]:
     """Read ``user`` as ``(uid, gid)``: ``"1000:1000"`` gives ``(1000, 1000)`` and ``1000`` gives ``(1000, None)``.
 
@@ -587,6 +608,10 @@ def _parse_user(value: Any, path: str, problems: ComposeProblems) -> tuple[int |
     match = re.fullmatch(r"([0-9]+)(?::([0-9]+))?", str(value))
     if match is None:
         problems.unsupported(f"{path}: {value!r} (only a numeric uid[:gid])")
+        return None, None
+    # Checked by length first, so a number with thousands of digits is never converted.
+    if any(id_ is not None and (len(id_) > 10 or int(id_) > _MAX_ID) for id_ in match.groups()):
+        problems.invalid(path, f"{value!r} is above the largest uid or gid Linux allows, {_MAX_ID}")
         return None, None
     uid, gid = match.groups()
     return int(uid), int(gid) if gid is not None else None
@@ -648,8 +673,8 @@ def parse_security(raw_service: Mapping[str, Any], path: str, problems: ComposeP
     return None if security == ComposeSecurity() else security
 
 
-# tmpfs options an ``emptyDir`` already behaves as. Its mode is 0777, which lacks only ``1777``'s sticky bit.
-_NO_EFFECT_TMPFS_OPTIONS = frozenset({"rw", "exec", "suid", "dev", "mode=777", "mode=0777", "mode=1777", "mode=01777"})
+# tmpfs options an ``emptyDir`` already behaves as. Its mode is always 0777.
+_NO_EFFECT_TMPFS_OPTIONS = frozenset({"rw", "exec", "suid", "dev", "mode=777", "mode=0777"})
 
 
 def _tmpfs_entry(
@@ -658,8 +683,9 @@ def _tmpfs_entry(
     """Read one ``tmpfs`` entry, ``/path[:option,...]``, as a mount a pod can make; None when it can't.
 
     A pod's memory-backed ``emptyDir`` takes a size and nothing else. ``size=`` becomes its limit, and options it
-    already behaves as are accepted. ``nosuid`` and ``nodev`` are accepted when the service already guarantees them
-    another way; any other option (``noexec``, ``ro``, ``uid=``, a narrower ``mode``) would be lost, so it's unsupported.
+    already behaves as are accepted. ``nosuid``, ``nodev`` and ``mode=1777`` are accepted when the service already
+    guarantees them another way; any other option (``noexec``, ``ro``, ``uid=``, a narrower ``mode``) would be lost, so
+    it's unsupported.
     """
     if not isinstance(entry, str):
         problems.invalid(path, "expected a path with optional options, such as /tmp:size=64m")
@@ -670,14 +696,23 @@ def _tmpfs_entry(
         problems.invalid(path, f"{mount_path!r} is not an absolute path")
         return None
 
-    # An emptyDir can't be mounted nosuid or nodev, but the service's own settings give the same protection:
-    # with no-new-privileges a setuid program raises no privileges, and without MKNOD nothing can create a device
-    # file. For each option, the setting the service is missing, or None when it has it.
+    # An emptyDir can't be mounted nosuid or nodev, or given the sticky bit of mode 1777, but the service's own
+    # settings can give the same protection:
+    # * nosuid: with no-new-privileges, a setuid program raises no privileges.
+    # * nodev: without MKNOD, nothing can create a device file.
+    # * mode=1777: the sticky bit stops one user deleting another's files. With every capability dropped and
+    #   no-new-privileges, nothing in the container can become a second user, so there's no one to protect from.
+    # For each option, the setting the service is missing, or None when it has it.
     no_new_privileges = security is not None and security.no_new_privileges
-    drops_mknod = security is not None and bool({"ALL", "MKNOD"} & set(security.cap_drop))
+    drops = set(security.cap_drop) if security is not None else set()
+    drops_mknod = bool({"ALL", "MKNOD"} & drops)
+    single_user = no_new_privileges and "ALL" in drops
+    sticky_requirement = None if single_user else "cap_drop: [ALL] and security_opt: [no-new-privileges]"
     missing_setting = {
         "nosuid": None if no_new_privileges else "security_opt: [no-new-privileges]",
         "nodev": None if drops_mknod else "cap_drop: [MKNOD] or [ALL]",
+        "mode=1777": sticky_requirement,
+        "mode=01777": sticky_requirement,
     }
 
     size = None

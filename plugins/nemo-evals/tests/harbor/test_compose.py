@@ -1078,6 +1078,7 @@ services:
     volumes:
       - type: volume
         target: /logs
+        volume: {nocopy: true}
 """
 
 
@@ -1119,6 +1120,13 @@ def test_a_user_or_group_name_is_unsupported(tmp_path: Path, user: str) -> None:
     error = _error(tmp_path, f"services:\n  a:\n    image: redis\n    user: {user}\n")
     assert error.code == "compose_unsupported"
     assert error.paths[0].startswith("services.a.user: ")
+
+
+@pytest.mark.parametrize("user", ['"4294967295"', '"1000:4294967295"', '"' + "9" * 5000 + '"'])
+def test_a_user_above_linux_s_largest_id_is_invalid(tmp_path: Path, user: str) -> None:
+    error = _error(tmp_path, f"services:\n  a:\n    image: redis\n    user: {user}\n")
+    assert error.code == "compose_invalid"
+    assert "is above the largest uid or gid Linux allows, 4294967294" in error.detail
 
 
 def test_cap_drop_is_written_as_kubernetes_names_it(tmp_path: Path) -> None:
@@ -1179,6 +1187,16 @@ def test_tmpfs_becomes_a_memory_backed_mount(tmp_path: Path, tmpfs: str, mounts:
         ("", "ro", "services.a.tmpfs[0]: ro"),
         ("", "uid=1000", "services.a.tmpfs[0]: uid=1000"),
         ("", "mode=0700", "services.a.tmpfs[0]: mode=0700"),
+        (
+            "cap_drop: [ALL]",
+            "mode=1777",
+            "services.a.tmpfs[0]: mode=1777 without cap_drop: [ALL] and security_opt: [no-new-privileges]",
+        ),
+        (
+            "security_opt: [no-new-privileges]",
+            "mode=01777",
+            "services.a.tmpfs[0]: mode=01777 without cap_drop: [ALL] and security_opt: [no-new-privileges]",
+        ),
     ],
 )
 def test_tmpfs_options_a_pod_would_lose_are_unsupported(
@@ -1198,6 +1216,20 @@ def test_nosuid_and_nodev_hold_once_the_service_drops_what_they_guard_against(tm
         cap_drop: [MKNOD]
         security_opt: [no-new-privileges]
         tmpfs: ["/run:nosuid,nodev"]
+    """
+    assert _service(_spec(tmp_path, compose), "a")["tmpfs"] == [{"mount_path": "/run"}]
+
+
+def test_mode_1777_holds_once_nothing_can_become_a_second_user(tmp_path: Path) -> None:
+    # A pod's folder lacks the sticky bit, which only protects one user's files from another's. With every
+    # capability dropped and no-new-privileges, everything in the container runs as one user.
+    compose = """
+    services:
+      a:
+        image: redis
+        cap_drop: [ALL]
+        security_opt: [no-new-privileges]
+        tmpfs: ["/run:mode=1777"]
     """
     assert _service(_spec(tmp_path, compose), "a")["tmpfs"] == [{"mount_path": "/run"}]
 
@@ -1222,10 +1254,13 @@ def test_anonymous_volumes_are_private_to_their_container(tmp_path: Path) -> Non
         """
         services:
           main:
-            volumes: [/cache]
+            volumes: [{type: volume, target: /cache, volume: {nocopy: true}}]
           a:
             image: redis
-            volumes: [shared:/shared, /data, {type: volume, target: /scratch, read_only: true}]
+            volumes:
+              - shared:/shared
+              - {type: volume, target: /data, volume: {nocopy: true}}
+              - {type: volume, target: /scratch, read_only: true, volume: {nocopy: true}}
         volumes:
           shared: {}
         """,
@@ -1240,14 +1275,29 @@ def test_anonymous_volumes_are_private_to_their_container(tmp_path: Path) -> Non
     assert spec["main"]["volume_mounts"] == [{"name": "main-anon-0", "mount_path": "/cache"}]
 
 
+@pytest.mark.parametrize("volume", ["/data", {"type": "volume", "target": "/data"}])
+def test_an_anonymous_volume_without_nocopy_is_unsupported(tmp_path: Path, volume: Any) -> None:
+    # Docker would fill it with the image's files at /data; a pod's volume starts empty.
+    error = _error(tmp_path, json.dumps({"services": {"a": {"image": "redis", "volumes": [volume]}}}))
+    assert error.code == "compose_unsupported"
+    assert error.paths == (
+        "services.a.volumes[0]: an anonymous volume without nocopy (Docker would fill it from the image; a pod starts "
+        "it empty). Write it as {type: volume, target: /data, volume: {nocopy: true}}",
+    )
+
+
 def test_a_declared_volume_named_like_an_anonymous_one_is_invalid(tmp_path: Path) -> None:
-    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    volumes: [/data]\nvolumes:\n  a-anon-0: {}\n")
+    compose = (
+        "services:\n  a:\n    image: redis\n    volumes: [{type: volume, target: /data, volume: {nocopy: true}}]\n"
+    )
+    error = _error(tmp_path, compose + "volumes:\n  a-anon-0: {}\n")
     assert error.code == "compose_invalid"
     assert "volumes.a-anon-0: this name is reserved for an anonymous volume" in error.detail
 
 
 def test_an_anonymous_volume_needs_an_absolute_path(tmp_path: Path) -> None:
-    error = _error(tmp_path, "services:\n  a:\n    image: redis\n    volumes: [{type: volume, target: data}]\n")
+    compose = "services:\n  a:\n    image: redis\n    volumes: [{type: volume, target: data, volume: {nocopy: true}}]\n"
+    error = _error(tmp_path, compose)
     assert error.code == "compose_invalid"
     assert "an anonymous volume needs an absolute container path" in error.detail
 
@@ -1261,8 +1311,38 @@ def test_a_read_only_main_needs_somewhere_writable_for_harbor(tmp_path: Path) ->
     error = _error(
         tmp_path / "read-only-volume",
         "services:\n  main:\n    read_only: true\n    tmpfs: [/tests, /solution]\n"
-        "    volumes: [{type: volume, target: /logs, read_only: true}]\n",
+        "    volumes: [{type: volume, target: /logs, read_only: true, volume: {nocopy: true}}]\n",
     )
+    assert error.paths == ("/logs/agent", "/logs/verifier", "/logs/artifacts")
+
+
+def test_a_read_only_main_needs_a_writable_temp_folder_at_submit(tmp_path: Path) -> None:
+    # Commands write their output to /tmp before running, so on a read-only main without it, none of them could run.
+    compose = "services:\n  main:\n    read_only: true\n    tmpfs: [/logs, /tests, /solution]\n"
+    with pytest.raises(ComposeError) as caught:
+        compose_services_kwarg(_task(tmp_path, compose))
+    assert caught.value.code == "compose_unsupported"
+    assert "needs a writable tmpfs or volume at /tmp" in caught.value.detail
+
+
+def test_a_read_only_mount_inside_a_writable_one_is_what_counts(tmp_path: Path) -> None:
+    # The container uses the closest mount, so /logs/agent is read-only even though /logs is writable.
+    error = _error(
+        tmp_path,
+        "services:\n  main:\n    read_only: true\n    tmpfs: [/logs, /tests, /solution]\n"
+        "    volumes: [{type: volume, target: /logs/agent, read_only: true, volume: {nocopy: true}}]\n",
+    )
+    assert error.code == "compose_unsupported"
+    assert error.paths == ("/logs/agent",)
+
+
+def test_a_read_only_mount_over_harbor_s_folders_is_refused_on_any_main(tmp_path: Path) -> None:
+    # main's own filesystem is writable here, but the read-only mount hides it at /logs.
+    error = _error(
+        tmp_path,
+        "services:\n  main:\n    volumes: [{type: volume, target: /logs, read_only: true, volume: {nocopy: true}}]\n",
+    )
+    assert error.code == "compose_unsupported"
     assert error.paths == ("/logs/agent", "/logs/verifier", "/logs/artifacts")
 
 

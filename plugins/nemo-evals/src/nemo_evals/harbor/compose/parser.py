@@ -176,7 +176,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         compose_path=compose_path,
     )
     services, main, log_volumes = _share_harbor_log_mounts(services, main, resolved.harbor_log_mounts)
-    _check_read_only_main(main, resolved.workdir, compose_path)
+    _check_harbor_paths_writable(main, resolved.workdir, compose_path)
 
     # Only a prebuilt task runs the image named in the compose file; a built `main` comes from its Dockerfile.
     main_image = resolved.main.get("image")
@@ -414,29 +414,39 @@ def _check_main_network_mode(
         problems.unsupported(f"services.{MAIN_SERVICE}.network_mode: none, alongside other services")
 
 
-def _check_read_only_main(main: ComposeMainSettings, workdir: str | None, compose_path: str) -> None:
-    """Raise if ``main`` is ``read_only`` and Harbor couldn't write where it needs to.
+def _check_harbor_paths_writable(main: ComposeMainSettings, workdir: str | None, compose_path: str) -> None:
+    """Raise if Harbor couldn't write somewhere it needs to in ``main``.
 
     Harbor writes its logs, and uploads the tests and the solution, into ``main``. The sandbox also creates
-    ``task.toml``'s ``workdir`` there when it starts, unless it's ``/``. Each of those paths needs a ``tmpfs`` or a
-    writable volume over it; without one the trial would only fail later, when the sandbox starts or the verifier runs.
-    """
-    if main.security is None or not main.security.read_only:
-        return
+    ``task.toml``'s ``workdir`` there when it starts, unless it's ``/``. Without this check such a task would only fail
+    later, when the sandbox starts or the verifier runs.
 
-    writable_mounts = [mount.mount_path for mount in main.tmpfs]
-    writable_mounts += [mount.mount_path for mount in main.volume_mounts if not mount.read_only]
+    What decides is the closest mount over each path, as in the container: a read-only mount inside a writable one
+    wins over it. A path no mount covers is on the image's own filesystem, which is writable unless ``main`` is
+    ``read_only``.
+    """
+    main_is_read_only = main.security is not None and main.security.read_only
+    # Each mount over main, and whether it can be written.
+    mounts = [(PurePosixPath(mount.mount_path), True) for mount in main.tmpfs]
+    mounts += [(PurePosixPath(mount.mount_path), not mount.read_only) for mount in main.volume_mounts]
+
     paths_written = [*_PATHS_HARBOR_WRITES, *([workdir] if workdir and workdir != "/" else [])]
-    # A path is writable when it's a writable mount or sits under one.
-    unwritable_paths = [
-        path
-        for path in paths_written
-        if not any(PurePosixPath(path).is_relative_to(mount) for mount in writable_mounts)
-    ]
+    unwritable_paths = []
+    for path in paths_written:
+        covering_mounts = [
+            (mount_path, writable) for mount_path, writable in mounts if PurePosixPath(path).is_relative_to(mount_path)
+        ]
+        if covering_mounts:
+            _closest_path, writable = max(covering_mounts, key=lambda mount: len(mount[0].parts))
+        else:
+            writable = not main_is_read_only
+        if not writable:
+            unwritable_paths.append(path)
+
     if unwritable_paths:
         raise ComposeError(
             "compose_unsupported",
-            "main is read_only, but Harbor writes to these paths; mount a tmpfs or a volume over each",
+            "Harbor writes to these paths in main, but they aren't writable; mount a writable tmpfs or volume over each",
             compose_path=compose_path,
             paths=tuple(unwritable_paths),
         )
