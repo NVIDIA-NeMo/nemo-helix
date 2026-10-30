@@ -117,6 +117,8 @@ auth:
     userinfo_endpoint:
     # Expected token audience. Required when OIDC is enabled; tokens must include this value in their 'aud' claim.
     audience:
+    # Extra audiences accepted alongside audience, for identity providers that set 'aud' to the issuing client's ID so tokens from several clients carry different values. A token is accepted when its 'aud' claim includes audience or any of these.
+    additional_audiences: []
     # JWT claim containing the principal email (maps to X-NHX-Principal-Email). Set explicitly for your IdP. | default: 'email'
     email_claim: email
     # JWT claim containing user groups. Supports 'groups' (standard) and 'cognito:groups' (AWS Cognito). | default: 'groups'

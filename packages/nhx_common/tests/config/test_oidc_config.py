@@ -50,6 +50,11 @@ def test_oidc_enabled_accepts_audience() -> None:
     assert OIDCConfig(enabled=True, issuer="https://sso.example.com", audience="nemo-helix").audience == "nemo-helix"
 
 
+def test_oidc_additional_audiences_default_empty() -> None:
+    config = OIDCConfig(enabled=True, issuer="https://sso.example.com", audience="nemo-helix")
+    assert config.additional_audiences == []
+
+
 def test_oidc_disabled_does_not_require_audience() -> None:
     assert OIDCConfig(enabled=False).audience is None
 
