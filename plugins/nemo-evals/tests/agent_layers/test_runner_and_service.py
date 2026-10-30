@@ -16,7 +16,7 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, layer_entity_name
-from nemo_evals.agent_layers.runner import AgentLayerBuildSpec, run_agent_layer_build
+from nemo_evals.agent_layers.runner import AgentLayerBuildSpec, layer_builder_name, run_agent_layer_build
 from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
 from nemo_evals.entities import TaskEntity
 from nemo_evals.image_builds.service import BuildJob
@@ -272,3 +272,12 @@ def test_the_job_fetches_the_installer_onto_storage_its_build_step_reads() -> No
     assert build.config == spec.model_dump(mode="json")
     assert is_job_for(request.custom_fields, spec)
     assert not is_job_for(request.custom_fields, spec.model_copy(update={"attempt": 2}))
+
+
+def test_the_layers_builder_name_covers_everything_the_layer_holds() -> None:
+    base = {"environment": "e" * 64, "agent_key": "k", "user": "agent", "platform": None}
+    name = layer_builder_name(**base)
+
+    assert name.startswith("harbor-agent-") and name == layer_builder_name(**base)
+    for field, other in [("environment", "f" * 64), ("agent_key", "k2"), ("user", "root"), ("platform", "linux/arm64")]:
+        assert layer_builder_name(**{**base, field: other}) != name

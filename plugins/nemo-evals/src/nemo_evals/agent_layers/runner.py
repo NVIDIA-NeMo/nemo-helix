@@ -132,7 +132,9 @@ async def _submit(
             main = await asyncio.to_thread(_plan_main, definition, archive)
             base_image = str(normalize_reference(main.image)) if main.image is not None else None
             environment = main.context_digest if base_image is None else base_image
-            name = layer_builder_name(environment=environment or "", agent_key=spec.agent_key, platform=main.platform)
+            name = layer_builder_name(
+                environment=environment or "", agent_key=spec.agent_key, user=user, platform=main.platform
+            )
             built = await usable_build(builder, name)
             if built is None:
                 environment_dockerfile = await asyncio.to_thread(_stage_environment, main, archive, context)
@@ -163,9 +165,11 @@ async def _submit(
     return image
 
 
-def layer_builder_name(*, environment: str, agent_key: str, platform: str | None) -> str:
-    """Builder build-set name for a layer: keyed by the environment it builds on, the agent install and platform."""
-    key = json.dumps({"v": 1, "environment": environment, "agent": agent_key, "platform": platform}, sort_keys=True)
+def layer_builder_name(*, environment: str, agent_key: str, user: str | int | None, platform: str | None) -> str:
+    """Builder build-set name for a layer: keyed by the environment it builds on, the agent install, the task's agent
+    user (installs write into that user's home) and the platform."""
+    document = {"v": 1, "environment": environment, "agent": agent_key, "user": user, "platform": platform}
+    key = json.dumps(document, sort_keys=True)
     return f"{_BUILDER_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
 
 
