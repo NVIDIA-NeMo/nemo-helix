@@ -126,6 +126,13 @@ def _version_string(name: str, value: str | float | int) -> str:
     return value
 
 
+def fabric_install_spec(package: str, python_version: str, uv_version: str) -> str:
+    """What an install of ``package`` puts in the venv, as :data:`INSTALL_MARKER` records it."""
+    return json.dumps(
+        {"package": package, "python": python_version, "uv": uv_version}, sort_keys=True, separators=(",", ":")
+    )
+
+
 def _quoted_requirements(package: str) -> str:
     """``fabric_package`` split like a shell command line, each requirement re-quoted as one argument."""
     requirements = shlex.split(package)
@@ -274,12 +281,8 @@ class FabricInstalledAgent(BaseInstalledAgent):
     @property
     def install_spec(self) -> str:
         """What an install puts in the venv; :data:`INSTALL_MARKER` holds it once the install finished."""
-        spec = {
-            "package": self.fabric.fabric_package,
-            "python": self.fabric_python_version,
-            "uv": self.fabric_uv_version,
-        }
-        return json.dumps(spec, sort_keys=True, separators=(",", ":"))
+        assert self.fabric.fabric_package is not None  # checked in __init__
+        return fabric_install_spec(self.fabric.fabric_package, self.fabric_python_version, self.fabric_uv_version)
 
     async def _already_installed(self, environment: BaseEnvironment) -> bool:
         marker = shlex.quote(str(PurePosixPath(self._venv_path) / INSTALL_MARKER))
