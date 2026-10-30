@@ -139,11 +139,7 @@ async def adopt_or_build(
     winner's build instead.
     """
     for _ in range(_ADOPT_ATTEMPTS):
-        newest: ContainerImage | None = None
-        revision = 1
-        while (image := await builder.get_image(f"{name}-{revision}")) is not None:
-            newest = image
-            revision += 1
+        newest, revision = await _newest(builder, name)
         if newest is not None and not await _abandoned(builder, newest):
             return newest
         try:
@@ -155,6 +151,25 @@ async def adopt_or_build(
             continue
         return submitted.images[0]
     raise RuntimeError(f"Builder build {name} kept being submitted by other requests; try again")
+
+
+async def usable_build(builder: ImageBuilder, name: str) -> ContainerImage | None:
+    """The newest build of ``name`` that is ready, or still building; None when there is none to use.
+
+    What :func:`adopt_or_build` would use without submitting, so a caller can skip preparing a source it won't need.
+    """
+    newest, _ = await _newest(builder, name)
+    return newest if newest is not None and not await _abandoned(builder, newest) else None
+
+
+async def _newest(builder: ImageBuilder, name: str) -> tuple[ContainerImage | None, int]:
+    """The newest revision of ``name`` and the next revision number."""
+    newest: ContainerImage | None = None
+    revision = 1
+    while (image := await builder.get_image(f"{name}-{revision}")) is not None:
+        newest = image
+        revision += 1
+    return newest, revision
 
 
 async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:

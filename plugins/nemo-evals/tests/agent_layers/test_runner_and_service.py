@@ -118,9 +118,11 @@ class _Files:
     def __init__(self) -> None:
         self.create_fileset = AsyncMock()
         self.uploads: dict[tuple[str, str], bytes] = {}
+        self.upload_calls = 0
 
     async def upload_file(self, *, workspace: str, name: str, path: str, content: bytes) -> Mock:
         self.uploads[(name, path)] = content
+        self.upload_calls += 1
         return Mock()
 
 
@@ -201,6 +203,7 @@ async def test_tasks_whose_environments_hold_the_same_files_share_one_build(
 
     assert layer.status == "ready"
     assert len(builder.submits) == 1
+    assert files.upload_calls == 1  # the second task found the build and uploaded no context
 
 
 async def test_a_compose_task_gets_no_layer(entity_store, store_task, monkeypatch, tmp_path) -> None:
