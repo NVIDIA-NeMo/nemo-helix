@@ -200,28 +200,6 @@ def squad_val_rows(chat_format_cache: Path) -> list[dict]:
 
 
 @pytest.fixture(scope="module")
-def unsloth_train_fileset(client: NemoClient, customizer_workspace: str, chat_format_cache: Path) -> str:
-    return stage_assets.stage_dataset_fileset(
-        client,
-        customizer_workspace,
-        local_dir=chat_format_cache,
-        name_prefix="squad-train",
-        files={"train.jsonl": "training.jsonl"},
-    )
-
-
-@pytest.fixture(scope="module")
-def unsloth_val_fileset(client: NemoClient, customizer_workspace: str, chat_format_cache: Path) -> str:
-    return stage_assets.stage_dataset_fileset(
-        client,
-        customizer_workspace,
-        local_dir=chat_format_cache,
-        name_prefix="squad-val",
-        files={"validation.jsonl": "validation.jsonl"},
-    )
-
-
-@pytest.fixture(scope="module")
 def helpsteer_dpo_fileset(client: NemoClient, customizer_workspace: str, dpo_cache: Path) -> str:
     return stage_assets.stage_dataset_fileset(
         client,
@@ -260,30 +238,6 @@ def squad_smoke_fileset(client: NemoClient, customizer_workspace: str, chat_form
         local_dir=chat_format_cache,
         name_prefix="squad-smoke",
         files={"train.jsonl": "training.jsonl", "validation.jsonl": "validation.jsonl"},
-        max_rows=SMOKE_DATASET_ROWS,
-    )
-
-
-@pytest.fixture(scope="module")
-def unsloth_smoke_train_fileset(client: NemoClient, customizer_workspace: str, chat_format_cache: Path) -> str:
-    return stage_assets.stage_dataset_fileset(
-        client,
-        customizer_workspace,
-        local_dir=chat_format_cache,
-        name_prefix="squad-smoke-train",
-        files={"train.jsonl": "training.jsonl"},
-        max_rows=SMOKE_DATASET_ROWS,
-    )
-
-
-@pytest.fixture(scope="module")
-def unsloth_smoke_val_fileset(client: NemoClient, customizer_workspace: str, chat_format_cache: Path) -> str:
-    return stage_assets.stage_dataset_fileset(
-        client,
-        customizer_workspace,
-        local_dir=chat_format_cache,
-        name_prefix="squad-smoke-val",
-        files={"validation.jsonl": "validation.jsonl"},
         max_rows=SMOKE_DATASET_ROWS,
     )
 

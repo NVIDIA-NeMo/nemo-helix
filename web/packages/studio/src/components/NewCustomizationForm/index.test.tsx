@@ -88,8 +88,6 @@ const validValidation: CustomizationDatasetValidationResult = {
   encoding: { ok: true, fileErrors: [] },
   hasTraining: true,
   hasValidation: false,
-  unmatchedRootJson: [],
-  unmatchedRootJsonValid: true,
   autoSplitNotice: false,
   training: [],
   validation: [],
@@ -278,11 +276,8 @@ describe('NewCustomizationForm', () => {
     await waitFor(() => expect(mutateAutomodel).not.toHaveBeenCalled());
   });
 
-  /**
-   * The dataset picker writes the validation reference and no field renders it, so the
-   * only thing proving it survives to the API is the request itself.
-   */
-  it('submits the validation dataset the picker resolved', async () => {
+  /** The backend finds the validation files in the dataset fileset, so no validation reference is sent. */
+  it('submits the one dataset fileset when it has validation files', async () => {
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue({
       ...validValidation,
       hasTraining: true,
@@ -307,10 +302,8 @@ describe('NewCustomizationForm', () => {
 
     await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
     const [[call]] = mutateAutomodel.mock.calls;
-    expect(call.data.spec.dataset).toMatchObject({
-      training: 'default/commonsense_qa',
-      validation: 'default/commonsense_qa',
-    });
+    expect(call.data.spec.dataset).toMatchObject({ training: 'default/commonsense_qa' });
+    expect(call.data.spec.dataset).not.toHaveProperty('validation');
   });
 
   /**

@@ -277,7 +277,7 @@ def _train(
     spec = AutomodelJobInput.model_validate(
         {
             "model": f"{workspace}/{base_entity}",
-            "dataset": {"training": f"{workspace}/{dataset}", "validation": f"{workspace}/{dataset}"},
+            "dataset": {"training": f"{workspace}/{dataset}"},
             "training": {"training_type": "sft", "finetuning_type": finetuning_type, "max_seq_length": 512},
             "schedule": {"epochs": 1, "max_steps": 5},
             "batch": {"global_batch_size": 4, "micro_batch_size": 1},

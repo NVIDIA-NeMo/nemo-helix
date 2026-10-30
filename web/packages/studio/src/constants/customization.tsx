@@ -41,45 +41,37 @@ export const CUSTOMIZATION_FILESET_FILE_PREFIXES: Record<CustomizationFileType, 
 };
 
 interface DatasetDiscoveryRule {
-  /** Top-level subdirectories whose contents are claimed by this category. */
+  /** Root directories whose files (directly inside) hold this split: TRAIN_DIRS / VAL_DIRS. */
   dirs: readonly string[];
-  /** Regexes matched against a root-level filename (basename) to claim it for this category. */
+  /** Root file names that hold this split: TRAIN_PATTERNS / VAL_PATTERNS as regexes. */
   filePatterns: readonly RegExp[];
-  label: string;
-  required: boolean;
 }
 
 /**
- * Discovery rules mirroring the Customizer service's heuristics in
- * services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py.
- *
- * Customizer accepts any .jsonl/.json file in the named subdirs OR any root-level
- * file whose basename matches the given patterns. A lone unmatched root .jsonl is
- * also treated as training (auto-split applies); that fallback lives in the discovery
- * hook, not in this table.
+ * The rule every Customizer backend shares
+ * (packages/nhx_customization_common/src/nhx/customization_common/dataset_files.py),
+ * matched case-sensitively. With no file matching either split, every root .jsonl file is
+ * training data. useDatasetFileDiscovery applies the rule.
  */
-/**
- * Customizer's default validation-split ratio when no validation files are found.
- * Source: services/customizer/src/nhx/customizer/tasks/training/datasets/preparation.py
- * (prepare_dataset val_split_ratio=0.1).
- */
-export const CUSTOMIZER_AUTO_VAL_SPLIT_RATIO = 0.1;
-
 export const CUSTOMIZATION_DATASET_DISCOVERY: Record<CustomizationFileType, DatasetDiscoveryRule> =
   {
     [CustomizationFileType.Training]: {
       dirs: ['train', 'training'],
       filePatterns: [/^train.*\.jsonl?$/, /^training.*\.jsonl?$/],
-      label: 'Training',
-      required: true,
     },
     [CustomizationFileType.Validation]: {
       dirs: ['val', 'validation', 'dev'],
       filePatterns: [/^val.*\.jsonl?$/, /^validation.*\.jsonl?$/, /^dev.*\.jsonl?$/],
-      label: 'Validation',
-      required: false,
     },
   };
+
+/**
+ * Share of the training rows Customizer holds out for validation when the dataset has no
+ * validation files: the default `schedule.validation_split` of automodel and unsloth, and
+ * the fixed split of rl.
+ */
+export const CUSTOMIZER_AUTO_VAL_SPLIT_RATIO = 0.1;
+
 export const CUSTOMIZATION_FILESET_FILEPATHS: Record<CustomizationFileType, string> = {
   [CustomizationFileType.Training]: `${CUSTOMIZATION_FILESET_FILE_PREFIXES.Training}/training_file.jsonl`,
   [CustomizationFileType.Validation]: `${CUSTOMIZATION_FILESET_FILE_PREFIXES.Validation}/validation_file.jsonl`,

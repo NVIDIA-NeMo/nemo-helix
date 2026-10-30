@@ -48,8 +48,7 @@ An Automodel job is configured with the following top-level sections: `model`, `
 | Field | Description | Default |
 |-------|-------------|---------|
 | `model` | Base **Model Entity** reference (`name` or `workspace/name`) to fine-tune | *(required)* |
-| `dataset.training` | Training fileset reference (`name` or `workspace/name`) | *(required)* |
-| `dataset.validation` | Optional validation fileset reference | `null` |
+| `dataset.training` | Dataset fileset reference (`name` or `workspace/name`), holding the training file and, optionally, the validation file, told apart by name (`train.jsonl`, `validation.jsonl`) | *(required)* |
 | `dataset.prompt_template` | Optional prompt template for custom dataset schemas | `null` |
 
 ### Training Method
@@ -77,6 +76,7 @@ LoRA parameters (`training.lora`):
 | `schedule.epochs` | Number of passes over the training data | `1` |
 | `schedule.max_steps` | Optional cap on training steps. When set, training stops at this many steps even if `epochs` is not reached | `null` |
 | `schedule.val_check_interval` | Validation cadence. Use a fractional value (e.g. `0.5` for twice per epoch); avoid integer step counts that may not divide evenly | `null` |
+| `schedule.validation_split` | Share of the training rows held out for validation when the dataset has no validation file | `0.1` |
 | `schedule.seed` | Random seed | `null` |
 
 ### Batch
@@ -178,10 +178,9 @@ Full-weight training (`training.finetuning_type: "all_weights"`) cannot be combi
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `dataset.path` | Training fileset reference (`name` or `workspace/name`) | *(required)* |
+| `dataset.path` | Dataset fileset reference (`name` or `workspace/name`), holding the training file and, optionally, the validation file, told apart by name (`train.jsonl`, `validation.jsonl`) | *(required)* |
 | `dataset.text_field` | Row field consumed by the trainer | `text` |
 | `dataset.apply_chat_template` | Apply the tokenizer's chat template to rows containing a `messages` field | `false` |
-| `dataset.validation_path` | Optional validation fileset reference | `null` |
 | `dataset.packing` | Pack multiple samples into one sequence to reduce padding | `false` |
 
 ### Training Method
@@ -223,6 +222,7 @@ LoRA parameters (`training.lora`):
 | `schedule.logging_steps` | Logging cadence (steps) | `1` |
 | `schedule.save_steps` | Checkpoint cadence (steps) | `null` |
 | `schedule.eval_steps` | Evaluation cadence (steps) | `null` |
+| `schedule.validation_split` | Share of the training rows held out for validation when the dataset has no validation file | `0.1` |
 | `schedule.seed` | Random seed | `3407` |
 | `schedule.lr_scheduler_kwargs` | Additional scheduler arguments, such as `{"num_cycles": 3}` for `cosine_with_restarts` | `null` |
 
@@ -280,7 +280,7 @@ The `rl` backend runs two methods on a Ray cluster, selected by `training.type`.
 
 | `training.type` | Trains on | Dataset |
 |-----------------|-----------|---------|
-| `"dpo"` | Preference pairs | One fileset holding `training.jsonl` and `validation.jsonl` |
+| `"dpo"` | Preference pairs | One fileset holding a training file and, optionally, a validation file, such as `train.jsonl` and `validation.jsonl`; without one, 10% of the training rows are held out |
 | `"grpo"` | A reward environment | One dataset fileset of rollout rows, **plus** an environment fileset |
 
 <Note>

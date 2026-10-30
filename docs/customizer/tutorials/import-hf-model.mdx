@@ -292,10 +292,7 @@ OUTPUT_NAME = f"{MODEL_NAME}-lora-{job_suffix}"
 
 spec = AutomodelJobInput(
     model=f"default/{base_model.name}",
-    dataset=DatasetSpec(
-        training=f"default/{DATASET_NAME}",
-        validation=f"default/{DATASET_NAME}",
-    ),
+    dataset=DatasetSpec(training=f"default/{DATASET_NAME}"),
     training=TrainingSpec(
         training_type="sft",
         finetuning_type="lora",
