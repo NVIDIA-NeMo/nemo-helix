@@ -3650,6 +3650,7 @@ nemo inference providers create [OPTIONS] [NAME]
 * `--host-url`: The network endpoint URL for the model provider
 * `--api-key-secret-name`: Reference to an API key secret stored in the Secrets service. Create the secret first via secrets API, then pass the secret name here.
 * `--auth-header-format`: Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.
+* `--forward-caller-credential, --no-forward-caller-credential`: Send each call's caller credential to this provider instead of a stored key, for a router that calls models back through the gateway as its caller. With platform auth on, only a credential limited to the inference scope is sent. Leave `--api-key-secret-name` unset.
 * `--default-extra-body`: Default body parameters for inference requests. Can be overridden by user requests. (JSON string)
 * `--default-extra-headers`: Default headers for inference requests. Can be overridden by user requests. (JSON string)
 * `--description`: Optional description of the model provider
@@ -3799,6 +3800,7 @@ nemo inference providers update [OPTIONS] NAME
 * `--host-url`: The network endpoint URL for the model provider
 * `--api-key-secret-name`: Reference to an API key secret stored in the Secrets service. Create the secret first via secrets API, then pass the secret name here.
 * `--auth-header-format`: Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.
+* `--forward-caller-credential, --no-forward-caller-credential`: Send each call's caller credential to this provider instead of a stored key, for a router that calls models back through the gateway as its caller. With platform auth on, only a credential limited to the inference scope is sent. Leave `--api-key-secret-name` unset.
 * `--default-extra-body`: Default body parameters for inference requests. Can be overridden by user requests. (JSON string)
 * `--default-extra-headers`: Default headers for inference requests. Can be overridden by user requests. (JSON string)
 * `--description`: Optional description of the model provider

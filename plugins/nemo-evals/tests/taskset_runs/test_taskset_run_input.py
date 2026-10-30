@@ -287,6 +287,7 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "max_concurrent_task_jobs"), None, 10),
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
+        (("spec", "target", "closed_book"), False, True),
     ],
 )
 def test_digest_preserves_meaningful_request_differences(run_body, path, left, right):

@@ -82,6 +82,13 @@ def create_providers(
             help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
         ),
     ] = None,
+    forward_caller_credential: Annotated[
+        bool | None,
+        typer.Option(
+            "--forward-caller-credential/--no-forward-caller-credential",
+            help="Send each call's caller credential to this provider instead of a stored key, for a router that calls models back through the gateway as its caller. With platform auth on, only a credential limited to the inference scope is sent. Leave --api-key-secret-name unset.",
+        ),
+    ] = None,
     default_extra_body: Annotated[
         str | None,
         typer.Option(
@@ -172,6 +179,8 @@ def create_providers(
         input_payload["api_key_secret_name"] = api_key_secret_name
     if auth_header_format is not None:
         input_payload["auth_header_format"] = auth_header_format
+    if forward_caller_credential is not None:
+        input_payload["forward_caller_credential"] = forward_caller_credential
     if default_extra_body is not None:
         input_payload["default_extra_body"] = read_payload("default_extra_body", default_extra_body)
     if default_extra_headers is not None:
@@ -390,6 +399,13 @@ def update_providers(
             help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
         ),
     ] = None,
+    forward_caller_credential: Annotated[
+        bool | None,
+        typer.Option(
+            "--forward-caller-credential/--no-forward-caller-credential",
+            help="Send each call's caller credential to this provider instead of a stored key, for a router that calls models back through the gateway as its caller. With platform auth on, only a credential limited to the inference scope is sent. Leave --api-key-secret-name unset.",
+        ),
+    ] = None,
     default_extra_body: Annotated[
         str | None,
         typer.Option(
@@ -472,6 +488,8 @@ def update_providers(
         input_payload["api_key_secret_name"] = api_key_secret_name
     if auth_header_format is not None:
         input_payload["auth_header_format"] = auth_header_format
+    if forward_caller_credential is not None:
+        input_payload["forward_caller_credential"] = forward_caller_credential
     if default_extra_body is not None:
         input_payload["default_extra_body"] = read_payload("default_extra_body", default_extra_body)
     if default_extra_headers is not None:

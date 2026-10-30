@@ -301,6 +301,14 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 f"The provider serving {model!r} adds provider-executed tools or features to requests, "
                 "so it cannot be served closed-book.",
             )
+        if target.forwards_caller_credential and not await self._caller_is_closed(ctx):
+            raise _refusal(
+                ctx,
+                model,
+                "provider_calls_back",
+                f"The provider serving {model!r} calls models back through the gateway as its caller, so only a "
+                "closed trial's calls through it stay closed-book.",
+            )
         try:
             provider_refusal = await self._provider_credentials().refusal(target.outbound_headers, model)
         except Exception as exc:

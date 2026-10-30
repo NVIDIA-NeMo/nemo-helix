@@ -22,6 +22,7 @@ from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefin
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.jobs import agent_evaluate
 from nemo_evals.jobs.agent_compiler import _environment
 from nemo_evals.jobs.agent_evaluate import (
@@ -49,6 +50,7 @@ from nemo_evals.jobs.agent_spec import (
     ResolvedTask,
     Target,
 )
+from nemo_evals.jobs.gateway_models import TrialRoute
 from nemo_evals.jobs.gym_sandbox import (
     GYM_SANDBOX_PLAN_ENVVAR,
     SandboxPlan,
@@ -120,6 +122,7 @@ from nhx_evals_sdk.values import (
     AgentBase,
     GenericAgent,
     Model,
+    ModelRef,
     RunConfigOnline,
     RunConfigOnlineModel,
     SecretRef,
@@ -650,6 +653,35 @@ def test_agent_eval_job_passes_async_client_to_publication(tmp_path: Path, mocke
     intake = publish.call_args.kwargs["intake"]
     assert isinstance(intake, AsyncIntakeClient)
     assert intake.default_headers == _SDK_IDENTITY_HEADERS
+
+
+@pytest.mark.parametrize(
+    ("issuer", "marked"),
+    [
+        pytest.param(SimpleNamespace(records_calls=True), True, id="the route records the trials' calls"),
+        pytest.param(SimpleNamespace(records_calls=False), False, id="the route doesn't record them"),
+        pytest.param(None, False, id="no trial tokens"),
+    ],
+)
+def test_agent_eval_job_marks_published_usage_as_superseded_when_the_gateway_recorded_it(
+    tmp_path: Path, mocker: MockerFixture, issuer: SimpleNamespace | None, marked: bool
+) -> None:
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    mocker.patch("nemo_evals.jobs.agent_evaluate._trial_credential_issuer", return_value=issuer)
+    publish = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+
+    AgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity())
+
+    assert publish.call_args.kwargs["usage_superseded_by_gateway"] is marked
 
 
 def test_agent_eval_job_records_the_publish_outcome_in_status_details(tmp_path: Path, mocker: MockerFixture) -> None:
@@ -2809,3 +2841,178 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
     assert isinstance(runner, HarborAgentTaskRunner)
     assert runner._config is not None
     assert runner._config.agent_kwargs["fabric_config"] == raised
+
+
+def test_a_registered_fabric_agent_on_the_gateway_gets_trial_tokens_in_its_models_key_variable() -> None:
+    config = {
+        "models": {
+            "default": {
+                "base_url": "http://h/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                "model": "dev/recorded-model",
+            }
+        }
+    }
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent="dev/codex-agent"), agent_kwargs={"fabric_config": config}
+    )
+
+    assert agent_evaluate._trial_gateway(target) == (ModelRef("dev/recorded-model"), ["NEMO_AGENTS_IGW_API_KEY"])
+
+
+_IGW_WS = "http://h/apis/inference-gateway/v2/workspaces/ws"
+
+
+def _registered_target(*, closed_book: bool = False, harness_model: dict | None = None) -> HarborRunnerTarget:
+    return HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        closed_book=closed_book,
+        agent_kwargs={
+            "fabric_config": {
+                "models": {"default": {"base_url": f"{_IGW_WS}/openai/-/v1", "model": "cb"}},
+                "harnesses": {"codex": {"model": harness_model or {"base_url": f"{_IGW_WS}/model/cb-harness/-/v1"}}},
+            }
+        },
+    )
+
+
+def _issuer(target: HarborRunnerTarget) -> Any:
+    return agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+
+@pytest.mark.parametrize("closed_book", [True, False], ids=["labelled closed-book", "unlabelled"])
+def test_a_trials_policy_is_closed_exactly_when_the_run_is_labelled_closed_book(
+    monkeypatch: pytest.MonkeyPatch, closed_book: bool
+) -> None:
+    """Closed-book is the run's choice: the same closed-book capable models serve open runs too."""
+    monkeypatch.setattr(
+        agent_evaluate, "check_trial_route", lambda _client, model: TrialRoute(closed_book=True, records_calls=True)
+    )
+
+    issuer = _issuer(_registered_target(closed_book=closed_book))
+
+    assert issuer._policy == ModelPolicy(
+        model_access=ModelAccess.CLOSED if closed_book else ModelAccess.OPEN, models=("ws/cb", "ws/cb-harness")
+    )
+
+
+def test_a_closed_book_run_that_can_reach_a_model_that_cant_keep_it_closed_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capable = {"ws/cb": True, "ws/cb-harness": False}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(closed_book=capable[model.root], records_calls=True),
+    )
+
+    with pytest.raises(ValueError, match="ws/cb-harness can't keep trials closed-book"):
+        _issuer(_registered_target(closed_book=True))
+
+
+def test_a_trial_may_also_call_the_models_its_routers_call_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A router behind a listed VirtualModel calls its targets as the trial, so the trial's list must include them."""
+    callbacks = {"ws/cb": ("ws/strong", "ws/judge")}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(
+            closed_book=True, records_calls=True, routes_to=callbacks.get(model.root, ())
+        ),
+    )
+
+    issuer = _issuer(_registered_target(closed_book=True))
+
+    assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/strong", "ws/judge")
+
+
+@pytest.mark.parametrize(
+    ("harness_model", "recording", "records_calls"),
+    [
+        pytest.param(
+            {"base_url": f"{_IGW_WS}/model/judge/-/v1"},
+            {"ws/main", "ws/judge"},
+            True,
+            id="every model records",
+        ),
+        pytest.param(
+            {"base_url": f"{_IGW_WS}/model/judge/-/v1"},
+            {"ws/main"},
+            False,
+            id="a gateway model that doesn't record",
+        ),
+        pytest.param(
+            {"base_url": "https://api.example.com/v1", "model": "direct"},
+            {"ws/main"},
+            False,
+            id="a model called directly, not through the gateway",
+        ),
+    ],
+)
+def test_a_registered_agents_traces_are_superseded_only_when_the_gateway_records_every_model_it_calls(
+    monkeypatch: pytest.MonkeyPatch, harness_model: dict[str, str], recording: set[str], records_calls: bool
+) -> None:
+    """A superseded trace stops counting usage the gateway reports, so a call the gateway never saw would be lost."""
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(closed_book=False, records_calls=model.root in recording),
+    )
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        agent_kwargs={
+            "fabric_config": {
+                "models": {"default": {"base_url": f"{_IGW_WS}/model/main/-/v1"}},
+                "harnesses": {"codex": {"model": harness_model}},
+            }
+        },
+    )
+
+    issuer = agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+    assert issuer is not None
+    assert issuer.records_calls is records_calls
+
+
+def test_trials_of_an_agent_whose_models_cannot_all_be_named_get_an_open_policy_without_a_list(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda *_: TrialRoute(closed_book=True, records_calls=True),
+    )
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        agent_kwargs={
+            "fabric_config": {
+                "models": {
+                    "default": {"base_url": f"{_IGW_WS}/model/cb/-/v1"},
+                    "templated": {"base_url": "${GATEWAY}/model/x/-/v1"},
+                }
+            }
+        },
+    )
+
+    issuer = agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+    assert issuer is not None
+    assert issuer._policy == ModelPolicy(model_access=ModelAccess.OPEN)
+    assert "aren't limited to the models it configures" in caplog.text

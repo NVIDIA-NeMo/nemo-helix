@@ -555,6 +555,14 @@ class ModelProvider(ModelEntityBaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    forward_caller_credential: bool = Field(
+        default=False,
+        description=(
+            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
+            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
+            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+        ),
+    )
 
 
 class ModelProviderSort(StrEnum):
@@ -635,6 +643,14 @@ class CreateModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    forward_caller_credential: bool = Field(
+        default=False,
+        description=(
+            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
+            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
+            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+        ),
+    )
 
 
 class UpsertModelProviderRequest(BaseModel):
@@ -699,6 +715,14 @@ class UpsertModelProviderRequest(BaseModel):
         default=None,
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
+    )
+    forward_caller_credential: bool = Field(
+        default=False,
+        description=(
+            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
+            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
+            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+        ),
     )
 
 

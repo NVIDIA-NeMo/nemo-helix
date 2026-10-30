@@ -6059,6 +6059,16 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        closed_book:
+          type: boolean
+          title: Closed Book
+          description: Run the trials closed-book. Each trial's gateway calls are
+            held to closed-book capable VirtualModels (ones whose request_middleware
+            ends with nemo-evals-closed-book), and the closed-book middleware applies
+            to them. Every VirtualModel the agent can reach, a router's routes_to
+            included, must be closed-book capable. Taskset runs set it for tasks whose
+            agent runs with no network.
+          default: false
         agent_setup_timeout_multiplier:
           title: Agent Setup Timeout Multiplier
           description: Harbor agent-setup timeout multiplier. An agent that installs

@@ -13684,6 +13684,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - name
@@ -20242,6 +20251,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - name
@@ -23926,6 +23944,15 @@ components:
             Bearer {{ auth_secret }}''`.'
           type: string
           maxLength: 1024
+        forward_caller_credential:
+          type: boolean
+          title: Forward Caller Credential
+          description: Send each call's caller credential to this provider instead
+            of a stored key, for a router that calls models back through the gateway
+            as its caller. With platform auth on, only a credential limited to the
+            `inference` scope is sent; any other call is refused. Leave `api_key_secret_name`
+            unset.
+          default: false
       type: object
       required:
       - host_url

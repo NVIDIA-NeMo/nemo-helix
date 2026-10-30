@@ -37,8 +37,14 @@ from nemo_evals.harbor.remote.resources import defaulted_resources_notice
 from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_sandbox_policy
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
-from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
-from nemo_evals.jobs.gateway_models import require_closed_book_route
+from nemo_evals.jobs.agent_spec import (
+    AgentEvalSpec,
+    HarborRunnerTarget,
+    ResolvedTask,
+    registered_agent_source,
+    target_agent_identity,
+)
+from nemo_evals.jobs.gateway_models import closed_book_run, require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
@@ -365,6 +371,8 @@ class TasksetRunService:
                 )
             except ValueError as exc:
                 raise TasksetRunResolutionError(str(exc)) from exc
+            if isinstance(spec.target, HarborRunnerTarget) and closed_book_run(spec.target, configs):
+                spec = spec.model_copy(update={"target": spec.target.model_copy(update={"closed_book": True})})
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             plan = TasksetRunPlan(
