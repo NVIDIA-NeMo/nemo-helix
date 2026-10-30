@@ -55,7 +55,7 @@ export const expertParallelError = (
   }
   const ep = p.expert_parallel_size;
   if (ep === undefined || !sizes.includes(ep)) {
-    return `With ${totalGpus(p)} GPUs, expert parallel size must be one of ${sizes.join(', ')}.`;
+    return `With ${totalGpus(p)} GPUs, this Mixture-of-Experts model needs one of ${sizes.join(', ')}.`;
   }
   return undefined;
 };

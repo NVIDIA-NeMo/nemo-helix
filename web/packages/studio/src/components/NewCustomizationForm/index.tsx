@@ -68,6 +68,7 @@ import {
   DATASET_FIELD_BY_BACKEND,
   FORM_DEFAULTS,
   customizationFormSchema,
+  customizationFormSchemaFor,
   formToAutomodelCreate,
   formToRlCreate,
   formToUnslothCreate,
@@ -76,7 +77,7 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { expertParallelError, expertParallelExpertCount } from '@studio/util/forms/expertParallel';
+import { expertParallelExpertCount } from '@studio/util/forms/expertParallel';
 import { FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
@@ -192,8 +193,16 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     };
   }, [initialModel, initialValues]);
 
+  // The schema needs the selected model's expert count, which is only known once the form
+  // exists, so the resolver reads it from a ref kept current below.
+  const automodelExpertCountRef = useRef<number | undefined>(undefined);
   const form = useForm<CustomizationFormFields>({
-    resolver: zodResolver(customizationFormSchema) as unknown as Resolver<CustomizationFormFields>,
+    resolver: (values, context, options) =>
+      (
+        zodResolver(
+          customizationFormSchemaFor(automodelExpertCountRef.current)
+        ) as unknown as Resolver<CustomizationFormFields>
+      )(values, context, options),
     defaultValues,
     mode: 'onChange',
     shouldUnregister: false,
@@ -222,6 +231,9 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const automodelExpertCount = expertParallelExpertCount(
     useModelEntity(automodelModel, { enabled: backend === 'automodel' })
   );
+  useEffect(() => {
+    automodelExpertCountRef.current = automodelExpertCount;
+  }, [automodelExpertCount]);
   const unslothFinetuningType = useWatch({
     control: form.control,
     name: 'unsloth.training.finetuning_type',
@@ -372,17 +384,6 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
 
-    if (backend === 'automodel') {
-      const expertParallelIssue = expertParallelError(
-        automodelExpertCount,
-        fields.automodel.parallelism ?? {}
-      );
-      if (expertParallelIssue) {
-        setValidationErrors([expertParallelIssue]);
-        return;
-      }
-    }
-
     // Reuse the dataset checks shown in the setup panel before creating any resources.
     if (datasetValidation.isPending) {
       setValidationErrors([
@@ -526,7 +527,9 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     const subscription = form.watch(() => {
       setValidationErrors((current) => {
         if (current.length === 0) return current;
-        const result = customizationFormSchema.safeParse(form.getValues());
+        const result = customizationFormSchemaFor(automodelExpertCountRef.current).safeParse(
+          form.getValues()
+        );
         const next = result.success ? [] : messagesFromZodIssues(result.error.issues);
         // Keep the same array reference when nothing changed, so a keystroke that does not
         // change the error set does not re-render the form.

@@ -12,6 +12,7 @@ import {
   RL_DPO_TRAINING_DEFAULTS,
   RL_GRPO_TRAINING_DEFAULTS,
   customizationFormSchema,
+  customizationFormSchemaFor,
   formToAutomodelCreate,
   formToUnslothCreate,
   getInitialFormValuesFromState,
@@ -144,6 +145,43 @@ describe('customizationFormSchema', () => {
       data.unsloth.dataset.path = '';
       expect(messages(data)).toContain('Training dataset is required');
     });
+  });
+});
+
+describe('customizationFormSchemaFor', () => {
+  const onGpus = (gpus: number, expertParallelSize?: number): CustomizationFormFields => {
+    const data = validAutomodel();
+    data.automodel.parallelism = {
+      ...data.automodel.parallelism,
+      num_gpus_per_node: gpus,
+      expert_parallel_size: expertParallelSize,
+    };
+    return data;
+  };
+  const issues = (expertCount: number | undefined, data: CustomizationFormFields) => {
+    const result = customizationFormSchemaFor(expertCount).safeParse(data);
+    return result.success ? [] : result.error.issues;
+  };
+
+  it('rejects a multi-GPU MoE run without a valid expert parallel size, on that field', () => {
+    expect(issues(128, onGpus(4))).toEqual([
+      expect.objectContaining({
+        message: 'With 4 GPUs, this Mixture-of-Experts model needs one of 2, 4.',
+        path: ['automodel', 'parallelism', 'expert_parallel_size'],
+      }),
+    ]);
+  });
+
+  it('accepts a valid expert parallel size', () => {
+    expect(issues(128, onGpus(4, 4))).toEqual([]);
+  });
+
+  it('skips the check while the expert count is unknown', () => {
+    expect(issues(undefined, onGpus(4))).toEqual([]);
+  });
+
+  it('only applies to the automodel backend', () => {
+    expect(issues(128, validUnsloth())).toEqual([]);
   });
 });
 

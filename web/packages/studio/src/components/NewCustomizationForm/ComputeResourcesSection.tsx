@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
@@ -16,38 +15,14 @@ import {
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
-  expertParallelError,
-  expertParallelExpertCount,
-  validExpertParallelSizes,
-} from '@studio/util/forms/expertParallel';
-import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
-import { useEffect } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
-
-const EXPERT_PARALLEL_FIELD = 'automodel.parallelism.expert_parallel_size';
+import { useFormContext } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
-  const { control, getValues, setValue } = useFormContext<CustomizationFormFields>();
-  const modelUrn = useWatch({ control, name: 'automodel.model' });
-  const parallelism = useWatch({ control, name: 'automodel.parallelism' }) ?? {};
-  const numExperts = expertParallelExpertCount(useModelEntity(modelUrn));
-  const validSizes = validExpertParallelSizes(numExperts, parallelism);
-
-  // Runs when the model or GPU layout changes, not on every keystroke, so typing a
-  // multi-digit size is not snapped back mid-entry.
-  const defaultSize = (parallelism.tensor_parallel_size ?? 1) > 1 ? undefined : validSizes?.at(-1);
-  useEffect(() => {
-    if (defaultSize === undefined) return;
-    const current = getValues(EXPERT_PARALLEL_FIELD);
-    const sizes = validExpertParallelSizes(numExperts, getValues('automodel.parallelism') ?? {});
-    if (current !== undefined && sizes?.includes(current)) return;
-    setValue(EXPERT_PARALLEL_FIELD, defaultSize, { shouldValidate: true });
-  }, [defaultSize, numExperts, getValues, setValue]);
-
+  const { control } = useFormContext<CustomizationFormFields>();
   return (
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
@@ -72,19 +47,15 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         disabled={disabled}
       />
       <ControlledSliderWithTextInput
-        useControllerProps={{ name: EXPERT_PARALLEL_FIELD, control }}
+        useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
         formFieldProps={{
           slotLabel: 'Expert Parallel Size',
-          slotInfo: `Shards a Mixture-of-Experts model's experts across GPUs, so each holds only its share. Must divide data parallel × context parallel size, and tensor parallel size must be 1 when this is above 1.${
-            validSizes
-              ? ` This model has ${numExperts} experts and needs a value above 1 that divides that count to train on more than one GPU.`
-              : ''
-          }`,
-          slotError: expertParallelError(numExperts, parallelism),
+          slotInfo:
+            "Shards a Mixture-of-Experts model's experts across GPUs, so each holds only its share. MoE models such as Nemotron 3.5 need a value above 1 that divides the expert count to train on more than one GPU. Must divide data parallel × context parallel size, and tensor parallel size must be 1 when this is above 1.",
         }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
-        min={validSizes?.[0] ?? 1}
-        max={Math.max(8, ...(validSizes ?? []))}
+        min={1}
+        max={32}
         step={1}
         disabled={disabled}
       />

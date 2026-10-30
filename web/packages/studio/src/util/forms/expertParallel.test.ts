@@ -68,7 +68,7 @@ describe('expertParallelError', () => {
 
   it.each([undefined, 1, 3])('lists the valid sizes when the size is %s', (size) => {
     expect(expertParallelError(128, { num_gpus_per_node: 4, expert_parallel_size: size })).toBe(
-      'With 4 GPUs, expert parallel size must be one of 2, 4.'
+      'With 4 GPUs, this Mixture-of-Experts model needs one of 2, 4.'
     );
   });
 
