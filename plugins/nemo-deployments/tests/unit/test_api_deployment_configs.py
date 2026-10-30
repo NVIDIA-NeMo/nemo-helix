@@ -125,6 +125,19 @@ def test_create_deployment_config_rejects_zero_backoff_limit(
     mock_entity_client.create.assert_not_awaited()
 
 
+@pytest.mark.parametrize("network", ["host", "container:other", "", " bridge "])
+@pytest.mark.parametrize("alias", ["backendConfig", "backend_config"])
+def test_create_deployment_config_rejects_docker_namespace_mode(
+    client: TestClient, mock_entity_client: AsyncMock, network: str, alias: str
+) -> None:
+    resp = client.post(
+        "/apis/deployments/v2/workspaces/default/deployment-configs",
+        json={"name": "cfg1", alias: {"docker": {"network": network}}},
+    )
+    assert resp.status_code == 422
+    mock_entity_client.create.assert_not_awaited()
+
+
 def test_get_deployment_config_404(client: TestClient, mock_entity_client: AsyncMock) -> None:
     mock_entity_client.get.side_effect = NemoEntityNotFoundError("missing")
     resp = client.get("/apis/deployments/v2/workspaces/default/deployment-configs/missing")

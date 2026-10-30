@@ -9,6 +9,7 @@ import os
 from typing import Literal
 
 from nemo_deployments_plugin.backends.labels import DEFAULT_RESOURCE_SCOPE
+from nemo_deployments_plugin.docker_network_policy import validate_client_docker_network
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 DOCKER_ENDPOINT_MODE_ENV_VAR = "NEMO_DEPLOYMENTS_DOCKER_ENDPOINT_MODE"
@@ -80,6 +81,15 @@ class DockerExecutorConfig(BaseModel):
             f"{LEGACY_MODELS_DOCKER_NETWORK_ENV_VAR} is accepted for compatibility."
         ),
     )
+    allowed_networks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional exact Docker network names clients may select for the primary container. "
+            "By default only the executor's configured network may be selected explicitly; "
+            "omitting the override always inherits the executor default. Namespace-sharing modes "
+            "are never allowed as client overrides."
+        ),
+    )
     endpoint_mode: DockerEndpointMode = Field(
         default_factory=_default_endpoint_mode,
         validate_default=True,
@@ -123,6 +133,22 @@ class DockerExecutorConfig(BaseModel):
         le=65535,
         description="Last host port (inclusive) to consider when publishing container ports for this executor.",
     )
+
+    def resolve_network(self, client_network: str | None) -> str | None:
+        """Authorize client input before applying the trusted operator default."""
+        validate_client_docker_network(client_network)
+        if client_network is None:
+            return self.network
+        if client_network != self.network and client_network not in self.allowed_networks:
+            raise ValueError("Docker network override is not allowed by this executor")
+        return client_network
+
+    @field_validator("allowed_networks")
+    @classmethod
+    def _validate_allowed_networks(cls, networks: list[str]) -> list[str]:
+        for network in networks:
+            validate_client_docker_network(network)
+        return networks
 
     @field_validator("endpoint_mode", mode="before")
     @classmethod
