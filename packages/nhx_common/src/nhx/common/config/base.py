@@ -309,6 +309,13 @@ class OIDCConfig(BaseSettings):
         "in their 'aud' claim.",
     )
 
+    additional_audiences: list[str] = Field(
+        default_factory=list,
+        description="Extra audiences accepted alongside audience, for identity providers that set 'aud' to "
+        "the issuing client's ID so tokens from several clients carry different values. A token is accepted "
+        "when its 'aud' claim includes audience or any of these.",
+    )
+
     email_claim: str = Field(
         default="email",
         description="JWT claim containing the principal email (maps to X-NHX-Principal-Email). "

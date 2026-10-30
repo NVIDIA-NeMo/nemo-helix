@@ -141,12 +141,16 @@ class JWTValidator:
             logger.warning("Introspection reported the token as inactive")
             return None
 
-        audience = self.config.oidc.audience
-        if audience and not self._introspected_audience_matches(claims.get("aud"), audience):
-            logger.warning(f"Introspected token audience does not include {audience!r}")
+        audiences = self._accepted_audiences()
+        if not any(self._introspected_audience_matches(claims.get("aud"), audience) for audience in audiences):
+            logger.warning(f"Introspected token audience does not include any of {audiences!r}")
             return None
 
         return claims
+
+    def _accepted_audiences(self) -> list[str]:
+        oidc = self.config.oidc
+        return [audience for audience in [oidc.audience, *oidc.additional_audiences] if audience]
 
     @staticmethod
     def _introspected_audience_matches(claim_audience: object, expected: str) -> bool:
@@ -231,19 +235,14 @@ class JWTValidator:
                 jwks_client = await self._get_jwks_client()
                 signing_key = await jwks_client.get_signing_key_from_jwt(token)
 
-                # Only validate audience when explicitly configured.
-                # When audience is not set, skip the check so tokens from any
-                # audience are accepted (the issuer + signature checks are still
-                # enforced).
-                audience = [self.config.oidc.audience] if self.config.oidc.audience else None
+                # Audience is required when OIDC is enabled; any configured audience is accepted.
+                audience = self._accepted_audiences()
 
                 # Build list of allowed issuers
                 allowed_issuers = [self.config.oidc.issuer] + self.config.oidc.additional_issuers
 
                 # Decode and validate token (validate issuer manually to support multiple)
                 decode_options: Options = {"require": ["exp", "iat", "sub"]}
-                if audience is None:
-                    decode_options["verify_aud"] = False
                 claims = jwt.decode(
                     token,
                     signing_key.key,

@@ -157,6 +157,7 @@ nemo workspaces list
 | `issuer` | string | IdP issuer URL (e.g., `https://login.microsoftonline.com/<tenant>/v2.0`). |
 | `additional_issuers` | list | Extra issuer URLs to accept (e.g., Azure AD v1 format). |
 | `audience` | string | Expected token audience. Required when `enabled` is true; startup fails if it is unset or blank. If your provider uses one shared audience for several applications, also restrict which clients may obtain tokens for it at the provider. |
+| `additional_audiences` | list of strings | Extra audiences accepted alongside `audience`, for providers that set `aud` to the issuing client's ID so different clients' tokens carry different values. Default: empty. |
 | `email_claim` | string | JWT claim for email (default: `email`). |
 | `subject_claim` | string | JWT claim for subject (default: `sub`). |
 | `groups_claim` | string | JWT claim for groups (default: `groups`). |

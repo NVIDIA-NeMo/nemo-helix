@@ -98,7 +98,7 @@ nemo auth status
 |-------|-------|-----|
 | AADSTS70011 | Scope not configured or no admin consent | Add the API scopes under **Expose an API**, add them under **API permissions**, and grant consent if required |
 | AADSTS50011 | Reply URL mismatch | Not typically needed for device flow; check **Authentication** settings if you also use browser redirects |
-| Audience mismatch | `audience` doesn't match token's `aud` claim | Set `audience` to the Azure token audience. It cannot be left unset |
+| Audience mismatch | `audience` doesn't match token's `aud` claim | Set `audience` to the Azure token audience. It is required |
 | Empty email claim | Azure AD didn't populate `email` | Use `email_claim: "upn"` instead |
 
 ## Related

@@ -662,6 +662,48 @@ class TestJWTValidator:
         assert result is not None
         assert result.subject == "user123"
 
+    async def test_validate_token_passes_additional_audiences(self):
+        """Test that additional_audiences are accepted alongside audience."""
+        config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            public_client=OIDCPublicClientConfig(client_id="test-client"),
+            audience="expected-audience",
+            additional_audiences=["other-client"],
+        )
+        validator = JWTValidator(
+            AuthConfig(enabled=True, policy_decision_point_base_url="http://localhost:8181", oidc=config)
+        )
+        claims = {
+            "sub": "user123",
+            "exp": int(time.time()) + 3600,
+            "iat": int(time.time()),
+            "aud": "other-client",
+            "iss": "https://sso.example.com",
+        }
+
+        with patch.object(validator, "_get_jwks_client") as mock_get_jwks:
+            mock_jwks = MagicMock()
+            mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=MagicMock(key="test-key"))
+            mock_get_jwks.return_value = mock_jwks
+            with patch("jwt.decode", return_value=claims) as mock_decode:
+                result = await validator.validate_token("valid.token.here")
+
+        assert mock_decode.call_args[1]["audience"] == ["expected-audience", "other-client"]
+        assert result is not None
+
+    def test_introspected_audience_matches_additional_audience(self):
+        config = OIDCConfig(
+            enabled=True,
+            issuer="https://sso.example.com",
+            audience="expected-audience",
+            additional_audiences=["other-client"],
+        )
+        validator = JWTValidator(
+            AuthConfig(enabled=True, policy_decision_point_base_url="http://localhost:8181", oidc=config)
+        )
+        assert validator._accepted_audiences() == ["expected-audience", "other-client"]
+
     @pytest.mark.asyncio
     async def test_validate_token_http_error(self, jwt_validator):
         """Test token validation when JWKS fetch fails."""
