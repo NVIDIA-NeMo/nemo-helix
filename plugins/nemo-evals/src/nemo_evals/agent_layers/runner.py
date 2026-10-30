@@ -143,7 +143,7 @@ async def _submit(
             name = layer_builder_name(
                 environment=environment or "", agent_key=spec.agent_key, user=user, platform=main.platform
             )
-            built = await usable_build(builder, name)
+            built = await usable_build(builder, name, built_after=layer.built_after)
             if built is None:
                 environment_dockerfile = await asyncio.to_thread(_stage_environment, main, archive, context)
         if built is None:
@@ -157,7 +157,12 @@ async def _submit(
             await asyncio.to_thread(_unpack, installer, context / INSTALLER_DIR)
             source = await _upload_context(files, spec.workspace, name, Path(scratch))
             built = await adopt_or_build(
-                builder, name=name, source=source, dockerfile=LAYER_DOCKERFILE, platform=main.platform
+                builder,
+                name=name,
+                source=source,
+                dockerfile=LAYER_DOCKERFILE,
+                platform=main.platform,
+                built_after=layer.built_after,
             )
     image = BuildImage(
         type=MAIN_SERVICE,

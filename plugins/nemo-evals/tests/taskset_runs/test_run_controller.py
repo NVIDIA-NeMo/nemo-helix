@@ -13,8 +13,10 @@ from typing import Any
 import httpx
 import nemo_evals.taskset_runs.controller as controller_module
 import pytest
+from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
+from nemo_evals.image_builds.models import BuildImage, BuildStatus
 from nemo_evals.taskset_runs.controller import (
     LIST_CHUNK,
     TERMINAL_JOB_STATUSES,
@@ -33,9 +35,14 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.run_evaluation import QUEUE_DURATION_KEY, RESULT_STATE_KEY, ensure_run_evaluation
-from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetBundleSpec, TasksetRunPlan
+from nemo_evals.taskset_runs.specs import (
+    PlannedAgentLayers,
+    RunIntakePublication,
+    TasksetBundleSpec,
+    TasksetRunPlan,
+)
 from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunStore
-from nemo_evals.taskset_runs.task_jobs import task_job_request
+from nemo_evals.taskset_runs.task_jobs import member_environment, task_job_request
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -230,7 +237,12 @@ class Harness:
         self.clock = Clock(T0)
         self.plans: dict[str, TasksetRunPlan] = {}
         self.plan_errors: dict[str, Exception] = {}
-        self.reconciler = TasksetRunReconciler(store, self.jobs_for, config, clock=self.clock)
+        # Agent layers by (task entity name, revision digest); an Exception is raised by the read.
+        self.layers: dict[tuple[str, str], AgentLayerEntity | Exception] = {}
+        self.layer_reads: list[tuple[str, str, str]] = []
+        self.reconciler = TasksetRunReconciler(
+            store, self.jobs_for, config, clock=self.clock, agent_layers=self.agent_layer
+        )
 
         async def load_plan(run: TasksetRunEntity) -> TasksetRunPlan:
             if run.name in self.plan_errors:
@@ -242,6 +254,13 @@ class Harness:
     @asynccontextmanager
     async def jobs_for(self, workspace: str, run: TasksetRunEntity | None) -> AsyncGenerator[FakeRunJobs]:
         yield self.jobs
+
+    async def agent_layer(self, task: str, revision: str, key: str) -> AgentLayerEntity | None:
+        self.layer_reads.append((task, revision, key))
+        layer = self.layers.get((task, revision))
+        if isinstance(layer, Exception):
+            raise layer
+        return layer
 
     async def submit(
         self, plan: TasksetRunPlan, *, name: str, creator: str = "user:alice", workspace: str = "default", **run: Any
@@ -1920,3 +1939,126 @@ async def test_the_jobs_adapter_lists_up_to_100_names_in_one_request(harbor_plan
     assert request.url.path == "/apis/jobs/v2/workspaces/default/jobs"
     assert request.url.params["page_size"] == str(LIST_CHUNK)
     assert json.loads(request.url.params["filter"]) == {"name": {"$in": [*names, "run-gone-task-9"]}}
+
+
+# ---- agent layers ----------------------------------------------------------------------------------------
+
+LAYER_REF = "registry.invalid/default/harbor-agent-1/main@sha256:" + "c" * 64
+WAIT_UNTIL = T0 + timedelta(minutes=30)
+
+
+def layered(plan: TasksetRunPlan) -> TasksetRunPlan:
+    """``plan`` with its tasks waiting for agent layers of install key ``k`` until ``WAIT_UNTIL``."""
+    return plan.model_copy(update={"agent_layers": PlannedAgentLayers(key="k", wait_until=WAIT_UNTIL)})
+
+
+def revision(plan: TasksetRunPlan, index: int) -> tuple[str, str]:
+    provenance = plan.spec.tasks[index].spec.provenance
+    assert provenance is not None
+    return provenance.entity_name, provenance.revision_digest
+
+
+def agent_layer(
+    plan: TasksetRunPlan, index: int, status: BuildStatus = "ready", *, expires_at: datetime | None = None
+) -> AgentLayerEntity:
+    task, digest = revision(plan, index)
+    image = BuildImage(type="main", source="dockerfile", status="ready" if status == "ready" else "building")
+    if status == "ready":
+        image.image_ref = LAYER_REF
+        image.builder_image = "harbor-agent-1-1"
+    return AgentLayerEntity(
+        name=f"agent-layer.{index}",
+        workspace="default",
+        task=task,
+        revision_digest=digest,
+        agent_key="k",
+        agent=AgentLayerRequest(name="codex"),
+        attempt=1,
+        status=status,
+        job="agent-layer-build-1",
+        image=image,
+        error="install failed" if status == "failed" else None,
+        expires_at=expires_at,
+    )
+
+
+async def test_tasks_wait_for_their_agent_layers_then_run_on_them(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running"), revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    # Task 1's layer is ready: it runs on it. Task 0's is still building: it waits, holding no slot and no Job.
+    assert await harness.phases(run) == ["image_preparing", "registered"]
+    assert [r.name for r in jobs.created] == [task(run, 1)]
+    harness.layers[revision(plan, 0)] = agent_layer(plan, 0)
+    await harness.cycle()
+    assert await harness.phases(run) == ["registered", "registered"]
+    members = await harness.members(run)
+    for member, request in zip(members, sorted(jobs.created, key=lambda r: r.name or ""), strict=True):
+        environment = member_environment(harness.plans[run.name], member)
+        assert environment.agent.image_ref == LAYER_REF and environment.agent_preinstalled
+        assert environment.verifier == plan.task_environments[member.task_index].verifier
+        assert request == await task_job_request(harness.plans[run.name], run, member.task_index, environment)
+        assert request.spec["environment"]["agent_preinstalled"] is True
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, "failed", "expired"],
+    ids=["no-layer", "failed-layer", "expired-layer"],
+)
+async def test_a_task_without_a_usable_layer_runs_on_its_own_image(harness, harbor_plan, jobs, answer):
+    plan = layered(harbor_plan)
+    if answer == "failed":
+        harness.layers = {revision(plan, 0): agent_layer(plan, 0, "failed")}
+    elif answer == "expired":
+        harness.layers = {revision(plan, 0): agent_layer(plan, 0, expires_at=T0)}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.REGISTERED and member.agent_layer is None
+    assert jobs.created == [await harness.request(run, 0)]
+
+
+async def test_a_layer_still_building_at_the_wait_deadline_is_given_up(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running")}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    assert await harness.phases(run) == ["image_preparing"]
+    await harness.cycle(at=WAIT_UNTIL)
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.REGISTERED and member.agent_layer is None
+
+
+async def test_a_failed_layer_read_keeps_the_task_waiting_until_the_deadline(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, 0): InternalServerError(httpx.Response(500, json={"detail": "entities down"}))}
+    run = await harness.submit(sized(plan, 1), name="run-a")
+    await harness.cycle()
+    await harness.cycle()
+    assert await harness.phases(run) == ["image_preparing"] and jobs.created == []
+    await harness.cycle(at=WAIT_UNTIL)
+    assert await harness.phases(run) == ["registered"]
+
+
+async def test_tasks_of_one_revision_read_its_layer_once_a_cycle(harness, harbor_plan, jobs):
+    plan = layered(sized(harbor_plan, 3))
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0, "running")}
+    await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    assert harness.layer_reads == [(*revision(plan, 0), "k")]
+
+
+async def test_a_run_stopped_while_its_tasks_wait_for_layers_settles_them(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    harness.layers = {revision(plan, i): agent_layer(plan, i, "running") for i in range(2)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    await harness.cancel(run, at=harness.clock.now)
+    await harness.cycle()
+    members = await harness.members(run)
+    assert [m.phase for m in members] == [MemberPhase.CANCELLED, MemberPhase.CANCELLED]
+    assert all(m.error == "run cancelled before it started" for m in members)
+    assert jobs.created == []
+    assert (await harness.run(run)).phase is TasksetRunPhase.CANCELLED

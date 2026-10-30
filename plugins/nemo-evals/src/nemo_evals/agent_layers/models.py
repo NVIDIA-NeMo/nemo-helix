@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import ClassVar
 
 from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
+from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.models import BuildImage, BuildStatus
 from nemo_helix_plugin.entities import EntityBase
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -65,6 +66,34 @@ class AgentLayerEntity(EntityBase):
     job: str = Field(description="Name of the agent-layer Job that runs this attempt.")
     image: BuildImage | None = Field(default=None, description="The layer's image, once the build has planned it.")
     error: str | None = None
+    expires_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When runs stop starting trials from this layer; a later run requests a new attempt. None: never (a layer "
+            "made before layers expired)."
+        ),
+    )
+    built_after: datetime | None = Field(
+        default=None,
+        description=(
+            "The oldest Builder build of this layer the attempt reuses: one TTL before the attempt. So no run starts "
+            "from an image older than two TTLs, which a registry lifecycle rule on the layers' repositories relies on."
+        ),
+    )
+
+    def agent_image(self, base: PreparedImage) -> PreparedImage | None:
+        """The task's agent image with this layer's agent installed, replacing ``base``; None unless ready."""
+        image = self.image
+        if self.status != "ready" or image is None or image.status != "ready" or image.image_ref is None:
+            return None
+        return PreparedImage(
+            image_ref=image.image_ref,
+            preparation_key=image.image_ref.rpartition("@")[2],
+            builder_image=image.builder_image,
+            build_job=image.build_job,
+            source_archive_digest=base.source_archive_digest,
+            runtime_config=image.runtime_config,
+        )
 
 
 class AgentLayer(BaseModel):
@@ -78,6 +107,7 @@ class AgentLayer(BaseModel):
     job: str
     image: BuildImage | None = None
     error: str | None = None
+    expires_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -92,6 +122,7 @@ class AgentLayer(BaseModel):
             job=entity.job,
             image=entity.image,
             error=entity.error,
+            expires_at=entity.expires_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )

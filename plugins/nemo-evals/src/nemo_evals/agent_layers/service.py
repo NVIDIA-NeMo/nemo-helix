@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from nemo_evals.agent_layers.models import (
     AgentLayer,
@@ -58,6 +59,14 @@ def agent_layer_key(request: AgentLayerRequest) -> str:
     return install.layer_key(f"installer={installer_image()}")
 
 
+def expired(layer: AgentLayerEntity, now: datetime) -> bool:
+    """Whether runs may no longer start trials from ``layer``."""
+    expires = layer.expires_at
+    if expires is None:
+        return False
+    return now >= (expires if expires.tzinfo is not None else expires.replace(tzinfo=timezone.utc))
+
+
 class AgentLayerService:
     """Agent layers of task revisions, stored under the task and keyed by revision digest and agent install."""
 
@@ -67,10 +76,18 @@ class AgentLayerService:
         self.authorize_builds = authorize_builds
 
     async def request_layer(
-        self, workspace: str, name: str, revision: str, request: AgentLayerRequest
+        self,
+        workspace: str,
+        name: str,
+        revision: str,
+        request: AgentLayerRequest,
+        *,
+        ttl: timedelta,
+        now: datetime,
     ) -> AgentLayer | None:
-        """Start a layer of a revision for an agent, or return the one already running or ready.
+        """Start a layer of a revision for an agent, or return the one already running, or ready and unexpired.
 
+        A new attempt expires ``ttl`` after ``now`` and reuses only a Builder build made within ``ttl`` before it.
         Returns ``None`` when the task doesn't exist.
 
         Raises:
@@ -96,8 +113,9 @@ class AgentLayerService:
         layers = await self._layers(head, task_revision.content_hash, key)
         newest = layers[0] if layers else None
         if newest is not None and newest.status == "ready":
-            return AgentLayer.from_entity(newest)
-        if newest is not None and newest.status != "failed":
+            if not expired(newest, now):
+                return AgentLayer.from_entity(newest)
+        elif newest is not None and newest.status != "failed":
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._ensure_job(newest)
@@ -118,6 +136,8 @@ class AgentLayerService:
             agent=request,
             attempt=attempt,
             job=layer_job_name(task, task_revision.content_hash, key, attempt),
+            expires_at=now + ttl,
+            built_after=now - ttl,
         )
         layer._parent = head.id
         try:
@@ -127,27 +147,6 @@ class AgentLayerService:
         await self._ensure_job(layer)
         return AgentLayer.from_entity(layer)
 
-    async def list_layers(self, workspace: str, name: str, revision: str) -> list[AgentLayer] | None:
-        """A revision's layers, newest first; ``None`` when the task doesn't exist."""
-        found = await self._revision(workspace, name, revision)
-        if found is None:
-            return None
-        head, task_revision = found
-        return [AgentLayer.from_entity(layer) for layer in await self._layers(head, task_revision.content_hash, None)]
-
-    async def ready_layer(self, workspace: str, name: str, revision: str, agent_key: str) -> AgentLayer | None:
-        """The revision's newest layer for ``agent_key`` if it's ready; None otherwise.
-
-        Raises:
-            NemoEntityNotFoundError: The task doesn't exist.
-            RevisionNotFoundError: ``revision`` names no revision of the task.
-        """
-        head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
-        task_revision = await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
-        layers = await self._layers(head, task_revision.content_hash, agent_key)
-        newest = layers[0] if layers else None
-        return AgentLayer.from_entity(newest) if newest is not None and newest.status == "ready" else None
-
     async def _revision(self, workspace: str, name: str, revision: str) -> tuple[TaskEntity, TaskRevisionEntity] | None:
         try:
             head = await self.entity_client.get(TaskEntity, name=name, workspace=workspace)
@@ -156,21 +155,7 @@ class AgentLayerService:
         return head, await get_revision(self.entity_client, TaskRevisionEntity, head, revision)
 
     async def _layers(self, head: TaskEntity, revision_digest: str, agent_key: str | None) -> list[AgentLayerEntity]:
-        operations = [
-            ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
-            ComparisonOperation(field="data.revision_digest", operator=FilterOperator.EQ, value=revision_digest),
-        ]
-        if agent_key is not None:
-            operations.append(ComparisonOperation(field="data.agent_key", operator=FilterOperator.EQ, value=agent_key))
-        result = await self.entity_client.list(
-            AgentLayerEntity,
-            workspace=head.workspace,
-            filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=operations),
-            sort="-created_at",
-            page=1,
-            page_size=100,
-        )
-        return list(result.data)
+        return await _layers(self.entity_client, head, revision_digest, agent_key)
 
     async def _fail_abandoned(self, layer: AgentLayerEntity, job_status: str) -> AgentLayerEntity:
         layer.status = "failed"
@@ -200,3 +185,38 @@ class AgentLayerService:
                 raise ImageBuildJobConflictError(f"Job {layer.job} exists and does not run this layer") from None
             return
         logger.info("Started agent layer %s of %s as job %s", layer.name, layer.task, layer.job)
+
+
+async def newest_layer(
+    entity_client: EntityClient, workspace: str, name: str, revision: str, agent_key: str
+) -> AgentLayerEntity | None:
+    """The revision's newest layer for ``agent_key``, in any status; None when it has none.
+
+    Raises:
+        NemoEntityNotFoundError: The task doesn't exist.
+        RevisionNotFoundError: ``revision`` names no revision of the task.
+    """
+    head = await entity_client.get(TaskEntity, name=name, workspace=workspace)
+    task_revision = await get_revision(entity_client, TaskRevisionEntity, head, revision)
+    layers = await _layers(entity_client, head, task_revision.content_hash, agent_key)
+    return layers[0] if layers else None
+
+
+async def _layers(
+    entity_client: EntityClient, head: TaskEntity, revision_digest: str, agent_key: str | None
+) -> list[AgentLayerEntity]:
+    operations = [
+        ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=head.id),
+        ComparisonOperation(field="data.revision_digest", operator=FilterOperator.EQ, value=revision_digest),
+    ]
+    if agent_key is not None:
+        operations.append(ComparisonOperation(field="data.agent_key", operator=FilterOperator.EQ, value=agent_key))
+    result = await entity_client.list(
+        AgentLayerEntity,
+        workspace=head.workspace,
+        filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=operations),
+        sort="-created_at",
+        page=1,
+        page_size=100,
+    )
+    return list(result.data)
