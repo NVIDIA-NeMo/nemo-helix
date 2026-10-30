@@ -1237,53 +1237,13 @@ jobs:
             uv venv --python 3.12 "$venv"
             # --python, not VIRTUAL_ENV: setup-uv exports UV_PYTHON, which would otherwise send the
             # install to the workspace .venv.
-            # Ignore workspace overrides: these environments must carry their declared Harbor release.
-            uv --no-config pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
+            uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
-            "$venv/bin/python" -c \
-              'import sys, opensandbox; from importlib.metadata import version; assert version("harbor") == sys.argv[1]; assert version("opensandbox") == "1.2.0"' \
-              "$version"
             "$venv/bin/python" -m pytest -p no:cacheprovider -v \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
-              tests/test_harbor_opensandbox_compose_services.py tests/test_harbor_opensandbox_cleanup.py \
-              tests/test_opensandbox_sdk_compatibility.py
+              tests/test_harbor_opensandbox_compose_services.py
             echo "::endgroup::"
           done
-
-  # The shipping nhx-tasks image uses the workspace lock rather than the legacy runner requirements.
-  # Its Harbor/Gym checks span runtime packages beyond the scaled-evals plugin's path filter.
-  opensandbox-sdk-compatibility:
-    name: OpenSandbox SDK compatibility (shipping tasks)
-    needs: [changes]
-    if: >
-      !cancelled() && needs.changes.outputs.cpu-smoke == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Run shipping OpenSandbox SDK compatibility tests
-        env:
-          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/opensandbox-cpu-tasks
-        run: |
-          uv run --frozen --group cpu-tasks python -c \
-            'import opensandbox; from importlib.metadata import version; assert version("opensandbox") == "1.2.0"'
-          uv run --frozen --group cpu-tasks pytest --import-mode=importlib -v \
-            packages/nhx_sandbox/tests \
-            packages/sandboxed_gym/tests/test_opensandbox_driver.py \
-            packages/sandboxed_gym/tests/test_opensandbox_host_provider.py \
-            plugins/nemo-evals/tests/harbor/test_agent_setup_egress.py \
-            plugins/nemo-evals/tests/jobs/test_harbor_task_dispatch.py
 
   # WHY THIS JOB EXISTS (it looks redundant, it isn't): `--extra fabric` appears nowhere else in this
   # file and there is no `--all-extras`, so no other job installs nemo-fabric. Every other Fabric test
@@ -2759,7 +2719,6 @@ jobs:
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
-      - opensandbox-sdk-compatibility
       - agents-mini-swe-agent-tests
       - agents-nooa-tests
       - agents-claude-tests

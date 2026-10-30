@@ -3,8 +3,8 @@
 
 """The real SDK must authenticate proxy requests without exposing tenant keys to direct endpoints.
 
-The SDK is optional in the shared package. Runner CI requires it explicitly before running this
-module; other consumers can run the package's SDK-free tests without installing it.
+The SDK is optional in the shared package. Run this module with the cpu-tasks dependency group to
+exercise the real SDK; other consumers can run the package's SDK-free tests without installing it.
 """
 
 from __future__ import annotations
