@@ -64,7 +64,7 @@ jobs:
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
-      job-secret-auth: ${{ steps.changes.outputs.job-secret-auth }}
+      go: ${{ steps.changes.outputs.go }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
@@ -2465,55 +2465,27 @@ jobs:
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
-  job-secret-auth-tests:
-    name: Launcher and signed workload Secret tests
-    needs: [changes, policy-wasm]
+  go-tests:
+    name: Go tests
+    needs: [changes]
     if: >-
-      !cancelled() && needs.policy-wasm.result == 'success' && (
+      !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.deps == 'true' ||
-        needs.changes.outputs.job-secret-auth == 'true'
+        needs.changes.outputs.go == 'true'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Free disk space
-        uses: ./.github/actions/free-disk-space
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          python-version: "3.13"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
       - name: Install Flox
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
         with:
           disable-metrics: "true"
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
-      - name: Pull reference gateway image
-        run: docker pull envoyproxy/envoy:v1.37.0
-      - name: Run launcher Go and real-gateway Secret tests
-        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
-        env:
-          NHX_TEST_WORKLOAD_GATEWAY: "1"
-        with:
-          dir: ./tools/go
-          command: |
-            set -euo pipefail
-            cd services/core/jobs/jobs-launcher
-            go test -race ./...
-            go vet ./...
-            cd "$GITHUB_WORKSPACE"
-            uv run --frozen pytest services/core/jobs/tests/integration/test_workload_secret_authorization.py -v
+      - name: Test all tracked Go modules
+        run: flox activate --dir tools/go -- bash .github/scripts/run-go-tests.sh
 
   jobs-openshell-tests:
     name: Jobs OpenShell backend tests
@@ -2790,7 +2762,7 @@ jobs:
       - web-studio-deps
       - web-studio-e2e
       - opa-policy-test
-      - job-secret-auth-tests
+      - go-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
     if: always()
