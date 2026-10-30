@@ -20,13 +20,13 @@ from nemo_evals.gateway.middleware.closed_book import (
     REMOVED_TOOLS_STATE_KEY,
     ClosedBookConfig,
     ClosedBookMiddleware,
-    RouterCredentialCheck,
+    ProviderCredentialCheck,
     client_tool_label,
     is_self_searching_model,
     strip_hosted_tools,
 )
 from nemo_evals.gateway.policy import ModelAccess
-from nemo_evals.gateway.tokens import RouterKeyClaims, TrialTokenReader, unsigned_token
+from nemo_evals.gateway.tokens import TrialClaims, TrialTokenReader, unsigned_token
 from nemo_helix_plugin.client.oidc import decode_jwt_claims, generate_unsigned_jwt
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareCacheAccessor,
@@ -311,13 +311,15 @@ def _middleware(targets: dict[str, ModelProviderInferenceTarget] | None = None) 
     return middleware
 
 
-def _request(path: str, body: dict) -> tuple[InferenceMiddlewareContext, InferenceRequest]:
+def _request(
+    path: str, body: dict, caller_headers: dict[str, str] | None = None
+) -> tuple[InferenceMiddlewareContext, InferenceRequest]:
     request = InferenceRequest(body=body, headers={}, path=path)
     ctx = InferenceMiddlewareContext(
         request_id="r1",
         virtual_model_name="closed-book",
         workspace="ws",
-        original_request=InferenceRequest(body=dict(body), headers={}, path=path),
+        original_request=InferenceRequest(body=dict(body), headers=caller_headers or {}, path=path),
     )
     return ctx, request
 
@@ -617,8 +619,10 @@ def test_no_tool_type_is_both_client_and_provider_executed() -> None:
     }
 
 
-CLOSED_ROUTER_KEY = unsigned_token(RouterKeyClaims(model_access=ModelAccess.CLOSED, models=("ws/cb-strong",)))
-OPEN_ROUTER_KEY = unsigned_token(RouterKeyClaims(model_access=ModelAccess.OPEN))
+CLOSED_TRIAL = unsigned_token(
+    TrialClaims(session="run:t", intake_workspace="ws", model_access=ModelAccess.CLOSED, models=("ws/luna",))
+)
+OPEN_TRIAL = unsigned_token(TrialClaims(session="run:t", intake_workspace="ws", model_access=ModelAccess.OPEN))
 PLATFORM_KEY = generate_unsigned_jwt("user:alice")
 
 
@@ -634,28 +638,22 @@ class _Signed:
         return decode_jwt_claims(token) if token in self._tokens else None
 
 
-def _router_check(signed: _Signed) -> RouterCredentialCheck:
-    return RouterCredentialCheck(TrialTokenReader(signed), signed)
-
-
 @pytest.mark.parametrize(
     ("headers", "signed", "refused"),
     [
         pytest.param({"Authorization": "Bearer nvapi-provider-key"}, (), False, id="a model provider's own key"),
         pytest.param({}, (), False, id="no credential"),
-        pytest.param({"Authorization": f"Bearer {CLOSED_ROUTER_KEY}"}, (CLOSED_ROUTER_KEY,), False, id="a closed key"),
-        pytest.param({"x-api-key": CLOSED_ROUTER_KEY}, (CLOSED_ROUTER_KEY,), False, id="a closed key as x-api-key"),
-        pytest.param({"Authorization": f"Bearer {OPEN_ROUTER_KEY}"}, (OPEN_ROUTER_KEY,), True, id="an open key"),
-        pytest.param({"Authorization": f"Bearer {CLOSED_ROUTER_KEY}"}, (), True, id="a closed key nobody signed"),
-        pytest.param({"Authorization": f"Bearer {PLATFORM_KEY}"}, (PLATFORM_KEY,), True, id="a plain platform key"),
+        pytest.param({"Authorization": f"Bearer {PLATFORM_KEY}"}, (PLATFORM_KEY,), True, id="a platform key"),
+        pytest.param({"x-api-key": PLATFORM_KEY}, (PLATFORM_KEY,), True, id="a platform key as x-api-key"),
+        pytest.param({"Authorization": f"Bearer {CLOSED_TRIAL}"}, (), True, id="a trial token"),
     ],
 )
-async def test_a_provider_calling_back_into_the_gateway_needs_a_closed_router_key(
+async def test_a_provider_calling_back_into_the_gateway_with_a_platform_credential_is_refused(
     headers: dict[str, str], signed: tuple[str, ...], refused: bool
 ) -> None:
-    """Closed-book can't see the calls a router makes back through the gateway, so the router's key must keep them closed."""
+    """Closed-book can't see the calls a provider makes back through the gateway with a platform credential."""
     middleware = _middleware({"ws/routed": _target("route", outbound_headers=headers)})
-    middleware._router_check = _router_check(_Signed(*signed))
+    middleware._provider_check = ProviderCredentialCheck(_Signed(*signed))
     ctx, request = _request("v1/responses", {"model": "ws/routed", "input": "hi"})
 
     if refused:
@@ -668,9 +666,57 @@ async def test_a_provider_calling_back_into_the_gateway_needs_a_closed_router_ke
 
 async def test_whether_a_provider_key_is_a_platform_key_is_remembered() -> None:
     signed = _Signed()
-    check = _router_check(signed)
+    check = ProviderCredentialCheck(signed)
 
     for _ in range(3):
         assert await check.refusal({"Authorization": "Bearer nvapi-provider-key"}, "ws/model") is None
 
     assert signed.asked == 1
+
+
+_SEARCHING = {"model": "ws/luna", "input": "hi", "tools": [{"type": "web_search"}]}
+
+
+@pytest.mark.parametrize(
+    ("caller_headers", "closed"),
+    [
+        pytest.param({"Authorization": f"Bearer {CLOSED_TRIAL}"}, True, id="a closed trial token"),
+        pytest.param({"x-api-key": CLOSED_TRIAL}, True, id="a closed trial token as x-api-key"),
+        pytest.param({"Authorization": f"Bearer {OPEN_TRIAL}"}, False, id="an open trial token"),
+        pytest.param({"Authorization": f"Bearer {PLATFORM_KEY}"}, False, id="another credential"),
+        pytest.param({}, False, id="no credential"),
+    ],
+)
+async def test_applied_only_for_closed_credentials_it_closes_just_their_calls(
+    caller_headers: dict[str, str], closed: bool
+) -> None:
+    """One VirtualModel serves open and closed evaluations: only a closed trial's call loses its hosted tools."""
+    middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
+    middleware._trials = TrialTokenReader(None)
+    ctx, request = _request("v1/responses", dict(_SEARCHING), caller_headers)
+
+    await middleware.process_request(ctx, request, ClosedBookConfig(apply="closed_credential"))
+
+    assert ("tools" not in request.body) is closed
+
+
+async def test_applied_always_it_closes_calls_without_a_trial_token() -> None:
+    middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
+    ctx, request = _request("v1/responses", dict(_SEARCHING))
+
+    await middleware.process_request(ctx, request, ClosedBookConfig())
+
+    assert "tools" not in request.body
+
+
+async def test_a_trial_token_that_cant_be_verified_is_refused_rather_than_left_open() -> None:
+    async def unreachable(token: str) -> Mapping[str, Any] | None:
+        raise RuntimeError("the platform's signing keys are unreachable")
+
+    middleware = _middleware({"ws/luna": _target("azure/openai/gpt-5.6-luna")})
+    middleware._trials = TrialTokenReader(unreachable)
+    ctx, request = _request("v1/responses", dict(_SEARCHING), {"Authorization": f"Bearer {CLOSED_TRIAL}"})
+
+    with pytest.raises(InferenceMiddlewareError) as exc_info:
+        await middleware.process_request(ctx, request, ClosedBookConfig(apply="closed_credential"))
+    assert exc_info.value.status_code == 503

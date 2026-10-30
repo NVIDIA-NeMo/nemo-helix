@@ -7,6 +7,9 @@ Closed-book means the model answers only from the request: no provider-executed
 tool (hosted web search, fetch, MCP, code execution) and no model that searches on
 its own. Client-executed tools are kept, because the agent runs them inside its
 sandbox, where egress policy already applies.
+
+By default it applies to every call. Configured with ``apply: closed_credential``, it applies only to calls whose
+caller carries a closed trial token, so one VirtualModel serves open and closed evaluations alike.
 """
 
 from __future__ import annotations
@@ -17,10 +20,10 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from nemo_evals.gateway.policy import ModelAccess
-from nemo_evals.gateway.tokens import TrialTokenReader, claims_evals_credential, platform_token_reader
+from nemo_evals.gateway.tokens import TrialTokenReader, claims_a_trial, platform_token_reader
 from nemo_helix_plugin.auth import inference_gateway_credential, platform_auth_enabled, verified_access_key_claims
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareContext,
@@ -31,7 +34,7 @@ from nemo_helix_plugin.inference_middleware import (
     ModelProviderInferenceTarget,
     NemoInferenceMiddleware,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,12 @@ def ends_closed_book(request_middleware: Sequence[MiddlewareCall]) -> bool:
 
 class ClosedBookConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    apply: Literal["always", "closed_credential"] = Field(
+        default="always",
+        description="`always`: every call is closed-book. `closed_credential`: only calls made with a closed trial "
+        "token are; every other call passes through unchanged.",
+    )
 
 
 def client_tool_label(tool: object) -> str | None:
@@ -168,23 +177,20 @@ def _tool_choice_survives(choice: MutableMapping[str, Any], kept: _KeptTools, re
 PlatformKeyVerifier = Callable[[str], Awaitable[Mapping[str, Any] | None]]
 
 
-class RouterCredentialCheck:
-    """Whether a provider that calls back into the gateway is held to a closed model policy.
+class ProviderCredentialCheck:
+    """Whether a provider calls models back through the gateway with a platform credential.
 
-    A provider such as a router deployment holds a platform credential and calls other models back through the
-    gateway on its caller's behalf. Closed-book can't see those calls, so it serves such a provider only when its
-    credential is a closed evals router key, which the gateway holds to closed-book models. Any other provider
-    credential, such as a model provider's own API key, is not a platform credential and passes.
+    A provider such as a router deployment can hold a platform credential and call other models back through the
+    gateway. Closed-book can't see those calls, so it refuses such a provider. A model provider's own API key is not a
+    platform credential and passes.
     """
 
     def __init__(
         self,
-        reader: TrialTokenReader,
         verify_platform_key: PlatformKeyVerifier | None,
         *,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
-        self._reader = reader
         self._verify_platform_key = verify_platform_key
         self._clock = clock
         self._platform_keys: dict[str, tuple[float, bool]] = {}
@@ -192,17 +198,11 @@ class RouterCredentialCheck:
     async def refusal(self, provider_headers: Mapping[str, str], model: str) -> str | None:
         """Why the provider sending ``provider_headers`` can't serve ``model`` closed-book; ``None`` when it can."""
         credential = inference_gateway_credential(provider_headers)
-        if credential is None:
-            return None
-        if claims_evals_credential(credential):
-            claims = await self._reader.claims(credential)
-            if claims is not None and claims.model_access is ModelAccess.CLOSED:
-                return None
-        elif not await self._is_platform_key(credential):
+        if credential is None or not (claims_a_trial(credential) or await self._is_platform_key(credential)):
             return None
         return (
-            f"The provider serving {model!r} calls models back through the gateway with a credential that isn't a "
-            "closed evals router key, so the models it calls might not be closed-book."
+            f"The provider serving {model!r} calls models back through the gateway with a platform credential, "
+            "so the models it calls might not be closed-book."
         )
 
     async def _is_platform_key(self, credential: str) -> bool:
@@ -236,14 +236,28 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
 
     def __init__(self) -> None:
         super().__init__()
-        self._router_check: RouterCredentialCheck | None = None
+        self._provider_check: ProviderCredentialCheck | None = None
+        self._trials: TrialTokenReader | None = None
 
-    def _router_credentials(self) -> RouterCredentialCheck:
-        if self._router_check is None:
-            self._router_check = RouterCredentialCheck(
-                platform_token_reader(), verified_access_key_claims if platform_auth_enabled() else None
+    def _provider_credentials(self) -> ProviderCredentialCheck:
+        if self._provider_check is None:
+            self._provider_check = ProviderCredentialCheck(
+                verified_access_key_claims if platform_auth_enabled() else None
             )
-        return self._router_check
+        return self._provider_check
+
+    async def _caller_is_closed(self, ctx: InferenceMiddlewareContext) -> bool:
+        credential = inference_gateway_credential(ctx.original_request.headers)
+        if credential is None or not claims_a_trial(credential):
+            return False
+        if self._trials is None:
+            self._trials = platform_token_reader()
+        try:
+            trial = await self._trials.trial(credential)
+        except Exception as exc:
+            logger.warning("Couldn't verify the caller's trial token", exc_info=True)
+            raise InferenceMiddlewareUnavailableError("The caller's trial token couldn't be verified.") from exc
+        return trial is not None and trial.model_access is ModelAccess.CLOSED
 
     def supports_middleware_phase(self, phase: str) -> bool:
         return phase == "request"
@@ -259,6 +273,8 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
         request: InferenceRequest,
         middleware_config: ClosedBookConfig,
     ) -> InferenceRequest:
+        if middleware_config.apply == "closed_credential" and not await self._caller_is_closed(ctx):
+            return request
         model = request.body.get("model")
         if not isinstance(model, str):
             raise _unresolved_model(ctx, model)
@@ -286,14 +302,14 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 "so it cannot be served closed-book.",
             )
         try:
-            router_refusal = await self._router_credentials().refusal(target.outbound_headers, model)
+            provider_refusal = await self._provider_credentials().refusal(target.outbound_headers, model)
         except Exception as exc:
             logger.warning("Couldn't check the credential of the provider serving %r", model, exc_info=True)
             raise InferenceMiddlewareUnavailableError(
                 f"The credential of the provider serving {model!r} couldn't be checked."
             ) from exc
-        if router_refusal is not None:
-            raise _refusal(ctx, model, "router_credential_not_closed", router_refusal)
+        if provider_refusal is not None:
+            raise _refusal(ctx, model, "provider_calls_back", provider_refusal)
         forwarded = {**target.default_extra_body, **request.body, **target.required_extra_body}
         stored = [key for key in _PROVIDER_STORED_HISTORY_KEYS if forwarded.get(key) is not None]
         if references_stored_items(forwarded):
