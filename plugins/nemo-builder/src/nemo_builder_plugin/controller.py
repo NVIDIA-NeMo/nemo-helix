@@ -32,6 +32,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -138,12 +139,21 @@ class BuildQueueController(NemoController):
     async def _start(self, build: QueuedBuild) -> bool:
         """Create ``build``'s job and move its images to ``pending``. False if the job was refused for good."""
         assert self._jobs is not None and self._entities is not None
-        request = CreateHelixJobRequest.model_validate(build.request)
+        try:
+            request = CreateHelixJobRequest.model_validate(build.request)
+        except ValidationError as exc:
+            await self._refuse(build, f"not built: the queued job request is invalid ({exc.error_count()} error(s))")
+            return False
         async with self._jobs_as(_submitter(build)) as jobs:
             try:
                 await jobs.create_job(workspace=build.workspace, body=request)
-            except ConflictError:
-                job = (await self._jobs.get_job(workspace=build.workspace, name=build.name)).data()
+            except ConflictError as exc:
+                try:
+                    job = (await self._jobs.get_job(workspace=build.workspace, name=build.name)).data()
+                except NotFoundError:
+                    # A 409 with no job behind it is a refusal, such as a secret the job names going missing.
+                    await self._refuse(build, f"not built: Jobs refused the build job (HTTP 409): {exc.detail}")
+                    return False
                 if (job.custom_fields or {}).get("request_digest") != (request.custom_fields or {}).get(
                     "request_digest"
                 ):
@@ -184,15 +194,17 @@ class BuildQueueController(NemoController):
 
     async def _refuse(self, build: QueuedBuild, detail: str) -> None:
         logger.warning("dropping queued build %s: %s", _label(build), sanitize_for_log(detail))
-        assert self._entities is not None
-        await fail_rows(self._entities, await self._rows(build), detail)
-        await self._forget(build)
+        await self._settle(build, detail)
 
     async def _end(self, build: QueuedBuild) -> None:
         """Forget ``build``, whose job ended; any image it did not publish by then never will be, so fail it."""
+        await self._settle(build, "not built: its build job ended without publishing it")
+
+    async def _settle(self, build: QueuedBuild, detail: str) -> None:
+        """Fail ``build``'s waiting images, then forget it; kept for the next pass if any image couldn't be failed."""
         assert self._entities is not None
-        await fail_rows(self._entities, await self._rows(build), "not built: its build job ended without publishing it")
-        await self._forget(build)
+        if await fail_rows(self._entities, await self._rows(build), detail):
+            await self._forget(build)
 
     async def _rows(self, build: QueuedBuild) -> list[ContainerImage]:
         assert self._entities is not None

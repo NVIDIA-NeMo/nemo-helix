@@ -131,9 +131,10 @@ builder:
   # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
   # queues steps behind the Jobs controller, and that queue time counts.
   ttlSecondsBeforeActive: 3600
-  # -- Most builds running at once, across all workspaces: the builder's `max_concurrent_builds`. Later submits return
-  # their images `queued` and start in order as running builds finish. Size it to `resourceQuota`: each running build
-  # holds a sandbox and a step pod. Null starts every build as it is submitted.
+  # -- Most builds running at once, across all workspaces: the builder's `max_concurrent_builds`. Set, every submit
+  # returns its images `queued`, and they start oldest first while fewer than this many run. Size it to
+  # `resourceQuota`: each running build holds a sandbox and a step pod. Null skips the queue and starts every build
+  # as it is submitted; builds the quota then rejects fail without a retry.
   maxConcurrentBuilds: 3
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}

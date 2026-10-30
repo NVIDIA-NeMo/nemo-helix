@@ -91,10 +91,11 @@ class BuilderConfig(NemoConfig):
         default=None,
         ge=1,
         description=(
-            "Most build jobs running at once, across every workspace. A submit over it returns its images `queued`, "
-            "and the `builder-queue` controller starts each job, oldest first, as a running one ends. Size it to the "
-            "build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null starts every "
-            "job as it is submitted."
+            "Most build jobs running at once, across every workspace. Set, every submit returns its images `queued`, "
+            "and the `builder-queue` controller starts each job, oldest first, while fewer than this many run. Size "
+            "it to the build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null "
+            "skips the queue and creates every job as it is submitted; jobs the ResourceQuota then rejects fail "
+            "without a retry."
         ),
     )
 

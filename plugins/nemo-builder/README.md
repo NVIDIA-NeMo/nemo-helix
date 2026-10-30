@@ -359,8 +359,9 @@ A successful submit returns `201` with the job's name and the `pending` rows. Po
 job: images in a set finish independently.
 
 With `max_concurrent_builds` set (see [Configuration](#configuration)), the rows come back `queued` and
-the job isn't created yet. The `builder-queue` controller creates it, as you, once fewer than that many
-builds run across the deployment, oldest submit first, and moves the rows to `pending`. If Jobs then
+the job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
+the build, once fewer than `max_concurrent_builds` builds run across the deployment, oldest submit first,
+and moves the rows to `pending`. If Jobs then
 refuses the job, the rows are failed with the reason in `status_detail` rather than the submit
 returning `403` or `409`.
 

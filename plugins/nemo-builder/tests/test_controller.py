@@ -31,6 +31,7 @@ def _response(code: int) -> httpx.Response:
 class FakeEntities:
     def __init__(self) -> None:
         self.entities: dict[str, Any] = {}
+        self.fail_update: set[str] = set()
 
     async def list(self, entity_type, *, workspace, sort, page):
         found = [e for e in self.entities.values() if isinstance(e, entity_type)]
@@ -39,9 +40,12 @@ class FakeEntities:
     async def get(self, entity_type, *, name, workspace):
         if name not in self.entities:
             raise EntityNotFoundError(name)
-        return self.entities[name]
+        return self.entities[name].model_copy(deep=True)
 
     async def update(self, entity):
+        if entity.name in self.fail_update:
+            self.fail_update.discard(entity.name)
+            raise RuntimeError("entity store down")
         self.entities[entity.name] = entity
         return entity
 
@@ -53,12 +57,13 @@ class FakeJobs:
     def __init__(self) -> None:
         self.jobs: dict[str, SimpleNamespace] = {}
         self.refuse: set[str] = set()
+        self.conflict: set[str] = set()
 
     async def create_job(self, *, workspace: str, body: CreateHelixJobRequest):
         assert body.name is not None
         if body.name in self.refuse:
             raise PermissionDeniedError(_response(403))
-        if body.name in self.jobs:
+        if body.name in self.jobs or body.name in self.conflict:
             raise ConflictError(_response(409))
         self.jobs[body.name] = SimpleNamespace(status=HelixJobStatus.CREATED, custom_fields=body.custom_fields)
 
@@ -140,3 +145,27 @@ async def test_queue_starts_builds_in_order_within_the_cap() -> None:
     jobs.jobs["build-e"] = SimpleNamespace(status=HelixJobStatus.ACTIVE, custom_fields={"request_digest": DIGEST})
     await controller.reconcile()
     assert status("build-e") == "failed" and "build-e" not in entities.entities
+
+
+@pytest.mark.asyncio
+async def test_refused_builds_do_not_block_the_queue() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: 1)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    for job in ("bad-request", "missing-secret", "good"):
+        _queue(entities, job)
+    entities.entities["bad-request"].request = {"name": "bad-request"}
+    # Jobs answers 409 with no job behind it, as it does for a secret the job names going missing.
+    jobs.conflict.add("missing-secret")
+    # The first attempt to fail its image doesn't stick, so its entry must outlive this pass.
+    entities.fail_update.add("missing-secret.img")
+
+    await controller.reconcile()
+    assert entities.entities["bad-request.img"].status == "failed" and "bad-request" not in entities.entities
+    assert entities.entities["missing-secret.img"].status == "queued" and "missing-secret" in entities.entities
+    assert set(jobs.jobs) == {"good"} and entities.entities["good.img"].status == "pending"
+
+    # Retried once a slot is free.
+    jobs.jobs["good"].status = HelixJobStatus.COMPLETED
+    await controller.reconcile()
+    assert entities.entities["missing-secret.img"].status == "failed" and "missing-secret" not in entities.entities

@@ -273,11 +273,12 @@ async def submit_build_set(
     return SubmitResult(job=plan.job_name, images=images)
 
 
-async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], detail: str) -> None:
+async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], detail: str) -> bool:
     """Fail each of ``rows`` still waiting, rather than leave it waiting on a job this submit didn't create.
 
-    One that changed since it was read, or can't be written, is logged and left.
+    One that changed since it was read, or can't be written, is logged and left. True if none was left.
     """
+    settled = True
     for row in rows:
         if row.status not in ("queued", "pending"):
             continue
@@ -286,17 +287,20 @@ async def fail_rows(entity_client: _EntityWriter, rows: list[ContainerImage], de
         try:
             await entity_client.update(row)
         except EntityConflictError:
+            settled = False
             logger.warning(
                 "image %s/%s changed while being failed; leaving it as it is",
                 sanitize_for_log(row.workspace),
                 sanitize_for_log(row.name),
             )
         except Exception:
+            settled = False
             logger.exception(
                 "image %s/%s could not be failed, and stays pending",
                 sanitize_for_log(row.workspace),
                 sanitize_for_log(row.name),
             )
+    return settled
 
 
 async def _adopt(
