@@ -242,6 +242,7 @@ def test_redeploy_bad_config_aborts_before_teardown(tmp_path: Path, make_cli_sta
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("interactive_stdin")
 def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path, make_cli_state) -> None:
     """Without --yes, the user is prompted; 'y' proceeds through all steps."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])
@@ -265,6 +266,7 @@ def test_redeploy_prompts_and_proceeds_on_yes(tmp_path: Path, make_cli_state) ->
     assert rec.ordered_ops() == ["undeploy", "delete", "create", "deploy"]
 
 
+@pytest.mark.usefixtures("interactive_stdin")
 def test_redeploy_aborts_on_decline(tmp_path: Path, make_cli_state) -> None:
     """Declining the prompt performs no destructive calls."""
     rec = _Recorder(deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running"}])

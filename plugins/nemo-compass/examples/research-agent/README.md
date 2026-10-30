@@ -107,12 +107,12 @@ uv run nemo agents list
 uv run nemo agents deployments list
 uv run nemo agents logs --agent research-agent
 
-echo y | uv run nemo agents undeploy --agent research-agent
-echo y | uv run nemo agents delete   research-agent
+uv run nemo agents undeploy --agent research-agent --yes
+uv run nemo agents delete research-agent --yes
 ```
 
 ### Gotchas
 
 - **Model name format.** NAT YAML accepts the `meta/llama-3.3-70b-instruct` style for direct NIM calls, but when the agent runs under the platform, NIM calls are routed through the inference gateway, which validates names as lowercase letters/digits/hyphens (2–63 chars). Use the hyphenated entity ID from `nemo models list` (e.g. `meta-llama-3-3-70b-instruct`).
-- **Undeploy / delete prompt.** No `--yes` flag on this build — pipe `echo y |` for non-interactive use.
+- **Undeploy / delete prompt.** Both commands ask for confirmation. Pass `--yes` for non-interactive use; piping `echo y |` no longer works.
 - **Editing `workflow.yml`.** The platform stores the YAML at registration time. After edits, `undeploy` + `delete` + `register` + `deploy` to pick them up.

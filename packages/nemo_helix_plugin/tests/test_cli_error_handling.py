@@ -378,6 +378,19 @@ def test_decorator_catches_and_handles_errors(capsys):
     assert "Not found:" in captured.err
 
 
+def test_decorator_lets_a_declined_confirmation_abort(capsys):
+    from nemo_helix_plugin.cli_error_handling import handle_errors
+
+    @handle_errors
+    def declined():
+        raise click.Abort()
+
+    with pytest.raises(click.Abort):
+        declined()
+
+    assert "Unexpected error" not in capsys.readouterr().err
+
+
 def test_not_found_prints_server_message(capsys):
     """NotFoundError prints the server's detail (e.g. workspace not found) on its own line."""
     error = _http_error(NotFoundError, 404, {"detail": "Workspace 'default' not found"})

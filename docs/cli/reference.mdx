@@ -5816,6 +5816,9 @@ will handle deletion of all entities and external resources.
 
 Role bindings are immediately deleted to revoke access.
 
+Asks for confirmation first; pass `--yes` to skip it (required when not
+running interactively).
+
 **Examples:**
 
 
@@ -5832,6 +5835,10 @@ nemo workspaces delete [OPTIONS] NAME
 **Arguments:**
 
 * `<NAME>`
+
+**Options:**
+
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6484,7 +6491,7 @@ nemo agents delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6563,7 +6570,7 @@ nemo agents redeploy [OPTIONS]
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass `--no-wait` to return the pending deployment immediately as JSON.
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with `--wait`). [default: 300]
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
@@ -6626,7 +6633,7 @@ nemo agents undeploy [OPTIONS] [NAME]
 
 * `--agent, --all, -a`: Remove all deployments for this agent.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6724,7 +6731,7 @@ nemo agents deployments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6877,7 +6884,7 @@ nemo agents environment-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7005,7 +7012,7 @@ nemo agents environments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7127,7 +7134,7 @@ nemo agents compute-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7288,7 +7295,7 @@ nemo agents sessions close [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
