@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Regression: validation fileset refs must resolve to on-disk paths in the training step."""
+"""The steps the unsloth compiler builds: what they download, train on and upload."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pytest
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.models.types import ModelEntity
 from nhx.customization_common.schemas.file_io import model_upload_lifecycle
-from nhx.unsloth.app.constants import DEFAULT_DATASET_PATH, DEFAULT_VALIDATION_DATASET_PATH
+from nhx.unsloth.app.constants import DEFAULT_DATASET_PATH
 from nhx.unsloth.app.jobs.compiler import platform_job_config_compiler
 from nhx.unsloth.schemas import (
     DatasetSpec,
@@ -57,14 +57,10 @@ def _model_entity() -> ModelEntity:
     )
 
 
-def _spec(*, validation_path: str | None) -> UnslothJobOutput:
+def _spec() -> UnslothJobOutput:
     return UnslothJobOutput(
         model=ModelLoadSpec(name="default/qwen3-1.7b"),
-        dataset=DatasetSpec(
-            path="default/commonsense_qa",
-            validation_path=validation_path,
-            apply_chat_template=True,
-        ),
+        dataset=DatasetSpec(path="default/commonsense_qa", apply_chat_template=True),
         training=TrainingSpec(lora=LoRAParams()),
         schedule=ScheduleSpec(epochs=1),
         output=OutputResponse(
@@ -77,7 +73,7 @@ def _spec(*, validation_path: str | None) -> UnslothJobOutput:
 
 
 @pytest.mark.asyncio
-async def test_training_step_gets_local_validation_path_for_same_fileset() -> None:
+async def test_training_reads_validation_files_from_the_one_dataset_fileset() -> None:
     from nhx.unsloth.app.jobs import compiler as compiler_mod
 
     original_fetch = compiler_mod.fetch_model_entity
@@ -85,39 +81,18 @@ async def test_training_step_gets_local_validation_path_for_same_fileset() -> No
     try:
         job = await platform_job_config_compiler(
             workspace="default",
-            job_spec=_spec(validation_path="default/commonsense_qa"),
+            job_spec=_spec(),
             platform=_platform_mock(),
         )
     finally:
         compiler_mod.fetch_model_entity = original_fetch
 
     training = next(s for s in job["steps"] if s["name"] == "training")
-    assert training["config"]["validation_path"] == DEFAULT_DATASET_PATH
+    assert training["config"]["dataset_path"] == DEFAULT_DATASET_PATH
+    assert "validation_path" not in training["config"]
 
     download = next(s for s in job["steps"] if s["name"] == "model-and-dataset-download")
-    assert len(download["config"]["download"]) == 2
-
-
-@pytest.mark.asyncio
-async def test_training_step_gets_separate_validation_path_for_different_fileset() -> None:
-    from nhx.unsloth.app.jobs import compiler as compiler_mod
-
-    original_fetch = compiler_mod.fetch_model_entity
-    compiler_mod.fetch_model_entity = AsyncMock(return_value=_model_entity())
-    try:
-        job = await platform_job_config_compiler(
-            workspace="default",
-            job_spec=_spec(validation_path="default/commonsense_qa_val"),
-            platform=_platform_mock(),
-        )
-    finally:
-        compiler_mod.fetch_model_entity = original_fetch
-
-    training = next(s for s in job["steps"] if s["name"] == "training")
-    assert training["config"]["validation_path"] == DEFAULT_VALIDATION_DATASET_PATH
-
-    download = next(s for s in job["steps"] if s["name"] == "model-and-dataset-download")
-    assert len(download["config"]["download"]) == 3
+    assert [item["src"]["name"] for item in download["config"]["download"]][1:] == ["commonsense_qa"]
 
 
 @pytest.mark.asyncio
@@ -129,7 +104,7 @@ async def test_upload_step_stamps_output_metadata() -> None:
     try:
         job = await platform_job_config_compiler(
             workspace="default",
-            job_spec=_spec(validation_path=None),
+            job_spec=_spec(),
             platform=_platform_mock(),
         )
     finally:
@@ -149,7 +124,7 @@ async def test_compiler_applies_profile_to_task_steps() -> None:
     try:
         job = await platform_job_config_compiler(
             workspace="default",
-            job_spec=_spec(validation_path=None),
+            job_spec=_spec(),
             platform=_platform_mock(),
             profile="custom-gpu",
         )

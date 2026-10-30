@@ -81,8 +81,6 @@ class SpecRefs:
     model: tuple[str, ...]
     #: Path to the training dataset reference, e.g. ``("dataset", "training")``.
     dataset: tuple[str, ...]
-    #: Path to the validation dataset reference, when the backend has a separate one.
-    dataset_validation: tuple[str, ...] | None = None
     #: Path to the environment reference, when the backend has one. GRPO only.
     environment: tuple[str, ...] | None = None
 
@@ -207,8 +205,6 @@ def write_refs(spec: dict, refs: SpecRefs, report: UploadReport) -> None:
         _write_spec(spec, refs.model, report.model_ref)
     if report.dataset_ref is not None:
         _write_spec(spec, refs.dataset, report.dataset_ref)
-        if refs.dataset_validation is not None:
-            _write_spec(spec, refs.dataset_validation, report.dataset_ref)
     if report.environment_ref is not None and refs.environment is not None:
         _write_spec(spec, refs.environment, report.environment_ref)
 
@@ -230,7 +226,6 @@ def find_conflicts(
     checks: list[tuple[bool, tuple[str, ...] | None]] = [
         (model, refs.model),
         (dataset, refs.dataset),
-        (dataset, refs.dataset_validation),
         (environment, refs.environment),
     ]
     conflicts = []
@@ -293,6 +288,36 @@ def _create_model(
 
     _create_model_entity(models, name=name, fileset=f"{workspace}/{name}", workspace=workspace, exist_ok=exist_ok)
     return f"{workspace}/{name}"
+
+
+def create_dataset_fileset(
+    files: FilesUploadClient,
+    *,
+    name: str,
+    source: Path,
+    workspace: str,
+    exist_ok: bool,
+    report: UploadReport,
+) -> str:
+    """Create the dataset fileset *name* from a local file or directory, and return its reference.
+
+    The same create, reuse and upload rules as ``--upload-dataset``, for a caller that picks the name.
+    """
+    if _create_fileset(
+        files, name=name, purpose=FilesetPurpose.DATASET, workspace=workspace, exist_ok=exist_ok, report=report
+    ):
+        _upload_source(files, name=name, workspace=workspace, source=source)
+    return f"{workspace}/{name}"
+
+
+def require_new_filesets(files: FilesUploadClient, *, names: Iterable[str], workspace: str) -> None:
+    """Refuse when any fileset in *names* already exists, before the caller creates or uploads anything."""
+    taken = [f"{workspace}/{name}" for name in names if _fileset_exists(files, name=name, workspace=workspace)]
+    if taken:
+        raise UploadError(
+            f"{' and '.join(taken)} already exist{'s' if len(taken) == 1 else ''}. Pass --exist-ok to reuse "
+            "what exists as it is, or delete it if you want it rebuilt from the local source."
+        )
 
 
 def _create_fileset_from_source(

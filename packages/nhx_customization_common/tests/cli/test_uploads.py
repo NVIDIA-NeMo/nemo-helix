@@ -16,11 +16,14 @@ from nhx.customization_common.cli.uploads import (
     FilesUploadClient,
     SpecRefs,
     UploadError,
+    UploadReport,
     _upload_source,
+    create_dataset_fileset,
     create_resources,
     fileset_name_for,
     find_conflicts,
     is_huggingface_id,
+    require_new_filesets,
     write_refs,
 )
 
@@ -80,12 +83,10 @@ class _FakeModels:
 AUTOMODEL_REFS = SpecRefs(
     model=("model",),
     dataset=("dataset", "training"),
-    dataset_validation=("dataset", "validation"),
 )
 UNSLOTH_REFS = SpecRefs(
     model=("model", "name"),
     dataset=("dataset", "path"),
-    dataset_validation=("dataset", "validation_path"),
 )
 RL_REFS = SpecRefs(model=("model",), dataset=("dataset",), environment=("environment",))
 
@@ -347,23 +348,17 @@ class TestWriteRefs:
     """Each backend holds its references in a different place."""
 
     def test_automodel_paths(self) -> None:
-        """One uploaded fileset fills training and validation; the backend splits them."""
+        """The one dataset fileset holds training and validation files; the backend tells them apart."""
         spec: dict[str, Any] = {"model": "x", "dataset": {"training": "y"}}
         report = _Report(model_ref="default/m", dataset_ref="default/d")
         write_refs(spec, AUTOMODEL_REFS, report)
-        assert spec == {
-            "model": "default/m",
-            "dataset": {"training": "default/d", "validation": "default/d"},
-        }
+        assert spec == {"model": "default/m", "dataset": {"training": "default/d"}}
 
     def test_unsloth_paths(self) -> None:
         spec: dict[str, Any] = {"model": {"name": "x"}, "dataset": {"path": "y"}}
         report = _Report(model_ref="default/m", dataset_ref="default/d")
         write_refs(spec, UNSLOTH_REFS, report)
-        assert spec == {
-            "model": {"name": "default/m"},
-            "dataset": {"path": "default/d", "validation_path": "default/d"},
-        }
+        assert spec == {"model": {"name": "default/m"}, "dataset": {"path": "default/d"}}
 
     def test_rl_has_no_separate_validation_ref(self) -> None:
         spec: dict[str, Any] = {"model": "x", "dataset": "y"}
@@ -383,7 +378,7 @@ class TestWriteRefs:
             (
                 AUTOMODEL_REFS,
                 {"dataset": "stale"},
-                {"dataset": {"training": "default/d", "validation": "default/d"}},
+                {"dataset": {"training": "default/d"}},
             ),
         ],
         ids=["unsloth-null-model", "automodel-string-dataset"],
@@ -485,7 +480,6 @@ class TestSiblingOptionsSurvive:
             "apply_chat_template": True,
             "text_field": "text",
             "path": "default/d",
-            "validation_path": "default/d",
         }
 
     def test_model_options_are_kept(self) -> None:
@@ -496,7 +490,7 @@ class TestSiblingOptionsSurvive:
     def test_a_missing_block_is_created(self) -> None:
         spec: dict[str, Any] = {}
         write_refs(spec, AUTOMODEL_REFS, _Report(dataset_ref="default/d"))
-        assert spec == {"dataset": {"training": "default/d", "validation": "default/d"}}
+        assert spec == {"dataset": {"training": "default/d"}}
 
 
 class TestConflicts:
@@ -506,12 +500,6 @@ class TestConflicts:
         spec: dict[str, Any] = {"model": "default/already-there"}
         conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=True, dataset=False, environment=False)
         assert conflicts == ["model (default/already-there)"]
-
-    def test_the_validation_ref_counts_as_a_dataset_conflict(self) -> None:
-        """The reported bug: only training was replaced, leaving validation stale."""
-        spec: dict[str, Any] = {"dataset": {"validation": "default/old"}}
-        conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=False, dataset=True, environment=False)
-        assert conflicts == ["dataset.validation (default/old)"]
 
     def test_a_field_with_no_matching_flag_is_not_a_conflict(self) -> None:
         spec: dict[str, Any] = {"model": "default/keep"}
@@ -527,12 +515,67 @@ class TestConflicts:
     def test_every_conflicting_field_is_reported_at_once(self) -> None:
         spec: dict[str, Any] = {
             "model": "default/m",
-            "dataset": {"training": "default/t", "validation": "default/v"},
+            "dataset": {"training": "default/t"},
         }
         conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=True, dataset=True, environment=False)
-        assert len(conflicts) == 3
+        assert len(conflicts) == 2
 
     def test_rl_environment_conflict(self) -> None:
         spec: dict[str, Any] = {"environment": "default/env"}
         conflicts = find_conflicts(spec, RL_REFS, model=False, dataset=False, environment=True)
         assert conflicts == ["environment (default/env)"]
+
+
+class TestCreateDatasetFileset:
+    """The named dataset fileset ``nemo customization dataset prepare`` uploads its splits to."""
+
+    def _splits(self, tmp_path: Path) -> Path:
+        (tmp_path / "train.jsonl").write_text("{}\n")
+        (tmp_path / "validation.jsonl").write_text("{}\n")
+        return tmp_path
+
+    def test_creates_a_dataset_fileset_with_the_given_name(self, tmp_path: Path) -> None:
+        files, report = _FakeFiles(), UploadReport()
+
+        ref = create_dataset_fileset(
+            files, name="sft-data", source=self._splits(tmp_path), workspace="ws", exist_ok=False, report=report
+        )
+
+        assert ref == "ws/sft-data"
+        assert files.created[0]["purpose"].value == "dataset"
+        assert files.uploaded == [("sft-data", "train.jsonl"), ("sft-data", "validation.jsonl")]
+
+    def test_an_existing_fileset_fails_without_exist_ok_and_is_left_alone_with_it(self, tmp_path: Path) -> None:
+        files = _FakeFiles(existing={"sft-data"})
+
+        with pytest.raises(UploadError, match="already exists"):
+            create_dataset_fileset(
+                files,
+                name="sft-data",
+                source=self._splits(tmp_path),
+                workspace="ws",
+                exist_ok=False,
+                report=UploadReport(),
+            )
+        report = UploadReport()
+        create_dataset_fileset(
+            files, name="sft-data", source=self._splits(tmp_path), workspace="ws", exist_ok=True, report=report
+        )
+
+        assert report.reused == ["ws/sft-data"]
+        assert files.uploaded == []
+
+
+class TestRequireNewFilesets:
+    def test_passes_when_every_fileset_is_free(self) -> None:
+        require_new_filesets(_FakeFiles(), names=["sft-data", "sft-data-test"], workspace="ws")
+
+    def test_names_every_fileset_that_is_taken(self) -> None:
+        files = _FakeFiles(existing={"sft-data", "sft-data-test"})
+
+        with pytest.raises(UploadError, match="^ws/sft-data and ws/sft-data-test already exist. Pass --exist-ok"):
+            require_new_filesets(files, names=["sft-data", "sft-data-test"], workspace="ws")
+        with pytest.raises(UploadError, match="^ws/sft-data-test already exists."):
+            require_new_filesets(
+                _FakeFiles(existing={"sft-data-test"}), names=["sft-data", "sft-data-test"], workspace="ws"
+            )

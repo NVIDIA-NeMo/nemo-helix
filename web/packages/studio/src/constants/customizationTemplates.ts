@@ -158,7 +158,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
       automodel: {
         ...FORM_DEFAULTS.automodel,
         model: `${workspace}/nemotron-35-lightning-30b-a3b-bf16`,
-        dataset: { training: datasetRef, validation: datasetRef },
+        dataset: { training: datasetRef },
         training: {
           ...FORM_DEFAULTS.automodel.training,
           training_type: 'sft',
@@ -242,7 +242,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
       automodel: {
         ...FORM_DEFAULTS.automodel,
         model: `${workspace}/nemotron-3-super-120b-a12b-bf16`,
-        dataset: { training: datasetRef, validation: datasetRef },
+        dataset: { training: datasetRef },
         training: {
           ...FORM_DEFAULTS.automodel.training,
           training_type: 'sft',
@@ -320,7 +320,7 @@ export const CUSTOMIZATION_TEMPLATES: CustomizationTemplate[] = [
       automodel: {
         ...FORM_DEFAULTS.automodel,
         model: `${workspace}/nemotron-3-ultra-550b-a55b-bf16`,
-        dataset: { training: datasetRef, validation: datasetRef },
+        dataset: { training: datasetRef },
         training: {
           ...FORM_DEFAULTS.automodel.training,
           training_type: 'sft',

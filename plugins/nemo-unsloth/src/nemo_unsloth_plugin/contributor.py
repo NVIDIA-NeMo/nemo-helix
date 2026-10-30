@@ -40,7 +40,7 @@ does not split the model across several GPUs.
 
 The job JSON follows the UnslothJobInput schema:
   model      base model entity, max_seq_length, 4-bit or 8-bit loading
-  dataset    training fileset path, plus an optional validation_path
+  dataset    fileset of training files and optional validation files
   training   lora or all_weights, and the LoRA rank, alpha, dropout
   schedule   epochs, max_steps, warmup, scheduler, logging cadence
   batch      per_device_train_batch_size, gradient_accumulation_steps

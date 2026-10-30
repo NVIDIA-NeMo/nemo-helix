@@ -19,7 +19,7 @@ A customization job is submitted with a backend-specific spec (`AutomodelJobInpu
 | `name` | No | Name for this customization job. Auto-generated if not provided |
 | `workspace` | Yes | Workspace where the job runs. Determines which datasets and models are authorized for the job. Passed to `jobs.create()`, not part of the spec |
 | `spec.model` | Yes | Base Model Entity to fine-tune. Automodel takes a string (`workspace/name`); Unsloth takes an object (`{"name": "workspace/name", ...}`) |
-| `spec.dataset` | Yes | Training data filesets. Automodel uses `{"training": "...", "validation": "..."}`; Unsloth uses `{"path": "..."}` |
+| `spec.dataset` | Yes | The dataset fileset, holding the training file and, optionally, the validation file. Automodel uses `{"training": "..."}`; Unsloth uses `{"path": "..."}` |
 | `spec.training` | Yes | Training method and hyperparameters (see [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration)) |
 | `spec.training.training_type` | No | Training method. Automodel: `sft` or `distillation`. Unsloth: `sft`. Defaults to `sft` |
 | `spec.training.finetuning_type` | No | Adapter regime. Automodel: `lora`, `lora_merged`, or `all_weights`. Unsloth: `lora` or `all_weights`. Defaults to `lora` |

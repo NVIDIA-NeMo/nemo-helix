@@ -127,7 +127,6 @@ def _run_training(raw: dict) -> dict:
         ctx,
         model_path=_storage_path(config.model_path),
         dataset_path=_storage_path(config.dataset_path),
-        validation_path=_storage_path(config.validation_path),
         output_path=_storage_path(config.output_path),
         checkpoint_path=_storage_path(config.checkpoint_path),
     )

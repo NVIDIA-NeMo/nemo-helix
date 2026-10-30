@@ -9691,6 +9691,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 
 **Commands:**
 
+* `dataset`: Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
 * `automodel`: Create an Automodel training job on the platform.
 * `rl`: Create a NeMo-RL training job on the platform.
 * `unsloth`: Create an Unsloth training job on the platform.
@@ -9700,6 +9701,90 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 * `automodel.jobs`: Automodel SFT, retrieval, and knowledge-distillation...
 * `rl.jobs`: NeMo-RL DPO and GRPO training jobs on the platform...
 * `unsloth.jobs`: Unsloth SFT (LoRA / full / merged) training jobs on the...
+
+#### nemo customization dataset
+
+Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
+
+Formats (`--format`), and the backends that train on each:
+- chat: automodel, training.training_type sft or distillation; or unsloth, with dataset.apply_chat_template: true.
+- preference: rl, training.type dpo.
+- prompt-completion: automodel, training.training_type sft or distillation; or unsloth. Raw text with no chat template, for base models.
+- embedding: automodel, training.recipe bi_encoder or cross_encoder.
+- text: unsloth, with dataset.text_field: text.
+
+GRPO is not supported: rl GRPO (training.type: grpo) trains on NeMo Gym rows that each environment defines, not on a table. Write them for the environment and upload them with `--upload-dataset` on the rl command.
+
+The prepare command's help lists the source, split and column options.
+
+**Usage:**
+
+```shell
+nemo customization dataset [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `prepare`: Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
+
+##### nemo customization dataset prepare
+
+Convert a Parquet, CSV or JSONL table into a Customizer training dataset and upload it as a fileset.
+
+Reads SOURCE on this machine: a local file or directory, or a fileset. Writes its rows in the format `--format` names, drops rows with an empty required field, and splits the rest with a seeded shuffle. Then uploads the training and validation splits to the platform as a new dataset fileset, NAME (train.jsonl, and validation.jsonl unless `--val-fraction` is 0), and the test split, unless `--test-fraction` is 0, as a second fileset, NAME-test (test.jsonl). Prints the fileset references as JSON, to put in the job JSON. It creates filesets, not a training job.
+
+Formats (`--format`), and the backends that train on each:
+- chat: automodel, training.training_type sft or distillation; or unsloth, with dataset.apply_chat_template: true.
+- preference: rl, training.type dpo.
+- prompt-completion: automodel, training.training_type sft or distillation; or unsloth. Raw text with no chat template, for base models.
+- embedding: automodel, training.recipe bi_encoder or cross_encoder.
+- text: unsloth, with dataset.text_field: text.
+
+GRPO is not supported: rl GRPO (training.type: grpo) trains on NeMo Gym rows that each environment defines, not on a table. Write them for the environment and upload them with `--upload-dataset` on the rl command.
+
+Data Designer output: download the job's artifacts result (nemo jobs results download artifacts `--job` JOB -o artifacts.tar), extract it, and pass its parquet-files directory.
+
+**Usage:**
+
+```shell
+nemo customization dataset prepare [OPTIONS] SOURCE
+```
+
+**Arguments:**
+
+* `<SOURCE>`: A local file or directory, or a fileset as WORKSPACE/NAME[#PATH]. Data Designer: its parquet-files.
+
+**Options:**
+
+* `--name`: Dataset fileset to create on the platform and upload the splits to. The test split goes to NAME-test.
+* `--format <CHOICE>`: Row format to write; it decides which backends can train on the dataset. [possible values: chat, preference, prompt-completion, embedding, text]
+* `--input-format <CHOICE>`: Format of the source files. Default: from the file extensions, which must all be the same. [possible values: parquet, csv, jsonl]
+* `--val-fraction <FLOAT>`: Share of rows for validation. 0 writes no validation.jsonl; training then holds out its own. [default: 0.1]
+* `--test-fraction <FLOAT>`: Share of rows held out for evaluation. Default: 0 for preference, else 0.1.
+* `--seed <INTEGER>`: Shuffle seed. The same seed gives the same split. [default: 42]
+* `--exist-ok`: Reuse a fileset that already exists. Its files are left as they are.
+* `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
+
+**Column mapping:**
+
+* `--prompt-column`: The user prompt (chat, preference, prompt-completion). Default: instruction or prompt.
+* `--response-column`: The answer to train on (chat, prompt-completion). Default: response or completion.
+* `--system-column`: A system prompt added to each row (chat, preference). Default: none.
+* `--messages-column`: Whole chat conversations, as a list of \{role, content} (chat). Default: messages.
+* `--chosen-column`: The preferred answer (preference). Default: chosen.
+* `--rejected-column`: The dispreferred answer (preference). Default: rejected.
+* `--query-column`: The query (embedding). Default: query.
+* `--positive-column`: The document that matches the query (embedding). Default: pos_doc.
+* `--negatives-column`: A list of documents that do not match the query (embedding). Default: neg_doc.
+* `--text-column`: The text to train on (text). Default: text.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
 
 #### nemo customization automodel
 
@@ -9738,9 +9823,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.training and dataset.validation with
-the new fileset. Automodel finds the train and validation files inside it by
-name, so upload a directory holding both.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Automodel tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -9847,8 +9932,12 @@ Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
-fileset, so point `--upload-dataset` at a local directory holding training.jsonl
-and validation.jsonl. For GRPO, `--upload-environment` takes the environment
+fileset, so point `--upload-dataset` at a local directory holding a training file
+and, optionally, a validation file, named like train*.jsonl and val*.jsonl or
+dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or
+training/) and val/ (or validation/, dev/). Without a validation file, 10% of the
+training rows are held out, except in a sandboxed GRPO run, which skips
+validation. For GRPO, `--upload-environment` takes the environment
 directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
@@ -9953,9 +10042,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Unsloth tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -10040,8 +10129,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Override `model` in the spec.
-* `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
-* `--dataset.validation`: Override `dataset.validation` in the spec.
+* `--dataset.training`: Dataset fileset as 'name', 'workspace/name', or either form with a '#path/' directory. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
 * `--dataset.shuffle`: Reshuffle training examples each epoch. Disable only for a deliberate curriculum order.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
@@ -10176,7 +10264,7 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Model entity reference ('name' or 'workspace/name').
-* `--dataset`: Dataset fileset reference. DPO: preference JSONL (training.jsonl + validation.jsonl). GRPO: Gym JSONL (training.jsonl required).
+* `--dataset`: Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file and, optionally, a validation file, named like train*.jsonl and val*.jsonl or dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or training/) and val/ (or validation/, dev/). Without a validation file, 10% of the training rows are held out, except in a sandboxed GRPO run, which skips validation.
 * `--environment`: Environment fileset reference (required when training.type is grpo).
 * `--integrations.wandb.project`: W&B project name (groups related runs). Defaults to output.name if not set.
 * `--integrations.wandb.name`: W&B run name. Defaults to job_id if not provided.
@@ -10252,10 +10340,9 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--model.load-in-4bit`: bitsandbytes 4-bit. Mutex with load_in_8bit. Default for Unsloth's headline path.
 * `--model.load-in-8bit`: Override `model.load_in_8bit` in the spec.
 * `--model.trust-remote-code`: Override `model.trust_remote_code` in the spec.
-* `--dataset.path`: Training fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Resolved to a local path by the plugin run.
+* `--dataset.path`: Dataset fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.text-field`: Row field consumed by SFTTrainer.
 * `--dataset.apply-chat-template`: If True, expects rows with a 'messages' field and applies tokenizer.apply_chat_template at training time.
-* `--dataset.validation-path`: Optional validation fileset reference (same format as 'path'). Downloaded under the same scheme.
 * `--dataset.packing`: trl. SFTTrainer packing flag.
 * `--training.lora.rank <INTEGER>`: LoRA rank.
 * `--training.lora.alpha <INTEGER>`: LoRA scaling factor (alpha).
@@ -10272,6 +10359,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--schedule.logging-steps <INTEGER>`: Override `schedule.logging_steps` in the spec.
 * `--schedule.save-steps <INTEGER>`: Override `schedule.save_steps` in the spec.
 * `--schedule.eval-steps <INTEGER>`: Override `schedule.eval_steps` in the spec.
+* `--schedule.validation-split <FLOAT>`: Validation split to use when the dataset has no validation files.
 * `--schedule.progress-reporting.min-report-interval-seconds <FLOAT>`: Least number of seconds between progress reports reaching the Jobs service. Every metric the training library logs is still recorded at full resolution -- this only buffers them in memory and decides how often the accumulated set is sent, which is what the reporting actually costs. 0 sends a report for every step the library logs. Raising it reduces the time training spends blocked on reporting, at the cost of a progress bar and charts that update less often.
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--batch.per-device-train-batch-size <INTEGER>`: Override `batch.per_device_train_batch_size` in the spec.

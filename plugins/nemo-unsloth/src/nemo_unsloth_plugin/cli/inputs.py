@@ -55,9 +55,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
 create the resources and print their references without creating a job.
 
-One --upload-dataset fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Unsloth tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -73,7 +73,6 @@ Run 'nemo customization unsloth explain' to print the job JSON schema."""
 _SPEC_REFS = SpecRefs(
     model=("model", "name"),
     dataset=("dataset", "path"),
-    dataset_validation=("dataset", "validation_path"),
 )
 
 
