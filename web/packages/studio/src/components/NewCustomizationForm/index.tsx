@@ -193,16 +193,8 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     };
   }, [initialModel, initialValues]);
 
-  // The schema needs the selected model's expert count, which is only known once the form
-  // exists, so the resolver reads it from a ref kept current below.
-  const automodelExpertCountRef = useRef<number | undefined>(undefined);
   const form = useForm<CustomizationFormFields>({
-    resolver: (values, context, options) =>
-      (
-        zodResolver(
-          customizationFormSchemaFor(automodelExpertCountRef.current)
-        ) as unknown as Resolver<CustomizationFormFields>
-      )(values, context, options),
+    resolver: zodResolver(customizationFormSchema) as unknown as Resolver<CustomizationFormFields>,
     defaultValues,
     mode: 'onChange',
     shouldUnregister: false,
@@ -231,9 +223,6 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const automodelExpertCount = expertParallelExpertCount(
     useModelEntity(automodelModel, { enabled: backend === 'automodel' })
   );
-  useEffect(() => {
-    automodelExpertCountRef.current = automodelExpertCount;
-  }, [automodelExpertCount]);
   const unslothFinetuningType = useWatch({
     control: form.control,
     name: 'unsloth.training.finetuning_type',
@@ -384,6 +373,14 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
   const onSubmit = async (fields: CustomizationFormFields) => {
     setValidationErrors([]);
 
+    // The resolver's schema cannot see the selected model, so the checks that need its
+    // metadata run here.
+    const modelChecks = customizationFormSchemaFor(automodelExpertCount).safeParse(fields);
+    if (!modelChecks.success) {
+      setValidationErrors(messagesFromZodIssues(modelChecks.error.issues));
+      return;
+    }
+
     // Reuse the dataset checks shown in the setup panel before creating any resources.
     if (datasetValidation.isPending) {
       setValidationErrors([
@@ -527,9 +524,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     const subscription = form.watch(() => {
       setValidationErrors((current) => {
         if (current.length === 0) return current;
-        const result = customizationFormSchemaFor(automodelExpertCountRef.current).safeParse(
-          form.getValues()
-        );
+        const result = customizationFormSchemaFor(automodelExpertCount).safeParse(form.getValues());
         const next = result.success ? [] : messagesFromZodIssues(result.error.issues);
         // Keep the same array reference when nothing changed, so a keystroke that does not
         // change the error set does not re-render the form.
@@ -539,7 +534,7 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
       });
     });
     return () => subscription.unsubscribe();
-  }, [form]);
+  }, [form, automodelExpertCount]);
 
   useEffect(() => {
     if (validationErrors.length > 0) {
