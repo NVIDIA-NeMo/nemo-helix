@@ -14,6 +14,8 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
   DEPLOYMENT_MODES_URL,
   deploymentModesResponse,
+  EXECUTION_PROFILES_URL,
+  executionProfilesResponse,
 } from '@studio/mocks/handlers/agentDeploymentCapabilities';
 import { server } from '@studio/mocks/node';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
@@ -320,6 +322,35 @@ describe('CreateDeploymentModal', () => {
     await waitFor(() => expect(deploy).toBeEnabled());
     expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
       'Kubernetes'
+    );
+  });
+
+  it('holds Deploy on a Kubernetes install until the runtimes are known', async () => {
+    mockEnabledModes('subprocess', 'k8s');
+    let releaseProfiles = () => {};
+    const profilesReleased = new Promise<void>((resolve) => {
+      releaseProfiles = resolve;
+    });
+    server.use(
+      http.get(EXECUTION_PROFILES_URL, async () => {
+        await profilesReleased;
+        return HttpResponse.json(
+          executionProfilesResponse([{ profile: 'default', backend: 'kubernetes_job' }])
+        );
+      })
+    );
+    renderModal();
+
+    const dialog = await getDeploymentDialog();
+    const deploy = within(dialog).getByRole('button', { name: 'Deploy' });
+    expect(deploy).toBeDisabled();
+
+    releaseProfiles();
+    await waitFor(() => expect(deploy).toBeEnabled());
+    await waitFor(() =>
+      expect(within(dialog).getByRole('combobox', { name: 'Runtime' })).toHaveTextContent(
+        'Kubernetes'
+      )
     );
   });
 
