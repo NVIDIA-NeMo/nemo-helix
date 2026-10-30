@@ -85,16 +85,17 @@ def record_upstream_request(
             ``None`` when the gateway never received an upstream response (a
             network error or an internal gateway error). ``None`` is recorded as
             :data:`METRIC_LABEL_UNKNOWN`.
-        gateway_status: The HTTP status the gateway's PROXY STAGE produced for this
-            upstream response. It differs from *upstream_status* on the
-            wrapped-rejection path (an upstream 401/403/404 is surfaced as 424) and
-            on the network/internal-error paths (502 / 500), and equals it for the
-            pass-through 429/5xx and 2xx cases. NOTE: this is the proxy-stage status,
-            NOT necessarily the final status the client receives -- response
-            middleware runs in the caller (``virtual_model_proxy``) AFTER the proxy
-            stage and can still turn a recorded 2xx into a client-facing 4xx/5xx.
-            Measuring the final client status is deliberately out of scope for this
-            upstream-focused counter.
+        gateway_status: The HTTP status the client ultimately receives for this
+            request. It differs from *upstream_status* on the wrapped-rejection
+            path (an upstream 401/403/404 is surfaced as 424), on the
+            network/internal-error paths (502 / 500), and when response middleware
+            rejects an upstream 2xx (e.g. a guardrails redaction surfaced as a
+            4xx/5xx); it equals *upstream_status* for the pass-through 429/5xx and
+            the plain 2xx cases. Proxy-stage failures (upstream errors, 424 wraps,
+            502/500) are recorded by the proxy functions, where the proxy-stage
+            status IS the client status; the success count is finalized by the
+            caller (``virtual_model_proxy``) AFTER response middleware so this label
+            reflects the true client status even when middleware changes it.
     """
     labels = labels or UpstreamRequestLabels()
     upstream_requests_counter.add(

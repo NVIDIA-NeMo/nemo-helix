@@ -1391,20 +1391,24 @@ async def virtual_model_proxy(
             record_upstream_request(metric_labels, response_status, exc.status_code)
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    # Response middleware passed (or there was none): the client receives
-    # response_status. Record the success once, here, so it is counted exactly
-    # once against the true post-middleware client status.
-    record_upstream_request(metric_labels, response_status, response_status)
-
-    # Build final streaming response.
+    # Build final streaming response. Record the success only AFTER it is built:
+    # if serialization/header construction fails the client gets a 500, so count
+    # it as (response_status, 500) rather than a (response_status, response_status)
+    # success. Recording after the build also guarantees the request is counted
+    # exactly once (mirrors proxy_request's ordering).
     is_streaming = _is_streaming_response_result(inference_response)
     response_with_annotations = _build_inference_response_with_annotations(inference_response)
-    final_response = await stream_response_result(
-        response_with_annotations,
-        response_status,
-        response_with_annotations.headers,
-        named_events=_uses_named_sse_events(trailing_uri),
-    )
+    try:
+        final_response = await stream_response_result(
+            response_with_annotations,
+            response_status,
+            response_with_annotations.headers,
+            named_events=_uses_named_sse_events(trailing_uri),
+        )
+    except Exception:
+        record_upstream_request(metric_labels, response_status, 500)
+        raise
+    record_upstream_request(metric_labels, response_status, response_status)
 
     # Post-response middleware (fire-and-forget, non-streaming only).
     post_response_middleware_calls = registry.post_response_middleware_calls.get((workspace, vm_name), [])
