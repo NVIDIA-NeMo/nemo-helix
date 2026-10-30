@@ -8,7 +8,7 @@ import {
   type DatasetBindings,
   EVALUATION_FORM_DEFAULTS,
   type EvaluationFormValues,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import { useLiveTest } from '@studio/components/evaluation/ModelEvaluationWizard/useLiveTest';
 import { act, renderHook } from '@testing-library/react';
 

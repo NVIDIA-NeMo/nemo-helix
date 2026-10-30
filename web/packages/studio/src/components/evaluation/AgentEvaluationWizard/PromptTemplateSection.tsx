@@ -12,7 +12,7 @@ import {
   itemRef,
   templateFields,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
-import { hasMalformedBraces } from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
+import { hasMalformedBraces } from '@studio/components/evaluation/EvalWizard/judgePromptVariables';
 import { ComponentProps, FC, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 

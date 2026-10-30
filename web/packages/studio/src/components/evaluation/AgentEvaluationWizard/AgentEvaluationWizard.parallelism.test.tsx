@@ -61,16 +61,11 @@ vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSele
   (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
 );
 
-vi.mock(
-  '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview',
-  async (importOriginal) =>
-    (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(
-      await importOriginal(),
-      {
-        prompt: 'hi',
-        expected: 'hi',
-      }
-    )
+vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', async (importOriginal) =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(await importOriginal(), {
+    prompt: 'hi',
+    expected: 'hi',
+  })
 );
 
 const AGENT = 'my-agent';

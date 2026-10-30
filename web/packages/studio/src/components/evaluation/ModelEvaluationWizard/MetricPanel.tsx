@@ -5,9 +5,6 @@ import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledC
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Anchor, Banner, Block, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
-import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
-import { JudgePromptSection } from '@studio/components/evaluation/ModelEvaluationWizard/JudgePromptSection';
 import {
   type EvaluationFormValues,
   COMPARISON_METRICS,
@@ -16,7 +13,10 @@ import {
   type SelectableMetric,
   SELECTABLE_METRICS,
   STRING_CHECK_OPERATIONS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { ScoreDefinitions } from '@studio/components/evaluation/Jobs/form/ScoreDefinitions';
+import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
+import { JudgePromptSection } from '@studio/components/evaluation/ModelEvaluationWizard/JudgePromptSection';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
 import { FC, ReactNode, useEffect } from 'react';

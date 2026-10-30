@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { type EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
+import { useMessagesBinding } from '@studio/components/evaluation/EvalWizard/useMessagesBinding';
 import { JudgeModelSelect } from '@studio/components/evaluation/JudgeModelSelect';
 import { LiveTestPanel } from '@studio/components/evaluation/ModelEvaluationWizard/LiveTestPanel';
-import { type EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
-import { useMessagesBinding } from '@studio/components/evaluation/ModelEvaluationWizard/useMessagesBinding';
 import { FC } from 'react';
 
 /**

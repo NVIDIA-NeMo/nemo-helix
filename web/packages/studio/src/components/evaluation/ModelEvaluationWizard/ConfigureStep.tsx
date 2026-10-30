@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Stack, Text } from '@nvidia/foundations-react-core';
+import { DatasetPanel } from '@studio/components/evaluation/EvalWizard/DatasetPanel';
 import { ConfigNameField } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigNameField';
-import { DatasetPanel } from '@studio/components/evaluation/ModelEvaluationWizard/DatasetPanel';
 import { FC } from 'react';
 
 /**

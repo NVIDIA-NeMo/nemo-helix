@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { toValidEntityName } from '@nemo/common/src/utils/entityName';
-import type { EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import type { EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
 import { useFilesetNameStatus } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

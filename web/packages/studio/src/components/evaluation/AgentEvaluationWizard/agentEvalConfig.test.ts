@@ -8,7 +8,7 @@ import {
   defaultJudgePrompt,
   templateFields,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
-import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import { EVALUATION_FORM_DEFAULTS } from '@studio/components/evaluation/EvalWizard/types';
 import {
   type DatasetEvalSpec,
   parseUploadedDatasetConfig,

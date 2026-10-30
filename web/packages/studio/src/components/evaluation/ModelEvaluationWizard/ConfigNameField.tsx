@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { type EvaluationFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import { type EvaluationFormValues } from '@studio/components/evaluation/EvalWizard/types';
 import { useConfigNameStatus } from '@studio/components/evaluation/ModelEvaluationWizard/useConfigNameStatus';
 import { nameFieldSlots } from '@studio/components/form/entityNameCheck';
 import { FC } from 'react';

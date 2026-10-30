@@ -5,12 +5,13 @@ import {
   getFilesListFilesetFilesQueryKey,
   getFilesRetrieveFilesetQueryKey,
 } from '@nemo/sdk/generated/platform/files';
+import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   type MessageSelector,
   messagesPath,
   messagesShape,
   useDatasetPreview,
-} from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
+} from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
@@ -19,9 +20,14 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 
 const downloadFileHead = vi.hoisted(() => vi.fn());
+const fetchFile = vi.hoisted(() => vi.fn());
 
 vi.mock('@studio/components/filesets/hooks/useDownloadFileHead', () => ({
   useDownloadFileHead: () => downloadFileHead,
+}));
+
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer: () => fetchFile,
 }));
 
 /** Mirrors ``extractUserFriendlyKeysFromRow``: `null` is a contentless message
@@ -67,6 +73,10 @@ describe('messagesShape', () => {
 });
 
 describe('useDatasetPreview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('reads a Parquet file whole and offers its columns', async () => {
     // Listed larger than the 64 KB head a line-delimited file is read from.
     const listedSize = 100_000;
@@ -78,7 +88,7 @@ describe('useDatasetPreview', () => {
         HttpResponse.json({ data: [{ path: 'rows.parquet', size: listedSize }] })
       )
     );
-    downloadFileHead.mockImplementation(() => parquetFile(PARQUET.twoRows).arrayBuffer());
+    fetchFile.mockImplementation(() => parquetFile(PARQUET.twoRows).arrayBuffer());
 
     const { result } = renderHook(() => useDatasetPreview('ws/data#rows.parquet'), { wrapper });
 
@@ -86,6 +96,31 @@ describe('useDatasetPreview', () => {
     expect(result.current.keyOptions.map((option) => option.value)).toEqual(['prompt', 'expected']);
     expect(result.current.rowCount).toBe(2);
     expect(result.current.error).toBeNull();
-    expect(downloadFileHead).toHaveBeenCalledWith(expect.objectContaining({ bytes: listedSize }));
+    expect(fetchFile).toHaveBeenCalledWith(expect.objectContaining({ path: 'rows.parquet' }));
+    expect(downloadFileHead).not.toHaveBeenCalled();
+  });
+
+  it('shares one download with a whole-file read of the same file', async () => {
+    server.use(
+      http.get(mockApiUrl(getFilesRetrieveFilesetQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ name: 'data', workspace: 'ws' })
+      ),
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ data: [{ path: 'rows.parquet', size: 100_000 }] })
+      )
+    );
+    fetchFile.mockImplementation(() => parquetFile(PARQUET.twoRows).arrayBuffer());
+
+    const { result } = renderHook(
+      () => ({
+        preview: useDatasetPreview('ws/data#rows.parquet'),
+        file: useFilesetFile({ workspace: 'ws', fileset: 'data', path: 'rows.parquet' }),
+      }),
+      { wrapper }
+    );
+
+    await waitFor(() => expect(result.current.preview.row).not.toBeNull());
+    expect(result.current.file.data).toBeInstanceOf(File);
+    expect(fetchFile).toHaveBeenCalledTimes(1);
   });
 });
