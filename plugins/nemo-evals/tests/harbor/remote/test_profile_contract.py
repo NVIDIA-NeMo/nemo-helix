@@ -219,6 +219,12 @@ def test_resolver_freezes_ceilings_and_disk_limit(harbor_config, sandbox_platfor
     assert policy.enforce_disk_limit is False and policy.max_disk_mb is None
 
 
+def test_resolver_freezes_enforce_closed_book_default_off(harbor_config, sandbox_platform):
+    assert resolve_sandbox_policy(harbor_config, sandbox_platform).enforce_closed_book is False
+    config = with_profile(harbor_config, enforce_closed_book=True)
+    assert resolve_sandbox_policy(config, sandbox_platform).enforce_closed_book is True
+
+
 @pytest.mark.parametrize(
     ("field", "ceiling"), [("cpus", "max_cpus"), ("memory_mb", "max_memory_mb"), ("storage_mb", "max_storage_mb")]
 )

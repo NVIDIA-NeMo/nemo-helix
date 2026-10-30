@@ -257,7 +257,8 @@ then point the target at it:
 | Registered agent (`source.agent`) | Register the agent with the virtual model as its model and the gateway's OpenAI route as that model's `base_url`. |
 | Harbor built-in agent | Name the virtual model with the source's `model`; see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation). |
 
-A taskset run with no-network tasks requires the Harbor built-in agent form and refuses the others;
+When its sandbox profile sets `enforce_closed_book: true`, a taskset run with no-network tasks
+requires the Harbor built-in agent form and refuses the others;
 see [Run a closed-book evaluation](/documentation/evaluate-models/agent-eval/harbor-runner#run-a-closed-book-evaluation).
 
 For a `Model` target:
