@@ -400,7 +400,7 @@ def test_the_job_has_a_sandbox_on_an_https_gateway_trust_its_ca(
 
     config = _job_config(tmp_path, _codex(), sandboxed=True)
 
-    assert config.env_vars["OPENAI_BASE_URL"].startswith("https://nemo-helix-envoy.ns.svc:8080/")
+    assert config.env_vars["OPENAI_BASE_URL"] == f"https://nemo-helix-envoy.ns.svc:8080{ROUTE}/v1"
     assert config.environment is not None
     assert config.environment.kwargs[GATEWAY_CA_FILE_KWARG] == "/etc/nhx/ca.crt"
 
