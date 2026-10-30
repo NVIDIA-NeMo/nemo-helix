@@ -4,7 +4,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
-import { ControlledCheckbox } from '@nemo/common/src/components/form/ControlledCheckbox';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
@@ -30,6 +29,7 @@ import {
   Anchor,
   Banner,
   Button,
+  Checkbox,
   Flex,
   FormField,
   RadioGroup,
@@ -202,8 +202,6 @@ const submitEvaluationBaseSchema = z.object({
   evaluationRecordName: entityNameField(),
   /** Name of the existing evaluation whose eval config is reused on the re-run path. */
   evaluationName: z.string(),
-  /** Read every Parquet file beside the picked one as one dataset. */
-  useAllShards: z.boolean(),
   /** Whether the eval config is built here, picked from a fileset, or uploaded. */
   configKind: z.enum(CONFIG_KINDS),
   /** The prompt sent to the agent; ``null`` while it is still the generated one. */
@@ -316,7 +314,6 @@ const makeDefaultValues = (
   newName: '',
   evaluationRecordName: '',
   evaluationName: sourceEvaluation ?? '',
-  useAllShards: false,
   configKind: CONFIG_KIND_FORM,
   promptTemplate: null,
   dataset: null,
@@ -561,14 +558,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
-  const [dataset, promptTemplate, useAllShards, judgePrompt] = useWatch({
+  const [dataset, promptTemplate, judgePrompt] = useWatch({
     control,
-    name: ['dataset', 'promptTemplate', 'useAllShards', 'body.judgePrompt'],
+    name: ['dataset', 'promptTemplate', 'body.judgePrompt'],
   });
   const datasetLocation = dataset ? parseFilesetLocation(dataset) : null;
   // Reading the sibling shards is opted into per file: another pick may share a folder with
   // files that are not part of it, such as a test split beside a train split.
-  useEffect(() => setValue('useAllShards', false), [dataset, setValue]);
+  const [allShardsFor, setAllShardsFor] = useState<string | null>(null);
+  const useAllShards = !!dataset && allShardsFor === dataset;
   const preview = useDatasetPreview(dataset ?? null);
   const columns = useMemo(
     () => preview.keyOptions.map((option) => option.value),
@@ -1187,8 +1185,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                 showMapping={false}
               >
                 {shards ? (
-                  <ControlledCheckbox
-                    useControllerProps={{ control, name: 'useAllShards' }}
+                  <Checkbox
+                    checked={useAllShards}
+                    onCheckedChange={(checked) =>
+                      setAllShardsFor(checked === true ? dataset : null)
+                    }
                     slotLabel={`Use All ${shards.count} Parquet Files in ${shards.dir || 'the Fileset Root'}`}
                   />
                 ) : null}
