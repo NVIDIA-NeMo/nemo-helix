@@ -496,7 +496,7 @@ class TestConflicts:
     def test_model_in_both_places_is_a_conflict(self) -> None:
         spec: dict[str, Any] = {"model": "default/already-there"}
         conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=True, dataset=False, environment=False)
-        assert conflicts == ["model (default/already-there), which --upload-model would replace"]
+        assert conflicts == ["model (default/already-there)"]
 
     def test_a_field_with_no_matching_flag_is_not_a_conflict(self) -> None:
         spec: dict[str, Any] = {"model": "default/keep"}
@@ -520,4 +520,4 @@ class TestConflicts:
     def test_rl_environment_conflict(self) -> None:
         spec: dict[str, Any] = {"environment": "default/env"}
         conflicts = find_conflicts(spec, RL_REFS, model=False, dataset=False, environment=True)
-        assert conflicts == ["environment (default/env), which --upload-environment would replace"]
+        assert conflicts == ["environment (default/env)"]

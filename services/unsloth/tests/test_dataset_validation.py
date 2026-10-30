@@ -13,10 +13,10 @@ _MESSAGES = {"messages": [{"role": "user", "content": "q"}, {"role": "assistant"
     ("paths", "expected"),
     [
         (["validation.jsonl", "train.jsonl"], ["train.jsonl", "validation.jsonl"]),
-        (["training.jsonl", "eval.jsonl", "test.jsonl"], ["training.jsonl", "eval.jsonl"]),
+        (["training.jsonl", "dev.jsonl", "eval.jsonl", "test.jsonl"], ["training.jsonl", "dev.jsonl"]),
         (["/b.jsonl", "a/c.jsonl", "notes.json"], ["b.jsonl"]),
-        (["a/c.jsonl", "a/b.jsonl"], ["a/b.jsonl", "a/c.jsonl"]),
-        (["data.json", "README.md"], ["data.json"]),
+        (["train/c.jsonl", "train/b.jsonl", "val/a.jsonl"], ["train/b.jsonl", "train/c.jsonl", "val/a.jsonl"]),
+        (["train.json", "README.md"], ["train.json"]),
     ],
 )
 def test_select_data_files_picks_what_training_loads(paths: list[str], expected: list[str]) -> None:
@@ -28,11 +28,18 @@ def test_select_data_files_requires_a_training_file() -> None:
         select_data_files(["README.md"])
     with pytest.raises(DatasetFormatError, match="No training .jsonl/.json files"):
         select_data_files(["validation.jsonl"])
+    with pytest.raises(DatasetFormatError, match="No training .jsonl/.json files"):
+        select_data_files(["data.json", "a/c.jsonl"])
 
 
 @pytest.mark.parametrize(
     "row",
-    [{"text": "a rendered example"}, _MESSAGES, {"prompt": "q", "completion": "a"}],
+    [
+        {"text": "a rendered example"},
+        _MESSAGES,
+        {"prompt": "q", "completion": "a"},
+        {"prompt": _MESSAGES["messages"][:1], "completion": _MESSAGES["messages"][1:]},
+    ],
 )
 def test_rows_trl_reads_pass_without_the_chat_template(row: dict) -> None:
     assert validate_lines([json.dumps(row)], "rows", apply_chat_template=False, text_field="text") == 1
@@ -55,3 +62,9 @@ def test_rejects_non_json_and_empty_input() -> None:
         validate_lines(["{not json"], "rows", apply_chat_template=False, text_field="text")
     with pytest.raises(DatasetFormatError, match="has no rows"):
         validate_lines(["", "  "], "rows", apply_chat_template=False, text_field="text")
+
+
+def test_a_prompt_completion_pair_must_be_one_kind() -> None:
+    row = {"prompt": "q", "completion": _MESSAGES["messages"][1:]}
+    with pytest.raises(DatasetFormatError, match="'prompt' and 'completion' as strings or 'messages'-style lists"):
+        validate_lines([json.dumps(row)], "rows", apply_chat_template=False, text_field="text")

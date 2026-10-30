@@ -200,8 +200,6 @@ nemo customization automodel --job-json job.json --dry-run
 
 With `--upload-model`, `--upload-dataset` or `--upload-environment`, the dry run uploads nothing and runs on your machine. It checks the job JSON and, with `--upload-dataset`, the first 10 rows of the local dataset. The model and dataset references and the execution profile do not exist yet, so submit checks them after the upload.
 
-Before preparing any data, run `nemo jobs list-execution-profiles` to check that the platform is reachable and has a GPU execution profile (`provider` is `gpu` or `gpu_distributed`) for the backend. For `rl`, that profile's `backend` must be `kubernetes_job` or `volcano_job`.
-
 ---
 
 ## After Submission

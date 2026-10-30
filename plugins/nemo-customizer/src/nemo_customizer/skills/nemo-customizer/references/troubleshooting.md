@@ -69,7 +69,7 @@ Check both before any data work, after `SKILL.md`'s platform check passes. Neith
 **Training image.** The platform resolves each backend's image when it starts, from its environment:
 
 - `NHX_<BACKEND>_TRAINING_IMAGE` (`NHX_AUTOMODEL_…`, `NHX_UNSLOTH_…`, `NHX_RL_…`), if set, is the image verbatim.
-- Otherwise it is `<registry>/nhx-<backend>-training:<tag>`: `<registry>` is `NHX_<BACKEND>_IMAGE_REGISTRY`, else `NHX_IMAGE_REGISTRY`; `<tag>` is `NHX_IMAGE_TAG`. With neither set, a local platform uses `my-registry` and `local`, which exist only if built on that host. A Helm install uses `nvcr.io/nvidia/nemo-helix` and the chart's app version. The CPU steps use `nhx-customizer-tasks` the same way.
+- Otherwise it is `<registry>/nhx-<backend>-training:<tag>`: `<registry>` is `NHX_<BACKEND>_IMAGE_REGISTRY`, else `NHX_IMAGE_REGISTRY`; `<tag>` is `NHX_IMAGE_TAG`. With neither set, a local platform uses `my-registry` and `local`, which exist only if built on that host. A Helm install uses `nvcr.io/nvidia/nemo-helix` and the chart's app version. The CPU steps' image is resolved the same way, as `nhx-customizer-tasks` for automodel and rl and `nhx-unsloth-tasks` for unsloth, with `NHX_<BACKEND>_TASKS_IMAGE` as its override.
 
 When you do not know the platform's environment (you did not start it), ask the user for the image or its registry and tag. Then check it:
 

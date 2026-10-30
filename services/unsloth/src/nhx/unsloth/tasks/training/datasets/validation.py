@@ -40,7 +40,7 @@ def select_data_files(paths: Iterable[str]) -> list[str]:
     if not train:
         raise DatasetFormatError(
             "No training .jsonl/.json files found. "
-            "Name training files with 'train' (train.jsonl) and validation files with 'val' (validation.jsonl)."
+            "Expected files matching patterns like train*.jsonl or a train/ directory."
         )
     return train + validation
 
@@ -78,18 +78,24 @@ def validate_lines(lines: Iterable[str], source: str, *, apply_chat_template: bo
                     "because dataset.apply_chat_template is true"
                 )
         elif not (
-            isinstance(row.get(text_field), str)
-            or _is_messages(row.get("messages"))
-            or (isinstance(row.get("prompt"), str) and isinstance(row.get("completion"), str))
+            isinstance(row.get(text_field), str) or _is_messages(row.get("messages")) or _is_prompt_completion(row)
         ):
             raise DatasetFormatError(
                 f"{source} line {line_number} needs a string '{text_field}' field (dataset.text_field), "
-                "a 'messages' list, or 'prompt' and 'completion' strings"
+                "a 'messages' list, or 'prompt' and 'completion' as strings or 'messages'-style lists"
             )
         rows += 1
     if rows == 0:
         raise DatasetFormatError(f"{source} has no rows")
     return rows
+
+
+def _is_prompt_completion(row: dict[str, Any]) -> bool:
+    """A ``prompt`` / ``completion`` pair, both strings or both lists of messages, as TRL reads them."""
+    prompt, completion = row.get("prompt"), row.get("completion")
+    return (isinstance(prompt, str) and isinstance(completion, str)) or (
+        _is_messages(prompt) and _is_messages(completion)
+    )
 
 
 def _is_messages(value: object) -> bool:
