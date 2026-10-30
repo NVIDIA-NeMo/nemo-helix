@@ -1,0 +1,153 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Evaluate Agent Candidates"
+description: "Keep each agent candidate's traces apart with one Evaluation per candidate, then score, analyze, and compare the candidates by Evaluation."
+---
+
+When you try changes to an agent, such as a new prompt, model, or tool, give each candidate its own
+**Evaluation** and tag every run with it. NeMo Intake, NeMo Compass, and NeMo Studio can then select
+one candidate's traces by Evaluation name, even when candidates run at the same time.
+
+Do not tell candidates apart by time window or by a temporary agent name:
+
+- Candidates that run concurrently overlap in time, so a time window mixes their runs. A discarded
+  candidate's runs also stay in every window that covers them.
+- Compass files Insights per agent. A per-candidate agent name scatters findings about one agent
+  across several names.
+
+## Before You Start
+
+You need:
+
+- A running NeMo Helix with Intake. Compass and NeMo Studio are needed for the analysis and comparison
+  steps.
+- An Experiment to hold the candidates. See the
+  [Experiments First Workflow](/documentation/evaluate-models/experiments#first-workflow).
+- One agent name for every candidate. Every trace must carry the same `agent_name`, the one you pass
+  to Compass as `--agent`. See
+  [Telemetry Requirement](/documentation/agents/traces-and-insights/insights-from-traces#telemetry-requirement).
+
+The examples use the agent `support-agent` and two candidates, `support-agent-baseline` and
+`support-agent-short-prompt`.
+
+## Steps
+
+### Create One Evaluation per Candidate
+
+Create an Evaluation for each candidate in the same Experiment **before** you send its runs. Intake
+rejects runs that name an Evaluation that does not exist. Use a new name for each candidate, and
+record what changed in the Evaluation's `metadata`. Do not reuse a deleted Evaluation's name: traces
+keep the name they were ingested with, so the new Evaluation would also select the deleted one's
+runs. See
+[Add an Evaluation to an Existing Experiment](/documentation/evaluate-models/experiments#add-an-evaluation-to-an-existing-experiment).
+
+If you run candidates as agent evaluation jobs, the job publishes each run and its scores to the
+Evaluation named by `publication.intake.evaluation_id`, which covers the next two steps. The job
+derives the recorded agent name from the target, so when candidates are separate targets, set
+`publication.intake.agent_name` to the shared agent name. The
+**Run Evaluation** wizard in [NeMo Studio Agents](/documentation/studio/agents#evaluate-an-agent)
+also creates the Experiment and Evaluation. See
+[Where Evaluations Come From](/documentation/evaluate-models/experiments#where-evaluations-come-from).
+
+### Tag Every Run with Its Evaluation and Test Case
+
+Tag each run at ingest with the candidate's Evaluation name and the test case it ran:
+
+- For chat-completions, add a top-level `evaluation_context` object to the ingest payload.
+- For ATIF, put the same object in the trajectory's `extra.evaluation_context`. Intake also accepts
+  it at the top level of the ingest payload.
+- For OTLP, set `nemo.evaluation.name` and `nemo.test_case.name` on each trace's root span.
+
+```json
+{
+  "evaluation_context": {
+    "evaluation_name": "support-agent-short-prompt",
+    "test_case_name": "refund-request-001"
+  }
+}
+```
+
+Send `test_case_name` on every run, and use the same test case name for the same task in every
+candidate. A run without `test_case_name` does not count toward the Evaluation's leaderboard
+metrics. Shared test case names let Studio compare two candidates' runs of one task, and let Compass
+count repeated attempts at one task as a single case. For full ingest examples, see step 3 of the
+[Experiments First Workflow](/documentation/evaluate-models/experiments#first-workflow).
+
+### Attach Evaluator Results
+
+Attach each run's scores as evaluator results. ATIF trajectories can carry them in
+`extra.verifier_result.rewards`; for other formats, post them to the evaluator-results endpoint. See
+[Capture Evaluator Results](/documentation/agents/traces-and-insights/collect-agent-traces#capture-evaluator-results).
+
+Use the same evaluator names in every candidate, such as `solved` or `faithfulness/v1`, so the
+candidates' scores line up in one leaderboard column. Evaluator results also enable the Compass
+`grader-failure-patterns` stream, which is skipped for traces without them.
+
+### List One Candidate's Traces
+
+Filter Intake's trace list by Evaluation name:
+
+```bash
+nemo intake traces list \
+  --filter.agent-name support-agent \
+  --filter.evaluation-name support-agent-short-prompt
+```
+
+Add `--filter.test-case-name refund-request-001` to list one test case. The traces API takes the
+same filter as `filter[evaluation_name]=support-agent-short-prompt`.
+
+### Analyze One Candidate with Compass
+
+Pass the Evaluation name to `--evaluation-id`:
+
+```bash
+nemo compass analysis-runs create \
+  --agent support-agent \
+  --evaluation-id support-agent-short-prompt \
+  --wait
+```
+
+`--evaluation-id` restricts every trace and span the run reads to that Evaluation. `--agent` is still
+required and must match the traces' `agent_name`. Do not use `--since` to isolate a candidate.
+
+Keep these limits in mind when you scope a run to one Evaluation:
+
+- Compass counts independent cases by test case name, so a tool issue must recur in 3 distinct test
+  cases before it is filed. Repeating one test case does not add cases. See
+  [Recurrence Thresholds](/documentation/agents/traces-and-insights/insights-from-traces#recurrence-thresholds).
+- Insights belong to the agent, not to the Evaluation. The run's `analysis-report` records which
+  Insights that run created or updated. See
+  [Read the Analysis Report](/documentation/agents/traces-and-insights/insights-from-traces#read-the-analysis-report).
+
+### Compare Candidates
+
+In NeMo Studio, open the Experiment and toggle **Scorecard**. It lists every Evaluation side by side
+with each evaluator's score and its change against a baseline Evaluation. Pick the baseline from
+**Baseline**.
+
+To compare two candidates on one task, open an Evaluation, open a session, and select
+**Compare against evaluation run**. The list offers that test case's other runs, grouped by
+Evaluation, from every Evaluation in the Experiment. See
+[NeMo Studio Experiments](/documentation/studio/experiments).
+
+To rank candidates through the API instead, see
+[Rank an Experiment by the Metric That Matters](/documentation/evaluate-models/experiments#rank-an-experiment-by-the-metric-that-matters).
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---------|---------------|
+| ATIF or chat-completions ingest returns `400` with `Evaluation '<name>' must be created before it can be logged.` | The Evaluation does not exist in this workspace, or it was deleted. Create it first, or create a new Evaluation with a new name. |
+| OTLP traces for a candidate are missing | OTLP ingest drops spans whose `nemo.evaluation.name` names an Evaluation that does not exist, and still returns success. The response body's `errors` list carries the same message. Create the Evaluation, then send the traces again. |
+| A candidate's leaderboard row shows zero metrics | Its runs were ingested without `test_case_name`. See [Experiments Troubleshooting](/documentation/evaluate-models/experiments#troubleshooting). |
+| Compass reports `Analyzed 0 traces` | `--agent` does not match the traces' `agent_name`, or `--evaluation-id` is not the Evaluation name used at ingest. |
+
+## Related Topics
+
+- [Experiments](/documentation/evaluate-models/experiments)
+- [Collect Agent Traces](/documentation/agents/traces-and-insights/collect-agent-traces)
+- [Insights from Traces](/documentation/agents/traces-and-insights/insights-from-traces)
+- [NeMo Studio Experiments](/documentation/studio/experiments)
+- [Optimize Agents](/documentation/agents/optimize-agents)
