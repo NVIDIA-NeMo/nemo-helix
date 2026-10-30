@@ -351,3 +351,39 @@ async def test_a_failed_preparation_cancels_the_others_and_fails_submit(service)
     with pytest.raises(RuntimeError, match="registry down for task-3"):
         await prepare(service, preparer, 25)
     assert preparer.cancelled and preparer.running == 0  # the in-flight ones were stopped, none left running
+
+
+class _RecordingJobs:
+    created: list = []
+
+    def __init__(self, jobs, *, workspace: str) -> None:
+        pass
+
+    async def create(self, request) -> None:
+        _RecordingJobs.created.append(request)
+
+    async def get(self, name: str):
+        return None
+
+
+async def test_a_runs_agent_layers_are_requested_once_per_task(service, two_task_body, monkeypatch):
+    """What `runs submit` asks for before it submits: each task's layer for the run's agent, and nothing accepted."""
+    _RecordingJobs.created = []
+    monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)
+    two_task_body["spec"]["target"] = {
+        "kind": "harbor",
+        "source": {"name": "codex"},
+        "agent_kwargs": {"version": "0.162.1"},
+    }
+
+    layers = await service.request_agent_layers(TasksetRunInput.model_validate(two_task_body), workspace="default")
+
+    assert sorted(layer.task for layer in layers) == ["default/task-1", "default/task-2"]
+    assert len({layer.agent_key for layer in layers}) == 1
+    assert len(_RecordingJobs.created) == 2
+
+
+async def test_an_agent_that_installs_nothing_gets_no_layers(service, request_body, monkeypatch):
+    monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)
+
+    assert await service.request_agent_layers(TasksetRunInput.model_validate(request_body), workspace="default") == []

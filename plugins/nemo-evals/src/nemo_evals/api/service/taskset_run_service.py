@@ -17,7 +17,6 @@ from nemo_evals.agent_layers.run_agents import agent_layer_request
 from nemo_evals.agent_layers.service import AgentLayerService, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
-from nemo_evals.api.task_definitions.provenance import TaskProvenance
 from nemo_evals.api.taskset_run_schemas import (
     TasksetRunInput,
     TasksetRunStatus,
@@ -340,23 +339,27 @@ class TasksetRunService:
             agent = agent_layer_request(spec.target)
             if agent is None:
                 return []
+            # Keyed by name and digest: provenance models don't hash, and two members may name one revision.
             revisions = dict.fromkeys(
-                task.spec.provenance for task in spec.tasks if isinstance(task.spec, ResolvedHarborTaskDefinition)
+                (task.spec.provenance.entity_name, task.spec.provenance.revision_digest)
+                for task in spec.tasks
+                if isinstance(task.spec, ResolvedHarborTaskDefinition)
             )
             limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
 
-            async def request(provenance: TaskProvenance) -> AgentLayer | None:
-                task_workspace, _, name = provenance.entity_name.partition("/")
+            async def request(revision: tuple[str, str]) -> AgentLayer | None:
+                entity_name, digest = revision
+                task_workspace, _, name = entity_name.partition("/")
                 jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=task_workspace)
                 service = AgentLayerService(self._entities, jobs, builder_authorizer(self._authorizer))
                 async with limit:
                     try:
-                        return await service.request_layer(task_workspace, name, provenance.revision_digest, agent)
+                        return await service.request_layer(task_workspace, name, digest, agent)
                     except (ImagePlanError, UnsupportedTaskKindError) as exc:
-                        logger.info("Task %s gets no agent layer: %s", provenance.entity_name, exc)
+                        logger.info("Task %s gets no agent layer: %s", entity_name, exc)
                         return None
 
-            return [layer for layer in await _all(request(p) for p in revisions) if layer is not None]
+            return [layer for layer in await _all(request(revision) for revision in revisions) if layer is not None]
         finally:
             # Resolving a registered agent snapshots its files for the run; no run is accepted here.
             if snapshot is not None:
