@@ -21,7 +21,9 @@ def test_clickhouse_server_matches_supported_lts(
     result = run_async(clickhouse_client.query("SELECT version()"))
 
     assert len(result.result_rows) == 1
-    assert str(result.result_rows[0][0]).startswith(f"{clickhouse_version}.")
+    reported = str(result.result_rows[0][0])
+    # `.clickhouse-version` may name a release line (`26.3`) or an exact build (`26.3.62.3`).
+    assert reported == clickhouse_version or reported.startswith(f"{clickhouse_version}.")
 
 
 def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanClient, run_async):
