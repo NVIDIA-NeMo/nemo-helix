@@ -5,8 +5,7 @@
 
 A Compose task (one that ships ``docker-compose.yaml``) runs helper services next to ``main``.
 OpenSandbox can't run Compose, so the evaluation profile lists the services with prebuilt
-images, and the OpenSandbox server's NeMo extension (``plugins/_temporary-scaled-evals/opensandbox_ext``)
-adds them to the sandbox pod as extra containers:
+images, and the OpenSandbox server's NeMo extension adds them to the sandbox pod as extra containers:
 
 .. code-block:: yaml
 
@@ -40,6 +39,7 @@ images that can't install them, such as images with a non-root ``USER``.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -61,7 +61,10 @@ AGENT_BUNDLE_FEATURE = "agent-bundle"
 # A spec with no services, and ``main``'s ``command`` and ``working_dir``: what a compose file that only changes
 # ``main`` needs. An extension from before them refuses such a spec.
 COMPOSE_MAIN_FEATURE = "compose-main"
-EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE, COMPOSE_MAIN_FEATURE)
+# Moving the egress policy API off 18080 when a compose service needs that port. An older extension leaves the API
+# on 18080, and the service can't start.
+EGRESS_PORT_FEATURE = "egress-port"
+EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE, COMPOSE_MAIN_FEATURE, EGRESS_PORT_FEATURE)
 
 # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
@@ -75,9 +78,19 @@ INSTALLED_AGENT_DIR = "/installed-agent"
 RESERVED_NAMES = frozenset({MAIN_SERVICE, "sandbox", "egress", "execd-installer", AGENT_BUNDLE_CONTAINER})
 # The most services one sandbox pod runs besides ``main``.
 MAX_SERVICES = 16
-# Ports the sandbox pod already listens on: execd (44772), the egress DNS proxy (15353) and the
-# egress policy API (18080). Every container shares the pod network, so a service can't use them.
-RESERVED_PORTS = frozenset({44772, 15353, 18080})
+# Ports the sandbox pod always uses: execd (44772) and the egress DNS proxy (15353). All containers in the pod share
+# one network, so a service can't listen on these. OpenSandbox hard-codes both, so they can't move.
+RESERVED_PORTS = frozenset({44772, 15353})
+
+# The egress sidecar's policy API listens on 18080 by default. Unlike the ports above, it can move: when a compose
+# service needs 18080, the extension moves the API to another port, so we don't have to refuse the task. Every other
+# sandbox keeps the API on 18080.
+EGRESS_API_PORT = 18080
+# The ports the API can move to. We pick the first one no service needs.
+EGRESS_API_FALLBACK_PORTS = range(18081, 18100)
+# The extension records the moved port on the sandbox under this annotation. The server reads it back to attach the
+# egress auth token when a client asks for that port.
+EGRESS_API_PORT_ANNOTATION = "opensandbox.io/nemo-egress-api-port"
 
 # A Kubernetes DNS label short enough that "nemo-vol-<name>" and "nemo-shm-<name>" still fit in 63.
 Name = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,52}[a-z0-9])?$")]
@@ -219,6 +232,8 @@ class ComposeServices(_Strict):
     # How long ``NemoOpenSandboxEnvironment.start()`` waits for the services when the ``main`` container has no
     # readiness check to carry its own ``timeout_sec``.
     services_timeout_sec: int | None = Field(default=None, ge=1, le=3600)
+    # Where the egress policy API moves when a service needs 18080. None leaves it on 18080.
+    egress_api_port: Port | None = None
 
     @model_validator(mode="after")
     def _check(self) -> ComposeServices:
@@ -228,9 +243,18 @@ class ComposeServices(_Strict):
             raise ValueError("service names must be unique")
         if len(set(self.volumes)) != len(self.volumes):
             raise ValueError("volume names must be unique")
-        ports = [p for s in self.services for p in s.ports]
+        ports = [port for service in self.services for port in service.ports]
         if len(set(ports)) != len(ports):
             raise ValueError("two services claim the same port; all containers share one network")
+
+        # The egress API can't move onto a port the pod already uses, and no service can share a port with it.
+        if self.egress_api_port in RESERVED_PORTS | {EGRESS_API_PORT}:
+            raise ValueError(f"egress_api_port {self.egress_api_port} is already used by the sandbox pod")
+        if self.egress_port() in ports:
+            raise ValueError(
+                f"a service uses port {self.egress_port()}, which the egress policy API needs; "
+                "set egress_api_port to move the API"
+            )
 
         # Every mount, main's included, must name a declared volume.
         mounts = [(MAIN_SERVICE, m) for m in self.main.volume_mounts]
@@ -263,6 +287,10 @@ class ComposeServices(_Strict):
     def uses_main_settings(self) -> bool:
         """Whether the spec needs the extension's ``COMPOSE_MAIN_FEATURE``: no services, or ``main``'s command or working directory."""
         return not self.services or self.main.command is not None or self.main.working_dir is not None
+
+    def egress_port(self) -> int:
+        """The port the egress policy API listens on in this sandbox: 18080, unless a service needed it."""
+        return self.egress_api_port or EGRESS_API_PORT
 
     def to_json(self) -> str:
         """The value sent in ``extensions[EXTENSION_KEY]``."""
@@ -304,6 +332,28 @@ class SandboxAgentBundle(_Strict):
     def to_json(self) -> str:
         """The value sent in ``extensions[AGENT_BUNDLE_EXTENSION_KEY]``."""
         return self.model_dump_json(exclude_defaults=True)
+
+
+def egress_api_port_for(ports: Iterable[int]) -> int | None:
+    """The port to move the egress policy API to, given the ports the task's containers listen on.
+
+    Returns None when no container needs 18080, so the API stays where OpenSandbox puts it.
+
+    Raises:
+        ValueError: A container needs 18080, and every fallback port is taken too.
+    """
+    used_ports = set(ports)
+    if EGRESS_API_PORT not in used_ports:
+        return None
+
+    for port in EGRESS_API_FALLBACK_PORTS:
+        if port not in used_ports:
+            return port
+
+    raise ValueError(
+        f"the task uses port {EGRESS_API_PORT} and every port the egress policy API could move to "
+        f"({EGRESS_API_FALLBACK_PORTS.start}-{EGRESS_API_FALLBACK_PORTS.stop - 1})"
+    )
 
 
 def keep_alive_entrypoint(entrypoint: list[str] | None, command: list[str] | None = None) -> list[str] | None:

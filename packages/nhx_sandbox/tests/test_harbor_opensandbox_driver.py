@@ -11,6 +11,7 @@ that no sandbox is left running after a failed, retried or cancelled create.
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -90,6 +91,45 @@ async def test_create_sends_an_entrypoint_and_extensions(server: Server) -> None
     sent = server.creates[-1]
     assert sent["entrypoint"] == ["/app/start.sh", "sh", "-c", "sleep infinity"]
     assert sent["extensions"] == {"nemo.ext": "{}"}
+
+
+@pytest.mark.parametrize(("egress_api_port", "reached_on"), [(None, 18080), (18081, 18081)])
+async def test_the_egress_client_follows_the_egress_api(
+    server: Server, egress_api_port: int | None, reached_on: int
+) -> None:
+    """The SDK builds its egress client for 18080; a sandbox whose API moved gets one for the new port."""
+    sandbox = await _driver(server).create(_request(egress_api_port=egress_api_port))
+
+    assert sandbox._egress_service.endpoint.port == reached_on
+
+
+async def test_an_sdk_without_its_egress_client_fails_a_moved_api_and_leaves_nothing(server: Server) -> None:
+    """Rather than leave the SDK calling 18080, where a task's service listens."""
+    server.private_services = False
+
+    with pytest.raises(RuntimeError, match="doesn't let us move the egress policy API"):
+        await _driver(server).create(_request(egress_api_port=18081))
+
+    assert server.live() == set()
+
+
+async def test_an_sdk_without_adapter_factory_fails_only_a_moved_api(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``AdapterFactory`` is internal to the SDK, so only a sandbox that needs it should break when it moves."""
+    sdk = mock_sdk(server)
+    del sdk["AdapterFactory"]
+    # A None entry makes the import fail, whether or not this environment has the real SDK installed.
+    monkeypatch.setitem(sys.modules, "opensandbox.adapters.factory", None)
+    driver = OpenSandboxDriver(
+        Connection(domain="opensandbox.example", api_key=""), sdk=sdk, retry_wait=lambda attempt: 0
+    )
+
+    stock = await driver.create(_request())
+    with pytest.raises(RuntimeError, match="doesn't let us move the egress policy API"):
+        await driver.create(_request(egress_api_port=18081))
+
+    assert server.live() == {stock.id}
 
 
 async def test_transient_errors_are_retried_and_orphans_killed(server: Server) -> None:

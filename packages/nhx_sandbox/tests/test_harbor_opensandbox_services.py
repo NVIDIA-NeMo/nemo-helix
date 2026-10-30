@@ -8,7 +8,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nhx_sandbox.harbor_opensandbox_services import ComposeServices, keep_alive_entrypoint, parse_compose_services
+from nhx_sandbox.harbor_opensandbox_services import (
+    ComposeServices,
+    egress_api_port_for,
+    keep_alive_entrypoint,
+    parse_compose_services,
+)
 from pydantic import ValidationError
 
 
@@ -53,7 +58,7 @@ def test_services_timeout_is_a_whole_number_of_seconds_up_to_an_hour(value: Any)
     [
         (_spec({"name": "main", "image": "docker.io/x:1"}), "service name 'main' is reserved"),
         (_spec({"name": "egress", "image": "docker.io/x:1"}), "service name 'egress' is reserved"),
-        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}), r"ports \[18080\] are used"),
+        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [44772]}), r"ports \[44772\] are used"),
         (_spec({"name": "db", "image": "postgres:16"}), "String should match pattern"),
         (
             _spec({"name": "seed", "image": "docker.io/x:1", "role": "run_once", "readiness": {"exec": ["true"]}}),
@@ -192,3 +197,47 @@ def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() 
 def test_main_s_working_dir_must_be_absolute() -> None:
     with pytest.raises(ValidationError):
         parse_compose_services(_spec(main={"working_dir": "app"}))
+
+
+@pytest.mark.parametrize(
+    ("ports", "moved_to"),
+    [
+        ([5432], None),
+        ([18080], 18081),
+        # The API can't land on a port another service already holds.
+        ([18080, 18081, 18082], 18083),
+    ],
+)
+def test_egress_api_moves_only_for_a_service_on_its_port(ports: list[int], moved_to: int | None) -> None:
+    assert egress_api_port_for(ports) == moved_to
+
+
+def test_egress_api_with_nowhere_to_move_is_refused() -> None:
+    with pytest.raises(ValueError, match="every port the egress policy API could move to"):
+        egress_api_port_for([18080, *range(18081, 18100)])
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        # A spec that left the API on 18080 would make the service fail to bind it.
+        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}), "set egress_api_port"),
+        (
+            _spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080, 18081]}, egress_api_port=18081),
+            "a service uses port 18081",
+        ),
+        (_spec(egress_api_port=44772), "already used by the sandbox pod"),
+        (_spec(egress_api_port=18080), "already used by the sandbox pod"),
+    ],
+)
+def test_egress_api_port_must_be_free(raw: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        ComposeServices.model_validate(raw)
+
+
+def test_a_service_on_18080_runs_with_the_egress_api_moved() -> None:
+    spec = ComposeServices.model_validate(
+        _spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}, egress_api_port=18081)
+    )
+    assert spec.egress_port() == 18081
+    assert ComposeServices.model_validate(_spec()).egress_port() == 18080

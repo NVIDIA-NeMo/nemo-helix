@@ -22,7 +22,13 @@ from nemo_evals.harbor.compose.models import (
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
-from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, RESERVED_NAMES, RESERVED_PORTS, ComposeServices
+from nhx_sandbox.harbor_opensandbox_services import (
+    MAIN_SERVICE,
+    RESERVED_NAMES,
+    RESERVED_PORTS,
+    ComposeServices,
+    egress_api_port_for,
+)
 from pydantic import ValidationError
 
 # The bounds of ``MainReadiness.timeout_sec`` in ``ComposeServices``.
@@ -68,6 +74,18 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
     if task.main.readiness is None and wait_budget_sec > MIN_READY_TIMEOUT_SEC:
         # With no readiness check on `main`, there's nowhere else to carry a wait longer than the default.
         spec["services_timeout_sec"] = _clamped_timeout_sec(wait_budget_sec)
+
+    # The egress sidecar's policy API listens on 18080 too. If `main` or a service needs that port, move the API
+    # instead. `main` counts as well: every container in the pod shares one network.
+    container_ports = [port.port for port in task.main.ports]
+    for service in task.services.values():
+        container_ports.extend(port.port for port in service.ports)
+    try:
+        egress_api_port = egress_api_port_for(container_ports)
+    except ValueError as error:
+        raise ComposeError("compose_reserved_port", str(error), compose_path=task.compose_path) from error
+    if egress_api_port is not None:
+        spec["egress_api_port"] = egress_api_port
 
     # `ComposeServices` is the sandbox's own model, so whatever it rejects would also fail on the server. The parser
     # has already refused what Compose would, so anything rejected here is a limit of the sandbox, not of Compose.

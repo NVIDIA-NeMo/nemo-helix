@@ -43,11 +43,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from kubernetes import client as k8s
 from kubernetes.stream import stream
-from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, service_states
+from nemo_ext_pod import add_agent_bundle, add_services, agent_bundle_state, move_egress_api, service_states
 from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_CONTAINER,
     AGENT_BUNDLE_EXTENSION_KEY,
     AGENT_BUNDLE_POD_ANNOTATION,
+    EGRESS_API_PORT_ANNOTATION,
     EXTENSION_FEATURES,
     EXTENSION_KEY,
     POD_ANNOTATION,
@@ -55,7 +56,8 @@ from nhx_sandbox.harbor_opensandbox_services import (
     SandboxAgentBundle,
 )
 from opensandbox_server.config import CONFIG_ENV_VAR
-from opensandbox_server.services.constants import SANDBOX_ID_LABEL
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY, SANDBOX_ID_LABEL
+from opensandbox_server.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
 from opensandbox_server.services.k8s import provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from pydantic import BaseModel, ConfigDict, Field
@@ -120,6 +122,33 @@ class NemoComposeProvider(BatchSandboxProvider):
         if raw is not None:
             services = ComposeServices.model_validate_json(raw)
             add_services(template["spec"], services, pull_policy)
+
+            # A service needs 18080, so move the egress policy API out of its way. A sandbox without a network policy
+            # has no egress sidecar, so there's nothing to move or record.
+            if services.egress_api_port is not None and move_egress_api(template["spec"], services.egress_api_port):
+                # Record the moved port on the BatchSandbox, next to the egress token the server stores there, so
+                # get_endpoint_info can find both later.
+                workload_annotations = batchsandbox.setdefault("metadata", {}).setdefault("annotations", {})
+                workload_annotations[EGRESS_API_PORT_ANNOTATION] = str(services.egress_api_port)
+
+    def get_endpoint_info(self, workload: dict[str, Any], port: int, sandbox_id: str) -> Any:
+        """The stock endpoint, plus the egress auth token when ``port`` is where we moved the egress policy API.
+
+        The stock server only attaches the token for port 18080, so without this the egress API would reject our
+        client's calls on the moved port. The server still attaches the token for 18080, where a compose service now
+        listens, but our client never calls that port on these sandboxes.
+        """
+        endpoint = super().get_endpoint_info(workload, port, sandbox_id)
+        if endpoint is None:
+            return None
+
+        annotations = (workload.get("metadata") or {}).get("annotations") or {}
+        moved_egress_port = annotations.get(EGRESS_API_PORT_ANNOTATION)
+        token = annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
+        if token and moved_egress_port == str(port):
+            endpoint.headers = merge_endpoint_headers(endpoint.headers, build_egress_auth_headers(token))
+
+        return endpoint
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
         """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
@@ -375,7 +404,13 @@ async def exec_in_service(sandbox_id: str, service: str, req: ExecRequest) -> Ex
 def install(argv: list[str]) -> None:
     """Load the extension into the server process that ``argv`` starts. Raises if it can't."""
     # Overriding a method the server no longer has would silently drop the services.
-    for name in ("_merge_pod_spec_extras", "_create_workload_from_pool", "get_status", "_parse_pod_ip"):
+    for name in (
+        "_merge_pod_spec_extras",
+        "_create_workload_from_pool",
+        "get_status",
+        "_parse_pod_ip",
+        "get_endpoint_info",
+    ):
         if not callable(getattr(BatchSandboxProvider, name, None)):
             raise RuntimeError(f"BatchSandboxProvider.{name} is missing; this server version is unsupported")
     if "--reload" in argv:

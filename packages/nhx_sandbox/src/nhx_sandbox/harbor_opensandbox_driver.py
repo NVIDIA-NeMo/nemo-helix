@@ -130,6 +130,8 @@ class CreateRequest:
     entrypoint: Sequence[str] | None = None
     # No sandbox outlives this; each create gets ``sandbox_timeout_sec`` cut to the time left. None: no cut.
     expires_at: datetime | None = None
+    # The port the egress policy API was moved to because a compose service needs 18080. None means it's on 18080.
+    egress_api_port: int | None = None
 
     def lifetime_sec(self) -> float:
         """``sandbox_timeout_sec``, cut to the seconds left before ``expires_at`` now (at least 1 while any is left).
@@ -278,12 +280,59 @@ class OpenSandboxDriver:
         )
         self._logger.debug("OpenSandbox sandbox created sandbox_id=%s", sandbox_id(sandbox))
         try:
+            # Point the SDK at the moved egress API before anything checks the sandbox's policy.
+            if request.egress_api_port is not None:
+                await self._point_egress_at(sandbox, request.egress_api_port)
+
             await self._wait_until_ready(sandbox, request, failure_check)
         except BaseException:
             # We hold the handle here, so kill this sandbox directly rather than by label.
             await self.safe_kill(sandbox)
             raise
         return sandbox
+
+    async def _point_egress_at(self, sandbox: Any, port: int) -> None:
+        """Make the SDK talk to this sandbox's egress policy API on ``port`` instead of 18080.
+
+        The SDK always talks to the egress API on 18080. On this sandbox a compose service listens there instead, so
+        without this our policy checks would reach that service and hand it the egress auth token. The SDK has no
+        public option for the port, so we replace its private egress client. If a future SDK stores that client
+        somewhere else, we fail the create rather than quietly fall back to 18080.
+
+        Raises:
+            RuntimeError: This SDK version doesn't keep its egress client where we expect.
+        """
+        sandbox_service = getattr(sandbox, "_sandbox_service", None)
+        connection_config = getattr(sandbox, "_connection_config", None)
+        if sandbox_service is None or connection_config is None or not hasattr(sandbox, "_egress_service"):
+            raise RuntimeError("this OpenSandbox SDK version doesn't let us move the egress policy API off 18080")
+
+        # Ask the server how to reach the moved port, then build an egress client for it the way the SDK would.
+        endpoint = await sandbox_service.get_sandbox_endpoint(
+            sandbox_id(sandbox), port, connection_config.use_server_proxy
+        )
+        adapter_factory = self._adapter_factory()(connection_config)
+        sandbox._egress_service = adapter_factory.create_egress_service(endpoint)
+
+    def _adapter_factory(self) -> Any:
+        """The SDK's internal ``AdapterFactory``, imported only when a sandbox's egress API has moved.
+
+        It isn't part of the SDK's public API. Importing it here, rather than in ``load_sdk``, means an SDK that
+        moves it only breaks sandboxes that need it, instead of every sandbox create.
+
+        Raises:
+            RuntimeError: This SDK version has no ``AdapterFactory`` where we expect it.
+        """
+        if "AdapterFactory" not in self.sdk:
+            try:
+                from opensandbox.adapters.factory import AdapterFactory  # ty: ignore[unresolved-import]
+            except ImportError as error:
+                raise RuntimeError(
+                    "this OpenSandbox SDK version doesn't let us move the egress policy API off 18080"
+                ) from error
+            self.sdk["AdapterFactory"] = AdapterFactory
+
+        return self.sdk["AdapterFactory"]
 
     async def _wait_until_ready(self, sandbox: Any, request: CreateRequest, failure_check: FailureCheck | None) -> None:
         """Poll until the sandbox is healthy; fail at once on a terminal state, or at the deadline."""
