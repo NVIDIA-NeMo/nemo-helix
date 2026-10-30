@@ -19,7 +19,7 @@ from sqlalchemy import URL, Boolean, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import NullPool
 
-from .tickets import RegistrationDenied, RegistrationTickets, TicketClaims
+from .tickets import RegistrationClaims, RegistrationDenied, RegistrationTickets
 
 
 class ProviderOwner(BaseModel):
@@ -40,7 +40,7 @@ class Binding(BaseModel):
 
     handle: str
     owner: ProviderOwner
-    claims: TicketClaims
+    claims: RegistrationClaims
 
 
 class RegistryModel(DeclarativeBase):
@@ -65,8 +65,8 @@ class BindingRecord(RegistryModel):
         return ProviderOwner.model_validate_json(self.owner_json)
 
     @property
-    def claims(self) -> TicketClaims:
-        return TicketClaims.model_validate_json(self.claims_json)
+    def claims(self) -> RegistrationClaims:
+        return RegistrationClaims.model_validate_json(self.claims_json)
 
 
 class RevokedJob(RegistryModel):
