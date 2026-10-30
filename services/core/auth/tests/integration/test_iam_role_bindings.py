@@ -243,6 +243,41 @@ class TestIAMRoleBindings:
         )
         assert response.status_code == 409
 
+    def test_regrant_revoked_binding_succeeds(self, http_client: TestClient):
+        """Granting a revoked principal/workspace/role again reactivates it; active duplicates still 409."""
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        binding_data = {
+            "principal": f"regrant-user-{uuid.uuid4().hex[:8]}@example.com",
+            "workspace": DEFAULT_WORKSPACE,
+            "role": "Viewer",
+        }
+        create_url = f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false"
+
+        first = http_client.post(create_url, json=binding_data, headers=headers)
+        assert first.status_code == 200, first.text
+        name = first.json()["name"]
+
+        revoke = http_client.delete(f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers)
+        assert revoke.status_code == 200, revoke.text
+
+        regrant = http_client.post(create_url, json=binding_data, headers=headers)
+        assert regrant.status_code == 200, regrant.text
+        assert regrant.json()["name"] == name
+        assert regrant.json()["revoked_at"] is None
+
+        fetched = http_client.get(f"{IAM_ROLE_BINDINGS_PATH}/{name}", headers=headers)
+        assert fetched.status_code == 200
+        assert fetched.json()["revoked_at"] is None
+
+        # Now active again: a further grant is a duplicate, and it can be revoked and re-granted once more.
+        duplicate = http_client.post(create_url, json=binding_data, headers=headers)
+        assert duplicate.status_code == 409
+        revoke_again = http_client.delete(
+            f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers
+        )
+        assert revoke_again.status_code == 200, revoke_again.text
+        assert http_client.post(create_url, json=binding_data, headers=headers).status_code == 200
+
     def test_list_role_bindings_with_pagination(self, http_client: TestClient):
         """Test listing role bindings with pagination."""
         headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
