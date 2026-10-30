@@ -18,10 +18,12 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from pydantic import JsonValue
 
@@ -29,6 +31,22 @@ from pydantic import JsonValue
 FABRIC_INSTALLED_AGENT = "nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent"
 #: Bumped when the way a layer is built changes what it holds, so older layers are no longer reused.
 LAYER_FORMAT = 1
+AGENT_LAYERS_ENV = "NHX_HARBOR_AGENT_LAYERS"
+"""``0`` turns agent layers off for local Docker trials."""
+AGENT_LAYER_DOCKER_ENVIRONMENT = (
+    "nhx_evals_sdk.agent_eval.runtimes.harbor.local_agent_layer:AgentLayerDockerEnvironment"
+)
+AGENT_LAYER_KWARG = "agent_layer"
+"""The environment kwarg naming the trial's agent: ``{"name", "import_path", "kwargs"}``."""
+
+
+def agent_layers_enabled() -> bool:
+    return os.environ.get(AGENT_LAYERS_ENV, "").strip() != "0"
+
+
+def agent_layer_kwarg(*, name: str | None, import_path: str | None, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The :data:`AGENT_LAYER_KWARG` value for a trial's agent."""
+    return {"name": name, "import_path": import_path, "kwargs": kwargs}
 
 
 @dataclass(frozen=True)
