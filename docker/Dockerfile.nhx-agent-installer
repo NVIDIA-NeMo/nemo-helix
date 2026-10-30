@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# NHX Agent Installer - the self-contained installer an agent layer's build mounts to install an agent.
+#
+# An agent layer is a task's environment image with an agent already installed (nemo-evals agent layers). Its build
+# runs the agent's own Harbor setup inside the image, which may have no Python at all, so it mounts this: a standalone
+# CPython and a relocatable venv with Harbor, NeMo Fabric's Harbor agent and the SDK's agent installer, under
+# /opt/nhx-agent-installer. The agent-layer Job copies /nhx-agent-installer.tar.gz from this image into each build's
+# context. The build mounts it at the same path, so the venv's interpreter path holds.
+#
+# HARBOR_VERSION and NEMO_FABRIC_VERSION match uv.lock (a test checks); nemo-fabric[harbor] 0.5 caps harbor below
+# 0.24, overridden as the workspace's own override-dependencies do.
+
+ARG NHX_PYTHON_BASE=nhx-python-base
+
+FROM ${NHX_PYTHON_BASE} AS builder
+ARG PYTHON_VERSION=3.12
+ARG HARBOR_VERSION=0.24.0
+ARG NEMO_FABRIC_VERSION=0.5.0
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+ENV INSTALLER=/opt/nhx-agent-installer
+COPY packages/nhx_evals_sdk /src/nhx_evals_sdk
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv python install "${PYTHON_VERSION}" --install-dir "${INSTALLER}/python" && \
+    uv venv --relocatable --python "$(ls -d "${INSTALLER}/python/cpython-${PYTHON_VERSION}".*-*/bin/python3)" "${INSTALLER}/venv" && \
+    printf 'harbor==%s\n' "${HARBOR_VERSION}" > /tmp/overrides.txt && \
+    uv pip install --python "${INSTALLER}/venv/bin/python" --override /tmp/overrides.txt \
+        "harbor==${HARBOR_VERSION}" "nemo-fabric[harbor]==${NEMO_FABRIC_VERSION}" && \
+    uv pip install --python "${INSTALLER}/venv/bin/python" --no-deps /src/nhx_evals_sdk
+# The installer's entry point, and the agents it installs, import without the SDK's other dependencies.
+RUN "${INSTALLER}/venv/bin/python" -c 'import nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install, \
+nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent, harbor.agents.installed.codex, \
+harbor.agents.installed.claude_code'
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv run --no-project --python "${INSTALLER}/venv/bin/python" \
+        /usr/local/bin/collect-python-sdists.py \
+        --python "${INSTALLER}/venv/bin/python" \
+        --output /source-distributions/nhx-agent-installer && \
+    uv run --no-project --python "${INSTALLER}/venv/bin/python" \
+        /usr/local/bin/collect-cpython-source.py \
+        --python "${INSTALLER}/venv/bin/python" \
+        --output /source-distributions/nhx-agent-installer && \
+    mkdir -p /source-distributions/nhx-agent-installer && \
+    tar -C /opt -czf /nhx-agent-installer.tar.gz nhx-agent-installer
+
+FROM root-busybox AS runtime
+COPY --from=builder /nhx-agent-installer.tar.gz /nhx-agent-installer.tar.gz
+COPY --from=builder /source-distributions/nhx-agent-installer/ /usr/share/nemo-helix/source-distributions/nhx-agent-installer/
+
+FROM runtime AS smoke-test
+# Unpacked where a layer's build mounts it, the venv's interpreter link resolves inside the bundle.
+RUN ["/bin/sh", "-c", "mkdir -p /opt && tar -xzf /nhx-agent-installer.tar.gz -C /opt && test -x /opt/nhx-agent-installer/venv/bin/python"]
+
+FROM runtime
