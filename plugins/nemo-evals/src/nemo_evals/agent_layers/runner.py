@@ -15,15 +15,23 @@ import asyncio
 import hashlib
 import json
 import logging
+import posixpath
 import tarfile
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from nemo_builder_plugin.identity import normalize_reference
 from nemo_builder_plugin.schema import FileSetSource
-from nemo_evals.agent_layers.dockerfile import AGENT_DIR, AGENT_FILE, INSTALLER_DIR, LAYER_DOCKERFILE, layer_dockerfile
+from nemo_evals.agent_layers.dockerfile import (
+    AGENT_DIR,
+    AGENT_FILE,
+    INSTALLER_DIR,
+    INSTALLER_MOUNT,
+    LAYER_DOCKERFILE,
+    layer_dockerfile,
+)
 from nemo_evals.agent_layers.models import AgentLayerEntity, layer_entity_name
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
@@ -198,14 +206,30 @@ def _stage_environment(main: BuildImage, archive: TaskArchive, context: Path) ->
 
 
 def _unpack(installer: Path, target: Path) -> None:
-    """The installer archive holds ``nhx-agent-installer/``; unpack its contents into ``target``."""
+    """The installer archive holds ``nhx-agent-installer/``; unpack its contents into ``target``.
+
+    Builder refuses a context with a link to an absolute path, and the installer's venv links its interpreter by
+    one under :data:`INSTALLER_MOUNT`. Such links become relative, which resolve the same once the build mounts the
+    installer there. A link anywhere else is refused.
+    """
     with tarfile.open(installer, "r:*") as tar:
         for member in tar.getmembers():
             top, _, rest = member.name.partition("/")
             if top != INSTALLER_DIR or not rest:
                 continue
             member.name = rest
-            tar.extract(member, target, filter="tar")
+            if member.issym() and member.linkname.startswith("/"):
+                member.linkname = relative_link(rest, member.linkname)
+            tar.extract(member, target, filter="data")
+
+
+def relative_link(member: str, link: str) -> str:
+    """``link``, an absolute path under the installer's mount, relative to ``member``'s directory in the installer."""
+    mount = PurePosixPath(INSTALLER_MOUNT)
+    target = PurePosixPath(link)
+    if not target.is_relative_to(mount):
+        raise ValueError(f"the agent installer's {member} links outside {INSTALLER_MOUNT}: {link}")
+    return posixpath.relpath(str(target.relative_to(mount)), str(PurePosixPath(member).parent))
 
 
 async def _upload_context(files: AsyncFilesClient, workspace: str, name: str, scratch: Path) -> FileSetSource:

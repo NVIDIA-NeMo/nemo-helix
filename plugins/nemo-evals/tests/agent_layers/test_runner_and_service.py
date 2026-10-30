@@ -16,7 +16,12 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, layer_entity_name
-from nemo_evals.agent_layers.runner import AgentLayerBuildSpec, layer_builder_name, run_agent_layer_build
+from nemo_evals.agent_layers.runner import (
+    AgentLayerBuildSpec,
+    layer_builder_name,
+    relative_link,
+    run_agent_layer_build,
+)
 from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
 from nemo_evals.entities import TaskEntity
 from nemo_evals.image_builds.service import BuildJob
@@ -106,9 +111,17 @@ def _installer(tmp_path: Path) -> Path:
     path = tmp_path / INSTALLER_ARCHIVE
     with tarfile.open(path, "w:gz") as archive:
         content = b"#!/bin/sh\n"
-        info = tarfile.TarInfo("nhx-agent-installer/venv/bin/python")
+        info = tarfile.TarInfo("nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3")
         info.size, info.mode = len(content), 0o755
         archive.addfile(info, io.BytesIO(content))
+        # The real installer's links, absolute under the mount: uv's minor-version alias and the venv's interpreter.
+        for name, target in [
+            ("nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu", "python/cpython-3.12.15-linux-x86_64-gnu"),
+            ("nhx-agent-installer/venv/bin/python", "python/cpython-3.12.15-linux-x86_64-gnu/bin/python3"),
+        ]:
+            link = tarfile.TarInfo(name)
+            link.type, link.linkname = tarfile.SYMTYPE, f"/opt/nhx-agent-installer/{target}"
+            archive.addfile(link)
     return path
 
 
@@ -124,6 +137,11 @@ class _Files:
         self.uploads[(name, path)] = content
         self.upload_calls += 1
         return Mock()
+
+
+def _links(upload: bytes) -> dict[str, str]:
+    with tarfile.open(fileobj=io.BytesIO(upload), mode="r:gz") as archive:
+        return {member.name: member.linkname for member in archive.getmembers() if member.issym()}
 
 
 def _context(upload: bytes) -> dict[str, bytes]:
@@ -185,7 +203,13 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
     assert context["context/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
     agent = json.loads(context["context/nhx-agent-layer/agent.json"])
     assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "user": "agent"}
-    assert "context/nhx-agent-installer/venv/bin/python" in context
+    assert "context/nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3" in context
+    # Builder refuses a link to an absolute path: the installer's links are relative, to the same files.
+    links = _links(files.uploads[(name, "context.tar.gz")])
+    assert links == {
+        "context/nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu": "cpython-3.12.15-linux-x86_64-gnu",
+        "context/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
+    }
     assert not any("instruction.md" in path or "task.toml" in path for path in context)
 
 
@@ -286,3 +310,8 @@ def test_the_layers_builder_name_covers_everything_the_layer_holds() -> None:
         layer_builder_name(environment="e" * 64, agent_key="k", user="agent", platform="linux/arm64"),
     ]
     assert name not in others and len(set(others)) == len(others)
+
+
+def test_an_installer_link_outside_its_mount_is_refused() -> None:
+    with pytest.raises(ValueError, match="links outside /opt/nhx-agent-installer"):
+        relative_link("venv/bin/python", "/usr/bin/python3")
