@@ -174,6 +174,8 @@ def test_delete_declined_on_a_terminal_sends_nothing(monkeypatch: pytest.MonkeyP
     result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state, input="n\n")
 
     assert result.exit_code == 1
+    assert "Aborted" in result.stderr
+    assert "Unexpected error" not in result.stderr
     assert recorder.requests == []
 
 
