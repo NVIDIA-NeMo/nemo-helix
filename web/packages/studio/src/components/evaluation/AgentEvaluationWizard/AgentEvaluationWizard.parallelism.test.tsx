@@ -8,7 +8,10 @@ import {
   createExperiment,
   getListExperimentsQueryKey,
 } from '@nemo/sdk/generated/platform/experiments';
-import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
+import {
+  filesDownloadFile,
+  getFilesListFilesetFilesQueryKey,
+} from '@nemo/sdk/generated/platform/files';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
 import {
@@ -20,7 +23,7 @@ import {
 import { ROUTES } from '@studio/constants/routes';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -48,6 +51,22 @@ vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOrigi
   evaluationConfigError: vi.fn(),
   findEvalConfigFile: vi.fn(),
 }));
+
+vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
+  useFetchFileAsArrayBuffer: () => async () =>
+    new TextEncoder().encode('{"prompt": "hi", "expected": "hi"}\n').buffer,
+}));
+
+vi.mock('@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect', async () =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetFileSelectMock()
+);
+
+vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', async (importOriginal) =>
+  (await import('@studio/tests/util/mockDatasetPick')).datasetPreviewMock(await importOriginal(), {
+    prompt: 'hi',
+    expected: 'hi',
+  })
+);
 
 const AGENT = 'my-agent';
 
@@ -104,7 +123,10 @@ const mockLists = () => {
     http.get(mockApiUrl(getListEvaluationsQueryKey, ':workspace'), ({ request }) => {
       const name = new URL(request.url).searchParams.get('filter[name]');
       return HttpResponse.json({ data: name ? [] : [SOURCE] });
-    })
+    }),
+    http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+      HttpResponse.json({ data: [] })
+    )
   );
 };
 
@@ -121,7 +143,7 @@ const renderWizard = () =>
   });
 
 const setParallelism = async (user: ReturnType<typeof userEvent.setup>, value: string) => {
-  const field = await screen.findByRole('spinbutton', { name: 'Parallel requests' });
+  const field = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
   await user.clear(field);
   await user.type(field, value);
 };
@@ -157,11 +179,12 @@ describe('AgentEvaluationWizard parallel requests', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Next' }));
 
-    await user.upload(
-      screen.getByLabelText('Dataset file'),
-      new File(['{"prompt": "hi", "expected": "hi"}\n'], 'dataset.jsonl', {
-        type: 'application/json',
-      })
+    await user.click(await screen.findByLabelText('Dataset file ref'));
+    await user.paste(`${DEFAULT_WORKSPACE}/data#rows.jsonl`);
+    await user.click(
+      within(
+        await screen.findByRole('radiogroup', { name: 'Eval configuration source' })
+      ).getByRole('radio', { name: 'Upload' })
     );
     await user.upload(
       screen.getByLabelText('Eval configuration file'),
@@ -169,11 +192,9 @@ describe('AgentEvaluationWizard parallel requests', () => {
     );
     await setParallelism(user, '2');
 
-    await waitFor(async () => {
-      await user.click(screen.getByRole('button', { name: 'Next' }));
-      expect(screen.getByLabelText('Evaluation Name')).toBeInTheDocument();
-    });
-    await user.type(screen.getByLabelText('Evaluation Name'), 'run-1');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await user.type(await screen.findByLabelText('Evaluation Name'), 'run-1');
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
     );

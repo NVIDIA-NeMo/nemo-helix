@@ -5,7 +5,7 @@ import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import {
   type DatasetBindings,
   EVALUATION_FORM_DEFAULTS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import { useCreateEvaluation } from '@studio/components/evaluation/ModelEvaluationWizard/useCreateEvaluation';
 import { server } from '@studio/mocks/node';
 import { renderRoute } from '@studio/tests/util/render';

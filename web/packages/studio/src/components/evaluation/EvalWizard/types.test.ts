@@ -5,7 +5,7 @@ import {
   EMPTY_FIELD_MAPPING,
   isSupportedMappingPath,
   toFieldMapping,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 
 /** ``PATH_CASES`` in ``nhx_evals_sdk/tests/dataset_schemas/test_common.py``. */
 const ACCEPTED = [

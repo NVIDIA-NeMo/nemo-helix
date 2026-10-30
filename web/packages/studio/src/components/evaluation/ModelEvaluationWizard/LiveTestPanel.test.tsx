@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { LiveTestPanel } from '@studio/components/evaluation/ModelEvaluationWizard/LiveTestPanel';
 import {
   EVALUATION_FORM_DEFAULTS,
   type EvaluationFormValues,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { LiveTestPanel } from '@studio/components/evaluation/ModelEvaluationWizard/LiveTestPanel';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FormProvider, type UseFormReturn, useForm } from 'react-hook-form';
@@ -17,7 +17,7 @@ vi.mock('@studio/components/evaluation/ModelEvaluationWizard/useLiveTest', () =>
   useLiveTest: () => ({ state: { status: 'idle' }, run, cancel }),
 }));
 
-vi.mock('@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview', () => ({
+vi.mock('@studio/components/evaluation/EvalWizard/useDatasetPreview', () => ({
   useDatasetPreview: () => ({ row: { question: 'q' }, rowCount: 1, isPartial: false }),
 }));
 

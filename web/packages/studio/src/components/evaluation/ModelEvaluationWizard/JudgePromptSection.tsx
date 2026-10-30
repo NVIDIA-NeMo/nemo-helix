@@ -11,7 +11,7 @@ import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-cor
 import {
   composeJudgeUserPrompt,
   type EvaluationFormValues,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import { useJudgePromptVariables } from '@studio/components/evaluation/ModelEvaluationWizard/useJudgePromptVariables';
 import { FC, useRef, useState } from 'react';

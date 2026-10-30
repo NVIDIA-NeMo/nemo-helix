@@ -6,14 +6,14 @@ import {
   classifyJudgePromptVariables,
   isKnownJudgeVariable,
   type JudgePromptVariableReport,
-} from '@studio/components/evaluation/ModelEvaluationWizard/judgePromptVariables';
+} from '@studio/components/evaluation/EvalWizard/judgePromptVariables';
 import {
   CANONICAL_FIELD_LABELS,
   composeJudgeUserPrompt,
   type EvaluationFormValues,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { useDatasetPreview } from '@studio/components/evaluation/EvalWizard/useDatasetPreview';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
-import { useDatasetPreview } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetPreview';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 

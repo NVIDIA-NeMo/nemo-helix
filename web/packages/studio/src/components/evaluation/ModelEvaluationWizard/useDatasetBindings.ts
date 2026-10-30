@@ -4,7 +4,7 @@
 import {
   type EvaluationFormValues,
   type DatasetBindings,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
