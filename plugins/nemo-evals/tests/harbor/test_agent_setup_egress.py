@@ -274,24 +274,24 @@ def _warning(agent: Any) -> str:
     return warning.args[0] % warning.args[1:]
 
 
-async def test_a_failed_install_is_retried_once_inside_the_same_window(tmp_path, sleep):
+async def test_a_failed_install_is_retried_inside_the_same_window(tmp_path, sleep):
     agent = _codex(tmp_path)
     environment = _FlakyCodexInstallEnvironment(failures=1)
     await agent.setup(environment)
     assert environment.downloads() == [True, True]
     assert environment.opens == 1 and not environment.open
     sleep.assert_awaited_once_with(20.0)
-    assert _warning(agent).startswith("Agent setup failed (attempt 1 of 2), retrying in 20 s: Command failed (exit 1)")
+    assert _warning(agent).startswith("Agent setup failed (attempt 1 of 3), retrying in 20 s: Command failed (exit 1)")
 
 
-async def test_a_second_failed_install_raises_and_closes_the_window(tmp_path, sleep):
+async def test_a_third_failed_install_raises_and_closes_the_window(tmp_path, sleep):
     agent = _codex(tmp_path)
-    environment = _FlakyCodexInstallEnvironment(failures=2)
+    environment = _FlakyCodexInstallEnvironment(failures=3)
     with pytest.raises(NonZeroAgentExitCodeError, match="ENETUNREACH"):
         await agent.setup(environment)
-    assert environment.downloads() == [True, True]
+    assert environment.downloads() == [True, True, True]
     assert environment.opens == 1 and not environment.open
-    sleep.assert_awaited_once_with(20.0)
+    assert [c.args for c in sleep.await_args_list] == [(20.0,), (20.0,)]
 
 
 async def test_an_install_that_succeeds_runs_once(tmp_path, sleep):

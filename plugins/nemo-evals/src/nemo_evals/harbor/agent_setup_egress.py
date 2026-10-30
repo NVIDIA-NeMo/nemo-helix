@@ -14,8 +14,8 @@ the task's policy through Harbor's ``set_network_policy()`` for the duration of 
 the processes setup left holding an outside connection are killed. Elsewhere, setup runs under the task's
 own policy.
 
-An installed agent whose setup command fails (a download that hit a transient network error) gets a second
-attempt in the same window, after :data:`SETUP_RETRY_DELAY_SEC`. Installed agents' setup is idempotent;
+An installed agent whose setup command fails (a download that hit a transient network error) gets up to
+:data:`SETUP_ATTEMPTS` attempts in the same window, :data:`SETUP_RETRY_DELAY_SEC` apart. Installed agents' setup is idempotent;
 any other agent's setup runs once. A timeout or cancellation is never retried.
 """
 
@@ -41,8 +41,8 @@ SETUP_EGRESS_AGENT = "nemo_evals.harbor.agent_setup_egress:AgentSetupEgress"
 INNER_AGENT_KWARG = "agent_setup_egress_inner"
 SETUP_HOSTS_KWARG = "agent_setup_egress_hosts"
 
-SETUP_ATTEMPTS = 2
-# Failures cluster in time (two sandboxes of one run failed 5 s apart), so the retry waits out a short blip.
+SETUP_ATTEMPTS = 3
+# Failures cluster in time (two sandboxes of one run failed 5 s apart), so each retry waits out a short blip.
 SETUP_RETRY_DELAY_SEC = 20.0
 
 
@@ -210,9 +210,9 @@ def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> 
 async def _setup_with_retry(
     agent: BaseAgent, setup: Callable[[BaseEnvironment], Awaitable[None]], environment: BaseEnvironment
 ) -> None:
-    """Runs ``setup``; an installed agent whose setup command failed gets one more attempt.
+    """Runs ``setup``; an installed agent whose setup command failed is retried, up to ``SETUP_ATTEMPTS`` in all.
 
-    Both attempts share Harbor's setup timeout, which wraps the whole ``setup()``.
+    All attempts share Harbor's setup timeout, which wraps the whole ``setup()``.
     """
     for attempt in range(1, SETUP_ATTEMPTS + 1):
         try:
