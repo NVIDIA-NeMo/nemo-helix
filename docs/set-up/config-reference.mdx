@@ -111,12 +111,14 @@ auth:
     introspection_client_id:
     # Environment variable containing the client secret used to authenticate RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens is enabled. Store only the environment variable name here; the secret value must come from the process environment.
     introspection_client_secret_env_var:
-    # Fall back to the OIDC UserInfo endpoint when a bearer token is not a JWT (some IdPs issue opaque access tokens and don't support introspecting them via RFC 7662). Requires userinfo_endpoint to be set or discoverable. Takes priority over introspect_opaque_tokens when both are enabled, except when oidc.audience is also configured: UserInfo responses can't be checked against an audience, so validation falls back to introspect_opaque_tokens (if enabled) instead. The token's original OAuth scope grant also can't be recovered from UserInfo responses, so it goes unenforced for tokens resolved this way (RBAC/permissions still apply). Enable only for IdPs that don't issue narrower per-token scopes in practice. | default: False
+    # Removed. UserInfo responses carry no 'aud' claim, so they cannot be checked against the required oidc.audience; setting this to true is rejected at config load. Use introspect_opaque_tokens for IdPs that issue opaque access tokens. | default: False
     resolve_opaque_tokens_via_userinfo: false
-    # Override OIDC UserInfo endpoint (defaults to discovery). Only used when resolve_opaque_tokens_via_userinfo is enabled.
+    # Unused. Retained so existing configs still load; UserInfo resolution was removed.
     userinfo_endpoint:
-    # Expected token audience. When set, tokens must include this value in their 'aud' claim. When not set, audience validation is skipped entirely.
+    # Expected token audience. Required when OIDC is enabled; tokens must include this value in their 'aud' claim.
     audience:
+    # Extra audiences accepted alongside audience, for identity providers that set 'aud' to the issuing client's ID so tokens from several clients carry different values. A token is accepted when its 'aud' claim includes audience or any of these.
+    additional_audiences: []
     # JWT claim containing the principal email (maps to X-NHX-Principal-Email). Set explicitly for your IdP. | default: 'email'
     email_claim: email
     # JWT claim containing user groups. Supports 'groups' (standard) and 'cognito:groups' (AWS Cognito). | default: 'groups'

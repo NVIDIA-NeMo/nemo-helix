@@ -15,6 +15,7 @@ def auth_config() -> AuthConfig:
         policy_decision_point_base_url="http://localhost:8181",
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="test-client", scope_prefix="nhx:"),
             email_claim="mail",

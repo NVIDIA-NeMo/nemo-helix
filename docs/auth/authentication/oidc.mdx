@@ -19,7 +19,7 @@ When OIDC is enabled:
 1. **Platform configuration** points to your IdP and defines independent public, confidential, and workload client profiles.
 2. **Discovery**: Clients and the platform discover token and device-auth endpoints from the IdP's `.well-known/openid-configuration` (or from NeMo Helix's aggregated discovery at `{BASE_URL}/apis/auth/discovery`).
 3. **Login**: Users obtain tokens via **device flow** (browser) or **password grant** (CI) using the CLI, or authorization code flow in Studio.
-4. **API calls**: Clients send the access token in the `Authorization: Bearer <token>` header. NeMo Helix validates signed JWTs (signature, issuer, audience when configured, and expiry) and extracts the principal and configured groups for authorization.
+4. **API calls**: Clients send the access token in the `Authorization: Bearer <token>` header. NeMo Helix validates signed JWTs (signature, issuer, the required `audience`, and expiry) and extracts the principal and configured groups for authorization.
 
 OIDC provides the identity; workspace authorization comes from NeMo Helix role bindings. OAuth `scope` or `scp` values never become group principals or grant roles, but recognized NeMo Helix API scopes such as `platform:read` can narrow which APIs the bearer token can call.
 
@@ -87,6 +87,8 @@ auth:
   oidc:
     enabled: true
     issuer: "https://your-idp.example.com/realm"
+    # Required: the 'aud' claim your IdP puts in access tokens for NeMo Helix.
+    audience: "<token-audience>"
     public_client:
       client_id: "your-public-client-id"
       # authorization_endpoint: "https://your-idp.example.com/oauth2/authorize"
@@ -154,7 +156,8 @@ nemo workspaces list
 | `enabled` | bool | Enable OIDC token validation. |
 | `issuer` | string | IdP issuer URL (e.g., `https://login.microsoftonline.com/<tenant>/v2.0`). |
 | `additional_issuers` | list | Extra issuer URLs to accept (e.g., Azure AD v1 format). |
-| `audience` | string | Expected token audience. Unset by default; validation is skipped when unset. |
+| `audience` | string | Expected token audience. Required when `enabled` is true; startup fails if it is unset or blank. If your provider uses one shared audience for several applications, also restrict which clients may obtain tokens for it at the provider. |
+| `additional_audiences` | list of strings | Extra audiences accepted alongside `audience`, for providers that set `aud` to the issuing client's ID so different clients' tokens carry different values. Default: empty. |
 | `email_claim` | string | JWT claim for email (default: `email`). |
 | `subject_claim` | string | JWT claim for subject (default: `sub`). |
 | `groups_claim` | string | JWT claim for groups (default: `groups`). |
@@ -190,6 +193,10 @@ translate them at runtime.
 | `workload_token_issuer`, `workload_token_ttl_seconds`, `workload_token_key_id`, `workload_token_private_key_file` | The corresponding `workload.token_*` field |
 | `workload_allowed_audiences`, `workload_subject_jwks_uri`, `workload_subject_issuers`, `workload_subject_jwks_cache_ttl_seconds` | The corresponding `workload` subject-validation field |
 | `workload_kubernetes_token_review_enabled` | `workload.kubernetes_token_review_enabled` |
+| `resolve_opaque_tokens_via_userinfo` (set to `true`) | `introspect_opaque_tokens` with `introspection_endpoint`. UserInfo responses have no `aud` claim, so they cannot satisfy the required `audience`; `true` now fails validation, and `userinfo_endpoint` is ignored. |
+
+Separately, `audience` is now required whenever `enabled` is true. Add it to every
+configuration that enables OIDC, including workload-only configurations.
 
 Auth discovery now exposes interactive clients only through structured
 `oidc.clients` entries. Removed top-level client IDs, endpoints, scopes,

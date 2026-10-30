@@ -50,6 +50,7 @@ def oidc_config():
     """Create an OIDC config for testing."""
     return OIDCConfig(
         enabled=True,
+        audience="test-audience",
         issuer="https://sso.example.com",
         public_client=OIDCPublicClientConfig(client_id="test-client"),
     )
@@ -507,6 +508,7 @@ class TestBearerTokenAuth:
         """Test Bearer token with valid token when auth is disabled."""
         auth_config_disabled.oidc = OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="test-client"),
         )

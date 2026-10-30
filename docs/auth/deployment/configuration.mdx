@@ -216,6 +216,7 @@ auth:
    private_key_file: "/etc/nhx/workload-token/private-key.pem"
  oidc:
    enabled: true
+   audience: "<token-audience>"
    workload:
      client_id: "nemo-helix-workload"
      token_endpoint: "https://nhx.company.com/apis/auth/token"
@@ -336,6 +337,7 @@ auth:
  oidc:
    enabled: true
    issuer: "https://login.microsoftonline.com/<tenant>/v2.0"
+   audience: "<token-audience>"
    public_client:
      client_id: "<client-id>"
 ```

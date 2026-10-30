@@ -255,6 +255,7 @@ def exchange_config(workload_signing_key: rsa.RSAPrivateKey, tmp_path) -> AuthCo
         enabled=True,
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://idp.example.com/application/o/nemo-cli/",
             additional_issuers=["https://idp.example.com/application/o/nemo/"],
             workload=OIDCWorkloadConfig(
@@ -360,6 +361,7 @@ def test_jwks_includes_distinct_workload_and_access_key_signing_keys(
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             workload=OIDCWorkloadConfig(
                 client_id="nemo-helix-workload",
                 token_key_id="workload-signing",
@@ -1189,6 +1191,7 @@ def test_workload_signing_key_uses_shared_token_signing_when_workload_override_u
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://idp.example.com/application/o/nemo-cli/",
             workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
         ),
@@ -1206,6 +1209,7 @@ def test_workload_exchange_requires_resolved_token_signing_key_id() -> None:
             token_signing=TokenSigningConfig(key_id=""),
             oidc=OIDCConfig(
                 enabled=True,
+                audience="test-audience",
                 workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
             ),
         )
@@ -1217,6 +1221,7 @@ def test_workload_exchange_requires_configured_signing_private_key_file() -> Non
             enabled=True,
             oidc=OIDCConfig(
                 enabled=True,
+                audience="test-audience",
                 workload=OIDCWorkloadConfig(client_id="nemo-helix-workload"),
             ),
         )
@@ -1228,6 +1233,7 @@ def test_workload_exchange_accepts_workload_key_id_when_shared_key_id_unset(tmp_
         token_signing=TokenSigningConfig(key_id="", private_key_file=str(tmp_path / "workload-token.pem")),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             workload=OIDCWorkloadConfig(client_id="nemo-helix-workload", token_key_id="workload-signing"),
         ),
     )
@@ -1245,6 +1251,7 @@ def test_workload_exchange_requires_distinct_key_id_for_distinct_access_key_jwks
             ),
             oidc=OIDCConfig(
                 enabled=True,
+                audience="test-audience",
                 workload=OIDCWorkloadConfig(
                     client_id="nemo-helix-workload",
                     token_private_key_file=str(tmp_path / "workload-token.pem"),
@@ -1271,6 +1278,7 @@ def test_workload_signing_key_specific_override_wins_over_shared_token_signing(
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://idp.example.com/application/o/nemo-cli/",
             workload=OIDCWorkloadConfig(
                 client_id="nemo-helix-workload",
