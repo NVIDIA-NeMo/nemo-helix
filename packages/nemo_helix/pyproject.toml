@@ -731,6 +731,7 @@ agents-deployment = "nemo_agents_plugin.runner.controller:AgentDeploymentControl
 compass-analysis = "nemo_compass_plugin.controller:CompassAnalysisController"
 deployments = "nemo_deployments_plugin.controller:DeploymentsController"
 evals-taskset-runs = "nemo_evals.taskset_runs.controller:EvaluatorRunController"
+builder-queue = "nemo_builder_plugin.controller:BuildQueueController"
 
 # Generated from [tool.bundle-package]; do not edit this table by hand.
 [project.entry-points."nemo.customization.contributors"]
