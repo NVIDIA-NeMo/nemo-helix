@@ -88,6 +88,7 @@ class _Recorder:
                 json={
                     "data": [
                         {"mode": "subprocess", "enabled": self._subprocess_enabled, "requires_image": False},
+                        {"mode": "docker", "enabled": True, "requires_image": True},
                         {"mode": "k8s", "enabled": True, "requires_image": False},
                     ]
                 },
@@ -380,6 +381,23 @@ def test_redeploy_without_existing_deployment_uses_the_platform_default_mode(tmp
 
     assert result.exit_code == 0, result.output
     assert [body["deployment_mode"] for body in rec.deploy_bodies] == ["k8s"]
+
+
+@pytest.mark.parametrize("mode_args", [[], ["--mode", "subprocess"]])
+def test_redeploy_refuses_disabled_mode_before_teardown(tmp_path: Path, make_cli_state, mode_args: list[str]) -> None:
+    rec = _Recorder(
+        deployments=[{"name": "dep-1", "agent": "my-agent", "status": "running", "deployment_mode": "subprocess"}],
+        subprocess_enabled=False,
+    )
+    result = runner.invoke(
+        AgentsCLI().get_cli(),
+        ["redeploy", "--agent", "my-agent", "--agent-config", str(_write_config(tmp_path)), "--yes", *mode_args],
+        obj=make_cli_state(rec),
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "'subprocess' is disabled" in result.output
+    assert rec.ordered_ops() == []
 
 
 # ---------------------------------------------------------------------------

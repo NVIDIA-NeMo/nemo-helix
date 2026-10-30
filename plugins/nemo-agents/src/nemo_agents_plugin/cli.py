@@ -90,6 +90,7 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateSessionRequest,
+    DeploymentModeList,
     Labels,
     ListAgentsQueryParams,
     ListSessionsQueryParams,
@@ -1256,7 +1257,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             raise typer.Exit(code=2)
         client = _agents_client(base_url, workspace)
         if mode is None:
-            mode = _default_deployment_mode(client, workspace)
+            mode = _default_deployment_mode(_list_deployment_modes(client, workspace))
         payload: dict[str, Any] = {"agent": agent, "deployment_mode": mode}
         if name:
             payload["name"] = name
@@ -1450,9 +1451,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
                     return only
             return default
 
+        available_modes = _list_deployment_modes(client, workspace)
         resolved_mode = _detect("deployment_mode", mode, default=None)
         if resolved_mode is None:
-            resolved_mode = _default_deployment_mode(client, workspace)
+            resolved_mode = _default_deployment_mode(available_modes)
         resolved_image = _detect("image", image, default=None)
         resolved_use_entrypoint = bool(_detect("use_image_entrypoint", use_image_entrypoint, default=False))
         resolved_environment = _detect("environment", environment, default=None)
@@ -1460,6 +1462,14 @@ def _register_platform_commands(app: typer.Typer) -> None:
         valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
         if resolved_mode not in valid_modes:
             typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
+            raise typer.Exit(code=2)
+        enabled_modes = [availability.mode for availability in available_modes.data if availability.enabled]
+        if resolved_mode not in enabled_modes:
+            typer.echo(
+                f"Error: deployment mode {resolved_mode!r} is disabled on this platform; "
+                f"pass --mode with one of: {', '.join(enabled_modes)}.",
+                err=True,
+            )
             raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
             typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
@@ -2932,8 +2942,11 @@ def _agents_client(_base_url: str, _workspace: str) -> AgentsClient:
     return shared_cli_client(AgentsClient)
 
 
-def _default_deployment_mode(client: AgentsClient, workspace: str) -> str:
-    modes = _run_sdk("GET agent API", lambda: client.list_deployment_modes(workspace=workspace).data())
+def _list_deployment_modes(client: AgentsClient, workspace: str) -> DeploymentModeList:
+    return _run_sdk("GET agent API", lambda: client.list_deployment_modes(workspace=workspace).data())
+
+
+def _default_deployment_mode(modes: DeploymentModeList) -> str:
     mode = modes.default_mode()
     if mode is None:
         typer.echo(
