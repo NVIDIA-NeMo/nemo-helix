@@ -5695,13 +5695,17 @@ components:
         workspace:
           type: string
           title: Workspace
-          description: Workspace owning the agent and its spec fileset.
+          description: Workspace owning the agent.
           default: ''
         agent_config:
           additionalProperties: true
           type: object
           title: Agent Config
           description: Resolved agent config.
+        source_fileset:
+          title: Source Fileset
+          description: Source fileset referenced by the agent.
+          type: string
       additionalProperties: false
       type: object
       required:

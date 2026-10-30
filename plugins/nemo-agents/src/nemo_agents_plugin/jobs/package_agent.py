@@ -5,8 +5,8 @@
 
 Registered under ``nemo.jobs`` as ``agents.package-agent``, serving
 ``/jobs/package``. The REST equivalent of
-``nemo agents package``, for agents whose source of truth is the
-``{agent}-ethos`` fileset rather than a directory on the submitter's laptop.
+``nemo agents package``, using the agent's referenced source fileset or the
+conventional ``{agent}-ethos`` fileset rather than a local directory.
 
 The build runs as a **host subprocess**, not in a container — the same shape
 every other agents job uses. That is deliberate: the Fabric Dockerfile relies
@@ -57,6 +57,7 @@ from nemo_helix_plugin.jobs.exceptions import (
     HelixJobDependencyUnavailableError,
 )
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -174,8 +175,9 @@ class PackageAgentInput(BaseModel):
 class PackageAgentSpec(PackageAgentInput):
     """Canonical spec — the agent's config resolved inline by :meth:`PackageAgentJob.to_spec`."""
 
-    workspace: str = Field(default="", description="Workspace owning the agent and its spec fileset.")
+    workspace: str = Field(default="", description="Workspace owning the agent.")
     agent_config: dict[str, Any] = Field(default_factory=dict, description="Resolved agent config.")
+    source_fileset: FilesetRef | None = Field(default=None, description="Source fileset referenced by the agent.")
 
     @model_validator(mode="after")
     def _push_tag_stays_in_the_workspace_namespace(self) -> PackageAgentSpec:
@@ -249,6 +251,7 @@ class PackageAgentJob(NemoJob):
             **input_spec.model_dump(),
             workspace=workspace,
             agent_config=agent.config,
+            source_fileset=agent.reference.fileset if agent.reference is not None else None,
         )
 
     @staticmethod
@@ -438,13 +441,13 @@ class PackageAgentJob(NemoJob):
 
     @staticmethod
     async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNemoClient | None) -> None:
-        """Download the ``{agent}-ethos`` fileset into *build_dir*.
+        """Stage the referenced source fileset, or ``{agent}-ethos``, into *build_dir*.
 
         Must run before ``agent.yaml`` is written — staging clears the tree first.
         """
         from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
 
-        if async_sdk is None:
+        if async_sdk is None and cfg.source_fileset is None:
             logger.warning(
                 "No platform client available; packaging agent %r from its stored agent.yaml alone. "
                 "Skills, MCP servers, and prompts in the %r fileset will be missing from the image.",
@@ -458,4 +461,5 @@ class PackageAgentJob(NemoJob):
             agent_config=cfg.agent_config,
             base_dir=build_dir,
             files_client=AsyncFilesClient.from_client(async_sdk) if async_sdk is not None else None,
+            source_fileset=cfg.source_fileset,
         )

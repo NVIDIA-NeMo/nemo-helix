@@ -25,6 +25,7 @@ from nemo_agents_plugin.entities import (
 from nemo_deployments_plugin.entities import ConfigFile
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}
@@ -110,13 +111,14 @@ async def stage_fabric_ethos_dir(
     agent_config: dict[str, Any],
     base_dir: Path,
     files_client: AsyncFilesClient | None = None,
+    source_fileset: FilesetRef | None = None,
 ) -> None:
-    """Download the Ethos fileset into *base_dir* for subprocess deployments.
+    """Download agent source into *base_dir* for packaging or subprocess deployments.
 
     Mirrors :func:`stage_fabric_ethos_config_files` for a runtime that reads the
-    agent root off local disk rather than through a ConfigMap. An unavailable
-    fileset is not fatal — config-only agents deploy from ``agent.yaml`` alone —
-    but a config referencing skills still needs them staged.
+    agent root off local disk rather than through a ConfigMap. An explicit
+    ``source_fileset`` must be readable. Otherwise, use the optional Ethos fileset;
+    config-only agents can proceed without it, but configured skills must exist.
 
     ``ETHOS.md`` and the legacy ``AGENT-SPEC.md`` file are dropped after
     download, matching the container path, so both runtimes see the same tree.
@@ -132,11 +134,18 @@ async def stage_fabric_ethos_dir(
     the fileset would survive locally, and stale skills could satisfy validation
     for a deployment that staged nothing.
     """
+    if source_fileset is not None:
+        ref = parse_entity_ref(source_fileset, default_workspace=workspace)
+        workspace, fileset_name = ref.workspace, ref.name
+        if files_client is None:
+            raise FabricArtifactStagingError(f"A Files client is required to stage source fileset {source_fileset}.")
+    else:
+        fileset_name = ethos_fileset_name(agent_name)
+
     preserved = _runtime_dir_names(agent_config)
     await asyncio.to_thread(_clear_staged_tree, base_dir, preserved)
 
-    if agent_name and files_client is not None:
-        fileset_name = ethos_fileset_name(agent_name)
+    if (agent_name or source_fileset is not None) and files_client is not None:
         try:
             with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
                 tmp_path = Path(tmp)
@@ -148,6 +157,8 @@ async def stage_fabric_ethos_dir(
                 )
                 await asyncio.to_thread(_copy_downloaded_tree, tmp_path, base_dir, preserved)
         except FabricEthosFilesetNotFound as exc:
+            if source_fileset is not None:
+                raise FabricArtifactStagingError(f"Source fileset {workspace}/{fileset_name} was not found.") from exc
             logger.info(
                 "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
                 workspace,
