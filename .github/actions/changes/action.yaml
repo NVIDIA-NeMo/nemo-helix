@@ -202,6 +202,7 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
             - 'packages/nhx_sandbox/**'
+            - 'services/core/entities/**'
             - 'services/core/auth/src/nhx/core/auth/app/embedded_pdp/**'
             - 'services/core/auth/src/nhx/core/auth/app/policies/**'
             - 'services/core/auth/src/nhx/core/auth/app/scope_families.py'
