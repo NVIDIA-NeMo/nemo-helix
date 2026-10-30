@@ -83,19 +83,19 @@ Then upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/test.j
 
 When a source row has an image, write the image next to the JSONL and emit a part list. A string `content` is still one text part. Text-only rows in this same file use `to_chat`, so every line is a `messages` row. An image file needs a chat model. The assistant label stays one text part (a string).
 
-Automodel does not convert the Hugging Face dataset. Upload a directory that is already this shape. For CORD-v2, run the helper and upload what it writes (`train/` and frozen `eval/`):
+Automodel does not convert the Hugging Face dataset. Upload one directory that is already this shape. For CORD-v2, run the helper and upload the directory it writes. That fileset holds `train/` and `validation/`:
 
 ```bash
 uv run --no-project --with datasets --with pillow \
   plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
   --output /tmp/cord-v2
 nemo files filesets create cord-v2 --workspace default --purpose dataset
-nemo files upload /tmp/cord-v2/train cord-v2 --workspace default
-nemo files filesets create cord-v2-eval --workspace default --purpose dataset
-nemo files upload /tmp/cord-v2/eval cord-v2-eval --workspace default
+nemo files upload /tmp/cord-v2 cord-v2 --workspace default
 ```
 
-`train/` holds `train.jsonl` plus `images/`. `eval/` holds `validation.jsonl` and is the frozen eval fileset. Point training validation and Evaluator at `cord-v2-eval`. `nemo customization automodel --upload-dataset` takes one directory, so it does not create the eval fileset.
+`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`.
+
+`nemo customization automodel --upload-dataset /tmp/cord-v2` uploads that same directory.
 
 Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit.
 

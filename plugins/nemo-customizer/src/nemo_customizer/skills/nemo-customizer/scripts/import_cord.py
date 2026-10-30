@@ -2,25 +2,30 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Write CORD-v2 train and frozen validation as OpenAI multimodal JSONL.
+"""Write CORD-v2 train and validation into one fileset directory.
 
 Run this before upload. Automodel does not convert the Hugging Face dataset.
-The fileset you upload is already the training row: JSONL plus sibling images.
+The directory you upload is already the fileset: ``train/`` and ``validation/``,
+each with its JSONL and ``images/``.
 
     uv run --no-project --with datasets --with pillow \
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
       --output /tmp/cord-v2
 
-Then upload the directories (new fileset names, no ``--exist-ok``):
+Then upload that directory (a new fileset name, no ``--exist-ok``):
 
     nemo files filesets create cord-v2 --workspace default --purpose dataset
-    nemo files upload /tmp/cord-v2/train cord-v2 --workspace default
-    nemo files filesets create cord-v2-eval --workspace default --purpose dataset
-    nemo files upload /tmp/cord-v2/eval cord-v2-eval --workspace default
+    nemo files upload /tmp/cord-v2 cord-v2 --workspace default
 
-``train/`` holds ``train.jsonl``. ``eval/`` holds ``validation.jsonl`` and is the
-frozen eval fileset. Point training validation and Evaluator at ``cord-v2-eval``.
-Do not reshuffle it between base and tuned runs.
+The fileset holds ``train/train.jsonl`` and ``validation/validation.jsonl``.
+Automodel selects training files from ``train/`` and validation files from
+``validation/``. Job JSON names this one fileset. The Evaluator scores
+``validation/validation.jsonl`` in it: that official validation file is the
+frozen split, and the script does not write ``test.jsonl``. Do not reshuffle
+it between base and tuned runs.
+
+Image urls are fileset-relative (``train/images/00000.png``,
+``validation/images/00000.png``).
 
 ``json2token`` matches the Automodel CORD loader. When a row has ``gt_parses``,
 the first parse is kept so a second run writes the same label.
@@ -86,14 +91,19 @@ def cord_row(image_url: str, label: str) -> dict[str, Any]:
     }
 
 
-def write_split(examples: Iterable[dict[str, Any]], dest: Path, jsonl_name: str) -> int:
-    """Write ``jsonl_name`` and ``images/`` under ``dest``. Return the row count."""
+def write_split(examples: Iterable[dict[str, Any]], dest: Path, jsonl_name: str, url_prefix: str = "") -> int:
+    """Write ``jsonl_name`` and ``images/`` under ``dest``. Return the row count.
+
+    ``url_prefix`` is the directory name under the fileset root, so the image
+    url is fileset-relative (``train/images/00000.png``).
+    """
     images = dest / "images"
     images.mkdir(parents=True, exist_ok=True)
+    image_dir = f"{url_prefix}/images" if url_prefix else "images"
     count = 0
     with (dest / jsonl_name).open("w", encoding="utf-8") as handle:
         for index, example in enumerate(examples):
-            relative = f"images/{index:05d}.png"
+            relative = f"{image_dir}/{index:05d}.png"
             image: _Image = example["image"]
             image.save(images / f"{index:05d}.png")
             row = cord_row(relative, cord_label(example["ground_truth"]))
@@ -111,21 +121,23 @@ def load_split(split: str, limit: int | None) -> Any:
 
 
 def write_filesets(output: Path, limit: int | None = None) -> dict[str, int]:
-    """Write ``output/train`` and ``output/eval``. Eval is the validation split."""
+    """Write ``output/train`` and ``output/validation`` for one fileset upload."""
     counts = {
-        "train": write_split(load_split("train", limit), output / "train", "train.jsonl"),
-        "eval": write_split(load_split("validation", limit), output / "eval", "validation.jsonl"),
+        "train": write_split(load_split("train", limit), output / "train", "train.jsonl", "train"),
+        "validation": write_split(
+            load_split("validation", limit), output / "validation", "validation.jsonl", "validation"
+        ),
     }
     return counts
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, required=True, help="Directory for train/ and eval/")
+    parser.add_argument("--output", type=Path, required=True, help="Fileset directory: train/ and validation/")
     parser.add_argument("--limit", type=int, default=None, help="First N rows of each split")
     args = parser.parse_args()
     counts = write_filesets(args.output, args.limit)
-    print(f"Wrote {counts['train']} train rows and {counts['eval']} eval rows to {args.output}")
+    print(f"Wrote {counts['train']} train rows and {counts['validation']} validation rows to {args.output}")
 
 
 if __name__ == "__main__":

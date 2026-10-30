@@ -8,7 +8,6 @@ readme = "README.md"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "nemo-helix-plugin",
-    "pillow>=12.3.0",
     "pydantic>=2.10.6",
     "typer>=0.12.5",
 ]
@@ -42,10 +41,11 @@ nemo-helix-plugin = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "fastapi>=0.115.0",
+    "pillow>=12.3.0",
     "pytest>=8.3.4",
     "pytest-asyncio>=0.25.3",
     "ruff>=0.11.8",
-    "fastapi>=0.115.0",
 ]
 
 [tool.pytest.ini_options]
