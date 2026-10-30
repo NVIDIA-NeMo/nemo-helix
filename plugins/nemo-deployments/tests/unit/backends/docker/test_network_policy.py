@@ -6,8 +6,8 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from backends.docker.docker_helpers import lora_config, sample_config
 from docker.errors import NotFound
-from docker_helpers import lora_config, sample_config
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
 from nemo_deployments_plugin.entities import DeploymentBackendConfig, DockerDeploymentConfig
