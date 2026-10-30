@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import logging
 import os
+import re
 import sys
 from asyncio import to_thread
 from dataclasses import dataclass, replace
@@ -33,7 +34,12 @@ import clickhouse_connect
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 from docker.models.containers import Container
 from nhx.common.config import nhx_user_data_dir
-from nhx.intake.config import DEFAULT_CLICKHOUSE_IMAGE, DEFAULT_CLICKHOUSE_VERSION, IntakeConfig
+from nhx.intake.config import (
+    DEFAULT_CLICKHOUSE_IMAGE,
+    DEFAULT_CLICKHOUSE_REPOSITORY,
+    DEFAULT_CLICKHOUSE_VERSION,
+    IntakeConfig,
+)
 from nhx.intake.spans.clickhouse_client import ClickHouseSettings
 from nhx.intake.spans.clickhouse_migrations import parse_clickhouse_url
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -58,6 +64,8 @@ _DATA_DIR_LABEL = "nhx.nvidia.com/data-directory-sha256"
 _DATA_INSTANCE_LABEL = "nhx.nvidia.com/data-instance-id"
 _MANAGED_BY_VALUE = "nemo-helix"
 _COMPONENT_VALUE = "intake-clickhouse"
+_UPSTREAM_REGISTRY_PREFIXES = ("", "docker.io/", "index.docker.io/")
+_NUMERIC_TAG = re.compile(r"\d+(\.\d+)+")
 _DATA_IDENTITY_FILE = ".nhx-clickhouse-identity"
 _DATA_INSTANCE_FILE_PREFIX = f"{_DATA_IDENTITY_FILE}-"
 _READINESS_TIMEOUT_SECONDS = 60.0
@@ -108,6 +116,7 @@ class ContainerDisposition(Enum):
 
     REUSABLE = auto()
     STALE_DATA_INSTANCE = auto()
+    OUTDATED_IMAGE = auto()
 
 
 @dataclass(frozen=True)
@@ -365,6 +374,15 @@ def _reconcile_container(
         )
         _stop_and_remove_container(candidate.container)
         return _create_container(client, desired)
+    if disposition is ContainerDisposition.OUTDATED_IMAGE:
+        logger.warning(
+            "Replacing managed ClickHouse container %s running %s with %s; its data directory is kept",
+            candidate.container.name,
+            _container_image(candidate.container),
+            desired.image,
+        )
+        _stop_and_remove_container(candidate.container)
+        return _create_container(client, desired)
 
     _disable_automatic_restart(candidate.container)
     candidate.container.reload()
@@ -433,13 +451,6 @@ def _classify_existing_container(
     expected_name = container.name
     container.reload()
     attrs = cast(dict[str, Any], container.attrs or {})
-    container_config = cast(dict[str, Any], attrs.get("Config") or {})
-    actual_image = str(container_config.get("Image", ""))
-    if actual_image != desired.image:
-        raise LocalClickHouseProvisioningError(
-            f"Container {expected_name} uses {actual_image or 'an unknown image'}, but Intake requires {desired.image}. "
-            "Preserve any data you need and remove or rename the container before retrying."
-        )
 
     if _mounted_clickhouse_data_dir(attrs) != desired.data_dir:
         raise LocalClickHouseProvisioningError(
@@ -475,7 +486,56 @@ def _classify_existing_container(
             "it with NHX_INTAKE_CLICKHOUSE_USER and NHX_INTAKE_CLICKHOUSE_PASSWORD, or restore the previous values."
         )
 
-    return ContainerDisposition.REUSABLE
+    actual_image = _container_image(container)
+    if _images_match(actual_image, desired.image):
+        return ContainerDisposition.REUSABLE
+    if (
+        candidate.kind is ContainerKind.MANAGED
+        and desired.image == DEFAULT_CLICKHOUSE_IMAGE
+        and _is_older_default_line_image(actual_image)
+    ):
+        return ContainerDisposition.OUTDATED_IMAGE
+    raise LocalClickHouseProvisioningError(
+        f"Container {expected_name} uses {actual_image or 'an unknown image'}, but Intake requires {desired.image}. "
+        "Preserve any data you need, then remove the container with "
+        "`uv run python -m nhx.intake.local_clickhouse --remove` (its data directory is kept) and restart."
+    )
+
+
+def _container_image(container: Container) -> str:
+    attrs = cast(dict[str, Any], container.attrs or {})
+    container_config = cast(dict[str, Any], attrs.get("Config") or {})
+    return str(container_config.get("Image", ""))
+
+
+def _images_match(actual: str, desired: str) -> bool:
+    if actual == desired:
+        return True
+    _, _, desired_digest = desired.partition("@")
+    _, _, actual_digest = actual.partition("@")
+    return bool(desired_digest) and actual_digest == desired_digest
+
+
+def _is_older_default_line_image(image: str) -> bool:
+    """Whether a previous Intake default could have produced this image.
+
+    Only older builds of the default release line qualify, so Intake never
+    downgrades data written by a newer ClickHouse line.
+    """
+    reference = image.partition("@")[0]
+    tag = next(
+        (
+            reference.removeprefix(f"{prefix}{DEFAULT_CLICKHOUSE_REPOSITORY}:")
+            for prefix in _UPSTREAM_REGISTRY_PREFIXES
+            if reference.startswith(f"{prefix}{DEFAULT_CLICKHOUSE_REPOSITORY}:")
+        ),
+        None,
+    )
+    if tag is None or not _NUMERIC_TAG.fullmatch(tag):
+        return False
+    version = tuple(int(part) for part in tag.split("."))
+    default_version = tuple(int(part) for part in DEFAULT_CLICKHOUSE_VERSION.split("."))
+    return version[:2] == default_version[:2] and version < default_version
 
 
 def _validate_lifecycle_target(

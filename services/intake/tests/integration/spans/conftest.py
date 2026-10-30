@@ -15,7 +15,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from nhx.intake.config import ClickHouseConfig, IntakeConfig
+from nhx.intake.config import DEFAULT_CLICKHOUSE_IMAGE, ClickHouseConfig, IntakeConfig
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
 from nhx.intake.service import IntakeService
 from nhx.intake.spans.clickhouse_client import (
@@ -56,7 +56,7 @@ def clickhouse_container():
     from testcontainers.clickhouse import ClickHouseContainer
 
     with ClickHouseContainer(
-        f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        DEFAULT_CLICKHOUSE_IMAGE,
         username="test",
         password="test",
         dbname="default",

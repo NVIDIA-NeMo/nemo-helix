@@ -73,6 +73,13 @@ Intake is included in the platform API service group. By default, the chart
 deploys a single-node embedded ClickHouse 26.3 LTS service, and Intake creates
 and migrates its own `intake` database on first use.
 
+The embedded image is pinned by tag and digest (`clickhouse.image.tag` and
+`clickhouse.image.digest`) to ClickHouse 26.3.62.3 or later, which fixes
+CVE-2026-116366. If you mirror the image, mirror that digest, or override both
+values together. The chart does not patch an external ClickHouse: run a fixed
+build of a supported release line (26.3.62.3, 26.8.36.3, 26.9.27.3, or
+26.10.3.7 or later).
+
 The embedded ClickHouse is intended for development, evaluation, and
 non-critical single-node installations. It does not provide replication or
 automatic backups. For a production deployment that requires high availability,

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from nhx.intake.config import DEFAULT_CLICKHOUSE_IMAGE, DEFAULT_CLICKHOUSE_VERSION
 
 ROOT = Path(__file__).parent.parent.parent
 HELM_DIR = ROOT / "k8s" / "helm"
@@ -91,6 +92,36 @@ def test_default_intake_selection_renders_embedded_clickhouse_dependency() -> No
 
     env = _env_by_name(_api_container(documents))
     assert env["NHX_INTAKE_CLICKHOUSE_URL"]["value"] == "http://nemo-helix-clickhouse:8123"
+
+
+def _clickhouse_image(documents: list[dict]) -> str:
+    statefulset = next(document for document in _clickhouse_resources(documents) if document["kind"] == "StatefulSet")
+    return statefulset["spec"]["template"]["spec"]["containers"][0]["image"]
+
+
+def test_embedded_clickhouse_image_matches_intake_pinned_digest() -> None:
+    assert _clickhouse_image(_helm_template()) == f"docker.io/{DEFAULT_CLICKHOUSE_IMAGE}"
+
+
+def test_embedded_clickhouse_image_without_digest_uses_tag() -> None:
+    documents = _helm_template("--set", "clickhouse.image.digest=", "--set", "clickhouse.image.tag=26.3.62.3")
+
+    assert _clickhouse_image(documents) == "docker.io/clickhouse/clickhouse-server:26.3.62.3"
+
+
+def test_embedded_clickhouse_image_accepts_mirrored_repository_and_digest() -> None:
+    digest = "sha256:" + "a" * 64
+    documents = _helm_template(
+        "--set",
+        "clickhouse.image.repository=registry.example.com/mirror/clickhouse-server",
+        "--set",
+        f"clickhouse.image.digest={digest}",
+    )
+
+    assert (
+        _clickhouse_image(documents)
+        == f"registry.example.com/mirror/clickhouse-server:{DEFAULT_CLICKHOUSE_VERSION}@{digest}"
+    )
 
 
 def test_core_service_group_can_skip_embedded_clickhouse_dependency() -> None:
