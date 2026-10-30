@@ -164,7 +164,7 @@ type launcherOTLPLogAuthConfig struct {
 func newLauncherOTLPLogAuthConfig(ctx context.Context) (launcherOTLPLogAuthConfig, error) {
 	if os.Getenv(workloadIdentityTokenFileEnv) != "" {
 		// True auth: exchange the workload subject token and send the resulting bearer token.
-		tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
+		tokenSource, err := newWorkloadAuthTokenSource(ctx)
 		if err != nil {
 			return launcherOTLPLogAuthConfig{}, fmt.Errorf("configure workload identity auth for OTLP logs: %w", err)
 		}

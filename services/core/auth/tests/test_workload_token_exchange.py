@@ -729,6 +729,7 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
                 "sub": "workload-subject",
                 "email": "svc@example.com",
                 "groups": ["svc-group", "system:serviceaccounts"],
+                "nhx_workload": {"kind": "job", "workspace": "default", "job_id": "forged-job"},
             }
         )
 
@@ -755,6 +756,7 @@ def test_token_exchange_mints_access_token_signed_by_configured_key(
     assert claims["sub"] == "workload-subject"
     assert claims["email"] == "svc@example.com"
     assert claims["groups"] == "svc-group,system:serviceaccounts"
+    assert "nhx_workload" not in claims
 
 
 def test_token_exchange_ignores_non_string_subject_group_values(
@@ -871,6 +873,7 @@ def test_opaque_docker_proof_token_mints_delegated_access_token(
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {"sub": delegation.name}
+    assert claims["nhx_workload"] == {"kind": "job", "workspace": "default", "job_id": "job-123"}
 
 
 def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_row(
@@ -892,6 +895,7 @@ def test_opaque_docker_proof_token_mints_delegated_access_token_for_deployment_r
     claims = _decode_access_token(response.json()["access_token"], exchange_config, exchange_service)
     assert claims["sub"] == "creator@example.com"
     assert claims["act"] == {"sub": delegation.name}
+    assert "nhx_workload" not in claims
 
 
 def test_opaque_docker_proof_token_requires_private_subject_token_type(
@@ -1055,6 +1059,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token(
         "sub": "system:serviceaccount:nemo-runs:job-runner",
         "groups": "system:serviceaccounts",
     }
+    assert claims["nhx_workload"] == {"kind": "job", "workspace": "default", "job_id": "job-123"}
 
 
 def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_row(
@@ -1090,6 +1095,7 @@ def test_kubernetes_reference_row_mints_delegated_access_token_for_deployment_ro
         "sub": "system:serviceaccount:nemo-deployments:deployment-runner",
         "groups": "system:serviceaccounts",
     }
+    assert "nhx_workload" not in claims
 
 
 def test_kubernetes_reference_lookup_retries_missing_row_without_waiting(

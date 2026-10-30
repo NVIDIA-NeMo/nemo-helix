@@ -171,6 +171,14 @@ def _identity_resolution_from_resolved_token(resolved: ResolvedBearerToken, conf
             "claims_snapshot": {},
         }
 
+    # Runtime capabilities are attested only by a verified Helix workload access
+    # token with an actor. Never accept the same claim from an IdP/access key or
+    # from a non-delegated workload identity.
+    if resolved.token_kind == "workload_access_token" and resolved.claims.actor is not None:
+        workload = resolved.claims.raw_claims.get("nhx_workload")
+        if isinstance(workload, dict):
+            descriptor["claims_snapshot"] = {"nhx_workload": workload}
+
     resolution: dict[str, Any] = {"principal": descriptor}
     if principal.on_behalf_of:
         resolution["on_behalf_of"] = {

@@ -82,14 +82,31 @@ type workloadAuthTokenSource struct {
 }
 
 func getOTLPLogWorkloadAuthHeaders(ctx context.Context) (map[string]string, error) {
-	tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
+	tokenSource, err := newWorkloadAuthTokenSource(ctx)
 	if err != nil || tokenSource == nil {
 		return nil, err
 	}
 	return tokenSource.authHeaders(ctx)
 }
 
-func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenSource, error) {
+// workloadAuthTransport authenticates each request with a cached, refreshable
+// workload access token. The wrapped transport retains TCP or Unix socket routing.
+type workloadAuthTransport struct {
+	base        http.RoundTripper
+	tokenSource *workloadAuthTokenSource
+}
+
+func (t *workloadAuthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	header, err := t.tokenSource.AuthorizationHeader(req.Context())
+	if err != nil {
+		return nil, fmt.Errorf("authenticate workload request: %w", err)
+	}
+	authenticated := req.Clone(req.Context())
+	authenticated.Header.Set("Authorization", header)
+	return t.base.RoundTrip(authenticated)
+}
+
+func newWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenSource, error) {
 	subjectTokenFile := os.Getenv(workloadIdentityTokenFileEnv)
 	if subjectTokenFile == "" {
 		return nil, nil

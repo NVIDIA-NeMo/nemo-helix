@@ -64,6 +64,7 @@ jobs:
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
+      go: ${{ steps.changes.outputs.go }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
@@ -2464,6 +2465,28 @@ jobs:
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
+  go-tests:
+    name: Go tests
+    needs: [changes]
+    if: >-
+      !cancelled() && (
+        github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.go == 'true'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Install Flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
+        with:
+          disable-metrics: "true"
+      - name: Test all tracked Go modules
+        run: flox activate --dir tools/go -- bash .github/scripts/run-go-tests.sh
+
   jobs-openshell-tests:
     name: Jobs OpenShell backend tests
     needs: [changes]
@@ -2739,6 +2762,7 @@ jobs:
       - web-studio-deps
       - web-studio-e2e
       - opa-policy-test
+      - go-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
     if: always()
