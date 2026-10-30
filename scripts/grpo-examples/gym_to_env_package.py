@@ -21,6 +21,10 @@ to recreate ``.venv``, which blocks commits and uploads.
         --server resources_servers/math_with_judge \\
         --format wheels-v1 --arch x86_64 --out-dir /tmp/mwj-env
 
+``--server-dir`` packages a server that is not in the Gym checkout (for example
+``scripts/grpo-examples/servers/vlm``). It still needs ``--gym-root`` for the
+``nemo_gym`` wheel and for servers the config only names, such as ``simple_agent``.
+
 Then validate and upload, still with that interpreter:
 
     .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
@@ -200,11 +204,33 @@ def referenced_server_requirements(gym_root: Path, config_files: list[Path], sel
     return lines
 
 
-def copy_server(gym_root: Path, out_dir: Path, rel: Path) -> Path:
-    """Copy the server tree, dropping bundled data, tests and any stray JSONL."""
+def resolve_external_server(raw: str) -> tuple[Path, Path]:
+    """Validate a server directory outside the Gym checkout.
+
+    Returns ``(resources_servers/<dirname>, absolute source)``. The package layout is
+    the same as ``--server resources_servers/<dirname>``; ``--gym-root`` is still
+    required for the ``nemo_gym`` wheel and for servers the config only names.
+    """
+    source = Path(raw).expanduser().resolve()
+    if not source.is_dir():
+        raise SystemExit(f"--server-dir does not exist: {source}")
+    if not (source / "app.py").is_file():
+        raise SystemExit(f"no app.py under {source}")
+    if not ((source / "requirements.txt").is_file() or (source / "pyproject.toml").is_file()):
+        raise SystemExit(
+            f"{source} has neither requirements.txt nor pyproject.toml. Gym would not recognise "
+            "it as a server, and would silently run a built-in of the same name instead."
+        )
+    if not (source / "configs").is_dir():
+        raise SystemExit(f"no configs/ under {source}. An environment with no config starts no servers.")
+    return Path("resources_servers") / source.name, source
+
+
+def copy_server(source: Path, out_dir: Path, rel: Path) -> Path:
+    """Copy a server tree into ``out_dir / rel``, dropping bundled data, tests and JSONL."""
     target = out_dir / rel
     shutil.copytree(
-        gym_root / rel,
+        source,
         target,
         dirs_exist_ok=True,
         ignore=lambda d, names: [n for n in names if n in SKIP_DIRS or n.endswith(".jsonl")],
@@ -814,8 +840,12 @@ def main() -> int:
     )
     parser.add_argument(
         "--server",
-        required=True,
         help="Server to package, as '<server_type>/<implementation>', e.g. resources_servers/math_with_judge",
+    )
+    parser.add_argument(
+        "--server-dir",
+        help="Server directory outside the Gym checkout. Packaged as resources_servers/<dirname>. "
+        "Mutually exclusive with --server. --gym-root is still required.",
     )
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument(
@@ -866,15 +896,27 @@ def main() -> int:
             "no server code does not have."
         )
 
+    if bool(args.server) == bool(args.server_dir):
+        raise SystemExit("Pass exactly one of --server or --server-dir.")
+    if args.server_dir and args.reference_only:
+        raise SystemExit(
+            "--reference-only runs the training image's built-in server. An out-of-tree "
+            "--server-dir is not in that image, so the package has to carry the implementation."
+        )
+
     gym_root = resolve_gym_root(args.gym_root)
-    rel = resolve_server(gym_root, args.server)
+    if args.server_dir:
+        rel, source = resolve_external_server(args.server_dir)
+    else:
+        rel = resolve_server(gym_root, args.server)
+        source = gym_root / rel
     name = args.name or rel.parts[1].replace("_", "-")
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     if args.reference_only:
         pkg_server_dir = copy_server_configs(gym_root, args.out_dir, rel, args.config)
     else:
-        pkg_server_dir = copy_server(gym_root, args.out_dir, rel)
+        pkg_server_dir = copy_server(source, args.out_dir, rel)
     stripped = strip_inline_datasets(pkg_server_dir)
     config_paths = [
         c.relative_to(args.out_dir).as_posix() for c in select_configs(pkg_server_dir, rel.parts[1], args.config)

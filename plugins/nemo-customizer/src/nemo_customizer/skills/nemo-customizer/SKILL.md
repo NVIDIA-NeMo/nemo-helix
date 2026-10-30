@@ -149,7 +149,7 @@ A GRPO job takes two FileSets beyond the model: an **environment** package and a
 
 1. They have not supplied an environment, and GRPO requires one: unlike SFT or DPO, the labels do not come from the dataset.
 2. Their dataset is probably not compatible with `math_with_judge`, the one worked example. It scores a short final answer against an `expected_answer` field per row, so it fits math and short-answer datasets only.
-3. Offer exactly two ways forward. **A:** they supply an environment (or a hub / `verifiers` env) written to score their dataset; build it with **nemo-gym-environments**. **B:** run the `math_with_judge` reference with **DAPO-Math-17k**, a known-good pair. Say plainly that B **replaces** their dataset; do not offer a third path that keeps it.
+3. Offer exactly two ways forward. **A:** they supply an environment (or a hub / `verifiers` env) written to score their dataset; build it with **nemo-gym-environments**. **B:** run a reference pair, which **replaces** their dataset. Text: `math_with_judge` with **DAPO-Math-17k**. Vision: `clevr_cogent` (the Gym port of NeMo-RL `VLMEnvironment`, `scripts/grpo-examples/servers/vlm`) with **CLEVR-CoGenT**, built by `scripts/grpo-examples/prepare_clevr_cogent.py`. Do not offer a third path that keeps their dataset.
 
 ## Defaults
 
@@ -187,5 +187,6 @@ Unsloth, rl DPO and rl GRPO defaults: `references/defaults.md`. Worked examples 
 | Evaluation: frozen test split, base vs tuned, model IDs | `references/post-training-eval.md` |
 | Job polling and training health | `scripts/poll_customization_job.sh`, `scripts/job_health.py` |
 | GRPO environment package and rollout rows | the **nemo-gym-environments** skill |
+| CLEVR-CoGenT vision GRPO (VLM verifier + image rows) | `scripts/grpo-examples/servers/vlm`, `scripts/grpo-examples/prepare_clevr_cogent.py` |
 
 Related skills: **`nemo-files`**, **`nemo-status`**, **`nemo-secrets`**.

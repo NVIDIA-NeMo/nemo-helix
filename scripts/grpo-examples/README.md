@@ -143,5 +143,28 @@ nemo models create qwen3-8b-base -w default --exist-ok \
 
 | File | Role |
 |---|---|
-| `gym_to_env_package.py` | Packages any Gym server directory as `wheels-v1` or `native-v1` from a local Gym checkout |
+| `gym_to_env_package.py` | Packages any Gym server directory as `wheels-v1` or `native-v1` from a local Gym checkout. `--server-dir` packages a server that lives outside that checkout |
 | `prepare_math_with_judge.py` | Builds Gym rollout rows from DAPO-Math-17k and a holdout or AIME24 |
+| `prepare_clevr_cogent.py` | Builds CLEVR-CoGenT Gym rows (inline images, `expected_answer`) for `servers/vlm` |
+| `gym_rows.py` | Shared row writer and image-part helper used by both dataset scripts |
+| `servers/vlm/` | Gym port of NeMo-RL `VLMEnvironment`'s verifier. `configs/clevr_cogent.yaml` is the CLEVR mix: `format` 0.2 + `exact_alnum` 0.8 |
+
+## CLEVR-CoGenT (vision GRPO)
+
+NeMo-RL scores CLEVR inside `VLMEnvironment`. Gym has no equivalent, so `servers/vlm` is that verifier: `expected_answer` is the ground truth, and `reward_functions` on the server config selects the same functions (`format`, `exact_alnum`, `math_expr`, `bbox_giou`, `geo3k`). The CLEVR config uses `format` at 0.2 and `exact_alnum` at 0.8. Pass `--config clevr_cogent.yaml` because the server directory is `vlm`, not `clevr_cogent`.
+
+```bash
+.venv-conversion/bin/python scripts/grpo-examples/gym_to_env_package.py \
+  --gym-root ~/workspace/Gym --nemo-rl-root ~/workspace/RL \
+  --server-dir scripts/grpo-examples/servers/vlm \
+  --config clevr_cogent.yaml \
+  --format wheels-v1 --arch x86_64 --out-dir /tmp/clevr-env
+
+uv run --no-project --with datasets --with pillow \
+  scripts/grpo-examples/prepare_clevr_cogent.py \
+  --out-dir /tmp/clevr-data --train-size 32 --validation-size 16 --prompt qwen
+```
+
+`--prompt nemotron-omni` uses the Super VL CLEVR prompt. A positive size keeps the first N rows of that split; `-1` loads the whole split. Upload `/tmp/clevr-env/` as an environment FileSet and `/tmp/clevr-data/` as a dataset FileSet, trailing slash on both. The agent name on every row is `clevr_cogent_simple_agent`.
+
+The published recipe is 8 GPUs, full weights, learning rate `5e-7`, 16 generations, and 1024 new tokens (`examples/configs/vlm_grpo_3B.yaml`). A one-GPU smoke keeps the same reward and the same row shape, and scales the batch down: LoRA rank 16, batch 8, 4 generations, 2 prompts per step, sequence length 2048, 512 new tokens, vLLM tensor parallel 1.
