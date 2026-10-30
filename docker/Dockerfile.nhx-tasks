@@ -84,8 +84,7 @@ COPY --chown=1000:1000 --from=builder /app/.source-distributions/nhx-tasks/ /usr
 COPY --chown=1000:1000 --from=builder /app/plugins/nemo-data-designer/tiktoken-cache /app/tiktoken-cache
 ENV TIKTOKEN_CACHE_DIR=/app/tiktoken-cache
 ENV VIRTUAL_ENV=/app/.venv \
-    PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH="/app/.venv/lib/python${PY_VERSION}/site-packages"
+    PATH="/app/.venv/bin:$PATH"
 USER 0
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/cve-cleanup-runtime.txt,target=/tmp/file-removals.txt,readonly \
