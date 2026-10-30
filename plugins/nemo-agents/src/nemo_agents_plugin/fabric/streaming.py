@@ -226,7 +226,8 @@ async def iter_fabric_assistant_deltas(stream: FabricRuntimeStream) -> AsyncIter
     if stream.streaming_method is StreamingMethod.BUFFERED and not isinstance(result.response, str):
         raise ValueError("Fabric invocation did not return a text response.")
     if not emitted_text and isinstance(result.response, str) and result.response:
-        yield ChatCompletionStreamDelta(content=result.response)
+        reasoning = None if emitted_reasoning else extract_output_reasoning(result.output)
+        yield ChatCompletionStreamDelta(content=result.response, reasoning_content=reasoning)
 
 
 class _PrimaryAgentScopes:

@@ -575,6 +575,48 @@ async def test_iter_fabric_assistant_deltas_falls_back_to_response_after_tool_on
     assert [delta.content for delta in deltas] == ["final"]
 
 
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_buffered_fallback_includes_output_reasoning() -> None:
+    output = {
+        "messages": [
+            {"role": "human", "content": "list files"},
+            {"role": "ai", "content": "Checking the root directory now.", "tool_calls": [{"name": "ls"}]},
+            {"role": "tool", "content": "[]"},
+            {"role": "ai", "content": "There are 0 entries."},
+        ]
+    }
+    stream = _FakeFabricRuntimeStream(
+        [],
+        result=FabricRuntimeResult(status="succeeded", response="There are 0 entries.", output=output),
+        streaming_method=StreamingMethod.BUFFERED,
+    )
+
+    deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert [(delta.content, delta.reasoning_content) for delta in deltas] == [
+        ("There are 0 entries.", "Checking the root directory now.")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_iter_fabric_assistant_deltas_fallback_skips_output_reasoning_already_streamed() -> None:
+    stream = _FakeFabricRuntimeStream(
+        [_llm_end({"role": "assistant", "content": "", "reasoning_content": "streamed"})],
+        result=FabricRuntimeResult(
+            status="succeeded",
+            response="final",
+            output={"messages": [{"role": "ai", "content": "final", "reasoning_content": "streamed"}]},
+        ),
+    )
+
+    deltas = [delta async for delta in iter_fabric_assistant_deltas(stream)]
+
+    assert [(delta.content, delta.reasoning_content) for delta in deltas] == [
+        (None, "streamed"),
+        ("final", None),
+    ]
+
+
 @pytest.mark.parametrize(
     ("output", "expected"),
     [
