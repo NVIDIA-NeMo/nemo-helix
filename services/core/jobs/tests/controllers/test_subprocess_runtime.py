@@ -238,6 +238,13 @@ def test_create_otel_logger_batching_is_configurable_via_env():
     assert kwargs["max_queue_size"] >= 100
 
 
+def test_create_otel_logger_keeps_default_queue_floor_for_small_batches():
+    kwargs = _create_logger_capturing_batch_kwargs({NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "1"})
+
+    assert kwargs["max_export_batch_size"] == 1
+    assert kwargs["max_queue_size"] == DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+
+
 def test_create_otel_logger_clamps_oversized_batch_size_env():
     kwargs = _create_logger_capturing_batch_kwargs({NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "1000000000"})
 

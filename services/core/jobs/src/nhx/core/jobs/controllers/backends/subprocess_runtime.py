@@ -272,7 +272,7 @@ def create_otel_logger(
             schedule_delay_millis=export_interval_ms,
             max_export_batch_size=max_batch_size,
             # Queue must be >= batch size; leave headroom for bursts between less frequent exports.
-            max_queue_size=max_batch_size * 4,
+            max_queue_size=max(max_batch_size * 4, DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE),
         )
     )
     logger.info("Created local OTEL logger", extra={"endpoint": endpoint, "job": job, "step": step})

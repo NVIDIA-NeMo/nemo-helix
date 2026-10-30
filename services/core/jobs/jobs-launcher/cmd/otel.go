@@ -146,7 +146,7 @@ func batchProcessorOptions() []log.BatchProcessorOption {
 		// The queue must be at least the batch size; keep headroom so bursts between exports
 		// are not dropped now that exports are less frequent.
 		if os.Getenv(otelBLRPMaxQueueSizeEnv) == "" {
-			opts = append(opts, log.WithMaxQueueSize(n*4))
+			opts = append(opts, log.WithMaxQueueSize(max(n*4, defaultLogExportBatch)))
 		}
 	} else if os.Getenv(otelBLRPMaxExportBatchSizeEnv) == "" {
 		opts = append(opts, log.WithExportMaxBatchSize(defaultLogExportBatch))

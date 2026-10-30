@@ -66,3 +66,15 @@ func TestBatchProcessorOptionsDefersToOTELEnv(t *testing.T) {
 		t.Fatalf("expected only the batch size option, got %d", got)
 	}
 }
+
+func TestBatchProcessorOptionsKeepsQueueFloorForSmallBatches(t *testing.T) {
+	t.Setenv(logExportIntervalEnv, "")
+	t.Setenv(logExportMaxBatchSizeEnv, "1")
+	t.Setenv(otelBLRPScheduleDelayEnv, "")
+	t.Setenv(otelBLRPMaxExportBatchSizeEnv, "")
+	t.Setenv(otelBLRPMaxQueueSizeEnv, "")
+	// interval + batch size + queue size; the queue option must still be present.
+	if got := len(batchProcessorOptions()); got != 3 {
+		t.Fatalf("expected 3 batch processor options, got %d", got)
+	}
+}
