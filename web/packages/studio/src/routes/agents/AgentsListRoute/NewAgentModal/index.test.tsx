@@ -936,6 +936,28 @@ describe('NewAgentModal deploy after create', () => {
     expect(deployments).toEqual([]);
   });
 
+  it('deploys to Kubernetes, not subprocess, on a Kubernetes install with a default image', async () => {
+    const user = userEvent.setup();
+    serveModeList([
+      { mode: 'subprocess', enabled: true, requires_image: false },
+      { mode: 'docker', enabled: false, requires_image: true },
+      { mode: 'k8s', enabled: true, requires_image: false },
+    ]);
+    mockExecutionProfiles([{ profile: 'default', backend: 'kubernetes_job' }]);
+    const { deployments } = mockHelix();
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await pickAgent(dialog);
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Register' })).toBeEnabled()
+    );
+    expect(within(dialog).getByRole('checkbox', { name: 'Deploy after creating' })).toBeChecked();
+    await submit(dialog, user);
+
+    await waitFor(() => expect(deployments).toEqual([{ agent: 'calc', deployment_mode: 'k8s' }]));
+  });
+
   it('holds Register while the runtimes load', async () => {
     let releaseModes = () => {};
     const modesReleased = new Promise<void>((resolve) => {
