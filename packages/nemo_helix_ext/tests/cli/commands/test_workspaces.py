@@ -154,20 +154,21 @@ def test_delete_without_yes_off_a_terminal_sends_nothing() -> None:
 
 
 def test_delete_prompts_on_a_terminal_and_deletes_when_confirmed(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)
     recorder = Recorder([httpx.Response(200, json={"message": "deleted", "id": "ml-team", "deleted_at": None})])
     runner, state = make_runner(recorder)
 
     result = runner.invoke(app, ["workspaces", "delete", "ml-team"], obj=state, input="y\n")
 
     assert result.exit_code == 0, result.output
-    assert "Delete workspace 'ml-team'" in result.stdout
+    assert "Delete workspace 'ml-team'" in result.stderr
+    assert "Delete workspace" not in result.stdout
     assert recorder.last.method == "DELETE"
     assert recorder.last.url.path == "/apis/entities/v2/workspaces/ml-team"
 
 
 def test_delete_declined_on_a_terminal_sends_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)
     recorder = Recorder([])
     runner, state = make_runner(recorder)
 

@@ -47,19 +47,20 @@ def test_off_a_terminal_without_yes_is_a_usage_error() -> None:
 
 
 def test_on_a_terminal_confirming_runs_the_action(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)
     ran: list[str] = []
 
     result = runner.invoke(_app(ran), ["thing"], input="y\n")
 
     assert result.exit_code == 0, result.output
-    assert "Delete 'thing'? [y/N]" in result.output
+    assert "Delete 'thing'? [y/N]" in result.stderr
+    assert "Delete" not in result.stdout
     assert ran == ["thing"]
 
 
 @pytest.mark.parametrize("answer", ["n\n", "\n"])
 def test_on_a_terminal_declining_aborts(monkeypatch: pytest.MonkeyPatch, answer: str) -> None:
-    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.stdin_is_interactive", lambda: True)
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)
     ran: list[str] = []
 
     result = runner.invoke(_app(ran), ["thing"], input=answer)
