@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import quote
 
 from fastapi import Depends
+from nemo_evals.agent_layers.service import AgentLayerService
 from nemo_evals.api.service.metric_service import MetricService
 from nemo_evals.api.service.result_service import ResultService
 from nemo_evals.api.service.task_service import TaskService
@@ -120,6 +121,20 @@ def get_task_service(
         metric_service,
         AsyncFilesClient.from_client(async_client),
         authorize_metric_read=authorize_metric_read,
+    )
+
+
+def get_agent_layer_service(
+    workspace: str,
+    entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    async_client: AsyncNemoClient = Depends(get_nemo_client),
+    authorize: RequestAuthorizer = Depends(get_request_authorizer),
+) -> AgentLayerService:
+    """Provide an AgentLayerService whose agent-layer Jobs are created as the caller."""
+    return AgentLayerService(
+        entity_client,
+        JobsServiceBuildJobs(AsyncJobsClient.from_client(async_client), workspace=workspace),
+        builder_authorizer(authorize),
     )
 
 

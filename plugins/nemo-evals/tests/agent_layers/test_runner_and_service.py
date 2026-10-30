@@ -1,0 +1,271 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Agent layers: requesting one, and the Job's work of building its context and having Builder build it."""
+
+from __future__ import annotations
+
+import io
+import json
+import tarfile
+from pathlib import Path
+from typing import Any, cast
+from unittest.mock import AsyncMock, Mock
+
+import pytest
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
+from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, layer_entity_name
+from nemo_evals.agent_layers.runner import AgentLayerBuildSpec, run_agent_layer_build
+from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
+from nemo_evals.entities import TaskEntity
+from nemo_evals.image_builds.service import BuildJob
+from nemo_evals.jobs.agent_layer_build import INSTALLER_ARCHIVE, agent_layer_build_job_request, is_job_for
+from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.providers import CPUExecutionProvider
+from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
+
+_CODEX = AgentLayerRequest(name="codex", kwargs={"version": "0.162.1"})
+
+
+class _Jobs:
+    def __init__(self) -> None:
+        self.created: list[CreateHelixJobRequest] = []
+
+    async def create(self, request: CreateHelixJobRequest) -> None:
+        self.created.append(request)
+
+    async def get(self, name: str) -> BuildJob | None:
+        return None
+
+
+async def _allow(workspace: str) -> None:
+    pass
+
+
+def _ready(name: str) -> ContainerImage:
+    return ContainerImage(
+        name=name,
+        workspace="default",
+        status="ready",
+        registry="registry.test",
+        repository=f"default/{name}",
+        digest="sha256:" + "d" * 64,
+        runtime_config=ImageRuntimeConfig(entrypoint=None, working_dir="/app"),
+        provenance=Provenance(
+            build_set=name.rsplit("-", 1)[0],
+            revision=int(name.rsplit("-", 1)[1]),
+            job=f"default/builder-{name}",
+            request_digest="sha256:" + "a" * 64,
+        ),
+    )
+
+
+class _Builder:
+    """Builder whose builds are ready once submitted; records each submit's source and Dockerfile."""
+
+    def __init__(self) -> None:
+        self.rows: dict[str, ContainerImage] = {}
+        self.submits: list[tuple[str, FileSetSource | ImageSource, str | None]] = []
+
+    async def get_image(self, name: str) -> ContainerImage | None:
+        return self.rows.get(name)
+
+    async def submit(self, *, name: str, revision: int, source: Any, dockerfile: str | None, platform: str | None):
+        self.submits.append((name, source, dockerfile))
+        self.rows[f"{name}-{revision}"] = _ready(f"{name}-{revision}")
+        return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[self.rows[f"{name}-{revision}"]])
+
+    async def job_status(self, job: str) -> str | None:
+        return "completed"
+
+    async def image_platforms(self, image: str) -> list[str]:
+        return []
+
+
+def _serve_archive(monkeypatch: pytest.MonkeyPatch, files: dict[str, bytes]) -> None:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        root = tarfile.TarInfo("sort-task")
+        root.type, root.mode = tarfile.DIRTYPE, 0o755
+        archive.addfile(root)
+        for name, content in files.items():
+            info = tarfile.TarInfo(f"sort-task/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+
+    async def download(files_client, ref, output, **kwargs) -> None:
+        output.write(buffer.getvalue())
+
+    monkeypatch.setattr("nemo_evals.image_builds.runner.download_verified_async", download)
+
+
+def _installer(tmp_path: Path) -> Path:
+    """An installer archive shaped like the image's: ``nhx-agent-installer/venv/bin/python``."""
+    path = tmp_path / INSTALLER_ARCHIVE
+    with tarfile.open(path, "w:gz") as archive:
+        content = b"#!/bin/sh\n"
+        info = tarfile.TarInfo("nhx-agent-installer/venv/bin/python")
+        info.size, info.mode = len(content), 0o755
+        archive.addfile(info, io.BytesIO(content))
+    return path
+
+
+class _Files:
+    """The Files calls the runner makes: one fileset per build, holding the context archive."""
+
+    def __init__(self) -> None:
+        self.create_fileset = AsyncMock()
+        self.uploads: dict[tuple[str, str], bytes] = {}
+
+    async def upload_file(self, *, workspace: str, name: str, path: str, content: bytes) -> Mock:
+        self.uploads[(name, path)] = content
+        return Mock()
+
+
+def _context(upload: bytes) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    with tarfile.open(fileobj=io.BytesIO(upload), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            handle = archive.extractfile(member) if member.isfile() else None
+            if handle is not None:
+                files[member.name] = handle.read()
+    return files
+
+
+_ENV = {
+    "task.toml": b'[agent]\nuser = "agent"\n',
+    "environment/Dockerfile": b"FROM ubuntu:24.04\nCOPY setup.sh /setup.sh\nUSER agent\n",
+    "environment/setup.sh": b"echo hi\n",
+}
+
+
+async def _requested(entity_store, store_task, name: str = "sort-task") -> tuple[AgentLayerBuildSpec, _Jobs]:
+    jobs = _Jobs()
+    digest = await store_task(name, config={"agent": {"user": "agent"}})
+    layer = await AgentLayerService(entity_store, jobs, _allow).request_layer("default", name, digest, _CODEX)
+    assert layer is not None
+    spec = AgentLayerBuildSpec(
+        workspace="default", task=name, revision_digest=digest, agent_key=layer.agent_key, attempt=1
+    )
+    return spec, jobs
+
+
+async def _run(entity_store, spec: AgentLayerBuildSpec, builder: _Builder, files: _Files, tmp_path: Path):
+    return await run_agent_layer_build(
+        spec,
+        entities=entity_store,
+        files=cast(AsyncFilesClient, files),
+        builder=builder,
+        installer=_installer(tmp_path),
+        sleep=AsyncMock(),
+    )
+
+
+async def test_the_layer_builds_the_environment_with_the_agent_installed(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    spec, _ = await _requested(entity_store, store_task)
+    builder, files = _Builder(), _Files()
+
+    layer = await _run(entity_store, spec, builder, files, tmp_path)
+
+    assert layer.status == "ready" and layer.image is not None
+    assert layer.image.image_ref is not None and layer.image.image_ref.endswith("@sha256:" + "d" * 64)
+    ((name, source, dockerfile),) = builder.submits
+    assert name.startswith("harbor-agent-") and dockerfile == "Dockerfile.nhx-agent-layer"
+    assert isinstance(source, FileSetSource) and source.fileset == f"default/{name}"
+    context = _context(files.uploads[(name, "context.tar.gz")])
+    # The environment's own files, the generated Dockerfile, the agent and the installer; nothing else of the task.
+    assert context["context/setup.sh"] == b"echo hi\n"
+    assert context["context/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
+    agent = json.loads(context["context/nhx-agent-layer/agent.json"])
+    assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "user": "agent"}
+    assert "context/nhx-agent-installer/venv/bin/python" in context
+    assert not any("instruction.md" in path or "task.toml" in path for path in context)
+
+
+async def test_tasks_whose_environments_hold_the_same_files_share_one_build(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    builder, files = _Builder(), _Files()
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Sort.\n"})
+    first, _ = await _requested(entity_store, store_task, "sort-a")
+    await _run(entity_store, first, builder, files, tmp_path)
+    _serve_archive(monkeypatch, {**_ENV, "instruction.md": b"Reverse.\n"})
+    second, _ = await _requested(entity_store, store_task, "sort-b")
+
+    layer = await _run(entity_store, second, builder, files, tmp_path)
+
+    assert layer.status == "ready"
+    assert len(builder.submits) == 1
+
+
+async def test_a_compose_task_gets_no_layer(entity_store, store_task, monkeypatch, tmp_path) -> None:
+    _serve_archive(monkeypatch, {**_ENV, "environment/docker-compose.yaml": b"services:\n  main:\n    build: .\n"})
+    spec, _ = await _requested(entity_store, store_task)
+
+    layer = await _run(entity_store, spec, _Builder(), _Files(), tmp_path)
+
+    assert layer.status == "failed" and "compose" in (layer.error or "")
+
+
+async def test_a_request_starts_the_layers_job_once(entity_store, store_task) -> None:
+    jobs = _Jobs()
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, jobs, _allow)
+
+    first = await service.request_layer("default", "sort-task", digest, _CODEX)
+    again = await service.request_layer("default", "sort-task", digest, _CODEX)
+
+    assert first is not None and again is not None and first.id == again.id == "1"
+    assert [request.name for request in jobs.created] == [first.job, first.job]  # the second confirms the same Job
+    assert first.agent_key == agent_layer_key(_CODEX)
+
+
+async def test_a_ready_layer_is_returned_without_a_job(entity_store, store_task) -> None:
+    jobs = _Jobs()
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, jobs, _allow)
+    layer = await service.request_layer("default", "sort-task", digest, _CODEX)
+    assert layer is not None
+    head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
+    stored = await entity_store.get(
+        AgentLayerEntity, name=layer_entity_name(digest, layer.agent_key, 1), workspace="default", parent=head.id
+    )
+    stored.status = "ready"
+    await entity_store.update(stored)
+    jobs.created.clear()
+
+    ready = await service.ready_layer("default", "sort-task", digest, layer.agent_key)
+    again = await service.request_layer("default", "sort-task", digest, _CODEX)
+
+    assert ready is not None and again is not None and again.status == "ready"
+    assert jobs.created == []
+
+
+async def test_an_agent_whose_setup_isnt_an_install_is_refused(entity_store, store_task) -> None:
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, _Jobs(), _allow)
+
+    with pytest.raises(AgentNotLayerableError):
+        await service.request_layer("default", "sort-task", digest, AgentLayerRequest(name="oracle"))
+
+
+def test_the_job_fetches_the_installer_onto_storage_its_build_step_reads() -> None:
+    spec = AgentLayerBuildSpec(workspace="default", task="t", revision_digest="e" * 64, agent_key="k", attempt=1)
+
+    request = agent_layer_build_job_request(spec, name="agent-layer-build-x-1")
+
+    assert request.platform_spec is not None
+    fetch, build = request.platform_spec.steps
+    assert isinstance(fetch.executor, CPUExecutionProvider) and fetch.executor.container is not None
+    assert (fetch.executor.container.image or "").rpartition("/")[2].startswith("nhx-agent-installer")
+    assert fetch.executor.container.entrypoint == ["/bin/cp"]
+    for step in (fetch, build):
+        assert [variable.name for variable in step.environment or []] == [PERSISTENT_JOB_STORAGE_PATH_ENVVAR]
+    assert build.config == spec.model_dump(mode="json")
+    assert is_job_for(request.custom_fields, spec)
+    assert not is_job_for(request.custom_fields, spec.model_copy(update={"attempt": 2}))
