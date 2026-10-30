@@ -1,8 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
+import hashlib
+import os
 import shutil
 import subprocess
+import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -11,6 +16,11 @@ import yaml
 ROOT = Path(__file__).parent.parent.parent
 HELM_DIR = ROOT / "k8s" / "helm"
 HELM_TEMPLATE_TIMEOUT_SECONDS = 60
+HELM_SERVER_DRY_RUN_TIMEOUT_SECONDS = 180
+CLICKHOUSE_CREDENTIALS_CHECKSUM = "checksum/clickhouse-credentials"
+CHART_MANAGED_CLICKHOUSE_SECRET = "nemo-helix-clickhouse"
+CLICKHOUSE_PASSWORD_KEY = "password"
+STORED_GENERATED_PASSWORD = "already-installed-password"
 
 
 def _helm_template(*args: str) -> list[dict]:
@@ -80,6 +90,177 @@ def _envoy_config(documents: list[dict]) -> dict:
 
 def _env_by_name(container: dict) -> dict[str, dict]:
     return {env["name"]: env for env in container["env"]}
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _clickhouse_name_key_checksum(secret_name: str, password_key: str = CLICKHOUSE_PASSWORD_KEY) -> str:
+    return _sha256_text(f"{secret_name}:{password_key}")
+
+
+def _explicit_password_checksum(password: str) -> str:
+    encoded = base64.b64encode(password.encode()).decode()
+    return _sha256_text(encoded)
+
+
+def _pod_annotation(documents: list[dict], *, kind: str, name: str, annotation: str) -> str:
+    document = next(
+        item for item in documents if item.get("kind") == kind and item.get("metadata", {}).get("name") == name
+    )
+    annotations = document["spec"]["template"]["metadata"].get("annotations") or {}
+    value = annotations.get(annotation)
+    assert isinstance(value, str) and value
+    return value
+
+
+def _clickhouse_credential_checksums(documents: list[dict]) -> tuple[str, str]:
+    return (
+        _pod_annotation(
+            documents,
+            kind="Deployment",
+            name="nemo-helix-api",
+            annotation=CLICKHOUSE_CREDENTIALS_CHECKSUM,
+        ),
+        _pod_annotation(
+            documents,
+            kind="StatefulSet",
+            name=CHART_MANAGED_CLICKHOUSE_SECRET,
+            annotation=CLICKHOUSE_CREDENTIALS_CHECKSUM,
+        ),
+    )
+
+
+def _kube_context() -> str | None:
+    return os.environ.get("NHX_HELM_KUBE_CONTEXT") or None
+
+
+def _kube_context_args() -> list[str]:
+    context = _kube_context()
+    if context is None:
+        return []
+    return ["--context", context]
+
+
+def _require_helm_cluster() -> None:
+    if shutil.which("helm") is None or shutil.which("kubectl") is None:
+        pytest.skip("helm and kubectl are required to render against a live lookup")
+    probe = subprocess.run(
+        ["kubectl", *_kube_context_args(), "--request-timeout=8s", "get", "ns"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    if probe.returncode != 0:
+        pytest.skip(f"Kubernetes API is not reachable: {probe.stderr.strip()}")
+
+
+def _helm_server_dry_run(namespace: str, *args: str) -> list[dict]:
+    context = _kube_context()
+    command = [
+        "helm",
+        "upgrade",
+        "--install",
+        "nemo-helix",
+        str(HELM_DIR),
+        "--namespace",
+        namespace,
+        "--dry-run=server",
+    ]
+    if context:
+        command.extend(["--kube-context", context])
+    command.extend(args)
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=HELM_SERVER_DRY_RUN_TIMEOUT_SECONDS,
+    )
+    assert completed.returncode == 0, completed.stderr
+    manifest = completed.stdout
+    if "\nMANIFEST:\n" in manifest:
+        manifest = manifest.split("\nMANIFEST:\n", 1)[1]
+    if "\nNOTES:\n" in manifest:
+        manifest = manifest.split("\nNOTES:\n", 1)[0]
+    return [document for document in yaml.safe_load_all(manifest) if isinstance(document, dict)]
+
+
+def _assert_clickhouse_checksums(documents: list[dict], expected: str) -> None:
+    api_checksum, clickhouse_checksum = _clickhouse_credential_checksums(documents)
+    assert api_checksum == expected
+    assert clickhouse_checksum == expected
+
+
+def _kubectl(*args: str, input_text: str | None = None, check: bool = True) -> None:
+    subprocess.run(
+        ["kubectl", *_kube_context_args(), *args],
+        check=check,
+        capture_output=True,
+        input=input_text,
+        text=True,
+        timeout=30,
+    )
+
+
+def _secret_manifest(name: str, key: str, password: str, *, namespace: str, helm_owned: bool) -> str:
+    metadata: dict[str, object] = {"name": name}
+    if helm_owned:
+        metadata["labels"] = {"app.kubernetes.io/managed-by": "Helm"}
+        metadata["annotations"] = {
+            "meta.helm.sh/release-name": "nemo-helix",
+            "meta.helm.sh/release-namespace": namespace,
+        }
+    return yaml.safe_dump(
+        {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": metadata,
+            "type": "Opaque",
+            "data": {key: base64.b64encode(password.encode()).decode()},
+        }
+    )
+
+
+@pytest.fixture
+def clickhouse_lookup_namespace() -> Iterator[str]:
+    _require_helm_cluster()
+    namespace = f"nhx-ch-cs-{uuid.uuid4().hex[:8]}"
+    _kubectl("create", "namespace", namespace)
+    try:
+        _kubectl(
+            "--namespace",
+            namespace,
+            "apply",
+            "-f",
+            "-",
+            input_text=_secret_manifest(
+                CHART_MANAGED_CLICKHOUSE_SECRET,
+                CLICKHOUSE_PASSWORD_KEY,
+                STORED_GENERATED_PASSWORD,
+                namespace=namespace,
+                helm_owned=True,
+            ),
+        )
+        _kubectl(
+            "--namespace",
+            namespace,
+            "apply",
+            "-f",
+            "-",
+            input_text=_secret_manifest(
+                "custom-clickhouse-credentials",
+                "custom-key",
+                "external-password",
+                namespace=namespace,
+                helm_owned=False,
+            ),
+        )
+        yield namespace
+    finally:
+        _kubectl("delete", "namespace", namespace, "--wait=false", check=False)
 
 
 def test_default_intake_selection_renders_embedded_clickhouse_dependency() -> None:
@@ -289,3 +470,87 @@ def test_api_deployment_passes_keep_alive_timeout_to_services_run() -> None:
     )
 
     assert "--keep-alive-timeout-seconds=9" in _api_container(documents)["args"]
+
+
+def test_generated_clickhouse_credentials_checksum_hashes_secret_name_and_key() -> None:
+    documents = _helm_template()
+
+    _assert_clickhouse_checksums(documents, _clickhouse_name_key_checksum(CHART_MANAGED_CLICKHOUSE_SECRET))
+
+
+def test_empty_clickhouse_password_keeps_generated_credentials_checksum() -> None:
+    documents = _helm_template("--set-string", "clickhouse.auth.password=")
+
+    _assert_clickhouse_checksums(documents, _clickhouse_name_key_checksum(CHART_MANAGED_CLICKHOUSE_SECRET))
+
+
+def test_generated_clickhouse_checksum_hashes_name_before_any_secret_lookup() -> None:
+    """The generated-password hash must be chosen before lookup runs.
+
+    `helm template` in CI never populates lookup, so the rendered tests cannot
+    tell this helper from the one that hashed the live Secret after install.
+    """
+    helper = (HELM_DIR / "templates" / "_helpers.tpl").read_text()
+    body = helper.split('{{- define "nemo-common.clickhouse.credentialsChecksum" -}}', 1)[1]
+    body = body.split('{{- define "', 1)[0]
+    name_key_hash = '{{- printf "%s:%s" $secretName $passwordKey | sha256sum -}}'
+    assert body.index(name_key_hash) < body.index('lookup "v1" "Secret"')
+
+
+def test_existing_clickhouse_secret_checksum_hashes_name_and_key_when_secret_is_absent() -> None:
+    documents = _helm_template(
+        "--set",
+        "clickhouse.auth.existingSecret=custom-clickhouse-credentials",
+        "--set",
+        "clickhouse.auth.existingSecretPasswordKey=custom-key",
+    )
+
+    _assert_clickhouse_checksums(
+        documents, _clickhouse_name_key_checksum("custom-clickhouse-credentials", "custom-key")
+    )
+
+
+@pytest.mark.skip_in_ci
+def test_chart_managed_clickhouse_checksum_ignores_stored_generated_password(
+    clickhouse_lookup_namespace: str,
+) -> None:
+    """A stored generated password must not change the chart-managed checksum.
+
+    `helm template` never calls lookup, so this renders with a server-side dry-run
+    against a Secret that an earlier install would already have stored. The final
+    render omits auth.password again without writing the rotated password back to
+    the cluster, so it checks that the checksum returns to the name/key hash.
+    """
+    expected = _clickhouse_name_key_checksum(CHART_MANAGED_CLICKHOUSE_SECRET)
+    installed = _helm_server_dry_run(clickhouse_lookup_namespace)
+    _assert_clickhouse_checksums(installed, expected)
+
+    unrelated_change = _helm_server_dry_run(
+        clickhouse_lookup_namespace,
+        "--set-string",
+        "api.service.annotations.qa=1",
+    )
+    _assert_clickhouse_checksums(unrelated_change, expected)
+
+    rotated = _helm_server_dry_run(
+        clickhouse_lookup_namespace,
+        "--set-string",
+        "clickhouse.auth.password=rotated-test-password",
+    )
+    _assert_clickhouse_checksums(rotated, _explicit_password_checksum("rotated-test-password"))
+
+    cleared = _helm_server_dry_run(clickhouse_lookup_namespace)
+    _assert_clickhouse_checksums(cleared, expected)
+
+
+@pytest.mark.skip_in_ci
+def test_existing_clickhouse_secret_checksum_hashes_live_password(clickhouse_lookup_namespace: str) -> None:
+    documents = _helm_server_dry_run(
+        clickhouse_lookup_namespace,
+        "--set",
+        "clickhouse.auth.existingSecret=custom-clickhouse-credentials",
+        "--set",
+        "clickhouse.auth.existingSecretPasswordKey=custom-key",
+    )
+
+    _assert_clickhouse_checksums(documents, _explicit_password_checksum("external-password"))
