@@ -80,15 +80,13 @@ Run the signed-token, gateway authentication handler, policy, and Secret service
 uv run --frozen pytest services/core/jobs/tests/integration/test_workload_secret_authorization.py -v
 ```
 
-To also exercise the built Go launcher through real Envoy on Linux, start Docker and cache `envoyproxy/envoy:v1.37.0`, then run with Go available:
+These tests run in the normal Python integration suite, without Docker, a custom runner, or an opt-in environment variable. They use real signed workload exchange, the gateway's authentication handler, policy, and Secret storage; they do not test Envoy networking, TLS, or Kubernetes TokenReview.
+
+The generic `Go tests` CI job runs `go test -race ./...` and `go vet ./...` for every tracked Go module when Go code, module files, or the runner/toolchain changes. It is included in the `CI status` gate. Run the same checks locally with:
 
 ```bash
-NHX_TEST_WORKLOAD_GATEWAY=1 uv run --frozen pytest services/core/jobs/tests/integration/test_workload_secret_authorization.py -v
+flox activate --dir tools/go -- bash .github/scripts/run-go-tests.sh
 ```
-
-CI enables this test in the path-filtered `Launcher and signed workload Secret tests` job, alongside `go test -race ./...` and `go vet ./...`; that job is included in the `CI status` gate.
-
-The test uses temporary data, a loopback HTTP listener (not TLS), and a local IdP discovery stub. It verifies that an authorized creator's Job receives the injected Secret and starts, while an unauthorized creator's Job receives 403 and never starts. It does not exercise Kubernetes TokenReview.
 
 ## Logging
 
