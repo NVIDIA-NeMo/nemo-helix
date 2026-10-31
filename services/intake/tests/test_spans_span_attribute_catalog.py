@@ -213,6 +213,28 @@ def test_span_attribute_catalog_rejects_non_numeric_numeric_filters():
         where_clause("total_tokens", ">", "not-a-number")
 
 
+@pytest.mark.parametrize(("value", "expected"), [(True, True), (False, False), ("true", True), ("false", False)])
+def test_span_attribute_catalog_reads_a_boolean_or_its_exact_spelling(value, expected):
+    spec = SPECS_BY_FIELD_VALUE["usage_superseded_by_gateway"]
+
+    assert from_bag(to_bag(value, spec), spec) is expected
+
+
+@pytest.mark.parametrize("value", ["False", "no", "", 0, 1])
+def test_span_attribute_catalog_rejects_other_boolean_values(value):
+    """``bool("false")`` is True: coercing would turn a span's explicit "false" into the marker it denies."""
+    spec = SPECS_BY_FIELD_VALUE["gateway_call"]
+
+    with pytest.raises(ValueError, match="Invalid boolean value"):
+        to_bag(value, spec)
+
+
+def test_span_attribute_catalog_filters_a_boolean_field_on_false():
+    _, params = where_clause("gateway_call", "=", "false")
+
+    assert params["gateway_call_value"] is False
+
+
 def _sample_value(bag: str) -> str | int | bool:
     if bag == "attributes_string":
         return "sample"
