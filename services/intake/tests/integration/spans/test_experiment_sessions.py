@@ -269,6 +269,121 @@ def test_list_evaluation_sessions_filter_by_status(client: TestClient) -> None:
     assert mismatched.json()["pagination"]["total_results"] == 0
 
 
+def test_list_evaluation_sessions_aggregates_every_turn_of_a_multi_turn_session(client: TestClient) -> None:
+    evaluation_name = "sessions-multi-turn-exp"
+    group_id = _ensure_group(client)
+    created = client.post(
+        EVALUATIONS,
+        json={
+            "name": evaluation_name,
+            "experiment_group_id": group_id,
+            "dataset_name": "sessions-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    multi_turn_session_id = f"{evaluation_name}-chat"
+    turns = [
+        _turn_body(
+            started_at=started_at,
+            session_id=multi_turn_session_id,
+            evaluation_name=evaluation_name,
+            test_case_name="case-chat",
+            turn=1,
+            latency_ms=1000,
+            prompt_tokens=100,
+            completion_tokens=10,
+            cost_usd=0.05,
+            score=None,
+        ),
+        _turn_body(
+            started_at=started_at + timedelta(seconds=5),
+            session_id=multi_turn_session_id,
+            evaluation_name=evaluation_name,
+            test_case_name="case-chat",
+            turn=2,
+            latency_ms=2000,
+            prompt_tokens=200,
+            completion_tokens=20,
+            cost_usd=0.10,
+            score=1.0,
+            errored=True,
+        ),
+    ]
+    for body in turns:
+        response = client.post(ATIF_INGEST, json=body)
+        assert response.status_code == 201, response.text
+    single = client.post(
+        ATIF_INGEST,
+        json=_atif_body(
+            started_at=started_at,
+            evaluation_name=evaluation_name,
+            test_case_id="case-single",
+            score=0.5,
+            cost_usd=0.01,
+            latency_ms=3000,
+            prompt_tokens=50,
+            completion_tokens=5,
+            offset_seconds=1,
+            run_id="run-single",
+        ),
+    )
+    assert single.status_code == 201, single.text
+
+    listed = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert body["pagination"]["total_results"] == 2
+    rows_by_case = {row["test_case_name"]: row for row in body["data"]}
+    assert set(rows_by_case) == {"case-chat", "case-single"}
+
+    chat = rows_by_case["case-chat"]
+    assert chat["session_id"] == multi_turn_session_id
+    assert _utc(chat["started_at"]) == started_at
+    assert _utc(chat["ended_at"]) == started_at + timedelta(seconds=7)
+    assert chat["latency_ms"] == pytest.approx(7000.0)
+    assert chat["status"] == "error"
+    assert chat["input"] == "ask turn-1"
+    assert chat["output"] == "answer turn-2"
+    assert chat["input_tokens"] == 300
+    assert chat["output_tokens"] == 30
+    assert chat["cost_total_usd"] == pytest.approx(0.15)
+    assert chat["evaluator_scores"] == {"reward": pytest.approx(1.0)}
+
+    traces = client.get(
+        "/apis/intake/v2/workspaces/default/traces", params={"filter[session_id]": multi_turn_session_id}
+    )
+    assert traces.status_code == 200, traces.text
+    first_turn = min(traces.json()["data"], key=lambda trace: trace["started_at"])
+    assert chat["trace_id"] == first_turn["id"]
+    assert chat["root_span_id"] == first_turn["root_span_id"]
+
+    single_row = rows_by_case["case-single"]
+    assert single_row["latency_ms"] == pytest.approx(3000.0)
+    assert single_row["input_tokens"] == 50
+    assert single_row["evaluator_scores"] == {"reward": pytest.approx(0.5)}
+
+    latency_sorted = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"sort": "-latency_ms"})
+    assert latency_sorted.status_code == 200, latency_sorted.text
+    assert [row["test_case_name"] for row in latency_sorted.json()["data"]] == ["case-chat", "case-single"]
+
+    errored = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"filter[status]": "error"})
+    assert errored.status_code == 200, errored.text
+    assert errored.json()["pagination"]["total_results"] == 1
+    assert [row["session_id"] for row in errored.json()["data"]] == [multi_turn_session_id]
+
+    succeeded = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"filter[status]": "success"})
+    assert succeeded.status_code == 200, succeeded.text
+    assert [row["test_case_name"] for row in succeeded.json()["data"]] == ["case-single"]
+
+    paged = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"page": 2, "page_size": 1})
+    assert paged.status_code == 200, paged.text
+    assert paged.json()["pagination"]["total_results"] == 2
+    assert [row["test_case_name"] for row in paged.json()["data"]] == ["case-single"]
+
+
 def test_list_evaluation_sessions_returns_404_for_unknown_evaluation(client: TestClient) -> None:
     response = client.get(f"{EVALUATIONS}/does-not-exist/sessions")
     assert response.status_code == 404, response.text
@@ -335,6 +450,69 @@ def _atif_body(
             }
         ],
     }
+
+
+def _turn_body(
+    *,
+    started_at: datetime,
+    session_id: str,
+    evaluation_name: str,
+    test_case_name: str,
+    turn: int,
+    latency_ms: int,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cost_usd: float,
+    score: float | None,
+    errored: bool = False,
+) -> dict[str, Any]:
+    finished_at = started_at + timedelta(milliseconds=latency_ms)
+    extra: dict[str, Any] = {
+        "verifier": {"started_at": _iso(started_at), "finished_at": _iso(finished_at)},
+    }
+    if score is not None:
+        extra["verifier_result"] = {"rewards": {"reward": score}}
+    if errored:
+        extra["error"] = {"type": "TurnFailed", "message": f"turn-{turn} failed"}
+    return {
+        "schema_version": "ATIF-v1.7",
+        "session_id": session_id,
+        "trajectory_id": f"turn-{turn}",
+        "evaluation_context": {
+            "evaluation_name": evaluation_name,
+            "test_case_name": test_case_name,
+        },
+        "extra": extra,
+        "agent": {
+            "name": "sample-agent",
+            "version": "1.0.0",
+            "model_name": "provider/sample-model",
+        },
+        "steps": [
+            {
+                "step_id": 1,
+                "timestamp": _iso(started_at),
+                "source": "user",
+                "message": f"ask turn-{turn}",
+            },
+            {
+                "step_id": 2,
+                "timestamp": _iso(started_at),
+                "source": "agent",
+                "model_name": "provider/sample-model",
+                "message": f"answer turn-{turn}",
+                "metrics": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost_usd": cost_usd,
+                },
+            },
+        ],
+    }
+
+
+def _utc(value: str) -> datetime:
+    return datetime.fromisoformat(value).replace(tzinfo=timezone.utc)
 
 
 def _iso(value: datetime) -> str:
