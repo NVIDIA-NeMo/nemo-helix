@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
+import { handleGenericError } from '@nemo/common/src/utils/logger';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Block } from '@nvidia/foundations-react-core';
+import { useAgentChatSession } from '@studio/api/agents/useAgentChatSession';
 import { ModelChat } from '@studio/components/ModelChat';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
@@ -38,6 +40,18 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
 }) => {
   const chatDeployment = deployment?.status === 'running' ? deployment : undefined;
   const showBanner = !isDeploymentsLoading && !chatDeployment;
+  const {
+    extraHeaders,
+    isPending: isSessionPending,
+    resetSession,
+    recoverFromError,
+  } = useAgentChatSession(workspace, chatDeployment);
+
+  const handleChatError = (error: Error) => {
+    if (!recoverFromError(error)) {
+      handleGenericError(error);
+    }
+  };
 
   return (
     <div ref={chatAreaRef} className="flex flex-col h-full min-h-0">
@@ -66,7 +80,10 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
               ? `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${workspace}/deployments/${chatDeployment.name}/-/v1`
               : undefined
           }
-          disabled={isDeploymentsLoading || !chatDeployment}
+          extraHeaders={extraHeaders}
+          onError={handleChatError}
+          onReset={resetSession}
+          disabled={isDeploymentsLoading || !chatDeployment || isSessionPending}
           describeError={describeChatError}
         />
       </Block>
