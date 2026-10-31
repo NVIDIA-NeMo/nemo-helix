@@ -12,7 +12,7 @@ Fern generates its request snippets from the operation alone. Three shapes come 
   ``/apis/auth/authenticate`` needs an ``Authorization`` header and the OTLP logs upload needs a
   JSON body, but neither appears in the spec, so the snippets send neither.
 
-For these operations this module writes explicit samples in all eight custom language tabs and
+For these operations this module writes explicit Python and JavaScript samples and
 an SDK override for Fern's default cURL tab. Binary downloads use bytes rather than a JSON decoder;
 raw uploads have representative nonempty content. ATIF's empty 201 response is handled explicitly.
 Operations that already carry ``x-codeSamples`` (authored on the route) are left alone, and
@@ -29,7 +29,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 BASE_URL = "http://localhost:8080"
-LANGUAGES = ("Python", "JavaScript", "Go", "Ruby", "PHP", "Java", "C#", "Swift")
+LANGUAGES = ("Python", "JavaScript")
 _BODYLESS_STATUSES = {"204", "205"}
 _METHODS = ("get", "put", "post", "delete", "patch")
 
@@ -210,174 +210,7 @@ def _javascript(r: SampleRequest) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _go(r: SampleRequest) -> str:
-    imports = ['"fmt"', '"net/http"'] + (['"io"'] if r.reads_body else []) + (['"strings"'] if r.body else [])
-    body = f"strings.NewReader({_q(r.body)})" if r.body is not None else "nil"
-    lines = ["package main", "", "import ("] + [f"\t{i}" for i in sorted(imports)] + [")", "", "func main() {"]
-    lines += [
-        f"\treq, err := http.NewRequest({_q(r.method)}, {_q(r.url)}, {body})",
-        "\tif err != nil {",
-        "\t\tpanic(err)",
-        "\t}",
-    ]
-    lines += [f"\treq.Header.Set({_q(k)}, {_q(v)})" for k, v in r.headers.items()]
-    lines += [
-        "\tres, err := http.DefaultClient.Do(req)",
-        "\tif err != nil {",
-        "\t\tpanic(err)",
-        "\t}",
-        "\tdefer res.Body.Close()",
-        "\tfmt.Println(res.Status)",
-    ]
-    if r.reads_body:
-        lines += [
-            "\tdata, err := io.ReadAll(res.Body)",
-            "\tif err != nil {",
-            "\t\tpanic(err)",
-            "\t}",
-            "\tfmt.Println(string(data))",
-        ]
-    return "\n".join(lines + ["}"]) + "\n"
-
-
-def _ruby(r: SampleRequest) -> str:
-    cls = r.method.capitalize()
-    lines = ['require "net/http"', "", f"uri = URI({_q(r.url)})", f"request = Net::HTTP::{cls}.new(uri)"]
-    lines += [f"request[{_q(k)}] = {_q(v)}" for k, v in r.headers.items()]
-    if r.body is not None:
-        lines.append(f"request.body = {_q(r.body)}")
-    lines += [
-        'response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") do |http|',
-        "  http.request(request)",
-        "end",
-        "",
-        "puts response.code",
-    ]
-    if r.reads_body:
-        lines.append("puts response.body")
-    return "\n".join(lines) + "\n"
-
-
-def _php(r: SampleRequest) -> str:
-    lines = ["<?php", f"$ch = curl_init({_q(r.url)});", f"curl_setopt($ch, CURLOPT_CUSTOMREQUEST, {_q(r.method)});"]
-    if r.headers:
-        headers = ", ".join(_q(f"{k}: {v}") for k, v in r.headers.items())
-        lines.append(f"curl_setopt($ch, CURLOPT_HTTPHEADER, [{headers}]);")
-    if r.body is not None:
-        lines.append(f"curl_setopt($ch, CURLOPT_POSTFIELDS, {_q(r.body)});")
-    lines.append("curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);")
-    lines.append("$body = curl_exec($ch);" if r.reads_body else "curl_exec($ch);")
-    lines += ["$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);", "curl_close($ch);", "", "echo $status, PHP_EOL;"]
-    if r.reads_body:
-        lines.append("echo $body, PHP_EOL;")
-    return "\n".join(lines) + "\n"
-
-
-def _java(r: SampleRequest) -> str:
-    publisher = (
-        f"HttpRequest.BodyPublishers.ofString({_q(r.body)})"
-        if r.body is not None
-        else "HttpRequest.BodyPublishers.noBody()"
-    )
-    handler, kind = (
-        ("ofByteArray()", "byte[]")
-        if r.binary_response
-        else ("ofString()", "String")
-        if r.reads_body
-        else ("discarding()", "Void")
-    )
-    lines = [
-        "import java.net.URI;",
-        "import java.net.http.HttpClient;",
-        "import java.net.http.HttpRequest;",
-        "import java.net.http.HttpResponse;",
-        "",
-        "public class Example {",
-        "  public static void main(String[] args) throws Exception {",
-        f"    HttpRequest request = HttpRequest.newBuilder(URI.create({_q(r.url)}))",
-    ]
-    lines += [f"        .header({_q(k)}, {_q(v)})" for k, v in r.headers.items()]
-    lines += [
-        f"        .method({_q(r.method)}, {publisher})",
-        "        .build();",
-        f"    HttpResponse<{kind}> response = HttpClient.newHttpClient()",
-        f"        .send(request, HttpResponse.BodyHandlers.{handler});",
-        "    System.out.println(response.statusCode());",
-    ]
-    if r.reads_body:
-        lines.append(
-            "    System.out.write(response.body());"
-            if r.binary_response
-            else "    System.out.println(response.body());"
-        )
-    return "\n".join(lines + ["  }", "}"]) + "\n"
-
-
-def _csharp(r: SampleRequest) -> str:
-    lines = [
-        "using System;",
-        "using System.Net.Http;",
-        "using System.Text;",
-        "",
-        "using var client = new HttpClient();",
-        f"using var request = new HttpRequestMessage(new HttpMethod({_q(r.method)}), {_q(r.url)});",
-    ]
-    content_type = r.headers.get("Content-Type")
-    lines += [f"request.Headers.Add({_q(k)}, {_q(v)});" for k, v in r.headers.items() if k != "Content-Type"]
-    if r.body is not None:
-        lines.append(
-            f"request.Content = new StringContent({_q(r.body)}, Encoding.UTF8, {_q(content_type or 'text/plain')});"
-        )
-    lines += ["using var response = await client.SendAsync(request);", "Console.WriteLine((int)response.StatusCode);"]
-    if r.reads_body:
-        if r.binary_response:
-            lines += ["using var output = Console.OpenStandardOutput();", "await response.Content.CopyToAsync(output);"]
-        else:
-            lines.append("Console.WriteLine(await response.Content.ReadAsStringAsync());")
-    return "\n".join(lines) + "\n"
-
-
-def _swift(r: SampleRequest) -> str:
-    lines = [
-        "import Foundation",
-        "#if canImport(FoundationNetworking)",
-        "import FoundationNetworking",
-        "#endif",
-        "",
-        f"var request = URLRequest(url: URL(string: {_q(r.url)})!)",
-        f"request.httpMethod = {_q(r.method)}",
-    ]
-    lines += [f"request.setValue({_q(v)}, forHTTPHeaderField: {_q(k)})" for k, v in r.headers.items()]
-    if r.body is not None:
-        lines.append(f"request.httpBody = Data({_q(r.body)}.utf8)")
-    data = "data" if r.reads_body else "_"
-    lines += [
-        "let done = DispatchSemaphore(value: 0)",
-        f"URLSession.shared.dataTask(with: request) {{ {data}, response, error in",
-        "  defer { done.signal() }",
-        "  if let error = error { print(error); return }",
-        "  print((response as! HTTPURLResponse).statusCode)",
-    ]
-    if r.reads_body:
-        lines.append(
-            "  if let data = data { FileHandle.standardOutput.write(data) }"
-            if r.binary_response
-            else "  if let data = data { print(String(decoding: data, as: UTF8.self)) }"
-        )
-    lines += ["}.resume()", "done.wait()"]
-    return "\n".join(lines) + "\n"
-
-
-_RENDERERS = {
-    "Python": _python,
-    "JavaScript": _javascript,
-    "Go": _go,
-    "Ruby": _ruby,
-    "PHP": _php,
-    "Java": _java,
-    "C#": _csharp,
-    "Swift": _swift,
-}
+_RENDERERS = {"Python": _python, "JavaScript": _javascript}
 
 
 def _curl(r: SampleRequest) -> str:
