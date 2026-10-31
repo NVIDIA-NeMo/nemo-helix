@@ -573,6 +573,65 @@ async def test_insert_and_query_logs_under_path_with_apostrophe(log_storage, apo
     assert [log.message for log in cursor_page.data] == [f"Log message {i}" for i in range(15, 20)]
 
 
+def _progress_bar_message(updates: int) -> str:
+    redraws = (
+        f"Downloading model.safetensors: {i * 100 // updates:3d}%|{'#' * (i * 10 // updates):<10}|"
+        for i in range(updates + 1)
+    )
+    return "".join(f"\r{redraw}" for redraw in redraws)
+
+
+async def test_query_logs_collapses_carriage_return_progress_updates(log_storage, local_storage):
+    """A progress bar stored as one message is returned as its final state, in every mode."""
+    base_time = datetime(2024, 1, 1, 12, 0, 0)
+    messages = ["starting", _progress_bar_message(300), "\r\r", "done"]
+    entries = [
+        LogEntry(
+            workspace="test-workspace",
+            job="job-123",
+            job_attempt="attempt-1",
+            job_step="step1",
+            job_task="task1",
+            log_message=message,
+            timestamp=base_time + timedelta(seconds=i),
+        )
+        for i, message in enumerate(messages)
+    ]
+    assert len(messages[1]) > 10_000
+    await log_storage.insert_logs(local_storage, entries)
+    final_bar = "Downloading model.safetensors: 100%|##########|"
+    expected = ["starting", final_bar, "", "done"]
+
+    offset_page = await log_storage.query_logs(local_storage, filters={"job": "job-123"}, page_size=10)
+    assert [log.message for log in offset_page.data] == expected
+    assert offset_page.total == 4
+
+    tail_page = await log_storage.query_logs(local_storage, filters={"job": "job-123"}, tail=4)
+    assert [log.message for log in tail_page.data] == expected
+
+    newest_two = await log_storage.query_logs(local_storage, filters={"job": "job-123"}, tail=2)
+    assert [log.message for log in newest_two.data] == ["", "done"]
+    older = await log_storage.query_logs(
+        local_storage, filters={"job": "job-123"}, page_size=2, page_cursor=newest_two.prev_page
+    )
+    assert [log.message for log in older.data] == ["starting", final_bar]
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("plain", "plain"),
+        ("", ""),
+        ("\rfirst\rsecond", "second"),
+        ("\rfinal\r", "final"),
+        ("prefix\rfinal", "final"),
+        ("\r\r", ""),
+    ],
+)
+def test_collapse_carriage_returns(message, expected):
+    assert DuckDBLogRepository._collapse_carriage_returns(message) == expected
+
+
 def test_prepare_query_escapes_apostrophes_in_s3_prefix():
     """An S3 prefix with an apostrophe must stay inside the read_parquet string literal."""
     base_path = "s3://bucket/it's/'; DROP TABLE logs; --/logs"

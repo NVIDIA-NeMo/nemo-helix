@@ -322,14 +322,30 @@ class DuckDBLogRepository:
         return [QueriedLogEntry.model_validate(dict(zip(columns, row))) for row in result.fetchall()]
 
     @staticmethod
-    def _platform_logs(rows: list[QueriedLogEntry]) -> list[HelixJobLog]:
+    def _collapse_carriage_returns(message: str) -> str:
+        """Return what a terminal would show for a message redrawn with ``\\r``.
+
+        Progress bars (tqdm, pip, git) redraw with ``\\r`` and no newline, so one stored message can
+        hold hundreds of redraws (30 KB). Only the last non-empty segment is worth returning. This runs
+        on the returned page only, after ordering, row hashes and cursors are computed from the stored
+        text, so pagination is unaffected.
+        """
+        if "\r" not in message:
+            return message
+        for segment in reversed(message.split("\r")):
+            if segment:
+                return segment
+        return ""
+
+    @classmethod
+    def _platform_logs(cls, rows: list[QueriedLogEntry]) -> list[HelixJobLog]:
         return [
             HelixJobLog(
                 timestamp=row.timestamp,
                 job=row.job,
                 job_step=row.job_step,
                 job_task=row.job_task,
-                message=row.log_message,
+                message=cls._collapse_carriage_returns(row.log_message),
             )
             for row in rows
         ]
