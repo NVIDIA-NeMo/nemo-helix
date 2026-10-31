@@ -93,6 +93,33 @@ const localStorageMock = (() => {
 })();
 vi.stubGlobal('localStorage', localStorageMock);
 
+/**
+ * user-event's `upload` redefines `input.files` as getter-only, and KUI 1.19's Upload writes
+ * `input.files` back during the change event, which throws. Give that getter a setter.
+ */
+const writableUploadFiles = Symbol.for('nemo.testing.writableUploadFiles');
+if (!(writableUploadFiles in Object.defineProperties)) {
+  const defineProperties = Object.defineProperties;
+  const patched = <T>(target: T, properties: PropertyDescriptorMap & ThisType<unknown>): T => {
+    const files = properties.files;
+    if (target instanceof HTMLInputElement && files?.get && !files.set) {
+      let current: unknown = files.get();
+      properties = {
+        ...properties,
+        files: {
+          configurable: true,
+          get: () => current,
+          set: (next: unknown) => {
+            current = next;
+          },
+        },
+      };
+    }
+    return defineProperties(target, properties);
+  };
+  Object.defineProperties = Object.assign(patched, { [writableUploadFiles]: true });
+}
+
 beforeEach(() => {
   // Unmount any React trees from a previous test. Vitest 4 does not fire
   // `afterEach` hooks registered in setup files reliably (observed: setupFiles'
