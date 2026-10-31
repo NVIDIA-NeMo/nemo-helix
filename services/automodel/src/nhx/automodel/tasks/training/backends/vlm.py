@@ -39,7 +39,6 @@ _INLINE_IMAGE_EXTENSIONS = {
 def rewrite_fileset_rows(
     source: Path,
     dest: Path,
-    *,
     dataset_root: Path,
     image_dir: Path,
     column_keys: tuple[str, str] | None,
@@ -100,7 +99,6 @@ def make_conversation_dataset(path_or_dataset: str, **kwargs: Any) -> list[dict[
 
 def _row_to_conversation(
     row: dict[str, Any],
-    *,
     dataset_root: Path,
     image_dir: Path,
     column_keys: tuple[str, str] | None,
@@ -126,7 +124,7 @@ def _row_to_conversation(
     ]
 
 
-def _content_parts(content: Any, *, dataset_root: Path, image_dir: Path) -> list[dict[str, Any]]:
+def _content_parts(content: Any, dataset_root: Path, image_dir: Path) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     parts = [content] if isinstance(content, dict) else content

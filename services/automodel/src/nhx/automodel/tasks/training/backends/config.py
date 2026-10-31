@@ -583,7 +583,6 @@ def _build_distributed(
 def _prepare_and_validate_dataset(
     customizer_config: TrainingStepConfig,
     workspace_dir: Path,
-    *,
     allow_multimodal: bool = False,
 ) -> PreparedDataset:
     """Discover, merge, and optionally split dataset files."""

@@ -58,7 +58,7 @@ from nhx.rl.tasks.training.datasets.validation import DatasetValidator
 logger = logging.getLogger(__name__)
 
 
-def _build_lora_cfg(customizer_config: TrainingStepConfig, *, is_vlm: bool = False) -> dict[str, Any]:
+def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
     enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
@@ -157,7 +157,6 @@ def _build_automodel_cfg(
 def _build_batching_config(
     customizer_config: TrainingStepConfig,
     grpo_hp: GRPOConfig,
-    *,
     is_vlm: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return the ``(dynamic_batching, sequence_packing)`` blocks for ``policy``.
