@@ -14,6 +14,7 @@ import asyncio
 import atexit
 import codecs
 import collections
+import collections.abc
 import concurrent.futures
 import json
 import os
@@ -78,6 +79,10 @@ MODEL_CALLS_RESULT_KEY = "_nhx_model_calls"
 UV_FIND_LINKS_ENV_KEY = "UV_FIND_LINKS"
 # Gym's config key; the name must match Gym's.
 SKIP_VENV_IF_PRESENT_KEY = "skip_venv_if_present"
+#: Server groups Gym nests under a config entry. Same list as NeMo-RL's
+#: ``GYM_SERVER_TYPE_KEYS``. An entry is routable only when one of these groups
+#: starts a process (its server config has an ``entrypoint``).
+_SERVER_TYPE_KEYS = ("responses_api_agents", "responses_api_models", "resources_servers")
 COMPONENT_VENV_DIRNAME = ".venv"
 COMPONENT_VENV_ROOT_SUBDIR = "gym_venvs"
 UV_OFFLINE_ENV_KEY = "UV_OFFLINE"
@@ -312,6 +317,31 @@ def _runtime_error(code: str, message: str) -> dict[str, Any]:
     if tail:
         error["host_output_tail"] = tail
     return {"error": error}
+
+
+def resolved_spawned_entries(resolved: collections.abc.Mapping[str, Any] | None = None) -> dict[str, list[str]]:
+    """Entries Gym actually started, as ``{name: [server type, ...]}``.
+
+    NeMo-RL's coverage check asks the actor for this after spinup. The resolved
+    config lives in this process, after ``RunHelper.start``, not in the actor.
+    """
+    if resolved is None:
+        from nemo_gym.global_config import get_global_config_dict
+
+        resolved = get_global_config_dict()
+    entries: dict[str, list[str]] = {}
+    for name, entry in resolved.items():
+        if not isinstance(entry, collections.abc.Mapping):
+            continue
+        types = [
+            key
+            for key in _SERVER_TYPE_KEYS
+            if isinstance(group := entry.get(key), collections.abc.Mapping)
+            and any(isinstance(server, collections.abc.Mapping) and "entrypoint" in server for server in group.values())
+        ]
+        if types:
+            entries[str(name)] = types
+    return entries
 
 
 def _load_global_config_dict() -> dict[str, Any]:
@@ -611,9 +641,10 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     ``adapter-wheels-v1``, every wheel under its wheelhouse is installed into the writable work
     mount, so nothing is fetched from a package index during this installation.
 
-    The wheels are installed into the writable work directory instead of an existing virtualenv.
-    ``PYTHONPATH`` exposes them to Gym's child processes, while ``sys.path`` exposes them to the
-    already-running host process.
+    Wheels land in the writable work directory. ``PYTHONPATH`` and ``sys.path`` expose them to
+    Gym's children and to this process. ``UV_OFFLINE`` keeps later server venvs on that
+    wheelhouse; ``--find-links`` still lets uv download a newer index build. Hugging Face stays
+    under ``environment_offline``.
 
     A failed install raises ``RuntimeError`` carrying uv's own reason, not the command line.
     """
@@ -661,18 +692,16 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
             f"failed with exit code {result.returncode}:\n{reason}"
         )
 
-    # For any component Gym still builds a venv for.
+    # Server venvs Gym builds next resolve from this wheelhouse only.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
 
-    if _environment_offline():
-        if UV_OFFLINE_ENV_KEY in os.environ:
-            print(
-                f"gym-host: offline requested, but {UV_OFFLINE_ENV_KEY}="
-                f"{os.environ[UV_OFFLINE_ENV_KEY]} is already set",
-                flush=True,
-            )
-        else:
-            os.environ[UV_OFFLINE_ENV_KEY] = "1"
+    if UV_OFFLINE_ENV_KEY in os.environ:
+        print(
+            f"gym-host: wheels-v1 install leaving {UV_OFFLINE_ENV_KEY}={os.environ[UV_OFFLINE_ENV_KEY]} as already set",
+            flush=True,
+        )
+    else:
+        os.environ[UV_OFFLINE_ENV_KEY] = "1"
 
     # Gym starts agent and resource servers as child Python processes. Prepend the wheel target so
     # those processes can import the environment's vendored dependencies.
@@ -1145,7 +1174,16 @@ class Handler(BaseHTTPRequestHandler):
         return parsed
 
     def do_GET(self) -> None:
-        if not self.path.startswith("/health"):
+        path = self.path.split("?", 1)[0]
+        if path == "/entries":
+            if _BOOTSTRAP_ERROR is not None:
+                self._send_json(503, {"status": "failed", **_BOOTSTRAP_ERROR})
+            elif not _READY:
+                self._send_json(503, {"status": "starting"})
+            else:
+                self._send_json(200, {"entries": resolved_spawned_entries()})
+            return
+        if not path.startswith("/health"):
             self._send_empty(404)
             return
         # Must match do_POST: a host that passes /health and then 503s every rollout is

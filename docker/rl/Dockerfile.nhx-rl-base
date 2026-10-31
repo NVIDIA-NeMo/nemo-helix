@@ -342,11 +342,12 @@ COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/n
 # Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
 # verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
 # writes into the driver bin; this image already wrote those wrappers above.
+# The generation port-range bind is already in the pinned RL commit, so it is
+# not applied again here.
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
-    /tmp/patches/nemo-rl-vllm-reserved-port-range.patch
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
 
 # Editable root only. Dependencies were installed by the syncs above.
 RUN <<"EOF" bash -eu

@@ -123,6 +123,7 @@ def test_library_gym_project_copies_the_library_only(tmp_path: Path) -> None:
     assert "anthropic<=0.109.2" in text
     assert "mypy>=1.8.0" in text
     assert 'include = ["nemo_gym", "nemo_gym.*"]' in text
+    assert '"**/*.yaml"' in text
 
 
 def test_required_wheel_versions_accept_supported_hydra_stack(tmp_path: Path) -> None:

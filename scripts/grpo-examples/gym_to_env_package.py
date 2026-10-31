@@ -425,6 +425,12 @@ dev = {array(dev)}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nemo_gym", "nemo_gym.*"]
+
+# The checkout relies on setuptools-scm's VCS file-finder for configs. This project is a
+# copy with no git metadata, so name the non-Python files or the sandbox provider YAMLs
+# never land in the wheel.
+[tool.setuptools.package-data]
+nemo_gym = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]
 """,
         encoding="utf-8",
     )

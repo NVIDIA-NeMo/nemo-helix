@@ -58,6 +58,35 @@ def ready_server():
         runtime.Handler.rollout_deadline_s = runtime._DEFAULT_ROLLOUT_DEADLINE_S
 
 
+def test_resolved_spawned_entries_keeps_servers_that_have_an_entrypoint():
+    resolved = {
+        "clevr_agent": {
+            "responses_api_agents": {"main": {"entrypoint": "app.py"}},
+            "resources_servers": {"judge": {"host": "127.0.0.1"}},
+        },
+        "policy_model": {"responses_api_models": {"vllm": {"entrypoint": "serve"}}},
+        "note": "not a server",
+    }
+
+    assert runtime.resolved_spawned_entries(resolved) == {
+        "clevr_agent": ["responses_api_agents"],
+        "policy_model": ["responses_api_models"],
+    }
+
+
+def test_entries_reports_the_resolved_routes(ready_server, monkeypatch):
+    monkeypatch.setattr(
+        runtime,
+        "resolved_spawned_entries",
+        lambda resolved=None: {"clevr_agent": ["responses_api_agents"]},
+    )
+
+    with urllib.request.urlopen(f"{ready_server}/entries", timeout=5) as response:
+        body = json.loads(response.read().decode())
+
+    assert body == {"entries": {"clevr_agent": ["responses_api_agents"]}}
+
+
 def test_health_not_ready():
     runtime._READY = False
     server = HTTPServer(("127.0.0.1", 0), runtime.Handler)
@@ -609,8 +638,9 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
     # Child processes and the already-running host both prefer staged packages over image packages.
     assert runtime.os.environ["PYTHONPATH"] == f"{install_dir}{runtime.os.pathsep}/image/packages"
     assert runtime.sys.path[0] == str(install_dir)
-    # Index fallback is left in place unless the caller declares the wheelhouse self-sufficient.
-    assert runtime.UV_OFFLINE_ENV_KEY not in runtime.os.environ
+    # The wheelhouse is the closure. A reachable index would otherwise win with a newer build
+    # and the server venvs would download packages this package already vendors.
+    assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "1"
 
 
 def _stage_wheelhouse(tmp_path, monkeypatch):
@@ -676,25 +706,28 @@ def test_a_failed_wheel_install_keeps_only_the_last_stderr_lines_and_masks_secre
     assert reason[-1] == "error: token *** rejected"
 
 
-def test_an_offline_environment_takes_uv_off_the_index(tmp_path, monkeypatch, isolated_gym_host_process_state):
-    """A wheelhouse the caller calls complete must resolve without an index.
+def test_a_wheels_v1_install_stays_offline_even_when_the_sandbox_may_reach_the_network(
+    tmp_path, monkeypatch, isolated_gym_host_process_state
+):
+    """`--find-links` alone is not enough.
 
-    `--find-links` alone is not enough: a configured but unreachable index makes uv fail to
-    resolve the `uv venv --seed` packages for Gym's per-component venvs rather than fall back
-    to the staged wheels.
+    A reachable index makes uv prefer a newer build over the staged wheel, so the server venvs
+    download packages the wheelhouse already has. An unreachable index makes `uv venv --seed`
+    fail instead of falling back to those wheels. Either way the wheelhouse has to be the only
+    source. Hugging Face stays reachable: that policy belongs to ``environment_offline``.
     """
     package = _stage_wheelhouse(tmp_path, monkeypatch)
-    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
+    monkeypatch.delenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, raising=False)
 
     runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
 
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "1"
+    assert "HF_HUB_OFFLINE" not in runtime.os.environ
 
 
 def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkeypatch, isolated_gym_host_process_state):
     """Whoever set it in the image knows something this flag does not."""
     package = _stage_wheelhouse(tmp_path, monkeypatch)
-    monkeypatch.setenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, "true")
     monkeypatch.setenv(runtime.UV_OFFLINE_ENV_KEY, "0")
 
     runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))

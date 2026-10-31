@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Callable, Coroutine, Mapping
 from types import FrameType
 from typing import Any, Protocol, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunsplit
 
 import sandboxed_gym.job_reaper as job_reaper
 from sandboxed_gym.broker import EpisodeBrokerServer
@@ -166,6 +166,7 @@ def apply_sandbox_runtime_defaults(global_config: dict[str, Any]) -> dict[str, A
 
     cfg = dict(global_config)
     cfg.pop("ray_head_node_address", None)
+    cfg.pop("nemo_gym_log_dir", None)
     cfg.setdefault("default_host", "127.0.0.1")
     cfg.setdefault("port_range_low", DEFAULT_BROKER_PORT_RANGE_LOW)
     cfg.setdefault("port_range_high", DEFAULT_BROKER_PORT_RANGE_HIGH)
@@ -348,6 +349,22 @@ class SandboxedGymSession:
             broker_token=self.broker.token,
             rollout_auth_token=self.cfg.rollout_auth_token,
         )
+
+    def list_entries(self) -> dict[str, list[str]]:
+        """Entries the host's Gym stack spawned, for NeMo-RL's route coverage check."""
+        parsed = urlparse(self.host.health_url)
+        url = urlunsplit((parsed.scheme, parsed.netloc, "/entries", "", ""))
+        request = urllib.request.Request(url, method="GET", headers=dict(self.host.headers))
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"gym host /entries failed: HTTP {exc.code} {detail}") from exc
+        entries = body.get("entries") if isinstance(body, dict) else None
+        if not isinstance(entries, dict):
+            raise RuntimeError("gym host /entries did not return an entries object")
+        return {str(name): [str(kind) for kind in kinds] for name, kinds in entries.items()}
 
     def run_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         """Blocking form of :meth:`arun_rollouts`."""
