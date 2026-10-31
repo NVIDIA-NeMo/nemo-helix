@@ -23,7 +23,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import client, v1
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from scaled_evals.api.config_profile_store import ConfigProfileStore
-from scaled_evals.api.db import Database, get_stream_database_factory
+from scaled_evals.api.db import Database, get_request_stream_database_factory
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.routers import evaluations as evaluations_router
 from scaled_evals.api.runnability import caller_secret_readable
@@ -172,7 +172,7 @@ def _sse_events(text: str) -> list[dict]:
 def _cleanup_overrides() -> Iterator[None]:
     evaluations_router._sse_active_connections = 0
     yield
-    v1.dependency_overrides.pop(get_stream_database_factory, None)
+    v1.dependency_overrides.pop(get_request_stream_database_factory, None)
     evaluations_router._sse_active_connections = 0
 
 
@@ -1486,7 +1486,7 @@ def test_events_stream_releases_database_between_polls(monkeypatch) -> None:  # 
         finally:
             active -= 1
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
 
     response = client.get("/v1/evaluations/ev_test123/events/stream")
 
@@ -1572,7 +1572,7 @@ def test_get_artifact_streams_content(monkeypatch) -> None:  # noqa: ANN001
         assert not checkout_active, "artifact download retained its database checkout"
         yield b"artifact content"
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.stream_object", stream_object)
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: True)
 
@@ -1592,7 +1592,7 @@ def test_get_artifact_missing_object_returns_404(monkeypatch) -> None:  # noqa: 
     def stream_db() -> Iterator[Database]:
         yield Database()
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     # The object does not exist in the backing Files store; the route must map that
     # to a clean 404 up front rather than a 200 with a stream that fails mid-iteration.
     monkeypatch.setattr("scaled_evals.api.routers.evaluations.artifacts.object_exists", lambda _key: False)

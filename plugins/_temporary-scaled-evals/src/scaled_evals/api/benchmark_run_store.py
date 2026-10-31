@@ -27,6 +27,7 @@ from scaled_evals.api.evaluation_store import TERMINAL_STATUSES as _TERMINAL_STA
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code, is_retryable_failure
 from scaled_evals.api.repositories.base_repository import Conflict
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.api.task_store import TaskStore
 
 T = TypeVar("T")
@@ -260,15 +261,31 @@ def _row(entity: ScaledEvalsBenchmarkRun) -> dict[str, Any]:
 
 
 class BenchmarkRunStore:
-    def __init__(self, client: SyncEntityClient | None = None) -> None:
+    def __init__(self, client: SyncEntityClient | None = None, *, access: ResourceAccess = INTERNAL_ACCESS) -> None:
         self._client = client or entity_store.entity_client()
+        self._access = access
+
+    def _can_access(self, entity: ScaledEvalsBenchmarkRun, *, write: bool = False) -> bool:
+        if self._access.include_all:
+            return True
+        if write:
+            if not self._access.can_write(entity.owner_id):
+                return False
+        elif not self._access.can_read(entity.owner_id, entity.visibility):
+            return False
+        members = EvaluationStore(self._client, access=INTERNAL_ACCESS).list_for_runs([entity.name])
+        if write:
+            return all(self._access.can_write(member["owner_id"]) for member in members)
+        return all(self._access.can_read(member["owner_id"], member["visibility"]) for member in members)
 
     def _get(self, run_id: str, *, include_deleted: bool = False) -> ScaledEvalsBenchmarkRun | None:
         try:
             entity = self._client.get(ScaledEvalsBenchmarkRun, run_id, workspace=entity_store.private_workspace())
         except EntityNotFoundError:
             return None
-        return entity if include_deleted or entity.deleted_at is None else None
+        if entity.deleted_at is not None and not (include_deleted and self._access.internal):
+            return None
+        return entity if self._can_access(entity) else None
 
     def _mutate(
         self,
@@ -279,7 +296,7 @@ class BenchmarkRunStore:
     ) -> T | None:
         for _ in range(_MAX_WRITE_ATTEMPTS):
             entity = self._get(run_id, include_deleted=include_deleted)
-            if entity is None:
+            if entity is None or not self._can_access(entity, write=True):
                 return None
             result, write = change(entity)
             if not write:
@@ -469,6 +486,12 @@ class BenchmarkRunStore:
     def exists(self, run_id: str) -> bool:
         return self._get(run_id) is not None
 
+    def get_for_mutation(self, run_id: str) -> dict | None:
+        entity = self._get(run_id)
+        if entity is None or not self._can_access(entity, write=True):
+            return None
+        return _row(entity)
+
     def list(
         self,
         *,
@@ -483,15 +506,28 @@ class BenchmarkRunStore:
         # ponytail: lists every live run, and a search derives each run's
         # status from all of its members. Upgrade path: store a derived status
         # the members update on terminal transitions.
-        runs = [
-            _row(entity)
+        entities = [
+            entity
             for entity in entity_store.list_all(
                 self._client,
                 ScaledEvalsBenchmarkRun,
                 {"benchmark_id": [benchmark_id]} if benchmark_id is not None else None,
             )
-            if entity.deleted_at is None and (not shared or entity.visibility != "private")
+            if entity.deleted_at is None
+            and self._access.can_read(entity.owner_id, entity.visibility)
+            and (not shared or entity.visibility != "private")
         ]
+        if not self._access.include_all:
+            member_rows = EvaluationStore(self._client, access=INTERNAL_ACCESS).list_for_runs(
+                [entity.name for entity in entities]
+            )
+            inaccessible_runs = {
+                member["benchmark_run_id"]
+                for member in member_rows
+                if not self._access.can_read(member["owner_id"], member["visibility"])
+            }
+            entities = [entity for entity in entities if entity.name not in inaccessible_runs]
+        runs = [_row(entity) for entity in entities]
         if q:
             members: dict[str, builtins.list[dict]] = {}
             for member in self.members_for_runs([run["id"] for run in runs]):
@@ -517,7 +553,10 @@ class BenchmarkRunStore:
 
     def members_for_runs(self, run_ids: builtins.list[str]) -> builtins.list[dict]:
         """Return the member evaluations of the given runs with their task slug and name, by task."""
-        rows = EvaluationStore(self._client).list_for_runs(run_ids)
+        allowed_runs = (
+            run_ids if self._access.include_all else [run_id for run_id in run_ids if self._get(run_id) is not None]
+        )
+        rows = EvaluationStore(self._client, access=self._access).list_for_runs(allowed_runs)
         tasks = TaskStore().tasks(row["task_id"] for row in rows)
         members = [
             {**row, "task_slug": task["slug"], "task_name": task["name"]}
@@ -541,11 +580,16 @@ class BenchmarkRunStore:
             entity.cancelled_at = datetime.now(tz=UTC)
             return True, True
 
-        cancelled_now = bool(self._mutate(run_id, change))
+        changed = self._mutate(run_id, change)
+        if changed is None:
+            return None, False, []
+        cancelled_now = bool(changed)
         run = self._get(run_id)
+        if run is None or not self._can_access(run, write=True):
+            return None, False, []
         cancelled_members: builtins.list[dict] = []
-        if run is not None and run.cancelled_at is not None:
-            evaluations = EvaluationStore(self._client)
+        if run.cancelled_at is not None:
+            evaluations = EvaluationStore(self._client, access=self._access)
             # ponytail: members are cancelled one write each after the run is
             # marked, so a crash or conflict between them leaves some members
             # queued until the run is cancelled again, which retries them.

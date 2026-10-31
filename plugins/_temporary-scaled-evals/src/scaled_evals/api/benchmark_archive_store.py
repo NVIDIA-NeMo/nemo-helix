@@ -18,6 +18,7 @@ from scaled_evals.api import entity_store
 from scaled_evals.api.benchmark_run_store import BenchmarkRunStore
 from scaled_evals.api.evaluation_store import EvaluationStore
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.models.benchmark_archives import BenchmarkArchiveMember
 
 _MAX_ATTEMPTS = 3
@@ -62,8 +63,8 @@ def _members(run_id: str) -> list[dict]:
 
 
 class BenchmarkArchiveStore:
-    def __init__(self) -> None:
-        self._runs = BenchmarkRunStore()
+    def __init__(self, *, access: ResourceAccess = INTERNAL_ACCESS) -> None:
+        self._runs = BenchmarkRunStore(access=access)
 
     def _runs_with_archive(self, *statuses: str) -> list[ScaledEvalsBenchmarkRun]:
         """Return runs whose archive has one of `statuses`, deleted runs included."""
@@ -88,7 +89,7 @@ class BenchmarkArchiveStore:
         return None if entity is None else _row(entity)
 
     def request(self, run_id: str, *, force: bool = False) -> dict:
-        run = self._runs.get(run_id)
+        run = self._runs.get_for_mutation(run_id)
         if run is None:
             raise NotFound("benchmark_run", "benchmark run not found")
         if run["framework"] != "harbor":

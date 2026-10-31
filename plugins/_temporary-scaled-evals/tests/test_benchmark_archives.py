@@ -21,7 +21,7 @@ pytest.importorskip("scaled_evals")
 from api_test_fixture import app, v1
 from scaled_evals.api import artifacts
 from scaled_evals.api.benchmark_archive_store import BenchmarkArchiveStore
-from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.db import Database, get_request_db, get_request_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.settings import settings
 from scaled_evals.benchmark_archive import BenchmarkArchiveError, build_benchmark_archive
@@ -223,16 +223,16 @@ def test_export_rejects_changed_source_size(monkeypatch):
 def api_db():
     db = MagicMock(spec=Database)
     db.benchmark_runs.exists.return_value = True
-    v1.dependency_overrides[get_db] = lambda: db
+    v1.dependency_overrides[get_request_db] = lambda: db
 
     @contextmanager
     def _stream():
         yield db
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: _stream
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: _stream
     yield db
-    v1.dependency_overrides.pop(get_db)
-    v1.dependency_overrides.pop(get_stream_database_factory, None)
+    v1.dependency_overrides.pop(get_request_db)
+    v1.dependency_overrides.pop(get_request_stream_database_factory, None)
 
 
 def test_api_queues_and_reports_snapshot_without_private_storage_fields(api_db):
@@ -286,7 +286,7 @@ def test_api_missing_and_ready_archive(api_db, monkeypatch):
         assert not checkout_active, "download retained its database checkout while streaming"
         yield b"archive"
 
-    v1.dependency_overrides[get_stream_database_factory] = lambda: stream_db
+    v1.dependency_overrides[get_request_stream_database_factory] = lambda: stream_db
     monkeypatch.setattr(artifacts, "stream_object", stream_object)
     response = client.get("/v1/benchmark-runs/bmr_1/archive/download")
     assert response.content == b"archive"
