@@ -4,3 +4,4 @@
 api:
   specs:
     - openapi: ./openapi/openapi.yaml
+      overrides: ./openapi/overrides.yml

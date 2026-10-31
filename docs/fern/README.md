@@ -91,6 +91,12 @@ The REST API reference is generated natively by Fern from the OpenAPI spec — n
 
 `openapi/openapi.yaml` is a symlink to the repo-root `openapi/openapi.yaml` (the generated source of truth). Regenerate the root spec with `make refresh-openapi` from the repo root, then run `npm run check`.
 
+`openapi/overrides.yml` supplies a documentation-only local server URL so default cURL samples
+include a host, without changing generated client connection defaults. Replace that URL with your
+deployment URL when using the examples. Resource names, experiment IDs, model names, credentials,
+and enabled services remain deployment prerequisites. Proxy examples show a chat request body;
+PUT/PATCH/DELETE success still depends on the upstream provider supporting the selected method/path.
+
 Fern groups endpoints by their OpenAPI tag in the sidebar (Customizer, Evaluator, Guardrails, …), which replaces the old per-service filter chips. Link to it from other pages with the nav URL `/documentation/reference/api-reference`.
 
 ## Release versioning

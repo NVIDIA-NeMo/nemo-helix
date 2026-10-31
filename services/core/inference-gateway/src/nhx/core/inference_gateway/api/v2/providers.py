@@ -5,7 +5,7 @@ import logging
 from typing import Annotated
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from nhx.core.inference_gateway.api.authz import (
     PROVIDER_EXEC_PERMISSION,
     PROVIDER_READ_PERMISSION,
@@ -113,7 +113,7 @@ async def provider_proxy(
     request: Request,
     workspace: str,
     name: str,
-    trailing_uri: str,
+    trailing_uri: Annotated[str, Path(examples=["v1/chat/completions"])],
     http_client: Annotated[ClientSession, Depends(global_http_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
 ) -> Response:

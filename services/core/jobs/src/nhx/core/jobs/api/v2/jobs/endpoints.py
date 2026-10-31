@@ -455,7 +455,10 @@ async def get_job(
 )
 async def update_job(
     name: str,
-    request: UpdateHelixJobRequest,
+    request: Annotated[
+        UpdateHelixJobRequest,
+        Body(openapi_examples={"description": {"value": {"description": "Updated job description"}}}),
+    ],
     workspace: str,
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
