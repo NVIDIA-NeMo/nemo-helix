@@ -373,8 +373,17 @@ def test_compile_grpo_config_enables_lora(
     assert lora_cfg["dim"] == 32
     assert lora_cfg["alpha"] == 64
     assert lora_cfg["use_triton"] is True
+    assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
     assert "_v2" not in cfg["policy"]["automodel_cfg"]
     assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
+
+
+def test_full_weight_generation_omits_lora_refit_mode(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    assert "lora_refit_mode" not in compile_grpo_config(step, job_ctx)["policy"]["generation"]
 
 
 def test_compiled_config_has_master_config_required_fields(
@@ -484,6 +493,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_fields(
     [
         (FinetuningType.ALL_WEIGHTS, None, False),
         (FinetuningType.LORA, LoRAConfig(rank=8), True),
+        (FinetuningType.LORA_MERGED, LoRAConfig(rank=8), True),
         # finetuning_type is what enables LoRA; an omitted lora block just takes defaults.
         (FinetuningType.LORA, None, True),
     ],
@@ -505,6 +515,11 @@ def test_lora_cfg_follows_finetuning_type_under_automodel(
     # equivalent here and the test does not depend on which one we emit.
     assert dtensor_cfg.get("lora_cfg", {}).get("enabled", False) is expected
     assert "_v2" not in dtensor_cfg
+    generation = compile_grpo_config(step, job_ctx)["policy"]["generation"]
+    if expected:
+        assert generation["lora_refit_mode"] == "merged"
+    else:
+        assert "lora_refit_mode" not in generation
 
 
 @pytest.mark.parametrize(
