@@ -81,7 +81,7 @@ async def model_entity_proxy(
     request: Request,
     workspace: str,
     name: str,
-    trailing_uri: Annotated[str, Path(examples=["chat/completions"])],
+    trailing_uri: Annotated[str, Path(examples=["v1/chat/completions"])],
     http_client: Annotated[ClientSession, Depends(global_http_client)],
     nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],

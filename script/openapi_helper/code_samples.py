@@ -108,7 +108,7 @@ def _path_value(path: str, param: str) -> str:
     """A readable placeholder for a path parameter, named after the collection it indexes."""
     if param == "workspace":
         return "default"
-    if param == "path:path":
+    if param in {"path", "path:path"}:
         return "example.txt"
     segments = path.split("/")
     index = segments.index("{" + param + "}")
@@ -279,7 +279,13 @@ def _java(r: SampleRequest) -> str:
         if r.body is not None
         else "HttpRequest.BodyPublishers.noBody()"
     )
-    handler, kind = ("ofString()", "String") if r.reads_body else ("discarding()", "Void")
+    handler, kind = (
+        ("ofByteArray()", "byte[]")
+        if r.binary_response
+        else ("ofString()", "String")
+        if r.reads_body
+        else ("discarding()", "Void")
+    )
     lines = [
         "import java.net.URI;",
         "import java.net.http.HttpClient;",
@@ -299,7 +305,11 @@ def _java(r: SampleRequest) -> str:
         "    System.out.println(response.statusCode());",
     ]
     if r.reads_body:
-        lines.append("    System.out.println(response.body());")
+        lines.append(
+            "    System.out.write(response.body());"
+            if r.binary_response
+            else "    System.out.println(response.body());"
+        )
     return "\n".join(lines + ["  }", "}"]) + "\n"
 
 
@@ -320,7 +330,10 @@ def _csharp(r: SampleRequest) -> str:
         )
     lines += ["using var response = await client.SendAsync(request);", "Console.WriteLine((int)response.StatusCode);"]
     if r.reads_body:
-        lines.append("Console.WriteLine(await response.Content.ReadAsStringAsync());")
+        if r.binary_response:
+            lines += ["using var output = Console.OpenStandardOutput();", "await response.Content.CopyToAsync(output);"]
+        else:
+            lines.append("Console.WriteLine(await response.Content.ReadAsStringAsync());")
     return "\n".join(lines) + "\n"
 
 
@@ -346,7 +359,11 @@ def _swift(r: SampleRequest) -> str:
         "  print((response as! HTTPURLResponse).statusCode)",
     ]
     if r.reads_body:
-        lines.append("  if let data = data { print(String(decoding: data, as: UTF8.self)) }")
+        lines.append(
+            "  if let data = data { FileHandle.standardOutput.write(data) }"
+            if r.binary_response
+            else "  if let data = data { print(String(decoding: data, as: UTF8.self)) }"
+        )
     lines += ["}.resume()", "done.wait()"]
     return "\n".join(lines) + "\n"
 

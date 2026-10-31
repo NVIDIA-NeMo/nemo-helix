@@ -2860,7 +2860,7 @@ paths:
         source: 'import requests
 
 
-          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--"
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
 
 
           response = requests.request("GET", url)
@@ -2871,25 +2871,25 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
           console.log(await response.arrayBuffer());\n"
       - lang: Go
         source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\
-          \nfunc main() {\n\treq, err := http.NewRequest(\"GET\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          \nfunc main() {\n\treq, err := http.NewRequest(\"GET\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
           \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
           \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
           \t}\n\tfmt.Println(string(data))\n}\n"
       - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           )\nrequest = Net::HTTP::Get.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
           \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
           end\n\nputs response.code\nputs response.body\n"
       - lang: PHP
         source: '<?php
 
-          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--");
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt");
 
           curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
 
@@ -2911,11 +2911,11 @@ paths:
         source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
           import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
           \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           ))\n        .method(\"GET\", HttpRequest.BodyPublishers.noBody())\n    \
-          \    .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
-          \    System.out.println(response.body());\n  }\n}\n"
+          \    .build();\n    HttpResponse<byte[]> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.ofByteArray());\n    System.out.println(response.statusCode());\n\
+          \    System.out.write(response.body());\n  }\n}\n"
       - lang: C#
         source: 'using System;
 
@@ -2926,27 +2926,29 @@ paths:
 
           using var client = new HttpClient();
 
-          using var request = new HttpRequestMessage(new HttpMethod("GET"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--");
+          using var request = new HttpRequestMessage(new HttpMethod("GET"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt");
 
           using var response = await client.SendAsync(request);
 
           Console.WriteLine((int)response.StatusCode);
 
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
+          using var output = Console.OpenStandardOutput();
+
+          await response.Content.CopyToAsync(output);
 
           '
       - lang: Swift
         source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           )!)\nrequest.httpMethod = \"GET\"\nlet done = DispatchSemaphore(value: 0)\n\
           URLSession.shared.dataTask(with: request) { data, response, error in\n \
           \ defer { done.signal() }\n  if let error = error { print(error); return\
           \ }\n  print((response as! HTTPURLResponse).statusCode)\n  if let data =\
-          \ data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\ndone.wait()\n"
+          \ data { FileHandle.standardOutput.write(data) }\n}.resume()\ndone.wait()\n"
       x-fern-examples:
       - code-samples:
         - sdk: curl
-          code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\
+          code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
             \ \\\n  --output example.txt\n"
     put:
       tags:
@@ -3000,7 +3002,7 @@ paths:
         source: 'import requests
 
 
-          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--"
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
 
           headers = {"Content-Type": "application/octet-stream"}
 
@@ -3015,14 +3017,14 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           , {\n  method: \"PUT\",\n  headers: {\"Content-Type\": \"application/octet-stream\"\
           },\n  body: \"Hello, Helix!\\n\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(await response.json());\n"
       - lang: Go
         source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\
           \"strings\"\n)\n\nfunc main() {\n\treq, err := http.NewRequest(\"PUT\",\
-          \ \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          \ \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           , strings.NewReader(\"Hello, Helix!\\n\"))\n\tif err != nil {\n\t\tpanic(err)\n\
           \t}\n\treq.Header.Set(\"Content-Type\", \"application/octet-stream\")\n\t\
           res, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\tpanic(err)\n\
@@ -3030,7 +3032,7 @@ paths:
           \ io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tfmt.Println(string(data))\n\
           }\n"
       - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           )\nrequest = Net::HTTP::Put.new(uri)\nrequest[\"Content-Type\"] = \"application/octet-stream\"\
           \nrequest.body = \"Hello, Helix!\\n\"\nresponse = Net::HTTP.start(uri.hostname,\
           \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
@@ -3038,7 +3040,7 @@ paths:
       - lang: PHP
         source: '<?php
 
-          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--");
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt");
 
           curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "PUT");
 
@@ -3064,7 +3066,7 @@ paths:
         source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
           import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
           \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           ))\n        .header(\"Content-Type\", \"application/octet-stream\")\n  \
           \      .method(\"PUT\", HttpRequest.BodyPublishers.ofString(\"Hello, Helix!\\\
           n\"))\n        .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
@@ -3080,7 +3082,7 @@ paths:
 
           using var client = new HttpClient();
 
-          using var request = new HttpRequestMessage(new HttpMethod("PUT"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--");
+          using var request = new HttpRequestMessage(new HttpMethod("PUT"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt");
 
           request.Content = new StringContent("Hello, Helix!\n", Encoding.UTF8, "application/octet-stream");
 
@@ -3093,7 +3095,7 @@ paths:
           '
       - lang: Swift
         source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\"\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
           )!)\nrequest.httpMethod = \"PUT\"\nrequest.setValue(\"application/octet-stream\"\
           , forHTTPHeaderField: \"Content-Type\")\nrequest.httpBody = Data(\"Hello,\
           \ Helix!\\n\".utf8)\nlet done = DispatchSemaphore(value: 0)\nURLSession.shared.dataTask(with:\
@@ -3104,7 +3106,7 @@ paths:
       x-fern-examples:
       - code-samples:
         - sdk: curl
-          code: "curl --fail-with-body \\\n  --request PUT \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/my--\
+          code: "curl --fail-with-body \\\n  --request PUT \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
             \ \\\n  --header 'Content-Type: application/octet-stream' \\\n  --data-binary\
             \ 'Hello, Helix!\n'\n"
     delete:
@@ -3839,7 +3841,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3907,7 +3909,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3961,7 +3963,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4029,7 +4031,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4097,7 +4099,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4231,7 +4233,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4293,7 +4295,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4355,7 +4357,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4417,7 +4419,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4479,7 +4481,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4519,7 +4521,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4572,7 +4574,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4611,7 +4613,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4664,7 +4666,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4717,7 +4719,7 @@ paths:
         schema:
           type: string
           examples:
-          - chat/completions
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -7947,9 +7949,9 @@ paths:
           \ void main(String[] args) throws Exception {\n    HttpRequest request =\
           \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\"\
           ))\n        .method(\"GET\", HttpRequest.BodyPublishers.noBody())\n    \
-          \    .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
-          \    System.out.println(response.body());\n  }\n}\n"
+          \    .build();\n    HttpResponse<byte[]> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.ofByteArray());\n    System.out.println(response.statusCode());\n\
+          \    System.out.write(response.body());\n  }\n}\n"
       - lang: C#
         source: 'using System;
 
@@ -7966,7 +7968,9 @@ paths:
 
           Console.WriteLine((int)response.StatusCode);
 
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
+          using var output = Console.OpenStandardOutput();
+
+          await response.Content.CopyToAsync(output);
 
           '
       - lang: Swift
@@ -7976,7 +7980,7 @@ paths:
           URLSession.shared.dataTask(with: request) { data, response, error in\n \
           \ defer { done.signal() }\n  if let error = error { print(error); return\
           \ }\n  print((response as! HTTPURLResponse).statusCode)\n  if let data =\
-          \ data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\ndone.wait()\n"
+          \ data { FileHandle.standardOutput.write(data) }\n}.resume()\ndone.wait()\n"
       x-fern-examples:
       - code-samples:
         - sdk: curl
@@ -10968,7 +10972,10 @@ paths:
       tags:
       - ModelProviders
       summary: Create ModelProvider
-      description: Create a new model provider.
+      description: 'Create a new model provider.
+
+
+        The NVIDIA API example requires the named API-key secret to exist first.'
       operationId: create_provider_apis_models_v2_workspaces__workspace__providers_post
       parameters:
       - name: workspace
@@ -10985,9 +10992,11 @@ paths:
               $ref: '#/components/schemas/CreateModelProviderRequest'
             examples:
               provider:
+                summary: NVIDIA API provider (create the API-key secret first)
                 value:
                   name: my-provider
                   host_url: https://integrate.api.nvidia.com/v1
+                  api_key_secret_name: my-provider-api-key
       responses:
         '201':
           description: Create a new model provider
@@ -11006,7 +11015,16 @@ paths:
       tags:
       - ModelProviders
       summary: Upsert ModelProvider
-      description: Create or update a model provider.
+      description: 'Create or replace a model provider.
+
+
+        PUT replaces the configuration, including optional fields. For an existing
+
+        provider, first read its current configuration and preserve all fields you
+
+        intend to keep, especially api_key_secret_name. The NVIDIA API example requires
+
+        the named API-key secret to exist before this request.'
       operationId: upsert_provider_apis_models_v2_workspaces__workspace__providers__name__put
       parameters:
       - name: workspace
@@ -11026,11 +11044,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpsertModelProviderRequest'
+              allOf:
+              - $ref: '#/components/schemas/UpsertModelProviderRequest'
+              description: PUT replaces the provider configuration. When updating,
+                first read the existing provider and preserve every configuration
+                field you intend to keep, including its API-key secret reference.
+                The example assumes the named API-key secret already exists.
             examples:
               provider:
                 value:
                   host_url: https://integrate.api.nvidia.com/v1
+                  api_key_secret_name: my-provider-api-key
+                  description: NVIDIA API provider
       responses:
         '200':
           description: Create or update a model provider
