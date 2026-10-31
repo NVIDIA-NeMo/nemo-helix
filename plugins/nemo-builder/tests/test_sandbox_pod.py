@@ -377,6 +377,34 @@ class TestEachSandboxFailsAlone:
         assert "  STEP 1/2" in messages and "  STEP 2/2" in messages
 
 
+def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    killed = k8s.V1ContainerStatus(
+        name="sandbox",
+        image="nhx-kaniko:test",
+        image_id="",
+        ready=False,
+        restart_count=0,
+        state=k8s.V1ContainerState(terminated=k8s.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")),
+    )
+    pod = k8s.V1Pod(status=k8s.V1PodStatus(phase="Failed", container_statuses=[killed]))
+
+    class Watch:
+        def stream(self, *args: object, **kwargs: object) -> list[dict[str, object]]:
+            return [{"object": pod}]
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
+    with caplog.at_level(logging.ERROR, logger=supervise.__name__):
+        failures = _build_group(
+            cast(k8s.CoreV1Api, _Api()), name="nhx-sbx-abc-g0", manifest=_pod(), group=_group(1), namespace="b"
+        )
+    assert failures == 1
+    assert "no result recorded (sandbox phase Failed: sandbox OOMKilled (exit 137))" in caplog.text
+
+
 class TestResultParsing:
     def test_reads_per_image_exit_codes_from_the_log(self) -> None:
         log = f"noise\n{RESULT_MARKER} demo-1-0 0\nmore noise\n{RESULT_MARKER} demo-1-1 1\n"
