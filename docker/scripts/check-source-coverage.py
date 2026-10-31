@@ -5,7 +5,8 @@
 
 Compares a syft JSON inventory of the image against the manifests the source collectors wrote
 under ``source-distributions``. A coverage policy names first-party packages, which need no
-collected source, and vendored directories whose contents ship inside a collected parent's source.
+collected source; vendored directories whose contents ship inside a collected parent's source; and
+components embedded in a Python package whose sdist includes their source.
 """
 
 from __future__ import annotations
@@ -31,11 +32,12 @@ def normalize(name: str) -> str:
 class Policy:
     first_party: dict[str, frozenset[str]]
     vendored: tuple[tuple[str, str], ...]
+    embedded: dict[tuple[str, str], str]
 
     @classmethod
     def load(cls, path: Path | None) -> Policy:
         if path is None:
-            return cls(first_party={}, vendored=())
+            return cls(first_party={}, vendored=(), embedded={})
         data = json.loads(path.read_text(encoding="utf-8"))
         return cls(
             first_party={
@@ -43,6 +45,9 @@ class Policy:
                 for kind, entries in data.get("first_party", {}).items()
             },
             vendored=tuple((entry["path"], normalize(entry["covered_by"])) for entry in data.get("vendored", ())),
+            embedded={
+                (entry["type"], entry["name"]): normalize(entry["covered_by"]) for entry in data.get("embedded", ())
+            },
         )
 
 
@@ -85,7 +90,7 @@ class Collected:
             for line in lines(pattern):
                 name, _, version = line.split("\t", 1)[0].partition("==")
                 collected.crates.add((name, version))
-        for line in lines("downloaded-npm-packages.txt"):
+        for line in lines("downloaded-npm-packages*.txt"):
             name, _, version = line.split("\t", 1)[0].rpartition("@")
             collected.npm.add((name, version))
         for line in lines("downloaded-cpython-source.txt"):
@@ -114,6 +119,8 @@ def is_covered(artifact: dict, collected: Collected, policy: Policy) -> bool:
         if any(vendored_path in path for path in paths) and parent in collected.python_names:
             return True
     if (kind, name, version) in collected.covers:
+        return True
+    if policy.embedded.get((kind, name)) in collected.python_names:
         return True
     if kind == "python":
         return (normalize(name), version) in collected.python

@@ -1,0 +1,24 @@
+{
+  "sources": [
+    {
+      "name": "torch",
+      "version": "2.14.1",
+      "license": "BSD-3-Clause AND Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSL-1.0 AND MIT",
+      "url": "https://github.com/pytorch/pytorch/releases/download/v2.14.1/torch-2.14.1.tar.gz",
+      "sha256": "58cacad12fb09ae9cc2fb31412cb09d83c288e50ed06fd3eb48d3dcab427db87",
+      "covers": [
+        "python:torch@2.14.1"
+      ]
+    },
+    {
+      "name": "triton",
+      "version": "3.8.0",
+      "license": "MIT",
+      "url": "https://github.com/triton-lang/triton/releases/download/v3.8.0/triton-3.8.0.tar.gz",
+      "sha256": "451b07863426eb7804fc8fc59ca046a3e2e7312ded97124686a5a1d15fe9521f",
+      "covers": [
+        "python:triton@3.8.0"
+      ]
+    }
+  ]
+}

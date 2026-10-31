@@ -1,0 +1,145 @@
+{
+  "sources": [
+    {
+      "name": "ray",
+      "version": "2.57.0",
+      "license": "Apache-2.0",
+      "url": "https://github.com/ray-project/ray/archive/refs/tags/ray-2.57.0.tar.gz",
+      "sha256": "75b8ab2eab971b4c1bfb1bbe1c4636951b746c04a2541f02d0ce0716189f547c",
+      "covers": [
+        "python:ray@2.57.0"
+      ]
+    },
+    {
+      "name": "aiohappyeyeballs",
+      "version": "2.7.1",
+      "license": "PSF-2.0",
+      "url": "https://files.pythonhosted.org/packages/ce/f4/eec0465c2f67b2664688d0240b3212d5196fd89e741df67ddb81f8d35658/aiohappyeyeballs-2.7.1.tar.gz",
+      "sha256": "065665c041c42a5938ed220bdcd7230f22527fbec085e1853d2402c8a3615d9d",
+      "covers": [
+        "python:aiohappyeyeballs@2.7.1"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "aiohttp",
+      "version": "3.14.3",
+      "license": "Apache-2.0 AND MIT",
+      "url": "https://files.pythonhosted.org/packages/58/d9/22ce5786ac0c1653ae8b6c23bded02c1686d11f0dbb45b31ce128e0df985/aiohttp-3.14.3.tar.gz",
+      "sha256": "9491196535a88924a60afd5b5f434b5b203b6cc616250878dbdb223a8f7844bc",
+      "covers": [
+        "python:aiohttp@3.14.3"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "aiosignal",
+      "version": "1.4.0",
+      "license": "Apache-2.0",
+      "url": "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz",
+      "sha256": "f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7",
+      "covers": [
+        "python:aiosignal@1.4.0"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "license": "MIT",
+      "url": "https://files.pythonhosted.org/packages/9a/8e/82a0fe20a541c03148528be8cac2408564a6c9a0cc7e9171802bc1d26985/attrs-26.1.0.tar.gz",
+      "sha256": "d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32",
+      "covers": [
+        "python:attrs@26.1.0"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "colorama",
+      "version": "0.4.6",
+      "license": "BSD-3-Clause",
+      "url": "https://files.pythonhosted.org/packages/d8/53/6f443c9a4a8358a93a6792e2acffb9d9d5cb0a5cfd8802644b7b1c9a02e4/colorama-0.4.6.tar.gz",
+      "sha256": "08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44",
+      "covers": [
+        "python:colorama@0.4.6"
+      ],
+      "bundled_in": "ray (ray/thirdparty_files)"
+    },
+    {
+      "name": "frozenlist",
+      "version": "1.8.0",
+      "license": "Apache-2.0",
+      "url": "https://files.pythonhosted.org/packages/2d/f5/c831fac6cc817d26fd54c7eaccd04ef7e0288806943f7cc5bbf69f3ac1f0/frozenlist-1.8.0.tar.gz",
+      "sha256": "3ede829ed8d842f6cd48fc7081d7a41001a56f1f38603f9d49bf3020d59a31ad",
+      "covers": [
+        "python:frozenlist@1.8.0"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "idna",
+      "version": "3.18",
+      "license": "BSD-3-Clause",
+      "url": "https://files.pythonhosted.org/packages/cd/63/9496c57188a2ee585e0f1db071d75089a11e98aa86eb99d9d7618fc1edce/idna-3.18.tar.gz",
+      "sha256": "ffb385a7e039654cef1ab9ef32c6fafe283c0c0467bba1d9029738ce4a14a848",
+      "covers": [
+        "python:idna@3.18"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "multidict",
+      "version": "6.7.1",
+      "license": "Apache-2.0",
+      "url": "https://files.pythonhosted.org/packages/1a/c2/c2d94cbe6ac1753f3fc980da97b3d930efe1da3af3c9f5125354436c073d/multidict-6.7.1.tar.gz",
+      "sha256": "ec6652a1bee61c53a3e5776b6049172c53b6aaba34f18c9ad04f82712bac623d",
+      "covers": [
+        "python:multidict@6.7.1"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "propcache",
+      "version": "0.5.2",
+      "license": "Apache-2.0",
+      "url": "https://files.pythonhosted.org/packages/ec/44/c87281c333769159c50594f22610f77398a47ccbfbbf23074e744e86f87c/propcache-0.5.2.tar.gz",
+      "sha256": "01c4fc7480cd0598bb4b57022df55b9ca296da7fc5a8760bd8451a7e63a7d427",
+      "covers": [
+        "python:propcache@0.5.2"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "psutil",
+      "version": "7.2.2",
+      "license": "BSD-3-Clause",
+      "url": "https://files.pythonhosted.org/packages/aa/c6/d1ddf4abb55e93cebc4f2ed8b5d6dbad109ecb8d63748dd2b20ab5e57ebe/psutil-7.2.2.tar.gz",
+      "sha256": "0746f5f8d406af344fd547f1c8daa5f5c33dbc293bb8d6a16d80b4bb88f59372",
+      "covers": [
+        "python:psutil@7.2.2"
+      ],
+      "bundled_in": "ray (ray/thirdparty_files)"
+    },
+    {
+      "name": "yarl",
+      "version": "1.24.5",
+      "license": "Apache-2.0",
+      "url": "https://files.pythonhosted.org/packages/31/33/ebe9e3d1f86c7a0b51094c0a146392045ca1631d2664889539dec8088a33/yarl-1.24.5.tar.gz",
+      "sha256": "e81b83143bee16329c23db3c1b2d82b29892fcbcb849186d2f6e98a5abe9a57f",
+      "covers": [
+        "python:yarl@1.24.5"
+      ],
+      "bundled_in": "ray (ray/_private/runtime_env/agent/thirdparty_files)"
+    },
+    {
+      "name": "simple-launcher",
+      "version": "1.1.0.14",
+      "license": "BSD-3-Clause",
+      "url": "https://github.com/vsajip/simple_launcher/archive/2e1c7592574c4f42062fd3a5b1051ec02da4b543.tar.gz",
+      "sha256": "f2924fbe648314d0ab4a33c61fc52c536ce860743b674e98e9773a1bc5b84ec0",
+      "covers": [
+        "dotnet:Simple Launcher@1.1.0.14"
+      ]
+    }
+  ]
+}

@@ -211,12 +211,24 @@ while IFS= read -r package; do
     printf '%s\n' "${source_package}" >> "${source_packages_file}"
 done < "${packages_file}"
 
+# Retry each download: a mirror that drops one connection otherwise leaves a package's source out.
+download_source() {
+    local attempt
+    for attempt in 1 2 3; do
+        if (
+            cd "${output_dir}/sources" &&
+                apt-get source --download-only --only-source "$1" >> "${log_file}" 2>&1
+        ); then
+            return 0
+        fi
+        sleep "$((attempt * 5))"
+    done
+    return 1
+}
+
 sort -u "${source_packages_file}" | while IFS= read -r source_package; do
     [ -n "${source_package}" ] || continue
-    if (
-        cd "${output_dir}/sources" &&
-            apt-get source --download-only --only-source "${source_package}" >> "${log_file}" 2>&1
-    ); then
+    if download_source "${source_package}"; then
         printf '%s\n' "${source_package}" >> "${downloaded_file}"
     else
         printf '%s\n' "${source_package}" >> "${missing_file}"
