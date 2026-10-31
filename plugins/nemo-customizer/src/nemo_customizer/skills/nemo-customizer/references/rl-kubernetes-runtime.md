@@ -18,7 +18,7 @@ Deployment model is the same as automodel/unsloth: **run the platform locally**
 What matters is that the platform's jobs backend is `kubernetes_job` and the job
 pods can reach the platform's APIs.
 
-`SKILL.md` § **Plugin pick** (the **`rl` runtime gate**) sends you here when the execution profiles report `docker` or `subprocess`. Configure the local platform as below. If **no** Kubernetes cluster is available to point it at, stop and tell the user rl needs one.
+`SKILL.md` § **Plugin pick** (the **platform check**) sends you here when the GPU execution profiles report `backend: docker` or `subprocess`. Configure the local platform as below. If **no** Kubernetes cluster is available to point it at, stop and tell the user rl needs one.
 
 ## Configuring the local platform for rl
 
