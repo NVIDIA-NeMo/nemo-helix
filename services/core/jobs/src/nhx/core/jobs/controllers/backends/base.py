@@ -169,7 +169,7 @@ def validate_no_reserved_managed_job_environment_variable_names(env_names: Itera
     env_names = list(env_names)
     malformed = sorted({name for name in env_names if not _VALID_ENVIRONMENT_VARIABLE_NAME.fullmatch(name)})
     if malformed:
-        raise ValueError(f"{source} must match [A-Za-z_][A-Za-z0-9_]*: {malformed}")
+        raise ValueError(f"{source} must match {_VALID_ENVIRONMENT_VARIABLE_NAME.pattern}: {malformed}")
     conflicting = find_reserved_managed_job_environment_variable_names(env_names)
     if conflicting:
         raise ValueError(f"{source} must not use platform-reserved managed environment keys: {conflicting}")
