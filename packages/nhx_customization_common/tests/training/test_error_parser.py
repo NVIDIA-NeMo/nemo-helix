@@ -69,6 +69,8 @@ def test_exceptions_printed_while_shutting_down_are_ignored(line):
         "[rank0]: tried to write checkpoint: No space left on device",
         "(VllmWorker pid=9) CUDA out of memory. Tried to allocate 1.00 GiB",
         "  traceback : Signal 9 (SIGKILL) received by PID 1061",
+        'reason_message: "runtime_env_agent failed and raylet fate-shares with it."',
+        'reason_message: "dashboard_agent failed and raylet fate-shares with it."',
     ],
 )
 def test_failures_reported_without_an_exception_line_are_kept(line):

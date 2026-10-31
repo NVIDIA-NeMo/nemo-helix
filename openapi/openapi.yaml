@@ -20454,6 +20454,26 @@ components:
           allOf:
           - $ref: '#/components/schemas/SlidingWindowConfig'
           description: Sliding window attention config if applicable
+        has_vision_tower:
+          type: boolean
+          title: Has Vision Tower
+          description: True when the checkpoint config contains a vision tower.
+          default: false
+        has_audio_tower:
+          type: boolean
+          title: Has Audio Tower
+          description: True when the checkpoint config contains an audio tower.
+          default: false
+        num_experts:
+          title: Num Experts
+          description: Routed expert count when the checkpoint declares more than
+            one. None for a dense model.
+          type: integer
+        num_nextn_predict_layers:
+          title: Num Nextn Predict Layers
+          description: Multi-token prediction depth declared by the checkpoint. None
+            when the config has no such field.
+          type: integer
         linear_layers:
           title: Linear Layers
           description: List of all linear/Conv1D layers with their dimensions. Used
