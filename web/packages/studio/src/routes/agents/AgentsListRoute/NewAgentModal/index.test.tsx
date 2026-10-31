@@ -7,6 +7,7 @@ import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
+import { MAX_PICKED_FILES } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
@@ -428,12 +429,19 @@ describe('NewAgentModal oversized pick', () => {
     const dialog = await screen.findByRole('dialog');
     await openUploadTab(dialog);
 
-    // A real accidental pick was 880k files; only length is read before the guard fires.
+    const pickedCount = MAX_PICKED_FILES + 1;
     fireEvent.change(within(dialog).getByTestId('agent-directory-input'), {
-      target: { files: { length: 880_000 } },
+      target: {
+        files: Array.from(
+          { length: pickedCount },
+          (_, index) => new File([''], `file-${index}.py`)
+        ),
+      },
     });
 
-    expect(await within(dialog).findByText(/880,000 files/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(new RegExp(`${pickedCount.toLocaleString()} files`))
+    ).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 });
