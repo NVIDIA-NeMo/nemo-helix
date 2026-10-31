@@ -289,6 +289,31 @@ class DPOTraining(_TrainingBase):
     max_grad_norm: float = Field(default=1.0, ge=0.0, description="Maximum gradient norm for clipping.")
 
 
+# Keys the vLLM worker either overwrites (hf_overrides) or passes explicitly before **vllm_kwargs.
+_VLLM_KWARGS_RESERVED = frozenset(
+    {
+        "hf_overrides",
+        "model",
+        "served_model_name",
+        "load_format",
+        "skip_tokenizer_init",
+        "tensor_parallel_size",
+        "pipeline_parallel_size",
+        "enable_expert_parallel",
+        "gpu_memory_utilization",
+        "enable_prefix_caching",
+        "dtype",
+        "seed",
+        "enforce_eager",
+        "max_model_len",
+        "trust_remote_code",
+        "enable_sleep_mode",
+        "disable_log_stats",
+        "worker_extension_cls",
+    }
+)
+
+
 class GRPOTraining(_TrainingBase):
     """Group Relative Policy Optimization with NeMo Gym environments.
 
@@ -538,7 +563,8 @@ class GRPOTraining(_TrainingBase):
     vllm_kwargs: dict[str, Any] | None = Field(
         default=None,
         description="Additional arguments for the vLLM rollout engine, for example "
-        "{'moe_backend': 'triton'}. Forwarded to vLLM as supplied.",
+        "{'moe_backend': 'triton'}. Do not set hf_overrides (use hf_config_overrides) or engine "
+        "keys the worker already passes, such as tensor_parallel_size and enable_prefix_caching.",
     )
     moe_parallelizer: dict[str, Any] | None = Field(
         default=None,
@@ -595,6 +621,16 @@ class GRPOTraining(_TrainingBase):
         if isinstance(data, dict) and data.get("finetuning_type") == "lora" and "learning_rate" not in data:
             return {**data, "learning_rate": 1e-5}
         return data
+
+    @model_validator(mode="after")
+    def _reject_reserved_vllm_kwargs(self) -> Self:
+        """The worker sets these itself, so a copy here is a TypeError at startup."""
+        if not self.vllm_kwargs:
+            return self
+        reserved = sorted(self.vllm_kwargs.keys() & _VLLM_KWARGS_RESERVED)
+        if reserved:
+            raise ValueError(f"vllm_kwargs must not set {', '.join(reserved)}")
+        return self
 
     @model_validator(mode="after")
     def _lora_defaults(self) -> Self:
@@ -872,6 +908,15 @@ class RlJobOutput(RlSchema):
             if total_gpus % vllm_ep != 0:
                 raise ValueError(
                     f"Total GPUs ({total_gpus}) must be divisible by vllm_expert_parallel_size ({vllm_ep})."
+                )
+            # The compiler always sets async_engine. At that setting the pin requires
+            # expert parallelism to be 1 or equal to the resolved vLLM tensor parallelism.
+            resolved_vllm_tp = vllm_tp if vllm_tp is not None else min(p.tensor_parallel_size, p.num_gpus_per_node)
+            if vllm_ep > 1 and vllm_ep != resolved_vllm_tp:
+                raise ValueError(
+                    f"vllm_expert_parallel_size ({vllm_ep}) must be 1 or equal to the resolved "
+                    f"vLLM tensor parallel size ({resolved_vllm_tp}). async_engine rejects expert "
+                    "parallelism that is not equal to tensor parallelism."
                 )
             # The rollout batch is num_prompts_per_step * num_generations_per_prompt, and
             # NeMo-RL shards it by the train batch. When num_prompts_per_step is derived,

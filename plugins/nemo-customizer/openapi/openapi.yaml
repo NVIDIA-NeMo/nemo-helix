@@ -4598,7 +4598,9 @@ components:
         vllm_kwargs:
           title: Vllm Kwargs
           description: 'Additional arguments for the vLLM rollout engine, for example
-            {''moe_backend'': ''triton''}. Forwarded to vLLM as supplied.'
+            {''moe_backend'': ''triton''}. Do not set hf_overrides (use hf_config_overrides)
+            or engine keys the worker already passes, such as tensor_parallel_size
+            and enable_prefix_caching.'
           additionalProperties: true
           type: object
         moe_parallelizer:

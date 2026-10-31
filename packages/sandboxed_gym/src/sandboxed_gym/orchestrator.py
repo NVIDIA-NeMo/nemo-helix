@@ -353,7 +353,14 @@ class SandboxedGymSession:
     def list_entries(self) -> dict[str, list[str]]:
         """Entries the host's Gym stack spawned, for NeMo-RL's route coverage check."""
         parsed = urlparse(self.host.health_url)
-        url = urlunsplit((parsed.scheme, parsed.netloc, "/entries", "", ""))
+        # OpenSandbox's server proxy puts a sandbox prefix on health_url. Replacing the
+        # whole path with /entries would ask the proxy root instead of this sandbox.
+        path = parsed.path.rstrip("/")
+        if path.endswith("/health"):
+            path = f"{path[: -len('health')]}entries"
+        else:
+            path = "/entries"
+        url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
         request = urllib.request.Request(url, method="GET", headers=dict(self.host.headers))
         try:
             with urllib.request.urlopen(request, timeout=30) as response:

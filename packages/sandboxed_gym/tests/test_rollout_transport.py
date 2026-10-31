@@ -103,6 +103,37 @@ def test_list_entries_reads_the_host_entries_route(monkeypatch: pytest.MonkeyPat
     assert captured == {"url": "http://host/entries", "method": "GET", "timeout": 30}
 
 
+def test_list_entries_keeps_a_proxy_path_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self) -> bytes:
+            return json.dumps({"entries": {"clevr_agent": ["responses_api_agents"]}}).encode()
+
+    def _open(request, timeout):
+        captured["url"] = request.full_url
+        del timeout
+        return _Response()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    session = _session()
+    session.host = GymHostHandle(
+        host_id="h1",
+        health_url="http://host/sandboxes/abc/health",
+        rollout_url=ROLLOUT_URL,
+        headers={},
+    )
+
+    assert session.list_entries() == {"clevr_agent": ["responses_api_agents"]}
+    assert captured["url"] == "http://host/sandboxes/abc/entries"
+
+
 def test_a_batch_is_split_into_bounded_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
     """Request duration and response size have to track the chunk, not the batch.
 

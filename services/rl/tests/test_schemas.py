@@ -527,6 +527,35 @@ def test_vllm_expert_parallel_size_cannot_span_nodes() -> None:
         job.validate_for_training()
 
 
+def test_vllm_expert_parallel_must_match_resolved_tensor_parallel() -> None:
+    """async_engine is always on, so EP 4 with a resolved TP of 1 fails inside vLLM."""
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_gpus_per_node=4),
+            vllm_expert_parallel_size=4,
+            batch_size=4,
+            num_generations_per_prompt=4,
+        ),
+    )
+    with pytest.raises(ValueError, match="vllm_expert_parallel_size"):
+        job.validate_for_training()
+
+
+def test_vllm_expert_parallel_matching_tensor_parallel_is_accepted() -> None:
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_gpus_per_node=4),
+            vllm_tensor_parallel_size=4,
+            vllm_expert_parallel_size=4,
+            batch_size=4,
+            num_generations_per_prompt=4,
+        ),
+    )
+    job.validate_for_training()
+
+
 def test_vllm_tensor_parallel_size_cannot_span_nodes() -> None:
     """One vLLM engine lives inside a node; TP above the node size is unsatisfiable."""
     job = _grpo_job(
@@ -554,6 +583,21 @@ def test_vllm_tensor_parallel_size_must_divide_total_gpus() -> None:
     )
     with pytest.raises(ValueError, match="vllm_tensor_parallel_size"):
         job.validate_for_training()
+
+
+def test_vllm_kwargs_rejects_hf_overrides() -> None:
+    with pytest.raises(ValueError, match="hf_overrides"):
+        GRPOTraining(type="grpo", vllm_kwargs={"hf_overrides": {"rope_scaling": {}}})
+
+
+def test_vllm_kwargs_rejects_worker_owned_keys() -> None:
+    with pytest.raises(ValueError, match="enable_prefix_caching"):
+        GRPOTraining(type="grpo", vllm_kwargs={"enable_prefix_caching": False, "moe_backend": "triton"})
+
+
+def test_vllm_kwargs_accepts_engine_options() -> None:
+    t = GRPOTraining(type="grpo", vllm_kwargs={"moe_backend": "triton"})
+    assert t.vllm_kwargs == {"moe_backend": "triton"}
 
 
 def test_backend_settings_default_to_unset() -> None:
