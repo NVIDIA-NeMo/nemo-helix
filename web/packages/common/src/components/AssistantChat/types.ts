@@ -76,6 +76,8 @@ export interface AssistantChatProps {
    * Optional OpenAI-compatible tools for the request.
    */
   tools?: ChatCompletionTool[];
+  /** Extra headers sent with every completion request; memoize it. */
+  extraHeaders?: Record<string, string>;
   /**
    * Display name used in the composer placeholder.
    */
@@ -112,6 +114,8 @@ export interface AssistantChatProps {
    * parent derive seed-chip visibility from whether any messages exist.
    */
   onEmptyChange?: (isEmpty: boolean) => void;
+  /** Fires after the user resets the thread. */
+  onReset?: () => void;
   /**
    * Controls whether the internal composer is shown and how input is driven.
    * In `broadcast-all` mode the composer is suppressed; a page-level composer
