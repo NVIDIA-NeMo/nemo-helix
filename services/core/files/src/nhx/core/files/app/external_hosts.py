@@ -28,7 +28,11 @@ def _normalize_authority(url_str: str) -> str:
     # Normalize default ports so https://host and https://host:443 match
     if ":" in netloc:
         host, port = netloc.rsplit(":", 1)
-        if (scheme == "https" and port == "443") or (scheme == "http" and port == "80"):
+        if (
+            (scheme == "https" and port == "443")
+            or (scheme == "http" and port == "80")
+            or (scheme == "ssh" and port == "22")
+        ):
             netloc = host
     return f"{scheme}://{netloc}"
 
