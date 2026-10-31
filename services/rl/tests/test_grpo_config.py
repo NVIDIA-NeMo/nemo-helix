@@ -339,6 +339,7 @@ def test_compiled_config_selects_only_prefetched_actors(
     assert cfg["policy"]["offload_optimizer_for_refit"] is True
     # vLLM is the only prefetched generation backend (`vllm`); sglang/trtllm are not.
     assert cfg["policy"]["generation"]["backend"] == "vllm"
+    assert "lora_refit_mode" not in cfg["policy"]["generation"]
 
 
 def test_compile_grpo_config_enables_lora(
@@ -357,6 +358,7 @@ def test_compile_grpo_config_enables_lora(
     assert lora_cfg["alpha"] == 64
     assert lora_cfg["use_triton"] is True
     assert "_v2" not in cfg["policy"]["automodel_cfg"]
+    assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
 
 
 def test_compiled_config_has_master_config_required_fields(

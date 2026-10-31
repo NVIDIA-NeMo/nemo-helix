@@ -636,14 +636,17 @@ def compile_grpo_config(
                 "expose_http_server": True,
             },
             "colocated": {"enabled": True, "resources": {"gpus_per_node": None, "num_nodes": None}},
-            # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
-            # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
-            **({"vllm_kwargs": dict(grpo_hp.vllm_kwargs)} if grpo_hp.vllm_kwargs else {}),
         },
         "sequence_packing": sequence_packing_cfg,
         "dynamic_batching": dynamic_batching_cfg,
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
+    # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
+    # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
+    if grpo_hp.vllm_kwargs:
+        cfg["policy"]["generation"]["vllm_kwargs"] = dict(grpo_hp.vllm_kwargs)
+    if lora_cfg["enabled"]:
+        cfg["policy"]["generation"]["lora_refit_mode"] = "merged"
 
     # AutomodelPolicyWorker reads these from policy.automodel_cfg.checkpoint. The top-level
     # checkpointing config rejects them. "every" consolidates each save, which is
