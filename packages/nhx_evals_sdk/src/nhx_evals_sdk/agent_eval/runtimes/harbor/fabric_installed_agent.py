@@ -38,6 +38,7 @@ manylinux wheels only, and this is not something the agent can work around.
 
 from __future__ import annotations
 
+import json
 import shlex
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
@@ -83,6 +84,9 @@ _INSTALLED_AGENT_KWARGS = frozenset({*_VERSION_KWARGS, *InstalledAgentOptions.mo
 #: an archive mirror that rate-limits or blips takes the whole trial with it, and Harbor's own retry
 #: works at trial granularity. Backoff between attempts is ``attempt * _RETRY_BACKOFF_SEC``.
 _PACKAGE_MANAGER_ATTEMPTS = 3
+#: Written into the venv, last, by a finished install: what it installed. A later install that would install the
+#: same thing (an image with the agent already installed, or a retried setup) skips curl, uv and the venv build.
+INSTALL_MARKER = ".nemo-fabric-install"
 _RETRY_BACKOFF_SEC = 5
 #: Proxy and TLS settings ``FabricAgent`` forwards to its install step, mirrored for this one.
 _INSTALL_ENV_NAMES = frozenset(
@@ -120,6 +124,13 @@ def _version_string(name: str, value: str | float | int) -> str:
     if not value.strip():
         raise ValueError(f"{name} must not be empty")
     return value
+
+
+def fabric_install_spec(package: str, python_version: str, uv_version: str) -> str:
+    """What an install of ``package`` puts in the venv, as :data:`INSTALL_MARKER` records it."""
+    return json.dumps(
+        {"package": package, "python": python_version, "uv": uv_version}, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _quoted_requirements(package: str) -> str:
@@ -246,18 +257,37 @@ class FabricInstalledAgent(BaseInstalledAgent):
         )
 
     async def install(self, environment: BaseEnvironment) -> None:
-        """Provision curl, uv, a uv-managed interpreter, and the Fabric virtualenv."""
-        await self._ensure_curl(environment)
+        """Provision curl, uv, a uv-managed interpreter, and the Fabric virtualenv, unless they're already installed.
+
+        The agent's config bundle is uploaded either way: it belongs to this agent config, not to the install.
+        """
+        installed = await self._already_installed(environment)
+        if not installed:
+            await self._ensure_curl(environment)
         await self._prepare_directories(environment)
         bundle = self.fabric.fabric_config_bundle
         if bundle is not None:
             await environment.upload_dir(bundle, self.fabric.fabric_config_target)
+        if installed:
+            self.logger.info("NeMo Fabric is already installed in %s; skipping the install", self._venv_path)
+            return
         await self.exec_as_agent(
             environment,
             command=self._install_fabric_command(),
             env={name: value for name, value in self.extra_env.items() if name in _INSTALL_ENV_NAMES},
             timeout_sec=self.fabric.fabric_timeout_sec,
         )
+
+    @property
+    def install_spec(self) -> str:
+        """What an install puts in the venv; :data:`INSTALL_MARKER` holds it once the install finished."""
+        assert self.fabric.fabric_package is not None  # checked in __init__
+        return fabric_install_spec(self.fabric.fabric_package, self.fabric_python_version, self.fabric_uv_version)
+
+    async def _already_installed(self, environment: BaseEnvironment) -> bool:
+        marker = shlex.quote(str(PurePosixPath(self._venv_path) / INSTALL_MARKER))
+        result = await environment.exec(f"cat {marker} 2>/dev/null")
+        return result.return_code == 0 and (result.stdout or "").strip() == self.install_spec
 
     async def _ensure_curl(self, environment: BaseEnvironment) -> None:
         """Install curl and CA certificates through whichever package manager the image has.
@@ -342,7 +372,8 @@ class FabricInstalledAgent(BaseInstalledAgent):
             'if [ -f "$HOME/.local/bin/env" ]; then . "$HOME/.local/bin/env"; fi; '
             f"uv python install {python_version}; "
             f"uv venv {shlex.quote(self._venv_path)} --python {python_version} --clear; "
-            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}"
+            f"uv pip install --python {shlex.quote(self._venv_python)} {_quoted_requirements(package)}; "
+            f"printf %s {shlex.quote(self.install_spec)} > {shlex.quote(str(PurePosixPath(self._venv_path) / INSTALL_MARKER))}"
         )
 
     @property

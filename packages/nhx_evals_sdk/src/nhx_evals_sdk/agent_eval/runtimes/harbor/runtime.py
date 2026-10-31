@@ -1069,6 +1069,7 @@ def _build_native_job(
         ) -> None:
             """Run one Harbor job, ``parent/name``, over the ``selected`` task folders (all when None)."""
             harbor_job_dir = parent / name
+            environment = _with_agent_layers(environment, agent, agent_dir=config.agent_dir)
             job_config = JobConfig(
                 job_name=name,
                 jobs_dir=parent,
@@ -1289,6 +1290,37 @@ async def _partition_by_egress_control(
             logger.debug("Could not read Harbor task %s's network policy", name, exc_info=True)
             unknown.append(name)
     return public, restricted, unknown
+
+
+def _with_agent_layers(environment: Any, agent: Any, *, agent_dir: Path | None) -> Any:
+    """Harbor's default Docker environment for ``agent``, switched to one that reuses agent installs when it can.
+
+    Only the default local Docker environment switches: a custom one (by ``type`` or ``import_path``) is the
+    caller's. So does an agent whose setup can't be reused (``oracle``, an ``agent_dir`` wrapper), and every agent
+    when :data:`~nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer.AGENT_LAYERS_ENV` is ``0``.
+    """
+    from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
+        AGENT_LAYER_DOCKER_ENVIRONMENT,
+        AGENT_LAYER_KWARG,
+        agent_install,
+        agent_layer_kwarg,
+        agent_layers_enabled,
+    )
+
+    if not agent_layers_enabled() or getattr(environment, "import_path", "") is not None:
+        return environment
+    if getattr(environment, "type", None) not in (None, "docker"):
+        return environment
+    name, import_path, kwargs = agent.name, agent.import_path, dict(agent.kwargs)
+    if agent_install(agent_name=name, agent_import_path=import_path, agent_dir=agent_dir, agent_kwargs=kwargs) is None:
+        return environment
+    layer = agent_layer_kwarg(name=name, import_path=import_path, kwargs=kwargs)
+    return environment.model_copy(
+        update={
+            "import_path": AGENT_LAYER_DOCKER_ENVIRONMENT,
+            "kwargs": {**environment.kwargs, AGENT_LAYER_KWARG: layer},
+        }
+    )
 
 
 def _is_harbor_resume_refusal(exc: FileExistsError, job_dir: Path) -> bool:
