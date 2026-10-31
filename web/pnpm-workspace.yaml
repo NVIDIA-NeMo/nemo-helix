@@ -26,8 +26,8 @@ overrides:
 catalog:
   '@mui/x-charts': ^7.28.0
   '@mui/x-data-grid': ^7.28.3
-  '@nvidia/foundations-react-core': 1.16.0
-  '@nvidia/foundations-tailwind-plugin': 1.16.0
+  '@nvidia/foundations-react-core': 1.19.0
+  '@nvidia/foundations-tailwind-plugin': 1.19.0
   # Alias so imports use @nemo/icons/icons rather than the real package name;
   # if NVIDIA renames the package, update only this one line.
   '@nemo/icons': 'npm:@nvidia/react-gui-icons@1.0.0'

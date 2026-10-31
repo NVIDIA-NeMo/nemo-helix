@@ -13,11 +13,11 @@ catalogs:
       specifier: npm:@nvidia/react-gui-icons@1.0.0
       version: 1.0.0
     '@nvidia/foundations-react-core':
-      specifier: 1.16.0
-      version: 1.16.0
+      specifier: 1.19.0
+      version: 1.19.0
     '@nvidia/foundations-tailwind-plugin':
-      specifier: 1.16.0
-      version: 1.16.0
+      specifier: 1.19.0
+      version: 1.19.0
     '@storybook/addon-a11y':
       specifier: ^10.5.5
       version: 10.5.5
@@ -325,7 +325,7 @@ importers:
         version: link:../sdk
       '@nvidia/foundations-react-core':
         specifier: 'catalog:'
-        version: 1.16.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 1.19.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@opentelemetry/api-logs':
         specifier: ^0.219.0
         version: 0.219.0
@@ -646,7 +646,7 @@ importers:
         version: link:../sdk
       '@nvidia/foundations-react-core':
         specifier: 'catalog:'
-        version: 1.16.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 1.19.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -782,7 +782,7 @@ importers:
         version: link:../testing
       '@nvidia/foundations-tailwind-plugin':
         specifier: 'catalog:'
-        version: 1.16.0
+        version: 1.19.0
       '@playwright/test':
         specifier: ^1.57.0
         version: 1.58.2
@@ -1806,15 +1806,15 @@ packages:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
 
-  '@nvidia/foundations-react-core@1.16.0':
-    resolution: {integrity: sha512-ZlusnrGz5I7cfxA4a72qSUwZWGetf3mVTnL7i4cErt751vDBRzR4P/RrsmsD03EdLY2biFBIOXXxXdUnMV50/A==}
+  '@nvidia/foundations-react-core@1.19.0':
+    resolution: {integrity: sha512-eU0QZV9vyuaV4KjrCob4zZu3sJLf5uKdcS/99JKSQ3Mqo+1AIJ2uKPa2tuEurCSpwT473tOqPJWvwhEz8DW3eg==}
     hasBin: true
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@nvidia/foundations-tailwind-plugin@1.16.0':
-    resolution: {integrity: sha512-A/j92qUi7R+Xsdm5Ly/yATKlQpEs2U+Dl+GCyVx9xn7pQaXG30DTyaCGSEsBErBniwo4pkbRBEHLtGbWGRpJ5w==}
+  '@nvidia/foundations-tailwind-plugin@1.19.0':
+    resolution: {integrity: sha512-grPBXtyakD1NkuOPAt8mh2OKLrCaiyuPHewZyWJ6vhyM4zIhOa0FeVB6DRfIZOiFzCp1EXEXoCZ93AXBpfq8Lg==}
 
   '@nvidia/react-gui-icons@1.0.0':
     resolution: {integrity: sha512-8RLlb+rgufv3HRUOSykgF8CDt/5Btftmx4r8S+soawrzgYgprvOVTO20Q/31mbaP2wAyEWavaG2G6JQNKtz4Fw==}
@@ -9159,7 +9159,7 @@ snapshots:
       '@tybys/wasm-util': 0.10.1
     optional: true
 
-  '@nvidia/foundations-react-core@1.16.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
+  '@nvidia/foundations-react-core@1.19.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@date-fns/tz': 1.4.1
       '@radix-ui/react-primitive': 2.1.4(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -9182,7 +9182,7 @@ snapshots:
       - '@types/react'
       - '@types/react-dom'
 
-  '@nvidia/foundations-tailwind-plugin@1.16.0': {}
+  '@nvidia/foundations-tailwind-plugin@1.19.0': {}
 
   '@nvidia/react-gui-icons@1.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)':
     dependencies:
