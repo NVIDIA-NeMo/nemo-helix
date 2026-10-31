@@ -14,7 +14,7 @@ from scaled_evals.api import artifacts
 from scaled_evals.api.agent_bundle_registry import accessible_bundle_for_run
 from scaled_evals.api.auth import CurrentPrincipal, current_principal
 from scaled_evals.api.benchmark_run_store import derive_run_view
-from scaled_evals.api.db import Database, get_db, get_stream_database_factory
+from scaled_evals.api.db import Database, get_request_db, get_request_stream_database_factory
 from scaled_evals.api.repositories.base_repository import Conflict, NotFound
 from scaled_evals.api.routers.evaluations import teardown_cancelled_evaluation
 from scaled_evals.api.runnability import (
@@ -45,8 +45,10 @@ from scaled_evals.api.utils import make_id
 
 router = APIRouter(prefix="/benchmark-runs", tags=["benchmark-runs"])
 
-Db = Annotated[Database, Depends(get_db)]
-StreamDatabaseFactory = Annotated[Callable[[], AbstractContextManager[Database]], Depends(get_stream_database_factory)]
+Db = Annotated[Database, Depends(get_request_db)]
+StreamDatabaseFactory = Annotated[
+    Callable[[], AbstractContextManager[Database]], Depends(get_request_stream_database_factory)
+]
 Principal = Annotated[CurrentPrincipal, Depends(current_principal)]
 Secrets = Annotated[SecretReadable, Depends(caller_secret_readable)]
 
@@ -391,7 +393,7 @@ def cancel_benchmark_run(run_id: str, db: Db) -> BenchmarkRunResponse:
 
 @router.delete("/{run_id}", response_model=DeleteResponse)
 def delete_benchmark_run(run_id: str, db: Db) -> DeleteResponse:
-    """Soft-delete a benchmark run (cascades to its member evaluations)."""
+    """Soft-delete the benchmark run without deleting its member evaluations."""
     if not db.benchmark_runs.soft_delete(run_id):
         raise _http_error(404, "not_found", "benchmark run not found")
     return DeleteResponse(id=run_id)

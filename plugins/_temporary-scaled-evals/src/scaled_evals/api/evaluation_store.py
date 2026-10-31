@@ -33,6 +33,7 @@ from scaled_evals.api.benchmark_store import BenchmarkStore
 from scaled_evals.api.failure_diagnostics import failure_category_for_code
 from scaled_evals.api.redaction import redact_secret_text
 from scaled_evals.api.repositories.base_repository import Conflict, InvalidReference
+from scaled_evals.api.resource_access import INTERNAL_ACCESS, ResourceAccess
 from scaled_evals.api.schemas.common import decode_cursor
 from scaled_evals.api.task_store import TaskStore
 from scaled_evals.models.evaluations import EvaluationResultWrite
@@ -243,15 +244,18 @@ def _event_rows(entity: ScaledEvalsEvaluation) -> builtins.list[dict[str, Any]]:
 
 
 class EvaluationStore:
-    def __init__(self, client: SyncEntityClient | None = None) -> None:
+    def __init__(self, client: SyncEntityClient | None = None, *, access: ResourceAccess = INTERNAL_ACCESS) -> None:
         self._client = client or entity_store.entity_client()
+        self._access = access
 
     def _get(self, evaluation_id: str, *, include_deleted: bool = False) -> ScaledEvalsEvaluation | None:
         try:
             entity = self._client.get(ScaledEvalsEvaluation, evaluation_id, workspace=entity_store.private_workspace())
         except EntityNotFoundError:
             return None
-        return entity if include_deleted or entity.deleted_at is None else None
+        if entity.deleted_at is not None and not (include_deleted and self._access.internal):
+            return None
+        return entity if self._access.can_read(entity.owner_id, entity.visibility) else None
 
     def _scan(
         self, *, include_deleted: bool = False, **where: Iterable[str | bool]
@@ -261,9 +265,13 @@ class EvaluationStore:
         # list endpoint pages in memory and analytics read every live
         # evaluation. Upgrade path: push the keyset and limit into the store.
         filters = {field: list(values) for field, values in where.items()}
-        if not include_deleted:
+        if not include_deleted or not self._access.internal:
             filters["deleted"] = [False]
-        return entity_store.list_all(self._client, ScaledEvalsEvaluation, filters)
+        return [
+            entity
+            for entity in entity_store.list_all(self._client, ScaledEvalsEvaluation, filters)
+            if self._access.can_read(entity.owner_id, entity.visibility)
+        ]
 
     def _mutate(
         self,
@@ -281,7 +289,7 @@ class EvaluationStore:
         """
         for _ in range(_MAX_WRITE_ATTEMPTS):
             entity = self._get(evaluation_id, include_deleted=include_deleted)
-            if entity is None:
+            if entity is None or not self._access.can_write(entity.owner_id):
                 return None
             now = _now()
             result, write = change(entity, now)
@@ -304,7 +312,7 @@ class EvaluationStore:
         """Claim the first candidate whose write lands, rescanning after a lost race."""
         for _ in range(_MAX_WRITE_ATTEMPTS):
             now = _now()
-            ordered = candidates(now)
+            ordered = [entity for entity in candidates(now) if self._access.can_write(entity.owner_id)]
             if not ordered:
                 return None
             entity = ordered[0]
@@ -579,6 +587,12 @@ class EvaluationStore:
     def exists(self, evaluation_id: str) -> bool:
         return self._get(evaluation_id) is not None
 
+    def get_for_mutation(self, evaluation_id: str) -> dict | None:
+        entity = self._get(evaluation_id)
+        if entity is None or not self._access.can_write(entity.owner_id):
+            return None
+        return row(entity)
+
     def load_observability_row(self, evaluation_id: str) -> dict | None:
         entity = self._get(evaluation_id)
         return None if entity is None else row(entity)
@@ -712,7 +726,7 @@ class EvaluationStore:
     def retry_block_reason(self, evaluation_id: str) -> RetryBlockReason | None:
         """Explain why a failed evaluation cannot transition to a retry."""
         entity = self._get(evaluation_id)
-        if entity is None or entity.status != "failed":
+        if entity is None or not self._access.can_write(entity.owner_id) or entity.status != "failed":
             return None
         if entity.evidence_claimed_by is not None or entity.archive_claimed_by is not None:
             return "terminal_artifacts_finalizing"

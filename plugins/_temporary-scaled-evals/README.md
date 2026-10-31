@@ -220,6 +220,21 @@ Consequences worth knowing before you rely on this:
   login|status|logout` are gone and `auth whoami` is now top-level
   `scaled-evals whoami`.
 
+Evaluation and benchmark-run APIs enforce owner/admin access in their Entity
+Store reads and compare-and-swap writes. Private resources are visible only to
+their effective owner or an authorized platform admin. Existing `public`,
+`team` and `org` visibility permits authenticated reads; it does not authorize
+another owner to cancel, retry, delete or build archives. Team/org membership
+is not implemented by this sharing convention. Lists apply access checks before
+search and pagination; missing, deleted and inaccessible resources return 404.
+Streams retain request scope and recheck resource access on each poll. Internal
+controllers and workers keep deliberately unrestricted storage access.
+
+Deleting a benchmark run soft-deletes its parent entity; member evaluations and
+stored artifacts remain. Cascading member deletion is a
+separate follow-up, not part of the ownership-isolation port. The isolation unit
+regressions use in-memory entities and do not require Postgres or other services.
+
 ## Verify locally (end to end)
 
 **1. Plugin loads.** The `nemo.services` loader swallows import errors, so a broken
