@@ -785,7 +785,8 @@ An agent that declares no model connection, or a provider the gateway doesn't se
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
 
-A taskset run on Kubernetes enforces this for tasks whose agent runs with `network_mode = "no-network"`,
+A taskset run on Kubernetes enforces this when its sandbox profile sets `enforce_closed_book: true`
+(off by default), for tasks whose agent runs with `network_mode = "no-network"`,
 whether set under `[environment]`, `[agent]` or one of the task's steps. Their sandbox still reaches
 the agent's model route, so the run is refused at submit, naming those tasks, unless the agent's
 `model` is a `ref` to a virtual model whose `request_middleware` ends with `nemo-evals-closed-book`,

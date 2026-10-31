@@ -662,9 +662,14 @@ async def _no_network_spec(service, request, target):
     return pinned, spec
 
 
+def _enforce_closed_book(service) -> None:
+    service._config.runs.harbor.sandbox_profiles["harbor-standard"].enforce_closed_book = True
+
+
 async def test_no_network_tasks_without_a_closed_book_route_are_refused_before_acceptance(
     service, published, request_body, monkeypatch, entity_store
 ):
+    _enforce_closed_book(service)
     request = TasksetRunInput.model_validate(request_body)
     target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
     monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
@@ -674,9 +679,22 @@ async def test_no_network_tasks_without_a_closed_book_route_are_refused_before_a
     assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
 
 
+async def test_no_network_tasks_are_accepted_without_a_closed_book_route_by_default(
+    service, published, request_body, monkeypatch
+):
+    request = TasksetRunInput.model_validate(request_body)
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
+    monkeypatch.setattr(service, "_resolve", AsyncMock(return_value=await _no_network_spec(service, request, target)))
+
+    outcome = await service.submit(request, workspace="default", caller="user:alice")
+
+    assert outcome.created is True
+
+
 async def test_a_refused_registered_agent_does_not_leave_its_files_snapshot(
     service, published, request_body, monkeypatch, files_service
 ):
+    _enforce_closed_book(service)
     request = TasksetRunInput.model_validate(request_body)
     snapshot = FilesetRef("agents/request-snapshot")
     files_service.filesets[("agents", "request-snapshot")] = {"skill.txt": b"skill"}
