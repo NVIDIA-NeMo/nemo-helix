@@ -18,6 +18,29 @@ import (
 	"github.com/NVIDIA-NeMo/nemo-helix/services/core/jobs/jobs-launcher/nhxclient"
 )
 
+func TestCollapseCarriageReturns(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want string
+	}{
+		{name: "plain line", line: "plain output", want: "plain output"},
+		{name: "empty line", line: "", want: ""},
+		{name: "progress redraws keep last state", line: "\rDownloading: 0%|    |\rDownloading: 50%|##  |\rDownloading: 100%|####|", want: "Downloading: 100%|####|"},
+		{name: "trailing carriage return keeps last text", line: "\rDownloading: 100%|####|\r", want: "Downloading: 100%|####|"},
+		{name: "text before the first redraw is dropped", line: "prefix\rfinal", want: "final"},
+		{name: "only carriage returns", line: "\r\r", want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := collapseCarriageReturns(test.line); got != test.want {
+				t.Fatalf("collapseCarriageReturns(%q) = %q, want %q", test.line, got, test.want)
+			}
+		})
+	}
+}
+
 func TestLogLevel(t *testing.T) {
 	tests := []struct {
 		name     string

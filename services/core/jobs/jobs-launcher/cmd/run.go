@@ -353,8 +353,14 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 		scanner := bufio.NewScanner(reader)
 		for scanner.Scan() {
 			line := scanner.Text()
-			fmt.Println(line)                                           // Print to console without any extra formatting, so it can be captured by stdout logging collectors
-			slog.Log(context.Background(), logLevel(line, level), line) // Submit structured log to OTEL pipeline within the platform
+			fmt.Println(line) // Print to console without any extra formatting, so it can be captured by stdout logging collectors
+			// Progress bars (tqdm, pip, git) redraw with \r and no newline, so one "line" can hold
+			// thousands of redraws. Keep only what a terminal would end up showing.
+			record := collapseCarriageReturns(line)
+			if record == "" && line != "" {
+				continue
+			}
+			slog.Log(context.Background(), logLevel(record, level), record) // Submit structured log to OTEL pipeline within the platform
 		}
 	}
 
@@ -395,6 +401,22 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 
 	logger.Printf("Process completed successfully.")
 	return exitCode, nil
+}
+
+// collapseCarriageReturns returns the last non-empty segment of a line that was redrawn with
+// carriage returns. Progress bars end each redraw with \r instead of \n, so the scanner hands us
+// every update concatenated into one line; only the final state is worth storing.
+func collapseCarriageReturns(line string) string {
+	if !strings.Contains(line, "\r") {
+		return line
+	}
+	segments := strings.Split(line, "\r")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i] != "" {
+			return segments[i]
+		}
+	}
+	return ""
 }
 
 // logLevel preserves an application's explicit textual level even when the
