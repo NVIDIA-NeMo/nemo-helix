@@ -48,7 +48,9 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
   } = useAgentChatSession(workspace, chatDeployment);
 
   const handleChatError = (error: Error) => {
-    if (!recoverFromError(error)) handleGenericError(error);
+    if (!recoverFromError(error)) {
+      handleGenericError(error);
+    }
   };
 
   return (
