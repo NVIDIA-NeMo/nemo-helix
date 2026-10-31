@@ -299,7 +299,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | clickhouse.auth.database | string | `"intake"` | ClickHouse database used by Intake. |
 | clickhouse.auth.existingSecret | string | `""` | Name of an existing Secret containing the ClickHouse password. If empty, the chart creates one. |
 | clickhouse.auth.existingSecretPasswordKey | string | `"password"` | Key in auth.existingSecret containing the ClickHouse password. |
-| clickhouse.auth.password | string | `nil` | ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password. |
+| clickhouse.auth.password | string | `""` | ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password and keeps it across upgrades. Editing that Secret later does not roll the API or ClickHouse; restart those workloads manually. |
 | clickhouse.auth.username | string | `"nemo"` | ClickHouse username used by Intake. |
 | clickhouse.enabled | bool | `true` | Whether to deploy the embedded ClickHouse. Set to false to use `externalClickhouse`. |
 | clickhouse.image.pullPolicy | string | `"IfNotPresent"` | ClickHouse image pull policy. |
