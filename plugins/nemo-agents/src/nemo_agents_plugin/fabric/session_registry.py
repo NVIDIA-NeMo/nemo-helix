@@ -24,6 +24,7 @@ class FabricRuntimeSession:
     last_accessed_at: float
     streaming_method: StreamingMethod = StreamingMethod.RELAY
     closing: bool = False
+    has_invoked: bool = False
     invocation_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
 
