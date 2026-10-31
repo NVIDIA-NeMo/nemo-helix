@@ -73,8 +73,8 @@ def main():
     # by attribute (e.g. master_config.dpo.seed). OmegaConf.to_container() returns
     # a plain dict, so build the model here — mirroring NeMo-RL's own run_dpo.py —
     # which validates the config up front and matches how the algorithm consumes
-    # it. Only the top level is a model: the sub-configs (policy/logger/... ) stay
-    # TypedDict dicts, so they are still accessed by subscript (config.policy["x"]).
+    # it. logger is a LoggerConfig model too. policy, data, and checkpointing stay
+    # TypedDicts, so those are still accessed by subscript (config.policy["x"]).
     config = MasterConfig(**cast(dict[str, Any], OmegaConf.to_container(cfg, resolve=True)))
     print("Applied CLI overrides")
 
@@ -83,8 +83,8 @@ def main():
     # full structure to stdout. model_fields is names-only — no values materialized.
     print(f"Config sections loaded: {sorted(type(config).model_fields)}")
 
-    config.logger["log_dir"] = get_next_experiment_dir(config.logger["log_dir"])
-    print(f"📊 Using log directory: {config.logger['log_dir']}")
+    config.logger.log_dir = get_next_experiment_dir(config.logger.log_dir)
+    print(f"📊 Using log directory: {config.logger.log_dir}")
     if config.checkpointing["enabled"]:
         print(f"📊 Using checkpoint directory: {config.checkpointing['checkpoint_dir']}")
 

@@ -329,7 +329,10 @@ networkPolicies:
   # -- Per-step ingress NetworkPolicies created by the jobs controller for steps that declare `network`, such as sandboxed GRPO training.
   # @default -- This object has the following default values for per-step ingress isolation.
   jobSteps:
-    # -- Opt in to per-step ingress NetworkPolicies. Off by default; set true to write jobs.executor_defaults step_network_policies_enabled, which lets the jobs controller create and delete those policies. The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag, including a platformConfig override, so enabling this needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
+    # -- Opt in to per-step ingress NetworkPolicies.
+    # --   Off by default; set true to write jobs.executor_defaults step_network_policies_enabled, which lets the jobs controller create and delete those policies.
+    # --   The ValidatingAdmissionPolicy that limits the controller to those policies is installed from that resolved flag,
+    # --   including a platformConfig override, so enabling this needs Kubernetes 1.30+ (or 1.28+ with the ValidatingAdmissionPolicy feature and v1beta1 API enabled) and permission to create cluster-scoped admission resources.
     enabled: false
     # -- TCP ports a job step may open to pods outside its own job, besides the generation range. The episode broker. Must include DEFAULT_BROKER_PORT.
     allowedIngressTcpPorts: [51234]

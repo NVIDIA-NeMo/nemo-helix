@@ -25,6 +25,7 @@ from nemo_automodel.recipes.llm.kd import KnowledgeDistillationRecipeForNextToke
 from nemo_automodel.recipes.llm.train_ft import TrainFinetuneRecipeForNextTokenPrediction
 from nemo_automodel.recipes.retrieval.train_bi_encoder import TrainBiEncoderRecipe
 from nemo_automodel.recipes.retrieval.train_cross_encoder import TrainCrossEncoderRecipe
+from nemo_automodel.recipes.vlm.finetune import FinetuneRecipeForVLM
 from nhx.automodel.app.constants import PAUSE_SIGNAL, SERVICE_NAME
 from nhx.automodel.app.jobs.training.schemas import TrainingRecipe
 from nhx.automodel.tasks.tqdm_logging import install_line_tqdm
@@ -534,6 +535,9 @@ def create_automodel_recipe(cfg: Any) -> AutomodelRecipeWrapper:
     elif recipe == TrainingRecipe.CROSS_ENCODER:
         logger.info("Compiled recipe is cross_encoder, using reranking recipe")
         base_recipe = TrainCrossEncoderRecipe(cfg)
+    elif recipe == TrainingRecipe.VLM_SFT:
+        logger.info("Compiled recipe is vlm_sft, using the vision-language fine-tune recipe")
+        base_recipe = FinetuneRecipeForVLM(cfg)
     elif _is_kd_config(cfg):
         logger.info("Detected Knowledge Distillation config, using KD recipe")
         base_recipe = KnowledgeDistillationRecipeForNextTokenPrediction(cfg)

@@ -184,7 +184,7 @@ ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 # --no-install-project installs dependencies but not nemo-rl itself; the root package is added
 # editable in a cheap step after the full-source COPY.
 #
-# Then drop ray's vendored aiohttp and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
+# Then drop ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
 RUN <<"EOF" bash -eu
 set -x
@@ -220,6 +220,7 @@ uv sync ${UV_SYNC_MODE} --extra vllm --extra nemo_gym --no-install-project "${SK
 uv sync ${UV_SYNC_MODE} --all-groups --no-install-project "${SKIP[@]}"
 
 find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -exec rm -rf {} + || true
+find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/yarl*" -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d \
     \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
