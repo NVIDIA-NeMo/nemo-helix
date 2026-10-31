@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nhx.intake.repository.clickhouse.evaluation_session import evaluation_sessions_sql
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository, ScoreRollup
@@ -99,20 +100,13 @@ def _evaluation_name_parameters(evaluation_names: list[str]) -> tuple[str, dict[
 
 
 def _scoped_sessions_sql(trace_index_table: str, evaluation_names_sql: str) -> str:
-    return f"""
-        SELECT
-            workspace,
-            evaluation_name,
-            session_id,
-            test_case_name,
-            latency_ms
-        FROM {trace_index_table} FINAL
-        WHERE workspace = %(workspace)s
-            AND is_deleted = 0
-            AND evaluation_name IN ({evaluation_names_sql})
-        ORDER BY root_started_at ASC, root_span_id ASC
-        LIMIT 1 BY workspace, session_id, evaluation_name
-    """
+    return evaluation_sessions_sql(
+        trace_index_table,
+        roots_where_sql=f"""workspace = %(workspace)s
+                    AND is_deleted = 0
+                    AND evaluation_name IN ({evaluation_names_sql})""",
+        mode="summary",
+    )
 
 
 def _run_counts_sql(trace_index_table: str, evaluation_names_sql: str) -> str:
@@ -175,7 +169,7 @@ def _score_rollups_sql(*, trace_index_table: str, evaluator_results_table: str, 
     """Test-case-weighted score distribution per (evaluation, evaluator).
 
     A pipeline of CTEs, each built by its own helper below — read top to bottom:
-      scoped_sessions    — the in-scope sessions (deduped)
+      scoped_sessions    — the in-scope sessions, one row each across all their roots
       session_scores     — stage 1: one value per (session, evaluator)
       test_case_sessions — attempts per test case (the fixed denominator)
       evaluators         — the evaluator axis of the per-test-case grid

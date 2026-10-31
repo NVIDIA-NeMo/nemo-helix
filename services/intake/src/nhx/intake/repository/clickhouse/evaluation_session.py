@@ -61,25 +61,19 @@ _MAX_METRIC_SORT_SESSIONS = 10_000
 
 @dataclass(frozen=True)
 class _SessionPageRef:
-    """One session's identity and complete ``trace_index`` sorting key."""
+    """One session's identity and the ``root_started_at`` range covering all of its roots."""
 
     session_id: str
-    trace_id: str
-    root_span_id: str
-    start_time_us: int
+    first_root_started_at_us: int
+    last_root_started_at_us: int
 
     @classmethod
     def from_row(cls, row: dict[str, Any]) -> _SessionPageRef:
         return cls(
             session_id=str(row["session_id"]),
-            trace_id=str(row["trace_id"]),
-            root_span_id=str(row["root_span_id"]),
-            start_time_us=int(row["start_time_us"]),
+            first_root_started_at_us=int(row["first_root_started_at_us"]),
+            last_root_started_at_us=int(row["last_root_started_at_us"]),
         )
-
-    @property
-    def storage_key(self) -> tuple[int, str, str]:
-        return self.start_time_us, self.trace_id, self.root_span_id
 
 
 class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
@@ -195,8 +189,83 @@ def _scoped_filter(*, test_case_name: str | None, status: SpanStatus | None) -> 
         clauses.append("test_case_name = %(test_case_name)s")
     if status is not None:
         parameters["status"] = status.value
-        clauses.append("root_status = %(status)s")
-    return "".join(f"\n            AND {clause}" for clause in clauses), parameters
+        clauses.append("root_span_status = %(status)s")
+    if not clauses:
+        return "", parameters
+    return "WHERE " + "\n            AND ".join(clauses), parameters
+
+
+_ROOT_ORDER = "(root_started_at, root_id)"
+
+
+def evaluation_sessions_sql(
+    trace_index_table: str,
+    *,
+    roots_where_sql: str,
+    mode: IntakeResponseMode,
+    sessions_where_sql: str = "",
+) -> str:
+    """One row per ``(workspace, evaluation_name, session_id)``, aggregated over all of the session's roots.
+
+    A multi-turn session has one root trace per turn. Identity, input and test case come from the first
+    root; output from the last. Timing and status follow ``ClickHouseSessionRepository``: earliest start,
+    latest end (NULL while any root is open), and the most severe root status. ``roots_where_sql`` filters
+    ``trace_index`` rows before grouping; ``sessions_where_sql`` filters the aggregated sessions.
+    """
+    select_columns = [
+        "workspace",
+        "evaluation_name",
+        "session_id",
+        f"argMin(root_test_case_name, {_ROOT_ORDER}) AS test_case_name",
+        f"argMin(root_trace_id, {_ROOT_ORDER}) AS trace_id",
+        f"argMin(root_id, {_ROOT_ORDER}) AS root_span_id",
+        "min(root_started_at) AS start_time",
+        "max(root_started_at) AS last_root_started_at",
+        "if(countIf(isNull(root_ended_at)) > 0, NULL, max(root_ended_at)) AS end_time",
+        (
+            "if(countIf(isNull(root_ended_at)) > 0, NULL, "
+            "toFloat64(dateDiff('millisecond', min(root_started_at), max(root_ended_at)))) AS latency_ms"
+        ),
+        """multiIf(
+                countIf(root_status = 'error') > 0, 'error',
+                countIf(root_status = 'cancelled') > 0, 'cancelled',
+                countIf(root_status != 'success') > 0, 'unknown',
+                'success'
+            ) AS root_span_status""",
+        text_select_for_mode(f"argMin(root_input, {_ROOT_ORDER})", alias="input", mode=mode),
+        text_select_for_mode(f"argMax(root_output, {_ROOT_ORDER})", alias="output", mode=mode),
+    ]
+    select_sql = ",\n                ".join(select_columns)
+    return f"""
+        SELECT *
+        FROM (
+            SELECT
+                {select_sql}
+            FROM (
+                SELECT
+                    workspace,
+                    evaluation_name,
+                    session_id,
+                    test_case_name AS root_test_case_name,
+                    trace_id AS root_trace_id,
+                    root_span_id AS root_id,
+                    root_started_at,
+                    root_ended_at,
+                    root_status,
+                    root_input,
+                    root_output
+                FROM {trace_index_table} FINAL
+                WHERE {roots_where_sql}
+            ) AS roots
+            GROUP BY workspace, evaluation_name, session_id
+        ) AS sessions
+        {sessions_where_sql}
+    """
+
+
+_EVALUATION_ROOTS_WHERE = """workspace = %(workspace)s
+                    AND is_deleted = 0
+                    AND evaluation_name = %(evaluation_name)s"""
 
 
 def _scoped_sessions_sql(
@@ -205,36 +274,12 @@ def _scoped_sessions_sql(
     scoped_filter_sql: str,
     mode: IntakeResponseMode,
 ) -> str:
-    select_columns = [
-        "workspace",
-        "evaluation_name",
-        "session_id",
-        "test_case_name",
-        "trace_id",
-        "root_span_id",
-        "root_started_at AS start_time",
-        "root_ended_at AS end_time",
-        "latency_ms",
-        "root_status AS root_span_status",
-    ]
-    select_columns.extend(
-        (
-            text_select_for_mode("root_input", alias="input", mode=mode),
-            text_select_for_mode("root_output", alias="output", mode=mode),
-        )
+    return evaluation_sessions_sql(
+        trace_index_table,
+        roots_where_sql=_EVALUATION_ROOTS_WHERE,
+        sessions_where_sql=scoped_filter_sql,
+        mode=mode,
     )
-    select_sql = ",\n            ".join(select_columns)
-    return f"""
-        SELECT
-            {select_sql}
-        FROM {trace_index_table} FINAL
-        WHERE workspace = %(workspace)s
-            AND is_deleted = 0
-            AND evaluation_name = %(evaluation_name)s
-            {scoped_filter_sql}
-        ORDER BY root_started_at ASC, root_span_id ASC
-        LIMIT 1 BY workspace, session_id, evaluation_name
-    """
 
 
 def _count_sql(
@@ -293,9 +338,8 @@ def _page_refs_sql(
         )
         SELECT
             s.session_id,
-            s.trace_id,
-            s.root_span_id,
-            toUnixTimestamp64Micro(s.start_time) AS start_time_us
+            toUnixTimestamp64Micro(s.start_time) AS first_root_started_at_us,
+            toUnixTimestamp64Micro(s.last_root_started_at) AS last_root_started_at_us
         FROM scoped_sessions AS s
         ORDER BY {order_by}
         LIMIT %(limit)s OFFSET %(offset)s
@@ -354,9 +398,8 @@ def _metric_sort_page_refs_sql(
         )
         SELECT
             s.session_id,
-            s.trace_id,
-            s.root_span_id,
-            toUnixTimestamp64Micro(s.start_time) AS start_time_us
+            toUnixTimestamp64Micro(s.start_time) AS first_root_started_at_us,
+            toUnixTimestamp64Micro(s.last_root_started_at) AS last_root_started_at_us
         FROM scoped_sessions AS s
         LEFT JOIN pre_page_metrics AS pm
             ON s.workspace = pm.workspace AND s.session_id = pm.session_id
@@ -373,25 +416,15 @@ def _hydrate_by_refs_sql(
     mode: IntakeResponseMode,
 ) -> str:
     """Hydrate payloads, span metrics, and evaluator scores for one selected page."""
-    select_columns = [
-        "workspace",
-        "evaluation_name",
-        "session_id",
-        "test_case_name",
-        "trace_id",
-        "root_span_id",
-        "root_started_at AS start_time",
-        "root_ended_at AS end_time",
-        "latency_ms",
-        "root_status AS root_span_status",
-    ]
-    select_columns.extend(
-        (
-            text_select_for_mode("root_input", alias="input", mode=mode),
-            text_select_for_mode("root_output", alias="output", mode=mode),
-        )
+    page_sessions_sql = evaluation_sessions_sql(
+        trace_index_table,
+        roots_where_sql=f"""{_EVALUATION_ROOTS_WHERE}
+                    -- The session predicate engages the bloom index; the time range engages the primary key.
+                    AND session_id IN %(page_session_ids)s
+                    AND root_started_at >= fromUnixTimestamp64Micro(%(page_started_at_min_us)s)
+                    AND root_started_at <= fromUnixTimestamp64Micro(%(page_started_at_max_us)s)""",
+        mode=mode,
     )
-    select_sql = ",\n            ".join(select_columns)
 
     page_spans = current_spans_sql(
         spans_table,
@@ -401,24 +434,7 @@ def _hydrate_by_refs_sql(
     return f"""
         WITH
         page_sessions AS (
-            SELECT
-                {select_sql}
-            FROM {trace_index_table} FINAL
-            WHERE workspace = %(workspace)s
-                AND is_deleted = 0
-                AND evaluation_name = %(evaluation_name)s
-                -- The flat predicates engage the bloom indexes; the tuple preserves
-                -- exact trace_index identity. The time range engages the primary key.
-                AND session_id IN %(page_session_ids)s
-                AND trace_id IN %(page_trace_ids)s
-                AND root_started_at >= fromUnixTimestamp64Micro(%(page_started_at_min_us)s)
-                AND root_started_at <= fromUnixTimestamp64Micro(%(page_started_at_max_us)s)
-                AND (
-                    toUnixTimestamp64Micro(root_started_at),
-                    trace_id,
-                    root_span_id
-                ) IN %(page_storage_keys)s
-            LIMIT 1 BY workspace, session_id, evaluation_name
+            {page_sessions_sql}
         ),
         current_page_spans AS (
             {page_spans}
@@ -492,13 +508,10 @@ def _hydrate_by_refs_sql(
 
 
 def _page_ref_parameters(refs: list[_SessionPageRef]) -> dict[str, object]:
-    start_times_us = [ref.start_time_us for ref in refs]
     return {
         "page_session_ids": [ref.session_id for ref in refs],
-        "page_trace_ids": [ref.trace_id for ref in refs],
-        "page_started_at_min_us": min(start_times_us),
-        "page_started_at_max_us": max(start_times_us),
-        "page_storage_keys": [ref.storage_key for ref in refs],
+        "page_started_at_min_us": min(ref.first_root_started_at_us for ref in refs),
+        "page_started_at_max_us": max(ref.last_root_started_at_us for ref in refs),
     }
 
 
