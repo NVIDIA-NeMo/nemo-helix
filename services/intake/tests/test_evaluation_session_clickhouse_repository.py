@@ -61,12 +61,16 @@ def _session_record(session_id: str) -> dict[str, Any]:
     }
 
 
-def _page_ref(session_id: str, *, start_time_us: int = 1767225600000000) -> dict[str, Any]:
+def _page_ref(
+    session_id: str,
+    *,
+    first_root_started_at_us: int = 1767225600000000,
+    last_root_started_at_us: int = 1767225605000000,
+) -> dict[str, Any]:
     return {
         "session_id": session_id,
-        "trace_id": f"trace-{session_id}",
-        "root_span_id": f"root-{session_id}",
-        "start_time_us": start_time_us,
+        "first_root_started_at_us": first_root_started_at_us,
+        "last_root_started_at_us": last_root_started_at_us,
     }
 
 
@@ -117,14 +121,40 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
     assert executor.queries[1].parameters["offset"] == 5
     assert "'' AS input" in executor.queries[1].statement
     assert "'' AS output" in executor.queries[1].statement
-    assert "substringUTF8(root_input, 1, %(payload_char_limit)s) AS input" in executor.queries[2].statement
+    assert (
+        "substringUTF8(argMin(root_input, (root_started_at, root_id)), 1, %(payload_char_limit)s) AS input"
+        in executor.queries[2].statement
+    )
     assert "FROM spans AS span_versions FINAL" in executor.queries[2].statement
     assert "argMax(span_versions." not in executor.queries[2].statement
     assert executor.queries[2].parameters["page_session_ids"] == ["session-a"]
-    assert executor.queries[2].parameters["page_trace_ids"] == ["trace-session-a"]
-    assert executor.queries[2].parameters["page_storage_keys"] == [
-        (1767225600000000, "trace-session-a", "root-session-a")
-    ]
+    assert executor.queries[2].parameters["page_started_at_min_us"] == 1767225600000000
+    assert executor.queries[2].parameters["page_started_at_max_us"] == 1767225605000000
+
+
+@pytest.mark.asyncio
+async def test_every_query_aggregates_sessions_across_all_their_roots() -> None:
+    executor = _Executor([[{"count()": 1}], [_page_ref("session-a")], [_session_record("session-a")]])
+
+    await _repository(executor).list_sessions(
+        workspace="default",
+        evaluation_name="evaluation-a",
+        status=SpanStatus.ERROR,
+        page=1,
+        page_size=5,
+        mode="detailed",
+    )
+
+    for query in executor.queries:
+        assert "LIMIT 1 BY" not in query.statement
+        assert "GROUP BY workspace, evaluation_name, session_id" in query.statement
+        assert "min(root_started_at) AS start_time" in query.statement
+        assert "if(countIf(isNull(root_ended_at)) > 0, NULL, max(root_ended_at)) AS end_time" in query.statement
+        assert "countIf(root_status = 'error') > 0, 'error'" in query.statement
+    for query in executor.queries[:2]:
+        assert "root_span_status = %(status)s" in query.statement
+        assert "root_status = %(status)s" not in query.statement
+    assert "argMax(root_output, (root_started_at, root_id)) AS output" in executor.queries[2].statement
 
 
 @pytest.mark.asyncio
