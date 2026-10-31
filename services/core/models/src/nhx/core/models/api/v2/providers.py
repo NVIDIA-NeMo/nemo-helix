@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -85,7 +86,14 @@ async def list_providers(
 )
 async def create_provider(
     workspace: str,
-    request: CreateModelProviderRequest,
+    request: Annotated[
+        CreateModelProviderRequest,
+        Body(
+            openapi_examples={
+                "provider": {"value": {"name": "my-provider", "host_url": "https://integrate.api.nvidia.com/v1"}}
+            }
+        ),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),
@@ -138,7 +146,10 @@ async def create_provider(
 async def upsert_provider(
     workspace: str,
     name: str,
-    request: UpsertModelProviderRequest,
+    request: Annotated[
+        UpsertModelProviderRequest,
+        Body(openapi_examples={"provider": {"value": {"host_url": "https://integrate.api.nvidia.com/v1"}}}),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),

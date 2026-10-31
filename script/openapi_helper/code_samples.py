@@ -12,8 +12,10 @@ Fern generates its request snippets from the operation alone. Three shapes come 
   ``/apis/auth/authenticate`` needs an ``Authorization`` header and the OTLP logs upload needs a
   JSON body, but neither appears in the spec, so the snippets send neither.
 
-For these operations this module writes explicit samples in all eight languages the API reference
-shows. Operations that already carry ``x-codeSamples`` (authored on the route) are left alone, and
+For these operations this module writes explicit samples in all eight custom language tabs and
+an SDK override for Fern's default cURL tab. Binary downloads use bytes rather than a JSON decoder;
+raw uploads have representative nonempty content. ATIF's empty 201 response is handled explicitly.
+Operations that already carry ``x-codeSamples`` (authored on the route) are left alone, and
 the output depends only on the spec, so regeneration is idempotent.
 """
 
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
@@ -66,12 +69,25 @@ class SampleRequest:
     headers: dict[str, str] = field(default_factory=dict)
     body: str | None = None
     reads_body: bool = True
+    binary_response: bool = False
 
 
 # Requests whose headers or body the spec cannot express (see the module docstring).
 _EXPLICIT: dict[tuple[str, str], dict[str, Any]] = {
     ("get", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
     ("post", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/atif"): {
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "agent": {"name": "my-agent", "version": "1.0"},
+                # Omitting the optional timestamp uses ingest time, not a stale literal.
+                "steps": [{"step_id": 1, "source": "user", "message": "Hello!"}],
+            }
+        ),
+        "reads_body": False,
+    },
     ("post", "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"): {
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(_OTLP_LOGS_BODY, separators=(",", ":")),
@@ -92,6 +108,8 @@ def _path_value(path: str, param: str) -> str:
     """A readable placeholder for a path parameter, named after the collection it indexes."""
     if param == "workspace":
         return "default"
+    if param == "path:path":
+        return "example.txt"
     segments = path.split("/")
     index = segments.index("{" + param + "}")
     collection = segments[index - 1] if index > 0 else param
@@ -130,7 +148,15 @@ def sample_request(spec: dict, path: str, method: str, operation: dict) -> Sampl
         return None
     explicit = _EXPLICIT.get((method, path))
     if explicit is not None:
-        return SampleRequest(method.upper(), _url(path), reads_body=not _is_bodyless(operation), **explicit)
+        return SampleRequest(method.upper(), _url(path), **{"reads_body": not _is_bodyless(operation), **explicit})
+    content = _resolve(spec, operation.get("requestBody", {})).get("content", {})
+    if "application/octet-stream" in content:
+        return SampleRequest(
+            method.upper(), _url(path), headers={"Content-Type": "application/octet-stream"}, body="Hello, Helix!\n"
+        )
+    responses = [v for k, v in operation.get("responses", {}).items() if str(k).startswith("2")]
+    if responses and all("application/octet-stream" in v.get("content", {}) for v in responses):
+        return SampleRequest(method.upper(), _url(path), binary_response=True)
     form = _required_form_body(spec, operation)
     if form is not None:
         return SampleRequest(
@@ -160,7 +186,10 @@ def _python(r: SampleRequest) -> str:
         lines.append(f"payload = {_q(r.body)}")
         args.append("data=payload")
     lines += ["", f"response = requests.request({_q(r.method)}, {', '.join(args)})", "response.raise_for_status()"]
-    lines.append("print(response.json())" if r.reads_body else "print(response.status_code)  # no response body")
+    if r.binary_response:
+        lines.append("print(response.content)  # raw file bytes, not JSON")
+    else:
+        lines.append("print(response.json())" if r.reads_body else "print(response.status_code)  # no response body")
     return "\n".join(lines) + "\n"
 
 
@@ -172,7 +201,11 @@ def _javascript(r: SampleRequest) -> str:
         lines.append(f"  body: {_q(r.body)},")
     lines += ["});", "if (!response.ok) throw new Error(`HTTP ${response.status}`);"]
     lines.append(
-        "console.log(await response.json());" if r.reads_body else "console.log(response.status); // no response body"
+        "console.log(await response.arrayBuffer());"
+        if r.binary_response
+        else "console.log(await response.json());"
+        if r.reads_body
+        else "console.log(response.status); // no response body"
     )
     return "\n".join(lines) + "\n"
 
@@ -330,6 +363,16 @@ _RENDERERS = {
 }
 
 
+def _curl(r: SampleRequest) -> str:
+    args = ["curl --fail-with-body", "--request " + shlex.quote(r.method), shlex.quote(r.url)]
+    args += ["--header " + shlex.quote(f"{k}: {v}") for k, v in r.headers.items()]
+    if r.body is not None:
+        args.append("--data-binary " + shlex.quote(r.body))
+    if r.binary_response:
+        args.append("--output example.txt")
+    return " \\\n  ".join(args) + "\n"
+
+
 def render_samples(request: SampleRequest) -> list[dict[str, str]]:
     return [{"lang": lang, "source": _RENDERERS[lang](request)} for lang in LANGUAGES]
 
@@ -344,4 +387,9 @@ def add_code_samples(spec: dict) -> dict:
             request = sample_request(spec, path, method, operation)
             if request is not None:
                 operation["x-codeSamples"] = render_samples(request)
+                # Redocly x-codeSamples creates custom tabs. Only an SDK sample overrides
+                # Fern's default cURL tab; another custom `curl` tab does not replace it.
+                operation.setdefault("x-fern-examples", []).append(
+                    {"code-samples": [{"sdk": "curl", "code": _curl(request)}]}
+                )
     return spec

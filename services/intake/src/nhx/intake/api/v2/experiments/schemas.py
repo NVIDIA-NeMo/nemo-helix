@@ -98,7 +98,14 @@ class ExperimentUpdateRequest(ExperimentRequest):
 class EvaluationRequest(BaseModel):
     """Request body for creating an Evaluation."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {"name": "my-evaluation", "dataset_name": "my-dataset", "experiment_ids": ["YOUR_EXPERIMENT_ID"]}
+            ]
+        },
+    )
 
     name: str = Field(description="Producer-supplied, workspace-unique evaluation id.")
     experiment_ids: list[str] = Field(

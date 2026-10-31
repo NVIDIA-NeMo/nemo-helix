@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Documentation default only: do not change generated client connection defaults.
+servers:
+  - url: http://localhost:8080
+    description: Local deployment; replace with your configured deployment URL.
