@@ -326,16 +326,18 @@ class DuckDBLogRepository:
         """Return what a terminal would show for a message redrawn with ``\\r``.
 
         Progress bars (tqdm, pip, git) redraw with ``\\r`` and no newline, so one stored message can
-        hold hundreds of redraws (30 KB). Only the last non-empty segment is worth returning. This runs
-        on the returned page only, after ordering, row hashes and cursors are computed from the stored
-        text, so pagination is unaffected.
+        hold hundreds of redraws (30 KB). Within each line only the last non-empty redraw is worth
+        returning. ``\\r\\n`` is a line break, not a redraw, and lines are kept, so multi-line messages such
+        as tracebacks are returned intact. This runs on the returned page only, after ordering, row
+        hashes and cursors are computed from the stored text, so pagination is unaffected.
         """
         if "\r" not in message:
             return message
-        for segment in reversed(message.split("\r")):
-            if segment:
-                return segment
-        return ""
+        collapsed_lines = []
+        for line in message.replace("\r\n", "\n").split("\n"):
+            redraws = [segment for segment in line.split("\r") if segment]
+            collapsed_lines.append(redraws[-1] if redraws else "")
+        return "\n".join(collapsed_lines)
 
     @classmethod
     def _platform_logs(cls, rows: list[QueriedLogEntry]) -> list[HelixJobLog]:

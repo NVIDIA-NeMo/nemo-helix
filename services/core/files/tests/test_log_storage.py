@@ -617,6 +617,27 @@ async def test_query_logs_collapses_carriage_return_progress_updates(log_storage
     assert [log.message for log in older.data] == ["starting", final_bar]
 
 
+async def test_query_logs_keeps_multiline_messages_with_crlf(log_storage, local_storage):
+    """Tracebacks and other multi-line messages are returned in full, even with CRLF line breaks."""
+    traceback = 'Traceback (most recent call last):\r\n  File "train.py", line 7, in <module>\r\nValueError: boom'
+    entry = LogEntry(
+        workspace="test-workspace",
+        job="job-123",
+        job_attempt="attempt-1",
+        job_step="step1",
+        job_task="task1",
+        log_message=traceback,
+        timestamp=datetime(2024, 1, 1, 12, 0, 0),
+    )
+    await log_storage.insert_logs(local_storage, [entry])
+
+    page = await log_storage.query_logs(local_storage, filters={"job": "job-123"}, page_size=10)
+
+    assert [log.message for log in page.data] == [
+        'Traceback (most recent call last):\n  File "train.py", line 7, in <module>\nValueError: boom'
+    ]
+
+
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
@@ -626,6 +647,11 @@ async def test_query_logs_collapses_carriage_return_progress_updates(log_storage
         ("\rfinal\r", "final"),
         ("prefix\rfinal", "final"),
         ("\r\r", ""),
+        ("line one\nline two", "line one\nline two"),
+        ("Traceback:\r\n  File x\r\nValueError: boom", "Traceback:\n  File x\nValueError: boom"),
+        ("step 1\nprogress 10%\rprogress 100%\nstep 2", "step 1\nprogress 100%\nstep 2"),
+        ("a\r\n\r\nb\r\n", "a\n\nb\n"),
+        ("\rbar 1\rbar 2\r\nValueError: boom", "bar 2\nValueError: boom"),
     ],
 )
 def test_collapse_carriage_returns(message, expected):
