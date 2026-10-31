@@ -262,7 +262,7 @@ EOF
 # prefetch_venvs.py names them. This layer does not run that script: importing
 # it needs the rest of the tree, and the full source COPY is below so a
 # source-only bump reuses these syncs.
-#   AutomodelPolicyWorker -> automodel
+#   DTensorPolicyWorkerV2 -> automodel (nemo-automodel[moe,vlm]; no media extras)
 #   MegatronPolicyWorker  -> mcore + nemo_gym (not the quant worker)
 #   VllmGenerationWorker, VllmAsyncGenerationWorker -> vllm + nemo_gym
 #   SyncRolloutActor      -> vllm

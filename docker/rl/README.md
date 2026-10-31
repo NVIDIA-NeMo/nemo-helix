@@ -132,15 +132,14 @@ resolve the same interpreter as their parent.
 | Algorithm | Actor | Extra / venv | Notable contents |
 |---|---|---|---|
 | DPO | `AutomodelPolicyWorker` (policy training) | **`automodel`** | `nemo-automodel`, Transformer-Engine |
-| GRPO | `AutomodelPolicyWorker` (policy training) | **`automodel`** | `nemo-automodel`, Transformer-Engine, `megatron-fsdp` |
+| GRPO | `AutomodelPolicyWorker` (policy training) | **`automodel`** | `nemo-automodel[moe,vlm]`, Transformer-Engine, `megatron-fsdp` |
 | GRPO | `MegatronPolicyWorker` (policy training) | **`mcore`** | `megatron-bridge`, `megatron-core`, Transformer-Engine |
 | GRPO | `VllmGenerationWorker`, `SyncRolloutActor` | **`vllm`** | `vllm`, `deep_ep`, `deep_gemm`, `flashinfer` |
 | GRPO (Gym) | `NemoGym` | **`nemo_gym`** | NeMo-Gym workspace member |
 
 GRPO and DPO both compile `policy.automodel_cfg` for `AutomodelPolicyWorker` and the
 `automodel` extra. `training.policy_backend` has one value, `automodel`. A stored or
-submitted `policy_backend: dtensor` is read as `automodel`. This pin rejects a
-`dtensor_cfg` block and an `_v2` key.
+submitted `policy_backend: dtensor` is read as `automodel`.
 
 `MegatronPolicyWorker` is prefetched, and the compiler still emits an inert
 `megatron_cfg`. `policy_backend` cannot select it.
