@@ -26,6 +26,7 @@ from nhx.common.auth.token_resolver import ResolvedBearerToken
 from nhx.common.config import AuthConfig
 from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
 from nhx.common.entities import EntityConflictError
+from nhx.common.errors.validation_exception_handler import register_validation_exception_handler
 from nhx.core.auth.api.v2.access_keys.endpoints import get_access_key_issuer, get_workspaces_client, router
 from nhx.core.auth.app.access_key_credentials import AccessKeyCredentialAdapter
 from nhx.core.auth.app.access_keys import (
@@ -306,6 +307,7 @@ def client(tmp_path, access_key_workspaces_client):
     )
 
     app = FastAPI()
+    register_validation_exception_handler(app)
     app.include_router(router)
     registry = InMemoryAccessKeyRegistry()
     app.dependency_overrides[get_access_key_registry] = lambda: registry
@@ -2350,8 +2352,8 @@ def test_with_auth_off_no_caller_counts_as_a_service(client):
 def test_values_a_token_cant_carry_are_refused(client, value):
     """Python's JSON parser accepts these, but a token carrying them isn't valid JSON or UTF-8.
 
-    FastAPI's default 422 echoes the input, which it then can't render, so without the router's own handling this
-    would be a 500.
+    FastAPI's default 422 echoes the input, which it then can't render, so without the platform's validation handler
+    this would be a 500.
     """
     with _acting_as(_for_alice("evals")):
         response = TestClient(client.app, raise_server_exceptions=False).post(
