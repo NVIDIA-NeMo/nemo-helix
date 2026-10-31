@@ -1,0 +1,65 @@
+{
+  "sources": [
+    {
+      "name": "codex",
+      "version": "0.144.4",
+      "license": "Apache-2.0",
+      "url": "https://github.com/openai/codex/archive/refs/tags/rust-v0.144.4.tar.gz",
+      "sha256": "14c173d78f0c22da73e4ca1a205836b525e1dd9fe7db9b4ddea62214b2cc5009",
+      "covers": [
+        "python:openai-codex-cli-bin@0.144.4"
+      ]
+    },
+    {
+      "name": "sqlite-vec",
+      "version": "0.1.9",
+      "license": "MIT OR Apache-2.0",
+      "url": "https://github.com/asg017/sqlite-vec/archive/refs/tags/v0.1.9.tar.gz",
+      "sha256": "9823e737d9934dcbe85dff75d3fca81018a9beee803d70fa77b16faab5d61dc9",
+      "covers": [
+        "python:sqlite-vec@0.1.9"
+      ]
+    },
+    {
+      "name": "flatbuffers",
+      "version": "25.12.19",
+      "license": "Apache-2.0",
+      "url": "https://github.com/google/flatbuffers/archive/refs/tags/v25.12.19.tar.gz",
+      "sha256": "f81c3162b1046fe8b84b9a0dbdd383e24fdbcf88583b9cb6028f90d04d90696a",
+      "covers": [
+        "python:flatbuffers@25.12.19"
+      ]
+    },
+    {
+      "name": "onnxruntime",
+      "version": "1.28.0",
+      "license": "MIT",
+      "url": "https://github.com/microsoft/onnxruntime/archive/refs/tags/v1.28.0.tar.gz",
+      "sha256": "9616cbdbbfcb1420b3261cd280a047d74ab0a249825e577b0e2dd310e22f6b83",
+      "covers": [
+        "python:onnxruntime@1.28.0"
+      ]
+    },
+    {
+      "name": "duckdb-httpfs",
+      "version": "827222fb45a043a7a852d1f7aae46901492a3cda",
+      "license": "MIT",
+      "url": "https://github.com/duckdb/duckdb-httpfs/archive/827222fb45a043a7a852d1f7aae46901492a3cda.tar.gz",
+      "sha256": "c8ce44784aa728edca26dd5891ab7f30a2f6240531e2c4fe2002bf3bd637b332"
+    },
+    {
+      "name": "duckdb-aws",
+      "version": "efa54a990e16c976576685dd4134d2478cf5a574",
+      "license": "MIT",
+      "url": "https://github.com/duckdb/duckdb-aws/archive/efa54a990e16c976576685dd4134d2478cf5a574.tar.gz",
+      "sha256": "099a1e36443208550f5e370e1b263f0ab644530d8cccf6ee90be27cbe3a3b0d6"
+    },
+    {
+      "name": "opa",
+      "version": "1.8.0",
+      "license": "Apache-2.0",
+      "url": "https://github.com/open-policy-agent/opa/archive/refs/tags/v1.8.0.tar.gz",
+      "sha256": "739e949f8646c1a6552d3222154f72d66c6b1c8f3373382199b1f368a3efb592"
+    }
+  ]
+}

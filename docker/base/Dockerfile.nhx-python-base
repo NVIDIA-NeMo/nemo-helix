@@ -18,6 +18,7 @@ COPY docker/scripts/collect-apt-sources.sh \
     docker/scripts/collect-cargo-crate-sources.py \
     docker/scripts/collect-cpython-source.py \
     docker/scripts/collect-go-module-sources.py \
+    docker/scripts/collect-npm-sources.py \
     docker/scripts/collect-pinned-sources.py \
     docker/scripts/collect-python-sdists.py \
     docker/scripts/collect-workspace-sdists.py \
