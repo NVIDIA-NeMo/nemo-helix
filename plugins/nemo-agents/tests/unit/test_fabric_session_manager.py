@@ -715,7 +715,7 @@ async def test_stream_session_marks_runtime_as_having_history(
         base_dir=tmp_path,
         session_registry=registry,
     )
-    monkeypatch.setattr(session_manager, "stream_fabric_runtime", lambda runtime, request: object())
+    monkeypatch.setattr(session_manager, "stream_fabric_runtime", lambda runtime, request, streaming_method: object())
 
     async with manager.stream_session(session, FabricInvocationRequest(input="hello")):
         pass
