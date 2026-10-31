@@ -13,6 +13,8 @@ from nhx.core.inference_gateway.api.provider_request import render_auth_header
     ("fmt", "expected"),
     [
         (None, ("Authorization", "Bearer s3cret")),
+        ("X-Api-Key: <auth_secret>", ("X-Api-Key", "s3cret")),
+        ("X-Custom: pre-<auth_secret>-post", ("X-Custom", "pre-s3cret-post")),
         ("X-Api-Key: {{ auth_secret }}", ("X-Api-Key", "s3cret")),
         ("X-Api-Key: {{auth_secret}}", ("X-Api-Key", "s3cret")),
         ("X-Custom: pre-{{ auth_secret }}-post", ("X-Custom", "pre-s3cret-post")),
@@ -35,6 +37,10 @@ def test_secret_containing_template_syntax_is_inserted_literally() -> None:
         "X-Api-Key: {{ other }}",
         "X-Api-Key: static",
         "X-Api-Key: {{ auth_secret }} {{ auth_secret }}",
+        "X-Api-Key: <auth_secret> {{ auth_secret }}",
+        "X-Api-Key: <auth_secret> <auth_secret>",
+        "X-Api-Key: {{\n auth_secret }}",
+        "X-Api-Key: {{ auth_secret\r\n}}",
     ],
 )
 def test_rejects_stored_hostile_or_malformed_format(fmt: str) -> None:

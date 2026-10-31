@@ -365,37 +365,41 @@ class ModelEntityBaseModel(BaseModel, ABC):
 # ============================================================================
 
 _AUTH_HEADER_FORMAT_DESCRIPTION = (
-    "Jinja2 template string controlling how the API key secret is sent to the upstream. "
-    "Must contain exactly one variable named `auth_secret`, which is substituted with the "
-    "resolved secret value at request time. "
-    "Example: `'X-Api-Key: {{ auth_secret }}'`. "
-    "If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`."
+    "Literal header format controlling how the API key secret is sent to the upstream. "
+    "Must contain exactly one `<auth_secret>` placeholder, which is replaced with the "
+    "resolved secret value at request time. It is plain text, not a template: no `{` or `}` "
+    "characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. "
+    "Example: `'X-Api-Key: <auth_secret>'`. "
+    "If not set, defaults to `'Authorization: Bearer <auth_secret>'`."
 )
 
 
 # ``auth_header_format`` is NOT a template engine input. It must be literal text around exactly one
-# ``{{ auth_secret }}`` placeholder; no other ``{``/``}`` characters (and no CR/LF) are allowed. The
-# header is built by plain string substitution, so user input is never evaluated.
-_AUTH_HEADER_FORMAT_RE = re.compile(r"([^{}\r\n]*)\{\{\s*auth_secret\s*\}\}([^{}\r\n]*)")
+# ``<auth_secret>`` placeholder (the legacy ``{{ auth_secret }}`` spelling is still accepted for
+# providers stored before ``<auth_secret>`` existed); no other ``{``/``}`` characters (and no CR/LF)
+# are allowed. The header is built by plain string substitution, so user input is never evaluated.
+_AUTH_SECRET_PLACEHOLDER_RE = re.compile(r"<auth_secret>|\{\{[ \t]*auth_secret[ \t]*\}\}")
+_AUTH_HEADER_FORBIDDEN_CHARS = frozenset("{}\r\n")
 
 
 def _validate_auth_header_format(v: str | None) -> str | None:
     """Validate an ``auth_header_format`` value.
 
-    The value is literal text with exactly one ``{{ auth_secret }}`` placeholder (optional
-    whitespace inside the braces) and no other template syntax. It is never evaluated by a template
+    The value is literal text with exactly one ``<auth_secret>`` placeholder (or the legacy
+    ``{{ auth_secret }}``, with optional whitespace inside the braces) and no other template syntax. It is never evaluated by a template
     engine; the proxy substitutes the secret with plain string concatenation. The result must also
     have the ``<Header-Name>: <Header-Value>`` shape the IGW proxy splits on ``": "``.
     """
     if v is None:
         return v
-    match = _AUTH_HEADER_FORMAT_RE.fullmatch(v)
-    if match is None:
+    # Splitting on the placeholder yields [prefix, suffix] iff it appears exactly once.
+    parts = _AUTH_SECRET_PLACEHOLDER_RE.split(v)
+    if len(parts) != 2 or any(_AUTH_HEADER_FORBIDDEN_CHARS.intersection(part) for part in parts):
         raise ValueError(
-            "auth_header_format must contain exactly one '{{ auth_secret }}' placeholder "
-            "and no other template syntax ('{' or '}' characters or line breaks)"
+            "auth_header_format must contain exactly one placeholder: '<auth_secret>' "
+            "(or the legacy '{{ auth_secret }}'), and no '{' or '}' characters or line breaks otherwise"
         )
-    rendered = match.group(1) + "__AUTH_SECRET__" + match.group(2)
+    rendered = parts[0] + "__AUTH_SECRET__" + parts[1]
     header_name, sep, header_value = rendered.partition(": ")
     if not sep or not header_name.strip() or not header_value.strip():
         raise ValueError("auth_header_format must render to '<Header-Name>: <Header-Value>'")
@@ -517,11 +521,9 @@ class ModelProvider(ModelEntityBaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
-
-    @field_validator("auth_header_format")
-    @classmethod
-    def validate_auth_header_format(cls, v: str | None) -> str | None:
-        return _validate_auth_header_format(v)
+    # Deliberately no ``auth_header_format`` validator on this response model: providers stored before
+    # the format was restricted must still load for get/list. The request models validate on write and
+    # the gateway re-validates at use time.
 
 
 class ModelProviderSort(StrEnum):

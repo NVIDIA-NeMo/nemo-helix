@@ -13645,11 +13645,13 @@ components:
           maxLength: 1000
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
       type: object
@@ -20163,11 +20165,13 @@ components:
           description: Auth context captured at provider creation.
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
       type: object
@@ -23840,11 +23844,13 @@ components:
           maxLength: 1000
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
       type: object

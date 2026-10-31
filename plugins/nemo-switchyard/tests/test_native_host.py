@@ -615,3 +615,15 @@ async def test_judge_transport_maps_timeout() -> None:
         await IgwJudgeTransport(middleware, timeout=0.01).complete("ws/judge", {}, {})
 
     assert exc.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_judge_transport_maps_invalid_provider_auth_format() -> None:
+    middleware = SwitchyardMiddleware()
+    middleware.get_inference_url_and_model = MagicMock(side_effect=ValueError("Provider auth_header_format is invalid"))
+
+    with pytest.raises(InferenceMiddlewareError) as exc:
+        await IgwJudgeTransport(middleware).complete("ws/judge", {}, {})
+
+    assert exc.value.status_code == 422
+    assert "invalid configuration" in str(exc.value)

@@ -79,7 +79,7 @@ def create_providers(
         str | None,
         typer.Option(
             "--auth-header-format",
-            help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
+            help="Literal header format controlling how the API key secret is sent to the upstream. Must contain exactly one `<auth_secret>` placeholder, which is replaced with the resolved secret value at request time. It is plain text, not a template: no `{` or `}` characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example: `'X-Api-Key: <auth_secret>'`. If not set, defaults to `'Authorization: Bearer <auth_secret>'`.",
         ),
     ] = None,
     default_extra_body: Annotated[
@@ -387,7 +387,7 @@ def update_providers(
         str | None,
         typer.Option(
             "--auth-header-format",
-            help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
+            help="Literal header format controlling how the API key secret is sent to the upstream. Must contain exactly one `<auth_secret>` placeholder, which is replaced with the resolved secret value at request time. It is plain text, not a template: no `{` or `}` characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example: `'X-Api-Key: <auth_secret>'`. If not set, defaults to `'Authorization: Bearer <auth_secret>'`.",
         ),
     ] = None,
     default_extra_body: Annotated[
