@@ -33,6 +33,24 @@ from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_eg
 
 logger = logging.getLogger(__name__)
 
+GATEWAY_CA = "/etc/nemo-helix-tls/gateway-ca.pem"
+CA_BUNDLE = "/etc/nemo-helix-tls/ca-bundle.pem"
+# The task's own bundle, then Debian/Ubuntu/Alpine, RHEL/Fedora, SUSE, the OpenSSL default some minimal images
+# keep, and last Python's certifi, the bundle Python uses when SSL_CERT_FILE is unset.
+TRUST_GATEWAY_CA_SCRIPT = """\
+set -e
+system=
+certifi=$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null || true)
+for candidate in "$TASK_BUNDLE" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+/etc/ssl/ca-bundle.pem /etc/ssl/cert.pem "$certifi"; do
+  if [ -s "$candidate" ]; then system=$candidate; break; fi
+done
+{ if [ -n "$system" ]; then cat "$system"; echo; fi; cat "$GATEWAY_CA"; } > "$CA_BUNDLE"
+chmod 755 "${CA_BUNDLE%/*}"
+chmod 644 "$GATEWAY_CA" "$CA_BUNDLE"
+printf %s "$system"
+"""
+
 
 def network_rules(rules: list[EgressRule]) -> list[Any]:
     """The SDK's rule objects; imported here because only the dispatcher image installs the SDK."""
@@ -53,11 +71,13 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         agent_resource_overrides: dict[str, int] | None = None,
         sandbox_resource_defaults: dict[str, int] | None = None,
         agent_setup_hosts: list[str] | None = None,
+        gateway_ca_file: str | None = None,
         **kwargs: Any,
     ) -> None:
         # BaseEnvironment.__init__ may validate against the policy, so set the channel first.
         self._agent_channel_hosts = tuple(agent_channel_hosts or ())
         self._agent_setup_hosts = tuple(agent_setup_hosts or ())
+        self._gateway_ca_file = gateway_ca_file
         if agent_resource_overrides or sandbox_resource_defaults:
             # Harbor's factory passes these as keywords. A copy: the task's own config must keep task.toml's
             # values, since an inherited separate verifier's config is a copy of it, made after this one.
@@ -76,6 +96,36 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                     ", ".join(f"{field}={getattr(config, field)}" for field in defaulted),
                 )
         super().__init__(*args, **kwargs)
+
+    @override
+    async def start(self, force_build: bool) -> None:
+        await super().start(force_build)
+        if self._gateway_ca_file is not None:
+            await self._trust_gateway_ca(self._gateway_ca_file)
+
+    async def _trust_gateway_ca(self, ca_file: str) -> None:
+        """Make every later command trust ``ca_file`` alongside the roots it trusted already."""
+        await self.upload_file(ca_file, GATEWAY_CA)
+        result = await self._exec_cleanup(
+            TRUST_GATEWAY_CA_SCRIPT,
+            GATEWAY_CA=GATEWAY_CA,
+            CA_BUNDLE=CA_BUNDLE,
+            TASK_BUNDLE=self._persistent_env.get("SSL_CERT_FILE", ""),
+        )
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"Could not install the gateway CA in {self.session_id}'s sandbox (exit {result.return_code}): "
+                f"{(result.stderr or result.stdout or '').strip()[-2000:]}"
+            )
+        if not (result.stdout or "").strip():
+            self.logger.warning(
+                "%s's sandbox image has no CA bundle, so it trusts only the gateway CA. Install ca-certificates in "
+                "the image so it can reach other HTTPS hosts.",
+                self.session_id,
+            )
+        self._persistent_env.update(
+            SSL_CERT_FILE=CA_BUNDLE, REQUESTS_CA_BUNDLE=CA_BUNDLE, NODE_EXTRA_CA_CERTS=GATEWAY_CA
+        )
 
     @override
     def egress_policy(self) -> EgressPolicy:

@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 from harbor.models.task.config import NetworkMode, TaskConfig
 from harbor.models.trial.config import AgentConfig as TrialAgentConfig
 from harbor.trial.network_policy import resolve_agent_phase_policy
+from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
@@ -24,6 +25,7 @@ from nemo_evals.source_authorization import SourceReadAuthorizer, authorize_sour
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.adapter import AsyncHelixClient, client_from_platform
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, client_certificate_authority_from_env
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable
 from nemo_helix_plugin.models.client import AsyncModelsClient
@@ -67,6 +69,8 @@ async def check_gateway_model(
 
 #: The OpenSandbox environment setting that lists the hosts a no-network sandbox may still reach.
 AGENT_CHANNEL_HOSTS_KWARG = "agent_channel_hosts"
+#: The OpenSandbox environment setting naming the CA bundle its sandbox trusts for the gateway.
+GATEWAY_CA_FILE_KWARG = "gateway_ca_file"
 
 
 def sandbox_agent_channel(environment: HarborEnvironmentConfig | None) -> list[str]:
@@ -78,8 +82,9 @@ def sandbox_agent_channel(environment: HarborEnvironmentConfig | None) -> list[s
 def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) -> str:
     """The platform origin an agent reaches from its task container.
 
-    ``sandboxed`` is a Kubernetes task Job's OpenSandbox sandbox, which reaches the in-cluster API by the name its
-    ``agent_channel`` allows; otherwise Harbor's Docker task container, which reaches a loopback platform through
+    ``sandboxed`` is a Kubernetes task Job's OpenSandbox sandbox. It reaches the in-cluster API, or the agents
+    plugin's ``deployments.gateway_url_override`` when that is set, by the name its ``agent_channel`` allows.
+    Otherwise the task runs in Harbor's Docker task container, which reaches a loopback platform through
     ``host.docker.internal``.
     """
     base_url = get_base_url()
@@ -88,7 +93,14 @@ def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) 
     internal_base_url = get_internal_base_url()
     if internal_base_url is None and urlsplit(base_url).hostname not in LOOPBACK_ADDRESSES:
         internal_base_url = base_url
-    origin = urlsplit(resolve_agent_gateway_url(base_url, mode="k8s", internal_base_url=internal_base_url))
+    origin = urlsplit(
+        resolve_agent_gateway_url(
+            base_url,
+            mode="k8s",
+            override=AgentsConfig.get().deployments.gateway_url_override,
+            internal_base_url=internal_base_url,
+        )
+    )
     name = agent_channel_name(origin.hostname or "", agent_channel)
     if name is None or name == origin.hostname:
         return origin.geturl()
@@ -115,6 +127,17 @@ def point_agent_at_gateway_model(
     return config.model_copy(
         update={"env_vars": {**config.env_vars, env.base_url_env: route + env.route_suffix}, "env_secrets": env_secrets}
     )
+
+
+def trust_the_gateway_ca(config: HarborRuntimeConfig, origin: str) -> HarborRuntimeConfig:
+    """``config`` whose sandbox trusts the CA this job trusts for the platform, when ``origin`` is HTTPS."""
+    ca_file = client_certificate_authority_from_env(
+        cert_file_envvars=(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "SSL_CERT_FILE")
+    )
+    if config.environment is None or urlsplit(origin).scheme != "https" or ca_file is None:
+        return config
+    kwargs = {**config.environment.kwargs, GATEWAY_CA_FILE_KWARG: ca_file}
+    return config.model_copy(update={"environment": config.environment.model_copy(update={"kwargs": kwargs})})
 
 
 def add_gateway_key_placeholder(environment: list[EnvironmentVariable], target: object) -> list[EnvironmentVariable]:
