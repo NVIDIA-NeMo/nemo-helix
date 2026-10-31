@@ -227,11 +227,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_keys(tmp_path, monkeypatch, lo
 
 
 def test_lora_selects_the_v2_dtensor_worker(tmp_path, monkeypatch):
-    """LoRA is implemented only in DTensorPolicyWorkerV2.
-
-    lm_policy.py asserts "LoRA is not supported for DTensorPolicyWorker V1" when it
-    sees an enabled lora_cfg without _v2, so the two must be emitted together.
-    """
+    """LoRA is implemented on DTensorPolicyWorkerV2, so an enabled lora_cfg is emitted with ``_v2``."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     dtensor_cfg = _compile(tmp_path, lora=True)["policy"]["dtensor_cfg"]
 

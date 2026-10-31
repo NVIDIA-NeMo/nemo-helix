@@ -38,8 +38,7 @@ class ParallelismParams(RlSchema):
     expert_parallel_size: int = Field(
         default=1,
         gt=0,
-        description="Expert parallel size for MoE models. GRPO only, and implemented only by "
-        "policy_backend='automodel'.",
+        description="Expert parallel size for MoE models. GRPO only.",
     )
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
 
@@ -313,13 +312,12 @@ class GRPOTraining(_TrainingBase):
         default=None,
         description="LoRA hyperparameters. Defaults applied when finetuning_type is lora.",
     )
-    policy_backend: PolicyBackend | None = Field(
-        default=None,
-        description="NeMo-RL policy worker that trains the model. `lora` requires `automodel` "
-        "(NeMo Automodel + Transformer Engine, Hopper or newer; the only backend with expert "
-        "parallelism and automodel_kwargs). `all_weights` defaults to `dtensor` (stock HuggingFace "
-        "on PyTorch FSDP2, also the pre-Hopper option) and may be set to `automodel` for a "
-        "consolidated HuggingFace export. Omit it to get the default for the finetuning type.",
+    policy_backend: PolicyBackend = Field(
+        default=PolicyBackend.AUTOMODEL,
+        description="NeMo-RL policy worker that trains the model. The only value is `automodel` "
+        "(`DTensorPolicyWorkerV2`, the automodel extra), which is also the default for both LoRA "
+        "and full weights. A stored or submitted `dtensor` is read as `automodel`: full-weight "
+        "jobs saved that value, and it is not a separate worker.",
     )
     v4_compatible: bool = Field(
         default=True,
@@ -512,7 +510,7 @@ class GRPOTraining(_TrainingBase):
     # --- Per-architecture backend settings ---
     automodel_kwargs: dict[str, Any] | None = Field(
         default=None,
-        description="Passed to policy.dtensor_cfg.automodel_kwargs; requires policy_backend='automodel'. "
+        description="Passed to policy.dtensor_cfg.automodel_kwargs. "
         "{'force_hf': true} loads the stock HuggingFace modules; a {'backend': {...}} block picks "
         "the Transformer-Engine / DeepEP MoE implementation. Unset means Automodel auto-detects.",
     )
@@ -574,6 +572,18 @@ class GRPOTraining(_TrainingBase):
 
     @model_validator(mode="before")
     @classmethod
+    def _stored_dtensor_is_automodel(cls, data: Any) -> Any:
+        """Backwards compatibility for jobs saved with ``policy_backend: dtensor``.
+
+        Full-weight GRPO used to persist that value, and list, get, and submit
+        all validate this model. Read it as ``automodel``.
+        """
+        if isinstance(data, dict) and data.get("policy_backend") == "dtensor":
+            return {**data, "policy_backend": PolicyBackend.AUTOMODEL}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
     def _lora_learning_rate_default(cls, data: Any) -> Any:
         """Default a LoRA run's learning rate before ``min_learning_rate`` is checked against it."""
         if isinstance(data, dict) and data.get("finetuning_type") == "lora" and "learning_rate" not in data:
@@ -605,33 +615,6 @@ class GRPOTraining(_TrainingBase):
                 "tensor parallelism produces. Leave lora.use_triton unset to let the compiler pick, "
                 "set it false, or drop to tensor_parallel_size=1."
             )
-        return self
-
-    @model_validator(mode="after")
-    def _policy_backend_defaults_to_the_one_that_supports_the_request(self) -> Self:
-        """Follow ``finetuning_type`` when no backend was named; an explicit value is left alone."""
-        if self.policy_backend is None:
-            self.policy_backend = PolicyBackend.AUTOMODEL if self.finetuning_type == "lora" else PolicyBackend.DTENSOR
-        return self
-
-    @model_validator(mode="after")
-    def _policy_backend_supports_requested_features(self) -> Self:
-        """Reject pairings the backend does not support, before the job reaches a GPU.
-
-        ``dtensor`` asserts ``lora_cfg.enabled is False`` and ignores expert parallelism
-        and ``automodel_kwargs``. ``automodel`` trains LoRA and full weights.
-        """
-        if self.policy_backend is not PolicyBackend.DTENSOR:
-            return self
-        conflicts = []
-        if self.finetuning_type == "lora":
-            conflicts.append("finetuning_type='lora'")
-        if self.parallelism.expert_parallel_size > 1:
-            conflicts.append(f"parallelism.expert_parallel_size={self.parallelism.expert_parallel_size}")
-        if self.automodel_kwargs:
-            conflicts.append("automodel_kwargs")
-        if conflicts:
-            raise ValueError(f"{', '.join(conflicts)} require policy_backend='automodel'.")
         return self
 
     @model_validator(mode="after")
@@ -741,7 +724,7 @@ class GRPOTraining(_TrainingBase):
 
     @model_validator(mode="after")
     def _sequence_packing_rejects_context_parallel(self) -> Self:
-        """DTensorPolicyWorker rejects packing under CP; fail the request instead of the GPU job."""
+        """DTensorPolicyWorkerV2 rejects packing under CP; fail the request instead of the GPU job."""
         if self.batching_strategy == BatchingStrategy.SEQUENCE_PACKING and self.parallelism.context_parallel_size > 1:
             raise ValueError(
                 "batching_strategy='sequence_packing' is not supported with "

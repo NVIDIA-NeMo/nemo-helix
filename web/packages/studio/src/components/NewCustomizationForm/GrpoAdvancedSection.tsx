@@ -16,10 +16,7 @@ import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import { GRPO_SPEC_DEFAULTS, specSliderProps } from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
-const POLICY_BACKEND_ITEMS = [
-  { value: PolicyBackend.automodel, label: 'Automodel' },
-  { value: PolicyBackend.dtensor, label: 'DTensor' },
-];
+const POLICY_BACKEND_ITEMS = [{ value: PolicyBackend.automodel, label: 'Automodel' }];
 
 const BATCHING_STRATEGY_ITEMS = [
   { value: BatchingStrategy.dynamic, label: 'Dynamic' },
@@ -219,7 +216,7 @@ export const GrpoAdvancedSection = () => {
             formFieldProps={{
               slotLabel: 'Policy Backend',
               slotInfo:
-                'NeMo-RL policy worker that trains the model. Automodel is the only backend supporting LoRA, expert parallelism and automodel kwargs.',
+                'NeMo-RL policy worker that trains the model. Automodel is DTensorPolicyWorkerV2, for LoRA and full weights.',
             }}
             items={POLICY_BACKEND_ITEMS}
             disabled={disabled}

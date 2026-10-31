@@ -161,7 +161,6 @@ def test_rl_dpo_smoke(
 # internet is platform-wide, and turning it on stops forcing the wheels formats offline, so
 # the native-v1 formats (which install from an index) run in a second phase with it on.
 GRPO_POLICIES = {
-    "dt-fw": {"policy_backend": "dtensor", "finetuning_type": "all_weights"},
     "am-fw": {"policy_backend": "automodel", "finetuning_type": "all_weights"},
     "am-lr": {"policy_backend": "automodel", "finetuning_type": "lora"},
 }

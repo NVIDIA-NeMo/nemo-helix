@@ -207,10 +207,11 @@ def compile_dpo_config(
         "max_total_sequence_length": customizer_config.model.max_seq_length,
         "precision": precision,
         "offload_optimizer_for_logprob": False,
-        # Training runs on the DTensor backend. We propagate tensor / sequence /
+        # Training runs on DTensorPolicyWorkerV2. We propagate tensor / sequence /
         # context parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).
         "dtensor_cfg": {
+            "_v2": True,
             "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
             "enabled": True,
             "cpu_offload": False,

@@ -182,7 +182,7 @@ and the cluster.
 | # | Decide | From | Rule |
 |---|---|---|---|
 | 1 | `parallelism` | GPUs available; model size | Start 1 node × N GPUs, `tensor_parallel_size` 1. Raise TP only when weights do not fit — TP is a memory tool, not a speed one |
-| 2 | `policy_backend` | `finetuning_type` | Leave unset to set the default `lora` → `automodel` , `all_weights` → `dtensor`. |
+| 2 | `policy_backend` | `automodel` | The only value is `automodel` (`DTensorPolicyWorkerV2`) for LoRA and full weights. |
 | 3 | `max_seq_length` | prompt + expected answer length in the dataset | Measure it: tokenize a sample and take ~p99, round up. Over-provisioning here costs generation time on every rollout |
 | 4 | `num_generations_per_prompt` | how noisy the reward is | `8` is the standard start. Below `4` the group advantage is too noisy to learn from; above `16` you pay linearly in rollouts for diminishing signal |
 | 5 | `batch_size` | steps 1 and 4 | Must satisfy **both** divisibility rules below |

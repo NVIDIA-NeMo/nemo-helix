@@ -20,7 +20,7 @@ from nhx.customization_common.service.constants import (
 )
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.rl.app.constants import DEFAULT_BROKER_PORT, NHX_JOB_STORAGE_PVC_ENVVAR
-from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, PolicyBackend, TrainingStepConfig
+from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, TrainingStepConfig
 from nhx.rl.entities.values import FinetuningType
 from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _adapt_precision,
@@ -81,14 +81,12 @@ def _build_dtensor_cfg(
 ) -> dict[str, Any]:
     """Map parallelism and backend settings onto NeMo-RL's policy.dtensor_cfg.
 
-    ``_v2`` follows ``parallelism.policy_backend`` and nothing else. The V2-only features
-    (LoRA, expert parallelism, ``automodel_kwargs``) are rejected against ``dtensor`` in
-    :class:`GRPOTraining` rather than silently upgraded here.
+    ``_v2`` is always true. ``DTensorPolicyWorkerV2`` is the only DTensor worker, and
+    NeMo-RL rejects an explicit ``_v2: false``.
     """
     parallelism = customizer_config.parallelism
     expert_parallel_size = parallelism.expert_parallel_size
     automodel_kwargs = grpo_hp.automodel_kwargs
-    use_v2 = parallelism.policy_backend is PolicyBackend.AUTOMODEL
 
     dtensor_cfg: dict[str, Any] = {
         "enabled": True,
@@ -125,8 +123,7 @@ def _build_dtensor_cfg(
         dtensor_cfg["automodel_kwargs"] = dict(automodel_kwargs)
     if lora_cfg["enabled"]:
         dtensor_cfg["lora_cfg"] = lora_cfg
-    if use_v2:
-        dtensor_cfg["_v2"] = True
+    dtensor_cfg["_v2"] = True
     return dtensor_cfg
 
 
@@ -159,7 +156,7 @@ def _build_batching_config(
     budgets = {"train_mb_tokens": train_mb_tokens, "logprob_mb_tokens": train_mb_tokens}
 
     if strategy == BatchingStrategy.SEQUENCE_PACKING:
-        # DTensorPolicyWorker rejects packing under context parallelism. It also rejects it
+        # DTensorPolicyWorkerV2 rejects packing under context parallelism. It also rejects it
         # for VLM and reward models, neither of which this backend compiles.
         if customizer_config.parallelism.context_parallel_size > 1:
             raise ValueError(
@@ -629,10 +626,9 @@ def compile_grpo_config(
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
 
-    # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
+    # DTensorPolicyWorkerV2 reads these from policy.dtensor_cfg.checkpoint. The top-level
     # checkpointing config rejects them. "every" consolidates each save, which is
     # what publication needs: the kept checkpoint is the best one, not always the last.
-    # Both policy backends use that worker, so both need the block.
     cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
         "model_save_format": "safetensors",
         "save_consolidated": "every",

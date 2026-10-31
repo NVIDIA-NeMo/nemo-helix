@@ -28,15 +28,10 @@ class TrainingBackend(str, Enum):
 class PolicyBackend(str, Enum):
     """Which NeMo-RL policy worker trains the model.
 
-    The value picks the worker class, which picks the Ray actor's venv and kernels.
-    Asking for a capability the backend lacks is a validation error, not a silent upgrade.
+    ``automodel`` selects ``DTensorPolicyWorkerV2`` and the ``automodel`` extra.
+    ``MegatronPolicyWorker`` is prefetched, but this field does not select it.
     """
 
-    # _v2: false -> DTensorPolicyWorker. Stock HuggingFace + PyTorch FSDP2, no
-    # Transformer Engine (so pre-Hopper works), no LoRA, no expert parallelism.
-    DTENSOR = "dtensor"
-    # _v2: true -> DTensorPolicyWorkerV2. Automodel rebuilds the model on TE.
-    # Superset of DTENSOR; upstream NeMo-RL's reference configs default to it.
     AUTOMODEL = "automodel"
     # megatron_cfg.enabled -> MegatronPolicyWorker. The image builds the `mcore`
     # extra and prefetches the venv, but the compiler still emits an inert
@@ -266,7 +261,7 @@ class TrainingStepConfig(BaseModel):
         sequence_parallel: bool = False
         activation_checkpointing: bool = False
         # GRPO only; default matches GRPOTraining so a hand-built config compiles the
-        # same YAML. DPO ignores it -- its dtensor_cfg is a literal with no ``_v2``.
+        # same YAML. DPO ignores the field and still writes ``dtensor_cfg._v2: true``.
         policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL
         # Merged over the platform's own dtensor_cfg.env_vars.
         env_vars: dict[str, str] | None = None

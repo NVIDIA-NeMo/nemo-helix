@@ -99,7 +99,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 |-------|---------|-------|
 | `num_generations_per_prompt` | `8` | Group size for relative advantages. |
 | `num_prompts_per_step` | `null` | Derived from `batch_size / num_generations_per_prompt` when omitted. `num_prompts_per_step × num_generations_per_prompt` must be a multiple of `batch_size` (enforced by `validate_for_training`), so prefer a `num_generations_per_prompt` that divides `batch_size`. |
-| `automodel_kwargs` | `null` | Passed to `policy.dtensor_cfg.automodel_kwargs`. **Requires `training.policy_backend: "automodel"`** for either LoRA or full-weight GRPO; under `"dtensor"` it is rejected at submit rather than ignored. `{"force_hf": true}` loads stock HuggingFace modules when a model's custom Automodel backbone is not compatible with the parallelizer; a `{"backend": {...}}` block picks the Transformer-Engine / DeepEP MoE implementation. |
+| `automodel_kwargs` | `null` | Passed to `policy.dtensor_cfg.automodel_kwargs`. `{"force_hf": true}` loads stock HuggingFace modules when a model's custom Automodel backbone is not compatible with the parallelizer; a `{"backend": {...}}` block picks the Transformer-Engine / DeepEP MoE implementation. |
 | `router_aux_loss_coef` | `null` | MoE router auxiliary-loss coefficient, applied as a **top-level** HuggingFace config override. Set `0.0` for RL on a MoE model — the aux load-balancing loss is a pretraining regularizer and adds a gradient term unrelated to the reward. Models that nest their config need `hf_config_overrides` instead; a top-level key the model does not read is absorbed silently, leaving the aux loss on. |
 | `hf_config_overrides` | `null` | Passed to NeMo-RL's `policy.hf_config_overrides` verbatim, which forwards it to the training model as HuggingFace config kwargs and to vLLM as `hf_overrides`. Nesting is preserved, so this reaches models that namespace their config — Qwen3.5 reads the router coefficient under `text_config`, i.e. `{"text_config": {"router_aux_loss_coef": 0.0}}`. Setting `router_aux_loss_coef` here *and* as its own field is rejected at submit time. |
 | `vllm_tensor_parallel_size` | `null` | Tensor parallelism for the rollout engine alone. Defaults to `min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node)`. Set it when the model needs several GPUs to hold inference weights but you want the policy trained at a different tensor-parallel size. |
@@ -120,20 +120,11 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 
 ### `policy_backend` — which worker trains the model (GRPO only)
 
-Lives under `training`, a **sibling of `parallelism`** and not a field on it. The value picks the NeMo-RL policy worker, which picks the Ray actor's venv and kernels.
+Lives under `training`, a **sibling of `parallelism`** and not a field on it. The only value is `automodel`, which selects `DTensorPolicyWorkerV2` and the `automodel` extra. LoRA and full weights both use that worker. The field defaults to `automodel`. A stored or submitted `dtensor` is read as `automodel`: full-weight jobs saved that value, and it is not a separate worker.
 
-**Leave `policy_backend` unset to get the default for each `finetuning_type`.** LoRA requires `automodel`. Full-weight defaults to `dtensor` and may be set to `automodel` when you want a consolidated HuggingFace export or expert parallelism for a MoE model.
+`megatron` is not selectable. The image builds `MegatronPolicyWorker`, but the compiler still emits an inert `megatron_cfg`.
 
-| `finetuning_type` | Default backend | Worker | Notes |
-|---|---|---|---|
-| `"lora"` | `"automodel"` | `DTensorPolicyWorkerV2` (`_v2: true`) | Required pairing. Also the only backend with `expert_parallel_size > 1` and `automodel_kwargs`. Needs Transformer Engine, so **Hopper or newer** |
-| `"all_weights"` | `"dtensor"` | `DTensorPolicyWorker` | Stock HuggingFace + PyTorch FSDP2, no Transformer Engine — also the **pre-Hopper** option. Set `policy_backend: "automodel"` to train full weights on V2. MoE models using expert parallelism require `automodel`; `dtensor` rejects `expert_parallel_size > 1`. |
-
-`dtensor` plus LoRA / expert parallelism / `automodel_kwargs` is **rejected at submit**: the worker does not implement them; left to NeMo-RL, LoRA dies in a Ray worker and the other two are ignored silently. Every conflict is listed at once.
-
-Pre-Hopper GPUs must keep the default `dtensor` backend. On Hopper or newer, switch to `automodel` only when you need its consolidated export or expert parallelism. `megatron` is not selectable: the image builds the extra, but the compiler still emits an inert `megatron_cfg`.
-
-`v4_compatible` (`GRPOTraining.v4_compatible`, default `true`) is the compatibility control for that Automodel full-weight export. Automodel otherwise writes a transformers-v5 `config.json` that the platform's vLLM cannot load, so the compiler keeps the base checkpoint's v4 `config.json` on the published model and writes the in-memory v5 config beside it as `config.v5.json`. Set it `false` to export the v5 file as `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to opt out. The field has no effect on `dtensor` full-weight jobs or LoRA adapters.
+`v4_compatible` (`GRPOTraining.v4_compatible`, default `true`) is the compatibility control for the full-weight export. Automodel otherwise writes a transformers-v5 `config.json` that the platform's vLLM cannot load, so the compiler keeps the base checkpoint's v4 `config.json` on the published model and writes the in-memory v5 config beside it as `config.v5.json`. Set it `false` to export the v5 file as `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to opt out. The field is written on every GRPO job and has no effect on LoRA adapters.
 
 ```json
 {
@@ -208,7 +199,7 @@ The last two default to `true` on this platform, where the underlying library de
 - Omitting `lora` while asking for `finetuning_type: "lora"` is fine: defaults are filled in.
 - `lora_merged` is rejected at the schema level, so a merged checkpoint is not reachable from a GRPO job. To serve merged weights, train full-weight instead.
 
-**The backend follows `training.policy_backend`, and `_v2: true` follows that field and nothing else.** Left unset it resolves from `finetuning_type`: `lora` gets `automodel`, `all_weights` gets `dtensor`. `dtensor` plus LoRA is **rejected at submit**. `automodel` plus `all_weights` is allowed. Note the consequence for comparisons: a LoRA run and a default full-weight run use **different workers**, so their results are not directly comparable.
+LoRA and full-weight GRPO both train on `DTensorPolicyWorkerV2`. A LoRA run and a full-weight run use the same worker.
 
 ### Using a GRPO adapter
 
@@ -227,7 +218,7 @@ Full-weight GRPO instead registers a new **model** entity, which does need its o
 
 ### `parallelism`
 
-Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (GRPO only; **implemented only by `policy_backend: "automodel"`** — a value above `1` under `"dtensor"` is rejected at submit, not silently upgraded). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NHX_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
+Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (GRPO only). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NHX_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
 
 ### Known limitation: `max_new_tokens` does not reach the agent
 
