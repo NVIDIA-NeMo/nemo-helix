@@ -5,16 +5,22 @@
 
 import asyncio
 import functools
+import gc
 import json
 import os
 import shutil
 import stat
 import subprocess
 import sys
+import threading
 import time
+import zlib
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from dulwich.errors import ApplyDeltaError, ChecksumMismatch
 from dulwich.object_store import MemoryObjectStore
 from dulwich.objects import Blob, Tree
 from nhx.common.api.common import SecretRef
@@ -111,6 +117,13 @@ def _executable(path: Path, body: str) -> str:
 
 def _fake_ssh(directory: Path) -> str:
     return _executable(directory / "fake-ssh", f"#!{sys.executable}\n{_FAKE_SSH}")
+
+
+def _recording_ssh(directory: Path, received: Path) -> str:
+    run = 'os.execvpe("sh", ["sh", "-c", command], env)'
+    assert run in _FAKE_SSH
+    recording = _FAKE_SSH.replace(run, f'os.execvpe("sh", ["sh", "-c", command + " | tee -a {received}"], env)')
+    return _executable(directory / "recording-ssh", f"#!{sys.executable}\n{recording}")
 
 
 def _config(url: str, **overrides) -> GitStorageConfig:
@@ -406,8 +419,16 @@ class TestProcessGroups:
         await stop_process_group(proc)
         assert marker.exists()
 
+    async def test_a_reaped_process_is_not_signalled(self, monkeypatch):
+        proc = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+        proc.wait()
+        signalled: list[int] = []
+        monkeypatch.setattr(git_backend.os, "killpg", lambda pid, _sig: signalled.append(pid))
+        await stop_process_group(proc)
+        assert signalled == []
+
     @pytest.fixture
-    def hung_ssh(self, tmp_path, monkeypatch) -> tuple[str, list[subprocess.Popen[bytes]]]:
+    def started_ssh(self, monkeypatch) -> list[subprocess.Popen[bytes]]:
         started: list[subprocess.Popen[bytes]] = []
         run_command = SessionSSHVendor.run_command
 
@@ -417,10 +438,22 @@ class TestProcessGroups:
             return wrapper
 
         monkeypatch.setattr(SessionSSHVendor, "run_command", recording)
-        return _executable(tmp_path / "hung-ssh", "#!/bin/sh\nsleep 30 & sleep 30\n"), started
+        return started
 
-    async def test_a_timeout_stops_ssh_and_its_children(self, remote, tmp_path, hung_ssh):
+    @pytest.fixture
+    def hung_ssh(self, tmp_path, started_ssh) -> tuple[str, list[subprocess.Popen[bytes]]]:
+        return _executable(tmp_path / "hung-ssh", "#!/bin/sh\nsleep 30 & sleep 30\n"), started_ssh
+
+    async def test_a_timeout_stops_ssh_and_its_children(self, remote, tmp_path, hung_ssh, monkeypatch):
         ssh, started = hung_ssh
+        stop = SessionSSHVendor.stop
+
+        async def stop_once_ssh_runs(self):
+            while not started:
+                await asyncio.sleep(0.01)
+            await stop(self)
+
+        monkeypatch.setattr(SessionSSHVendor, "stop", stop_once_ssh_runs)
         impl = _impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=ssh)
         impl.timeout_seconds = 0.5
         began = time.monotonic()
@@ -451,6 +484,104 @@ class TestProcessGroups:
             await _impl(
                 _config(remote["url"]), tmp_path / "cache", ssh_binary=str(tmp_path / "no-ssh")
             ).resolve_config()
+
+    async def test_a_stopped_vendor_starts_no_ssh(self, tmp_path):
+        vendor = SessionSSHVendor({})
+        await vendor.stop()
+        with pytest.raises(GitUnavailableError, match="stopped"):
+            vendor.run_command("host.example", b"git-upload-pack '/r'", ssh_command=_fake_ssh(tmp_path))
+        assert vendor.processes == []
+
+    async def test_a_timeout_before_ssh_starts_keeps_it_from_starting(self, remote, tmp_path, hung_ssh, monkeypatch):
+        ssh, started = hung_ssh
+        stopped = threading.Event()
+        run_command = SessionSSHVendor.run_command
+        stop = SessionSSHVendor.stop
+
+        def after_stop(self, *args, **kwargs):
+            stopped.wait(10)
+            return run_command(self, *args, **kwargs)
+
+        async def stop_and_signal(self):
+            await stop(self)
+            stopped.set()
+
+        monkeypatch.setattr(SessionSSHVendor, "run_command", after_stop)
+        monkeypatch.setattr(SessionSSHVendor, "stop", stop_and_signal)
+        impl = _impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=ssh)
+        impl.timeout_seconds = 0.2
+        with pytest.raises(GitUnavailableError, match="timed out"):
+            await asyncio.wait_for(impl.resolve_config(), 10)
+        assert started == []
+
+    async def test_a_failed_handshake_closes_the_ssh_pipes(self, remote, tmp_path, started_ssh):
+        refusing = _executable(
+            tmp_path / "refusing-ssh", "#!/bin/sh\necho 'git@h: Permission denied (publickey).' >&2\nexit 255\n"
+        )
+        gc.disable()
+        try:
+            with pytest.raises(GitAccessError):
+                await _impl(_config(remote["url"]), tmp_path / "cache", ssh_binary=refusing).resolve_config()
+            assert started_ssh
+            assert all(pipe is not None and pipe.closed for proc in started_ssh for pipe in (proc.stdin, proc.stdout))
+        finally:
+            gc.enable()
+
+
+@pytest.fixture
+def occupy_remote_threads(monkeypatch) -> Iterator[Callable[[], threading.Event]]:
+    release = threading.Event()
+    pools: list[ThreadPoolExecutor] = []
+
+    def occupy() -> threading.Event:
+        pool = ThreadPoolExecutor(max_workers=1)
+        pool.submit(release.wait)
+        pools.append(pool)
+        monkeypatch.setattr(git_backend, "_REMOTE_POOL", pool)
+        return release
+
+    yield occupy
+    release.set()
+    for pool in pools:
+        pool.shutdown()
+
+
+class TestGitThreads:
+    async def test_the_deadline_starts_when_the_work_does(self, tmp_path, occupy_remote_threads):
+        release = occupy_remote_threads()
+        impl = GitStorageImpl(_config("ssh://localhost/x"), SECRETS, cache_root=tmp_path)
+        impl.timeout_seconds = 0.2
+        call = asyncio.create_task(impl._call(lambda: "done", "x", SessionSSHVendor({})))
+        await asyncio.sleep(0.5)
+        release.set()
+        assert await asyncio.wait_for(call, 10) == "done"
+
+    async def test_work_cancelled_while_waiting_for_a_thread_never_runs(self, tmp_path, occupy_remote_threads):
+        release = occupy_remote_threads()
+        ran = threading.Event()
+        impl = GitStorageImpl(_config("ssh://localhost/x"), SECRETS, cache_root=tmp_path)
+        call = asyncio.create_task(impl._call(ran.set, "x", SessionSSHVendor({})))
+        await asyncio.sleep(0)
+        call.cancel()
+        try:
+            done, _pending = await asyncio.wait({call}, timeout=5)
+        finally:
+            release.set()
+        await asyncio.to_thread(git_backend._REMOTE_POOL.shutdown)
+        assert call in done and call.cancelled()
+        assert not ran.is_set()
+
+    async def test_reading_a_fetched_file_does_not_wait_for_remote_calls(self, remote, tmp_path, occupy_remote_threads):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        await impl.list_files()
+        release = occupy_remote_threads()
+        read = asyncio.create_task(_read(impl, "README.md"))
+        try:
+            done, _pending = await asyncio.wait({read}, timeout=10)
+        finally:
+            release.set()
+        assert read in done
+        assert await read == b"changed\n"
 
 
 class TestRefResolution:
@@ -559,6 +690,28 @@ class TestReads:
         tree.add(b"bad-\xff.txt", 0o100644, blob.id)
         store.add_objects([(blob, None), (tree, None)])
         assert [path for path, _blob in _regular_files(store, tree.id)] == ["ok.txt"]
+
+    def test_tree_listing_keeps_every_mode_git_reads_as_a_regular_file(self):
+        store = MemoryObjectStore()
+        blob = Blob.from_string(b"x")
+        tree = Tree()
+        for name, mode in [
+            (b"644", 0o100644),
+            (b"755", 0o100755),
+            (b"664", 0o100664),
+            (b"775", 0o100775),
+            (b"link", 0o120000),
+            (b"submodule", 0o160000),
+        ]:
+            tree.add(name, mode, blob.id)
+        store.add_objects([(blob, None), (tree, None)])
+        assert sorted(path for path, _blob in _regular_files(store, tree.id)) == ["644", "664", "755", "775"]
+
+    async def test_a_directory_inside_a_submodule_is_a_config_error(self, remote, tmp_path):
+        _git(Path(remote["dir"]), "update-index", "--add", "--cacheinfo", f"160000,{remote['first']},vendored")
+        _git(Path(remote["dir"]), "commit", "--quiet", "-m", "submodule")
+        with pytest.raises(GitConfigError, match="no directory 'vendored/lib'"):
+            await _impl(_config(remote["url"], path="vendored/lib"), tmp_path / "cache").list_files()
 
 
 class TestListings:
@@ -798,6 +951,47 @@ class TestColdRepositories:
         await impl.get_file("README.md")
         assert not idle.exists()
 
+    async def test_a_new_commit_fetches_only_what_changed(self, remote, tmp_path):
+        repo = Path(remote["dir"])
+        (repo / "big.bin").write_bytes(os.urandom(2 * 1024 * 1024))
+        _git(repo, "add", "big.bin")
+        _git(repo, "commit", "--quiet", "-m", "big")
+        cache, received = tmp_path / "cache", tmp_path / "received"
+        ssh = _recording_ssh(tmp_path, received)
+        await _impl(
+            _config(remote["url"], revision=_git(repo, "rev-parse", "HEAD")), cache, ssh_binary=ssh
+        ).list_files()
+        before = received.stat().st_size
+
+        (repo / "README.md").write_text("again\n")
+        _git(repo, "commit", "--quiet", "-am", "readme")
+        impl = _impl(_config(remote["url"], revision=_git(repo, "rev-parse", "HEAD")), cache, ssh_binary=ssh)
+        assert await _read(impl, "README.md") == b"again\n"
+        assert len(await _read(impl, "big.bin")) == 2 * 1024 * 1024
+        assert received.stat().st_size - before < 64 * 1024
+
+    async def test_registering_a_cached_commit_again_downloads_little(self, remote, tmp_path, monkeypatch):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        repo = Path(remote["dir"])
+        (repo / "big.bin").write_bytes(os.urandom(2 * 1024 * 1024))
+        _git(repo, "add", "big.bin")
+        _git(repo, "commit", "--quiet", "-m", "big")
+        config = _config(remote["url"], revision=_git(repo, "rev-parse", "HEAD"))
+        cache, received = tmp_path / "cache", tmp_path / "received"
+        ssh = _recording_ssh(tmp_path, received)
+        await _impl(config, cache, ssh_binary=ssh).list_files()
+        before = received.stat().st_size
+
+        await _impl(config, cache, ssh_binary=ssh).validate_storage()
+        assert received.stat().st_size - before < 64 * 1024
+
+    async def test_a_half_initialised_repository_is_initialised_again(self, remote, tmp_path):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        for directory in ("branches", "refs/heads", "refs/tags", "hooks", "info"):
+            (impl._repo_dir / directory).mkdir(parents=True)
+
+        assert await _read(impl, "README.md") == b"changed\n"
+
 
 class TestServerFaults:
     @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
@@ -810,6 +1004,46 @@ class TestServerFaults:
                 await _impl(_config(remote["url"]), locked / "cache", ssh_binary=_fake_ssh(tmp_path)).list_files()
         finally:
             locked.chmod(0o700)
+
+
+class TestDamagedFetchRepository:
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            zlib.error("Error -3 while decompressing data: incorrect data check"),
+            ChecksumMismatch(b"a" * 40, b"b" * 40),
+            ApplyDeltaError("delta truncated in copy op"),
+        ],
+    )
+    async def test_a_damaged_object_is_a_backend_error(self, tmp_path, failure):
+        def read():
+            raise failure
+
+        with pytest.raises(GitBackendError, match="damaged object"):
+            await _impl(_config("ssh://localhost/r"), tmp_path / "cache")._call(read, "repo")
+
+    async def test_a_bug_in_the_work_is_not_reported_as_a_git_failure(self, tmp_path):
+        def read():
+            raise AttributeError("bug")
+
+        with pytest.raises(AttributeError, match="bug"):
+            await _impl(_config("ssh://localhost/r"), tmp_path / "cache")._call(read, "repo")
+
+    async def test_a_stale_lock_is_a_backend_error_naming_the_lock(self, remote, tmp_path):
+        await _impl(_config(remote["url"], revision=remote["first"]), tmp_path / "cache").list_files()
+        (_fetch_repository(tmp_path / "cache") / "shallow.lock").touch()
+        with pytest.raises(GitBackendError, match=r"shallow\.lock locked"):
+            await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").list_files()
+
+    async def test_a_commit_missing_from_the_fetch_repository_is_fetched_again_next_time(self, remote, tmp_path):
+        await _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache").list_files()
+        for pack in (_fetch_repository(tmp_path / "cache") / "objects" / "pack").iterdir():
+            pack.unlink()
+        config = _config(remote["url"], revision=remote["main"], path="agents")
+        with pytest.raises(GitBackendError, match="missing objects"):
+            await _impl(config, tmp_path / "cache").list_files()
+        assert remote["main"] not in _fetched_commits[str(_fetch_repository(tmp_path / "cache"))]
+        assert len(await _impl(config, tmp_path / "cache").list_files()) == 2
 
 
 class TestAccess:
