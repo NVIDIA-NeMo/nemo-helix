@@ -13,96 +13,53 @@ NeMo Helix uses modular plugins for the infrastructure agents need to run at sca
 
 ## What You Can Do
 
-- **Secure agents.** Guardrails (content safety, jailbreak detection, PII redaction), garak (red-teaming via garak), Anonymizer (PII handling for training data).
-- **Evaluate agents.** LLM-as-judge, deterministic, agentic, and RAG benchmarks. [Harbor](https://www.harborframework.com/)-backed eval suites for regression testing.
-- **Tune agents.** Skill optimization, prompt and hyperparameter tuning, Switchyard model routing.
-- **Build agents.** Create platform-managed agents with agent.yaml, with legacy support for NAT-based LangGraph agents. Shared infrastructure: Inference Gateway, Secrets, Files, Entity Store, Jobs.
-- **Run agents.** Deploy and manage agents interactively or as long-running jobs.
-- **Generate synthetic data.** Generate synthetic data for training or evaluation purposes using Data Designer.
-- **NeMo Studio (alpha).** Installed automatically with the platform. Studio is a browser UI for chatting with agents and models, starting and monitoring various jobs, and reviewing results. Studio's agent-focused features are still a work in progress; the CLI is the primary surface today.
+### Capabilities
 
-## Platform Capabilities
+| Domain | What it covers | Components |
+|---|---|---|
+| **Connectivity & Observability** | Connect agents to Helix and see what they actually do in production | NeMo Fabric (specialized agents, formerly NAT), NeMo Relay (runtime observability and control for agent runs), trace ingestion, session and cost inspection |
+| **Data** | Generate the training and evaluation data you do not have, and keep sensitive data out of it | Data Designer, Safe Synthesizer, Anonymizer|
+| **Optimization** | Make the agent more accurate, faster or cheaper | Prompt-optimization, Hyperparameter Search, model-routing with Switchyard|
+| **Fine-tuning** | Make OSS models more accurate, faster, or cheaper|  LoRA, Full SFT, DPO, GRPO for LLMs, Embedding and Re-ranking models with Customizer plugin ( AutoModel, NeMo RL, Unsloth ) |
+| **Evaluation** | Score candidates against your benchmarks before you ship them | NeMo Gym environments, Harbor eval suites, LLM-as-judge, deterministic, agentic, and RAG metrics, experiments |
+| **Safety** | Catch unsafe behavior before and during production | Guardrails (content safety, jailbreak detection, PII redaction), garak red-teaming, sandboxing |
 
-The platform provides several shared capabilities to NeMo libraries.
+### Built-In Agents
 
-- [Models and Inference](/documentation/models-and-inference) for model providers, virtual
-  models, and gateway calls.
-- [Files](/documentation/get-started/core-concepts/manage-files), [Secrets](/documentation/get-started/core-concepts/manage-secrets),
-  [Entities](/documentation/get-started/core-concepts/entities), and jobs for storing state and
-  running local work.
+Two agents work the loop with you rather than waiting for you to drive it.
+
+- **Compass.** Reads production traces and surfaces where and why the agent is failing.
+- **Eval Author.** Turns observed behavior into evaluation tasks so the failure does not come back.
+
+### Surfaces
+
+Every capability is reachable from every surface. Pick the one that fits the moment.
+
+| Surface | Use it for |
+|---|---|
+| **NeMo CLI** | The primary interface. Every service under one command, one config, one context. |
+| **NeMo Skills** | Agent skills installed into Claude Code, Cursor, Codex, or OpenCode, so your coding agent drives Helix in natural language. |
+| **Python SDK and REST APIs** | Programmatic access for pipelines, services, and products built on Helix. |
+| **NeMo Studio** | Web UI for chat, job monitoring, optimization & evaluation results, traces, experiments, and governance review. |
+
+### Foundations
+
+Shared services every capability builds on: [object](/documentation/get-started/core-concepts/entities) and [data storage](/documentation/get-started/core-concepts/manage-files), trace ingestion, model registry, experiments, jobs and session management, [inference gateway](/documentation/models-and-inference#inference-gateway), authentication and authorization, and [secrets management](/documentation/get-started/core-concepts/manage-secrets). [Workspaces](/documentation/get-started/core-concepts/workspaces) and [projects](/documentation/get-started/core-concepts/projects) scope every artifact, so what your team produces can be shared, referenced, and governed instead of copied between laptops.
+
+**These are defaults, not lock-in.** Each foundation is an interface with a working implementation attached, so `nemo setup` gets you running in minutes. When you move to your own environment, swap them: point storage at your object store, the database at your managed Postgres and ClickHouse, identity at your IdP over OIDC, and inference at any OpenAI-compatible gateway.
 
 ## Architecture Diagram
 
-```mermaid
-flowchart TB
-    Users["Users and applications"]
-
-    subgraph AccessTier["UNIFIED ACCESS"]
-        direction LR
-        CLI["NeMo CLI"]
-        SDK["Python SDK"]
-        Studio["NeMo Studio"]
-        REST["REST APIs"]
-        CLI ~~~ SDK ~~~ Studio ~~~ REST
-    end
-
-    subgraph CapabilityTier["SERVICES"]
-        direction LR
-        Agents["Managed Agents"]
-        Optimization["Optimization"]
-        Guardrails["Guardrails"]
-        Evaluator["Evaluator"]
-        FineTuning["Fine Tuning"]
-        garak["garak"]
-        DataDesigner["Data Designer"]
-        Anonymizer["Anonymizer"]
-        SafeSynthesizer["Safe Synthesizer"]
-        Agents ~~~ Optimization ~~~ Guardrails
-        Evaluator ~~~ FineTuning ~~~ garak
-        DataDesigner ~~~ Anonymizer ~~~ SafeSynthesizer
-    end
-
-    subgraph SharedTier["PLATFORM CAPABILITIES"]
-        direction LR
-        IGW["Models and Inference"]
-        Secrets["Secrets"]
-        Files["Files"]
-        Entities["Entity Store"]
-        Jobs["Jobs"]
-        IGW ~~~ Secrets ~~~ Files
-        Entities ~~~ Jobs
-    end
-
-    subgraph ProviderTier["MODEL PROVIDERS"]
-        direction TB
-        NVIDIABuild["NVIDIA Build"]
-        OpenAI["OpenAI"]
-        Anthropic["Anthropic"]
-        Gemini["Gemini"]
-        Ollama["Ollama"]
-        NVIDIABuild ~~~ OpenAI ~~~ Anthropic ~~~ Gemini ~~~ Ollama
-    end
-
-    subgraph OutputTier["OUTPUTS"]
-        direction TB
-        Datasets["Datasets"]
-        Configs["Configs"]
-        Reports["Reports"]
-        JobArtifacts["Job artifacts"]
-        Datasets ~~~ Configs ~~~ Reports ~~~ JobArtifacts
-    end
-
-    Users --> AccessTier
-    AccessTier --> CapabilityTier
-    CapabilityTier --> SharedTier
-    SharedTier --> ProviderTier
-    SharedTier --> OutputTier
-```
+![NeMo Helix architecture. Surfaces (NeMo Studio, NeMo CLI, Python SDK, NeMo Skills) call plugin APIs in NeMo Helix. Helix plugins (Connect, Fine-Tune, Generate data, Evaluate, Intake, Safeguard, Optimize, Route, Deployments, Third-party) run on Helix core (Auth, Entities, Files, Jobs, Secrets, Models, Gateway), alongside managed agents Compass and Email Triage. Production traces flow from the customer agent through Relay into Intake, managed agents propose changes as PRs, a developer reviews and merges them into the agent code repo, and the approved agent deploys to the online serving stack (NIM, Dynamo, Guardrails).](./_images/nemo-helix-architecture.png)
 
 ## Where to Go Next
 
 - [Setup](/documentation/get-started) - install, configure providers, and run
   local services.
+- [Database Setup](/documentation/kubernetes-deployment/setup/helm/database-setup) - point
+  Helix at your managed PostgreSQL database.
+- [OIDC Setup](/documentation/access-control/authentication/oidc-setup) - connect Helix to
+  your identity provider.
 - [About Agents](/documentation/agents) - learn the managed agent lifecycle.
 - [Register Agents](/documentation/agents/register-agents) - bring an agent from code, a container
   image, a remote endpoint, or its traces.
