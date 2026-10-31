@@ -303,6 +303,24 @@ def test_grpo_lora_uses_adapter_shm(sandbox_capable: None) -> None:
     assert actual == "8Gi"
 
 
+def test_grpo_lora_merged_uses_adapter_shm(sandbox_capable: None) -> None:
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(
+            type="grpo",
+            finetuning_type="lora_merged",
+            parallelism=ParallelismParams(num_nodes=1, num_gpus_per_node=1),
+        ),
+        output=OutputResponse(name="my-merged", type=OutputNameType.MODEL, fileset="my-merged-fs"),
+    )
+    step = _build_training_step(job, [], trust_remote_code=False, profile=None)
+    resources = step["executor"]["resources"]
+    actual = resources.shm_size if hasattr(resources, "shm_size") else resources["shm_size"]
+    assert actual == "8Gi"
+
+
 def test_multi_node_requires_shared_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.config.multinode_shared_storage_path", None, raising=False)
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=2)))
@@ -508,6 +526,23 @@ def test_grpo_lora_model_entity_peft(sandbox_capable: None) -> None:
     assert cfg.peft.rank == 8
     assert cfg.peft.alpha == 16
     assert cfg.peft.type is FinetuningType.LORA
+
+
+def test_grpo_lora_merged_model_entity_is_a_full_model(sandbox_capable: None) -> None:
+    from nhx.rl.app.jobs.compiler import _build_model_entity_config
+    from nhx.rl.schemas import LoRAParams
+
+    job = RlJobOutput(
+        model="default/base-model",
+        dataset="default/prefs",
+        environment="default/env",
+        training=GRPOTraining(type="grpo", finetuning_type="lora_merged", lora=LoRAParams(rank=8, alpha=16)),
+        output=OutputResponse(name="my-merged", type=OutputNameType.MODEL, fileset="my-merged-fs"),
+    )
+    cfg = _build_model_entity_config("default", job, trust_remote_code=False)
+    assert cfg.peft is not None
+    assert cfg.peft.type is FinetuningType.LORA_MERGED
+    assert job.trains_lora_adapter is False
 
 
 def test_grpo_compile_succeeds_when_platform_sandbox_capable(monkeypatch: pytest.MonkeyPatch) -> None:

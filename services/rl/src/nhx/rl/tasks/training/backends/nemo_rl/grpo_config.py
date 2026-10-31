@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 def _build_lora_cfg(customizer_config: TrainingStepConfig, *, is_vlm: bool = False) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
-    enabled = customizer_config.training.finetuning_type == FinetuningType.LORA
+    enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
     tp = customizer_config.parallelism.tensor_parallel_size
     # Triton is the faster LoRA path but only works at TP 1 (its kernel has no DTensor

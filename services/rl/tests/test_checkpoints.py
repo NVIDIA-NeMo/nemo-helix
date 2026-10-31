@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import pytest
+from nhx.rl.entities.values import FinetuningType
 from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
     copy_hf_full_weights,
     copy_lora_adapter,
@@ -14,6 +15,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
     find_hf_full_weight_root,
     find_lora_adapter_root,
     is_peft_publication,
+    select_publication,
 )
 
 
@@ -274,6 +276,26 @@ def test_copy_keeps_a_single_shard_named_by_an_index(tmp_path: Path):
 
     assert (output / "shard-00001-model-00001-of-00001.safetensors").is_file()
     assert not (output / "model.safetensors").exists()
+
+
+def test_lora_merged_publication_selects_the_adapter_for_merge(tmp_path: Path):
+    checkpoint = tmp_path / "step_20"
+    adapter = _write_adapter(checkpoint / "policy" / "weights" / "model")
+
+    kind, root = select_publication(checkpoint, FinetuningType.LORA_MERGED)
+
+    assert kind == "merge"
+    assert root == adapter
+
+
+def test_lora_publication_stays_peft(tmp_path: Path):
+    checkpoint = tmp_path / "step_20"
+    adapter = _write_adapter(checkpoint / "policy" / "weights" / "model")
+
+    kind, root = select_publication(checkpoint, FinetuningType.LORA)
+
+    assert kind == "peft"
+    assert root == adapter
 
 
 def test_peft_publication_requires_an_adapter_on_disk():

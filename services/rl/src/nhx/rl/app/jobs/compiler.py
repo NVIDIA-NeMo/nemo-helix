@@ -134,6 +134,12 @@ def _get_cpu_resources() -> ResourcesSpec:
     )
 
 
+def _training_uses_lora(job_spec: RlJobOutput) -> bool:
+    """True when the optimizer state is the adapter, including ``lora_merged``."""
+    training = job_spec.training
+    return isinstance(training, GRPOTraining) and training.finetuning_type in ("lora", "lora_merged")
+
+
 def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int, lora: bool) -> ResourcesSpec:
     return ResourcesSpec(
         num_nodes=num_nodes,
@@ -191,11 +197,14 @@ def _build_model_entity_config(
 ) -> ModelEntityTaskConfig:
     method = job_spec.training_type.value.upper()
     peft: PEFTConfig | None = None
-    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
+    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type in ("lora", "lora_merged"):
         lora = job_spec.training.lora
         assert lora is not None  # validated on GRPOTraining
-        peft = PEFTConfig(type=FinetuningType.LORA, rank=lora.rank, alpha=lora.alpha)
-        description = f"{method}-trained LoRA adapter from nhx-rl job ({job_spec.model})"
+        peft = PEFTConfig(type=FinetuningType(job_spec.training.finetuning_type), rank=lora.rank, alpha=lora.alpha)
+        if job_spec.training.finetuning_type == "lora":
+            description = f"{method}-trained LoRA adapter from nhx-rl job ({job_spec.model})"
+        else:
+            description = f"{method}-trained model (LoRA merged into the base) from nhx-rl job ({job_spec.model})"
     else:
         description = f"{method}-trained model from nhx-rl job ({job_spec.model})"
     return ModelEntityTaskConfig(
@@ -506,7 +515,11 @@ def _build_grpo_training_step_config(
         ),
         training=TrainingStepConfig.TrainingConfig(
             training_type=TrainingType.GRPO,
-            finetuning_type=FinetuningType.LORA if t.finetuning_type == "lora" else FinetuningType.ALL_WEIGHTS,
+            finetuning_type=(
+                FinetuningType(t.finetuning_type)
+                if t.finetuning_type in ("lora", "lora_merged")
+                else FinetuningType.ALL_WEIGHTS
+            ),
             grpo=GRPOConfig(
                 num_generations_per_prompt=t.num_generations_per_prompt,
                 num_prompts_per_step=t.num_prompts_per_step,
@@ -559,7 +572,7 @@ def _build_grpo_training_step_config(
                     exclude_modules=t.lora.exclude_modules,
                     use_triton=t.lora.use_triton,
                 )
-                if t.finetuning_type == "lora" and t.lora is not None
+                if t.finetuning_type in ("lora", "lora_merged") and t.lora is not None
                 else None
             ),
         ),
@@ -686,7 +699,7 @@ def _build_training_step(
             resources=_gpu_training_resources(
                 num_nodes=num_nodes,
                 num_gpus=num_gpus_per_node,
-                lora=job_spec.trains_lora_adapter,
+                lora=_training_uses_lora(job_spec),
             ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
@@ -698,7 +711,7 @@ def _build_training_step(
             resources=_gpu_training_resources(
                 num_nodes=1,
                 num_gpus=num_gpus_per_node,
-                lora=job_spec.trains_lora_adapter,
+                lora=_training_uses_lora(job_spec),
             ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )

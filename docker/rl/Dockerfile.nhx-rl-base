@@ -218,7 +218,7 @@ uv sync ${UV_SYNC_MODE} --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --extra mcore --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --extra vllm --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --all-groups --no-install-project "${SKIP[@]}"
-
+# Drop Ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg.
 find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -prune -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/yarl*" -prune -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
