@@ -17,7 +17,9 @@ to the Jobs service:
 
 - Automodel and NeMo-RL train in a subprocess, so the classifier reads its output (`parser.py`). It takes every
   distinct exception line (`TypeName: message`), plus log lines that name a failure without an exception, such as
-  Ray's memory monitor or NCCL.
+  Ray's memory monitor, a raylet that fate-shares with a dead agent, or NCCL. NeMo-RL prints the Ray session's
+  agent logs before it returns a failure, and appends one line naming a port conflict, a grpcio crash, or the
+  agent being killed when the logs show one.
 - Unsloth trains in-process, so the classifier reads the exception and the exceptions it was raised from.
 
 Each candidate is matched against the rules, in order; the first matching rule wins. The failure is classified by
