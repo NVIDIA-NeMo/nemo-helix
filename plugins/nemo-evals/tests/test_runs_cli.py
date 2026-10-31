@@ -552,6 +552,36 @@ def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(
     assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
 
 
+@pytest.mark.parametrize("error", [httpx.ConnectError("Connection refused"), httpx.ConnectTimeout("")])
+def test_a_submit_that_never_connected_is_resent_with_the_same_body(error):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        if len(bodies) == 1:
+            raise error
+        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    status = submit_run(
+        client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
+    )
+    assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
+
+
+def test_a_submit_that_never_connects_names_its_key():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="nothing was sent.*--idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
 @pytest.fixture
 def publishing(monkeypatch):
     """``publish_tasks`` over fake discovery and a fake evaluator holding one stored task, ``deep-swe-a``."""
