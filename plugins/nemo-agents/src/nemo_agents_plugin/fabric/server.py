@@ -400,14 +400,23 @@ def create_fabric_serving_app(
                 raise HTTPException(status_code=404, detail=str(error)) from error
             except FabricSessionStartError as error:
                 raise HTTPException(status_code=503, detail=str(error)) from error
-            invocation_request = _to_fabric_invocation_request(
+            invocation_request = _to_fabric_invocation_request(request, session_id=session.session_id)
+            continuation_request = _to_fabric_invocation_request(
                 request,
                 session_id=session.session_id,
-                runtime_has_history=session.has_invoked,
+                runtime_has_history=True,
             )
             response_headers = _session_headers(session.session_id)
-            invoke = partial(app.state.session_manager.invoke_session, session)
-            stream = partial(app.state.session_manager.stream_session, session)
+            invoke = partial(
+                app.state.session_manager.invoke_session,
+                session,
+                continuation_request=continuation_request,
+            )
+            stream = partial(
+                app.state.session_manager.stream_session,
+                session,
+                continuation_request=continuation_request,
+            )
 
         if request.stream:
             stream_context = stream(invocation_request)

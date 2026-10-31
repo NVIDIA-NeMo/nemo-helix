@@ -449,9 +449,9 @@ def test_chat_completion_with_session_id_reuses_session(
 
     async def resolve_session(session_id: str) -> Any:
         resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object(), has_invoked=False)
+        return SimpleNamespace(session_id="session-1", runtime=object())
 
-    async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", response="hello again")
 
     with TestClient(app) as client:
@@ -466,6 +466,53 @@ def test_chat_completion_with_session_id_reuses_session(
     assert response.status_code == 200
     assert response.headers[SESSION_ID_HEADER] == "session-1"
     assert resolve_calls == ["session-1"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_session_chat_completion_passes_transcript_and_latest_turn(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+) -> None:
+    app = create_fabric_serving_app(_write_agent_config(tmp_path))
+    session_calls: list[tuple[Any, Any]] = []
+    result = FabricRuntimeResult(status="succeeded", response="50")
+
+    async def resolve_session(session_id: str) -> Any:
+        return SimpleNamespace(session_id=session_id, runtime=object())
+
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
+        session_calls.append((request, continuation_request))
+        return result
+
+    def stream_session(session: Any, request: Any, *, continuation_request: Any) -> _FakeStreamContext:
+        session_calls.append((request, continuation_request))
+        return _FakeStreamContext(_FakeFabricStream(result=result))
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.session_manager, "resolve_session", resolve_session)
+        monkeypatch.setattr(app.state.session_manager, "invoke_session", invoke_session)
+        monkeypatch.setattr(app.state.session_manager, "stream_session", stream_session)
+        response = client.post(
+            "/v1/chat/completions",
+            headers={SESSION_ID_HEADER: "session-1"},
+            json={
+                "messages": [
+                    {"role": "user", "content": "What is 2+3?"},
+                    {"role": "assistant", "content": "5"},
+                    {"role": "user", "content": "Multiply that by 10."},
+                ],
+                "stream": stream,
+            },
+        )
+
+    assert response.status_code == 200
+    [(request, continuation_request)] = session_calls
+    assert request.input == "user: What is 2+3?\n\nassistant: 5\n\nuser: Multiply that by 10."
+    assert continuation_request.input == "Multiply that by 10."
+    assert continuation_request.caller_context == request.caller_context == {"session_id": "session-1"}
+    assert continuation_request.relay_session_root == request.relay_session_root
 
 
 @pytest.mark.parametrize(
@@ -508,9 +555,9 @@ def test_session_chat_completion_runtime_error_returns_session_header(
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
 
     async def resolve_session(session_id: str) -> Any:
-        return SimpleNamespace(session_id=session_id, runtime=object(), has_invoked=False)
+        return SimpleNamespace(session_id=session_id, runtime=object())
 
-    async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
         raise FabricRuntimeTimeoutError("timed out")
 
     with TestClient(app) as client:
@@ -653,9 +700,9 @@ def test_streaming_chat_completion_reuses_supplied_session_id(
 
     async def resolve_session(session_id: str) -> Any:
         resolve_calls.append(session_id)
-        return SimpleNamespace(session_id="session-1", runtime=object(), has_invoked=False)
+        return SimpleNamespace(session_id="session-1", runtime=object())
 
-    def stream_session(session: Any, request: Any) -> _FakeStreamContext:
+    def stream_session(session: Any, request: Any, *, continuation_request: Any) -> _FakeStreamContext:
         return _FakeStreamContext(_FakeFabricStream(result=FabricRuntimeResult(status="succeeded", response="done")))
 
     with TestClient(app) as client:

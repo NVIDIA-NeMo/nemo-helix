@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -12,7 +12,12 @@ from typing import Any, cast
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric import server, session_manager
-from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricRuntimeResult, FabricRuntimeStream
+from nemo_agents_plugin.fabric.runtime import (
+    FabricInvocationRequest,
+    FabricRuntimeExecutionError,
+    FabricRuntimeResult,
+    FabricRuntimeStream,
+)
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import (
     FabricSessionNotFoundError,
@@ -658,7 +663,7 @@ async def test_stream_session_refreshes_activity(
         base_dir=tmp_path,
         session_registry=registry,
     )
-    stream = object()
+    stream = SimpleNamespace(succeeded=True)
     refresh_calls: list[Any] = []
 
     def stream_fabric_runtime(
@@ -715,12 +720,174 @@ async def test_stream_session_marks_runtime_as_having_history(
         base_dir=tmp_path,
         session_registry=registry,
     )
-    monkeypatch.setattr(session_manager, "stream_fabric_runtime", lambda runtime, request, streaming_method: object())
+    monkeypatch.setattr(
+        session_manager,
+        "stream_fabric_runtime",
+        lambda runtime, request, streaming_method: SimpleNamespace(succeeded=True),
+    )
 
     async with manager.stream_session(session, FabricInvocationRequest(input="hello")):
         pass
 
     assert session.has_invoked
+
+
+def _turn_requests(turn: str) -> dict[str, FabricInvocationRequest]:
+    return {
+        "request": FabricInvocationRequest(input=f"{turn} transcript"),
+        "continuation_request": FabricInvocationRequest(input=f"{turn} only"),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "first_outcome",
+    [RuntimeError("invoke failed"), FabricRuntimeResult(status="failed", error={"message": "boom"})],
+)
+async def test_invoke_session_resends_transcript_after_failed_first_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    first_outcome: Exception | FabricRuntimeResult,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+    succeeded = FabricRuntimeResult(status="succeeded", response="ok")
+    outcomes = [first_outcome, succeeded, succeeded]
+    sent_inputs: list[str] = []
+
+    async def invoke_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> FabricRuntimeResult:
+        sent_inputs.append(request.input)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(session_manager, "invoke_fabric_runtime", invoke_fabric_runtime)
+
+    with suppress(RuntimeError):
+        await manager.invoke_session(session, **_turn_requests("first"))
+    await manager.invoke_session(session, **_turn_requests("second"))
+    await manager.invoke_session(session, **_turn_requests("third"))
+
+    assert sent_inputs == ["first transcript", "second transcript", "third only"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_invocations_send_the_transcript_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    sent_inputs: list[str] = []
+
+    async def invoke_fabric_runtime(runtime: Any, request: FabricInvocationRequest) -> FabricRuntimeResult:
+        sent_inputs.append(request.input)
+        if request.input == "first transcript":
+            first_started.set()
+            await release_first.wait()
+        return FabricRuntimeResult(status="succeeded", response="ok")
+
+    monkeypatch.setattr(session_manager, "invoke_fabric_runtime", invoke_fabric_runtime)
+
+    first = asyncio.create_task(manager.invoke_session(session, **_turn_requests("first")))
+    await first_started.wait()
+    second = asyncio.create_task(manager.invoke_session(session, **_turn_requests("second")))
+    await asyncio.sleep(0)
+    release_first.set()
+    await asyncio.gather(first, second)
+
+    assert sent_inputs == ["first transcript", "second only"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_outcome", [FabricRuntimeExecutionError("stream rejected"), False])
+async def test_stream_session_resends_transcript_after_failed_first_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    first_outcome: Exception | bool,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+    outcomes = [first_outcome, True, True]
+    sent_inputs: list[str] = []
+
+    def stream_fabric_runtime(
+        runtime: Any, request: FabricInvocationRequest, *, streaming_method: StreamingMethod
+    ) -> SimpleNamespace:
+        sent_inputs.append(request.input)
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(succeeded=outcome)
+
+    monkeypatch.setattr(session_manager, "stream_fabric_runtime", stream_fabric_runtime)
+
+    with suppress(FabricRuntimeExecutionError):
+        async with manager.stream_session(session, **_turn_requests("first")):
+            pass
+    async with manager.stream_session(session, **_turn_requests("second")):
+        pass
+    async with manager.stream_session(session, **_turn_requests("third")):
+        pass
+
+    assert sent_inputs == ["first transcript", "second transcript", "third only"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_streams_send_the_transcript_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = FabricSessionRegistry()
+    session = await registry.register(cast(Any, _FakeRuntime()), session_id="session-1")
+    manager = FabricSessionManager(
+        _agent_config(),
+        base_dir=tmp_path,
+        session_registry=registry,
+    )
+    sent_inputs: list[str] = []
+
+    def stream_fabric_runtime(
+        runtime: Any, request: FabricInvocationRequest, *, streaming_method: StreamingMethod
+    ) -> SimpleNamespace:
+        sent_inputs.append(request.input)
+        return SimpleNamespace(succeeded=True)
+
+    monkeypatch.setattr(session_manager, "stream_fabric_runtime", stream_fabric_runtime)
+
+    async def stream_second() -> None:
+        async with manager.stream_session(session, **_turn_requests("second")):
+            pass
+
+    first = manager.stream_session(session, **_turn_requests("first"))
+    await first.__aenter__()
+    second = asyncio.create_task(stream_second())
+    await asyncio.sleep(0)
+
+    assert sent_inputs == ["first transcript"]
+
+    await first.__aexit__(None, None, None)
+    await second
+
+    assert sent_inputs == ["first transcript", "second only"]
 
 
 @pytest.mark.asyncio
@@ -803,7 +970,7 @@ async def test_stream_session_holds_lock_until_cleanup_finishes(
     ) -> FabricRuntimeStream:
         assert streaming_method is method
         invocation_order.append(request.input)
-        return cast(FabricRuntimeStream, SimpleNamespace(aclose=close_stream))
+        return cast(FabricRuntimeStream, SimpleNamespace(aclose=close_stream, succeeded=False))
 
     monkeypatch.setattr(session_manager, "stream_fabric_runtime", stream_fabric_runtime)
 

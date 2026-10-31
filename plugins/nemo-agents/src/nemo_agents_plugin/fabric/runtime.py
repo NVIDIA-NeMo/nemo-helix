@@ -89,6 +89,7 @@ class FabricRuntimeStream:
         self._stream = stream
         self._timeout_seconds = timeout_seconds
         self.streaming_method = streaming_method
+        self.succeeded = False
 
     async def records(self) -> AsyncIterator[dict[str, Any]]:
         """Yield Relay records or native OpenAI chunks; buffered runs have neither."""
@@ -109,21 +110,24 @@ class FabricRuntimeStream:
     async def result(self) -> FabricRuntimeResult:
         """Return the authoritative terminal Fabric result for this stream."""
         if self.streaming_method is StreamingMethod.BUFFERED:
-            return await asyncio.shield(self._stream)
-        try:
-            result = await asyncio.wait_for(
-                self._stream.result(),
-                timeout=self._timeout_seconds,
-            )
-        except TimeoutError as error:
-            raise FabricRuntimeTimeoutError(
-                _timeout_error_message(self._timeout_seconds),
-            ) from error
-        except FabricError as error:
-            raise FabricRuntimeExecutionError(
-                f"Fabric runtime streaming failed: {error}",
-            ) from error
-        return _normalize_fabric_run_result(result)
+            result = await asyncio.shield(self._stream)
+        else:
+            try:
+                run_result = await asyncio.wait_for(
+                    self._stream.result(),
+                    timeout=self._timeout_seconds,
+                )
+            except TimeoutError as error:
+                raise FabricRuntimeTimeoutError(
+                    _timeout_error_message(self._timeout_seconds),
+                ) from error
+            except FabricError as error:
+                raise FabricRuntimeExecutionError(
+                    f"Fabric runtime streaming failed: {error}",
+                ) from error
+            result = _normalize_fabric_run_result(run_result)
+        self.succeeded = result.status == "succeeded"
+        return result
 
     async def aclose(self) -> None:
         """Finalize unread stream records without cancelling the harness turn."""

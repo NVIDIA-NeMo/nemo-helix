@@ -55,6 +55,16 @@ class FabricSessionStopError(RuntimeError):
     """Raised when a Fabric runtime cannot be stopped for a Platform session."""
 
 
+def _session_turn_request(
+    session: FabricRuntimeSession,
+    request: FabricInvocationRequest,
+    continuation_request: FabricInvocationRequest | None,
+) -> FabricInvocationRequest:
+    if session.has_invoked and continuation_request is not None:
+        return continuation_request
+    return request
+
+
 @dataclass(slots=True)
 class _SessionCreationGate:
     """Per-session runtime-start lock and its current holder/waiter count."""
@@ -161,15 +171,20 @@ class FabricSessionManager:
         self,
         session: FabricRuntimeSession,
         request: FabricInvocationRequest,
+        *,
+        continuation_request: FabricInvocationRequest | None = None,
     ) -> FabricRuntimeResult:
-        """Serialize and invoke one turn on a session's active runtime."""
+        """Serialize and invoke one turn, sending ``continuation_request`` once the runtime holds history."""
         async with session.invocation_lock:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
-            session.has_invoked = True
+            turn_request = _session_turn_request(session, request, continuation_request)
             try:
                 async with self._invocation_slot():
-                    return await invoke_fabric_runtime(session.runtime, request)
+                    result = await invoke_fabric_runtime(session.runtime, turn_request)
+                if result.status == "succeeded":
+                    session.has_invoked = True
+                return result
             finally:
                 await self._session_registry.refresh_activity(session)
 
@@ -178,15 +193,22 @@ class FabricSessionManager:
         self,
         session: FabricRuntimeSession,
         request: FabricInvocationRequest,
+        *,
+        continuation_request: FabricInvocationRequest | None = None,
     ) -> AsyncGenerator[FabricRuntimeStream, None]:
-        """Serialize and stream one turn on a session's active runtime."""
+        """Serialize and stream one turn, sending ``continuation_request`` once the runtime holds history."""
         async with session.invocation_lock:
             if session.closing:
                 raise FabricSessionNotFoundError(f"Fabric session '{session.session_id}' was not found.")
-            session.has_invoked = True
+            turn_request = _session_turn_request(session, request, continuation_request)
             try:
                 async with self._invocation_slot():
-                    yield stream_fabric_runtime(session.runtime, request, streaming_method=session.streaming_method)
+                    stream = stream_fabric_runtime(
+                        session.runtime, turn_request, streaming_method=session.streaming_method
+                    )
+                    yield stream
+                if stream.succeeded:
+                    session.has_invoked = True
             finally:
                 await self._session_registry.refresh_activity(session)
 

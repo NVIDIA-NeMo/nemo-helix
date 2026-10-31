@@ -715,6 +715,17 @@ class TestStreamFabricRuntime:
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
 
+    @pytest.mark.parametrize("status", ["succeeded", "failed"])
+    @pytest.mark.parametrize("method", list(StreamingMethod))
+    async def test_records_whether_the_terminal_result_succeeded(self, method: StreamingMethod, status: str) -> None:
+        fake_runtime = _FakeRuntime(result=_FakeRunResult(status=status))
+        stream = stream_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest(), streaming_method=method)
+
+        assert not stream.succeeded
+        await stream.result()
+
+        assert stream.succeeded is (status == "succeeded")
+
     @pytest.mark.parametrize("method", [StreamingMethod.RELAY, StreamingMethod.OPENAI])
     async def test_wraps_stream_start_errors(self, method: StreamingMethod) -> None:
         fake_runtime = _FakeRuntime(invoke_error=fabric_runtime.FabricError("streaming unavailable"))
