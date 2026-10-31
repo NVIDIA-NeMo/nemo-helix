@@ -137,6 +137,7 @@ files-service = [
   "opentelemetry-proto>=1.28.2",
   "aioboto3>=15.5.0",
   "types-aioboto3[s3]>=15.5.0",
+  "dulwich>=1.2.20",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.

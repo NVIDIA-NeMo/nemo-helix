@@ -37,6 +37,7 @@ from nhx.core.files.exceptions import (
     NotFoundError,
     StorageAccessError,
     StorageBackendError,
+    StorageServerFault,
     StorageUnavailableError,
 )
 from starlette.status import (
@@ -105,7 +106,12 @@ async def get_download_file_info(
 ) -> FileInfo:
     """Get file info for downloads, preferring the local cache when present."""
     if cache_ctx is not None:
-        cache_path_key = await storage.get_cache_path_key(path)
+        try:
+            cache_path_key = await storage.get_cache_path_key(path)
+        except InvalidPathError as exc:
+            raise HTTPException(HTTP_400_BAD_REQUEST, str(exc)) from exc
+        except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
+            raise runtime_storage_http_error(exc) from exc
         if cache_path_key is not None:
             try:
                 cached_file = await get_file_info(cache_ctx.storage, cache_path_key)
@@ -201,6 +207,8 @@ async def stream_file_download(
         )
     except (StorageAccessError, StorageUnavailableError, StorageBackendError) as exc:
         raise runtime_storage_http_error(exc) from exc
+    except StorageServerFault:
+        raise
     except Exception:
         logger.exception("Error during download")
         raise HTTPException(
