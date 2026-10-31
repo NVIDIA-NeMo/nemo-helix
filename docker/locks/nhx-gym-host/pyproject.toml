@@ -28,6 +28,7 @@ constraint-dependencies = [
     "mlflow-skinny>=3.15.0,<3.16.0",
     "sqlparse>=0.6.0,<0.7",
     "wandb>=0.30.0",
+    "virtualenv>=21.14.9", # GHSA-6w3r-xr62-4xcp and related virtualenv advisories
 ]
 required-version = ">=0.13.4"
 environments = [
