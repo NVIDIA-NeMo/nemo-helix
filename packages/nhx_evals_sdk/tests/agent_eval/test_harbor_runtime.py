@@ -1238,7 +1238,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -1945,6 +1945,18 @@ class _DriftConfig(BaseModel):
     quiet: bool = True
 
 
+class _HookableJob:
+    """Harbor ``Job``'s hook registration, which the runtime calls for the setup slots; records nothing."""
+
+    def on_environment_started(self, callback: object) -> None: ...
+
+    def on_agent_started(self, callback: object) -> None: ...
+
+    def on_trial_ended(self, callback: object) -> None: ...
+
+    def on_trial_cancelled(self, callback: object) -> None: ...
+
+
 def _stub_harbor(
     monkeypatch: pytest.MonkeyPatch,
     job_create: Callable[[object], Awaitable[object]],
@@ -1973,7 +1985,7 @@ def _stub_harbor(
             verifier_calls.append(kwargs)
         return object()
 
-    class _Job:
+    class _Job(_HookableJob):
         create = staticmethod(job_create)
 
     _module("harbor")
@@ -1994,9 +2006,35 @@ def _stub_harbor(
     )
 
 
-class _FakeJob:
+class _FakeJob(_HookableJob):
     async def run(self) -> None:
         return None
+
+
+@pytest.mark.asyncio
+async def test_each_harbor_job_takes_setup_slots_for_its_trials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Local Docker setups that overlap time out, so every job the runtime creates registers the slot hooks."""
+    registered: list[str] = []
+
+    class _RecordingJob(_FakeJob):
+        def on_environment_started(self, callback: object) -> None:
+            registered.append("environment-start")
+
+        def on_agent_started(self, callback: object) -> None:
+            registered.append("agent-start")
+
+    async def create(_config: object) -> _RecordingJob:
+        return _RecordingJob()
+
+    _stub_harbor(monkeypatch, create)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="slots")
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="slots", force_rerun=True, env_templates={}
+    )
+    await run_job()
+    assert registered == ["environment-start", "agent-start"]
 
 
 @pytest.mark.asyncio
@@ -2100,7 +2138,7 @@ async def test_unrelated_file_exists_error_mid_run_leaves_the_job_dir_alone(
     (job_dir / "finished-trial").mkdir(parents=True)
     attempts: list[int] = []
 
-    class _ExplodingJob:
+    class _ExplodingJob(_HookableJob):
         async def run(self) -> None:
             attempts.append(1)
             raise FileExistsError(17, "File exists", str(tmp_path / "scratch" / "artifact.tar"))
@@ -3476,7 +3514,7 @@ async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -3514,7 +3552,7 @@ async def _created_jobs(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -3740,7 +3778,7 @@ async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypa
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", env_vars={"DOCKER_HOST": "tcp://agent-only:2375"})
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
