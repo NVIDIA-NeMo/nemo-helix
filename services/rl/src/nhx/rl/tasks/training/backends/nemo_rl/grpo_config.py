@@ -87,9 +87,8 @@ def _build_automodel_cfg(
 ) -> dict[str, Any]:
     """Map parallelism and backend settings onto NeMo-RL's policy.automodel_cfg.
 
-    Upstream dropped ``dtensor_cfg`` and ``_v2``. LoRA, expert parallelism, and
-    ``automodel_kwargs`` are still rejected against ``policy_backend='dtensor'`` in
-    :class:`GRPOTraining` rather than silently upgraded here.
+    The only worker is ``AutomodelPolicyWorker``. Do not emit ``dtensor_cfg`` or
+    ``_v2``: this pin rejects both.
     """
     parallelism = customizer_config.parallelism
     expert_parallel_size = parallelism.expert_parallel_size
@@ -162,7 +161,7 @@ def _build_batching_config(
     budgets = {"train_mb_tokens": train_mb_tokens, "logprob_mb_tokens": train_mb_tokens}
 
     if strategy == BatchingStrategy.SEQUENCE_PACKING:
-        # DTensorPolicyWorker rejects packing under context parallelism. It also rejects it
+        # AutomodelPolicyWorker rejects packing under context parallelism. It also rejects it
         # for VLM and reward models, neither of which this backend compiles.
         if customizer_config.parallelism.context_parallel_size > 1:
             raise ValueError(

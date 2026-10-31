@@ -958,18 +958,6 @@ def test_lora_without_module_lists_matches_all_linear(
     assert lora_cfg["exclude_modules"] == []
 
 
-def test_policy_backend_dtensor_omits_v2(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``dtensor`` still compiles ``automodel_cfg``. Upstream removed the v1 worker and ``_v2``."""
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
-
-    assert "_v2" not in dtensor_cfg
-    assert dtensor_cfg["enabled"] is True
-
-
 def test_automodel_all_weights_requests_consolidated_safetensors(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -978,6 +966,7 @@ def test_automodel_all_weights_requests_consolidated_safetensors(
     compiled = compile_grpo_config(step, job_ctx)
     checkpoint = compiled["policy"]["automodel_cfg"]["checkpoint"]
 
+    assert "_v2" not in compiled["policy"]["automodel_cfg"]
     assert checkpoint["model_save_format"] == "safetensors"
     assert checkpoint["save_consolidated"] == "every"
     assert "model_save_format" not in compiled["checkpointing"]
@@ -1049,22 +1038,6 @@ def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
         compile_grpo_config(step, job_ctx)
 
     assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
-
-
-def test_dtensor_requests_consolidated_safetensors(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """DTensor v2 is the only policy worker, so ``dtensor`` needs the same checkpoint block."""
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
-    compiled = compile_grpo_config(step, job_ctx)
-    checkpoint = compiled["policy"]["automodel_cfg"]["checkpoint"]
-
-    assert checkpoint["model_save_format"] == "safetensors"
-    assert checkpoint["save_consolidated"] == "every"
-    assert "model_save_format" not in compiled["checkpointing"]
-    assert "save_consolidated" not in compiled["checkpointing"]
-    assert "v4_compatible" not in compiled["checkpointing"]
 
 
 def test_automodel_lora_still_requests_consolidated_export(
@@ -1147,7 +1120,7 @@ def test_expert_parallel_size_omitted_when_unused(
 def test_automodel_kwargs_reach_dtensor(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """force_hf is what makes NemotronH loadable at all on the DTensor path."""
+    """force_hf is what makes NemotronH loadable at all on the Automodel path."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(
         tmp_path,
@@ -1522,7 +1495,7 @@ def test_batching_rejects_budget_below_max_seq_length(
 def test_sequence_packing_rejected_under_context_parallel(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DTensorPolicyWorker rejects packing under CP; catch it at compile time instead."""
+    """AutomodelPolicyWorker rejects packing under CP; catch it at compile time instead."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(
         tmp_path,
@@ -1532,7 +1505,7 @@ def test_sequence_packing_rejected_under_context_parallel(
     with pytest.raises(ValueError, match="not supported with context_parallel_size"):
         compile_grpo_config(step, job_ctx)
 
-    # dynamic has no such restriction on the GRPO + DTensor path.
+    # dynamic has no such restriction on the GRPO Automodel path.
     assert step.training.grpo is not None
     step.training.grpo.batching_strategy = BatchingStrategy.DYNAMIC
     assert compile_grpo_config(step, job_ctx)["policy"]["dynamic_batching"]["enabled"] is True

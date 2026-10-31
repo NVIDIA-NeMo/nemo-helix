@@ -433,9 +433,6 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
     t = job_spec.training
     if not isinstance(t, GRPOTraining):
         raise HelixJobCompilationError(f"Expected a GRPO training spec, got {type(t).__name__}.")
-    if t.policy_backend is None:
-        # GRPOTraining resolves it from finetuning_type, so only a hand-built spec gets here.
-        raise HelixJobCompilationError("policy_backend is unset; submit through GRPOTraining.")
     p = t.parallelism
     sandboxed = config.sandboxed_gym_default
     if sandboxed and not platform_config.sandbox_cluster_capable:

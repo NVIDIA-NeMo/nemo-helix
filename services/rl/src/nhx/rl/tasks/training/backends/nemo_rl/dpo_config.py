@@ -209,7 +209,7 @@ def compile_dpo_config(
         "offload_optimizer_for_logprob": False,
         "offload_policy_before_refit": False,
         "offload_optimizer_for_refit": True,
-        # Training runs on Automodel. We propagate tensor / sequence /
+        # Training runs on AutomodelPolicyWorker. We propagate tensor / sequence /
         # context parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).
         "automodel_cfg": {

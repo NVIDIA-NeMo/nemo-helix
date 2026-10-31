@@ -227,7 +227,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_keys(tmp_path, monkeypatch, lo
 
 
 def test_lora_enables_automodel_lora_cfg(tmp_path, monkeypatch):
-    """LoRA is a flag on automodel_cfg. Upstream no longer pairs it with ``_v2``."""
+    """LoRA is a flag on automodel_cfg. This pin rejects ``_v2``."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     dtensor_cfg = _compile(tmp_path, lora=True)["policy"]["automodel_cfg"]
 

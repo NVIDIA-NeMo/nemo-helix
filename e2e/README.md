@@ -162,7 +162,7 @@ GRPO needs OpenSandbox, which the platform chart does not install. The `customiz
 and selects `grpo`. The nightly and weekly schedules always run it; manual runs opt in.
 
 GRPO smoke trains every environment format (`wheels-v1`, `adapter-wheels-v1`, `native-v1`, and
-`native-v1` reference-only) with DTensor full weights, Automodel full weights, and Automodel LoRA,
+`native-v1` reference-only) with Automodel full weights and Automodel LoRA,
 and serves each output. The `native-v1` formats install the server's requirements from a package
 index, so they need sandbox internet. That setting is platform-wide, and turning it on stops
 forcing the wheels formats offline, so the job runs in two phases: the wheels formats first, then

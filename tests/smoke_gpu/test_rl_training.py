@@ -55,7 +55,7 @@ BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
 # Listing all seven is what makes a broken prefetch filter fail here instead of silently shipping an
 # image whose workers rebuild their venv on the node at job start.
 WORKER_VENV_IMPORTS = {
-    # GRPO policy training, DTensor V2 (--extra automodel). nemo_automodel and transformer_engine
+    # DPO and GRPO policy training, AutomodelPolicyWorker (--extra automodel). nemo_automodel and transformer_engine
     # are checked through distribution metadata instead — see WORKER_VENV_DRIVER_LINKED below.
     "nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker": [
         "torch",

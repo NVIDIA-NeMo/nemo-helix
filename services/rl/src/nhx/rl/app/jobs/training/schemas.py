@@ -28,16 +28,11 @@ class TrainingBackend(str, Enum):
 class PolicyBackend(str, Enum):
     """Which NeMo-RL policy worker trains the model.
 
-    The value picks the worker class, which picks the Ray actor's venv and kernels.
-    Asking for a capability the backend lacks is a validation error, not a silent upgrade.
+    ``automodel`` selects ``AutomodelPolicyWorker`` and the ``automodel`` extra.
+    ``MegatronPolicyWorker`` is prefetched, but this field does not select it.
+    A stored ``dtensor`` is read as ``automodel``; it is not a second worker.
     """
 
-    # _v2 is gone upstream. Both values compile policy.automodel_cfg for
-    # AutomodelPolicyWorker. ``dtensor`` is still rejected at submit for LoRA
-    # and expert parallelism; it no longer selects a separate worker.
-    DTENSOR = "dtensor"
-    # AutomodelPolicyWorker. Automodel rebuilds the model on Transformer Engine.
-    # Upstream NeMo-RL's reference configs use this path.
     AUTOMODEL = "automodel"
     # megatron_cfg.enabled -> MegatronPolicyWorker. The image builds the `mcore`
     # extra and prefetches the venv, but the compiler still emits an inert
@@ -130,9 +125,9 @@ class GRPOConfig(BaseModel):
     batch_multiplier: float = Field(default=1.0, ge=1.0)
     reward_shaping: dict[str, Any] | None = None
     reward_scaling: dict[str, Any] | None = None
-    # Defaults to DYNAMIC: this backend always trains on DTensor, and dynamic batching is the
-    # DTensor/Automodel norm in NeMo-RL's recipes (sequence packing is the Megatron norm).
-    # It is also the only mode with no architecture restrictions on the GRPO + DTensor path --
+    # Defaults to DYNAMIC: this backend always trains on Automodel, and dynamic batching is the
+    # Automodel norm in NeMo-RL's recipes (sequence packing is the Megatron norm).
+    # It is also the only mode with no architecture restrictions on the GRPO Automodel path --
     # packing is rejected for VLM, multimodal and context parallel.
     batching_strategy: BatchingStrategy = BatchingStrategy.DYNAMIC
     # None derives max_seq_length * micro_batch_size: the peak STATIC already provisions for.
@@ -268,7 +263,7 @@ class TrainingStepConfig(BaseModel):
         sequence_parallel: bool = False
         activation_checkpointing: bool = False
         # GRPO only; default matches GRPOTraining so a hand-built config compiles the
-        # same YAML. DPO ignores it -- its automodel_cfg is a literal.
+        # same YAML. DPO ignores the field and still writes ``automodel_cfg``.
         policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL
         # Merged over the platform's own automodel_cfg.env_vars.
         env_vars: dict[str, str] | None = None
