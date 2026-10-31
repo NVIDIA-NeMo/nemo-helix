@@ -244,3 +244,108 @@ async def test_commands_run_normally_while_the_window_is_open_and_after_it_close
         await environment.exec("apt-get install -y curl")
     await environment.exec("run the agent")
     assert ran == ["apt-get install -y curl", "run the agent"]
+
+
+class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
+    """A sandbox that records its uploads and root shell commands. The shell answers with ``result``."""
+
+    uploads: list[tuple[str, str]]
+    scripts: list[tuple[str, dict[str, str]]]
+    result: ExecResult
+
+    @override
+    async def upload_file(self, source_path: Any, target_path: str) -> None:
+        self.uploads.append((str(source_path), target_path))
+
+    @override
+    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+        self.scripts.append((script, env))
+        return self.result
+
+
+def _gateway_ca_environment(result: ExecResult) -> _GatewayCAEnvironment:
+    environment = object.__new__(_GatewayCAEnvironment)
+    environment._persistent_env = {"PATH": "/agent/bin:/usr/bin"}
+    environment.session_id = "s"
+    environment.logger = logging.getLogger("test")
+    environment.uploads = []
+    environment.scripts = []
+    environment.result = result
+    return environment
+
+
+async def test_every_later_command_trusts_the_gateway_ca_alongside_the_image_roots():
+    """SSL_CERT_FILE and REQUESTS_CA_BUNDLE replace the image's roots, so they name the combined bundle.
+
+    Node adds NODE_EXTRA_CA_CERTS to its own roots, so it is given the CA alone.
+    """
+    environment = _gateway_ca_environment(ExecResult(stdout="/etc/ssl/certs/ca-certificates.crt", return_code=0))
+
+    await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert environment.uploads == [("/etc/nhx/ca.crt", opensandbox_environment.GATEWAY_CA)]
+    assert environment.scripts == [
+        (
+            opensandbox_environment.TRUST_GATEWAY_CA_SCRIPT,
+            {
+                "GATEWAY_CA": opensandbox_environment.GATEWAY_CA,
+                "CA_BUNDLE": opensandbox_environment.CA_BUNDLE,
+                "TASK_BUNDLE": "",
+            },
+        )
+    ]
+    assert environment._persistent_env == {
+        "PATH": "/agent/bin:/usr/bin",
+        "SSL_CERT_FILE": opensandbox_environment.CA_BUNDLE,
+        "REQUESTS_CA_BUNDLE": opensandbox_environment.CA_BUNDLE,
+        "NODE_EXTRA_CA_CERTS": opensandbox_environment.GATEWAY_CA,
+    }
+
+
+async def test_a_bundle_the_task_sets_is_the_one_the_gateway_ca_is_added_to():
+    """A task that names its own SSL_CERT_FILE keeps the roots in it, rather than the image's."""
+    environment = _gateway_ca_environment(ExecResult(stdout="/task/roots.pem", return_code=0))
+    environment._persistent_env["SSL_CERT_FILE"] = "/task/roots.pem"
+
+    await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert environment.scripts[0][1]["TASK_BUNDLE"] == "/task/roots.pem"
+    assert environment._persistent_env["SSL_CERT_FILE"] == opensandbox_environment.CA_BUNDLE
+
+
+async def test_an_image_without_a_ca_bundle_is_warned_about(caplog):
+    """Its commands can reach the gateway but no other HTTPS host, so the operator has to fix the image."""
+    environment = _gateway_ca_environment(ExecResult(stdout="", return_code=0))
+
+    with caplog.at_level(logging.WARNING):
+        await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert "has no CA bundle" in caplog.text
+    assert environment._persistent_env["SSL_CERT_FILE"] == opensandbox_environment.CA_BUNDLE
+
+
+async def test_a_ca_that_cannot_be_installed_fails_the_trial():
+    """Running on without it would fail every gateway call with a TLS error instead of naming the cause."""
+    environment = _gateway_ca_environment(ExecResult(stdout="", stderr="cat: permission denied", return_code=1))
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert "SSL_CERT_FILE" not in environment._persistent_env
+
+
+@pytest.mark.parametrize(("ca_file", "installs"), [("/etc/nhx/ca.crt", 1), (None, 0)], ids=["ca", "no-ca"])
+async def test_the_gateway_ca_is_installed_after_the_sandbox_starts(monkeypatch, ca_file, installs):
+    environment = _gateway_ca_environment(ExecResult(stdout="/etc/ssl/cert.pem", return_code=0))
+    environment._gateway_ca_file = ca_file
+    started: list[bool] = []
+
+    async def parent_start(self: Any, force_build: bool) -> None:
+        started.append(force_build)
+
+    monkeypatch.setattr(NemoOpenSandboxEnvironment, "start", parent_start)
+
+    await environment.start(force_build=False)
+
+    assert started == [False]
+    assert len(environment.scripts) == installs

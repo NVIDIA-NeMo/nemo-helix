@@ -64,6 +64,7 @@ from nemo_evals.jobs.gateway_models import (
     point_agent_at_gateway_model,
     rebase_registered_agent_config,
     sandbox_agent_channel,
+    trust_the_gateway_ca,
 )
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
@@ -560,6 +561,7 @@ class _AgentEvalJobBase(NemoJob):
                 harbor_config = point_agent_at_gateway_model(
                     harbor_config.model_copy(update={"agent_kwargs": agent_kwargs}), target, origin
                 )
+                harbor_config = trust_the_gateway_ca(harbor_config, origin)
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),

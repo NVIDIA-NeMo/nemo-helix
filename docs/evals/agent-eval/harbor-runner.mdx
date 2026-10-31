@@ -774,6 +774,12 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   sandbox resolves only the names it allows. A run with no-network tasks is refused when no
   `agent_channel` entry names the platform. Don't set the base URL variable yourself; a target that
   does is refused.
+- On Kubernetes, `agents.deployments.gateway_url_override` replaces the in-cluster address, as it
+  does for deployed agents. Set it to an HTTPS gateway, such as the platform's Envoy, to keep the
+  agent's key off plain HTTP. When the job trusts a private CA for the platform
+  (`NHX_CLIENT_SSL_CERT_FILE`, else `SSL_CERT_FILE`), each sandbox trusts it too: `SSL_CERT_FILE` and
+  `REQUESTS_CA_BUNDLE` name the image's CA bundle with that CA appended, and `NODE_EXTRA_CA_CERTS` names
+  the CA alone.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
   disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
   already uses the key variable's name; that job is refused rather than handing the agent the other

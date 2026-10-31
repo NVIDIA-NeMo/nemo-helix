@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
+from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
 from nemo_evals.api.fields import AgentRef
 from nemo_evals.jobs import agent_compiler, gateway_agents, gateway_models
@@ -28,12 +29,14 @@ from nemo_evals.jobs.agent_spec import (
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
+    GATEWAY_CA_FILE_KWARG,
     add_gateway_key_placeholder,
     agent_gateway_origin,
     check_gateway_model,
     check_tasks_reach_the_gateway,
     point_agent_at_gateway_model,
     require_closed_book_route,
+    trust_the_gateway_ca,
 )
 from nemo_evals.jobs.secret_env import SecretEnvError
 from nemo_helix_plugin.client.errors import NotFoundError
@@ -68,7 +71,15 @@ def _platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NEMO_BASE_URL", raising=False)
     monkeypatch.delenv("NEMO_INTERNAL_BASE_URL", raising=False)
     monkeypatch.delenv("NHX_INTERNAL_BASE_URL", raising=False)
+    monkeypatch.delenv("NHX_CLIENT_SSL_CERT_FILE", raising=False)
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
     monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8080")
+    _gateway_url_override(monkeypatch, None)
+
+
+def _gateway_url_override(monkeypatch: pytest.MonkeyPatch, override: str | None) -> None:
+    config = AgentsConfig(deployments=DeploymentsRunnerConfig(gateway_url_override=override))
+    monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
 
 
 @pytest.mark.parametrize(
@@ -112,6 +123,76 @@ def test_a_sandbox_gets_the_gateway_by_its_agent_channel_name(
 def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
     with pytest.raises(UnreachableGatewayURLError):
         agent_gateway_origin(sandboxed=True)
+
+
+@pytest.mark.parametrize(
+    ("agent_channel", "expected"),
+    [([], "https://nemo-helix-envoy.ns.svc:8080"), (["nemo-helix-envoy.ns.svc.cluster.local"], None)],
+    ids=["as-set", "by-agent-channel-name"],
+)
+def test_a_sandbox_reaches_the_gateway_url_deployed_agents_use(
+    monkeypatch: pytest.MonkeyPatch, agent_channel: list[str], expected: str | None
+) -> None:
+    """Operators set the agents plugin's gateway_url_override to send container traffic through the HTTPS gateway.
+
+    The internal API URL bypasses that gateway, so trials can't use it while the override is set.
+    """
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    _gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
+
+    origin = agent_gateway_origin(sandboxed=True, agent_channel=agent_channel)
+
+    assert origin == (expected or "https://nemo-helix-envoy.ns.svc.cluster.local:8080")
+
+
+def test_a_docker_trial_ignores_the_gateway_url_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the OpenSandbox environment installs the gateway CA, so a Docker trial keeps its reachable URL."""
+    _gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
+
+    assert agent_gateway_origin(sandboxed=False) == "http://host.docker.internal:8080"
+
+
+def _sandboxed_config() -> HarborRuntimeConfig:
+    return HarborRuntimeConfig(
+        environment=HarborEnvironmentConfig(import_path="x:Sandbox", kwargs={AGENT_CHANNEL_HOSTS_KWARG: ["gw"]})
+    )
+
+
+@pytest.mark.parametrize(
+    ("client_ca", "ssl_cert_file", "expected"),
+    [("/ca/client.pem", "/ca/ssl.pem", "/ca/client.pem"), (None, "/ca/ssl.pem", "/ca/ssl.pem")],
+    ids=["platform-client-ca-first", "ssl-cert-file"],
+)
+def test_a_sandbox_on_an_https_gateway_trusts_the_ca_this_job_trusts(
+    monkeypatch: pytest.MonkeyPatch, client_ca: str | None, ssl_cert_file: str, expected: str
+) -> None:
+    if client_ca is not None:
+        monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", client_ca)
+    monkeypatch.setenv("SSL_CERT_FILE", ssl_cert_file)
+
+    config = trust_the_gateway_ca(_sandboxed_config(), "https://gw:8080")
+
+    assert config.environment is not None
+    assert config.environment.kwargs == {AGENT_CHANNEL_HOSTS_KWARG: ["gw"], GATEWAY_CA_FILE_KWARG: expected}
+
+
+@pytest.mark.parametrize(
+    ("origin", "ca_file", "sandboxed"),
+    [
+        ("http://gw:8080", "/ca/ssl.pem", True),
+        ("https://gw:8080", None, True),
+        ("https://gw:8080", "/ca/ssl.pem", False),
+    ],
+    ids=["plain-http-gateway", "publicly-trusted-gateway", "docker-trial"],
+)
+def test_a_sandbox_is_given_no_ca_it_does_not_need(
+    monkeypatch: pytest.MonkeyPatch, origin: str, ca_file: str | None, sandboxed: bool
+) -> None:
+    if ca_file is not None:
+        monkeypatch.setenv("SSL_CERT_FILE", ca_file)
+    config = _sandboxed_config() if sandboxed else HarborRuntimeConfig()
+
+    assert trust_the_gateway_ca(config, origin) == config
 
 
 @pytest.mark.parametrize(
@@ -309,6 +390,19 @@ def test_the_job_points_the_agent_at_the_route_for_its_environment(
 
     assert config.agent_model_name == "cb-gpt"
     assert config.env_vars["OPENAI_BASE_URL"] == f"{origin}{ROUTE}/v1"
+
+
+def test_the_job_has_a_sandbox_on_an_https_gateway_trust_its_ca(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
+    monkeypatch.setenv("SSL_CERT_FILE", "/etc/nhx/ca.crt")
+
+    config = _job_config(tmp_path, _codex(), sandboxed=True)
+
+    assert config.env_vars["OPENAI_BASE_URL"] == f"https://nemo-helix-envoy.ns.svc:8080{ROUTE}/v1"
+    assert config.environment is not None
+    assert config.environment.kwargs[GATEWAY_CA_FILE_KWARG] == "/etc/nhx/ca.crt"
 
 
 _NO_NETWORK = {"environment": {"allow_internet": False}}
