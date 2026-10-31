@@ -78,7 +78,11 @@ PROXY_OPENAPI_EXTRA: dict = {
                 "schema": {
                     "type": "object",
                     "additionalProperties": True,
-                }
+                },
+                "example": {
+                    "model": "YOUR_MODEL_NAME",
+                    "messages": [{"role": "user", "content": "Hello!"}],
+                },
             }
         },
         "required": False,

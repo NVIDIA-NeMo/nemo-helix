@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -85,13 +86,29 @@ async def list_providers(
 )
 async def create_provider(
     workspace: str,
-    request: CreateModelProviderRequest,
+    request: Annotated[
+        CreateModelProviderRequest,
+        Body(
+            openapi_examples={
+                "provider": {
+                    "summary": "NVIDIA API provider (create the API-key secret first)",
+                    "value": {
+                        "name": "my-provider",
+                        "host_url": "https://integrate.api.nvidia.com/v1",
+                        "api_key_secret_name": "my-provider-api-key",
+                    },
+                }
+            }
+        ),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
     Create a new model provider.
+
+    The NVIDIA API example requires the named API-key secret to exist first.
     """
     logger.info(f"Creating model provider: {workspace}/{request.name}")
     auth_context = AuthContext.from_principal(auth_client.principal)
@@ -138,13 +155,36 @@ async def create_provider(
 async def upsert_provider(
     workspace: str,
     name: str,
-    request: UpsertModelProviderRequest,
+    request: Annotated[
+        UpsertModelProviderRequest,
+        Body(
+            description=(
+                "PUT replaces the provider configuration. When updating, first read the existing provider and "
+                "preserve every configuration field you intend to keep, including its API-key secret reference. "
+                "The example assumes the named API-key secret already exists."
+            ),
+            openapi_examples={
+                "provider": {
+                    "value": {
+                        "host_url": "https://integrate.api.nvidia.com/v1",
+                        "api_key_secret_name": "my-provider-api-key",
+                        "description": "NVIDIA API provider",
+                    }
+                }
+            },
+        ),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
-    Create or update a model provider.
+    Create or replace a model provider.
+
+    PUT replaces the configuration, including optional fields. For an existing
+    provider, first read its current configuration and preserve all fields you
+    intend to keep, especially api_key_secret_name. The NVIDIA API example requires
+    the named API-key secret to exist before this request.
     """
     logger.debug(f"Upserting model provider: {workspace}/{name}")
     auth_context = AuthContext.from_principal(auth_client.principal)

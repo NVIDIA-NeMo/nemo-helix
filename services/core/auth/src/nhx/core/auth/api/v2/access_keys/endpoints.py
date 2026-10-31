@@ -35,6 +35,21 @@ from . import schemas
 
 router = APIRouter(tags=["Scoped Access Keys"])
 
+# Authentication is enforced by platform middleware rather than a FastAPI
+# parameter. Describe it without adding a second runtime authentication path.
+_ACCESS_KEY_AUTH_OPENAPI = {
+    "parameters": [
+        {
+            "name": "Authorization",
+            "in": "header",
+            "required": True,
+            "description": "Bearer token for the authenticated caller. Scoped Access Keys must be enabled.",
+            "schema": {"type": "string"},
+            "example": "Bearer YOUR_ACCESS_TOKEN",
+        }
+    ]
+}
+
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
 _AccessKeyJTI = Annotated[
@@ -180,6 +195,7 @@ async def _change_suspension_status(
 @router.post(
     "/v2/access-keys",
     response_model=schemas.AccessKeyCreateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_CREATE_ERROR_RESPONSES,
 )
 async def create_access_key(
@@ -213,6 +229,7 @@ async def create_access_key(
 @router.get(
     "/v2/access-keys",
     response_model=schemas.AccessKeyListResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_LIFECYCLE_ERROR_RESPONSES,
 )
 async def list_access_keys(
@@ -231,6 +248,7 @@ async def list_access_keys(
 @router.delete(
     "/v2/access-keys/{jti}",
     response_model=schemas.AccessKeyRevokeResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_REVOKE_ERROR_RESPONSES,
 )
 async def revoke_access_key(
@@ -252,6 +270,7 @@ async def revoke_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/suspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -264,6 +283,7 @@ async def suspend_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/unsuspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -277,6 +297,7 @@ async def unsuspend_access_key(
 @router.post(
     "/v2/access-keys/{jti}/rotate",
     response_model=schemas.AccessKeyRotateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_ROTATE_ERROR_RESPONSES,
 )
 async def rotate_access_key(
