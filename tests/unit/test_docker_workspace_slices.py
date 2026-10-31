@@ -23,6 +23,25 @@ DOCKER_IMAGE_WANDB_CONFIG_PATHS = (
 )
 CVE_PACKAGE_FLOORS = (
     (
+        "virtualenv",
+        "21.14.9",
+        (
+            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
+            Path("docker/rl/Dockerfile.nhx-rl-base"),
+            Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
+            Path("docker/locks/nhx-gym-host/pyproject.toml"),
+        ),
+    ),
+    (
+        "notebook",
+        "7.6.3",
+        (
+            Path("docker/automodel/Dockerfile.nhx-automodel-base"),
+            Path("docker/Dockerfile.nhx-customizer-tasks"),
+            Path("docker/Dockerfile.nhx-unsloth-training"),
+        ),
+    ),
+    (
         "mlflow-skinny",
         "3.15.0",
         (
@@ -138,6 +157,45 @@ def test_distributed_image_cve_package_specs_use_reviewed_floor(
 
     assert specs
     assert all(spec.startswith(f"{package}>={floor}") for spec in specs)
+
+
+@pytest.mark.parametrize("project", ("nhx-gym-tasks", "nhx-gym-host"))
+def test_gym_locks_resolve_fixed_virtualenv(project: str) -> None:
+    """Standalone image locks must not retain the vulnerable Ray dependency."""
+    from packaging.version import Version
+
+    lock = _load_pyproject(ROOT / "docker/locks" / project / "uv.lock")
+    virtualenv = next(package for package in lock["package"] if package["name"] == "virtualenv")
+    assert Version(virtualenv["version"]) >= Version("21.14.9")
+
+
+def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:
+    """Keep the patched venv Notebook while removing scanner-visible NGC copies."""
+    removals = "docker/removals/files/base/pytorch-ngc-common.txt"
+    patterns = (ROOT / removals).read_text().splitlines()
+    assert "/usr/local/lib/python3.12/dist-packages/notebook" in patterns
+    assert "/usr/local/lib/python3.12/dist-packages/notebook-*.dist-info" in patterns
+    for path in (
+        "docker/automodel/Dockerfile.nhx-automodel-base",
+        "docker/Dockerfile.nhx-customizer-tasks",
+        "docker/Dockerfile.nhx-unsloth-training",
+    ):
+        text = (ROOT / path).read_text()
+        assert text.index('"notebook>=7.6.3,<8"') < text.index(f"source={removals}")
+
+
+def test_safe_synthesizer_sentence_transformers_security_pin() -> None:
+    """The isolated NSS engine must not retain its upstream vulnerable pin."""
+    specs = _package_specs(ROOT / "plugins/nemo-safe-synthesizer/constraints.txt", "sentence-transformers")
+    assert specs == ["sentence-transformers==5.6.1"]
+
+
+def test_rl_virtualenv_patch_precedes_unreferenced_cache_cleanup() -> None:
+    """Patch runtime environments and remove old archives, not just metadata."""
+    text = (ROOT / "docker/rl/Dockerfile.nhx-rl-base").read_text()
+    assert 'm.version("virtualenv")' in text
+    assert '--directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"' in text
+    assert text.index('"virtualenv>=21.14.9"') < text.index('"${d}virtualenv-*.dist-info"')
 
 
 def test_automodel_cve_layer_does_not_pin_full_mlflow_with_cryptography() -> None:
