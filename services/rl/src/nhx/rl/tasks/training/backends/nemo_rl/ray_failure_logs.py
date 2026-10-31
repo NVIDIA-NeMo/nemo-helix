@@ -107,7 +107,7 @@ def render_ray_failure_logs(log_dir: Path, logs: dict[str, list[str]]) -> str:
     return "\n".join(parts)
 
 
-def diagnose_ray_startup(logs: dict[str, list[str]], *, startup_failure: bool) -> str | None:
+def diagnose_ray_startup(logs: dict[str, list[str]], startup_failure: bool) -> str | None:
     """Return one ``RuntimeError`` line for the rules, or None when these logs do not explain the failure.
 
     During training, a diagnosis is reported only when the raylet actually fate-shared with an agent.

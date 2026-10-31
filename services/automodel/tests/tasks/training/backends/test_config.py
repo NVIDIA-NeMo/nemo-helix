@@ -272,7 +272,6 @@ class TestConfigureMoeBackend:
         num_gpus_per_node: int = 1,
         tensor_parallel_size: int = 1,
         expert_parallel_size: int | None = None,
-        *,
         architecture: str | None = "NemotronHForCausalLM",
         num_experts: int | None = 8,
     ) -> MagicMock:
@@ -899,7 +898,6 @@ class TestBackendSettings:
 def _vision_training_config(
     tmp_path: Path,
     rows: list[dict[str, Any]],
-    *,
     has_vision_tower: bool = True,
     has_audio_tower: bool = False,
     num_experts: int | None = None,

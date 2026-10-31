@@ -806,7 +806,7 @@ class RayClusterBootstrap:
         if cleanup_thread.is_alive():
             logger.warning("[WARN] Cleanup timed out. Forcing termination.")
 
-    def _capture_ray_failure_logs(self, *, startup_failure: bool, only_if_agent_died: bool = False) -> None:
+    def _capture_ray_failure_logs(self, startup_failure: bool, only_if_agent_died: bool = False) -> None:
         """Print the Ray agent and raylet logs, and record a diagnosis when the logs name one.
 
         A failure to read the logs must not replace the training error or skip Ray cleanup.

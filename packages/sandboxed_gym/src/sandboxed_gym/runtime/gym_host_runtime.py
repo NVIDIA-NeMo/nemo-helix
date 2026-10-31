@@ -29,6 +29,7 @@ import time
 import traceback
 import urllib.error
 import urllib.request
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -717,6 +718,33 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         sys.path.insert(0, wheels_install_dir)
 
 
+def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> None:
+    """Reject a nemo-gym wheel whose library is not the one in this image.
+
+    Both can report the same version. The wheel then lands on PYTHONPATH ahead of the image
+    checkout and Gym imports a mix of the two.
+    """
+    wheel_files = getattr(package, "wheel_files", ())
+    image_root = _image_gym_search_root()
+    library = Path(image_root, "nemo_gym") if image_root else None
+    wheel = next((path for path in wheel_files if path.name.startswith("nemo_gym-")), None)
+    if wheel is None or library is None or not library.is_dir():
+        return
+    with zipfile.ZipFile(wheel) as archive:
+        vendored = {name for name in archive.namelist() if name.startswith("nemo_gym/") and name.endswith(".py")}
+    image = {
+        f"nemo_gym/{path.relative_to(library).as_posix()}"
+        for path in library.rglob("*.py")
+        if "__pycache__" not in path.parts
+    }
+    if vendored != image:
+        raise RuntimeError(
+            "Gym version incompatible: the environment's nemo-gym wheel does not match the Gym "
+            "in this image. Rebuild the wheelhouse from this image's Gym checkout and replace "
+            "the environment fileset."
+        )
+
+
 def _image_gym_search_root() -> str | None:
     """Gym checkout the host script copied out of the training image, when that copy exists."""
     root = os.environ.get(IMAGE_GYM_SRC_ENV_KEY, DEFAULT_IMAGE_GYM_SRC)
@@ -964,6 +992,9 @@ def bootstrap_gym_host() -> tuple[Any, Any, Any]:
         os.environ.get("NHX_ENVIRONMENT_PATH", ""),
         required=_environment_package_required(),
     )
+    # Before the wheel is placed on PYTHONPATH and before Gym's config parser imports nemo_gym.
+    # A stale library wheel shares the image's version string and would otherwise be mixed in.
+    _require_vendored_gym_matches_image(environment_package)
     # Compose config paths before dependency installation or Gym imports can execute
     # anything from the mounted package.
     global_config = _compose_gym_config_with_environment_package(global_config, environment_package)

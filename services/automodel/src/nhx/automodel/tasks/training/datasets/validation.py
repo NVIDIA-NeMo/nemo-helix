@@ -192,7 +192,6 @@ class DatasetValidator:
         training_type: TrainingType,
         finetuning_type: Optional[FinetuningType] = None,
         prompt_template: str | None = None,
-        *,
         allow_multimodal: bool = False,
     ):
         """Initialize validator with training configuration.

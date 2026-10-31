@@ -96,7 +96,6 @@ def traits_from_step_model(model: Any) -> CheckpointTraits:
 
 def reject_incompatible_checkpoint(
     traits: CheckpointTraits,
-    *,
     training_type: str,
     recipe: str | None,
     sequence_packing: bool,
