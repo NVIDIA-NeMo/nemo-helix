@@ -12,11 +12,13 @@ from typing import Any
 
 import pytest
 from harbor.agents.factory import AgentFactory
+from harbor.agents.installed.base import NetworkConnectionError, NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
 from harbor.environments.base import ExecResult
 from harbor.environments.capabilities import EnvironmentCapabilities
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
+from nemo_evals.harbor import agent_setup_egress
 from nemo_evals.harbor.agent_setup_egress import (
     GUARDED_METHODS,
     INNER_AGENT_KWARG,
@@ -25,6 +27,7 @@ from nemo_evals.harbor.agent_setup_egress import (
     AgentSetupEgress,
 )
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SYSTEM_PATH
+from nemo_evals.harbor.setup_egress_readiness import SetupEgressNotReadyError
 
 SETUP_HOSTS = ["registry.npmjs.org", "pypi.org"]
 SNAPSHOT = ("1:100", "7:250")
@@ -229,6 +232,106 @@ async def test_a_failed_setup_still_closes_the_window(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="install failed"):
         await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events == ["open", "close"]
+
+
+CURL_6 = NetworkConnectionError(
+    "Command failed (exit 6): curl -LsSf https://astral.sh/uv/0.12.17/install.sh | sh\n"
+    "stdout: None\nstderr: curl: (6) Could not resolve host: releases.astral.sh"
+)
+
+
+def _failing_setup(monkeypatch, events: list[Any], failures: list[BaseException]) -> None:
+    """NopAgent's setup raises each of ``failures`` in turn, then succeeds; retries don't wait."""
+    monkeypatch.setattr(agent_setup_egress, "SETUP_RETRY_DELAYS_SEC", (0.0, 0.0))
+
+    async def setup(self, environment) -> None:
+        events.append("setup")
+        if failures:
+            raise failures.pop(0)
+
+    monkeypatch.setattr(NopAgent, "setup", setup)
+
+
+async def test_a_setup_that_fails_on_the_network_is_retried_in_a_fresh_window(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [CURL_6])
+    await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close", "open", "setup", "close"]
+
+
+async def test_a_window_whose_hosts_do_not_resolve_yet_is_retried(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [])
+    opens = [SetupEgressNotReadyError("setup egress not ready: astral.sh did not resolve")]
+
+    class NotReadyOnce(_WindowEnvironment):
+        @asynccontextmanager
+        async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
+            self.events.append("open")
+            try:
+                if opens:
+                    raise opens.pop(0)
+                yield
+            finally:
+                self.events.append("close")
+
+    await _agent(tmp_path).setup(NotReadyOnce(events))
+    assert events == ["open", "close", "open", "setup", "close"]
+
+
+async def test_a_setup_that_keeps_failing_on_the_network_gives_up_after_the_retries(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [CURL_6, CURL_6, CURL_6, CURL_6])
+    with pytest.raises(NetworkConnectionError, match="Could not resolve host"):
+        await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events.count("setup") == 3 and events[-1] == "close"
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        # Seen on dev-blue: nvm installed Node, then its version index came back empty during a DNS timeout.
+        "Checksums matched!\nVersion '22' not found - try `nvm ls-remote` to browse available versions.",
+        "urllib.error.URLError: <urlopen error [Errno -5] No address associated with hostname>",
+    ],
+    ids=["nvm-index", "urllib"],
+)
+async def test_a_network_failure_harbor_does_not_classify_is_retried(tmp_path, monkeypatch, output):
+    events: list[str] = []
+    failure = NonZeroAgentExitCodeError(f"Command failed (exit 3): install codex\nstdout: None\nstderr: {output}")
+    _failing_setup(monkeypatch, events, [failure])
+    await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close", "open", "setup", "close"]
+
+
+async def test_a_failed_command_for_another_reason_is_not_retried(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [NonZeroAgentExitCodeError("Command failed (exit 1): apt-get: no space left")])
+    with pytest.raises(NonZeroAgentExitCodeError):
+        await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close"]
+
+
+async def test_a_setup_that_fails_for_another_reason_is_not_retried(tmp_path, monkeypatch):
+    events: list[str] = []
+    _failing_setup(monkeypatch, events, [RuntimeError("install failed")])
+    with pytest.raises(RuntimeError, match="install failed"):
+        await _agent(tmp_path).setup(_WindowEnvironment(events))
+    assert events == ["open", "setup", "close"]
+
+
+async def test_a_network_failure_retries_through_the_network_policy_window(tmp_path, monkeypatch):
+    """Without the environment's own window, each attempt opens and restores the policy again."""
+    events: list[Any] = []
+    _failing_setup(monkeypatch, events, [CURL_6])
+    environment = _PolicyEnvironment(events)
+    await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
+    opened = _allowlist(*SETUP_HOSTS)
+    assert events == [
+        *["list", opened, "setup", NO_NETWORK, ("kill", KEEP)],
+        *["list", opened, "setup", NO_NETWORK, ("kill", KEEP)],
+    ]
+    assert environment.network_policy == NO_NETWORK
 
 
 async def test_an_environment_without_a_window_runs_setup_unchanged(tmp_path, monkeypatch):

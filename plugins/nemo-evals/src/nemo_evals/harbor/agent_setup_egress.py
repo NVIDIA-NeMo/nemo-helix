@@ -13,10 +13,16 @@ Any other Harbor environment that can switch to an allowlist after start gets th
 the task's policy through Harbor's ``set_network_policy()`` for the duration of ``setup()``, and on close
 the processes setup left holding an outside connection are killed. Elsewhere, setup runs under the task's
 own policy.
+
+A setup that fails on the network (Harbor's :class:`NetworkConnectionError`, a failed command whose output
+matches :data:`NETWORK_FAILURE_OUTPUT`, or a window whose hosts don't resolve yet) is retried in a freshly opened window, after a short wait. Harbor's setup timeout covers every
+attempt together, so retrying never makes a trial take longer than its setup budget.
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
 import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -26,14 +32,28 @@ from typing import Any, ClassVar
 from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.acp_registry import is_acp_registry_shorthand, registry_spec_from_agent_name
+from harbor.agents.installed.base import NetworkConnectionError, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
+from nemo_evals.harbor.setup_egress_readiness import SetupEgressNotReadyError
 
 SETUP_EGRESS_AGENT = "nemo_evals.harbor.agent_setup_egress:AgentSetupEgress"
 INNER_AGENT_KWARG = "agent_setup_egress_inner"
 SETUP_HOSTS_KWARG = "agent_setup_egress_hosts"
+
+SETUP_RETRY_DELAYS_SEC = (5.0, 15.0)
+"""The wait before each retry of a setup that failed on the network; one retry per entry."""
+NETWORK_SETUP_ERRORS = (NetworkConnectionError, SetupEgressNotReadyError)
+NETWORK_FAILURE_OUTPUT = re.compile(r"urlopen error|Version '[^']+' not found - try `nvm ls-remote`")
+"""Network failures Harbor doesn't classify: Python's urllib, and nvm when its remote version index didn't download."""
+
+
+def _is_network_failure(exc: Exception) -> bool:
+    if isinstance(exc, NETWORK_SETUP_ERRORS):
+        return True
+    return isinstance(exc, NonZeroAgentExitCodeError) and NETWORK_FAILURE_OUTPUT.search(str(exc)) is not None
 
 
 @cache
@@ -186,18 +206,38 @@ def _uses_compose(environment: BaseEnvironment) -> bool:
 def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> type[BaseAgent]:
     class SetupEgressAgent(agent_class):  # ty: ignore[unsupported-base]  # a class known only at run time
         async def setup(self, environment: BaseEnvironment) -> None:
-            window = getattr(environment, "agent_setup_egress", None)
-            if window is None:
-                async with _network_policy_window(environment, hosts):
-                    await super().setup(environment)
-                return
-            async with window():
-                await super().setup(environment)
+            inner_setup = super().setup
+            for attempt, delay in enumerate((*SETUP_RETRY_DELAYS_SEC, None), start=1):
+                try:
+                    await _setup_in_window(inner_setup, environment, hosts)
+                    return
+                except Exception as exc:
+                    if delay is None or not _is_network_failure(exc):
+                        raise
+                    self.logger.warning(
+                        "Agent setup failed on the network (attempt %d): %s; retrying in %.0f s",
+                        attempt,
+                        str(exc).splitlines()[0],
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
 
     SetupEgressAgent.__name__ = agent_class.__name__
     SetupEgressAgent.__qualname__ = agent_class.__qualname__
     SetupEgressAgent.__module__ = agent_class.__module__
     return SetupEgressAgent
+
+
+async def _setup_in_window(
+    setup: Callable[[BaseEnvironment], Awaitable[None]], environment: BaseEnvironment, hosts: tuple[str, ...]
+) -> None:
+    window = getattr(environment, "agent_setup_egress", None)
+    if window is None:
+        async with _network_policy_window(environment, hosts):
+            await setup(environment)
+        return
+    async with window():
+        await setup(environment)
 
 
 def setup_timeout_multiplier(inner: str, multiplier: float) -> float:
