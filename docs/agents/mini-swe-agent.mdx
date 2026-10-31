@@ -116,11 +116,11 @@ Close the session before removing the deployment; skip that command if you only
 used one-shot invocation:
 
 ```bash
-nemo agents sessions close mini-swe-demo-session --workspace default
-nemo agents undeploy --agent mini-swe-demo --workspace default
-nemo agents delete mini-swe-demo --workspace default
-nemo agents environments delete mini-swe-env --workspace default
-nemo agents environment-specs delete mini-swe-env --workspace default
+nemo agents sessions close mini-swe-demo-session --workspace default --yes
+nemo agents undeploy --agent mini-swe-demo --workspace default --yes
+nemo agents delete mini-swe-demo --workspace default --yes
+nemo agents environments delete mini-swe-env --workspace default --yes
+nemo agents environment-specs delete mini-swe-env --workspace default --yes
 nemo secrets delete mini-swe-model-key --workspace default
 ```
 
