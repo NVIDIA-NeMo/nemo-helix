@@ -22,7 +22,7 @@ if [[ -n ${NEMO_DEFAULT_INFERENCE_BASE_URL:-} && -z ${NEMO_DEFAULT_INFERENCE_KEY
     fail 'NEMO_DEFAULT_INFERENCE_BASE_URL requires NEMO_DEFAULT_INFERENCE_KEY.'
 fi
 
-for command in curl docker systemctl loginctl cc; do
+for command in curl docker systemctl loginctl sudo apt-get; do
     command -v "$command" >/dev/null || fail "Missing $command; see contrib/brev/README.md prerequisites."
 done
 docker info >/dev/null 2>&1 || fail 'Docker must be running and accessible to the VM user. Re-login after adding Docker group membership.'
@@ -33,6 +33,11 @@ export NHX_DATA_DIR="$HOME/.local/share/nemo"
 if systemctl --user is-active --quiet nemo-helix.service || curl --fail --silent --max-time 3 "$NHX_BASE_URL/health/ready" >/dev/null; then
     fail 'NeMo Helix is already running. Stop it explicitly before rerunning setup; existing data is preserved.'
 fi
+# Provision native build prerequisites rather than requiring manual VM setup.
+# Docker and the systemd user session come from the selected Brev VM image.
+sudo -n apt-get update
+sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    build-essential python3-dev ca-certificates
 # Keep the user service alive after setup/SSH exits, and start it on VM boot.
 sudo -n loginctl enable-linger "$(id -un)"
 
