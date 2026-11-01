@@ -3911,16 +3911,16 @@ components:
     PolicyBackend:
       type: string
       enum:
-      - dtensor
       - automodel
       title: PolicyBackend
       description: 'Which NeMo-RL policy worker trains the model.
 
 
-        The value picks the worker class, which picks the Ray actor''s venv and kernels.
+        ``automodel`` selects ``AutomodelPolicyWorker`` and the ``automodel`` extra.
 
-        Asking for a capability the backend lacks is a validation error, not a silent
-        upgrade.'
+        ``MegatronPolicyWorker`` is prefetched, but this field does not select it.
+
+        A stored ``dtensor`` is read as ``automodel``; it is not a second worker.'
     ProgressReportingConfig:
       properties:
         min_report_interval_seconds:
@@ -4317,12 +4317,12 @@ components:
         policy_backend:
           allOf:
           - $ref: '#/components/schemas/PolicyBackend'
-          description: NeMo-RL policy worker that trains the model. `lora` requires
-            `automodel` (NeMo Automodel + Transformer Engine, Hopper or newer; the
-            only backend with expert parallelism and automodel_kwargs). `all_weights`
-            defaults to `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
-            option) and may be set to `automodel` for a consolidated HuggingFace export.
-            Omit it to get the default for the finetuning type.
+          description: 'NeMo-RL policy worker that trains the model. The only value
+            is `automodel` (`AutomodelPolicyWorker`, the automodel extra), which is
+            also the default for both LoRA and full weights. A stored or submitted
+            `dtensor` is read as `automodel`: full-weight jobs saved that value, and
+            it is not a separate worker.'
+          default: automodel
         v4_compatible:
           type: boolean
           title: V4 Compatible
@@ -4564,10 +4564,10 @@ components:
           default: 64
         automodel_kwargs:
           title: Automodel Kwargs
-          description: 'Passed to policy.dtensor_cfg.automodel_kwargs; requires policy_backend=''automodel''.
-            {''force_hf'': true} loads the stock HuggingFace modules; a {''backend'':
-            {...}} block picks the Transformer-Engine / DeepEP MoE implementation.
-            Unset means Automodel auto-detects.'
+          description: 'Passed to policy.automodel_cfg.automodel_kwargs. {''force_hf'':
+            true} loads the stock HuggingFace modules; a {''backend'': {...}} block
+            picks the Transformer-Engine / DeepEP MoE implementation. Unset means
+            Automodel auto-detects.'
           additionalProperties: true
           type: object
         router_aux_loss_coef:
@@ -4598,12 +4598,14 @@ components:
         vllm_kwargs:
           title: Vllm Kwargs
           description: 'Additional arguments for the vLLM rollout engine, for example
-            {''moe_backend'': ''triton''}. Forwarded to vLLM as supplied.'
+            {''moe_backend'': ''triton''}. Do not set hf_overrides (use hf_config_overrides)
+            or engine keys the worker already passes, such as tensor_parallel_size
+            and enable_prefix_caching.'
           additionalProperties: true
           type: object
         moe_parallelizer:
           title: Moe Parallelizer
-          description: Merged over policy.dtensor_cfg.moe_parallelizer, which controls
+          description: Merged over policy.automodel_cfg.moe_parallelizer, which controls
             how MoE experts are sharded and checkpointed. The platform already sets
             ignore_router_for_ac when expert parallelism and activation checkpointing
             are both on; this reaches the rest.
@@ -4615,6 +4617,14 @@ components:
             of the policy's. Defaults to min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node).
           type: integer
           exclusiveMinimum: 0.0
+        vllm_expert_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Vllm Expert Parallel Size
+          description: Expert parallel size for the vLLM rollout engine, independent
+            of the policy's. Defaults to 1. Super VL recipes set this to 4 alongside
+            tensor_parallel_size 4.
+          default: 1
         vllm_gpu_memory_utilization:
           type: number
           maximum: 1.0
@@ -4643,7 +4653,7 @@ components:
 
         ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
 
-        ``lora_merged`` is not supported for GRPO on the platform DTensor path.'
+        ``lora_merged`` is not supported for GRPO on the Automodel path.'
     RlJobInput:
       properties:
         name:
@@ -5063,7 +5073,8 @@ components:
       additionalProperties: false
       type: object
       title: RlLoRAParams
-      description: LoRA hyperparameters for GRPO (DTensor ``lora_cfg``). No merge-at-export.
+      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No
+        merge-at-export.
     RlOutputRequest:
       properties:
         name:
@@ -5134,8 +5145,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Expert Parallel Size
-          description: Expert parallel size for MoE models. GRPO only, and implemented
-            only by policy_backend='automodel'.
+          description: Expert parallel size for MoE models. GRPO only.
           default: 1
         sequence_parallel:
           type: boolean

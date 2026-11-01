@@ -20,7 +20,7 @@ from nhx.customization_common.service.constants import (
 )
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.rl.app.constants import DEFAULT_BROKER_PORT, NHX_JOB_STORAGE_PVC_ENVVAR
-from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, PolicyBackend, TrainingStepConfig
+from nhx.rl.app.jobs.training.schemas import BatchingStrategy, GRPOConfig, TrainingStepConfig
 from nhx.rl.entities.values import FinetuningType
 from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import (
     _adapt_precision,
@@ -80,23 +80,21 @@ def _build_lora_cfg(customizer_config: TrainingStepConfig) -> dict[str, Any]:
     }
 
 
-def _build_dtensor_cfg(
+def _build_automodel_cfg(
     customizer_config: TrainingStepConfig,
     grpo_hp: GRPOConfig,
     lora_cfg: dict[str, Any],
 ) -> dict[str, Any]:
-    """Map parallelism and backend settings onto NeMo-RL's policy.dtensor_cfg.
+    """Map parallelism and backend settings onto NeMo-RL's policy.automodel_cfg.
 
-    ``_v2`` follows ``parallelism.policy_backend`` and nothing else. The V2-only features
-    (LoRA, expert parallelism, ``automodel_kwargs``) are rejected against ``dtensor`` in
-    :class:`GRPOTraining` rather than silently upgraded here.
+    The only worker is ``AutomodelPolicyWorker``. Do not emit ``dtensor_cfg`` or
+    ``_v2``: this pin rejects both.
     """
     parallelism = customizer_config.parallelism
     expert_parallel_size = parallelism.expert_parallel_size
     automodel_kwargs = grpo_hp.automodel_kwargs
-    use_v2 = parallelism.policy_backend is PolicyBackend.AUTOMODEL
 
-    dtensor_cfg: dict[str, Any] = {
+    automodel_cfg: dict[str, Any] = {
         "enabled": True,
         "cpu_offload": False,
         "sequence_parallel": parallelism.sequence_parallel,
@@ -108,7 +106,7 @@ def _build_dtensor_cfg(
     }
     # Optional keys stay absent when unset so NeMo-RL's defaults apply.
     if expert_parallel_size > 1:
-        dtensor_cfg["expert_parallel_size"] = expert_parallel_size
+        automodel_cfg["expert_parallel_size"] = expert_parallel_size
         if parallelism.activation_checkpointing:
             # The router's top-k runs in bf16 and is not deterministic, so the recomputed
             # forward can route one token differently than the saved one did. The expert
@@ -119,21 +117,19 @@ def _build_dtensor_cfg(
             # selective policy that SAVES the router output instead of recomputing it.
             # There is no case where recomputing it is what a caller wants, so this is not
             # a knob: NeMo-RL's own MoE recipes set it wherever AC is on.
-            dtensor_cfg["moe_parallelizer"] = {"ignore_router_for_ac": True}
+            automodel_cfg["moe_parallelizer"] = {"ignore_router_for_ac": True}
     if grpo_hp.moe_parallelizer:
         # Merged rather than replaced so a caller reaching for another parallelizer knob
         # does not silently drop ignore_router_for_ac and hit the recompute crash.
-        dtensor_cfg["moe_parallelizer"] = {
-            **dtensor_cfg.get("moe_parallelizer", {}),
+        automodel_cfg["moe_parallelizer"] = {
+            **automodel_cfg.get("moe_parallelizer", {}),
             **grpo_hp.moe_parallelizer,
         }
     if automodel_kwargs:
-        dtensor_cfg["automodel_kwargs"] = dict(automodel_kwargs)
+        automodel_cfg["automodel_kwargs"] = dict(automodel_kwargs)
     if lora_cfg["enabled"]:
-        dtensor_cfg["lora_cfg"] = lora_cfg
-    if use_v2:
-        dtensor_cfg["_v2"] = True
-    return dtensor_cfg
+        automodel_cfg["lora_cfg"] = lora_cfg
+    return automodel_cfg
 
 
 def _build_batching_config(
@@ -165,7 +161,7 @@ def _build_batching_config(
     budgets = {"train_mb_tokens": train_mb_tokens, "logprob_mb_tokens": train_mb_tokens}
 
     if strategy == BatchingStrategy.SEQUENCE_PACKING:
-        # DTensorPolicyWorker rejects packing under context parallelism. It also rejects it
+        # AutomodelPolicyWorker rejects packing under context parallelism. It also rejects it
         # for VLM and reward models, neither of which this backend compiles.
         if customizer_config.parallelism.context_parallel_size > 1:
             raise ValueError(
@@ -592,8 +588,13 @@ def compile_grpo_config(
         "precision": precision,
         "logprob_chunk_size": grpo_hp.logprob_chunk_size or 2048,
         "offload_optimizer_for_logprob": False,
+        # Required by upstream PolicyConfig. Refit offload is for non-colocated
+        # generation; this image colocates vLLM, so the lifecycle stays off.
+        # The optimizer flag is only read when that lifecycle runs.
+        "offload_policy_before_refit": False,
+        "offload_optimizer_for_refit": True,
         "max_grad_norm": grpo_hp.max_grad_norm,
-        "dtensor_cfg": _build_dtensor_cfg(customizer_config, grpo_hp, lora_cfg),
+        "automodel_cfg": _build_automodel_cfg(customizer_config, grpo_hp, lora_cfg),
         "megatron_cfg": _megatron_cfg_disabled(precision, grpo_hp.max_grad_norm),
         "optimizer": _build_optimizer_config(customizer_config),
         "scheduler": _build_scheduler_config(customizer_config, max_steps),
@@ -627,27 +628,29 @@ def compile_grpo_config(
                     or min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node)
                 ),
                 "pipeline_parallel_size": 1,
-                "expert_parallel_size": 1,
+                "expert_parallel_size": grpo_hp.vllm_expert_parallel_size,
                 "gpu_memory_utilization": grpo_hp.vllm_gpu_memory_utilization,
                 "max_model_len": customizer_config.model.max_seq_length,
                 "enforce_eager": True,
                 "expose_http_server": True,
             },
             "colocated": {"enabled": True, "resources": {"gpus_per_node": None, "num_nodes": None}},
-            # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
-            # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
-            **({"vllm_kwargs": dict(grpo_hp.vllm_kwargs)} if grpo_hp.vllm_kwargs else {}),
         },
         "sequence_packing": sequence_packing_cfg,
         "dynamic_batching": dynamic_batching_cfg,
         "make_sequence_length_divisible_by": parallelism.tensor_parallel_size,
     }
+    # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
+    # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
+    if grpo_hp.vllm_kwargs:
+        cfg["policy"]["generation"]["vllm_kwargs"] = dict(grpo_hp.vllm_kwargs)
+    if lora_cfg["enabled"]:
+        cfg["policy"]["generation"]["lora_refit_mode"] = "merged"
 
-    # DTensor v2 reads these from policy.dtensor_cfg.checkpoint. The top-level
+    # AutomodelPolicyWorker reads these from policy.automodel_cfg.checkpoint. The top-level
     # checkpointing config rejects them. "every" consolidates each save, which is
     # what publication needs: the kept checkpoint is the best one, not always the last.
-    # Both policy backends use that worker, so both need the block.
-    cfg["policy"]["dtensor_cfg"]["checkpoint"] = {
+    cfg["policy"]["automodel_cfg"]["checkpoint"] = {
         "model_save_format": "safetensors",
         "save_consolidated": "every",
         "v4_compatible": customizer_config.model.v4_compatible,

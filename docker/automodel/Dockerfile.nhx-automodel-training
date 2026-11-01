@@ -35,7 +35,6 @@ RUN uv pip freeze --python ${VIRTUAL_ENV}/bin/python --exclude-editable > /tmp/b
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/automodel/no_override_requirements.txt \
-
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nemo_helix_ext \
@@ -59,10 +58,10 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     python /usr/local/bin/collect-python-sdists.py \
-        --python ${VIRTUAL_ENV}/bin/python \
-        --output /usr/share/nemo-helix/source-distributions/nhx-automodel-training \
-        --baseline-freeze /tmp/base-python-freeze.txt \
-        --label platform-glue
+    --python ${VIRTUAL_ENV}/bin/python \
+    --output /usr/share/nemo-helix/source-distributions/nhx-automodel-training \
+    --baseline-freeze /tmp/base-python-freeze.txt \
+    --label platform-glue
 
 # Late file cleanup for bundled or non-package-managed files.
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \

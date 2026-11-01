@@ -329,11 +329,13 @@ def test_sandbox_runtime_defaults_preserve_caller_gym_config():
             "policy_model_name": "meta-llama/Llama-3.1-8B",
             "policy_base_url": ["http://vllm-0.svc.cluster.local:8000/v1"],
             "ray_head_node_address": "10.0.0.5:6379",
+            "nemo_gym_log_dir": "/var/run/scratch/job/training/logs/exp_001/nemo_gym",
         }
     )
 
     assert global_config["config_paths"] == ["/job/environment/nemo-environment.yaml"]
     assert "ray_head_node_address" not in global_config
+    assert "nemo_gym_log_dir" not in global_config
     assert global_config["policy_model_name"] == "meta-llama/Llama-3.1-8B"
     assert global_config["policy_base_url"] == ["http://vllm-0.svc.cluster.local:8000/v1"]
     assert global_config["default_host"] == "127.0.0.1"

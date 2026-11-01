@@ -184,7 +184,7 @@ ARG NEMO_SANDBOXED_GYM_VERSION=0.1.0a1
 # --no-install-project installs dependencies but not nemo-rl itself; the root package is added
 # editable in a cheap step after the full-source COPY.
 #
-# Then drop ray's vendored aiohttp and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
+# Then drop ray's vendored aiohttp, yarl, and jars, and PyNvVideoCodec's bundled FFmpeg, before prefetch
 # can symlink a venv at them. The package stays cached, so uv does not re-download it.
 RUN <<"EOF" bash -eu
 set -x
@@ -219,7 +219,8 @@ uv sync ${UV_SYNC_MODE} --extra mcore --extra nemo_gym --no-install-project "${S
 uv sync ${UV_SYNC_MODE} --extra vllm --extra nemo_gym --no-install-project "${SKIP[@]}"
 uv sync ${UV_SYNC_MODE} --all-groups --no-install-project "${SKIP[@]}"
 
-find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -exec rm -rf {} + || true
+find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/aiohttp*" -prune -exec rm -rf {} + || true
+find "${UV_CACHE_DIR}" -type d -path "*ray/_private/runtime_env/agent/thirdparty_files/yarl*" -prune -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d -path "*/ray/jars" -exec rm -rf {} + || true
 find "${UV_CACHE_DIR}" -type d \
     \( -name PyNvVideoCodec -o -name 'pynvvideocodec-*.data' \) -exec rm -rf {} + || true
@@ -261,7 +262,7 @@ EOF
 # prefetch_venvs.py names them. This layer does not run that script: importing
 # it needs the rest of the tree, and the full source COPY is below so a
 # source-only bump reuses these syncs.
-#   DTensorPolicyWorkerV2 -> automodel
+#   DTensorPolicyWorkerV2 -> automodel (nemo-automodel[moe,vlm]; no media extras)
 #   MegatronPolicyWorker  -> mcore + nemo_gym (not the quant worker)
 #   VllmGenerationWorker, VllmAsyncGenerationWorker -> vllm + nemo_gym
 #   SyncRolloutActor      -> vllm
@@ -324,7 +325,7 @@ sync_venv() {
     uv pip install --directory /tmp --python "${venv}/bin/python" --no-deps /mnt/wheels/*.whl
     write_wrapper "${venv}"
 }
-sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2 --extra automodel
+sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker --extra automodel
 sync_venv /opt/ray_venvs/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker --extra mcore --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker --extra vllm --extra nemo_gym
 sync_venv /opt/ray_venvs/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker --extra vllm --extra nemo_gym
@@ -338,15 +339,15 @@ EOF
 # Exclude submodule .git dirs here; a later rm would still leave them in this layer.
 COPY --from=nemo-rl --chown=${BUILD_UID}:${BUILD_GID} --exclude=**/.git . /opt/nemo-rl
 
-# Pin verifiers to the package version of the v0.3.1 tag. The wrapper-dir patch
-# stays so a later run of prefetch_venvs.py writes into the driver bin; this
-# image already wrote those wrappers above.
+# Upstream's tokenizer assert already allows the 5.17.0 override (<5.20). The
+# verifiers pin and wrapper-dir patch stay so a later run of prefetch_venvs.py
+# writes into the driver bin; this image already wrote those wrappers above.
+# The generation port-range bind is already in the pinned RL commit, so it is
+# not applied again here.
 RUN --mount=type=bind,source=docker/rl/patches,target=/tmp/patches,readonly \
     git -C /opt/nemo-rl apply --verbose \
     /tmp/patches/nemo-rl-verifiers-pin.patch \
-    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch \
-    /tmp/patches/nemo-rl-transformers-5.17-tokenizer.patch \
-    /tmp/patches/nemo-rl-vllm-reserved-port-range.patch
+    /tmp/patches/nemo-rl-prefetch-wrapper-dir.patch
 
 # Editable root only. Dependencies were installed by the syncs above.
 RUN <<"EOF" bash -eu

@@ -107,7 +107,10 @@ dev = {json.dumps(dev)}
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["nemo_gym", "nemo_gym.*"]""")
+include = ["nemo_gym", "nemo_gym.*"]
+
+[tool.setuptools.package-data]
+nemo_gym = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]""")
 EOF
 uv build --wheel --no-config --out-dir my-env/wheels "$LIB"
 GYM_WHEEL=$(ls my-env/wheels/nemo_gym-*.whl)

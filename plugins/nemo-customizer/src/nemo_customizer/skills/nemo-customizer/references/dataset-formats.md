@@ -19,7 +19,7 @@ Automodel detects schema from the **first JSONL line**.
 | Schema | JSONL shape | Job JSON |
 |--------|-------------|----------|
 | **CHAT** (preferred when model has chat template) | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` | (none) |
-| **MULTIMODAL** | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
+| **MULTIMODAL** (fileset shape only; trainer support pending) | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
 | **SFT** | `{"prompt": "...", "completion": "..."}` | (none) |
 | **CUSTOM** | Any two columns, e.g. `{"input": "...", "output": "..."}` | `"prompt_template": "{input} {output}"` on `dataset` |
 | **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | `training.recipe: bi_encoder` or `cross_encoder`. `neg_doc` must be a **non-empty** list; convert-only retrieval Stage 1 emits `[]` and training crashes unless you mine first. |
