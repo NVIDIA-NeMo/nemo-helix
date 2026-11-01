@@ -421,9 +421,9 @@ func TestWorkloadAuthTokenSourceRefreshesNearExpiry(t *testing.T) {
 	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 
-	source, err := newOTLPLogWorkloadAuthTokenSource(context.Background())
+	source, err := newWorkloadAuthTokenSource(context.Background())
 	if err != nil {
-		t.Fatalf("newOTLPLogWorkloadAuthTokenSource returned error: %v", err)
+		t.Fatalf("newWorkloadAuthTokenSource returned error: %v", err)
 	}
 	if source == nil {
 		t.Fatal("expected workload auth token source")
@@ -499,9 +499,9 @@ func TestWorkloadAuthTokenSourceSynchronizesConcurrentRefresh(t *testing.T) {
 	t.Setenv(nhxBaseURLEnv, server.URL)
 	t.Setenv(workloadIdentityTokenFileEnv, subjectTokenPath)
 
-	source, err := newOTLPLogWorkloadAuthTokenSource(context.Background())
+	source, err := newWorkloadAuthTokenSource(context.Background())
 	if err != nil {
-		t.Fatalf("newOTLPLogWorkloadAuthTokenSource returned error: %v", err)
+		t.Fatalf("newWorkloadAuthTokenSource returned error: %v", err)
 	}
 	if source == nil {
 		t.Fatal("expected workload auth token source")
