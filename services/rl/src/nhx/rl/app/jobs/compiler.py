@@ -51,6 +51,11 @@ from nhx.customization_common.integrations import (
     collect_integration_secret_envs,
     warn_incomplete_integrations,
 )
+from nhx.customization_common.schemas.checkpoint import (
+    CheckpointTraits,
+    reject_incompatible_checkpoint,
+    traits_from_model_spec,
+)
 from nhx.customization_common.schemas.file_io import (
     DownloadItem,
     FileIOTaskConfig,
@@ -129,6 +134,12 @@ def _get_cpu_resources() -> ResourcesSpec:
     )
 
 
+def _training_uses_lora(job_spec: RlJobOutput) -> bool:
+    """True when the optimizer state is the adapter, including ``lora_merged``."""
+    training = job_spec.training
+    return isinstance(training, GRPOTraining) and training.finetuning_type in ("lora", "lora_merged")
+
+
 def _gpu_training_resources(*, num_nodes: int = 1, num_gpus: int, lora: bool) -> ResourcesSpec:
     return ResourcesSpec(
         num_nodes=num_nodes,
@@ -186,11 +197,14 @@ def _build_model_entity_config(
 ) -> ModelEntityTaskConfig:
     method = job_spec.training_type.value.upper()
     peft: PEFTConfig | None = None
-    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
+    if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type in ("lora", "lora_merged"):
         lora = job_spec.training.lora
         assert lora is not None  # validated on GRPOTraining
-        peft = PEFTConfig(type=FinetuningType.LORA, rank=lora.rank, alpha=lora.alpha)
-        description = f"{method}-trained LoRA adapter from nhx-rl job ({job_spec.model})"
+        peft = PEFTConfig(type=FinetuningType(job_spec.training.finetuning_type), rank=lora.rank, alpha=lora.alpha)
+        if job_spec.training.finetuning_type == "lora":
+            description = f"{method}-trained LoRA adapter from nhx-rl job ({job_spec.model})"
+        else:
+            description = f"{method}-trained model (LoRA merged into the base) from nhx-rl job ({job_spec.model})"
     else:
         description = f"{method}-trained model from nhx-rl job ({job_spec.model})"
     return ModelEntityTaskConfig(
@@ -362,12 +376,18 @@ def _build_integrations_config(integrations: IntegrationsSpec | None) -> Trainin
     return TrainingStepConfig.IntegrationsConfig(wandb=wandb_cfg, mlflow=mlflow_cfg)
 
 
-def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+def _build_dpo_training_step_config(
+    job_spec: RlJobOutput,
+    *,
+    trust_remote_code: bool,
+    traits: CheckpointTraits | None = None,
+) -> TrainingStepConfig:
     """Map a DPO spec onto the backend-agnostic step config."""
     t = job_spec.training
     if not isinstance(t, DPOTraining):
         raise HelixJobCompilationError(f"Expected a DPO training spec, got {type(t).__name__}.")
     p = t.parallelism
+    recorded = traits or CheckpointTraits()
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
         model=ModelConfig(
@@ -375,6 +395,11 @@ def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code:
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
             trust_remote_code=trust_remote_code,
+            has_vision_tower=recorded.has_vision_tower,
+            has_audio_tower=recorded.has_audio_tower,
+            num_experts=recorded.expert_count,
+            num_nextn_predict_layers=recorded.num_nextn_predict_layers,
+            checkpoint_model_name=recorded.checkpoint_model_name,
         ),
         dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
         training=TrainingStepConfig.TrainingConfig(
@@ -428,7 +453,12 @@ def _build_dpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code:
     )
 
 
-def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+def _build_grpo_training_step_config(
+    job_spec: RlJobOutput,
+    *,
+    trust_remote_code: bool,
+    traits: CheckpointTraits | None = None,
+) -> TrainingStepConfig:
     """Map a GRPO spec onto the backend-agnostic step config."""
     t = job_spec.training
     if not isinstance(t, GRPOTraining):
@@ -453,6 +483,7 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
             "to the same claim the Jobs controller mounts for job storage."
         )
 
+    recorded = traits or CheckpointTraits()
     return TrainingStepConfig(
         backend=TrainingBackend.NEMO_RL,
         model=ModelConfig(
@@ -461,6 +492,11 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
             max_seq_length=t.max_seq_length,
             trust_remote_code=trust_remote_code,
             v4_compatible=t.v4_compatible,
+            has_vision_tower=recorded.has_vision_tower,
+            has_audio_tower=recorded.has_audio_tower,
+            num_experts=recorded.expert_count,
+            num_nextn_predict_layers=recorded.num_nextn_predict_layers,
+            checkpoint_model_name=recorded.checkpoint_model_name,
         ),
         dataset=TrainingStepConfig.DatasetConfig(path=DEFAULT_DATASET_PATH),
         gym=TrainingStepConfig.GymConfig(
@@ -479,7 +515,11 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
         ),
         training=TrainingStepConfig.TrainingConfig(
             training_type=TrainingType.GRPO,
-            finetuning_type=FinetuningType.LORA if t.finetuning_type == "lora" else FinetuningType.ALL_WEIGHTS,
+            finetuning_type=(
+                FinetuningType(t.finetuning_type)
+                if t.finetuning_type in ("lora", "lora_merged")
+                else FinetuningType.ALL_WEIGHTS
+            ),
             grpo=GRPOConfig(
                 num_generations_per_prompt=t.num_generations_per_prompt,
                 num_prompts_per_step=t.num_prompts_per_step,
@@ -532,7 +572,7 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
                     exclude_modules=t.lora.exclude_modules,
                     use_triton=t.lora.use_triton,
                 )
-                if t.finetuning_type == "lora" and t.lora is not None
+                if t.finetuning_type in ("lora", "lora_merged") and t.lora is not None
                 else None
             ),
         ),
@@ -576,10 +616,15 @@ def _build_grpo_training_step_config(job_spec: RlJobOutput, *, trust_remote_code
     )
 
 
-def _build_training_step_config(job_spec: RlJobOutput, *, trust_remote_code: bool) -> TrainingStepConfig:
+def _build_training_step_config(
+    job_spec: RlJobOutput,
+    *,
+    trust_remote_code: bool,
+    traits: CheckpointTraits | None = None,
+) -> TrainingStepConfig:
     if job_spec.training_type == TrainingType.GRPO:
-        return _build_grpo_training_step_config(job_spec, trust_remote_code=trust_remote_code)
-    return _build_dpo_training_step_config(job_spec, trust_remote_code=trust_remote_code)
+        return _build_grpo_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
+    return _build_dpo_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
 
 
 def _build_training_step(
@@ -588,6 +633,7 @@ def _build_training_step(
     *,
     trust_remote_code: bool,
     profile: str | None,
+    traits: CheckpointTraits | None = None,
 ) -> HelixJobStep:
     """Build the Ray DPO training step, selecting the executor by ``num_nodes``.
 
@@ -598,7 +644,7 @@ def _build_training_step(
     num_nodes = p.num_nodes
     num_gpus_per_node = p.num_gpus_per_node
 
-    step_config = _build_training_step_config(job_spec, trust_remote_code=trust_remote_code)
+    step_config = _build_training_step_config(job_spec, trust_remote_code=trust_remote_code, traits=traits)
     step_name = "grpo-training" if job_spec.training_type == TrainingType.GRPO else "dpo-training"
 
     container = ContainerSpec(
@@ -653,7 +699,7 @@ def _build_training_step(
             resources=_gpu_training_resources(
                 num_nodes=num_nodes,
                 num_gpus=num_gpus_per_node,
-                lora=job_spec.trains_lora_adapter,
+                lora=_training_uses_lora(job_spec),
             ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
@@ -665,7 +711,7 @@ def _build_training_step(
             resources=_gpu_training_resources(
                 num_nodes=1,
                 num_gpus=num_gpus_per_node,
-                lora=job_spec.trains_lora_adapter,
+                lora=_training_uses_lora(job_spec),
             ),
             profile=resolved_profile if resolved_profile is not None else "default",
         )
@@ -710,6 +756,23 @@ async def platform_job_config_compiler(
 
     me = await fetch_model_entity(job_spec.model, workspace, platform)
     trust_remote_code = me.trust_remote_code or False
+    traits = traits_from_model_spec(me.spec)
+    training = job_spec.training
+    parallelism = training.parallelism
+    strategy = getattr(training, "batching_strategy", None)
+    sequence_packing = getattr(strategy, "value", strategy) == "sequence_packing"
+    try:
+        reject_incompatible_checkpoint(
+            traits,
+            training_type=job_spec.training_type.value,
+            recipe=None,
+            sequence_packing=sequence_packing,
+            expert_parallel_size=parallelism.expert_parallel_size,
+            num_gpus_per_node=parallelism.num_gpus_per_node,
+            num_nodes=parallelism.num_nodes,
+        )
+    except ValueError as exc:
+        raise HelixJobCompilationError(str(exc)) from exc
 
     await validate_output_name_not_in_flight(job_spec.output.name, workspace, platform)
     if isinstance(job_spec.training, GRPOTraining) and job_spec.training.finetuning_type == "lora":
@@ -751,7 +814,7 @@ async def platform_job_config_compiler(
             FILE_IO_TASK_COMMAND,
             _build_download_config(job_spec, me, workspace=workspace),
         ),
-        _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile),
+        _build_training_step(job_spec, base_env, trust_remote_code=trust_remote_code, profile=profile, traits=traits),
         _cpu_task_step(
             "model-upload",
             FILE_IO_TASK_COMMAND,

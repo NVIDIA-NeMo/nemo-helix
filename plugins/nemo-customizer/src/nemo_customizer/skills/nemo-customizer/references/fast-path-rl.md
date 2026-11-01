@@ -80,7 +80,7 @@ It runs one full epoch; `references/defaults.md` has the bounded-run alternative
 
 `use_triton` is deliberately absent from the `lora` block: unset, the compiler picks `true` at `tensor_parallel_size` 1 and `false` above, and an explicit `true` above TP 1 is rejected at submit.
 
-**Full-weight variant.** Drop `finetuning_type` and the `lora` block — `all_weights` is the schema default. It registers a model entity that needs its own deployment, where LoRA registers an adapter that hot-reloads onto the base. Do not set `lora_merged` (rejected) or pass a `lora` block alongside `all_weights` (rejected).
+**Full-model variants.** `all_weights` and `lora_merged` both register a model entity that needs its own deployment. `all_weights` is the schema default: omit `finetuning_type` and the `lora` block, and every weight is trained. `lora_merged` keeps the `lora` block and sets `finetuning_type: "lora_merged"`; training stays on the adapter and export folds it into the base. The LoRA job above registers an adapter that hot-reloads onto the base. A `lora` block alongside `all_weights` is rejected.
 
 **5. Submit and poll**
 

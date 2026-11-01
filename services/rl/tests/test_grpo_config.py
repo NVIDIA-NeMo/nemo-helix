@@ -72,6 +72,10 @@ def _make_grpo_step(
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
     v4_compatible: bool = True,
     integrations: TrainingStepConfig.IntegrationsConfig | None = None,
+    has_vision_tower: bool = False,
+    has_audio_tower: bool = False,
+    num_experts: int | None = None,
+    num_nextn_predict_layers: int | None = None,
 ) -> TrainingStepConfig:
     env_root = tmp_path / "environment"
     env_root.mkdir(exist_ok=True)
@@ -86,6 +90,10 @@ def _make_grpo_step(
             path=str(tmp_path / "model"),
             max_seq_length=512,
             v4_compatible=v4_compatible,
+            has_vision_tower=has_vision_tower,
+            has_audio_tower=has_audio_tower,
+            num_experts=num_experts,
+            num_nextn_predict_layers=num_nextn_predict_layers,
         ),
         dataset=TrainingStepConfig.DatasetConfig(path=str(dataset_pvc)),
         gym=TrainingStepConfig.GymConfig(
@@ -129,6 +137,10 @@ def _prepared_step(
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
     v4_compatible: bool = True,
     integrations: TrainingStepConfig.IntegrationsConfig | None = None,
+    has_vision_tower: bool = False,
+    has_audio_tower: bool = False,
+    num_experts: int | None = None,
+    num_nextn_predict_layers: int | None = None,
 ) -> tuple[TrainingStepConfig, Path]:
     dataset_pvc = tmp_path / "dataset"
     dataset_pvc.mkdir(exist_ok=True)
@@ -147,6 +159,10 @@ def _prepared_step(
             policy_backend=policy_backend,
             v4_compatible=v4_compatible,
             integrations=integrations,
+            has_vision_tower=has_vision_tower,
+            has_audio_tower=has_audio_tower,
+            num_experts=num_experts,
+            num_nextn_predict_layers=num_nextn_predict_layers,
         ),
         dataset_pvc,
     )
@@ -357,8 +373,17 @@ def test_compile_grpo_config_enables_lora(
     assert lora_cfg["dim"] == 32
     assert lora_cfg["alpha"] == 64
     assert lora_cfg["use_triton"] is True
+    assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
     assert "_v2" not in cfg["policy"]["automodel_cfg"]
     assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
+
+
+def test_full_weight_generation_omits_lora_refit_mode(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    assert "lora_refit_mode" not in compile_grpo_config(step, job_ctx)["policy"]["generation"]
 
 
 def test_compiled_config_has_master_config_required_fields(
@@ -468,6 +493,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_fields(
     [
         (FinetuningType.ALL_WEIGHTS, None, False),
         (FinetuningType.LORA, LoRAConfig(rank=8), True),
+        (FinetuningType.LORA_MERGED, LoRAConfig(rank=8), True),
         # finetuning_type is what enables LoRA; an omitted lora block just takes defaults.
         (FinetuningType.LORA, None, True),
     ],
@@ -489,6 +515,11 @@ def test_lora_cfg_follows_finetuning_type_under_automodel(
     # equivalent here and the test does not depend on which one we emit.
     assert dtensor_cfg.get("lora_cfg", {}).get("enabled", False) is expected
     assert "_v2" not in dtensor_cfg
+    generation = compile_grpo_config(step, job_ctx)["policy"]["generation"]
+    if expected:
+        assert generation["lora_refit_mode"] == "merged"
+    else:
+        assert "lora_refit_mode" not in generation
 
 
 @pytest.mark.parametrize(
@@ -1718,3 +1749,128 @@ def test_full_result_tables_warn_when_the_wandb_key_never_arrives(
     assert cfg["logger"]["wandb_enabled"] is False
     assert "log_nemo_gym_full_result_tables" not in cfg["logger"]["wandb"]
     assert "rollout Tables will not be written" in caplog.text
+
+
+def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(
+        tmp_path, finetuning_type=FinetuningType.LORA, lora=LoRAConfig(), has_vision_tower=True
+    )
+    row = {
+        "task_idx": 0,
+        "vf_env_id": "ascii-tree",
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "page.png"}},
+                        {"type": "text", "text": "read"},
+                    ],
+                }
+            ]
+        },
+        "agent_ref": {"name": "verifiers_agent"},
+        "answer": "42",
+        "example_id": "ex-0",
+        "info": {},
+    }
+    (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["is_vlm"] is True
+    freeze = cfg["policy"]["automodel_cfg"]["automodel_kwargs"]["freeze_config"]
+    assert freeze["freeze_vision_tower"] is True
+    assert freeze["freeze_language_model"] is False
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 2}
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["skip_mm_profiling"] is True
+    assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"] == [
+        "*vision_tower*",
+        "*vision_model*",
+        "*visual*",
+        "*image_encoder*",
+        "*multi_modal_projector*",
+        "*mlp1*",
+        "*lm_head*",
+    ]
+    assert "image_url" in (dataset / "training.jsonl").read_text(encoding="utf-8")
+
+
+def test_grpo_input_image_rows_count_as_images(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(tmp_path, has_vision_tower=True)
+    row = {
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": "data:image/png;base64,aa", "detail": "auto"},
+                        {"type": "input_text", "text": "how many cubes?"},
+                    ],
+                }
+            ]
+        },
+        "agent_ref": {"type": "responses_api_agents", "name": "clevr_cogent_simple_agent"},
+        "expected_answer": "3",
+    }
+    (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 2}
+
+
+def test_grpo_text_rows_on_a_vision_model_limit_images_to_one(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path, has_vision_tower=True)
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
+
+
+def test_grpo_refuses_sequence_packing_for_a_vision_model(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        grpo=GRPOConfig(num_generations_per_prompt=4, batching_strategy=BatchingStrategy.SEQUENCE_PACKING),
+        has_vision_tower=True,
+    )
+
+    with pytest.raises(ValueError, match="sequence_packing"):
+        compile_grpo_config(step, job_ctx)
+
+
+def test_caller_vllm_kwargs_and_lora_targets_are_kept(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        finetuning_type=FinetuningType.LORA,
+        lora=LoRAConfig(target_modules=["*.q_proj"]),
+        grpo=GRPOConfig(
+            num_generations_per_prompt=4,
+            vllm_kwargs={"moe_backend": "triton"},
+            automodel_kwargs={"freeze_config": {"freeze_vision_tower": False}},
+        ),
+        has_vision_tower=True,
+        num_nextn_predict_layers=1,
+    )
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"] == {"moe_backend": "triton"}
+    assert cfg["policy"]["automodel_cfg"]["automodel_kwargs"]["freeze_config"] == {"freeze_vision_tower": False}
+    assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["target_modules"] == ["*.q_proj"]
+    assert cfg["policy"]["hf_config_overrides"]["num_nextn_predict_layers"] == 0

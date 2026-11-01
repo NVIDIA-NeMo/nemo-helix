@@ -188,6 +188,23 @@ EXAMPLES: dict[str, list[str]] = {
         "RuntimeError: CUDA error: an illegal memory access was encountered",
         "RuntimeError: CUDA error: uncorrectable ECC error encountered",
     ],
+    "ray_agent_port_conflict": [
+        "RuntimeError: Ray agent failed to start because its port is already in use",
+    ],
+    "ray_agent_grpcio_mismatch": [
+        "RuntimeError: Ray agent crashed during startup because grpcio does not match Ray's requirement",
+    ],
+    "ray_agent_killed": [
+        "RuntimeError: Ray agent was killed by the operating system during startup",
+    ],
+    "ray_agent_startup_error": [
+        "RuntimeError: Ray agent failed during startup: ValueError: worker failed to register",
+    ],
+    "ray_agent_fate_share": [
+        'reason_message: "runtime_env_agent failed and raylet fate-shares with it."',
+        'reason_message: "dashboard_agent failed and raylet fate-shares with it."',
+        "RuntimeError: Ray agent failed and the raylet shut down with it",
+    ],
     "cluster_resources_unavailable": [
         "ResourceInsufficientError: Maximum number of retries reached (6). Cluster resources may be insufficient.",
         "TimeoutError: Timed out waiting for all workers to connect after 600s.",
@@ -307,6 +324,38 @@ def test_a_storage_error_wins_over_the_checkpoint_wrapper_after_it(classifier):
     ]
 
     assert classifier.classify_output(lines, 1).cause == "disk_full"
+
+
+def test_a_training_oom_wins_over_the_raylet_fate_share_notice(classifier):
+    lines = [
+        "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB.",
+        'reason_message: "runtime_env_agent failed and raylet fate-shares with it."',
+    ]
+
+    assert classifier.classify_output(lines, 1).cause == "gpu_out_of_memory"
+
+
+def test_a_ray_port_conflict_wins_over_the_head_failing_to_start(classifier):
+    lines = [
+        "RuntimeError: Failed to start Ray head node",
+        "RuntimeError: Ray agent failed to start because its port is already in use",
+    ]
+
+    assert classifier.classify_output(lines, 1).cause == "ray_agent_port_conflict"
+
+
+def test_the_ray_hint_that_lists_every_cause_is_only_the_fate_share_notice(classifier):
+    # Ray prints all three causes in one paragraph whenever the agent dies. That paragraph is not
+    # itself a grpcio mismatch, a port conflict, or an out-of-memory kill.
+    lines = [
+        "The raylet fate shares with the agent. This can happen because",
+        "- The version of `grpcio` doesn't follow Ray's requirement. Agent can segfault with the incorrect `grpcio` version.",
+        "- The agent failed to start because of unexpected error or port conflict.",
+        "- The agent is killed by the OS (e.g., out of memory).",
+        'reason_message: "runtime_env_agent failed and raylet fate-shares with it."',
+    ]
+
+    assert classifier.classify_output(lines, 1).cause == "ray_agent_fate_share"
 
 
 def test_a_gpu_oom_wins_over_the_worker_crash_after_it(classifier):

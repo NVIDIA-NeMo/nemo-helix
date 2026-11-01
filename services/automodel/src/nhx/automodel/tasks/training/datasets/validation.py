@@ -100,6 +100,65 @@ SCHEMAS: dict[str, Callable[[str | None], dict]] = {
 }
 
 
+def is_multimodal_chat_row(row: Any) -> bool:
+    """A ``messages`` row whose content is text parts and ``image_url`` parts.
+
+    String ``content`` is the SFT chat shape. Any other part type is rejected,
+    which is the row ``MULTIMODAL_SCHEMA`` accepts once that schema is present.
+    """
+    if not isinstance(row, dict):
+        return False
+    messages = row.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return False
+    saw_parts = False
+    for message in messages:
+        if not isinstance(message, dict) or not isinstance(message.get("role"), str):
+            return False
+        content = message.get("content")
+        if isinstance(content, str):
+            continue
+        parts = [content] if isinstance(content, dict) else content
+        if not isinstance(parts, list) or not parts:
+            return False
+        for part in parts:
+            if not _is_multimodal_part(part):
+                return False
+        saw_parts = True
+    return saw_parts
+
+
+def row_has_image_part(row: Any) -> bool:
+    """True when a multimodal row carries an ``image_url`` part."""
+    if not isinstance(row, dict):
+        return False
+    messages = row.get("messages")
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        parts = [content] if isinstance(content, dict) else content
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                return True
+    return False
+
+
+def _is_multimodal_part(part: Any) -> bool:
+    if not isinstance(part, dict):
+        return False
+    if part.get("type") == "text":
+        return isinstance(part.get("text"), str)
+    if part.get("type") == "image_url":
+        image_url = part.get("image_url")
+        return isinstance(image_url, dict) and isinstance(image_url.get("url"), str) and bool(image_url["url"])
+    return False
+
+
 class DatasetValidator:
     """Validator for training datasets.
 
@@ -133,6 +192,7 @@ class DatasetValidator:
         training_type: TrainingType,
         finetuning_type: Optional[FinetuningType] = None,
         prompt_template: str | None = None,
+        allow_multimodal: bool = False,
     ):
         """Initialize validator with training configuration.
 
@@ -144,6 +204,9 @@ class DatasetValidator:
         self.training_type = training_type
         self.finetuning_type = finetuning_type
         self.prompt_template = prompt_template
+        # A vision checkpoint may train on SFT rows or on image_url chat rows.
+        # A text checkpoint stays on SFT_SCHEMA, so an image row fails here.
+        self.allow_multimodal = allow_multimodal
 
     def _validate_json_object(self, obj: dict, validator: Validator) -> None:
         """Validate a JSON object against a compiled JSON Schema validator.
@@ -238,8 +301,15 @@ class DatasetValidator:
                 try:
                     self._validate_json_object(obj, validator)
                 except Exception as e:
+                    if is_multimodal_chat_row(obj) and self.allow_multimodal:
+                        validated_rows += 1
+                        continue
+                    if is_multimodal_chat_row(obj) and row_has_image_part(obj):
+                        raise DatasetFormatError(
+                            f"{file_path} has an image row, which requires a model with a vision tower."
+                        ) from e
                     logger.debug(f"{file_path} does not conform to the expected schema: {e}")
-                    raise DatasetFormatError(f"{file_path} does not conform to the expected schema: {e}")
+                    raise DatasetFormatError(f"{file_path} does not conform to the expected schema: {e}") from e
                 validated_rows += 1
                 if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
                     logger.info("Validated %s rows in %s", validated_rows, file_path)

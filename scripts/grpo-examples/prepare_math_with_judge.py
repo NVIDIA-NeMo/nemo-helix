@@ -22,8 +22,12 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import sys
 from pathlib import Path
 from typing import Any, Iterator
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from gym_rows import write_rows  # noqa: E402
 
 # The `agent_ref.name` is the *config key* under `responses_api_agents:` in
 # math_with_judge.yaml, not the server directory name (`simple_agent`).
@@ -65,22 +69,6 @@ def _aime24_rows() -> Iterator[dict[str, Any]]:
             "question": example["problem"],
             "expected_answer": str(example["answer"]),
         }
-
-
-def _write(path: Path, rows: list[dict[str, Any]], repeats: int) -> int:
-    """Write rows with agent_ref and a stable task_idx, repeating each `repeats` times.
-
-    task_idx is not read by the resources server, but Gym sorts rollouts by it and the
-    platform's dataset validators expect an int, so number the emitted rows rather than
-    the source rows.
-    """
-    written = 0
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            for _ in range(repeats):
-                handle.write(json.dumps({**row, "task_idx": written, "agent_ref": AGENT_REF}) + "\n")
-                written += 1
-    return written
 
 
 def main() -> int:
@@ -142,8 +130,8 @@ def main() -> int:
 
     train_rows = rows if args.train_size == -1 else rows[: args.train_size]
 
-    n_train = _write(args.out_dir / "training.jsonl", train_rows, repeats=1)
-    n_val = _write(args.out_dir / "validation.jsonl", val_rows, repeats=args.val_repeats)
+    n_train = write_rows(args.out_dir / "training.jsonl", train_rows, AGENT_REF, repeats=1)
+    n_val = write_rows(args.out_dir / "validation.jsonl", val_rows, AGENT_REF, repeats=args.val_repeats)
 
     print(
         json.dumps(

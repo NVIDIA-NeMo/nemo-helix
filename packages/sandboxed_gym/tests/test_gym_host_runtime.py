@@ -11,6 +11,7 @@ import subprocess
 import threading
 import time
 import urllib.error
+import zipfile
 from email.message import Message
 from http.server import HTTPServer, ThreadingHTTPServer
 from types import ModuleType, SimpleNamespace
@@ -19,7 +20,12 @@ from unittest.mock import MagicMock
 from urllib.parse import urlsplit
 
 import pytest
-from sandboxed_gym.environment_package import WHEELS_V1_SUBDIR
+from sandboxed_gym.environment_package import (
+    WHEELS_V1_SUBDIR,
+    EnvironmentMetadata,
+    WheelsV1Manifest,
+    WheelsV1Package,
+)
 from sandboxed_gym.runtime import gym_host_runtime as runtime
 
 
@@ -749,6 +755,27 @@ def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, mon
     assert runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY] == os.pathsep.join(
         (str(package), str(image.resolve()), "/operator/root")
     )
+
+
+def test_a_stale_nemo_gym_wheel_says_to_rebuild_the_wheelhouse(tmp_path, monkeypatch):
+    image = tmp_path / "gym"
+    (image / "nemo_gym" / "config").mkdir(parents=True)
+    (image / "nemo_gym" / "config" / "global_config.py").write_text("x = 1\n")
+    wheel = tmp_path / "nemo_gym-0.7.0rc0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("nemo_gym/global_config.py", "x = 1\n")
+    package = WheelsV1Package(
+        root=tmp_path / "env",
+        manifest=WheelsV1Manifest(metadata=EnvironmentMetadata(name="clevr")),
+        config_paths=(),
+        wheelhouse_path=tmp_path / "env" / "wheels",
+        wheel_files=(wheel,),
+    )
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+
+    with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
+        runtime._require_vendored_gym_matches_image(package)
 
 
 def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatch):

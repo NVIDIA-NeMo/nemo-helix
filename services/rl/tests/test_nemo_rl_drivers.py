@@ -350,6 +350,15 @@ def test_driver_fails_a_resume_that_restored_no_checkpoint(driver: str, train_fn
 
 
 @pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
+def test_driver_sets_log_dir_on_the_logger_model(driver: str) -> None:
+    """LoggerConfig is a pydantic model. Subscripting it raises TypeError before training starts."""
+    source = (DRIVERS / driver).read_text()
+
+    assert 'config.logger["log_dir"]' not in source
+    assert "config.logger.log_dir" in source
+
+
+@pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
 def test_driver_marks_a_pause_for_the_resume(driver: str) -> None:
     """The exit code alone tells only this run's runner; the resume reads the marker."""
     lines = _first_call_lines((DRIVERS / driver).read_text())

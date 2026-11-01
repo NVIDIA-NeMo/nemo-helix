@@ -76,6 +76,17 @@ class ModelConfig(BaseModel):
         description="Keep the base checkpoint's transformers-v4 config.json on consolidated "
         "exports. Set false to write the in-memory v5 config instead.",
     )
+    has_vision_tower: bool = Field(default=False, description="Copied from the model spec.")
+    has_audio_tower: bool = Field(default=False, description="Copied from the model spec.")
+    num_experts: int | None = Field(default=None, description="Routed expert count from the model spec.")
+    num_nextn_predict_layers: int | None = Field(
+        default=None,
+        description="Multi-token prediction depth declared by the checkpoint.",
+    )
+    checkpoint_model_name: str | None = Field(
+        default=None,
+        description="Architecture class name from the model spec.",
+    )
 
 
 class DPOConfig(BaseModel):

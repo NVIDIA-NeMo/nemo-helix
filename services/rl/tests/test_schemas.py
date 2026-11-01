@@ -156,6 +156,7 @@ def test_grpo_lora_defaults_params() -> None:
         ({"type": "dpo"}, 5e-6),
         ({"type": "grpo"}, 5e-6),
         ({"type": "grpo", "finetuning_type": "lora"}, 1e-5),
+        ({"type": "grpo", "finetuning_type": "lora_merged"}, 1e-5),
         ({"type": "grpo", "finetuning_type": "lora", "learning_rate": 3e-5}, 3e-5),
         ({"type": "dpo", "learning_rate": 1e-6}, 1e-6),
     ],
@@ -404,12 +405,29 @@ def test_stored_dtensor_backend_reads_as_automodel() -> None:
     assert job.training.policy_backend is PolicyBackend.AUTOMODEL
 
 
-def test_grpo_lora_rejects_lora_merged() -> None:
-    # `type` is required, so omitting it raises before finetuning_type is ever
-    # looked at -- this would pass even if lora_merged were accepted. Match on the
-    # field name so the assertion is about lora_merged and nothing else.
-    with pytest.raises(ValueError, match="finetuning_type"):
-        GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora_merged"})
+def test_grpo_lora_merged_trains_an_adapter_and_publishes_a_model() -> None:
+    t = GRPOTraining(type="grpo", finetuning_type="lora_merged")
+    assert t.lora is not None
+    assert t.policy_backend is PolicyBackend.AUTOMODEL
+    job = RlJobOutput(
+        model="default/base",
+        dataset="default/gym-data",
+        environment="default/env",
+        training=t,
+        output=_make_output(out_type=OutputNameType.MODEL),
+    )
+    assert job.trains_lora_adapter is False
+
+
+def test_grpo_lora_merged_rejects_adapter_output() -> None:
+    with pytest.raises(ValueError, match="full-weight model"):
+        RlJobOutput(
+            model="default/base",
+            dataset="default/gym-data",
+            environment="default/env",
+            training=GRPOTraining(type="grpo", finetuning_type="lora_merged"),
+            output=_make_output(out_type=OutputNameType.ADAPTER),
+        )
 
 
 def test_grpo_lora_requires_adapter_output() -> None:
