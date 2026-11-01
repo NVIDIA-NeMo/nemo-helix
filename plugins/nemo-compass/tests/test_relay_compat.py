@@ -129,11 +129,24 @@ async def test_callback_errors_clean_up_scope_and_middleware(error):
         raise error
 
     with nemo_relay.scope.scope("parent", nemo_relay.ScopeType.Agent) as parent:
-        # Relay 0.9 converts exceptions raised by its callback into RuntimeError.
-        with pytest.raises(RuntimeError, match=type(error).__name__):
+        with pytest.raises(type(error)):
             async with relay_compat.relay_scope(manager, "compiler"):
                 await manager.run_middleware(MIDDLEWARE_EXECUTE_PYTHON, ExecutePythonContext(code="fails"), execute)
         assert nemo_relay.scope.get_handle().uuid == parent.uuid
+    assert not any(manager._middleware.values())
+
+
+@pytest.mark.asyncio
+async def test_intercept_rewriting_code_to_a_non_string_raises_type_error():
+    manager = EventManager()
+
+    async def execute(context):
+        pytest.fail("Invalid rewritten code must not execute")
+
+    async with relay_compat.relay_scope(manager, "rewritten") as handle:
+        nemo_relay.scope_local.register_tool_request(handle, "bad-code", 0, False, lambda name, args: {"code": 7})
+        with pytest.raises(TypeError, match="execute_python code must be a string"):
+            await manager.run_middleware(MIDDLEWARE_EXECUTE_PYTHON, ExecutePythonContext(code="original"), execute)
     assert not any(manager._middleware.values())
 
 
