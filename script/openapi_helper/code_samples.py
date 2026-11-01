@@ -8,9 +8,9 @@ Fern generates its request snippets from the operation alone. Three shapes come 
 - A bodyless success response (204/205): every tab parses or prints the empty body, so a
   successful call raises (``response.json()`` on Python, ``await response.json()`` in JavaScript).
 - A required form body: the snippet sends an empty form (``payload = ""``).
-- Credentials or bodies the route reads from the raw request, which FastAPI cannot describe:
-  ``/apis/auth/authenticate`` needs an ``Authorization`` header and the OTLP logs upload needs a
-  JSON body, but neither appears in the spec, so the snippets send neither.
+- Raw-request bodies not described by FastAPI, such as OTLP logs uploads.
+- Explicit authenticate examples that demonstrate runtime token variables rather than
+  embedding bearer placeholders. Their auth requirement comes from native OpenAPI metadata.
 
 For these operations this module writes explicit Python and JavaScript samples and
 an SDK override for Fern's default cURL tab. Binary downloads use bytes rather than a JSON decoder;
@@ -70,12 +70,17 @@ class SampleRequest:
     body: str | None = None
     reads_body: bool = True
     binary_response: bool = False
+    requires_bearer_token: bool = False
+
+    def __post_init__(self) -> None:
+        if self.requires_bearer_token and any(key.lower() == "authorization" for key in self.headers):
+            raise ValueError("Use bearer-token semantics instead of a literal Authorization header")
 
 
-# Requests whose headers or body the spec cannot express (see the module docstring).
+# Requests needing a custom body or runtime-credential demonstration (see the module docstring).
 _EXPLICIT: dict[tuple[str, str], dict[str, Any]] = {
-    ("get", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
-    ("post", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
+    ("get", "/apis/auth/authenticate"): {},
+    ("post", "/apis/auth/authenticate"): {},
     ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/atif"): {
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(
@@ -142,21 +147,44 @@ def _required_form_body(spec: dict, operation: dict) -> str | None:
     return urlencode(fields)
 
 
+def _requires_bearer_token(spec: dict, operation: dict) -> bool:
+    """Require bearer credentials only when every documented auth alternative does."""
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    requirements = operation.get("security", [])
+    return bool(requirements) and all(
+        any(
+            schemes.get(name, {}).get("type") == "http" and schemes[name].get("scheme", "").lower() == "bearer"
+            for name in requirement
+        )
+        for requirement in requirements
+    )
+
+
 def sample_request(spec: dict, path: str, method: str, operation: dict) -> SampleRequest | None:
     """The request to document for one operation, or None when Fern's own samples are correct."""
     if operation.get("x-codeSamples"):
         return None
+    bearer = _requires_bearer_token(spec, operation)
     explicit = _EXPLICIT.get((method, path))
     if explicit is not None:
-        return SampleRequest(method.upper(), _url(path), **{"reads_body": not _is_bodyless(operation), **explicit})
+        return SampleRequest(
+            method.upper(),
+            _url(path),
+            requires_bearer_token=bearer,
+            **{"reads_body": not _is_bodyless(operation), **explicit},
+        )
     content = _resolve(spec, operation.get("requestBody", {})).get("content", {})
     if "application/octet-stream" in content:
         return SampleRequest(
-            method.upper(), _url(path), headers={"Content-Type": "application/octet-stream"}, body="Hello, Helix!\n"
+            method.upper(),
+            _url(path),
+            headers={"Content-Type": "application/octet-stream"},
+            body="Hello, Helix!\n",
+            requires_bearer_token=bearer,
         )
     responses = [v for k, v in operation.get("responses", {}).items() if str(k).startswith("2")]
     if responses and all("application/octet-stream" in v.get("content", {}) for v in responses):
-        return SampleRequest(method.upper(), _url(path), binary_response=True)
+        return SampleRequest(method.upper(), _url(path), binary_response=True, requires_bearer_token=bearer)
     form = _required_form_body(spec, operation)
     if form is not None:
         return SampleRequest(
@@ -165,9 +193,10 @@ def sample_request(spec: dict, path: str, method: str, operation: dict) -> Sampl
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             body=form,
             reads_body=not _is_bodyless(operation),
+            requires_bearer_token=bearer,
         )
     if _is_bodyless(operation):
-        return SampleRequest(method.upper(), _url(path), reads_body=False)
+        return SampleRequest(method.upper(), _url(path), reads_body=False, requires_bearer_token=bearer)
     return None
 
 
@@ -177,10 +206,17 @@ def _q(value: str) -> str:
 
 
 def _python(r: SampleRequest) -> str:
-    lines = ["import requests", "", f"url = {_q(r.url)}"]
+    lines = (["import os"] if r.requires_bearer_token else []) + ["import requests", "", f"url = {_q(r.url)}"]
     args = ["url"]
-    if r.headers:
-        lines.append("headers = {" + ", ".join(f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()) + "}")
+    headers = [f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()]
+    if r.requires_bearer_token:
+        lines += [
+            "# Set NHX_ACCESS_TOKEN to a raw access token before running.",
+            'token = os.environ["NHX_ACCESS_TOKEN"]',
+        ]
+        headers.append('"Authorization": f"Bearer {token}"')
+    if headers:
+        lines.append("headers = {" + ", ".join(headers) + "}")
         args.append("headers=headers")
     if r.body is not None:
         lines.append(f"payload = {_q(r.body)}")
@@ -194,9 +230,17 @@ def _python(r: SampleRequest) -> str:
 
 
 def _javascript(r: SampleRequest) -> str:
-    lines = [f"const response = await fetch({_q(r.url)}, {{", f"  method: {_q(r.method)},"]
-    if r.headers:
-        lines.append("  headers: {" + ", ".join(f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()) + "},")
+    lines = []
+    headers = [f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()]
+    if r.requires_bearer_token:
+        lines += [
+            "// Supply `token` from your application's authentication flow before running.",
+            "// Do not embed a real token in frontend source or build-time environment variables.",
+        ]
+        headers.append('"Authorization": `Bearer ${token}`')
+    lines += [f"const response = await fetch({_q(r.url)}, {{", f"  method: {_q(r.method)},"]
+    if headers:
+        lines.append("  headers: {" + ", ".join(headers) + "},")
     if r.body is not None:
         lines.append(f"  body: {_q(r.body)},")
     lines += ["});", "if (!response.ok) throw new Error(`HTTP ${response.status}`);"]
@@ -216,11 +260,15 @@ _RENDERERS = {"Python": _python, "JavaScript": _javascript}
 def _curl(r: SampleRequest) -> str:
     args = ["curl --fail-with-body", "--request " + shlex.quote(r.method), shlex.quote(r.url)]
     args += ["--header " + shlex.quote(f"{k}: {v}") for k, v in r.headers.items()]
+    guidance = ""
+    if r.requires_bearer_token:
+        guidance = ': "${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}"\n'
+        args.append('--header "Authorization: Bearer ${NHX_ACCESS_TOKEN}"')
     if r.body is not None:
         args.append("--data-binary " + shlex.quote(r.body))
     if r.binary_response:
         args.append("--output example.txt")
-    return " \\\n  ".join(args) + "\n"
+    return guidance + " \\\n  ".join(args) + "\n"
 
 
 def render_samples(request: SampleRequest) -> list[dict[str, str]]:
@@ -239,7 +287,12 @@ def add_code_samples(spec: dict) -> dict:
                 operation["x-codeSamples"] = render_samples(request)
                 # Redocly x-codeSamples creates custom tabs. Only an SDK sample overrides
                 # Fern's default cURL tab; another custom `curl` tab does not replace it.
-                operation.setdefault("x-fern-examples", []).append(
-                    {"code-samples": [{"sdk": "curl", "code": _curl(request)}]}
-                )
+                sdk_samples = [{"sdk": "curl", "code": _curl(request)}]
+                if request.requires_bearer_token:
+                    # With native auth, Fern's HTTP fallback can replace custom
+                    # language tabs. SDK overrides preserve these runtime bindings.
+                    sdk_samples += [
+                        {"sdk": language.lower(), "code": _RENDERERS[language](request)} for language in LANGUAGES
+                    ]
+                operation.setdefault("x-fern-examples", []).append({"code-samples": sdk_samples})
     return spec

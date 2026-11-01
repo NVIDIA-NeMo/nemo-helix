@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 
 import yaml
 from nhx.common.api.utils import clear_query_param_schemas, register_query_param_schemas
+from nhx.common.auth.openapi import register_bearer_security_scheme
 from nhx.common.version import platform_api_version
 from uvicorn.importer import import_from_string
 
@@ -234,6 +235,7 @@ def extract_openapi_spec(service: ServiceConfig) -> tuple[str, bool, str]:
             # Inject filter/search schemas registered via generate_openapi_extra_params
             # (their $refs are in query parameters, not walked by pydantic's response model scan).
             openapi = register_query_param_schemas(openapi)
+            openapi = register_bearer_security_scheme(openapi)
             version = openapi.get("openapi", "unknown version")
 
             print_verbose(f"writing openapi spec v{version}")
@@ -468,6 +470,7 @@ def _extract_plugin_openapi_spec(plugin: PluginConfig) -> tuple[str, bool, str]:
 
     openapi = app.openapi()
     openapi = register_query_param_schemas(openapi)
+    openapi = register_bearer_security_scheme(openapi)
     version = openapi.get("openapi", "unknown version")
     print_verbose(f"writing plugin openapi spec v{version}")
 
