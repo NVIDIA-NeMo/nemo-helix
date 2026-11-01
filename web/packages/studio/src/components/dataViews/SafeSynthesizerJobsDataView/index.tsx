@@ -379,18 +379,11 @@ export const GenerateJobsDataView: FC = () => {
           DataViewTableContent: {
             renderErrorState: () => (
               <ErrorPanel
+                error={error}
                 errorMessage={
                   getErrorMessage(error ?? new Error()) || 'Failed to load Safe Synthesizer jobs'
                 }
-                attributes={{
-                  ErrorMessage: {
-                    slotFooter: (
-                      <Button kind="secondary" onClick={() => refetch()}>
-                        Retry
-                      </Button>
-                    ),
-                  },
-                }}
+                onRetry={() => void refetch()}
               />
             ),
             renderEmptyState: () =>

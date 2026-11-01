@@ -14,6 +14,29 @@ export const getJobRefetchInterval = (status?: HelixJobStatus): number | false =
   return false;
 };
 
+/** The fields of a TanStack query result that {@link getRequestStatus} reads. */
+export interface RequestStatusQuery {
+  error?: unknown;
+  isLoading?: boolean;
+  isPlaceholderData?: boolean;
+}
+
+/**
+ * A DataView's `requestStatus` for a query. Shows loading only when there's nothing current to
+ * show: the first load, or the previous page's placeholder rows while a new page, search or filter
+ * loads. Never use `isFetching` here; it is also true during background refetches and polls, which
+ * would blank a table that already has data.
+ */
+export const getRequestStatus = ({
+  error,
+  isLoading,
+  isPlaceholderData,
+}: RequestStatusQuery): DataView.QueryStatus | undefined => {
+  if (error) return 'error';
+  if (isLoading || isPlaceholderData) return 'loading';
+  return undefined;
+};
+
 // Helper to get sort string from DataView sorting state
 export const getSortParam = (sortingState: DataView.TanstackTable.SortingState) => {
   if (sortingState.length === 0) {

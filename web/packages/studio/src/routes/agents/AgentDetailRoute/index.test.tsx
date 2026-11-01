@@ -142,13 +142,12 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByDisplayValue(`${agentName}-v2`)).toBeInTheDocument();
   });
 
-  it('does not offer Upload while the agent is still loading', async () => {
+  it('shows the loading state, with no actions, until the agent loads', async () => {
     server.use(http.get(`${agentsUrl}/:name`, () => delay('infinite')));
     renderDetail();
 
-    const deploy = await screen.findByRole('button', { name: 'Deploy' });
-
-    expect(deploy).toBeDisabled();
+    expect(await screen.findByRole('status', { name: 'Loading...' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
   });
 

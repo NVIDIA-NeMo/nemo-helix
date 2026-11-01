@@ -146,6 +146,7 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
     data: agentsResponse,
     isLoading: agentsLoading,
     error: agentsError,
+    refetch: refetchAgents,
   } = useAgentsListAgents(
     workspace,
     { page, page_size: pageSize, sort: sortParam },
@@ -369,7 +370,9 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
               ),
             renderErrorState: () => (
               <ErrorPanel
+                error={agentsError}
                 errorMessage={getErrorMessage(agentsError ?? new Error('Failed to load agents.'))}
+                onRetry={() => void refetchAgents()}
               />
             ),
           },

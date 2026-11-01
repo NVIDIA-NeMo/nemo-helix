@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
+import { useModelsGetModelSuspense } from '@nemo/sdk/generated/platform/models';
 import type { Adapter, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
 import { useCustomizationJob } from '@studio/hooks/useCustomizationJob';
@@ -12,6 +14,10 @@ import { screen } from '@testing-library/react';
 vi.mock('@studio/hooks/useModelLineage', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/hooks/useModelLineage')>()),
   useModelLineage: vi.fn(),
+}));
+vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/models')>()),
+  useModelsGetModelSuspense: vi.fn(),
 }));
 vi.mock('@studio/hooks/useCustomizationJob');
 vi.mock('@studio/routes/ModelDetailRoute/DetailsTab', () => ({
@@ -64,13 +70,20 @@ const renderPage = (path: string) =>
   renderRoute(undefined, {
     history: path,
     routes: [
-      { path: ROUTES.workspace.modelDetail, element: <ModelDetailRoute /> },
+      {
+        path: ROUTES.workspace.modelDetail,
+        element: <ModelDetailRoute />,
+        errorElement: <RouteErrorPanel />,
+      },
       { path: ROUTES.workspace.modelAdapterDetail, element: <ModelDetailRoute /> },
     ],
   });
 
 describe('ModelDetailRoute', () => {
   beforeEach(() => {
+    vi.mocked(useModelsGetModelSuspense).mockReturnValue({
+      data: model,
+    } as unknown as ReturnType<typeof useModelsGetModelSuspense>);
     vi.mocked(useCustomizationJob).mockReturnValue({
       job: undefined,
     } as unknown as ReturnType<typeof useCustomizationJob>);
@@ -198,11 +211,16 @@ describe('ModelDetailRoute', () => {
     expect(screen.getByText('Model: my-model')).toBeInTheDocument();
   });
 
-  it('reports a model that cannot be loaded', async () => {
-    mockLineage({ model: undefined, isError: true });
+  it('defers a missing model to the route error panel', async () => {
+    mockLineage();
+    vi.mocked(useModelsGetModelSuspense).mockImplementation(() => {
+      throw Object.assign(new Error('Not found'), { status: 404 });
+    });
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     renderPage('/workspaces/ws/fine-tune/models/my-model');
 
-    expect(await screen.findByText('Model not found')).toBeInTheDocument();
+    expect(await screen.findByText('Not Found')).toBeInTheDocument();
+    consoleError.mockRestore();
   });
 
   it('reports an adapter the model does not have', async () => {

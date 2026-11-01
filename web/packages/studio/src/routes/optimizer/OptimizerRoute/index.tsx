@@ -9,6 +9,7 @@ import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { useCompassListInsights } from '@nemo/sdk/generated/compass/compass-insights';
 import type { InsightListItem } from '@nemo/sdk/generated/compass/schema';
 import { Flex, PageHeader, Stack, Tag, Text } from '@nvidia/foundations-react-core';
@@ -36,7 +37,7 @@ export const OptimizerRoute: FC = () => {
   const sortState = dataViewState.sorting.state[0];
   const sortParam = sortState ? `${sortState.desc ? '-' : ''}${sortState.id}` : '-created_at';
 
-  const { data, isFetching, error } = useCompassListInsights(
+  const { data, isPlaceholderData, isLoading, error, refetch } = useCompassListInsights(
     workspace,
     {
       page: dataViewState.pagination.state.pageIndex + 1,
@@ -144,7 +145,7 @@ export const OptimizerRoute: FC = () => {
             DataViewRoot: {
               data: data?.data ?? [],
               totalCount: data?.pagination?.total_results,
-              requestStatus: error ? 'error' : isFetching ? 'loading' : undefined,
+              requestStatus: getRequestStatus({ error, isLoading, isPlaceholderData }),
             },
             DataViewTableContent: {
               renderEmptyState: ({ hasFiltersApplied, hasSearchApplied }) =>
@@ -159,7 +160,9 @@ export const OptimizerRoute: FC = () => {
                 ),
               renderErrorState: () => (
                 <ErrorPanel
+                  error={error}
                   errorMessage={getErrorMessage(error ?? new Error('Failed to fetch insights'))}
+                  onRetry={() => void refetch()}
                 />
               ),
             },

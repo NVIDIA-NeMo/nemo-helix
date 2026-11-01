@@ -13,6 +13,7 @@ import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { ErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { LockClosed } from '@nemo/icons/icons';
 import type { WorkspaceMember } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Text } from '@nvidia/foundations-react-core';
@@ -41,7 +42,7 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
     defaultSort: [{ id: 'principal', desc: false }],
   });
 
-  const { data, isLoading, error, isFetching, isForbidden } = useWorkspaceMembers(workspace);
+  const { data, isLoading, error, isForbidden, refetch } = useWorkspaceMembers(workspace);
 
   const membersWithId = useMemo<WorkspaceMemberWithId[]>(
     () => (data?.data ?? []).map((m) => ({ ...m, id: m.principal })),
@@ -158,7 +159,7 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
         DataViewRoot: {
           data: pageData,
           totalCount: sortedMembers.length,
-          requestStatus: isFetching ? 'loading' : error ? 'error' : undefined,
+          requestStatus: getRequestStatus({ error, isLoading }),
         },
         DataViewTableContent: {
           renderEmptyState: () => (
@@ -166,7 +167,9 @@ export const MembersDataView: FC<MembersDataViewProps> = ({
           ),
           renderErrorState: () => (
             <ErrorPanel
+              error={error}
               errorMessage={getErrorMessage(error ?? new Error('Failed to load members.'))}
+              onRetry={() => void refetch()}
             />
           ),
         },

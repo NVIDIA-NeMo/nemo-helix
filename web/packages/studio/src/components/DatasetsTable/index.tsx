@@ -6,6 +6,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { getRequestStatus } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
@@ -53,7 +54,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     datasets,
     refetch,
     isPending,
-    isFetching,
+    isPlaceholderData,
     error,
     resetFilters,
     handleRowClick,
@@ -147,7 +148,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
           DataViewRoot: {
             data: datasets,
             totalCount: datasetsResponse?.pagination?.total_results,
-            requestStatus: isFetching ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ isPlaceholderData }),
           },
           DataViewTableContent: {
             // The hook's flag ignores the seeded default purposes, so an empty table is still "first use".

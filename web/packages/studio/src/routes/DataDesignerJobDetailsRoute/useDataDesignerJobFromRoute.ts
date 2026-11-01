@@ -3,22 +3,24 @@
 
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { useDataDesignerGetCreateJob } from '@nemo/sdk/generated/data-designer/data-designer';
+import type { CreateJob } from '@nemo/sdk/generated/data-designer/schema/CreateJob';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
+
+export const dataDesignerJobRefetchInterval = (query: {
+  state: { data?: Pick<CreateJob, 'status'> };
+}) => {
+  const status = query.state.data?.status;
+  return status && HelixJobTerminalStatuses.includes(status) ? false : 3000;
+};
 
 export const useDataDesignerJobFromRoute = () => {
   const workspace = useWorkspaceFromPath();
   const { dataDesignerJobName } = useRequiredPathParams([ROUTE_PARAMS.dataDesignerJobName]);
 
   const query = useDataDesignerGetCreateJob(workspace, dataDesignerJobName, {
-    query: {
-      refetchInterval: (q) => {
-        const status = q.state.data?.status;
-        const isTerminated = status && HelixJobTerminalStatuses.includes(status);
-        return isTerminated ? false : 3000;
-      },
-    },
+    query: { refetchInterval: dataDesignerJobRefetchInterval },
   });
 
   return {

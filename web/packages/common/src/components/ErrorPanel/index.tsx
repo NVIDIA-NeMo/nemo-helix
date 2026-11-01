@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { getErrorMessage, isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { logger } from '@nemo/common/src/utils/logger';
-import { TrashDelete } from '@nemo/icons/icons';
-import { Flex, PageHeader, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { Button, Flex, PageHeader, Panel, Stack, Text } from '@nvidia/foundations-react-core';
+import { useQueryClient } from '@tanstack/react-query';
+import { AxiosError } from 'axios';
 import { ComponentProps, FC, ReactNode, useEffect } from 'react';
-import { useRouteError, isRouteErrorResponse } from 'react-router';
+import { isRouteErrorResponse, useLocation, useNavigate, useRouteError } from 'react-router';
 
 const DEFAULT_ERROR_MESSAGE =
   'An unexpected error occurred.\nPlease contact your Administrator for support.';
@@ -23,7 +24,13 @@ export interface ErrorPanelProps {
   };
   /** The underlying error, when known (e.g. resolved by `RouteErrorPanel` from `useRouteError`). */
   error?: unknown;
+  /** Shows a Retry action. Not shown for not-found or forbidden errors, which retrying won't fix. */
+  onRetry?: () => void;
 }
+
+const isForbidden = (error: unknown) =>
+  (isRouteErrorResponse(error) && error.status === 403) ||
+  (error instanceof AxiosError && error.response?.status === 403);
 
 /**
  * Extracts a user-friendly error message from various error types.
@@ -38,46 +45,56 @@ const getRouterErrorMessage = (error: unknown): string | undefined => {
   return undefined;
 };
 
-const getErrorCode = (error: unknown): string | undefined => {
-  if (isRouteErrorResponse(error)) {
-    return error.status.toString();
+const getErrorContent = (error: unknown, errorMessage?: string) => {
+  if (isNotFoundError(error)) {
+    return {
+      header: 'Not Found',
+      message:
+        errorMessage ??
+        "This doesn't exist or may have been deleted. Check the link and try again.",
+      retryable: false,
+    };
   }
+  if (isForbidden(error)) {
+    return {
+      header: 'No Access',
+      message:
+        errorMessage ?? "You don't have permission to view this. Ask a workspace admin for access.",
+      retryable: false,
+    };
+  }
+  return {
+    header: "Couldn't Load Data",
+    message: errorMessage ?? getRouterErrorMessage(error) ?? DEFAULT_ERROR_MESSAGE,
+    retryable: true,
+  };
 };
 
 /**
- * Generic, hook-free error panel. Renders from the `error`/`errorMessage` props it is given —
+ * Generic error panel. Renders from the `error`/`errorMessage` props it is given —
  * it never reads a data-router error itself, so it is safe to render inline (e.g. a DataView's
  * `renderErrorState`) as well as anywhere else outside a route `errorElement`.
+ *
+ * Not-found (404) and forbidden (403) errors get their own heading and copy.
  *
  * Use {@link RouteErrorPanel} instead when rendering as a route's `errorElement`.
  *
  * @example
  * ```tsx
  * renderErrorState: () => (
- *   <ErrorPanel errorMessage={getErrorMessage(error ?? new Error('Failed to load items'))} />
+ *   <ErrorPanel error={error} onRetry={refetch} />
  * )
  * ```
  */
-export const ErrorPanel: FC<ErrorPanelProps> = ({ title, errorMessage, attributes, error }) => {
-  const errorCode = getErrorCode(error);
-  const errorMessageInternal =
-    errorMessage ?? getRouterErrorMessage(error) ?? DEFAULT_ERROR_MESSAGE;
-
-  // Log the error on mount
-  useEffect(() => {
-    if (error) {
-      const logMessage = JSON.stringify(errorMessage, null, 2);
-      logger.error(logMessage);
-    }
-  }, [error, errorMessage, title]);
-
-  const message = (
-    <Stack gap="2">
-      <Text kind="body/regular/md" className="whitespace-pre-wrap">
-        {errorMessageInternal}
-      </Text>
-    </Stack>
-  );
+export const ErrorPanel: FC<ErrorPanelProps> = ({
+  title,
+  errorMessage,
+  attributes,
+  error,
+  onRetry,
+}) => {
+  const navigate = useNavigate();
+  const { header, message, retryable } = getErrorContent(error, errorMessage);
 
   return (
     <Stack className="h-full" padding="4" gap="3">
@@ -90,9 +107,27 @@ export const ErrorPanel: FC<ErrorPanelProps> = ({ title, errorMessage, attribute
           data-testid="error-panel"
         >
           <ErrorMessage
-            slotMedia={<TrashDelete className="size-16" />}
-            header={<Text kind="title/md">Error{errorCode ? `: ${errorCode}` : ''}</Text>}
-            message={message}
+            header={<Text kind="title/md">{header}</Text>}
+            message={
+              <Text kind="body/regular/md" className="whitespace-pre-wrap">
+                {message}
+              </Text>
+            }
+            slotFooter={
+              // Refreshing can't fix a not-found or forbidden error, so those only offer Go Back.
+              retryable && !onRetry ? undefined : (
+                <Flex gap="density-sm">
+                  {retryable && (
+                    <Button kind="secondary" onClick={onRetry}>
+                      Retry
+                    </Button>
+                  )}
+                  <Button kind="secondary" onClick={() => navigate(-1)}>
+                    Go Back
+                  </Button>
+                </Flex>
+              )
+            }
             {...attributes?.ErrorMessage}
           />
         </Flex>
@@ -106,8 +141,9 @@ export const ErrorPanel: FC<ErrorPanelProps> = ({ title, errorMessage, attribute
  * `useRouteError()` — which is only valid inside a data router's `errorElement` tree — and hands
  * it down to the hook-free `ErrorPanel`.
  *
- * Use this as the `errorElement` in your route configuration to display error UI with a custom
- * title and error message attributes.
+ * Every route has one of these as its `errorElement`, so a page that loads its primary resource
+ * with a generated `use*Suspense` hook gets its loading (from `SuspenseOutlet`), not-found, and
+ * error states for free. Retry resets the failed queries and re-renders the route.
  *
  * @example
  * ```tsx
@@ -117,23 +153,23 @@ export const ErrorPanel: FC<ErrorPanelProps> = ({ title, errorMessage, attribute
  *   element: <EvaluationLayout />,
  *   errorElement: <RouteErrorPanel title="Evaluator" />,
  * }
- *
- * // With custom error message props:
- * {
- *   path: ROUTES.workspace.filesets,
- *   element: <FilesetLayout />,
- *   errorElement: (
- *     <RouteErrorPanel
- *       title="Data Store"
- *       attributes={{
- *         ErrorMessage: { slotMedia: <CustomIcon />, slotFooter: <CustomFooter /> },
- *       }}
- *     />
- *   ),
- * }
  * ```
  */
-export const RouteErrorPanel: FC<Omit<ErrorPanelProps, 'error'>> = (props) => {
+export const RouteErrorPanel: FC<Omit<ErrorPanelProps, 'error' | 'onRetry'>> = (props) => {
   const error = useRouteError();
-  return <ErrorPanel {...props} error={error} />;
+  // Inline panels show query errors that are already handled; a route-level error is worth reporting.
+  useEffect(() => {
+    logger.error(JSON.stringify(props.errorMessage, null, 2), error);
+  }, [error, props.errorMessage]);
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { pathname, search, hash, state } = useLocation();
+
+  const retry = () => {
+    void queryClient.resetQueries({ predicate: (query) => query.state.status === 'error' });
+    // A new location resets the route's error boundary so the page renders again.
+    navigate({ pathname, search, hash }, { replace: true, state });
+  };
+
+  return <ErrorPanel {...props} error={error} onRetry={retry} />;
 };

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { RouteErrorPanel } from '@nemo/common/src/components/ErrorPanel';
 import { getEvalsGetEvalResultQueryKey } from '@nemo/sdk/generated/evals/evals-plugin-eval-results-routes';
 import {
   getEvalsGetEvaluateJobQueryKey,
@@ -42,6 +43,7 @@ const renderDetail = () =>
       {
         path: ROUTES.workspace.evaluationResultDetails,
         element: <EvaluationResultDetailsRoute />,
+        errorElement: <RouteErrorPanel />,
       },
     ],
   });
@@ -54,7 +56,7 @@ const expectNoEmptyResults = () => {
 };
 
 describe('EvaluationResultDetailsRoute', () => {
-  it('shows a loading state, not empty or failed content, while the job is fetching', async () => {
+  it('suspends to the loading fallback while the job is fetching', async () => {
     server.use(
       http.get(jobUrl, async () => {
         await delay('infinite');
@@ -65,7 +67,7 @@ describe('EvaluationResultDetailsRoute', () => {
     renderDetail();
 
     expect(await screen.findByTestId('spinner')).toBeInTheDocument();
-    expect(screen.queryByText('Failed to Load Job')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('error-panel')).not.toBeInTheDocument();
     expectNoEmptyResults();
   });
 
@@ -106,13 +108,17 @@ describe('EvaluationResultDetailsRoute', () => {
     }
   );
 
-  it('shows only the load error when the job cannot be fetched', async () => {
+  it('renders the route error panel when the job cannot be fetched', async () => {
+    // React and the router log the error the route throws to its errorElement.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     server.use(http.get(jobUrl, () => HttpResponse.json({ detail: 'boom' }, { status: 500 })));
 
     renderDetail();
 
-    expect(await screen.findByText('Failed to Load Job')).toBeInTheDocument();
+    expect(await screen.findByTestId('error-panel')).toBeInTheDocument();
+    expect(screen.getByText("Couldn't Load Data")).toBeInTheDocument();
     expectNoEmptyResults();
+    consoleError.mockRestore();
   });
 
   it('renders aggregate scores once a completed job’s results load', async () => {

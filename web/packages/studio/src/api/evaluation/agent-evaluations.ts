@@ -4,7 +4,6 @@
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import {
   evalsCreateAgentEvaluateJob,
-  evalsGetAgentEvaluateJob,
   evalsListAgentEvaluateJobs,
 } from '@nemo/sdk/generated/evals/evals-plugin-agent-eval-jobs-routes';
 import {
@@ -74,20 +73,6 @@ export const fetchAgentEvalJobs = async (
     page++;
   }
   return all;
-};
-
-export const fetchAgentEvalJob = async (
-  workspace: string,
-  name: string,
-  signal: AbortSignal
-): Promise<AgentEvaluateJob | null> => {
-  try {
-    return await evalsGetAgentEvaluateJob(workspace, name, signal);
-  } catch (err) {
-    const e = err as { response?: { status?: number }; status?: number };
-    if (e?.response?.status === 404 || e?.status === 404) return null;
-    throw err;
-  }
 };
 
 export const submitAgentEvalJob = async (

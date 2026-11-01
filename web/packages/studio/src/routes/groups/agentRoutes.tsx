@@ -80,7 +80,7 @@ export const agentRoutes: RouteObject[] = [
   {
     path: ROUTES.workspace.agentDetail,
     element: <AgentDetailRoute />,
-    errorElement: <RouteErrorPanel title="Agent details" />,
+    errorElement: <RouteErrorPanel title="Agent Details" />,
   },
 ];
 

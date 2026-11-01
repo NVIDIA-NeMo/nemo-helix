@@ -13,7 +13,7 @@ import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { getSortParam } from '@nemo/common/src/utils/query';
+import { getSortParam, getRequestStatus } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import {
   getModelsListModelsQueryKey,
@@ -159,6 +159,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
     data: modelsResponse,
     refetch,
     isLoading,
+    isPlaceholderData,
     isError,
   } = useModelsListModels(
     workspace,
@@ -497,7 +498,7 @@ export const CustomModelsDataView: FC<CustomModelsDataViewProps> = ({
           DataViewRoot: {
             data: tableData,
             totalCount: modelsResponse?.pagination?.total_results,
-            requestStatus: isError ? 'error' : isLoading ? 'loading' : undefined,
+            requestStatus: getRequestStatus({ error: isError, isLoading, isPlaceholderData }),
             reactTableOptions: {
               getRowCanExpand: (row: { original: ModelTableRow }) =>
                 Boolean(row.original.adapters?.length),

@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useGetSessionSuspense } from '@nemo/sdk/generated/platform/sessions';
 import { Flex } from '@nvidia/foundations-react-core';
 import type { SessionDetailRouteContext } from '@studio/components/IntakeDetail/SessionDetailView';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -131,6 +132,8 @@ export const EvaluationSessionDetailRoute: FC = () => {
     ROUTE_PARAMS.experimentName,
     ROUTE_PARAMS.evaluationName,
   ]);
+  // Suspends until the session loads, in both views; a missing session renders the route's error state.
+  useGetSessionSuspense(workspace, sessionId);
 
   const onSelectCompare = useCallback(
     (targetSessionId: string) => {

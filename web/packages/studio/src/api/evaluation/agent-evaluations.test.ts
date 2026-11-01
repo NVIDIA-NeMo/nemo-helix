@@ -8,7 +8,6 @@ import {
   agentNameForJob,
   aggregateScoresOf,
   evalConfigName,
-  fetchAgentEvalJob,
   fetchAgentEvalJobs,
   fetchAgentEvalResultsForJobs,
   joinBundleByTask,
@@ -63,20 +62,6 @@ describe('fetchAgentEvalJobs', () => {
         url: '/apis/evals/v2/workspaces/ws-a/agent-evaluate/jobs',
       })
     );
-  });
-});
-
-describe('fetchAgentEvalJob', () => {
-  it('returns the job when the platform responds with one', async () => {
-    customFetchMock.mockResolvedValueOnce(baseJob({ name: 'eval-42' }));
-    const job = await fetchAgentEvalJob('ws-a', 'eval-42', new AbortController().signal);
-    expect(job?.name).toBe('eval-42');
-  });
-
-  it('returns null on 404', async () => {
-    customFetchMock.mockRejectedValueOnce({ response: { status: 404 } });
-    const job = await fetchAgentEvalJob('ws-a', 'missing', new AbortController().signal);
-    expect(job).toBeNull();
   });
 });
 

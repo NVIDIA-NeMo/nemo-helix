@@ -7,7 +7,7 @@ import { useQueryParams } from '@nemo/common/src/hooks/useQueryParams';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import {
   useFilesListFilesetFiles,
-  useFilesRetrieveFileset,
+  useFilesRetrieveFilesetSuspense,
 } from '@nemo/sdk/generated/platform/files';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import {
@@ -62,13 +62,7 @@ export const FilesetDetailRoute: FC = () => {
   });
   const files = filesResponse?.data;
 
-  const {
-    data: fileset,
-    isPending: isFilesetPending,
-    isError: isFilesetError,
-  } = useFilesRetrieveFileset(workspace, filesetName, {
-    query: { enabled: queryEnabled },
-  });
+  const { data: fileset } = useFilesRetrieveFilesetSuspense(workspace, filesetName);
 
   const handleTabChange = (value: string) => {
     if (isFilesetDetailTab(value)) {
@@ -76,19 +70,8 @@ export const FilesetDetailRoute: FC = () => {
     }
   };
 
-  if (isFilesPending || isFilesetPending) {
+  if (isFilesPending) {
     return <Loading description="Loading fileset..." />;
-  }
-
-  if (isFilesetError || !fileset) {
-    return (
-      <AccessibleTitle title={`Fileset ${filesetName}`}>
-        <Stack className="w-full h-full min-h-0 p-density-2xl" gap="density-xl">
-          <PageHeader slotHeading={filesetName} />
-          <Text className="text-feedback-danger">Failed to load fileset.</Text>
-        </Stack>
-      </AccessibleTitle>
-    );
   }
 
   const isDataset = fileset.purpose === FilesetPurpose.dataset;
