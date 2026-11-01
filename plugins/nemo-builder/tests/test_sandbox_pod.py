@@ -297,6 +297,9 @@ class _Api:
         if self._delete:
             raise self._delete
 
+    def list_namespaced_pod(self, **kwargs: object) -> None:
+        """Only named: the faked Watch streams the pods."""
+
 
 class TestEachSandboxFailsAlone:
     NAME = "nhx-sbx-abc-g0"
