@@ -23,6 +23,8 @@ data:
         spec:
           restartPolicy: Never
           terminationGracePeriodSeconds: 30
+          # Task code is untrusted and must not hold a cluster token.
+          automountServiceAccountToken: false
           # Sandbox pods are built from this template by the OpenSandbox server,
           # not by the jobs controller, so neither jobs executor_defaults
           # image_pull_secrets nor the chart's top-level imagePullSecrets apply.
