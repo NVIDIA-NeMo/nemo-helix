@@ -8,9 +8,11 @@ Docker itself is faked: these tests check what is asked of it, not Docker. The e
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,10 +27,12 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
     AGENT_LAYER_DOCKER_ENVIRONMENT,
     AGENT_LAYER_KWARG,
     AGENT_LAYERS_ENV,
+    FABRIC_INSTALLED_AGENT,
     AgentInstall,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.local_agent_layer import (
     LAYER_LABEL,
+    AgentLayerBuildFailedError,
     AgentLayerDockerEnvironment,
     ContainerExecEnvironment,
     build_agent_layer,
@@ -141,6 +145,42 @@ async def test_a_layer_another_run_is_building_is_waited_for_not_rebuilt(tmp_pat
 
     assert await asyncio.wait_for(waiting, timeout=5) == tag
     assert docker.builds == []
+
+
+async def test_a_failed_build_sends_trials_waiting_on_it_to_install_in_setup(tmp_path, monkeypatch) -> None:
+    docker = _Docker()
+    docker.install(monkeypatch)
+    attempts: list[str] = []
+
+    async def failing(image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: Any) -> None:
+        attempts.append(tag)
+        await asyncio.sleep(0.05)
+        raise RuntimeError("npm ERR! No matching version found for @openai/codex@0.0.0")
+
+    monkeypatch.setattr(local_agent_layer, "build_agent_layer", failing)
+
+    results = await asyncio.gather(*(_ensure(tmp_path) for _ in range(5)), return_exceptions=True)
+
+    # One trial tried the build; the others found it had just failed and gave up without trying again.
+    assert len(attempts) == 1
+    assert sum(isinstance(r, RuntimeError) and "npm ERR!" in str(r) for r in results) == 1
+    assert sum(isinstance(r, AgentLayerBuildFailedError) for r in results) == 4
+
+
+async def test_a_build_that_failed_long_ago_is_tried_again_and_a_success_clears_it(tmp_path, monkeypatch) -> None:
+    docker = _Docker()
+    docker.install(monkeypatch)
+    tag = await _ensure(tmp_path)  # learn the key's marker path
+    docker.images.discard(tag)
+    docker.builds.clear()
+    marker = tmp_path / "locks" / f"{tag.rpartition(':')[2]}.failed"
+    marker.touch()
+    old = time.time() - local_agent_layer.FAILED_BUILD_COOLDOWN_SEC - 1
+    os.utime(marker, (old, old))
+
+    assert await _ensure(tmp_path) == tag
+
+    assert docker.builds == [tag] and not marker.exists()
 
 
 async def test_a_missing_task_image_is_pulled_first(tmp_path, monkeypatch) -> None:
@@ -304,6 +344,34 @@ async def test_the_trial_starts_from_its_agent_layer(tmp_path, monkeypatch) -> N
     assert environment._use_prebuilt and environment._env_vars.prebuilt_image_name == "nemo-agent-layer:abc"
 
 
+async def test_a_fabric_layer_is_built_without_the_trials_config_bundle(tmp_path, monkeypatch) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    fabric = {
+        "name": None,
+        "import_path": FABRIC_INSTALLED_AGENT,
+        "kwargs": {"fabric_package": "nemo-fabric[codex]==0.5.0", "fabric_config_bundle": str(bundle)},
+        "env": {"HTTPS_PROXY": "http://proxy:3128"},
+    }
+    environment = _environment(tmp_path, fabric)
+    built: list[AgentConfig] = []
+
+    async def ensure(image: str, install: AgentInstall, agent: AgentConfig, **_: Any) -> str:
+        built.append(agent)
+        return "nemo-agent-layer:abc"
+
+    monkeypatch.setattr(local_agent_layer.DockerEnvironment, "_validate_image_os", _no_validate)
+    monkeypatch.setattr(local_agent_layer, "ensure_agent_layer", ensure)
+    await environment._validate_image_os("hb__task")
+
+    assert built[0].kwargs == {"fabric_package": "nemo-fabric[codex]==0.5.0"}
+    assert built[0].env == {"HTTPS_PROXY": "http://proxy:3128"}
+
+
+async def _no_validate(self: Any, image_name: str) -> None:
+    return None
+
+
 async def test_a_layer_that_cant_be_built_leaves_the_trial_on_its_image(tmp_path, monkeypatch) -> None:
     environment = _environment(tmp_path, _CODEX)
 
@@ -335,7 +403,17 @@ def test_the_default_docker_environment_reuses_installs_of_an_installed_agent(mo
         "name": "codex",
         "import_path": None,
         "kwargs": {"version": "0.162.1"},
+        "env": {},
     }
+
+
+def test_only_the_install_env_reaches_the_layer(monkeypatch) -> None:
+    monkeypatch.delenv(AGENT_LAYERS_ENV, raising=False)
+    agent = AgentConfig(name="codex", kwargs={"version": "0.162.1"}, env={"OPENAI_API_KEY": "sk", "NO_PROXY": "local"})
+
+    switched = _with_agent_layers(EnvironmentConfig(), agent, agent_dir=None)
+
+    assert switched.kwargs[AGENT_LAYER_KWARG]["env"] == {"NO_PROXY": "local"}
 
 
 @pytest.mark.parametrize(

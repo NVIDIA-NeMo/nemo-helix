@@ -11,7 +11,11 @@ import pytest
 
 pytest.importorskip("harbor", reason="the key names the Harbor version whose install code runs")
 
-from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import FABRIC_INSTALLED_AGENT, agent_install
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
+    FABRIC_INSTALLED_AGENT,
+    agent_install,
+    agent_layer_kwarg,
+)
 
 _IMAGE = "sha256:" + "e" * 64
 _FABRIC = {"fabric_package": "nemo-fabric[codex,relay]==0.5.0", "fabric_config": {"metadata": {"name": "a"}}}
@@ -48,10 +52,14 @@ def test_harbors_installed_agents_are_reused(name: str) -> None:
         {"name": "codex", "agent_dir": Path("/agents")},
         {"import_path": "harbor_wrapper:WrappedAgent"},
         {"import_path": FABRIC_INSTALLED_AGENT},  # no fabric_package
+        # Harbor installed agents that install again in every trial, or install from more than their version.
+        {"name": "openhands", "version": "1.0", "python_version": "3.12"},
+        {"name": "devin"},
+        {"name": "aider"},
     ],
-    ids=["oracle", "nop", "agent-dir", "other-import-path", "fabric-without-package"],
+    ids=["oracle", "nop", "agent-dir", "other-import-path", "fabric-without-package", "openhands", "devin", "aider"],
 )
-def test_agents_whose_setup_may_do_anything_are_not_reused(agent: dict[str, Any]) -> None:
+def test_agents_a_layer_cant_hold_are_not_reused(agent: dict[str, Any]) -> None:
     assert _install(**agent) is None
 
 
@@ -81,6 +89,36 @@ def test_a_registered_fabric_agent_is_keyed_by_its_install_not_its_config() -> N
         {"fabric_uv_version": "0.13.0"},
     ):
         assert _key(import_path=FABRIC_INSTALLED_AGENT, **{**_FABRIC, **change}) != base
+
+
+@pytest.mark.parametrize(
+    "agent", [{"name": "codex", "version": "0.162.1"}, {"import_path": FABRIC_INSTALLED_AGENT, **_FABRIC}]
+)
+def test_the_install_env_is_in_the_key_and_no_other_env(agent: dict[str, Any]) -> None:
+    def key(env: dict[str, str]) -> str:
+        install = agent_install(
+            agent_name=agent.get("name"),
+            agent_import_path=agent.get("import_path"),
+            agent_dir=None,
+            agent_kwargs={k: v for k, v in agent.items() if k not in ("name", "import_path")},
+            agent_env=env,
+        )
+        assert install is not None
+        return install.layer_key(_IMAGE)
+
+    base = key({})
+
+    assert key({"OPENAI_API_KEY": "${OPENAI_API_KEY}", "TERM": "xterm"}) == base
+    assert key({"PIP_INDEX_URL": "https://mirror.example/simple"}) != base
+    assert key({"HTTPS_PROXY": "http://proxy:3128"}) != key({"HTTPS_PROXY": "http://other:3128"})
+
+
+def test_the_layer_kwarg_carries_only_the_install_env() -> None:
+    layer = agent_layer_kwarg(
+        name="codex", import_path=None, kwargs={}, env={"OPENAI_API_KEY": "sk-secret", "HTTPS_PROXY": "http://p:3128"}
+    )
+
+    assert layer["env"] == {"HTTPS_PROXY": "http://p:3128"}
 
 
 def test_an_unpinned_version_is_reused_for_one_day() -> None:

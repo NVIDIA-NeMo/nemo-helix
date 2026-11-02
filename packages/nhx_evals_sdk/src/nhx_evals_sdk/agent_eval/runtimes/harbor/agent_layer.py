@@ -8,9 +8,9 @@ agent can start from it: Harbor's installed agents, and :class:`FabricInstalledA
 it. Local Docker runs and Kubernetes runs build their layers differently but key them the same way:
 :meth:`AgentInstall.layer_key` over the environment image and :func:`agent_install`'s description of the install.
 
-Only what changes the installed files is in the key: the agent, its version and install options, and the Harbor
-version whose install code runs. The model, prompts, turn limits and secrets aren't, so trials that differ only in
-those share a layer.
+Only what changes the installed files is in the key: the agent, its version and install options, the proxy and
+package-index settings its install runs with, and the Harbor version whose install code runs. The model, prompts,
+turn limits and secrets aren't, so trials that differ only in those share a layer.
 """
 
 from __future__ import annotations
@@ -37,16 +37,43 @@ AGENT_LAYER_DOCKER_ENVIRONMENT = (
     "nhx_evals_sdk.agent_eval.runtimes.harbor.local_agent_layer:AgentLayerDockerEnvironment"
 )
 AGENT_LAYER_KWARG = "agent_layer"
-"""The environment kwarg naming the trial's agent: ``{"name", "import_path", "kwargs"}``."""
+"""The environment kwarg naming the trial's agent: ``{"name", "import_path", "kwargs", "env"}``."""
+#: Harbor's installed agents whose install a layer can hold. Each skips its install when the version it would install
+#: is already there, and installs from its version alone. Harbor's other installed agents install again in every
+#: trial, so a layer would save them nothing, and some write run options or credentials during their install.
+LAYERED_HARBOR_AGENTS = frozenset({"codex", "claude-code"})
+#: Proxy, package-index and TLS settings an agent's install runs with: a layer is built with them and keyed by them.
+#: No other variable of the agent's environment, such as an API key, reaches a layer's build.
+INSTALL_ENV_NAMES = frozenset(
+    {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "PIP_CERT",
+        "PIP_CLIENT_CERT",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_FIND_LINKS",
+        "PIP_INDEX_URL",
+        "PIP_TRUSTED_HOST",
+        "REQUESTS_CA_BUNDLE",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+    }
+)
 
 
 def agent_layers_enabled() -> bool:
     return os.environ.get(AGENT_LAYERS_ENV, "").strip() != "0"
 
 
-def agent_layer_kwarg(*, name: str | None, import_path: str | None, kwargs: dict[str, Any]) -> dict[str, Any]:
-    """The :data:`AGENT_LAYER_KWARG` value for a trial's agent."""
-    return {"name": name, "import_path": import_path, "kwargs": kwargs}
+def agent_layer_kwarg(
+    *, name: str | None, import_path: str | None, kwargs: dict[str, Any], env: Mapping[str, str] | None = None
+) -> dict[str, Any]:
+    """The :data:`AGENT_LAYER_KWARG` value for a trial's agent; of its environment, only what its install runs with."""
+    return {"name": name, "import_path": import_path, "kwargs": kwargs, "env": install_env(env)}
 
 
 @dataclass(frozen=True)
@@ -76,32 +103,49 @@ def agent_install(
     agent_import_path: str | None,
     agent_dir: Path | None,
     agent_kwargs: Mapping[str, JsonValue],
+    agent_env: Mapping[str, str] | None = None,
     today: Callable[[], date] = lambda: datetime.now(timezone.utc).date(),
 ) -> AgentInstall | None:
     """The reusable install a Harbor run's agent does in setup, or None when it can't be reused.
 
-    Harbor's installed agents (``codex``, ``claude-code``, ...) and the registered-agent :class:`FabricInstalledAgent`
-    can be reused. Agents that install nothing (``oracle``, ``nop``), a loose ``agent_dir``, and any other
-    ``import_path`` can't: their setup may do anything, so it runs in every trial.
+    The Harbor agents in :data:`LAYERED_HARBOR_AGENTS` and the registered-agent :class:`FabricInstalledAgent` can be
+    reused. Every other agent can't: one that installs nothing (``oracle``, ``nop``) has nothing to reuse, a loose
+    ``agent_dir`` or any other ``import_path`` may do anything in setup, and Harbor's other installed agents install
+    again in every trial.
 
     An agent whose ``version`` isn't pinned installs whatever is newest, so its layer is keyed by the UTC date: it is
-    reused for a day, then installed again.
+    reused for a day, then installed again. ``agent_env`` is the agent's environment; only its
+    :data:`INSTALL_ENV_NAMES` are part of the install.
     """
     harbor_version = importlib.metadata.version("harbor")
     if agent_dir is not None:
         return None
+    env = install_env(agent_env)
     if agent_import_path is not None:
         if agent_import_path != FABRIC_INSTALLED_AGENT:
             return None
-        return _fabric_install(agent_kwargs, harbor_version)
-    if agent_name is None or not _is_installed_agent(agent_name):
+        return _fabric_install(agent_kwargs, env, harbor_version)
+    if agent_name not in LAYERED_HARBOR_AGENTS:
         return None
     version = agent_kwargs.get("version")
     pinned = str(version) if version is not None else f"unpinned:{today().isoformat()}"
-    return AgentInstall(agent=f"harbor:{agent_name}", inputs={"version": pinned}, harbor_version=harbor_version)
+    return AgentInstall(
+        agent=f"harbor:{agent_name}", inputs={"version": pinned, **_env_inputs(env)}, harbor_version=harbor_version
+    )
 
 
-def _fabric_install(agent_kwargs: Mapping[str, JsonValue], harbor_version: str) -> AgentInstall | None:
+def install_env(agent_env: Mapping[str, str] | None) -> dict[str, str]:
+    """The part of an agent's environment its install runs with: its :data:`INSTALL_ENV_NAMES`."""
+    return {name: value for name, value in sorted((agent_env or {}).items()) if name in INSTALL_ENV_NAMES}
+
+
+def _env_inputs(env: Mapping[str, str]) -> dict[str, str]:
+    return {f"env:{name}": value for name, value in env.items()}
+
+
+def _fabric_install(
+    agent_kwargs: Mapping[str, JsonValue], env: Mapping[str, str], harbor_version: str
+) -> AgentInstall | None:
     from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
         DEFAULT_FABRIC_PYTHON_VERSION,
         DEFAULT_UV_VERSION,
@@ -116,17 +160,4 @@ def _fabric_install(agent_kwargs: Mapping[str, JsonValue], harbor_version: str) 
         str(agent_kwargs.get("fabric_python_version") or DEFAULT_FABRIC_PYTHON_VERSION),
         str(agent_kwargs.get("fabric_uv_version") or DEFAULT_UV_VERSION),
     )
-    return AgentInstall(agent="fabric", inputs={"install": spec}, harbor_version=harbor_version)
-
-
-def _is_installed_agent(agent_name: str) -> bool:
-    """Whether Harbor's built-in ``agent_name`` installs itself in setup, which is what a layer can do ahead of time."""
-    from harbor.agents.factory import AgentFactory
-    from harbor.agents.installed.base import BaseInstalledAgent
-    from harbor.models.trial.config import AgentConfig
-
-    try:
-        agent_class = AgentFactory.get_agent_class_from_config(AgentConfig(name=agent_name))
-    except (ValueError, KeyError):
-        return False
-    return issubclass(agent_class, BaseInstalledAgent)
+    return AgentInstall(agent="fabric", inputs={"install": spec, **_env_inputs(env)}, harbor_version=harbor_version)

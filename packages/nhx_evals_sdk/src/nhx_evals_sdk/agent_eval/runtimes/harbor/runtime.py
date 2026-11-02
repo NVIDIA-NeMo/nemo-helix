@@ -1321,10 +1321,13 @@ def _with_agent_layers(environment: Any, agent: Any, *, agent_dir: Path | None) 
         return environment
     if getattr(environment, "type", None) not in (None, "docker"):
         return environment
-    name, import_path, kwargs = agent.name, agent.import_path, dict(agent.kwargs)
-    if agent_install(agent_name=name, agent_import_path=import_path, agent_dir=agent_dir, agent_kwargs=kwargs) is None:
+    name, import_path, kwargs, env = agent.name, agent.import_path, dict(agent.kwargs), dict(agent.env)
+    install = agent_install(
+        agent_name=name, agent_import_path=import_path, agent_dir=agent_dir, agent_kwargs=kwargs, agent_env=env
+    )
+    if install is None:
         return environment
-    layer = agent_layer_kwarg(name=name, import_path=import_path, kwargs=kwargs)
+    layer = agent_layer_kwarg(name=name, import_path=import_path, kwargs=kwargs, env=env)
     return environment.model_copy(
         update={
             "import_path": AGENT_LAYER_DOCKER_ENVIRONMENT,

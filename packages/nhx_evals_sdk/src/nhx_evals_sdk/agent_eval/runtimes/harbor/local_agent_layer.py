@@ -28,6 +28,7 @@ import logging
 import shlex
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any, cast, override
@@ -47,6 +48,11 @@ logger = logging.getLogger(__name__)
 LAYER_REPOSITORY = "nemo-agent-layer"
 LAYER_LABEL = "nemo.agent-layer"
 LOCK_POLL_INTERVAL_SEC = 0.5
+#: How long a failed or cancelled layer build stops other trials from trying the same build: they install the agent in setup
+#: instead, at once, rather than each repeating the failure in turn while holding the build's lock.
+FAILED_BUILD_COOLDOWN_SEC = 600
+#: The kwarg holding a Fabric agent's config bundle, a directory its setup uploads; never part of a layer.
+FABRIC_CONFIG_BUNDLE_KWARG = "fabric_config_bundle"
 _COMPOSE_LABEL_PREFIX = "com.docker.compose."
 
 
@@ -93,11 +99,14 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
     async def _agent_layer(self, image_name: str, *, base_key: str | None) -> str | None:
         if self._is_windows_container or self._environment_docker_compose_path.exists():
             return None  # A task's own compose file may define `main` itself.
+        kwargs = self._agent.get("kwargs") or {}
+        env = self._agent.get("env") or {}
         install = agent_install(
             agent_name=self._agent.get("name"),
             agent_import_path=self._agent.get("import_path"),
             agent_dir=None,
-            agent_kwargs=self._agent.get("kwargs") or {},
+            agent_kwargs=kwargs,
+            agent_env=env,
         )
         if install is None:
             return None
@@ -106,15 +115,20 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
             return await ensure_agent_layer(
                 image_name,
                 install,
+                # The Fabric config bundle is the trial's, not the install's: setup uploads it in every trial.
                 AgentConfig(
                     name=self._agent.get("name"),
                     import_path=self._agent.get("import_path"),
-                    kwargs=self._agent.get("kwargs") or {},
+                    kwargs={name: value for name, value in kwargs.items() if name != FABRIC_CONFIG_BUNDLE_KWARG},
+                    env=env,
                 ),
                 user=user,
                 lock_dir=default_lock_dir(),
                 base_key=base_key,
             )
+        except AgentLayerBuildFailedError as exc:
+            logger.info("%s; the trial installs its agent in setup", exc)
+            return None
         except Exception:
             logger.exception("Could not build the agent layer of %s; the trial installs its agent in setup", image_name)
             return None
@@ -153,12 +167,34 @@ async def ensure_agent_layer(
     if await _image_exists(tag):
         return tag
     lock_dir.mkdir(parents=True, exist_ok=True)
+    failed = lock_dir / f"{key}.failed"
     with (lock_dir / f"{key}.lock").open("ab") as lock:
         await _lock(lock, key)
-        # Another trial, here or in another run, may have built it while this one waited.
-        if not await _image_exists(tag):
+        # Another trial, here or in another run, may have built it while this one waited, or failed to.
+        if await _image_exists(tag):
+            return tag
+        if _failed_recently(failed):
+            raise AgentLayerBuildFailedError(
+                f"agent layer {tag} failed to build in the last {FAILED_BUILD_COOLDOWN_SEC} s"
+            )
+        try:
             await build_agent_layer(image, tag, install, agent, user=user)
+        except BaseException:  # a build cancelled by the trial's timeout counts too: the next one would take as long
+            failed.touch()
+            raise
+        failed.unlink(missing_ok=True)
     return tag
+
+
+class AgentLayerBuildFailedError(RuntimeError):
+    """The layer's build failed recently, so this trial installs its agent in setup instead of trying again."""
+
+
+def _failed_recently(marker: Path) -> bool:
+    try:
+        return time.time() - marker.stat().st_mtime < FAILED_BUILD_COOLDOWN_SEC
+    except FileNotFoundError:
+        return False
 
 
 async def _lock(lock: Any, key: str) -> None:

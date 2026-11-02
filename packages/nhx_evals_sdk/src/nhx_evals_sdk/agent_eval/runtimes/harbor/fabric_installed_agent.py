@@ -50,6 +50,7 @@ from harbor.agents.options import InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.task.config import MCPServerConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import INSTALL_ENV_NAMES
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import NemoFabricAgent
 
 #: Interpreter uv provisions for the Fabric virtualenv. Fabric's Harbor extra needs >= 3.12.
@@ -88,26 +89,6 @@ _PACKAGE_MANAGER_ATTEMPTS = 3
 #: same thing (an image with the agent already installed, or a retried setup) skips curl, uv and the venv build.
 INSTALL_MARKER = ".nemo-fabric-install"
 _RETRY_BACKOFF_SEC = 5
-#: Proxy and TLS settings ``FabricAgent`` forwards to its install step, mirrored for this one.
-_INSTALL_ENV_NAMES = frozenset(
-    {
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "PIP_CERT",
-        "PIP_CLIENT_CERT",
-        "PIP_EXTRA_INDEX_URL",
-        "PIP_FIND_LINKS",
-        "PIP_INDEX_URL",
-        "PIP_TRUSTED_HOST",
-        "REQUESTS_CA_BUNDLE",
-        "SSL_CERT_DIR",
-        "SSL_CERT_FILE",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
-    }
-)
 
 
 def _version_string(name: str, value: str | float | int) -> str:
@@ -274,7 +255,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=self._install_fabric_command(),
-            env={name: value for name, value in self.extra_env.items() if name in _INSTALL_ENV_NAMES},
+            env={name: value for name, value in self.extra_env.items() if name in INSTALL_ENV_NAMES},
             timeout_sec=self.fabric.fabric_timeout_sec,
         )
         await self.fabric.prepare_relay(environment)
