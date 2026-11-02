@@ -14,7 +14,7 @@ out over every member.
 import logging
 import math
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -29,7 +29,12 @@ from nhx.core.jobs.api.v2.jobs.schemas import (
     UpdateJobGroupRequest,
 )
 from nhx.core.jobs.app.ctx import JobContext
-from nhx.core.jobs.app.dispatcher import JobAlreadyExistsError, JobDeletionConflictError, JobDispatcher
+from nhx.core.jobs.app.dispatcher import (
+    JobAlreadyExistsError,
+    JobDeletionConflictError,
+    JobDispatcher,
+    JobOperationConflictError,
+)
 from nhx.core.jobs.config import profiles
 
 logger = logging.getLogger(__name__)
@@ -185,3 +190,46 @@ async def delete_job_group(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Job group '{name}' not found in workspace '{workspace}'.",
             )
+
+
+@router.post(
+    "/v2/workspaces/{workspace}/job-groups/{name}/cancel",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_200_OK: {"description": "Cancellation requested; the group is now cancelling"},
+        status.HTTP_404_NOT_FOUND: {"description": "Job group not found"},
+        status.HTTP_409_CONFLICT: {"description": "The job group has already reached a terminal state"},
+    },
+)
+async def cancel_job_group(
+    name: str,
+    workspace: str,
+    background_tasks: BackgroundTasks,
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> JobGroupResponse:
+    """Request cancellation of a job group.
+
+    Cancelling a group of thousands of jobs is one operation for the caller, not a cancel
+    per member: this records the group's ``cancelling`` intent in a single write and returns
+    immediately. The per-member teardown -- cancelling every non-terminal member through the
+    normal per-job cancel path -- then runs as a background task, off the caller's request
+    path. Once every member reaches a terminal state the group settles to ``cancelled`` via
+    the member-status roll-up. The background teardown is best-effort and not durable: if it
+    is lost before it runs, members finish naturally and the group settles to its real
+    terminal status (not ``cancelled``), so re-requesting cancellation is how a caller drives
+    it again -- there is no server-side reaper yet.
+    """
+    with scoped_app_ctx(JobContext(id=name)):
+        try:
+            group = await dispatcher.cancel_job_group(name, workspace)
+        except JobOperationConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job group '{name}' not found in workspace '{workspace}'.",
+            )
+        # Fan the per-member cancel out off the caller's request path: the intent write has
+        # already returned the group, and cancel_group_members walks the members itself.
+        background_tasks.add_task(dispatcher.cancel_group_members, group.id, workspace)
+        return group

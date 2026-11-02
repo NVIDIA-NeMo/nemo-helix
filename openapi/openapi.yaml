@@ -6468,6 +6468,93 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/jobs/v2/workspaces/default/job-groups/my-job-group"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/job-groups/my-job-group\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/jobs/v2/workspaces/default/job-groups/my-job-group\n"
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{name}/cancel:
+    post:
+      tags:
+      - Job Groups
+      summary: Cancel Job Group
+      description: 'Request cancellation of a job group.
+
+
+        Cancelling a group of thousands of jobs is one operation for the caller, not
+        a cancel
+
+        per member: this records the group''s ``cancelling`` intent in a single write
+        and returns
+
+        immediately. The per-member teardown -- cancelling every non-terminal member
+        through the
+
+        normal per-job cancel path -- then runs as a background task, off the caller''s
+        request
+
+        path. Once every member reaches a terminal state the group settles to ``cancelled``
+        via
+
+        the member-status roll-up. The background teardown is best-effort and not
+        durable: if it
+
+        is lost before it runs, members finish naturally and the group settles to
+        its real
+
+        terminal status (not ``cancelled``), so re-requesting cancellation is how
+        a caller drives
+
+        it again -- there is no server-side reaper yet.'
+      operationId: cancel_job_group_apis_jobs_v2_workspaces__workspace__job_groups__name__cancel_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Cancellation requested; the group is now cancelling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '404':
+          description: Job group not found
+        '409':
+          description: The job group has already reached a terminal state
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:
@@ -18013,8 +18100,7 @@ components:
           title: Name
           description: Job name. Name must start with a lowercase letter, be 2-63
             characters, and use lowercase letters, digits, hyphens, and dots (no consecutive
-            hyphens, cannot end with a hyphen). At most 51 characters when output_location
-            is not set. Auto-generated when omitted.
+            hyphens, cannot end with a hyphen). Auto-generated when omitted.
         config_patch:
           additionalProperties: true
           type: object
