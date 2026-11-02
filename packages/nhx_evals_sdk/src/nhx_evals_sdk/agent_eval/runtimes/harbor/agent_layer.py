@@ -40,6 +40,8 @@ AGENT_LAYER_DOCKER_ENVIRONMENT = (
 )
 AGENT_LAYER_KWARG = "agent_layer"
 """The environment kwarg naming the trial's agent: ``{"name", "import_path", "kwargs", "env"}``."""
+#: The kwarg holding a Fabric agent's config bundle, a directory its setup uploads; never part of a layer.
+FABRIC_CONFIG_BUNDLE_KWARG = "fabric_config_bundle"
 #: Harbor's installed agents whose install a layer can hold. Each skips its install when the version it would install
 #: is already there, and installs from its version alone. Harbor's other installed agents install again in every
 #: trial, so a layer would save them nothing, and some write run options or credentials during their install.

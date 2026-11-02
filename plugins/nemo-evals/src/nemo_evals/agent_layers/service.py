@@ -118,7 +118,7 @@ class AgentLayerService:
         elif newest is not None and newest.status != "failed":
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
-                await self._ensure_job(newest)
+                await self._start(newest)
                 return AgentLayer.from_entity(newest)
             newest = await self._fail_abandoned(newest, job.status)
             if newest.status != "failed":
@@ -144,7 +144,7 @@ class AgentLayerService:
             layer = await self.entity_client.create(layer)
         except NemoEntityConflictError:
             layer = await self.entity_client.get(AgentLayerEntity, name=layer.name, workspace=workspace, parent=head.id)
-        await self._ensure_job(layer)
+        await self._start(layer)
         return AgentLayer.from_entity(layer)
 
     async def _revision(self, workspace: str, name: str, revision: str) -> tuple[TaskEntity, TaskRevisionEntity] | None:
@@ -158,14 +158,25 @@ class AgentLayerService:
         return await _layers(self.entity_client, head, revision_digest, agent_key)
 
     async def _fail_abandoned(self, layer: AgentLayerEntity, job_status: str) -> AgentLayerEntity:
+        return await self._fail(layer, f"agent-layer job {layer.job} ended ({job_status}) without a result")
+
+    async def _fail(self, layer: AgentLayerEntity, error: str) -> AgentLayerEntity:
         layer.status = "failed"
-        layer.error = f"agent-layer job {layer.job} ended ({job_status}) without a result"
+        layer.error = error
         try:
             return await self.entity_client.update(layer)
         except NemoEntityConflictError:
             return await self.entity_client.get(
                 AgentLayerEntity, name=layer.name, workspace=layer.workspace, parent=layer.parent
             )
+
+    async def _start(self, layer: AgentLayerEntity) -> None:
+        """Start ``layer``'s Job; when it can't be started, mark the layer failed, so runs waiting for it stop at once."""
+        try:
+            await self._ensure_job(layer)
+        except Exception as exc:
+            await self._fail(layer, f"agent-layer job {layer.job} could not be started: {exc}")
+            raise
 
     async def _ensure_job(self, layer: AgentLayerEntity) -> None:
         """Create the layer's Job, or confirm the Job already under its name is this layer's."""

@@ -29,6 +29,7 @@ from typing import Any, cast
 from harbor.agents.factory import AgentFactory
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.trial.config import AgentConfig
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import FABRIC_CONFIG_BUNDLE_KWARG
 
 
 class LocalExecEnvironment:
@@ -88,7 +89,9 @@ def _account(user: str | int | None) -> pwd.struct_passwd | None:
 
 async def install(agent: Mapping[str, Any]) -> None:
     """Run ``agent``'s setup into this filesystem."""
-    config = AgentConfig(name=agent.get("name"), import_path=agent.get("import_path"), kwargs=agent.get("kwargs") or {})
+    # The Fabric config bundle is the trial's, not the install's: setup uploads it in every trial.
+    kwargs = {name: value for name, value in (agent.get("kwargs") or {}).items() if name != FABRIC_CONFIG_BUNDLE_KWARG}
+    config = AgentConfig(name=agent.get("name"), import_path=agent.get("import_path"), kwargs=kwargs)
     with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
         harbor_agent = AgentFactory.create_agent_from_config(config, logs_dir=Path(logs))
         # Agents' setup() uses only exec, upload_file/upload_dir and default_user: no trial, task directory or

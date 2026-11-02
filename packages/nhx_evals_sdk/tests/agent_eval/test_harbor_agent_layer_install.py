@@ -85,6 +85,29 @@ def test_main_runs_the_named_agents_setup_as_its_user(tmp_path: Path, monkeypatc
     assert isinstance(environment, LocalExecEnvironment) and environment.default_user == "agent"
 
 
+def test_a_fabric_agents_config_bundle_is_left_out_of_its_layer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built: list[Any] = []
+
+    class _Agent:
+        async def setup(self, environment: Any) -> None:
+            return None
+
+    def create(config: Any, *, logs_dir: Path) -> _Agent:
+        built.append(config)
+        return _Agent()
+
+    monkeypatch.setattr(agent_layer_install.AgentFactory, "create_agent_from_config", create)
+    spec = tmp_path / "agent.json"
+    kwargs = {"fabric_package": "nemo-fabric[codex]==0.5.0", "fabric_config_bundle": "/bundle"}
+    spec.write_text(json.dumps({"name": None, "import_path": "x:FabricInstalledAgent", "kwargs": kwargs, "user": None}))
+
+    assert main([str(spec)]) == 0
+
+    assert built[0].kwargs == {"fabric_package": "nemo-fabric[codex]==0.5.0"}
+
+
 def test_main_needs_one_argument() -> None:
     assert main([]) == 2
 

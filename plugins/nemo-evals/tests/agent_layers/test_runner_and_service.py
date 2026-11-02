@@ -262,6 +262,22 @@ async def test_a_request_starts_the_layers_job_once(entity_store, store_task) ->
     assert first.agent_key == agent_layer_key(_CODEX)
 
 
+async def test_a_layer_whose_job_cant_be_started_is_failed_so_no_run_waits_for_it(entity_store, store_task) -> None:
+    class _BrokenJobs(_Jobs):
+        async def create(self, request: CreateHelixJobRequest) -> None:
+            raise RuntimeError("jobs service unavailable")
+
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, _BrokenJobs(), _allow)
+
+    with pytest.raises(RuntimeError, match="jobs service unavailable"):
+        await _request(service, "sort-task", digest)
+    newest = await newest_layer(entity_store, "default", "sort-task", digest, agent_layer_key(_CODEX))
+
+    assert newest is not None and newest.status == "failed"
+    assert newest.error is not None and "could not be started" in newest.error
+
+
 async def _make_ready(entity_store, digest: str, attempt: int = 1) -> AgentLayerEntity:
     head = await entity_store.get(TaskEntity, name="sort-task", workspace="default")
     stored = await entity_store.get(
