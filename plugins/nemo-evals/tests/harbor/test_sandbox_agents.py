@@ -157,14 +157,24 @@ async def test_a_process_that_survives_the_kill_fails_the_trial(monkeypatch):
     assert _allowed_now(environment) == {IGW}  # the hosts were removed before the kill was attempted
 
 
-async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatch):
+@pytest.mark.parametrize(
+    ("verification", "error"),
+    [
+        # Strict verification of the closed policy already rejects the setup hosts the sidecar kept.
+        ("strict", "allows 2 egress target"),
+        # The dedicated check still catches them when only the default action is verified.
+        ("default_action", "still allows"),
+    ],
+)
+async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatch, verification, error):
     environment = _setup_environment(monkeypatch)
+    environment._egress_verification = verification
 
     async def ignore_delete(targets: list[str]) -> None:
         return None
 
     monkeypatch.setattr(environment._sandbox, "delete_egress_rules", ignore_delete)
-    with pytest.raises(EgressVerificationError, match="still allows"):
+    with pytest.raises(EgressVerificationError, match=error):
         async with environment.agent_setup_egress():
             pass
 

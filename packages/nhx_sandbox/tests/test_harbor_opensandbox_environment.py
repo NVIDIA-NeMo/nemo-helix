@@ -382,6 +382,29 @@ async def test_strict_verification_rejects_a_dropped_rule(
     assert server.live() == set()
 
 
+async def test_verification_is_strict_by_default_and_rejects_an_unrequested_allow_rule(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sandbox that reports an allow rule nobody requested can reach more than its task may, so it is killed."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    sdk = environment._driver.sdk
+    create = sdk["Sandbox"].create
+
+    async def add_rule(image: Any, **kwargs: Any) -> Sandbox:
+        """Create normally, but apply the policy with an extra allow rule."""
+        sandbox = await create(image, **kwargs)
+        egress = [*sandbox._policy["egress"], {"action": "allow", "target": "*.example.com"}]
+        sandbox._policy = {**sandbox._policy, "egress": egress}
+        return sandbox
+
+    monkeypatch.setattr(sdk["Sandbox"], "create", add_rule)
+
+    with pytest.raises(RuntimeError, match="allows 1 egress target"):
+        await environment._create_sandbox()
+
+    assert server.live() == set()
+
+
 def test_rejects_compose_tasks_and_missing_images(tmp_path: Path, server: Server) -> None:
     """Compose tasks and tasks without a prebuilt image are rejected at construction."""
     (tmp_path / "environment").mkdir()

@@ -206,7 +206,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         resolver_addresses: Nameservers to keep reachable. ``None`` uses the runner's own
             ``/etc/resolv.conf``, which in-cluster is the resolver sandboxes share.
         egress_verification: How strictly to compare the applied policy with the requested one;
-            see ``verify_applied_egress``. Readback itself is always required.
+            see ``verify_applied_egress``. Readback itself is always required. ``strict`` by default;
+            ``default_action`` is for a deployment whose sidecar adds allow rules of its own.
         enforce_disk_limit: Cap each sandbox's ephemeral storage at the task's ``storage_mb``. Turn
             this off only on a runtime that doesn't enforce the limit.
         max_disk_mb: Ceiling on the limit, so a task asking for far more than any node holds can't
@@ -252,7 +253,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         metadata: dict[str, str] | None = None,
         trusted_allowed_hosts: list[str] | None = None,
         resolver_addresses: list[str] | None = None,
-        egress_verification: EgressVerificationMode = "default_action",
+        egress_verification: EgressVerificationMode = "strict",
         enforce_disk_limit: bool = True,
         max_disk_mb: int | None = None,
         compose_services: dict[str, Any] | None = None,
