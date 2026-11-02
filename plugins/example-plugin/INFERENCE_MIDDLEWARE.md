@@ -218,7 +218,7 @@ nemo inference providers delete nvidia-cloud --workspace my-workspace
 nemo secrets delete ngc-api-key --workspace my-workspace
 
 # Workspace (marks all remaining entities for async deletion)
-nemo workspaces delete my-workspace
+nemo workspaces delete my-workspace --yes
 ```
 
 ---

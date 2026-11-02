@@ -714,8 +714,8 @@ that registered model.
 To remove the resources created during the calculator walkthrough:
 
 ```bash
-nemo agents undeploy --agent calculator-agent
-nemo agents delete calculator-agent
+nemo agents undeploy --agent calculator-agent --yes
+nemo agents delete calculator-agent --yes
 
 nemo inference providers delete nvidia-build
 nemo secrets delete ngc-api-key
