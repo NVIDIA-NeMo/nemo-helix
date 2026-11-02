@@ -773,9 +773,6 @@ baseHelixConfig: |
     # Harbor taskset runs: enables running harbor dataset evaluation in k8s.
     runs:
       harbor:
-        # Optional: the profile a run gets when it names none. If not set, the first profile is used; Helm
-        # renders profiles in alphabetical order, so keep this set when adding profiles.
-        default_sandbox_profile: harbor-standard
         # Add profiles under platformConfig.evals.runs.harbor.sandbox_profiles.
         sandbox_profiles:
           # harbor-standard reaches only the API by default.
