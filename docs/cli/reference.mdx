@@ -11914,4 +11914,5 @@ nemo intake traces show [OPTIONS] ID
 **Output Options:**
 
 * `--no-truncate`: Print each block's full input and output.
-* `--output-format, --output, -f <CHOICE>`: text prints the transcript; json and yaml print the same blocks as structured data. [possible values: text, json, yaml]
+* `--output-format, --output, -f <CHOICE>`: text prints the transcript; json and yaml print the same blocks as structured data. Defaults to text, even when piped, unless the configured output format is json or yaml. [possible values: text, json, yaml]
+* `--output-schema`: Print the JSON Schema of the json and yaml output, then exit. Needs no trace ID.

@@ -505,6 +505,30 @@ def test_traces_show_tool_input_is_never_parsed_as_messages(intake_cli) -> None:
     assert '    args: {"messages": [{"role": "user", "content": "hi"}]}' in result.stdout
 
 
+def test_traces_show_output_schema_needs_no_trace_or_api(intake_cli) -> None:
+    result, recorder = intake_cli.run(["traces", "show", "--output-schema"], workspace=None)
+
+    assert result.exit_code == 0, result.output
+    assert recorder.requests == []
+    schema = json.loads(result.stdout)
+    assert schema["title"] == "Transcript"
+    assert {"blocks", "kinds", "hidden_kinds", "max_chars"} <= set(schema["properties"])
+
+
+def test_traces_show_output_schema_matches_json_output(intake_cli) -> None:
+    schema_result, _ = intake_cli.run(["traces", "show", "--output-schema"])
+    schema = json.loads(schema_result.stdout)
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert set(body) == set(schema["properties"])
+    assert set(body["blocks"][0]) == set(schema["$defs"]["TranscriptBlock"]["properties"])
+
+
 def test_traces_show_not_found(intake_cli) -> None:
     result, recorder = intake_cli.run(
         ["traces", "show", "nope"], [httpx.Response(404, json={"detail": "Trace default/nope not found"})]

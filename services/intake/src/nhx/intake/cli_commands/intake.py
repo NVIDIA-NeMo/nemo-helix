@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal, cast
 
 import typer
@@ -58,6 +59,7 @@ from nhx.intake.cli_commands.common import list_query_params, without_keys
 from nhx.intake.cli_commands.transcript import (
     DEFAULT_MAX_CHARS,
     DEFAULT_TRANSCRIPT_KINDS,
+    Transcript,
     build_transcript,
     render_transcript,
 )
@@ -352,6 +354,13 @@ def _parse_transcript_kinds(value: str | None) -> list[str] | None:
     return None if "ALL" in kinds else list(dict.fromkeys(kinds))
 
 
+def _print_transcript_schema(value: bool) -> None:
+    # Eager, so it runs before the required trace ID is checked and never calls the API.
+    if value:
+        typer.echo(json.dumps(Transcript.model_json_schema(), indent=2))
+        raise typer.Exit()
+
+
 @traces_app.command("show")
 @collect_warnings
 @handle_errors
@@ -391,10 +400,24 @@ def show_traces(
         typer.Option(
             *OUTPUT_FORMAT_FLAGS,
             show_choices=True,
-            help="text prints the transcript; json and yaml print the same blocks as structured data.",
+            help=(
+                "text prints the transcript; json and yaml print the same blocks as structured data. "
+                "Defaults to text, even when piped, unless the configured output format is json or yaml."
+            ),
             rich_help_panel="Output Options",
         ),
     ] = None,
+    output_schema: Annotated[
+        bool,
+        typer.Option(
+            "--output-schema",
+            is_eager=True,
+            expose_value=False,
+            callback=_print_transcript_schema,
+            help="Print the JSON Schema of the json and yaml output, then exit. Needs no trace ID.",
+            rich_help_panel="Output Options",
+        ),
+    ] = False,
 ) -> None:
     """Show one trace as a transcript.
 
