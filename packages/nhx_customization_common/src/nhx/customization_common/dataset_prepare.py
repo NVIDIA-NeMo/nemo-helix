@@ -268,7 +268,10 @@ def _to_training_row(row: dict[str, Any], mapping: ColumnMapping, number: int) -
             user = {"role": "user", "content": text["prompt"]}
             return {"messages": [*system, user, {"role": "assistant", "content": text["response"]}]}
         case DatasetFormat.PREFERENCE:
-            prompt = [*system, {"role": "user", "content": text["prompt"]}] if system else text["prompt"]
+            # With a system column, every prompt is a message list, even where its system cell is empty:
+            # NeMo-RL loads the file into Arrow, which cannot hold strings and lists in one column.
+            user = {"role": "user", "content": text["prompt"]}
+            prompt = [*system, user] if "system" in mapping.columns else text["prompt"]
             return {"prompt": prompt, "chosen": text["chosen"], "rejected": text["rejected"]}
         case DatasetFormat.PROMPT_COMPLETION:
             return {"prompt": text["prompt"], "completion": text["response"]}

@@ -17,6 +17,7 @@ from nhx.customization_common.dataset_prepare import (
     read_rows,
     split_rows,
     to_training_rows,
+    write_split,
 )
 
 # The columns of the Studio Data Designer templates.
@@ -200,8 +201,9 @@ def test_preference_rows_with_and_without_a_system_prompt() -> None:
             "chosen": "Paris.",
             "rejected": "Not sure.",
         },
-        {"prompt": "Capital of France?", "chosen": "Paris.", "rejected": "Not sure."},
+        {"prompt": [{"role": "user", "content": "Capital of France?"}], "chosen": "Paris.", "rejected": "Not sure."},
     ]
+    assert _convert(DatasetFormat.PREFERENCE, [_PREFERENCE])[0]["prompt"] == "Capital of France?"
 
 
 def test_prompt_completion_and_text_rows() -> None:
@@ -287,3 +289,15 @@ def test_a_jsonl_line_that_is_not_an_object_names_its_number(tmp_path: Path) -> 
 
     with pytest.raises(DatasetPrepareError, match="line 2 is not a JSON object"):
         read_rows(tmp_path / "rows.jsonl")
+
+
+def test_preference_prompts_load_as_one_arrow_column_when_some_system_cells_are_empty(tmp_path: Path) -> None:
+    """NeMo-RL reads the file with HF ``load_dataset("json")``; a column of strings and lists loses its type."""
+    from datasets import load_dataset
+
+    rows = [{**_PREFERENCE, "persona": "Be brief."}, {**_PREFERENCE, "persona": ""}]
+    write_split(_convert(DatasetFormat.PREFERENCE, rows, system="persona"), tmp_path / "train.jsonl")
+
+    loaded = load_dataset("json", data_files=str(tmp_path / "train.jsonl"), split="train")
+    assert str(loaded.features["prompt"]) == "List({'role': Value('string'), 'content': Value('string')})"
+    assert [len(prompt) for prompt in loaded["prompt"]] == [2, 1]
