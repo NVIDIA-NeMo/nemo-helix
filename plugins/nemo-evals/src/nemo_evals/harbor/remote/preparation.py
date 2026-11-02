@@ -174,6 +174,10 @@ class ImageBuildPreparer:
 
         Build roles can't show compose: a compose file whose only service is ``main`` builds just ``main``.
         So the archive is still read, for its compose file only.
+
+        Raises:
+            PermissionDeniedError: Files refused the archive read.
+            ImagePreparationUnavailableError: Another archive HTTP failure prevents preparation.
         """
         if not isinstance(task.spec, ResolvedHarborTaskDefinition):
             return PreparationErrorInfo(code="invalid_task_config", detail=f"task {task.id} is not a Harbor task")
@@ -189,6 +193,8 @@ class ImageBuildPreparer:
             archive = await read_task_archive(clients.files, task.spec.source)
         except ImagePlanError as exc:
             return _plan_error(exc)
+        except PermissionDeniedError:
+            raise
         except NemoHTTPError as exc:
             raise ImagePreparationUnavailableError(f"could not read task {task.id}'s archive: {exc}") from exc
         if archive.compose is not None:

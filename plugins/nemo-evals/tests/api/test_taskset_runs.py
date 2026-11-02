@@ -14,13 +14,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from nemo_evals.api.dependencies import get_taskset_run_service
 from nemo_evals.api.v2.taskset_runs import router
-from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
+from nemo_evals.harbor.remote.preparation import ImageBuildPreparer, ImagePreparationUnavailableError
 from nemo_evals.jobs.agent_spec import registered_agent_source
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs import store as store_module
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.store import PlanStorageError, TasksetRunStore
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entities.types import Entity
@@ -391,3 +392,142 @@ async def test_keyless_submits_get_distinct_generated_keys(run_client, published
     assert first.status_code == second.status_code == 201
     assert first.json()["run_id"] != second.json()["run_id"]
     assert len({first.json()["idempotency_key"], second.json()["idempotency_key"]}) == 2
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_submit_storage_permission_denial_preserves_key(run_client, service, monkeypatch, request_body, key):
+    """Direct denials hide downstream details and expose generated replay keys in the response body."""
+    denied = PermissionDeniedError(
+        httpx.Response(
+            403,
+            json={"detail": "private storage denial"},
+            request=httpx.Request("POST", "http://entities.test/entities"),
+        )
+    )
+    monkeypatch.setattr(service, "submit", AsyncMock(side_effect=denied))
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": key})
+    assert response.status_code == 403
+    assert response.headers["x-should-retry"] == "false"
+    if key is None:
+        generated_key = response.headers["x-idempotency-key"]
+        assert response.json() == {
+            "detail": f"Forbidden; once access is restored, resubmit the same request with idempotency_key={generated_key}"
+        }
+    else:
+        assert response.json() == {"detail": "Forbidden"}
+        assert "x-idempotency-key" not in response.headers
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+@pytest.mark.parametrize("operation", ["create", "upload"])
+@pytest.mark.parametrize("status_code", [403, 400], ids=["denied", "other-failure"])
+async def test_plan_write_failures_preserve_http_status_and_cleanup(
+    run_client, published, request_body, files_service, entity_store, fake_task_jobs, key, operation, status_code
+):
+    """Wrapped Files denials stay 403; other write failures stay 500 and accept no run."""
+    files_service.failures[operation] = status_code
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": key})
+    assert response.status_code == (403 if status_code == 403 else 500), response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Forbidden" if status_code == 403 else "Internal server error")
+    assert "failed" not in detail and "-plan-" not in detail
+    if key is None:
+        generated_key = response.headers["x-idempotency-key"]
+        assert f"idempotency_key={generated_key}" in detail
+        assert response.headers["x-should-retry"] == "false"
+    else:
+        assert "x-idempotency-key" not in response.headers
+    if status_code == 403:
+        assert response.headers["x-should-retry"] == "false"
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert not fake_task_jobs.created
+    assert not files_service.filesets
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_plan_read_denied_after_acceptance_can_replay_without_duplicate_run(
+    run_client, published, request_body, files_service, entity_store, fake_task_jobs, key
+):
+    """A Files 403 after acceptance retains the replay key and never creates a second run."""
+    files_service.failures["download"] = 403
+    body = request_body | {"idempotency_key": key}
+    response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert response.headers["x-should-retry"] == "false"
+    replay_key = key or response.headers["x-idempotency-key"]
+    detail = response.json()["detail"]
+    if key is None:
+        assert "once access is restored, resubmit the same request" in detail
+        assert f"idempotency_key={replay_key}" in detail
+    assert "download" not in detail and "-plan-" not in detail
+    (accepted,) = (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert accepted.idempotency_key == replay_key
+    assert not fake_task_jobs.created
+    files_service.failures.clear()
+    replay = await run_client.post(PATH, json=body | {"idempotency_key": replay_key})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["run_id"] == accepted.name
+    assert len((await entity_store.list(TasksetRunEntity, workspace="default")).data) == 1
+    assert len(fake_task_jobs.created) == 1
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+async def test_jobs_permission_denial_is_nonretryable_and_replays_accepted_run(
+    run_client, published, request_body, fake_task_jobs, entity_store, monkeypatch, key
+):
+    """A Jobs create denial returns 403, retaining the accepted run for a keyed replay."""
+    denied = PermissionDeniedError(
+        httpx.Response(
+            403,
+            json={"detail": "private Jobs denial"},
+            request=httpx.Request("POST", "http://jobs.test/jobs"),
+        )
+    )
+    body = request_body | {"idempotency_key": key}
+    with monkeypatch.context() as patch:
+        patch.setattr(fake_task_jobs, "create", AsyncMock(side_effect=denied))
+        response = await run_client.post(PATH, json=body)
+    assert response.status_code == 403, response.text
+    assert response.headers["x-should-retry"] == "false"
+    replay_key = key or response.headers["x-idempotency-key"]
+    detail = response.json()["detail"]
+    assert detail.startswith("Forbidden") and "private Jobs denial" not in detail
+    if key is None:
+        assert f"idempotency_key={replay_key}" in detail
+    (accepted,) = (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert accepted.idempotency_key == replay_key
+    assert not fake_task_jobs.created
+    replay = await run_client.post(PATH, json=body | {"idempotency_key": replay_key})
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["run_id"] == accepted.name
+    assert len((await entity_store.list(TasksetRunEntity, workspace="default")).data) == 1
+    assert len(fake_task_jobs.created) == 1
+
+
+@pytest.mark.parametrize("key", ["ci-run", None], ids=["keyed", "keyless"])
+@pytest.mark.parametrize("status_code", [403, 404], ids=["denied", "unavailable"])
+async def test_archive_read_failure_preserves_denial_or_retryable_unavailability(
+    run_client,
+    published,
+    request_body,
+    files_service,
+    entity_store,
+    fake_task_jobs,
+    service,
+    monkeypatch,
+    key,
+    status_code,
+):
+    """Real archive checks return 403 for Files denials and retryable 503 for other read failures."""
+    monkeypatch.setattr(service, "_preparer", ImageBuildPreparer())
+    files_service.failures["download"] = status_code
+    response = await run_client.post(PATH, json=request_body | {"idempotency_key": key})
+    assert response.status_code == (403 if status_code == 403 else 503), response.text
+    assert response.headers["x-should-retry"] == ("false" if status_code == 403 else "true")
+    if status_code == 403:
+        detail = response.json()["detail"]
+        assert detail.startswith("Forbidden")
+        assert "harbor-tasks" not in detail and "failed" not in detail
+    assert not (await entity_store.list(TasksetRunEntity, workspace="default")).data
+    assert not fake_task_jobs.created
+    assert files_service.calls and all(operation == "download" for operation, _, _ in files_service.calls)

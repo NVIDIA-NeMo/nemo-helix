@@ -19,7 +19,7 @@ from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, build_ta
 from nemo_evals.taskset_runs.entities import TasksetRunEntity
 from nemo_evals.taskset_runs.identifiers import task_job_name
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
-from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
@@ -114,6 +114,7 @@ async def create_task_jobs(
     saves a Job and its attempt before creating the first step, with no rollback.
 
     Raises:
+        PermissionDeniedError: Jobs refused creation or adoption; access must be restored before replay.
         TaskJobsIncompleteError: Any task Job is missing; the others were created or adopted.
     """
     names: list[str] = []
@@ -130,12 +131,16 @@ async def create_task_jobs(
             continue
         except ConflictError:
             pass
+        except PermissionDeniedError:
+            raise
         except Exception as exc:
             logger.warning("Creating task Job %s failed", name, exc_info=True)
             missing.append((index, f"create failed: {type(exc).__name__}"))
             continue
         try:
             reason = await _adoption_refused(jobs, run.workspace, body)
+        except PermissionDeniedError:
+            raise
         except Exception as exc:
             # Like a failed create: report the task missing so the other tasks still get their Jobs.
             logger.warning("Inspecting existing task Job %s failed", name, exc_info=True)
