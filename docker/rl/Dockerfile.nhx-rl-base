@@ -403,6 +403,10 @@ for py in /opt/nemo_rl_venv/bin/python /opt/ray_venvs/*/bin/python /opt/gym_venv
     elif "${py}" -c 'import importlib.metadata as m; m.version("sqlparse")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package sqlparse "sqlparse>=0.6.0,<0.7"
     fi
+    # Patch the upstream RL/Gym locks without relocking their CUDA dependency stacks.
+    if "${py}" -c 'import importlib.metadata as m; m.version("virtualenv")' >/dev/null 2>&1; then
+        uv pip install --directory /tmp --python "${py}" --upgrade-package virtualenv "virtualenv>=21.14.9"
+    fi
     if "${py}" -c 'import importlib.metadata as m; m.version("hydra-core")' >/dev/null 2>&1; then
         uv pip install --python "${py}" --no-deps --upgrade-package hydra-core "hydra-core>=1.3.4,<1.4"
     fi
@@ -442,6 +446,7 @@ for d in "${UV_CACHE_DIR}"/archive-v0/*/; do
         && ! compgen -G "${d}mlflow-*.dist-info" >/dev/null \
         && ! compgen -G "${d}mlflow_skinny-*.dist-info" >/dev/null \
         && ! compgen -G "${d}hydra_core-*.dist-info" >/dev/null \
+        && ! compgen -G "${d}virtualenv-*.dist-info" >/dev/null \
         && ! compgen -G "${d}sqlparse-*.dist-info" >/dev/null \
         && ! compgen -G "${d}gitpython-*.dist-info" >/dev/null \
         && ! compgen -G "${d}mooncake_transfer_engine_cuda13-*.dist-info" >/dev/null; then
