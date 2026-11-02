@@ -170,7 +170,7 @@ async def probe_mcp_server(
         search_path = env.get("PATH", os.environ.get("PATH", ""))
         if not target or shutil.which(target, path=search_path) is None:
             status.state = "unresolved"
-            status.error = f"Command '{target}' was not found on the runtime PATH."
+            status.error = f"Command '{raw_target}' was not found on the runtime PATH."
             return status
 
     with tempfile.TemporaryFile(mode="w+") as errlog:

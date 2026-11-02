@@ -146,6 +146,17 @@ async def test_status_never_reports_expanded_secrets(monkeypatch: pytest.MonkeyP
     assert "s3cret" not in status.model_dump_json()
 
 
+async def test_unresolved_stdio_error_never_reports_expanded_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBE_SECRET", "s3cret")
+    spec = McpServerConfig(transport="stdio", url="missing-${PROBE_SECRET}", env={"PATH": "/nowhere"})
+
+    status = await probe_mcp_server("iocs", spec, _config({}))
+
+    assert status.state == "unresolved"
+    assert "missing-${PROBE_SECRET}" in (status.error or "")
+    assert "s3cret" not in status.model_dump_json()
+
+
 async def test_list_all_tools_follows_cursors() -> None:
     pages = {
         None: ListToolsResult(tools=[Tool(name="a", inputSchema={})], nextCursor="p2"),
