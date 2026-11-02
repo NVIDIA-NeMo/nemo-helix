@@ -9,6 +9,8 @@ OOM-killed and one evicted for exceeding its ephemeral-storage limit.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import httpx
@@ -16,7 +18,7 @@ import pytest
 from nhx_sandbox.backends.opensandbox.termination import (
     MAX_EVENTS,
     OpenSandboxTerminationDiagnostics,
-    diagnose_state,
+    diagnose_from_status,
     warning_events,
 )
 from nhx_sandbox.core.errors import SandboxBackendError, SandboxNotFound
@@ -33,14 +35,20 @@ EVICTED = "Evicted: Pod ephemeral local storage usage exceeds the total limit of
 
 
 class Server:
-    """The server's API as the diagnostics read it: canned answers by path, and every path asked for."""
+    """The server's API as the diagnostics read it: canned answers by path, and every path asked for.
 
-    def __init__(self, answers: dict[str, httpx.Response]) -> None:
+    A path in ``hanging`` never answers, like a server that accepts the request and stalls.
+    """
+
+    def __init__(self, answers: dict[str, httpx.Response], *, hanging: frozenset[str] = frozenset()) -> None:
         self._answers = answers
+        self._hanging = hanging
         self.paths: list[str] = []
 
     async def get(self, path: str, *, timeout: float, deadline: float | None = None) -> httpx.Response:
         self.paths.append(path)
+        if path in self._hanging:
+            await asyncio.sleep(3600)
         return self._answers.get(path, httpx.Response(404))
 
 
@@ -52,9 +60,10 @@ def _events(content: str) -> httpx.Response:
     return httpx.Response(200, json={"kind": "events", "scope": "runtime", "delivery": "inline", "content": content})
 
 
-async def _diagnose(answers: dict[str, httpx.Response]) -> tuple[Any, Server]:
+async def _diagnose(answers: dict[str, httpx.Response], *, budget_sec: float = 5) -> tuple[Any, Server]:
     server = Server(answers)
-    return await OpenSandboxTerminationDiagnostics(server, timeout_sec=5).diagnose_termination("sbx-1"), server
+    diagnostics = OpenSandboxTerminationDiagnostics(server)
+    return await diagnostics.diagnose_termination("sbx-1", deadline=time.monotonic() + budget_sec), server
 
 
 @pytest.mark.parametrize("state", ["Running", "Paused", "Pausing", "Resuming"])
@@ -104,6 +113,32 @@ async def test_unreadable_events_still_diagnose_from_the_state() -> None:
     assert diagnosis.evidence["events"] == []
 
 
+async def test_events_that_never_arrive_still_leave_the_status_diagnosis_by_the_deadline() -> None:
+    """The status already says why the sandbox stopped; slow optional events must not cost that diagnosis."""
+    server = Server(
+        {"/sandboxes/sbx-1": _status("Terminated", "SANDBOX_EXPIRED", "Sandbox expired")},
+        hanging=frozenset({"/sandboxes/sbx-1/diagnostics/events?scope=runtime"}),
+    )
+    started = time.monotonic()
+
+    diagnosis = await OpenSandboxTerminationDiagnostics(server).diagnose_termination("sbx-1", deadline=started + 0.1)
+
+    assert diagnosis is not None and diagnosis.cause is TerminationCause.LIFETIME_REACHED
+    assert diagnosis.evidence["events"] == []
+    assert time.monotonic() - started < 1
+
+
+async def test_no_time_left_skips_the_events_read() -> None:
+    server = Server({"/sandboxes/sbx-1": _status("Failed", "FAILED", "pod failed")})
+
+    diagnosis = await OpenSandboxTerminationDiagnostics(server).diagnose_termination(
+        "sbx-1", deadline=time.monotonic() - 1
+    )
+
+    assert diagnosis is not None and diagnosis.cause is TerminationCause.UNKNOWN
+    assert server.paths == ["/sandboxes/sbx-1"]
+
+
 async def test_a_sandbox_the_server_does_not_know_is_not_found() -> None:
     with pytest.raises(SandboxNotFound):
         await _diagnose({"/sandboxes/sbx-1": httpx.Response(404, json={"code": "KUBERNETES::SANDBOX_NOT_FOUND"})})
@@ -117,25 +152,25 @@ async def test_any_other_status_read_failure_says_nothing() -> None:
 
 
 def test_an_oom_kill_in_the_servers_message_is_named() -> None:
-    diagnosis = diagnose_state(state="Failed", reason="FAILED", message="container sandbox: OOMKilled", events=[])
+    diagnosis = diagnose_from_status(state="Failed", reason="FAILED", message="container sandbox: OOMKilled", events=[])
 
     assert diagnosis.cause is TerminationCause.OUT_OF_MEMORY
 
 
 def test_server_1_2s_expiry_reason_is_the_lifetime() -> None:
-    diagnosis = diagnose_state(state="Terminated", reason="SANDBOX_EXPIRED", message="Sandbox expired", events=[])
+    diagnosis = diagnose_from_status(state="Terminated", reason="SANDBOX_EXPIRED", message="Sandbox expired", events=[])
 
     assert diagnosis.cause is TerminationCause.LIFETIME_REACHED
 
 
 def test_a_sandbox_being_deleted_was_deleted() -> None:
-    diagnosis = diagnose_state(state="Stopping", reason="DELETING", message="Sandbox is being deleted", events=[])
+    diagnosis = diagnose_from_status(state="Stopping", reason="DELETING", message="Sandbox is being deleted", events=[])
 
     assert diagnosis.cause is TerminationCause.DELETED
 
 
 def test_unknown_lists_the_warning_events() -> None:
-    diagnosis = diagnose_state(
+    diagnosis = diagnose_from_status(
         state="Failed", reason="TASK_FAILED", message="1 sandbox task(s) failed", events=["BackOff: x"]
     )
 

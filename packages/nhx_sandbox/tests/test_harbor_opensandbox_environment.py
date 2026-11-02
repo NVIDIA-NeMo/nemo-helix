@@ -895,10 +895,9 @@ async def test_a_sandbox_gone_before_its_lifetime_ended_was_deleted(tmp_path: Pa
 
 async def test_a_sandbox_gone_after_its_lifetime_reached_it(tmp_path: Path, server: Server) -> None:
     """The server deletes a sandbox at the end of its lifetime, so a 404 after then is the lifetime, not a deletion."""
-    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, sandbox_timeout_sec=3600)
+    server.expiry_override = datetime.now(UTC) - timedelta(seconds=1)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
     await environment.start(force_build=False)
-    assert environment._sandbox_ends_at is not None
-    environment._sandbox_ends_at -= timedelta(hours=2)
     server.gone.add(_sandbox(environment).id)
 
     await environment.stop(delete=True)
@@ -907,13 +906,56 @@ async def test_a_sandbox_gone_after_its_lifetime_reached_it(tmp_path: Path, serv
     assert termination["cause"] == "lifetime_reached"
 
 
-async def test_the_lifetime_ends_at_the_run_expiry_when_that_comes_first(tmp_path: Path, server: Server) -> None:
-    expires_at = datetime.now(UTC) + timedelta(minutes=5)
-    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, sandbox_expires_at=expires_at.isoformat())
+async def test_the_expiry_is_the_one_the_server_reports_for_the_sandbox_a_retry_created(
+    tmp_path: Path, server: Server
+) -> None:
+    """A retried create starts the successful sandbox's lifetime late, so the expiry is read back, never computed.
 
+    The lifetime sent here is a millisecond, so an expiry computed before create would already
+    have passed at stop and turned this deletion into ``lifetime_reached``.
+    """
+    server.create_failures.append(SandboxApiException("transient"))
+    server.expiry_override = datetime.now(UTC) + timedelta(hours=1)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, sandbox_timeout_sec=0.001)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    assert len(server.creates) == 2
+    assert environment._server_expires_at == server.expiry_override
+    server.gone.add(sandbox.id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "deleted"
+
+
+async def test_a_sandbox_gone_without_a_reported_expiry_is_unknown(tmp_path: Path, server: Server) -> None:
+    """Without the server's expiry, a deletion and an expiry look the same, so the record doesn't pick one."""
+    server.reports_expiry = False
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    server.gone.add(_sandbox(environment).id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "unknown"
+
+
+async def test_an_unreadable_expiry_does_not_fail_the_create(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+
+    async def expires_at(sandbox: Any) -> datetime | None:
+        raise SandboxApiException("server unavailable", status_code=503)
+
+    monkeypatch.setattr(environment._driver, "expires_at", expires_at)
     await environment.start(force_build=False)
 
-    assert environment._sandbox_ends_at == expires_at
+    assert environment._server_expires_at is None
+    assert "Could not read sandbox" in caplog.text
+    assert server.live() == {_sandbox(environment).id}
 
 
 async def test_unreadable_events_still_record_the_stop(tmp_path: Path, server: Server) -> None:

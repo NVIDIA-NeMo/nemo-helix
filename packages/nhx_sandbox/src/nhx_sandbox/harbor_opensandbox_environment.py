@@ -53,7 +53,7 @@ import stat
 import tarfile
 import tempfile
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, override
 
@@ -153,6 +153,8 @@ PROVISIONING_STATUS_BUDGET_SEC = 30
 EXECD_PORT = 44772
 # The pod IP is optional, so its lookup gives up after this long in all, retries included.
 SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
+# The server-reported expiry is optional too, so its lookup gives up after this long.
+EXPIRY_LOOKUP_BUDGET_SEC = 15
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 # ``stop`` asks the server whether the sandbox stopped early; the check gives up after this long in all.
@@ -306,8 +308,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._max_disk_mb = max_disk_mb
         self._disk_limit_mb: int | None = None
         self._sandbox: Any | None = None
-        # When the server will delete the sandbox, at the latest; see _create_sandbox.
-        self._sandbox_ends_at: datetime | None = None
+        # When the server said it will delete the sandbox, read after create; None if it didn't say.
+        self._server_expires_at: datetime | None = None
         self._record: dict[str, Any] | None = None
         self._record_path: Path | None = None
         self._image_uid: int | None = None
@@ -471,13 +473,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
         egress_policy = self.egress_policy()
         entrypoint = self._sandbox_entrypoint()
-        # The server starts the lifetime when the create reaches it, so it ends no earlier than this.
-        # stop tells a sandbox whose lifetime ran out from one deleted early by comparing with it.
-        requested_at = datetime.now(UTC)
-        lifetime_ends_at = requested_at + timedelta(seconds=self._sandbox_timeout_sec)
-        self._sandbox_ends_at = (
-            min(lifetime_ends_at, self._sandbox_expires_at) if self._sandbox_expires_at else lifetime_ends_at
-        )
         sandbox = await self._driver.create(
             CreateRequest(
                 # _validate_definition guarantees the task names a prebuilt image.
@@ -515,6 +510,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 require_readback=True,
             )
             ip = await self._sandbox_ip(recorded_id) if recorded_id else None
+            self._server_expires_at = await self._expiry(sandbox)
         except BaseException as exc:
             await self._driver.safe_kill(sandbox)
             if isinstance(exc, EgressVerificationError):
@@ -560,6 +556,24 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             )
             return None
         return str(ip)
+
+    async def _expiry(self, sandbox: Any) -> datetime | None:
+        """When the server will delete the sandbox, as it reports it, or ``None`` if it can't say.
+
+        Read from the server rather than computed: a retried create starts the lifetime of the
+        sandbox that succeeded after the attempts before it, and stop tells a sandbox whose lifetime
+        ran out from one deleted early by this time.
+        """
+        try:
+            async with asyncio.timeout(EXPIRY_LOOKUP_BUDGET_SEC):
+                return await self._driver.expires_at(sandbox)
+        except Exception:
+            self.logger.warning(
+                "Could not read sandbox %s's expiry; if it is gone at stop, its cause is recorded as unknown",
+                sandbox_id(sandbox),
+                exc_info=True,
+            )
+            return None
 
     def _record_applied_egress(
         self, recorded_id: str | None, policy: EgressPolicy, *, ip: str | None, started_at: datetime
@@ -892,14 +906,14 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         would fail a trial that finished.
         """
         try:
-            diagnostics = OpenSandboxTerminationDiagnostics(self._server(), timeout_sec=TERMINATION_CHECK_BUDGET_SEC)
+            diagnostics = OpenSandboxTerminationDiagnostics(self._server())
         except Exception:
             self.logger.warning("Could not check whether sandbox %s stopped early", sandbox_id(sandbox), exc_info=True)
             return
         termination = await check_termination(
             diagnostics,
             str(sandbox_id(sandbox)),
-            ends_at=self._sandbox_ends_at,
+            expires_at=self._server_expires_at,
             role=sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
             budget_sec=TERMINATION_CHECK_BUDGET_SEC,
             logger=self.logger,

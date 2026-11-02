@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -30,6 +31,9 @@ from pydantic import BaseModel, ConfigDict, Field
 # published SDK doesn't ship; keep the two in step.
 TERMINATION_FILENAME_PREFIX = "nemo-sandbox-termination"
 TERMINATION_GLOB = f"{TERMINATION_FILENAME_PREFIX}-*.json"
+# How far past its deadline check_termination lets a backend run before abandoning the check. Backends
+# keep to the deadline they are given; this only stops one that doesn't from holding up its caller.
+BACKSTOP_GRACE_SEC = 5.0
 
 
 class TerminationCause(StrEnum):
@@ -60,8 +64,11 @@ class TerminationDiagnostics(Protocol):
     #: The backend's name, recorded with each termination.
     backend: str
 
-    async def diagnose_termination(self, sandbox_id: str) -> TerminationDiagnosis | None:
+    async def diagnose_termination(self, sandbox_id: str, *, deadline: float) -> TerminationDiagnosis | None:
         """The diagnosis for a sandbox that was ready once, or ``None`` while it is still alive.
+
+        ``deadline`` is a ``time.monotonic()`` value. The read that decides the diagnosis must end by
+        then; anything that only adds detail gets the time left, and is left out rather than finish late.
 
         Raises ``SandboxNotFound`` once the backend no longer knows the sandbox; the shared layer
         tells a lifetime that ran out from an early deletion. Any other error means the backend
@@ -89,15 +96,22 @@ class SandboxTermination(BaseModel):
     observed_at: datetime = Field(description="When the sandbox's state was read, in UTC.")
 
 
-def diagnose_gone(*, ends_at: datetime | None, now: datetime) -> TerminationDiagnosis:
+def diagnose_not_found(*, expires_at: datetime | None, now: datetime) -> TerminationDiagnosis:
     """The diagnosis for a sandbox the backend no longer knows: its lifetime ran out, or something deleted it.
 
-    ``ends_at`` is the latest the sandbox could have lived; a backend without its own lifetime
-    still has one, enforced by a reaper.
+    ``expires_at`` is when the backend said it would end the sandbox; a backend without its own
+    lifetime still has one, enforced by a reaper. Without it the two can't be told apart.
     """
-    if ends_at is not None and now >= ends_at:
+    if expires_at is None:
         return TerminationDiagnosis(
-            TerminationCause.LIFETIME_REACHED, f"the sandbox reached the end of its lifetime at {ends_at.isoformat()}"
+            TerminationCause.UNKNOWN,
+            "the sandbox is gone, and its backend never said when its lifetime ends, so whether it ran out or "
+            "something deleted it isn't known",
+        )
+    if now >= expires_at:
+        return TerminationDiagnosis(
+            TerminationCause.LIFETIME_REACHED,
+            f"the sandbox reached the end of its lifetime at {expires_at.isoformat()}",
         )
     return TerminationDiagnosis(TerminationCause.DELETED, "the sandbox was deleted before its caller was done with it")
 
@@ -106,7 +120,7 @@ async def check_termination(
     diagnostics: TerminationDiagnostics,
     sandbox_id: str,
     *,
-    ends_at: datetime | None,
+    expires_at: datetime | None,
     role: str | None,
     budget_sec: float,
     logger: logging.Logger,
@@ -115,28 +129,29 @@ async def check_termination(
 ) -> SandboxTermination | None:
     """Whether ``sandbox_id`` already stopped, and why; ``None`` while it is alive or when the backend can't say.
 
-    With ``wait_for_stop``, for a caller that saw the sandbox die (a command's output cut off),
-    an alive answer is asked again every ``poll_interval_sec``: a backend's status lags a dead
-    sandbox by seconds, and the caller releases it as soon as the error reaches it. A sandbox
-    still alive at the end is recorded as nothing, since a dropped connection cuts output off too.
+    With ``wait_for_stop``, for a caller that saw the sandbox fail as a dead one does, an alive
+    answer is asked again every ``poll_interval_sec``: a backend's status lags a dead sandbox by
+    seconds, and the caller releases it as soon as the failure reaches it. A sandbox still alive at
+    the end is recorded as nothing, since a dropped connection fails the same way.
 
-    Never raises and gives up after ``budget_sec``, so a caller releasing the sandbox always goes on.
+    The backend gets one deadline, ``budget_sec`` from now, for all its reads. Never raises, so a
+    caller releasing the sandbox always goes on.
     """
+    deadline = time.monotonic() + budget_sec
     try:
-        async with asyncio.timeout(budget_sec):
-            while (diagnosis := await diagnostics.diagnose_termination(sandbox_id)) is None and wait_for_stop:
+        async with asyncio.timeout(budget_sec + BACKSTOP_GRACE_SEC):
+            while (diagnosis := await diagnostics.diagnose_termination(sandbox_id, deadline=deadline)) is None:
+                if not wait_for_stop or time.monotonic() + poll_interval_sec >= deadline:
+                    break
                 await asyncio.sleep(poll_interval_sec)
     except SandboxNotFound:
-        diagnosis = diagnose_gone(ends_at=ends_at, now=datetime.now(UTC))
-    except TimeoutError:
-        logger.warning(
-            "Sandbox %s was not reported stopped within %gs; recording no cause", sandbox_id, budget_sec, exc_info=True
-        )
-        return None
+        diagnosis = diagnose_not_found(expires_at=expires_at, now=datetime.now(UTC))
     except Exception:
         logger.warning("Could not check whether sandbox %s stopped early", sandbox_id, exc_info=True)
         return None
     if diagnosis is None:
+        if wait_for_stop:
+            logger.warning("Sandbox %s was not reported stopped within %gs; recording no cause", sandbox_id, budget_sec)
         return None
     observed_at = datetime.now(UTC)
     return SandboxTermination(

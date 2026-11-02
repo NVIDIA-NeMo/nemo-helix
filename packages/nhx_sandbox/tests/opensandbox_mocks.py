@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import re
 import shlex
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -50,6 +51,10 @@ class Server:
         self.status_message: str | None = "image pull failed"
         # Sandbox IDs the server no longer knows; reading their status answers 404.
         self.gone: set[str] = set()
+        # The expiry get_info reports for each new sandbox; by default its create time plus the lifetime sent.
+        self.expiry_override: datetime | None = None
+        # False makes get_info report no expiry, as a server that doesn't track one.
+        self.reports_expiry = True
         # What the runtime events route reports as its text content; None answers it with a 500.
         self.events_content: str | None = ""
         self.healthy = True
@@ -241,10 +246,13 @@ class Commands:
 class Sandbox:
     """A live sandbox handle, as ``Sandbox.create`` returns it."""
 
-    def __init__(self, server: Server, sandbox_id: str, policy: dict[str, Any] | None) -> None:
+    def __init__(
+        self, server: Server, sandbox_id: str, policy: dict[str, Any] | None, expires_at: datetime | None = None
+    ) -> None:
         """A sandbox the server created with ``policy``; ``None`` means no egress policy was sent."""
         self._server = server
         self.id = sandbox_id
+        self.expires_at = expires_at
         self._policy = policy or {"defaultAction": "allow", "egress": []}
         self.files = Files()
         self.commands = Commands(server, self.files)
@@ -260,8 +268,11 @@ class Sandbox:
         return SimpleNamespace(default_action=default, egress=rules)
 
     async def get_info(self) -> SimpleNamespace:
-        """The next state from ``Server.states``, with the server's reason and message."""
-        return SimpleNamespace(status=SimpleNamespace(**self._server.next_status()))
+        """The next state from ``Server.states``, with the server's reason and message, and the sandbox's expiry."""
+        return SimpleNamespace(
+            status=SimpleNamespace(**self._server.next_status()),
+            expires_at=self.expires_at if self._server.reports_expiry else None,
+        )
 
     async def is_healthy(self) -> bool:
         """Raise for the first ``Server.health_errors`` probes, then report ``Server.healthy``."""
@@ -339,7 +350,9 @@ def mock_sdk(server: Server) -> dict[str, Any]:
                 # The server created the sandbox, but the client never got a handle for it.
                 raise server.create_failures.pop(0)
             policy = kwargs["network_policy"].payload if kwargs["network_policy"] is not None else None
-            return Sandbox(server, sandbox_id, policy)
+            # The server starts the lifetime when the create reaches it.
+            expires_at = server.expiry_override or datetime.now(UTC) + kwargs["timeout"]
+            return Sandbox(server, sandbox_id, policy, expires_at)
 
     class MockManager:
         """``opensandbox.manager.SandboxManager``: only ``create`` is called on the class."""

@@ -11,6 +11,7 @@ which the server reports as is. Those are diagnosed ``unknown``, with what the s
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from typing import Any, Protocol
@@ -44,20 +45,23 @@ class OpenSandboxTerminationDiagnostics:
 
     Args:
         server: A client for the server's API, with the caller's API key.
-        timeout_sec: How long the reads may take in all, retries included.
     """
 
     backend = BACKEND
 
-    def __init__(self, server: ServerClient, *, timeout_sec: float) -> None:
-        """Diagnose through ``server``, each check taking at most ``timeout_sec``."""
+    def __init__(self, server: ServerClient) -> None:
+        """Diagnose through ``server``."""
         self._server = server
-        self._timeout_sec = timeout_sec
 
-    async def diagnose_termination(self, sandbox_id: str) -> TerminationDiagnosis | None:
-        """The diagnosis for a sandbox that was ready once; ``None`` while it is alive."""
-        deadline = time.monotonic() + self._timeout_sec
-        response = await self._server.get(f"/sandboxes/{sandbox_id}", timeout=self._timeout_sec, deadline=deadline)
+    async def diagnose_termination(self, sandbox_id: str, *, deadline: float) -> TerminationDiagnosis | None:
+        """The diagnosis for a sandbox that was ready once; ``None`` while it is alive.
+
+        The status decides the diagnosis and is read by ``deadline``; the events only add detail,
+        so they get whatever time is left and are left out when there is none.
+        """
+        response = await self._server.get(
+            f"/sandboxes/{sandbox_id}", timeout=max(1.0, deadline - time.monotonic()), deadline=deadline
+        )
 
         if response.status_code == 404:
             raise SandboxNotFound(f"OpenSandbox has no sandbox {sandbox_id}")
@@ -72,20 +76,24 @@ class OpenSandboxTerminationDiagnostics:
 
         events = await self._warning_events(sandbox_id, deadline)
 
-        return diagnose_state(state=state, reason=status.get("reason"), message=status.get("message"), events=events)
+        return diagnose_from_status(
+            state=state, reason=status.get("reason"), message=status.get("message"), events=events
+        )
 
     async def _warning_events(self, sandbox_id: str, deadline: float) -> list[str]:
-        """The sandbox pod's warning events, or none when the server can't give them; the state alone still diagnoses."""
+        """The sandbox pod's warning events by ``deadline``, or none when the server can't give them in time."""
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return []
         try:
-            response = await self._server.get(
-                f"/sandboxes/{sandbox_id}/diagnostics/events?scope=runtime",
-                timeout=self._timeout_sec,
-                deadline=deadline,
-            )
+            async with asyncio.timeout(remaining):
+                response = await self._server.get(
+                    f"/sandboxes/{sandbox_id}/diagnostics/events?scope=runtime", timeout=remaining, deadline=deadline
+                )
             if response.status_code != 200:
                 return []
             content = response.json().get("content") or ""
-        except (httpx.HTTPError, ValueError, AttributeError):
+        except (TimeoutError, httpx.HTTPError, ValueError, AttributeError):
             return []
         return warning_events(str(content))
 
@@ -100,7 +108,9 @@ def warning_events(content: str) -> list[str]:
     return warnings[-MAX_EVENTS:]
 
 
-def diagnose_state(*, state: str, reason: str | None, message: str | None, events: list[str]) -> TerminationDiagnosis:
+def diagnose_from_status(
+    *, state: str, reason: str | None, message: str | None, events: list[str]
+) -> TerminationDiagnosis:
     """The diagnosis for a sandbox the server still knows but that is no longer alive."""
     evidence: dict[str, Any] = {"state": state, "reason": reason, "message": message, "events": events}
     reported = f"server reported {state}" + (f" ({reason})" if reason else "") + (f": {message}" if message else "")

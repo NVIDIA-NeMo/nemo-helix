@@ -331,6 +331,11 @@ class OpenSandboxDriver:
             return f"OpenSandbox sandbox {sandbox_id(sandbox)} entered {state} before becoming ready: {message}"
         return None
 
+    async def expires_at(self, sandbox: Any) -> datetime | None:
+        """When the server will delete the sandbox, as it reports it; ``None`` when it doesn't say."""
+        info = await sandbox.get_info()
+        return getattr(info, "expires_at", None)
+
     async def kill(self, sandbox: Any) -> None:
         """Kill the sandbox; one the server no longer has counts as killed, since nothing is left to stop.
 
