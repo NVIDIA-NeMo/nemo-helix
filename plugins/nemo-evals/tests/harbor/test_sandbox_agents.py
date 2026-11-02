@@ -54,13 +54,13 @@ def test_allowlist_tasks_get_their_own_hosts_and_the_channel_only():
         NetworkMode.ALLOWLIST, (IGW,), trusted=(IGW, "pypi.org", "github.com"), allowed=("pypi.org",)
     )
     allowed = _allowed(environment.egress_policy())
-    assert {IGW, "pypi.org"} <= allowed and "github.com" not in allowed
+    assert allowed & {IGW, "pypi.org", "github.com"} == {IGW, "pypi.org"}
 
 
 def test_allowlist_without_channel_keeps_the_task_hosts():
     environment = _environment(NetworkMode.ALLOWLIST, (), trusted=(IGW, "pypi.org"), allowed=("pypi.org",))
     allowed = _allowed(environment.egress_policy())
-    assert "pypi.org" in allowed and IGW not in allowed
+    assert allowed & {IGW, "pypi.org"} == {"pypi.org"}
 
 
 def test_public_tasks_keep_the_profile_allowlist():
