@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, useRef, useState } from 'react';
+import { FC, useState } from 'react';
 
 export interface CancelJobModalProps {
   open: boolean;
@@ -17,26 +17,21 @@ export interface CancelJobModalProps {
 export const CancelJobModal: FC<CancelJobModalProps> = ({ open, jobName, onClose, onConfirm }) => {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inFlight = useRef(false);
 
+  // FormModal ignores close requests while `disabled`, so no in-flight guard is needed here.
   const handleClose = () => {
-    if (inFlight.current) return;
     setError(null);
     onClose();
   };
 
   const handleSubmit = async () => {
-    if (inFlight.current) return;
-    inFlight.current = true;
     setPending(true);
     setError(null);
     try {
       await onConfirm();
-      inFlight.current = false;
       setPending(false);
       onClose();
     } catch (e) {
-      inFlight.current = false;
       setPending(false);
       setError(getErrorMessage(e as Error, 'Failed to cancel job'));
     }

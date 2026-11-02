@@ -402,19 +402,21 @@ export const GenerateJobsDataView: FC = () => {
         }}
       />
 
-      <CancelJobModal
-        open={!!cancelTarget}
-        jobName={cancelTarget?.name ?? ''}
-        onClose={() => setCancelTarget(undefined)}
-        onConfirm={async () => {
-          if (cancelTarget?.workspace && cancelTarget.name) {
-            await cancelJobMutation.mutateAsync({
-              workspace: cancelTarget.workspace,
-              name: cancelTarget.name,
-            });
-          }
-        }}
-      />
+      {cancelTarget && (
+        <CancelJobModal
+          open
+          jobName={cancelTarget.name ?? ''}
+          onClose={() => setCancelTarget(undefined)}
+          onConfirm={async () => {
+            if (cancelTarget.workspace && cancelTarget.name) {
+              await cancelJobMutation.mutateAsync({
+                workspace: cancelTarget.workspace,
+                name: cancelTarget.name,
+              });
+            }
+          }}
+        />
+      )}
     </Stack>
   );
 };

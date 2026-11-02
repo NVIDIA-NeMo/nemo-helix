@@ -134,12 +134,14 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
           onDeleted={onDeleted}
         />
       )}
-      <CancelJobModal
-        open={showCancelModal}
-        jobName={job.name ?? ''}
-        onClose={() => setShowCancelModal(false)}
-        onConfirm={handleCancel}
-      />
+      {showCancelModal && (
+        <CancelJobModal
+          open
+          jobName={job.name ?? ''}
+          onClose={() => setShowCancelModal(false)}
+          onConfirm={handleCancel}
+        />
+      )}
     </>
   );
 };
