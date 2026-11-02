@@ -280,3 +280,10 @@ def test_a_split_asked_for_gets_a_row_even_from_a_small_table() -> None:
 
     no_test = split_rows([{"i": i} for i in range(5)], val_fraction=0.1, test_fraction=0.0, seed=0)
     assert (len(no_test.train), len(no_test.validation), len(no_test.test)) == (4, 1, 0)
+
+
+def test_a_jsonl_line_that_is_not_an_object_names_its_number(tmp_path: Path) -> None:
+    (tmp_path / "rows.jsonl").write_text(json.dumps(_INSTRUCTION) + "\n" + json.dumps(["a", "list"]) + "\n")
+
+    with pytest.raises(DatasetPrepareError, match="line 2 is not a JSON object"):
+        read_rows(tmp_path / "rows.jsonl")

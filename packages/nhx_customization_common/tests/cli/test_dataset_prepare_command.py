@@ -13,7 +13,6 @@ import pyarrow.parquet as pq
 import pytest
 import typer
 from nhx.customization_common.cli.dataset_prepare import add_dataset_commands
-from nhx.customization_common.cli.uploads import UploadError
 from typer.testing import CliRunner, Result
 
 _MODULE = "nhx.customization_common.cli.dataset_prepare"
@@ -51,9 +50,8 @@ def _run(
     """
     uploaded: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
-    def require_new(files: object, *, names: list[str], workspace: str) -> None:
-        if taken := [name for name in names if name in existing]:
-            raise UploadError(f"{' and '.join(taken)} already exists.")
+    def existing_filesets(files: object, *, names: list[str], workspace: str) -> list[str]:
+        return [f"{workspace}/{name}" for name in names if name in existing]
 
     def create(files: object, *, name: str, source: Path, workspace: str, report: Any, **_: object) -> str:
         if name in existing:
@@ -65,7 +63,7 @@ def _run(
         return f"{workspace}/{name}"
 
     with (
-        patch(f"{_MODULE}.require_new_filesets", side_effect=require_new),
+        patch(f"{_MODULE}.existing_filesets", side_effect=existing_filesets),
         patch(f"{_MODULE}.create_dataset_fileset", side_effect=create),
     ):
         result = CliRunner().invoke(_app(), ["dataset", "prepare", *args])
@@ -86,6 +84,8 @@ def test_local_parquet_instruction_rows_become_chat_splits(tmp_path: Path) -> No
         "trained_by": report["trained_by"],
         "columns": {"prompt": "instruction", "response": "response"},
         "rows": {"train": 16, "validation": 2, "test": 2},
+        "dropped": 0,
+        "reused": [],
     }
     assert report["trained_by"] == [
         "automodel, training.training_type sft or distillation",
@@ -211,17 +211,53 @@ def test_a_taken_test_fileset_fails_before_the_dataset_is_uploaded(tmp_path: Pat
     )
 
     assert result.exit_code == 1
-    assert "sft-data-test already exists" in result.output
+    assert "default/sft-data-test already exists. Pass --exist-ok" in result.output
     assert uploaded == {}
 
 
-def test_exist_ok_reports_the_filesets_it_reused(tmp_path: Path) -> None:
+def test_exist_ok_reuses_the_dataset_and_its_test_split_together(tmp_path: Path) -> None:
+    source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
+    both = frozenset({"sft-data", "sft-data-test"})
+
+    result, uploaded = _run(str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=both)
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["reused"] == ["default/sft-data", "default/sft-data-test"]
+    assert uploaded == {}
+
+
+@pytest.mark.parametrize("taken", ["sft-data", "sft-data-test"])
+def test_exist_ok_refuses_to_reuse_one_of_the_pair_beside_a_new_other(tmp_path: Path, taken: str) -> None:
+    """Splits from two runs could overlap, so test rows could be trained on."""
     source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
 
     result, uploaded = _run(
-        str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=frozenset({"sft-data"})
+        str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=frozenset({taken})
     )
 
+    assert result.exit_code == 1
+    assert f"default/{taken} exists but" in result.output
+    assert uploaded == {}
+
+
+def test_dropped_and_reused_are_reported_even_when_empty(tmp_path: Path) -> None:
+    source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
+
+    result, _ = _run(str(source), "--name", "sft-data", "--format", "chat")
+
+    report = json.loads(result.stdout)
+    assert (report["dropped"], report["reused"]) == (0, [])
+
+
+def test_a_fileset_is_downloaded_into_a_directory(tmp_path: Path) -> None:
+    """A single file then lands under its own name, which gives its format."""
+
+    def download(files: object, *, remote_path: str, fileset: str, workspace: str, local_path: str) -> None:
+        assert Path(local_path).is_dir()
+        _parquet(Path(local_path) / remote_path, _INSTRUCTION)
+
+    with patch("filesets.transfer.download", side_effect=download):
+        result, uploaded = _run("ws/dd-output#batch_0.parquet", "--name", "sft-data", "--format", "chat")
+
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["reused"] == ["default/sft-data"]
-    assert sorted(uploaded) == ["sft-data-test"]
+    assert "train.jsonl" in uploaded["sft-data"]

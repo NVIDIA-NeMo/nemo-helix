@@ -9773,7 +9773,7 @@ nemo customization dataset prepare [OPTIONS] SOURCE
 * `--val-fraction <FLOAT>`: Share of rows for validation. 0 writes no validation.jsonl; training then holds out its own. [default: 0.1]
 * `--test-fraction <FLOAT>`: Share of rows held out for evaluation. Default: 0 for preference, else 0.1.
 * `--seed <INTEGER>`: Shuffle seed. The same seed gives the same split. [default: 42]
-* `--exist-ok`: Reuse a fileset that already exists. Its files are left as they are.
+* `--exist-ok`: Reuse the filesets if they already exist; their files are left as they are. The dataset and its -test fileset are reused together, never one beside a new other.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Column mapping:**

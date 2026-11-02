@@ -163,9 +163,12 @@ def _read_file(path: Path, input_format: InputFormat) -> list[dict[str, Any]]:
         for number, line in enumerate(f, start=1):
             if line.strip():
                 try:
-                    rows.append(json.loads(line))
+                    row = json.loads(line)
                 except json.JSONDecodeError as exc:
                     raise DatasetPrepareError(f"{path} line {number} is not JSON: {exc.msg}.") from exc
+                if not isinstance(row, dict):
+                    raise DatasetPrepareError(f"{path} line {number} is not a JSON object, so it has no columns.")
+                rows.append(row)
     return rows
 
 

@@ -51,8 +51,8 @@ GRPO scores sampled responses with an **environment**: code that runs a rollout 
 
 ```text
 environment FileSet (purpose=environment)   dataset FileSet (purpose=dataset)
-  nemo-environment.yaml   ← manifest          training.jsonl    ← required (any name with `train`)
-  configs/ or server dirs                     validation.jsonl  ← optional (any name with `val`)
+  nemo-environment.yaml   ← manifest          training.jsonl    ← required (a name starting with `train`)
+  configs/ or server dirs                     validation.jsonl  ← optional (a name starting with `val` or `dev`)
   wheels/                 ← 2 of 3 formats
 ```
 
