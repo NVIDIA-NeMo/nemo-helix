@@ -52,8 +52,6 @@ interface DatasetFileSelectProps {
   autoCommit?: boolean;
   /** Fileset ``purpose`` the picker lists. Defaults to ``'dataset'``. */
   filesetPurpose?: FilesetPurpose;
-  /** Let one upload carry several files while the selection stays a single file. */
-  allowMultipleUpload?: boolean;
   /** Label for the fileset picker. Defaults to ``'Dataset'``. */
   datasetLabel?: string;
   /** Auto-select the first root-level accepted file on fileset selection. */
@@ -88,7 +86,6 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
   inline = false,
   autoCommit = false,
   filesetPurpose,
-  allowMultipleUpload = false,
   datasetLabel,
   autoSelectFirstAcceptable,
   showUpdatedAt,
@@ -200,7 +197,7 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
             workspace={workspace}
             includeDataset={includeDataset}
             includeTabs={includeTabs}
-            allowMultipleFileSelection={allowMultiple || allowMultipleUpload}
+            allowMultipleFileSelection={allowMultiple}
             acceptableFileTypes={acceptedFileTypes}
             invalidFileMode={invalidFileMode}
             onSubmit={handleModalSubmit}
@@ -281,7 +278,7 @@ export const DatasetFileSelect: FC<DatasetFileSelectProps> = ({
           onSubmit={handleModalSubmit}
           acceptableFileTypes={acceptedFileTypes}
           invalidFileMode={invalidFileMode}
-          allowMultipleFileSelection={allowMultiple || allowMultipleUpload}
+          allowMultipleFileSelection={allowMultiple}
           // Default modal width is too narrow for the files table; widen the
           // surface so file paths and sizes don't get truncated. Stays
           // responsive with ``max-w-[90vw]``.
