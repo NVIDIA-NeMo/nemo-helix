@@ -163,7 +163,7 @@ async def create_deployment(
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
     # An agent image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
-        image.strip() and is_container_deployment_mode(body.deployment_mode)
+        image and is_container_deployment_mode(body.deployment_mode)
     ):
         # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
         await asyncio.to_thread(_validate_harness_kinds, merged.config)

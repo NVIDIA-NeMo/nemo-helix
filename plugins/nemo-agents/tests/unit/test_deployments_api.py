@@ -708,10 +708,20 @@ class TestCreateDeployment:
             {"deployment_mode": "subprocess"},
             # A subprocess runs in the platform's own environment, whatever image the request names.
             {"deployment_mode": "subprocess", "image": "acme-agent:1"},
+            # Falling back to the platform image still requires a known adapter.
+            {"deployment_mode": "docker", "image": "   "},
         ],
     )
     @pytest.mark.usefixtures("installed_adapter_manifests")
-    def test_create_rejects_an_unknown_adapter_id(self, request_fields: dict[str, str]) -> None:
+    def test_create_rejects_an_unknown_adapter_id(
+        self, monkeypatch: pytest.MonkeyPatch, request_fields: dict[str, str]
+    ) -> None:
+        _configure_deployments(
+            monkeypatch,
+            executors={"local": "docker"},
+            default_executor="local",
+            default_image="registry.example/agent:pinned",
+        )
         config = _fabric_agent_config()
         config["harnesses"]["hermes"]["kind"] = "nvidia.fabric.hermess"
         mock_entity_client = AsyncMock()
