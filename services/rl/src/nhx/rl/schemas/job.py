@@ -320,14 +320,16 @@ _VLLM_KWARGS_RESERVED = frozenset(
 # Applied by ``GRPOTraining._lora_learning_rate_default`` and published on its schema for Studio.
 GRPO_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
     {"when": {"finetuning_type": "lora"}, "value": 1e-5},
+    {"when": {"finetuning_type": "lora_merged"}, "value": 1e-5},
 ]
 
 
 class GRPOTraining(_TrainingBase):
     """Group Relative Policy Optimization with NeMo Gym environments.
 
-    ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
-    ``lora_merged`` is not supported for GRPO on the Automodel path.
+    ``finetuning_type`` is ``all_weights`` (default), ``lora``, or ``lora_merged``.
+    ``lora`` publishes the HF PEFT adapter. ``lora_merged`` trains the same adapter
+    and folds it into the base model at export.
     """
 
     model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(GRPO_LEARNING_RATE_DEFAULTS))
@@ -340,9 +342,9 @@ class GRPOTraining(_TrainingBase):
         gt=0.0,
         description="Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights' and 1e-5 for 'lora'.",
     )
-    finetuning_type: Literal["all_weights", "lora"] = Field(
+    finetuning_type: Literal["all_weights", "lora", "lora_merged"] = Field(
         default="all_weights",
-        description="Full-weight GRPO or LoRA adapter training. lora_merged is not supported.",
+        description="Full-weight GRPO, a LoRA adapter, or LoRA merged into the base model at export.",
     )
     lora: LoRAParams | None = Field(
         default=None,
@@ -632,7 +634,10 @@ class GRPOTraining(_TrainingBase):
         if not isinstance(data, dict) or "learning_rate" in data:
             return data
         learning_rate = match_learning_rate_default(GRPO_LEARNING_RATE_DEFAULTS, data)
-        return data if learning_rate is None else {**data, "learning_rate": learning_rate}
+        if learning_rate:
+            return {**data, "learning_rate": learning_rate}
+        else:
+            return data
 
     @model_validator(mode="after")
     def _reject_reserved_vllm_kwargs(self) -> Self:
@@ -646,7 +651,7 @@ class GRPOTraining(_TrainingBase):
 
     @model_validator(mode="after")
     def _lora_defaults(self) -> Self:
-        if self.finetuning_type == "lora" and self.lora is None:
+        if self.finetuning_type in ("lora", "lora_merged") and self.lora is None:
             self.lora = LoRAParams()
         if self.finetuning_type == "all_weights" and self.lora is not None:
             raise ValueError("lora must be omitted when finetuning_type is all_weights")
@@ -828,8 +833,8 @@ class OutputResponse(_OutputBase):
 def trains_lora_adapter(training: TrainingMethod) -> bool:
     """True when ``training`` produces a LoRA adapter rather than a full-weight model.
 
-    Only GRPO can train LoRA, and the Automodel path has no merge-at-export,
-    so an unmerged adapter is the only possible LoRA output.
+    Only GRPO ``finetuning_type='lora'`` publishes an adapter. ``lora_merged`` trains
+    the same adapter and publishes a full model, so it is not an adapter job.
     """
     return isinstance(training, GRPOTraining) and training.finetuning_type == "lora"
 
@@ -955,5 +960,7 @@ class RlJobOutput(RlSchema):
                 if self.output.type != OutputNameType.ADAPTER:
                     raise ValueError("GRPO LoRA produces an adapter; output.type must be 'adapter'.")
             elif self.output.type != OutputNameType.MODEL:
-                raise ValueError("GRPO all_weights produces a full-weight model; output.type must be 'model'.")
+                raise ValueError(
+                    "GRPO all_weights and lora_merged produce a full-weight model; output.type must be 'model'."
+                )
         return self
