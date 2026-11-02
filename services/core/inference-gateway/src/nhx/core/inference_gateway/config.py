@@ -1,8 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
+import binascii
+
 from nhx.common.config import create_service_config_class, get_service_config, internal_field
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 REFRESH_MODEL_CACHE_INTERVAL_SEC = 3
 SECRETS_TTL_SEC = 0  # 0 = refresh secrets on every provider cache refresh
@@ -26,6 +29,8 @@ class InferenceGatewayConfig(create_service_config_class("inference_gateway")): 
     This service acts as a reverse proxy for inference requests.
 
     """
+
+    model_config = ConfigDict(hide_input_in_errors=True)
 
     debug_model_providers: list[DebugModelProvider] = internal_field(
         default_factory=list,
@@ -53,6 +58,19 @@ class InferenceGatewayConfig(create_service_config_class("inference_gateway")): 
         "specify the JSON response body. Set to 'igw-mock-' for standard testing. "
         "Internal platform dev use only.",
     )
+
+    @field_validator("caller_context_key")
+    @classmethod
+    def _caller_context_key_is_32_bytes(cls, key: SecretStr | None) -> SecretStr | None:
+        if key is None:
+            return key
+        try:
+            decoded = base64.b64decode(key.get_secret_value(), validate=True)
+        except binascii.Error as exc:
+            raise ValueError("caller_context_key must be base64-encoded") from exc
+        if len(decoded) != 32:
+            raise ValueError(f"caller_context_key must decode to 32 bytes, not {len(decoded)}")
+        return key
 
 
 # Actual instance of the config

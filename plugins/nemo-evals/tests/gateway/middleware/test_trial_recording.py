@@ -391,6 +391,24 @@ async def test_a_call_to_a_router_that_calls_back_as_the_trial_is_a_routing_span
     assert span.parent_span_id.hex() == trial_root_span_id(TRIAL)
 
 
+async def test_a_routed_call_recorded_only_on_its_response_is_still_a_routing_span() -> None:
+    """Listed only in response_middleware, the router's calls back can't nest beneath it, but must not count twice."""
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink, routed=True)
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}"})
+
+    await middleware.process_response(
+        ctx, InferenceResponse(result={"usage": {"prompt_tokens": 7}}, headers={}), TrialRecordingConfig()
+    )
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    attributes = _attributes(span)
+    assert attributes[OPENINFERENCE_SPAN_KIND] == "CHAIN"
+    assert GATEWAY_CALL_ATTRIBUTE not in attributes
+
+
 async def test_a_call_to_an_ordinary_provider_keeps_the_callers_traceparent() -> None:
     sink = Sink()
     middleware = _middleware(_reader(TOKEN), sink)

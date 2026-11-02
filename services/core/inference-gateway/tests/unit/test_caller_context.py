@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Iterator
 
 import pytest
@@ -20,6 +21,8 @@ from nhx.core.inference_gateway.api.caller_context import (
     caller_headers,
 )
 from nhx.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.config import InferenceGatewayConfig
+from pydantic import ValidationError
 
 KEY = bytes(range(32))
 CALLER = "trial-token"
@@ -196,3 +199,21 @@ def test_a_routers_key_without_a_context_is_refused_at_the_gateway(
 
     assert response.status_code == 403
     mock_proxy_client.request.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [pytest.param("not*base64!!", id="not base64"), pytest.param(base64.b64encode(bytes(16)).decode(), id="16 bytes")],
+)
+def test_a_bad_caller_context_key_fails_at_startup_without_echoing_it(key: str) -> None:
+    """Otherwise every inference request would fail when the gateway first builds its seal."""
+    with pytest.raises(ValidationError) as exc_info:
+        InferenceGatewayConfig(caller_context_key=key)
+
+    assert key not in str(exc_info.value)
+
+
+def test_a_32_byte_caller_context_key_is_accepted() -> None:
+    config = InferenceGatewayConfig(caller_context_key=base64.b64encode(KEY).decode())
+
+    assert config.caller_context_key is not None

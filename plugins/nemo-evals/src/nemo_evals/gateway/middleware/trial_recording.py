@@ -130,7 +130,7 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
     """Record each call made with a trial token to Intake, in the trial.
 
     It records from ``response_middleware``. Listed in ``request_middleware`` too, a call's span starts when the
-    gateway received the call rather than when the response began.
+    gateway received the call rather than when the response began, and a router's calls back nest beneath its call.
     """
 
     def __init__(self) -> None:
@@ -175,13 +175,18 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         trial = TrialClaims.from_token_claims(decode_jwt_claims(credential))
         if trial is None:
             return None
-        try:
-            if not self.get_inference_url_and_model(model).calls_back_as_caller:
-                return None
-        except KeyError:
+        if not self._calls_back_as_caller(model):
             return None
         caller = CallerSpan.from_headers(request.headers.get("traceparent"), request.headers.get("tracestate"))
         return (caller.trace_id if caller is not None else trial_trace_id(trial)), os.urandom(8).hex()
+
+    def _calls_back_as_caller(self, model: object) -> bool:
+        if not isinstance(model, str):
+            return False
+        try:
+            return self.get_inference_url_and_model(model).calls_back_as_caller
+        except KeyError:
+            return False
 
     def _served_model_name(self, model_entity: str) -> str | None:
         try:
@@ -202,6 +207,8 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         call = _ObservedCall(ctx, credential, self._served_model_name)
         started_at = ctx.state(MIDDLEWARE_NAME).get(STARTED_AT_STATE_KEY) or datetime.now(UTC)
         routing_span = ctx.state(MIDDLEWARE_NAME).get(ROUTING_SPAN_STATE_KEY)
+        if routing_span is None and self._calls_back_as_caller(ctx.original_request.body.get("model")):
+            routing_span = os.urandom(8).hex()
         if isinstance(response.result, Mapping):
             call.observe(response.result)
             recorder.record(call.finished(started_at, cancelled=False, routing_span=routing_span))

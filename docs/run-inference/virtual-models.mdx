@@ -390,7 +390,9 @@ own, which works only while the router's calls back reach the process that calle
 
 On the virtual model that serves a router's route, list the virtual models the router calls back,
 such as its targets and judge, in its trial-recording middleware's `routes_to`. An evaluation trial
-held to that virtual model may also call those:
+held to that virtual model may also call those. List the trial-recording middleware in both
+`request_middleware` and `response_middleware`, so the router's calls back are recorded beneath the
+trial's call to the router:
 
 ```bash
 nemo inference virtual-models create routed \
