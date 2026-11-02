@@ -10,13 +10,15 @@ the trial ends. Waiting happens in Harbor's ``ENVIRONMENT_START`` hook, before H
 or setup's timers, so a queued trial never spends its setup budget waiting.
 
 A slot is an exclusive ``flock`` on one of N files in :func:`default_slot_dir`. The kernel drops the lock when
-its process exits, so a crashed run never keeps a slot. Trials in other environments (OpenSandbox and any
-other ``import_path`` environment) don't take a slot.
+its process exits, so a crashed run never keeps a slot. A trial takes one when it runs in Harbor's Docker
+environment or an ``import_path`` environment built on it, such as the agent-layer environment; trials in any
+other environment (OpenSandbox, other providers) don't.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
 import sys
@@ -138,4 +140,18 @@ class SetupSlots:
 
 def _is_local_docker(environment: _Environment) -> bool:
     kind = getattr(environment.type, "value", environment.type)
-    return environment.import_path is None and kind in (None, "docker")
+    if kind not in (None, "docker"):
+        return False
+    return environment.import_path is None or _is_docker_environment(environment.import_path)
+
+
+def _is_docker_environment(import_path: str) -> bool:
+    """Whether the environment class ``module:Class`` runs its trials in Harbor's local Docker environment."""
+    from harbor.environments.docker.docker import DockerEnvironment
+
+    module, _, name = import_path.partition(":")
+    try:
+        environment_class = getattr(importlib.import_module(module), name)
+    except (ImportError, AttributeError, ValueError):
+        return False
+    return isinstance(environment_class, type) and issubclass(environment_class, DockerEnvironment)

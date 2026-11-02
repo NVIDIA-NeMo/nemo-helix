@@ -136,6 +136,17 @@ async def test_trials_outside_local_docker_take_no_slot(tmp_path: Path, event: S
     await asyncio.wait_for(job.hooks["environment-start"](_event("b")), timeout=2)
 
 
+async def test_an_import_path_environment_built_on_harbors_docker_takes_a_slot(tmp_path: Path) -> None:
+    """Such as the agent-layer environment: an ``import_path`` environment whose trials still run on local Docker."""
+    pytest.importorskip("harbor")
+    job = _attached(tmp_path, slots=1)
+    docker = "harbor.environments.docker.docker:DockerEnvironment"
+
+    await job.hooks["environment-start"](_event("a", import_path=docker))
+
+    assert await _blocks(job.hooks["environment-start"](_event("b", import_path=docker)))
+
+
 def test_zero_slots_registers_no_hooks(tmp_path: Path) -> None:
     assert _attached(tmp_path, slots=0).hooks == {}
 
