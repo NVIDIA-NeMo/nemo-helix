@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import shlex
 from collections.abc import Mapping
@@ -58,6 +59,8 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, tcp_forwarde
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import TRACES_SUBDIR, fold_exports, otlp_endpoint_fields
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 try:
     from nemo_fabric.integrations.harbor.fabric_agent import FabricAgentOptions
@@ -460,9 +463,13 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
         try:
             await super().run(instruction, environment, context)
         finally:
-            await environment.exec(
-                f"for pid in {_RELAY_PID_GLOB}; do kill $(cat $pid) 2>/dev/null; rm -f $pid; done; true", timeout_sec=30
-            )
+            try:
+                await environment.exec(
+                    f"for pid in {_RELAY_PID_GLOB}; do kill $(cat $pid) 2>/dev/null; rm -f $pid; done; true",
+                    timeout_sec=30,
+                )
+            except Exception:
+                logger.warning("Couldn't stop the helpers Relay ran beside the harness", exc_info=True)
 
     def populate_context_post_run(self, context: Any) -> None:
         super().populate_context_post_run(context)

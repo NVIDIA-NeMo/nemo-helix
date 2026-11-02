@@ -174,6 +174,32 @@ async def test_the_receiver_listens_for_the_whole_run(
     assert "kill" in stop and "/tmp/nemo-fabric-relay-" in stop
 
 
+class _EnvironmentThatCantStopHelpers(_Environment):
+    async def exec(self, command: str, **kwargs: Any) -> _Result:
+        if "kill" in command:
+            raise TimeoutError("the container API timed out")
+        return await super().exec(command, **kwargs)
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["succeeds", "fails"])
+async def test_stopping_the_helpers_never_hides_how_the_harness_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    """A trial is judged on the harness's own outcome, not on whether Relay's helpers could be stopped after it."""
+
+    async def fabric_run(self: Any, instruction: str, environment: _Environment, context: Any) -> None:
+        if fails:
+            raise RuntimeError("the harness failed")
+
+    monkeypatch.setattr(FabricAgent, "run", fabric_run)
+
+    if fails:
+        with pytest.raises(RuntimeError, match="the harness failed"):
+            await _agent(tmp_path).run("say hello", _EnvironmentThatCantStopHelpers(), None)
+    else:
+        await _agent(tmp_path).run("say hello", _EnvironmentThatCantStopHelpers(), None)
+
+
 def test_after_the_run_the_exports_become_the_trials_otlp_trace(tmp_path: Path) -> None:
     traces = tmp_path / "traces"
     traces.mkdir()
