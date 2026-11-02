@@ -168,7 +168,7 @@ async def test_list_all_tools_rejects_repeated_cursor() -> None:
         async def list_tools(self, *, params: PaginatedRequestParams) -> ListToolsResult:
             return ListToolsResult(tools=[Tool(name="a", inputSchema={})], nextCursor="p2")
 
-    with pytest.raises(RuntimeError, match="repeated pagination cursor"):
+    with pytest.raises(RuntimeError, match="repeated its tool-list pagination cursor"):
         await _list_all_tools(Session())  # ty: ignore[invalid-argument-type]
 
 
