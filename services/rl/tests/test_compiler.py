@@ -428,7 +428,7 @@ async def test_compiler_emits_four_steps(
 
 
 @pytest.mark.asyncio
-async def test_dpo_text_moe_on_multiple_gpus_requires_expert_parallel(
+async def test_dpo_text_moe_compiles_with_the_default_expert_parallel(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationHelixClients,
 ) -> None:
@@ -439,8 +439,9 @@ async def test_dpo_text_moe_on_multiple_gpus_requires_expert_parallel(
     monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
     job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_gpus_per_node=4)))
 
-    with pytest.raises(HelixJobCompilationError, match="expert_parallel_size"):
-        await platform_job_config_compiler("default", job, platform_clients)
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[1]["name"] == "dpo-training"
 
 
 @pytest.mark.asyncio
