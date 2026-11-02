@@ -176,7 +176,7 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         if trial is None:
             return None
         try:
-            if not self.get_inference_url_and_model(model).forwards_caller_credential:
+            if not self.get_inference_url_and_model(model).calls_back_as_caller:
                 return None
         except KeyError:
             return None

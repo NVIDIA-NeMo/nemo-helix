@@ -464,9 +464,9 @@ class ModelProviderInferenceTarget:
     missing_secret_name: str | None = None
     """Required provider secret missing from the cache, if any."""
 
-    forwards_caller_credential: bool = False
-    """Whether the provider is sent each call's caller credential instead of a stored key, as a router that calls
-    models back through the gateway as its caller is."""
+    calls_back_as_caller: bool = False
+    """Whether the provider is a router that calls models back through the gateway on its caller's behalf. Its stored
+    key is left out of ``outbound_headers``: only the gateway, which sends the caller context, can call it."""
 
 
 @dataclass

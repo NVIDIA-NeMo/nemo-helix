@@ -525,12 +525,13 @@ class ModelProvider(ModelEntityBaseModel):
     # Deliberately no ``auth_header_format`` validator on this response model: providers stored before
     # the format was restricted must still load for get/list. The request models validate on write and
     # the gateway re-validates at use time.
-    forward_caller_credential: bool = Field(
+    calls_back_as_caller: bool = Field(
         default=False,
         description=(
-            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
-            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
-            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
         ),
     )
 
@@ -615,12 +616,13 @@ class CreateModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
-    forward_caller_credential: bool = Field(
+    calls_back_as_caller: bool = Field(
         default=False,
         description=(
-            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
-            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
-            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
         ),
     )
 
@@ -633,14 +635,6 @@ class CreateModelProviderRequest(BaseModel):
     @classmethod
     def validate_host_url(cls, v: str) -> str:
         return _validate_host_url(v)
-
-    @model_validator(mode="after")
-    def _forwarding_needs_no_stored_key(self) -> Self:
-        if self.forward_caller_credential and self.api_key_secret_name:
-            raise ValueError(
-                "forward_caller_credential sends the caller's credential, so leave api_key_secret_name unset"
-            )
-        return self
 
 
 class UpsertModelProviderRequest(BaseModel):
@@ -706,12 +700,13 @@ class UpsertModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
-    forward_caller_credential: bool = Field(
+    calls_back_as_caller: bool = Field(
         default=False,
         description=(
-            "Send each call's caller credential to this provider instead of a stored key, for a router that calls models back "
-            "through the gateway as its caller. With platform auth on, only a credential limited to the `inference` scope is "
-            "sent; any other call is refused. Leave `api_key_secret_name` unset."
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
         ),
     )
 
@@ -724,14 +719,6 @@ class UpsertModelProviderRequest(BaseModel):
     @classmethod
     def validate_host_url(cls, v: str) -> str:
         return _validate_host_url(v)
-
-    @model_validator(mode="after")
-    def _forwarding_needs_no_stored_key(self) -> Self:
-        if self.forward_caller_credential and self.api_key_secret_name:
-            raise ValueError(
-                "forward_caller_credential sends the caller's credential, so leave api_key_secret_name unset"
-            )
-        return self
 
 
 class UpdateModelProviderStatusRequest(BaseModel):

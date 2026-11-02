@@ -106,7 +106,7 @@ def _middleware(reader: TrialTokenReader, sink: Sink, *, routed: bool = False) -
         return ModelProviderInferenceTarget(
             model_provider_gateway_url="http://igw/provider",
             served_model_name=SERVED_MODELS.get(model_entity_id, "route"),
-            forwards_caller_credential=routed,
+            calls_back_as_caller=routed,
         )
 
     cache = MagicMock(spec=InferenceMiddlewareCacheAccessor)

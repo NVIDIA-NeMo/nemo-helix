@@ -301,7 +301,7 @@ class ClosedBookMiddleware(NemoInferenceMiddleware):
                 f"The provider serving {model!r} adds provider-executed tools or features to requests, "
                 "so it cannot be served closed-book.",
             )
-        if target.forwards_caller_credential and not await self._caller_is_closed(ctx):
+        if target.calls_back_as_caller and not await self._caller_is_closed(ctx):
             raise _refusal(
                 ctx,
                 model,

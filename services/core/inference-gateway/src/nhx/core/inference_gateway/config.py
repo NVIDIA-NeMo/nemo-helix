@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from nhx.common.config import create_service_config_class, get_service_config, internal_field
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 REFRESH_MODEL_CACHE_INTERVAL_SEC = 3
 SECRETS_TTL_SEC = 0  # 0 = refresh secrets on every provider cache refresh
@@ -38,6 +38,13 @@ class InferenceGatewayConfig(create_service_config_class("inference_gateway")): 
     secrets_ttl_sec: int = Field(
         default=SECRETS_TTL_SEC,
         description="Time-to-live (in seconds) for cached secrets before they expire and need refreshing. If set to 0, we will refresh this each time the model providers are refreshed.",
+    )
+    caller_context_key: SecretStr | None = Field(
+        default=None,
+        description="Base64-encoded 32-byte key the gateway seals a caller's credential with when it calls a model "
+        "provider that calls models back as its caller. Every gateway process must share it. When unset, each "
+        "process uses a key of its own, which works only while a router's calls back reach the process that called "
+        "it.",
     )
     mock_provider_prefix: str | None = internal_field(
         default=None,

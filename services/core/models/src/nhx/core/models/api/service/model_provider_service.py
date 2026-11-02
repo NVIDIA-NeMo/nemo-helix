@@ -85,7 +85,7 @@ def _entity_to_schema(entity: ModelProviderEntity) -> ModelProvider:
         model_deployment_id=entity.model_deployment_id,
         auth_context=entity.auth_context,
         auth_header_format=entity.auth_header_format,
-        forward_caller_credential=entity.forward_caller_credential,
+        calls_back_as_caller=entity.calls_back_as_caller,
         created_at=entity.created_at,
         updated_at=entity.updated_at,
     )
@@ -134,7 +134,7 @@ class ModelProviderService:
             required_extra_headers=request.required_extra_headers,
             model_deployment_id=request.model_deployment_id,
             auth_header_format=request.auth_header_format,
-            forward_caller_credential=request.forward_caller_credential,
+            calls_back_as_caller=request.calls_back_as_caller,
             status=request.status if request.status is not None else ModelProviderStatus.CREATED,
             status_message=request.status_message if request.status_message is not None else "Model provider created",
         ).with_auth_context(auth_context)
@@ -265,7 +265,7 @@ class ModelProviderService:
             existing_entity.required_extra_headers = request.required_extra_headers
             existing_entity.model_deployment_id = request.model_deployment_id
             existing_entity.auth_header_format = request.auth_header_format
-            existing_entity.forward_caller_credential = request.forward_caller_credential
+            existing_entity.calls_back_as_caller = request.calls_back_as_caller
             existing_entity.status = status
             existing_entity.status_message = status_message
             if auth_context:
@@ -289,7 +289,7 @@ class ModelProviderService:
                 required_extra_headers=request.required_extra_headers,
                 model_deployment_id=request.model_deployment_id,
                 auth_header_format=request.auth_header_format,
-                forward_caller_credential=request.forward_caller_credential,
+                calls_back_as_caller=request.calls_back_as_caller,
                 status=status,
                 status_message=status_message,
             ).with_auth_context(auth_context)

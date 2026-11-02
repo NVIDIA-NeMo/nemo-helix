@@ -333,8 +333,8 @@ The `nemo-evals-closed-book` middleware closes that path for the request the gat
 - It refuses with `403` a model whose provider calls models back through the gateway with a
   platform credential, such as a router registered as a model provider with a platform access key,
   since it can't see the calls that provider makes. A model provider's own API key isn't a platform
-  credential and passes. A router that calls back as its caller is served only to closed evaluation
-  trials; see [Route Through a Router That Calls Back](#route-through-a-router-that-calls-back).
+  credential and passes. A router registered to call back as its caller is served only to closed
+  evaluation trials; see [Route Through a Router That Calls Back](#route-through-a-router-that-calls-back).
 
 Add it last in `request_middleware`, so it sees the model a routing middleware selected:
 
@@ -360,14 +360,33 @@ another middleware makes on its own, such as the judge calls of the `nemo-switch
 ### Route Through a Router That Calls Back
 
 A router registered as a model provider, such as a Switchyard server, picks a model for each call and
-calls it back through the gateway. Register it so that it calls back as its caller: the gateway sends
-the router each call's credential instead of a stored key, the router forwards that credential with
-its own calls (Switchyard's `forward_auth`), and every policy that applied to the caller applies to
-those calls too. The router needs no closed-book or evaluation settings of its own.
+calls it back through the gateway. Register it so that it calls back as its caller: every policy that
+applied to the caller then applies to the router's own calls, and the router needs no closed-book or
+evaluation settings of its own.
+
+The router never holds the caller's credential:
+
+1. The gateway sends the router the provider's stored key and a caller context, an
+   `x-nemo-caller-context` header holding the caller's credential sealed with the gateway's key. Only
+   the gateway can read it. It is bound to that provider and expires after 15 minutes.
+2. The router returns the context with each call it makes back through the gateway with that key.
+   Switchyard does this for a backend with `forward_auth`, which forwards the caller's headers.
+3. The gateway opens the context and acts on that call as the caller.
 
 ```bash
-nemo inference providers create switchyard --host-url http://switchyard:4002 --forward-caller-credential
+nemo inference providers create switchyard --host-url http://switchyard:4002 \
+  --api-key-secret-name switchyard-key --calls-back-as-caller
 ```
+
+With platform auth on, the stored key is an access key with scope `inference` that may call the
+router's targets. The gateway refuses with `403` any call made with that key that doesn't carry a
+valid caller context, so the key is no use on its own.
+
+The gateway seals contexts with `inference_gateway.caller_context_key`, a base64-encoded 32-byte key
+set through `NHX_INFERENCE_GATEWAY_CALLER_CONTEXT_KEY`. A Helm install whose chart generates the API
+environment Secret generates this key too. Set it yourself on an existing install, or where you
+provide that Secret. Every gateway process must share it. Without one, each process uses a key of its
+own, which works only while the router's calls back reach the process that called it.
 
 On the virtual model that serves a router's route, list the virtual models the router calls back,
 such as its targets and judge, in its trial-recording middleware's `routes_to`. An evaluation trial
@@ -384,15 +403,9 @@ To serve open and closed-book evaluations through the same targets, give each ta
 middleware with `"config": {"apply": "closed_credential"}`: a closed evaluation's calls through the
 router are closed-book, and every other call passes through unchanged.
 
-The forwarded credential is limited:
-
-- With platform auth on, the gateway forwards only a credential limited to the `inference` scope,
-  such as an evaluation trial's key or an access key you mint with that scope, and refuses any other
-  call to the provider with `403`. A user's session token is never forwarded.
-- The gateway never writes the forwarded credential into its logs or error responses.
 - Switchyard's `fallback_client` forwards any request it doesn't route, with the caller's headers, to
   its own upstream. Give a router registered this way no `fallback_client`, or one that points at the
-  gateway, or the caller's credential leaves the platform.
+  gateway.
 - Closed-book refuses a model served by such a provider unless the caller is a closed evaluation
   trial, since only then are the router's own calls held closed-book.
 

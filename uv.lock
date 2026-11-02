@@ -5157,6 +5157,7 @@ core-service = [
     { name = "anyio" },
     { name = "asyncpg" },
     { name = "base58" },
+    { name = "cryptography" },
     { name = "docker" },
     { name = "duckdb" },
     { name = "dulwich" },
@@ -5293,6 +5294,7 @@ hello-world-service = [
 ]
 inference-gateway-service = [
     { name = "aiohttp" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
@@ -6057,6 +6059,8 @@ requires-dist = [
     { name = "cloudpickle", marker = "extra == 'plugins'", specifier = ">=3.1.1" },
     { name = "cloudpickle", marker = "extra == 'services'", specifier = ">=3.1.1" },
     { name = "cryptography", marker = "extra == 'all'", specifier = ">=42.0.0" },
+    { name = "cryptography", marker = "extra == 'core-service'", specifier = ">=42.0.0" },
+    { name = "cryptography", marker = "extra == 'inference-gateway-service'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'nemo-builder-plugin'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'plugins'", specifier = ">=42.0.0" },
     { name = "cryptography", marker = "extra == 'services'", specifier = ">=42.0.0" },
@@ -8820,6 +8824,7 @@ version = "0.0.0"
 source = { editable = "services/core/inference-gateway" }
 dependencies = [
     { name = "aiohttp" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
@@ -8843,6 +8848,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", extras = ["speedups"], specifier = ">=3.14.1" },
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.115.8" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-common", editable = "packages/nhx_common" },
