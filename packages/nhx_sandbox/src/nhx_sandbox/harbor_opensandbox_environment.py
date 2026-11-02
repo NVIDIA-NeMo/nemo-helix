@@ -63,7 +63,9 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from nhx_sandbox.backends.opensandbox.termination import OpenSandboxTerminationDiagnostics
 from nhx_sandbox.compose_env import expand_env
+from nhx_sandbox.core.termination import check_termination, write_termination
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_cleanup import applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import (
@@ -151,8 +153,14 @@ PROVISIONING_STATUS_BUDGET_SEC = 30
 EXECD_PORT = 44772
 # The pod IP is optional, so its lookup gives up after this long in all, retries included.
 SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
+# The server-reported expiry is optional too, so its lookup gives up after this long.
+EXPIRY_LOOKUP_BUDGET_SEC = 15
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
+# ``stop`` asks the server whether the sandbox stopped early; the check gives up after this long in all.
+TERMINATION_CHECK_BUDGET_SEC = 10
+# After a command was cut off, how often stop asks again until the server reports the sandbox stopped.
+TERMINATION_POLL_INTERVAL_SEC = 1.0
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -300,6 +308,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._max_disk_mb = max_disk_mb
         self._disk_limit_mb: int | None = None
         self._sandbox: Any | None = None
+        # When the server said it will delete the sandbox, read after create; None if it didn't say.
+        self._server_expires_at: datetime | None = None
         self._record: dict[str, Any] | None = None
         self._record_path: Path | None = None
         self._image_uid: int | None = None
@@ -500,6 +510,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 require_readback=True,
             )
             ip = await self._sandbox_ip(recorded_id) if recorded_id else None
+            self._server_expires_at = await self._expiry(sandbox)
         except BaseException as exc:
             await self._driver.safe_kill(sandbox)
             if isinstance(exc, EgressVerificationError):
@@ -545,6 +556,24 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             )
             return None
         return str(ip)
+
+    async def _expiry(self, sandbox: Any) -> datetime | None:
+        """When the server will delete the sandbox, as it reports it, or ``None`` if it can't say.
+
+        Read from the server rather than computed: a retried create starts the lifetime of the
+        sandbox that succeeded after the attempts before it, and stop tells a sandbox whose lifetime
+        ran out from one deleted early by this time.
+        """
+        try:
+            async with asyncio.timeout(EXPIRY_LOOKUP_BUDGET_SEC):
+                return await self._driver.expires_at(sandbox)
+        except Exception:
+            self.logger.warning(
+                "Could not read sandbox %s's expiry; if it is gone at stop, its cause is recorded as unknown",
+                sandbox_id(sandbox),
+                exc_info=True,
+            )
+            return None
 
     def _record_applied_egress(
         self, recorded_id: str | None, policy: EgressPolicy, *, ip: str | None, started_at: datetime
@@ -847,18 +876,60 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
     @override
     async def stop(self, delete: bool) -> None:
-        """Kill the sandbox when ``delete`` is set, and always release the client."""
+        """Record why the sandbox stopped if it already had, kill it when ``delete`` is set, and always release the client.
+
+        Harbor calls ``stop`` for every sandbox it started, whether the trial passed, failed or was
+        cancelled, and before it writes the trial's ``result.json``. So this one check sees every
+        sandbox that died under its trial, whichever operation hit it first.
+        """
         if not self._sandbox:
             return
-        self._record_stopped()
         try:
-            if delete:
-                await self._sandbox.kill()
+            await self._record_termination(self._sandbox)
         finally:
+            # In the finally, so a check cancelled mid-wait still kills and releases the sandbox;
+            # otherwise it would run until its server-side lifetime ends.
+            self._record_stopped()
             try:
-                await self._sandbox.close()
+                if delete:
+                    await self._driver.kill(self._sandbox)
             finally:
-                self._sandbox = None
+                try:
+                    await self._sandbox.close()
+                finally:
+                    self._sandbox = None
+
+    async def _record_termination(self, sandbox: Any) -> None:
+        """Write why ``sandbox`` stopped into the trial directory, if it had.
+
+        Never raises: Harbor records an error from ``stop`` as the trial's own, so a failed check
+        would fail a trial that finished.
+        """
+        try:
+            diagnostics = OpenSandboxTerminationDiagnostics(self._server())
+        except Exception:
+            self.logger.warning("Could not check whether sandbox %s stopped early", sandbox_id(sandbox), exc_info=True)
+            return
+        termination = await check_termination(
+            diagnostics,
+            str(sandbox_id(sandbox)),
+            expires_at=self._server_expires_at,
+            role=sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
+            budget_sec=TERMINATION_CHECK_BUDGET_SEC,
+            logger=self.logger,
+            # The server's status lags a dead sandbox by seconds, and stop runs right after the failure reaches Harbor.
+            wait_for_stop=self._driver.sandbox_may_have_died,
+            poll_interval_sec=TERMINATION_POLL_INTERVAL_SEC,
+        )
+        if termination is None:
+            return
+        self.logger.warning(
+            "Sandbox %s stopped before the trial finished with it: %s", termination.sandbox_id, termination.detail
+        )
+        try:
+            write_termination(self.trial_paths.trial_dir, termination)
+        except OSError:
+            self.logger.warning("Could not record why sandbox %s stopped", termination.sandbox_id, exc_info=True)
 
     def _require_sandbox(self) -> Any:
         """The live sandbox; raises if ``start`` hasn't created one or ``stop`` already released it."""
