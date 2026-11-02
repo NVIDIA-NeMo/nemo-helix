@@ -89,7 +89,7 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
       collapsed={collapsed}
       className="overflow-y-auto overflow-x-hidden transition-[width] duration-200"
     >
-      <VerticalNavList className="p-3">{renderGroups(groups)}</VerticalNavList>
+      <VerticalNavList className="px-2 py-3">{renderGroups(groups)}</VerticalNavList>
     </VerticalNavRoot>
   );
 };
