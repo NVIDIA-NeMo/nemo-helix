@@ -136,6 +136,22 @@ async def test_stdio_probe_expands_env_references_and_redacts_them(monkeypatch: 
     assert "s3cret" not in status.model_dump_json()
 
 
+async def test_stdio_probe_redacts_substituted_value_without_its_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBE_TOKEN", "s3cret")
+    spec = McpServerConfig.model_validate(
+        _stdio(
+            "-c",
+            "import os, sys; sys.stderr.write(os.environ['TOKEN'].split()[1]); sys.exit(1)",
+            env={"TOKEN": "Bearer ${PROBE_TOKEN}"},
+        )
+    )
+
+    status = await probe_mcp_server("env", spec, _config({}), timeout_seconds=5)
+
+    assert status.stderr == "${PROBE_TOKEN}"
+    assert "s3cret" not in status.model_dump_json()
+
+
 async def test_status_never_reports_expanded_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROBE_SECRET", "s3cret")
     spec = McpServerConfig(transport="http", url="http://127.0.0.1:1/${PROBE_SECRET}")

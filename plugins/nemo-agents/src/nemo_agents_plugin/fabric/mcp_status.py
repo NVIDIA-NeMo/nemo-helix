@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 PROBE_TIMEOUT_SECONDS = 15.0
 _STDERR_TAIL_CHARS = 2000
 _BRACED_VAR = re.compile(r"\$\{([^}]+)\}")
+_ENV_REFERENCE = re.compile(r"\$(?:\{([^}]+)\}|(\w+))")
 _STDIO_TRANSPORTS = {"stdio", "command", "process"}
 _STREAMABLE_HTTP_TRANSPORTS = {"", "http", "streamable_http", "streamablehttp"}
 
@@ -85,6 +86,11 @@ def _describe_error(error: BaseException) -> str:
 
 def _expand_braced(value: str) -> str:
     return _BRACED_VAR.sub(lambda match: os.environ.get(match.group(1), match.group(0)), value)
+
+
+def _env_references(value: str) -> list[tuple[str, str]]:
+    names = {braced or bare for braced, bare in _ENV_REFERENCE.findall(value)}
+    return [(f"${{{name}}}", os.environ[name]) for name in names if os.environ.get(name)]
 
 
 def _read_tail(errlog: TextIO) -> str | None:
@@ -151,6 +157,12 @@ async def probe_mcp_server(
         (raw_target, target),
         *((raw_env[key], env[key]) for key in env),
         *((header, os.path.expandvars(header)) for header in spec.custom_headers.values()),
+        # Also redact each substituted value alone, in case the server echoes it without its surrounding text.
+        *(
+            ref
+            for raw in (raw_target, *raw_env.values(), *spec.custom_headers.values())
+            for ref in _env_references(raw)
+        ),
     ]
     # Map every environment-substituted value back to its reference for redaction.
     expanded = {new: old for old, new in pairs if new and new != old}
