@@ -98,6 +98,7 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.cli import NemoCLI
 from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_confirm import confirm_destructive
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_options import (
     AllPagesOption,
@@ -108,6 +109,7 @@ from nemo_helix_plugin.cli_options import (
     NoTruncateOption,
     OutputColumnsOption,
     WorkspaceOption,
+    YesOption,
 )
 from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output, is_tty
 from nemo_helix_plugin.cli_pagination import PaginationType, collect_offset_pages, warn_if_more_pages
@@ -1049,13 +1051,12 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Session name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Close a session and release its deployed runtime."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Close session '{name}'? It cannot be resumed after it is closed.", abort=True)
+        confirm_destructive(f"Close session '{name}'? It cannot be resumed after it is closed.", yes=yes)
         client = _agents_client(base_url, workspace)
         _run_sdk(
             "POST agent API",
@@ -1156,13 +1157,12 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Agent name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Delete an agent from the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Delete agent '{name}'?", abort=True)
+        confirm_destructive(f"Delete agent '{name}'?", yes=yes)
         _delete_agent_entity(agent_name=name, workspace=workspace, base_url=base_url)
         typer.echo(f"Agent '{name}' deleted.")
 
@@ -1370,7 +1370,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             "-t",
             help="Maximum seconds to wait for a terminal status (only with --wait).",
         ),
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
         workspace: WorkspaceOption = None,
     ) -> None:
         """Redeploy an agent from a new config, in one command.
@@ -1490,11 +1490,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
         live = [dep for dep in existing if dep.get("status") in _LIVE_DEPLOYMENT_STATUSES]
 
         # 3. Confirm once, before any destructive step (unless --yes).
-        if not yes:
-            summary = f"Redeploy agent '{agent}' from '{agent_config}'? This tears down and recreates it"
-            if live:
-                summary += f" (undeploying {len(live)} live deployment(s))"
-            typer.confirm(f"{summary}.", abort=True)
+        summary = f"Redeploy agent '{agent}' from '{agent_config}'? This tears down and recreates it"
+        if live:
+            summary += f" (undeploying {len(live)} live deployment(s))"
+        confirm_destructive(f"{summary}.", yes=yes)
 
         # 4. Undeploy every live deployment (idempotent: skip if none).
         #    ``delete_deployment`` synchronously marks each deployment ``deleting``
@@ -1683,15 +1682,14 @@ def _register_platform_commands(app: typer.Typer) -> None:
             None, "--agent", "--all", "-a", help="Remove all deployments for this agent."
         ),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Stop and remove a deployment (or all deployments for an agent)."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
         client = _agents_client(base_url, workspace)
         if name:
-            if not yes:
-                typer.confirm(f"Undeploy '{name}'?", abort=True)
+            confirm_destructive(f"Undeploy '{name}'?", yes=yes)
             _run_sdk(
                 "DELETE agent API",
                 lambda: client.delete_deployment(workspace=workspace, name=name).data(),
@@ -1703,8 +1701,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 lambda: list(client.list_deployments(workspace=workspace).items()),
             )
             removed = [deployment for deployment in deps if deployment.agent == agent]
-            if not yes:
-                typer.confirm(f"Undeploy {len(removed)} deployment(s) for agent '{agent}'?", abort=True)
+            confirm_destructive(f"Undeploy {len(removed)} deployment(s) for agent '{agent}'?", yes=yes)
             for deployment in removed:
                 _run_sdk(
                     "DELETE agent API",
@@ -1767,13 +1764,12 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Deployment name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Delete a deployment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Delete deployment '{name}'?", abort=True)
+        confirm_destructive(f"Delete deployment '{name}'?", yes=yes)
         client = _agents_client(base_url, workspace)
         _run_sdk(
             "DELETE agent API",
@@ -2008,13 +2004,12 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment-spec name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Delete an environment spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Delete environment-spec '{name}'?", abort=True)
+        confirm_destructive(f"Delete environment-spec '{name}'?", yes=yes)
         client = _agents_client(base_url, workspace)
         _run_sdk(
             "DELETE agent API",
@@ -2113,13 +2108,12 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Environment name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Delete an environment by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Delete environment '{name}'?", abort=True)
+        confirm_destructive(f"Delete environment '{name}'?", yes=yes)
         client = _agents_client(base_url, workspace)
         _run_sdk(
             "DELETE agent API",
@@ -2201,13 +2195,12 @@ def _register_environment_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         name: str = typer.Argument(..., help="Compute-spec name."),
         workspace: WorkspaceOption = None,
-        yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+        yes: YesOption = False,
     ) -> None:
         """Delete a compute spec by name."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        if not yes:
-            typer.confirm(f"Delete compute-spec '{name}'?", abort=True)
+        confirm_destructive(f"Delete compute-spec '{name}'?", yes=yes)
         client = _agents_client(base_url, workspace)
         _run_sdk(
             "DELETE agent API",

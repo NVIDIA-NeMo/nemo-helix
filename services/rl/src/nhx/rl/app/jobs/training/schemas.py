@@ -28,15 +28,11 @@ class TrainingBackend(str, Enum):
 class PolicyBackend(str, Enum):
     """Which NeMo-RL policy worker trains the model.
 
-    The value picks the worker class, which picks the Ray actor's venv and kernels.
-    Asking for a capability the backend lacks is a validation error, not a silent upgrade.
+    ``automodel`` selects ``AutomodelPolicyWorker`` and the ``automodel`` extra.
+    ``MegatronPolicyWorker`` is prefetched, but this field does not select it.
+    A stored ``dtensor`` is read as ``automodel``; it is not a second worker.
     """
 
-    # _v2: false -> DTensorPolicyWorker. Stock HuggingFace + PyTorch FSDP2, no
-    # Transformer Engine (so pre-Hopper works), no LoRA, no expert parallelism.
-    DTENSOR = "dtensor"
-    # _v2: true -> DTensorPolicyWorkerV2. Automodel rebuilds the model on TE.
-    # Superset of DTENSOR; upstream NeMo-RL's reference configs default to it.
     AUTOMODEL = "automodel"
     # megatron_cfg.enabled -> MegatronPolicyWorker. The image builds the `mcore`
     # extra and prefetches the venv, but the compiler still emits an inert
@@ -129,9 +125,9 @@ class GRPOConfig(BaseModel):
     batch_multiplier: float = Field(default=1.0, ge=1.0)
     reward_shaping: dict[str, Any] | None = None
     reward_scaling: dict[str, Any] | None = None
-    # Defaults to DYNAMIC: this backend always trains on DTensor, and dynamic batching is the
-    # DTensor/Automodel norm in NeMo-RL's recipes (sequence packing is the Megatron norm).
-    # It is also the only mode with no architecture restrictions on the GRPO + DTensor path --
+    # Defaults to DYNAMIC: this backend always trains on Automodel, and dynamic batching is the
+    # Automodel norm in NeMo-RL's recipes (sequence packing is the Megatron norm).
+    # It is also the only mode with no architecture restrictions on the GRPO Automodel path --
     # packing is rejected for VLM, multimodal and context parallel.
     batching_strategy: BatchingStrategy = BatchingStrategy.DYNAMIC
     # None derives max_seq_length * micro_batch_size: the peak STATIC already provisions for.
@@ -144,12 +140,13 @@ class GRPOConfig(BaseModel):
     # that namespace their config (Qwen3.5 reads router_aux_loss_coef under text_config).
     hf_config_overrides: dict[str, Any] | None = None
     vllm_tensor_parallel_size: int | None = Field(default=None, gt=0)
+    vllm_expert_parallel_size: int = Field(default=1, gt=0)
     vllm_gpu_memory_utilization: float = Field(default=0.5, gt=0.0, le=1.0)
     # Lands in NeMo-RL's ``logger.wandb``, not ``policy``.
     log_nemo_gym_full_result_tables: bool = False
     # Passed through verbatim to the vLLM rollout engine.
     vllm_kwargs: dict[str, Any] | None = None
-    # Merged over policy.dtensor_cfg.moe_parallelizer, on top of the platform's own keys.
+    # Merged over policy.automodel_cfg.moe_parallelizer, on top of the platform's own keys.
     moe_parallelizer: dict[str, Any] | None = None
     # None keeps the platform default (2048).
     logprob_chunk_size: int | None = Field(default=None, gt=0)
@@ -266,9 +263,9 @@ class TrainingStepConfig(BaseModel):
         sequence_parallel: bool = False
         activation_checkpointing: bool = False
         # GRPO only; default matches GRPOTraining so a hand-built config compiles the
-        # same YAML. DPO ignores it -- its dtensor_cfg is a literal with no ``_v2``.
+        # same YAML. DPO ignores the field and still writes ``automodel_cfg``.
         policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL
-        # Merged over the platform's own dtensor_cfg.env_vars.
+        # Merged over the platform's own automodel_cfg.env_vars.
         env_vars: dict[str, str] | None = None
 
     class IntegrationsConfig(BaseModel):
