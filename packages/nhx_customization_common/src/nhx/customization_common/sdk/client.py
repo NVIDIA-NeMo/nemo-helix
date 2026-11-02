@@ -36,6 +36,7 @@ from nemo_helix_plugin.jobs.schemas import (
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nhx.customization_common.sdk import endpoints
 from nhx.customization_common.sdk.types import (
+    CreateCustomizationJobQueryParams,
     CustomizationJob,
     CustomizationJobCreateRequest,
     ListCustomizationJobsQueryParams,
@@ -146,6 +147,13 @@ def _create_request(
     return CustomizationJobCreateRequest.model_validate(body)
 
 
+def _dry_run_params(*, dry_run: bool, full: bool) -> CreateCustomizationJobQueryParams | None:
+    """The create query for a dry run; *full* is a dry run that checks every dataset row."""
+    if full:
+        return {"dry_run": True, "dry_run_full": True}
+    return {"dry_run": True} if dry_run else None
+
+
 def _list_jobs_query_params(
     *,
     page: int | None,
@@ -212,8 +220,20 @@ class JobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
+        dry_run_full: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        ``dry_run_full=True`` is a dry run that checks every row of each dataset file, not
+        the first rows. It returns only after every row is read and checked, so the larger
+        the dataset, the longer it takes; raise the client timeout for a large one.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -229,6 +249,7 @@ class JobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
+            query_params=_dry_run_params(dry_run=dry_run, full=dry_run_full),
         )
 
     def list(
@@ -317,8 +338,20 @@ class AsyncJobsResource:
         ownership: dict[str, Any] | None = None,
         custom_fields: dict[str, Any] | None = None,
         output_location: str | None = None,
+        dry_run: bool = False,
+        dry_run_full: bool = False,
     ) -> NemoResponse[CustomizationJob]:
-        """Submit a training job through the Customizer backend route."""
+        """Submit a training job through the Customizer backend route.
+
+        With ``dry_run=True``, the job is checked as submit would check it (validated and
+        compiled, its execution profile and the first rows of each dataset file) and
+        nothing is created. It returns the job unsaved, with the checks in
+        ``status_details["checks"]``; a failed check raises ``UnprocessableEntityError``,
+        whose ``body["detail"]["checks"]`` lists every check, passed and failed.
+        ``dry_run_full=True`` is a dry run that checks every row of each dataset file, not
+        the first rows. It returns only after every row is read and checked, so the larger
+        the dataset, the longer it takes; raise the client timeout for a large one.
+        """
         body = _create_request(
             spec,
             name=name,
@@ -334,6 +367,7 @@ class AsyncJobsResource:
             workspace=workspace,
             backend=self.backend,
             body=body,
+            query_params=_dry_run_params(dry_run=dry_run, full=dry_run_full),
         )
 
     async def list(

@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 _JOB_JSON_HELP = "Path to Automodel job JSON (AutomodelJobInput schema)."
@@ -101,4 +102,5 @@ def apply_automodel_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=AutomodelJob,
     )
