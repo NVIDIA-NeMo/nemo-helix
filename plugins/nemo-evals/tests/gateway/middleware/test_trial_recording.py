@@ -294,6 +294,25 @@ async def test_a_caller_that_stops_reading_mid_stream_is_recorded_as_cancelled()
     assert _attributes(span)["status"] == "cancelled"
 
 
+async def test_a_stream_the_provider_breaks_off_is_recorded_as_an_error_not_a_cancellation() -> None:
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink)
+
+    async def broken() -> AsyncIterator[dict[str, Any]]:
+        yield {"a": 1}
+        raise ConnectionError("upstream reset")
+
+    stream = await _call(middleware, _ctx({"authorization": f"Bearer {TOKEN}"}), broken())
+    with pytest.raises(ConnectionError):
+        _ = [chunk async for chunk in stream]
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    assert "status" not in _attributes(span)
+    assert span.status.code == span.status.STATUS_CODE_ERROR
+
+
 async def test_the_span_starts_when_the_gateway_received_the_call() -> None:
     sink = Sink()
     middleware = _middleware(_reader(TOKEN), sink)

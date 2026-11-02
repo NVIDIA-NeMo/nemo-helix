@@ -65,7 +65,7 @@ class _ObservedCall:
             self.usage.merge(usage)
         self.response_model = model_from_payload(payload) or self.response_model
 
-    def finished(self, started_at: datetime, *, cancelled: bool) -> FinishedCall:
+    def finished(self, started_at: datetime, *, cancelled: bool, error: bool = False) -> FinishedCall:
         proxied = self.ctx.proxied_request
         model = (proxied.body if proxied is not None else self.ctx.original_request.body).get("model")
         attributes: dict[str, object] = {
@@ -85,6 +85,7 @@ class _ObservedCall:
             started_at=started_at,
             ended_at=datetime.now(UTC),
             cancelled=cancelled,
+            error=error,
             attributes=attributes,
             caller=self.caller,
         )
@@ -149,12 +150,15 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
 async def _follow(
     chunks: AsyncIterator[dict[str, Any]], call: _ObservedCall, recorder: CallRecorder, started_at: datetime
 ) -> AsyncIterator[dict[str, Any]]:
-    """Pass the stream through, recording the call when the caller has all of it or stops reading."""
-    cancelled = True
+    """Pass the stream through, recording the call when the caller has all of it, stops reading, or it fails."""
+    cancelled, error = True, False
     try:
         async for chunk in chunks:
             call.observe(chunk)
             yield chunk
         cancelled = False
+    except Exception:
+        cancelled, error = False, True
+        raise
     finally:
-        recorder.record(call.finished(started_at, cancelled=cancelled))
+        recorder.record(call.finished(started_at, cancelled=cancelled, error=error))
