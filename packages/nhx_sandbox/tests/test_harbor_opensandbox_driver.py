@@ -350,6 +350,33 @@ async def test_kill_still_raises_any_other_failure(server: Server) -> None:
         await driver.kill(sandbox)
 
 
+@pytest.mark.parametrize(
+    ("error", "may_have_died"),
+    [
+        # What every operation raised on dev-blue once its sandbox was OOM-killed: execd unreachable.
+        (SandboxApiException("Could not connect to the backend sandbox", status_code=502), True),
+        (SandboxApiException("Network connectivity error: All connection attempts failed"), True),
+        # What a missing file or path raises on a live sandbox, which Harbor's optional downloads hit routinely.
+        (SandboxApiException("file not found", status_code=404), False),
+    ],
+    ids=["backend-unreachable", "connection-lost", "file-not-found"],
+)
+async def test_a_failed_operation_flags_a_dead_sandbox_only_when_it_fails_like_one(
+    server: Server, error: Exception, may_have_died: bool
+) -> None:
+    driver = _driver(server)
+    sandbox = await driver.create(_request())
+
+    async def read_bytes(path: str) -> bytes:
+        raise error
+
+    sandbox.files.read_bytes = read_bytes  # type: ignore[method-assign]
+    with pytest.raises(SandboxApiException):
+        await driver.read_bytes(sandbox, "/etc/hostname")
+
+    assert driver.sandbox_may_have_died is may_have_died
+
+
 async def test_run_passes_options_and_joins_output(server: Server) -> None:
     """``run`` sends cwd, env, timeout and uid, and returns both streams and the exit code."""
     driver = _driver(server)
@@ -390,12 +417,12 @@ async def test_run_raises_when_the_output_ends_without_an_exit_code(server: Serv
     sandbox = await driver.create(_request())
     sandbox.commands.results["x"] = execution(stderr=["400+0 records out"], exit_code=None)
 
-    assert not driver.exec_interrupted
+    assert not driver.sandbox_may_have_died
 
     with pytest.raises(ExecInterrupted, match="ended before it reported an exit code"):
         await driver.run(sandbox, "x")
 
-    assert driver.exec_interrupted
+    assert driver.sandbox_may_have_died
 
 
 async def test_run_keeps_line_breaks_including_blank_lines(server: Server) -> None:

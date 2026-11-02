@@ -17,10 +17,11 @@ Tests replace that mapping with mocks.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
@@ -184,8 +185,8 @@ class OpenSandboxDriver:
         self._sdk = dict(sdk) if sdk is not None else None
         self._logger = logger or LOGGER
         self._retry_wait = retry_wait or harbor_backoff_sec
-        # Set once a command's output is cut off, which is usually its sandbox dying under it.
-        self.exec_interrupted = False
+        # Set once an operation on the sandbox fails as one on a dead sandbox does; see _watch_for_death.
+        self.sandbox_may_have_died = False
 
     @property
     def sdk(self) -> dict[str, Any]:
@@ -442,7 +443,8 @@ class OpenSandboxDriver:
         # Leave uid out entirely rather than send None, so the SDK uses the image's default user.
         if uid is not None:
             opts["uid"] = uid
-        execution = await sandbox.commands.run(command, opts=self.sdk["RunCommandOpts"](**opts))
+        with self._watch_for_death():
+            execution = await sandbox.commands.run(command, opts=self.sdk["RunCommandOpts"](**opts))
 
         # The SDK infers the exit code of a foreground command. ``error.value`` is free text, so
         # only fall back to a generic failure when the SDK found no code at all.
@@ -451,7 +453,7 @@ class OpenSandboxDriver:
             # The SDK reports 0 only once execd confirms the command completed, so neither a code
             # nor an error means the output stream ended first, as it does when the sandbox's
             # container is killed under the command. Its outcome is unknown, not success.
-            self.exec_interrupted = True
+            self.sandbox_may_have_died = True
             raise ExecInterrupted(
                 f"OpenSandbox sandbox {sandbox_id(sandbox)}: the command's output ended before it reported an "
                 "exit code; the sandbox may have stopped"
@@ -464,19 +466,41 @@ class OpenSandboxDriver:
             exit_code=exit_code,
         )
 
+    @contextlib.contextmanager
+    def _watch_for_death(self) -> Generator[None]:
+        """Set ``sandbox_may_have_died`` when the operation fails as one on a dead sandbox does, then re-raise.
+
+        On a dead sandbox every operation fails with the server's 502 (it can't reach execd) or a
+        lost connection, while on a live one a missing file or path is a 4xx. Telling them apart
+        matters: Harbor routinely reads files that may not exist, and the status check in ``stop``
+        waits only after a likely death.
+        """
+        try:
+            yield
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status is None or status >= 500:
+                self.sandbox_may_have_died = True
+            raise
+
     async def create_directories(self, sandbox: Any, paths: Sequence[str], *, mode: int = 755) -> None:
         """Create directories, parents included. ``mode`` is octal written as decimal, as the SDK expects."""
         write_entry = self.sdk["WriteEntry"]
-        await sandbox.files.create_directories([write_entry(path=path, mode=mode) for path in paths])
+        with self._watch_for_death():
+            await sandbox.files.create_directories([write_entry(path=path, mode=mode) for path in paths])
 
     async def write_files(self, sandbox: Any, files: Sequence[tuple[str, bytes, int]]) -> None:
         """Write ``(path, data, mode)`` files; parent directories must already exist."""
         write_entry = self.sdk["WriteEntry"]
-        await sandbox.files.write_files([write_entry(path=path, data=data, mode=mode) for path, data, mode in files])
+        with self._watch_for_death():
+            await sandbox.files.write_files(
+                [write_entry(path=path, data=data, mode=mode) for path, data, mode in files]
+            )
 
     async def read_bytes(self, sandbox: Any, path: str) -> bytes:
         """Read one file."""
-        return await sandbox.files.read_bytes(path)
+        with self._watch_for_death():
+            return await sandbox.files.read_bytes(path)
 
     async def list_tree(self, sandbox: Any, root: str) -> list[tuple[PurePosixPath, str, str]]:
         """Every entry under ``root`` as ``(relative path, absolute path, entry type)``.
@@ -484,7 +508,8 @@ class OpenSandboxDriver:
         The type is the SDK's ``entry_type`` lower-cased, or ``""`` when the SDK left it unset.
         """
         # One recursive search rather than a listing per directory.
-        matches = await sandbox.files.search(self.sdk["SearchEntry"](path=root, pattern="**"))
+        with self._watch_for_death():
+            matches = await sandbox.files.search(self.sdk["SearchEntry"](path=root, pattern="**"))
         base = PurePosixPath(root)
         return [
             (

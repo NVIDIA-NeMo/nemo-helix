@@ -163,10 +163,10 @@ class Files:
             self.modes[entry.path] = entry.mode
 
     async def read_bytes(self, path: str) -> bytes:
-        """Return a file's bytes; directories, missing and unreadable paths raise."""
+        """Return a file's bytes; directories, missing and unreadable paths raise the server's 404, as the SDK does."""
         data = self.tree.get(path)
         if path in self.unreadable or data is None:
-            raise FileNotFoundError(path)
+            raise SandboxApiException(f"file not found. open {path}: no such file or directory", status_code=404)
         return data
 
     async def search(self, entry: SimpleNamespace) -> list[SimpleNamespace]:

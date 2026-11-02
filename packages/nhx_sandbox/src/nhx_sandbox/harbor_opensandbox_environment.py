@@ -870,28 +870,41 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """
         if not self._sandbox:
             return
-        await self._record_termination(self._sandbox)
-        self._record_stopped()
         try:
-            if delete:
-                await self._driver.kill(self._sandbox)
+            await self._record_termination(self._sandbox)
         finally:
+            # In the finally, so a check cancelled mid-wait still kills and releases the sandbox;
+            # otherwise it would run until its server-side lifetime ends.
+            self._record_stopped()
             try:
-                await self._sandbox.close()
+                if delete:
+                    await self._driver.kill(self._sandbox)
             finally:
-                self._sandbox = None
+                try:
+                    await self._sandbox.close()
+                finally:
+                    self._sandbox = None
 
     async def _record_termination(self, sandbox: Any) -> None:
-        """Write why ``sandbox`` stopped into the trial directory, if it had; never raises, so ``stop`` always goes on."""
+        """Write why ``sandbox`` stopped into the trial directory, if it had.
+
+        Never raises: Harbor records an error from ``stop`` as the trial's own, so a failed check
+        would fail a trial that finished.
+        """
+        try:
+            diagnostics = OpenSandboxTerminationDiagnostics(self._server(), timeout_sec=TERMINATION_CHECK_BUDGET_SEC)
+        except Exception:
+            self.logger.warning("Could not check whether sandbox %s stopped early", sandbox_id(sandbox), exc_info=True)
+            return
         termination = await check_termination(
-            OpenSandboxTerminationDiagnostics(self._server(), timeout_sec=TERMINATION_CHECK_BUDGET_SEC),
+            diagnostics,
             str(sandbox_id(sandbox)),
             ends_at=self._sandbox_ends_at,
             role=sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
             budget_sec=TERMINATION_CHECK_BUDGET_SEC,
             logger=self.logger,
-            # A command cut off mid-output usually means the sandbox died, and the server's status lags that.
-            wait_for_stop=self._driver.exec_interrupted,
+            # The server's status lags a dead sandbox by seconds, and stop runs right after the failure reaches Harbor.
+            wait_for_stop=self._driver.sandbox_may_have_died,
             poll_interval_sec=TERMINATION_POLL_INTERVAL_SEC,
         )
         if termination is None:

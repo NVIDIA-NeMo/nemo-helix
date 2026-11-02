@@ -948,6 +948,45 @@ async def test_an_oom_kill_the_server_still_reports_running_is_waited_for(
     assert termination["evidence"]["state"] == "Pending"
 
 
+async def test_a_check_that_cannot_start_still_kills_and_releases_without_raising(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An error from stop becomes the trial's, and a skipped kill leaves the sandbox running until its lifetime ends."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+
+    def broken_server() -> Any:
+        raise ValueError("bad connection config")
+
+    monkeypatch.setattr(environment, "_server", broken_server)
+    await environment.stop(delete=True)
+
+    assert "Could not check whether sandbox" in caplog.text
+    assert server.live() == set()
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
+async def test_a_cancelled_check_still_kills_and_releases(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+
+    async def cancelled(*args: Any, **kwargs: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(environment_module, "check_termination", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await environment.stop(delete=True)
+
+    assert server.live() == set()
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
 async def test_stop_of_a_sandbox_already_gone_does_not_raise(tmp_path: Path, server: Server) -> None:
     """Harbor records an error from stop as the trial's, so a sandbox gone after the trial finished must not fail it."""
     environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
