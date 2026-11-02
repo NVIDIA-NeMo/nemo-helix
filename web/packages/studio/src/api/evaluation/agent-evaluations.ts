@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
 import {
   evalsCreateAgentEvaluateJob,
   evalsGetAgentEvaluateJob,
@@ -197,11 +198,7 @@ const downloadJsonl = async <T>(
   const blob = await filesDownloadFile(workspace, fileset, remotePath, signal);
   if (!blob) return [];
   const text = await blob.text();
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as T);
+  return parseJsonl<T>(text);
 };
 
 /** Loads the per-task bundle (tasks/trials/scores) for a completed job. Returns

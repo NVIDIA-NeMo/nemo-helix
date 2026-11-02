@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { parseJsonl } from '@nemo/common/src/utils/parseRecords';
+
 export interface TelemetrySpan {
   parent_id?: string;
   function_ancestry?: {
@@ -60,21 +62,13 @@ const PREVIEW_MAX = 160;
 // agent workflow itself — everything else is a user-defined tool.
 const NON_TOOL_FUNCTIONS = new Set(['root', '<workflow>']);
 
-export const parseSpans = (text: string, agent?: string, runId?: string): TelemetrySpan[] => {
-  const spans: TelemetrySpan[] = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const parsed = JSON.parse(line) as TelemetrySpan;
-      if (agent) parsed.__agent = agent;
-      if (runId) parsed.__runId = runId;
-      spans.push(parsed);
-    } catch {
-      /* skip malformed line */
-    }
-  }
-  return spans;
-};
+/** Parses a spans JSONL body, skipping malformed lines and tagging each span with its source. */
+export const parseSpans = (text: string, agent?: string, runId?: string): TelemetrySpan[] =>
+  parseJsonl<TelemetrySpan>(text, { skipInvalid: true }).map((span) => {
+    if (agent) span.__agent = agent;
+    if (runId) span.__runId = runId;
+    return span;
+  });
 
 export const agentFromPath = (path: string): string | undefined => {
   const slash = path.indexOf('/');
