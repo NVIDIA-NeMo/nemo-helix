@@ -3,6 +3,8 @@
 
 """Documentation-only authentication metadata; no runtime security dependencies."""
 
+from copy import deepcopy
+
 BEARER_SCHEME_NAME = "HelixBearer"
 BEARER_AUTH_OPENAPI = {"security": [{BEARER_SCHEME_NAME: []}]}
 BEARER_SECURITY_SCHEME = {
@@ -20,8 +22,9 @@ BEARER_SECURITY_SCHEME = {
 def register_bearer_security_scheme(spec: dict) -> dict:
     """Complete explicitly annotated operations without imposing global security.
 
-    The offline extraction path calls this before merging specs. No route's
-    dependencies, authentication logic, or deployment configuration are changed.
+    Platform and service OpenAPI hooks call this while constructing their cached
+    schema. No route dependencies, authentication logic, or deployment configuration
+    are changed.
     """
     if any(
         BEARER_SCHEME_NAME in requirement
@@ -33,5 +36,5 @@ def register_bearer_security_scheme(spec: dict) -> dict:
         schemes = spec.setdefault("components", {}).setdefault("securitySchemes", {})
         if BEARER_SCHEME_NAME in schemes and schemes[BEARER_SCHEME_NAME] != BEARER_SECURITY_SCHEME:
             raise ValueError(f"Conflicting security scheme: {BEARER_SCHEME_NAME}")
-        schemes[BEARER_SCHEME_NAME] = BEARER_SECURITY_SCHEME
+        schemes[BEARER_SCHEME_NAME] = deepcopy(BEARER_SECURITY_SCHEME)
     return spec
