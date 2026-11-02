@@ -147,6 +147,15 @@ async def test_list_all_tools_follows_cursors() -> None:
     assert [tool.name for tool in await _list_all_tools(Session())] == ["a", "b"]  # ty: ignore[invalid-argument-type]
 
 
+async def test_list_all_tools_rejects_repeated_cursor() -> None:
+    class Session:
+        async def list_tools(self, *, params: PaginatedRequestParams) -> ListToolsResult:
+            return ListToolsResult(tools=[Tool(name="a", inputSchema={})], nextCursor="p2")
+
+    with pytest.raises(RuntimeError, match="repeated pagination cursor"):
+        await _list_all_tools(Session())  # ty: ignore[invalid-argument-type]
+
+
 async def test_status_cache_shares_one_probe_across_overlapping_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
 

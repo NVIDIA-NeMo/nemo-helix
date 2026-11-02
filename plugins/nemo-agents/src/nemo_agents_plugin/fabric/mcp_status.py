@@ -112,6 +112,8 @@ async def _list_all_tools(session: ClientSession) -> list[Tool]:
     cursor: str | None = None
     while True:
         page = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+        if page.nextCursor and page.nextCursor == cursor:
+            raise RuntimeError(f"MCP server repeated pagination cursor '{cursor}'.")
         tools.extend(page.tools)
         cursor = page.nextCursor
         if not cursor:
