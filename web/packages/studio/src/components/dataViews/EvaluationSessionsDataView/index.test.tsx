@@ -95,6 +95,33 @@ describe('EvaluationSessionsDataView', () => {
     expect(screen.getByText('Session output')).toBeInTheDocument();
   });
 
+  it('shows each session cost, with a dash when none was reported', async () => {
+    server.use(
+      http.get(SESSIONS_URL, () =>
+        HttpResponse.json({
+          ...mockSessionsPage,
+          data: [
+            {
+              ...mockSession,
+              session_id: 'session-1',
+              test_case_name: 'case-1',
+              cost_total_usd: 0.1234,
+            },
+            {
+              ...mockSession,
+              session_id: 'session-2',
+              test_case_name: 'case-2',
+              cost_total_usd: null,
+            },
+          ],
+        })
+      )
+    );
+    renderDataView();
+    expect(await screen.findByRole('columnheader', { name: /Cost/ })).toBeInTheDocument();
+    expect(await screen.findByText('$0.12')).toBeInTheDocument();
+  });
+
   it('marks an evaluator that ran but produced no score as failed', async () => {
     server.use(
       http.get(EVALUATION_URL, () =>
