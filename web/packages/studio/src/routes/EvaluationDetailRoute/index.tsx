@@ -33,7 +33,8 @@ const fetchAllSessions = async (workspace: string, evaluationName: string) => {
       { page, page_size: SESSIONS_PAGE_SIZE, mode: 'detailed' }
     );
     sessions.push(...data);
-    if (data.length < SESSIONS_PAGE_SIZE || page >= (pagination?.total_pages ?? page)) {
+    const totalPages = pagination?.total_pages;
+    if (data.length < SESSIONS_PAGE_SIZE || (totalPages !== undefined && page >= totalPages)) {
       return sessions;
     }
   }
