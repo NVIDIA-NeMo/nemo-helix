@@ -312,6 +312,27 @@ describe('SliderWithTextInput', () => {
       expect(mockOnChange).toHaveBeenCalledWith(10);
     });
 
+    it('should call the TextInput onBlur after clamping', () => {
+      const calls: string[] = [];
+      const field = createMockField(
+        50,
+        vi.fn(() => calls.push('onChange'))
+      );
+      render(
+        <SliderWithTextInput
+          field={field}
+          min={10}
+          max={90}
+          attributes={{ TextInput: { onBlur: () => calls.push('onBlur') } }}
+        />
+      );
+
+      const textInput = screen.getByRole('spinbutton');
+      fireEvent.change(textInput, { target: { value: '150' } });
+      fireEvent.blur(textInput);
+      expect(calls).toEqual(['onChange', 'onBlur']);
+    });
+
     it('should allow typing a value whose prefix is below min', () => {
       const mockOnChange = vi.fn();
       const field = createMockField(1, mockOnChange);
