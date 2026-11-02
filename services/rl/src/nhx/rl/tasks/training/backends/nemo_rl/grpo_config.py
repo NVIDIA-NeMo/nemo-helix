@@ -213,29 +213,6 @@ def _build_batching_config(
     }, dict(disabled)
 
 
-def _jsonl_has_image(path: Path) -> bool:
-    """True when any Gym row carries an image part. The fileset itself is not rewritten."""
-    if not path.is_file():
-        return False
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            if _value_has_image(json.loads(line)):
-                return True
-    return False
-
-
-def _value_has_image(value: Any) -> bool:
-    if isinstance(value, dict):
-        if value.get("type") in {"image_url", "image", "input_image"}:
-            return True
-        return any(_value_has_image(child) for child in value.values())
-    if isinstance(value, list):
-        return any(_value_has_image(child) for child in value)
-    return False
-
-
 def _count_jsonl_rows(path: Path) -> int:
     if not path.is_file():
         return 0
@@ -295,8 +272,8 @@ def _read_manifest_config_paths(environment_path: str | None) -> list[str]:
 def _resolve_gym_paths(
     customizer_config: TrainingStepConfig,
     workspace_dir: Path,
-) -> tuple[Path, Path, int, int]:
-    """Return train/val paths and sample counts for Gym JSONL.
+) -> tuple[Path, Path, int, int, int]:
+    """Return train/val paths, sample counts, and the widest prompt's image-part count.
 
     The returned paths feed ``cfg["data"]``, which NeMo-RL opens in the *training
     master* (``setup_response_data`` -> ``NemoGymDataset``). They must therefore stay
@@ -319,7 +296,13 @@ def _resolve_gym_paths(
         validator.validate_dataset(str(pvc_train))
         if pvc_val.is_file():
             validator.validate_dataset(str(pvc_val))
-        return pvc_train, pvc_val, _count_jsonl_rows(pvc_train), _count_jsonl_rows(pvc_val)
+        return (
+            pvc_train,
+            pvc_val,
+            _count_jsonl_rows(pvc_train),
+            _count_jsonl_rows(pvc_val),
+            validator.max_images_per_prompt,
+        )
 
     prepared = prepare_dataset(
         dataset_path=Path(customizer_config.dataset.path),
@@ -334,6 +317,7 @@ def _resolve_gym_paths(
         prepared.validation_file,
         prepared.train_samples,
         prepared.validation_samples,
+        validator.max_images_per_prompt,
     )
 
 
@@ -494,7 +478,7 @@ def compile_grpo_config(
     workspace_dir = Path(customizer_config.workspace_path)
     grpo_hp = customizer_config.training.grpo or GRPOConfig()
 
-    train_path, val_path, train_samples, val_samples = _resolve_gym_paths(customizer_config, workspace_dir)
+    train_path, val_path, train_samples, val_samples, max_images = _resolve_gym_paths(customizer_config, workspace_dir)
     traits = traits_from_step_model(customizer_config.model)
 
     batch_size = customizer_config.batch.global_batch_size
@@ -702,7 +686,7 @@ def compile_grpo_config(
     elif traits.has_vision_tower:
         cfg["policy"]["generation"]["vllm_kwargs"] = {
             "skip_mm_profiling": True,
-            "limit_mm_per_prompt": {"image": 2 if _jsonl_has_image(train_path) else 1},
+            "limit_mm_per_prompt": {"image": max(max_images, 1)},
         }
 
     if lora_cfg["enabled"]:

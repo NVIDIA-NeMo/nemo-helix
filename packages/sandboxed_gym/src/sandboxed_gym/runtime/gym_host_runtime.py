@@ -721,6 +721,9 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
         sys.path.insert(0, wheels_install_dir)
 
 
+_OPEN_SANDBOX_CONFIG = "nemo_gym/sandbox/providers/opensandbox/configs/opensandbox.yaml"
+
+
 def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> None:
     """Reject a nemo-gym wheel whose library is not the one in this image.
 
@@ -730,7 +733,7 @@ def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> N
     wheel_files = getattr(package, "wheel_files", ())
     image_root = _image_gym_search_root()
     library = Path(image_root, "nemo_gym") if image_root else None
-    wheel = next((path for path in wheel_files if path.name.startswith("nemo_gym-")), None)
+    wheel = next((path for path in wheel_files if _is_nemo_gym_wheel(path)), None)
     if wheel is None or library is None or not library.is_dir():
         return
 
@@ -753,6 +756,21 @@ def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> N
         for name in vendored:
             if archive.read(name) != (library.parent / name).read_bytes():
                 _mismatch()
+        probe = library.parent / _OPEN_SANDBOX_CONFIG
+        if probe.is_file():
+            try:
+                archived = archive.read(_OPEN_SANDBOX_CONFIG)
+            except KeyError:
+                _mismatch()
+            else:
+                if archived != probe.read_bytes():
+                    _mismatch()
+
+
+def _is_nemo_gym_wheel(path: Path) -> bool:
+    """PEP 427 distribution field: the filename before the first ``-``, normalized."""
+    distribution, separator, _rest = path.name.partition("-")
+    return bool(separator) and distribution.replace("_", "-").lower() == "nemo-gym"
 
 
 def _image_gym_search_root() -> str | None:

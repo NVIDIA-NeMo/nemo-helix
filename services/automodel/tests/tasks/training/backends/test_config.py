@@ -6,6 +6,7 @@
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -290,7 +291,11 @@ class TestConfigureMoeBackend:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        with patch(
+            "transformers.AutoConfig.from_pretrained", side_effect=AssertionError("traits already recorded")
+        ) as load:
+            _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        load.assert_not_called()
 
         assert cfg["model"]["backend"] == {
             "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
@@ -381,7 +386,45 @@ class TestConfigureMoeBackend:
         assert "backend" not in cfg["model"]
         assert "parallelizer" not in cfg
 
-    def test_missing_architecture_skips_moe_config(self) -> None:
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_loads_a_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronHForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_with_a_dense_config_skips_moe(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    def test_missing_architecture_skips_moe_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _unloadable(path: str, trust_remote_code: bool = False) -> None:
+            raise OSError(f"cannot load {path}")
+
+        monkeypatch.setattr("transformers.AutoConfig.from_pretrained", _unloadable)
         cfg: dict[str, Any] = {"model": {}}
         _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None))
 

@@ -1785,7 +1785,7 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
     freeze = cfg["policy"]["automodel_cfg"]["automodel_kwargs"]["freeze_config"]
     assert freeze["freeze_vision_tower"] is True
     assert freeze["freeze_language_model"] is False
-    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 2}
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
     assert cfg["policy"]["generation"]["vllm_kwargs"]["skip_mm_profiling"] is True
     assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"] == [
         "*vision_tower*",
@@ -1820,6 +1820,46 @@ def test_grpo_input_image_rows_count_as_images(
         "expected_answer": "3",
     }
     (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
+
+
+def test_grpo_image_limit_is_the_widest_prompt(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(tmp_path, has_vision_tower=True)
+    images = [{"type": "image_url", "image_url": {"url": f"page-{index}.png"}} for index in range(3)]
+    row = {
+        "responses_create_params": {
+            "input": [{"role": "user", "content": [*images, {"type": "text", "text": "read"}]}]
+        },
+        "agent_ref": {"name": "verifiers_agent"},
+        "answer": "42",
+    }
+    (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 3}
+
+
+def test_grpo_image_limit_includes_the_validation_file(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(tmp_path, has_vision_tower=True)
+    images = [{"type": "image", "image": f"page-{index}.png"} for index in range(2)]
+    row = {
+        "responses_create_params": {
+            "input": [{"role": "user", "content": [*images, {"type": "text", "text": "read"}]}]
+        },
+        "agent_ref": {"name": "verifiers_agent"},
+        "answer": "42",
+    }
+    (dataset / "validation.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
 
     cfg = compile_grpo_config(step, job_ctx)
 

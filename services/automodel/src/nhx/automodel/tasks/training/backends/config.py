@@ -51,6 +51,7 @@ from nhx.customization_common.schemas.checkpoint import (
     traits_from_step_model,
 )
 from nhx.customization_common.service.context import NHXJobContext
+from transformers import AutoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -896,18 +897,19 @@ def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepC
     """
     Configure custom Automodel model implementations for MoE models.
 
-    The model-spec task already recorded the architecture name and expert count.
+    The model-spec task records the architecture name and expert count when it has them.
+    A model entity with no spec leaves both unset; those fall back to AutoConfig.
     Only MoE models require additional backend and parallelizer configuration.
 
     Dense models like LlamaForCausalLM may have custom Automodel implementations
     (for combined QKV projections, etc.) but don't need MoE-specific config.
 
     This function:
-    1. Detects if the model is an MoE model from the step config
+    1. Detects if the model is an MoE model from the step config, or from AutoConfig
     2. Only for MoE: Configures the backend (torch dispatcher, i.e. DeepEP off, for stability)
     3. Only for MoE: Configures the parallelizer for expert distribution
     """
-    architecture = customizer_config.model.checkpoint_model_name
+    architecture, num_experts = _recorded_or_loaded_moe_traits(customizer_config)
     if not architecture:
         logger.debug(
             "No architecture name on the step config for %s. Using the standard HuggingFace model implementation.",
@@ -918,7 +920,6 @@ def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepC
     has_custom_impl = architecture in ModelRegistry.model_arch_name_to_cls
 
     if has_custom_impl:
-        num_experts = customizer_config.model.num_experts
         is_moe_model = num_experts is not None and num_experts > 1
         if is_moe_model:
             logger.info(
@@ -967,6 +968,46 @@ def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepC
             "No custom Automodel implementation found for %s. Using standard HuggingFace model implementation.",
             architecture,
         )
+
+
+def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tuple[str | None, int | None]:
+    """Architecture and expert count from the step, filling gaps from the checkpoint config.
+
+    Both traits already recorded means the checkpoint is not opened again. A failed
+    ``AutoConfig`` load leaves the recorded values in place.
+    """
+    architecture = customizer_config.model.checkpoint_model_name
+    num_experts = customizer_config.model.num_experts
+    if architecture and num_experts is not None:
+        return architecture, num_experts
+
+    try:
+        hf_config = AutoConfig.from_pretrained(
+            customizer_config.model.path,
+            trust_remote_code=customizer_config.model.trust_remote_code,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to check for custom model implementation: %s. Using standard HuggingFace model implementation.",
+            exc,
+        )
+        return architecture, num_experts
+
+    architectures = getattr(hf_config, "architectures", None)
+    loaded_architecture = architectures[0] if isinstance(architectures, (list, tuple)) and architectures else None
+    if not isinstance(loaded_architecture, str):
+        loaded_architecture = None
+    loaded_experts = num_experts
+    if loaded_experts is None:
+        for value in (
+            getattr(hf_config, "num_local_experts", None),
+            getattr(hf_config, "num_experts", None),
+            getattr(hf_config, "n_routed_experts", None),
+        ):
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                loaded_experts = value
+                break
+    return architecture or loaded_architecture, loaded_experts
 
 
 def _configure_datasets(
