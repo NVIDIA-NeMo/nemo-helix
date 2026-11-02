@@ -17,7 +17,7 @@ The platform itself installs nothing. `grpo_driver` calls `bootstrap_environment
 |---|---|---|
 | When | During `RunHelper.start`, per server | After `RunHelper.start`, per agent/resources venv |
 | What | `uv venv --seed` + `uv pip install` of the server's `requirements.txt` / `pyproject.toml`, **plus** `nemo-gym==<image version>`, `ray[default]==<pin>`, `openai==<pin>` | `uv pip install --no-index --find-links=wheels/ <names>` |
-| Wheelhouse role | `UV_FIND_LINKS` — a **candidate pool**. Anything it covers installs from local files; anything it misses **goes to an index** | Hard offline. `--no-index` is explicit |
+| Wheelhouse role | `UV_FIND_LINKS` — a **candidate pool**. A covered package installs from the wheelhouse. A miss **goes to an index** only when `allow_internet` is configured for the cluster. Otherwise the server venv fails at startup | Hard offline. `--no-index` is explicit |
 | Requirements | The server's own, resolved normally | One **unpinned** distribution name per wheel in `wheels/` |
 
 So `--no-index` is real, but it is step 2 only. **A job is offline-clean only when `wheels/` also satisfies step 1**, which means the closure must cover:
@@ -25,7 +25,7 @@ So `--no-index` is real, but it is step 2 only. **A job is offline-clean only wh
 - everything the server's `requirements.txt` names, and their transitive deps;
 - **`nemo-gym` at exactly the version the training image reports** (below);
 - `ray[default]` and `openai` at the versions Gym pins as head-server deps — the sub-venv starts from `uv venv --seed`, so nothing is inherited from the image.
-- **`pip`** — `uv venv --seed` installs it into each new virtualenv *before* any `uv pip install` runs, resolving it like any other package. Without it in `wheels/` the seed step reaches for an index and the job fails with `Failed to install seed packages into virtual environment` / `No solution found when resolving: pip`. `uv venv` honours `UV_FIND_LINKS`, so vendoring the wheel is all that is needed. Python 3.13 seeds only `pip`.
+- **`pip`** — `uv venv --seed` installs it into each new virtualenv *before* any `uv pip install` runs, resolving it like any other package. Without it in `wheels/` the default `UV_OFFLINE=1` fails the job with `Failed to install seed packages into virtual environment` / `No solution found when resolving: pip`. The seed step reaches an index only when `allow_internet` set `UV_OFFLINE=0`. `uv venv` honours `UV_FIND_LINKS`, so vendoring the wheel is what the default path needs. Python 3.13 seeds only `pip`.
 
 Completeness of `wheels/` is what makes a sandboxed run work. The format name alone does not.
 
@@ -60,7 +60,7 @@ The second form is why a Gym server copies cleanly: its `-e nemo-gym[dev] @ ../.
 
 ## Vendoring a wheel closure
 
-Two consumers, per the table above: Gym's venv build reaches the wheelhouse through `UV_FIND_LINKS` (candidate pool — misses go to an index), and NeMo-RL's later install reads it with `--no-index`. Build the closure for the first, and the second follows for free.
+Two consumers, per the table above. Gym's venv build reaches the wheelhouse through `UV_FIND_LINKS`. A miss goes to an index only when `allow_internet` is set, which puts `UV_OFFLINE=0` in the sandbox payload. Otherwise the host sets `UV_OFFLINE=1` and a missing wheel fails at server startup. NeMo-RL's later install reads the same wheelhouse with `--no-index`. Build the closure so step 1 succeeds offline, and step 2 follows for free.
 
 Resolve it from the **`nemo-gym` wheel plus the server's requirements**, not from the requirements alone: the sub-venv starts at `uv venv --seed`, so everything `nemo_gym` itself imports has to be present too.
 
@@ -155,7 +155,7 @@ pi-to-gym-conversion --validate-only ./my-env
 
 `setuptools` is capped below 81 — the release that removed `pkg_resources`, which Gym's pinned hydra imports at import time.
 
-The sub-venv is created with `uv venv --seed`, so nothing carries over from the image — omit `ray[default]` / `openai` and the venv build reaches for an index even when the environment's own closure is complete. A `nemo-gym` version mismatch is worse than an omission: uv ignores your wheel and silently resolves upstream from PyPI.
+The sub-venv is created with `uv venv --seed`, so nothing carries over from the image. Omit `ray[default]` / `openai` and the default `UV_OFFLINE=1` fails the venv build; with `allow_internet` (`UV_OFFLINE=0`) it reaches an index, even when the environment's own closure is complete. A `nemo-gym` version mismatch is worse than an omission: once the index is open, uv ignores your wheel and resolves upstream from PyPI.
 
 `--platform` is repeated because pip matches tags literally rather than expanding a compatibility range, so a project publishing only against an older glibc floor is missed unless its tag is named.
 
