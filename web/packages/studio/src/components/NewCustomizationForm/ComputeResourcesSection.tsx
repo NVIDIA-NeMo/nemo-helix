@@ -31,7 +31,23 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     name: ['automodel.model', 'automodel.parallelism'],
   });
   const numExperts = useModelEntity(model)?.spec?.moe_config?.num_experts;
+  const isMoe = !!numExperts && numExperts > 1;
   const warning = expertParallelWarning(numExperts, parallelism ?? {});
+  const expertParallelSize = (
+    <ControlledSliderWithTextInput
+      useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
+      formFieldProps={{
+        slotLabel: 'Expert Parallel Size',
+        slotInfo:
+          "Shards a Mixture-of-Experts model's experts across GPUs. On more than one GPU, MoE models need a value above 1 that divides both the expert count and data parallel × context parallel size.",
+      }}
+      {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
+      min={1}
+      max={32}
+      step={1}
+      disabled={disabled}
+    />
+  );
   return (
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
@@ -55,19 +71,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         step={1}
         disabled={disabled}
       />
-      <ControlledSliderWithTextInput
-        useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
-        formFieldProps={{
-          slotLabel: 'Expert Parallel Size',
-          slotInfo:
-            "Shards a Mixture-of-Experts model's experts across GPUs. On more than one GPU, MoE models need a value above 1 that divides both the expert count and data parallel × context parallel size.",
-        }}
-        {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
-        min={1}
-        max={32}
-        step={1}
-        disabled={disabled}
-      />
+      {isMoe && expertParallelSize}
       {warning && (
         <Banner kind="inline" status="warning">
           {warning}
@@ -123,6 +127,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 step={1}
                 disabled={disabled}
               />
+              {!isMoe && expertParallelSize}
               <ControlledSwitch
                 useControllerProps={{ name: 'automodel.parallelism.sequence_parallel', control }}
                 formFieldProps={{
