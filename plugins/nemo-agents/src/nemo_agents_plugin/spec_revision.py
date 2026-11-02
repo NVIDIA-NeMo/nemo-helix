@@ -14,6 +14,7 @@ from nemo_agents_plugin.entities import ethos_fileset_name
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.log_utils import sanitize_for_log
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,19 @@ class SpecRevision:
     tracked_revision: str = ""
 
 
-async def read_spec_revision(files_client: AsyncFilesClient | None, *, workspace: str, agent_name: str) -> SpecRevision:
+async def read_spec_revision(
+    files_client: AsyncFilesClient | None,
+    *,
+    workspace: str,
+    agent_name: str,
+    source_fileset: FilesetRef | None = None,
+) -> SpecRevision:
     """Return what the agent's spec fileset is pinned to, or nothing if it cannot be read."""
     if files_client is None:
         return SpecRevision()
 
-    fileset_name = ethos_fileset_name(agent_name)
+    ref = parse_entity_ref(source_fileset or ethos_fileset_name(agent_name), default_workspace=workspace)
+    workspace, fileset_name = ref.workspace, ref.name
     try:
         response = await files_client.get_fileset(workspace=workspace, name=fileset_name)
         storage = response.data().storage
@@ -55,6 +63,7 @@ async def stage_with_spec_revision(
     workspace: str,
     agent_name: str,
     stage: Callable[[], Awaitable[T]],
+    source_fileset: FilesetRef | None = None,
 ) -> tuple[T, SpecRevision]:
     """Run *stage*, and report the revision the content it staged came from.
 
@@ -64,26 +73,34 @@ async def stage_with_spec_revision(
     if files_client is None:
         return await stage(), SpecRevision()
 
-    before = await read_spec_revision(files_client, workspace=workspace, agent_name=agent_name)
+    ref = parse_entity_ref(source_fileset or ethos_fileset_name(agent_name), default_workspace=workspace)
+    source_fileset = FilesetRef(f"{ref.workspace}/{ref.name}")
+    before = await read_spec_revision(
+        files_client, workspace=workspace, agent_name=agent_name, source_fileset=source_fileset
+    )
     staged = await stage()
-    after = await read_spec_revision(files_client, workspace=workspace, agent_name=agent_name)
+    after = await read_spec_revision(
+        files_client, workspace=workspace, agent_name=agent_name, source_fileset=source_fileset
+    )
     if after == before:
         return staged, after
 
     logger.info(
         "Spec fileset %s/%s moved from %r to %r while staging; staging it again",
-        sanitize_for_log(workspace),
-        sanitize_for_log(ethos_fileset_name(agent_name)),
+        sanitize_for_log(ref.workspace),
+        sanitize_for_log(ref.name),
         before.revision,
         after.revision,
     )
     staged = await stage()
-    settled = await read_spec_revision(files_client, workspace=workspace, agent_name=agent_name)
+    settled = await read_spec_revision(
+        files_client, workspace=workspace, agent_name=agent_name, source_fileset=source_fileset
+    )
     if settled != after:
         logger.warning(
             "Spec fileset %s/%s moved again while staging; recording no revision for it",
-            sanitize_for_log(workspace),
-            sanitize_for_log(ethos_fileset_name(agent_name)),
+            sanitize_for_log(ref.workspace),
+            sanitize_for_log(ref.name),
         )
         return staged, SpecRevision()
     return staged, settled

@@ -35,12 +35,14 @@ from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
+from nemo_helix_plugin.refs import FilesetRef
 
 NOW = datetime.now(timezone.utc)
 
@@ -199,16 +201,46 @@ class TestSpecRevisionSnapshot:
         )
 
         assert resp.status_code == 201
+        assert resp.json()["source_fileset"] == mock_entity_client.create.call_args[0][0].source_fileset
         return mock_entity_client.create.call_args[0][0]
 
-    def test_records_the_revision_the_deployment_stages(self) -> None:
+    @pytest.mark.parametrize("source_fileset", [None, FilesetRef("agent-source"), FilesetRef("sources/agent-source")])
+    def test_records_the_revision_the_deployment_stages(self, source_fileset: FilesetRef | None) -> None:
         files_client = _files_client(_github_storage(revision="abc123", original_revision="main"))
+        agent = _make_agent()
+        agent.reference = ReferenceConfig(fileset=source_fileset)
 
-        deployment = self._create(files_client)
+        deployment = self._create(files_client, agent=agent)
 
         assert deployment.spec_revision == "abc123"
         assert deployment.spec_tracked_revision == "main"
-        assert files_client.get_fileset.call_args.kwargs["name"] == "fabric-agent-ethos"
+        workspace = "sources" if source_fileset and "/" in source_fileset else "default"
+        name = "agent-source" if source_fileset else "fabric-agent-ethos"
+        assert deployment.source_fileset == (f"{workspace}/{name}" if source_fileset else None)
+        assert all(
+            call.kwargs == {"workspace": workspace, "name": name} for call in files_client.get_fileset.await_args_list
+        )
+
+    @pytest.mark.parametrize(
+        "error,status_code",
+        [(PluginClientNotFoundError(httpx.Response(404)), 400), (PermissionDeniedError(httpx.Response(403)), 403)],
+    )
+    def test_rejects_unavailable_explicit_source(self, error: Exception, status_code: int) -> None:
+        agent = _make_agent()
+        agent.reference = ReferenceConfig(fileset=FilesetRef("sources/agent-source"))
+        entity_client = AsyncMock()
+        entity_client.get.return_value = agent
+        files_client = AsyncMock()
+        files_client.get_fileset.side_effect = error
+
+        response = _test_client(entity_client, files_client).post(
+            "/apis/agents/v2/workspaces/default/deployments",
+            json={"agent": "fabric-agent", "name": "fabric-dep"},
+        )
+
+        assert response.status_code == status_code
+        assert "sources/agent-source" in response.json()["detail"]
+        entity_client.create.assert_not_awaited()
 
     def test_a_fileset_pinned_to_a_commit_tracks_nothing(self) -> None:
         sha = "1" * 40

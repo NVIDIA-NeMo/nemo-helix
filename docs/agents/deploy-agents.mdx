@@ -43,6 +43,10 @@ under `helix_registration.reference.container_image` alongside a runnable config
 without repeating `--image`. Deployment fails if no image is available; a pull or startup failure
 does not trigger fallback to another image.
 
+Deployments stage supporting files from `reference.fileset`, or `<name>-ethos` in the agent's workspace
+when no reference is set. An explicit reference must be accessible. The deployment snapshots the
+reference at creation; restarts use the same fileset, but its contents can change.
+
 ### Subprocess
 
 The platform starts the agent on its own host, assigns a port, and watches its health. No image or

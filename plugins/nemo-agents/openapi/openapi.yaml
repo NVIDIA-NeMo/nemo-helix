@@ -3001,6 +3001,11 @@ components:
             as ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed
             container env vars (never plaintext) for docker/k8s modes; ignored for
             subprocess.
+        source_fileset:
+          title: Source Fileset
+          description: Agent source fileset snapshotted at creation. When absent,
+            stages <agent>-ethos.
+          type: string
         spec_revision:
           type: string
           title: Spec Revision

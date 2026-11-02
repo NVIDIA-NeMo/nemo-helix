@@ -259,23 +259,26 @@ async def stage_fabric_ethos_config_files(
     rewritten_agent_config: dict[str, Any],
     agent_yaml_path: str,
     files_client: AsyncFilesClient | None = None,
+    source_fileset: FilesetRef | None = None,
 ) -> list[ConfigFile]:
-    """Download the Ethos fileset and return container ``config_files`` entries.
+    """Stage agent source as container ``config_files`` entries.
 
-    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry.
-    When available, maps every fileset file under the same
+    An explicit ``source_fileset`` must be readable. Otherwise, use the optional
+    Ethos fileset, falling back to inline ``agent.yaml`` when it is absent.
+    Maps every fileset file under the same
     ``base_dir`` as *agent_yaml_path*, substituting the rewritten YAML for
     ``agent.yaml``.
     """
     config_yaml = yaml.safe_dump(rewritten_agent_config, sort_keys=False)
-    if not agent_name:
+    if not agent_name and source_fileset is None:
         return [ConfigFile(path=agent_yaml_path, content=config_yaml)]
     if files_client is None:
-        raise FabricArtifactStagingError("Fabric Ethos staging requires an AsyncFilesClient.")
+        raise FabricArtifactStagingError("Agent source staging requires an AsyncFilesClient.")
 
-    fileset_name = ethos_fileset_name(agent_name)
+    ref = parse_entity_ref(source_fileset or ethos_fileset_name(agent_name), default_workspace=workspace)
+    workspace, fileset_name = ref.workspace, ref.name
     try:
-        with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
+        with tempfile.TemporaryDirectory(prefix=f".fabric-source-{agent_name}-") as tmp:
             tmp_path = Path(tmp)
             await _download_fileset(files_client, workspace=workspace, fileset_name=fileset_name, local_path=tmp_path)
             config_files = _collect_staged_config_files(
@@ -290,6 +293,8 @@ async def stage_fabric_ethos_config_files(
             _validate_staged_size(config_files, fileset_name)
             return config_files
     except FabricEthosFilesetNotFound as exc:
+        if source_fileset is not None:
+            raise FabricArtifactStagingError(f"Source fileset {workspace}/{fileset_name} was not found.") from exc
         logger.info(
             "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
             workspace,
@@ -317,7 +322,7 @@ def _collect_staged_config_files(
             continue
         rel = path.relative_to(root)
         if ".." in rel.parts:
-            raise FabricArtifactStagingError(f"Path escape in Ethos fileset: {rel.as_posix()!r}")
+            raise FabricArtifactStagingError(f"Path escape in source fileset: {rel.as_posix()!r}")
         if rel.name in _CONTRACT_FILENAMES:
             continue
         container_path = str(base_dir / PurePosixPath(rel.as_posix()))
@@ -328,7 +333,7 @@ def _collect_staged_config_files(
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError as exc:
                 raise FabricArtifactStagingError(
-                    f"Ethos fileset contains non-UTF-8 file {rel.as_posix()!r}; staged artifacts must be text"
+                    f"Source fileset contains non-UTF-8 file {rel.as_posix()!r}; staged artifacts must be text"
                 ) from exc
         config_files.append(ConfigFile(path=container_path, content=content))
 
@@ -341,7 +346,7 @@ def _validate_staged_size(config_files: list[ConfigFile], fileset_name: str) -> 
     total = sum(len(config_file.content.encode("utf-8")) for config_file in config_files)
     if total > MAX_ETHOS_STAGED_BYTES:
         raise FabricArtifactStagingError(
-            f"Ethos fileset {fileset_name!r} stages {total} bytes across {len(config_files)} files, "
+            f"Source fileset {fileset_name!r} stages {total} bytes across {len(config_files)} files, "
             f"exceeding the {MAX_ETHOS_STAGED_BYTES} byte limit for container config delivery"
         )
 

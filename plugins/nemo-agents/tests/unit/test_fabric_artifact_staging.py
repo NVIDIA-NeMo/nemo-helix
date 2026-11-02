@@ -232,9 +232,11 @@ async def test_stage_fabric_ethos_config_files_plugin_client_not_found_error_fal
 
 @pytest.mark.usefixtures("patched_download_fileset")
 @pytest.mark.asyncio
-async def test_stage_fabric_ethos_config_files_stages_sibling_artifacts() -> None:
+@pytest.mark.parametrize("source_fileset", [None, FilesetRef("agent-source"), FilesetRef("sources/agent-source")])
+async def test_stage_fabric_ethos_config_files_stages_sibling_artifacts(source_fileset: FilesetRef | None) -> None:
     async def _fake_download(*, local_path: str, fileset: str | None, workspace: str | None) -> None:
-        del fileset, workspace
+        assert fileset == ("agent-source" if source_fileset else "fabric-agent-ethos")
+        assert workspace == ("sources" if source_fileset and "/" in source_fileset else "default")
         root = Path(local_path)
         (root / "agent.yaml").write_text("stale: true\n", encoding="utf-8")
         (root / "prompts").mkdir()
@@ -256,6 +258,7 @@ async def test_stage_fabric_ethos_config_files_stages_sibling_artifacts() -> Non
         rewritten_agent_config=rewritten,
         agent_yaml_path="/workspace/agent.yaml",
         files_client=files_client,
+        source_fileset=source_fileset,
     )
 
     by_path = {item.path: item.content for item in result}
@@ -267,6 +270,27 @@ async def test_stage_fabric_ethos_config_files_stages_sibling_artifacts() -> Non
     loaded = yaml.safe_load(by_path["/workspace/agent.yaml"])
     assert loaded["models"]["default"]["settings"]["base_url"] == "http://igw"
     assert "stale" not in by_path["/workspace/agent.yaml"]
+
+
+@pytest.mark.usefixtures("patched_download_fileset")
+@pytest.mark.parametrize("error", [_plugin_not_found(), PermissionError("Access denied")])
+async def test_stage_fabric_ethos_config_files_requires_explicit_source(error: Exception) -> None:
+    files_client = AsyncMock()
+    files_client.download.side_effect = error
+
+    with pytest.raises((FabricArtifactStagingError, PermissionError)):
+        await stage_fabric_ethos_config_files(
+            workspace="default",
+            agent_name="fabric-agent",
+            rewritten_agent_config=_fabric_config(),
+            agent_yaml_path="/workspace/agent.yaml",
+            files_client=files_client,
+            source_fileset=FilesetRef("sources/agent-source"),
+        )
+
+    files_client.download.assert_awaited_once()
+    assert files_client.download.call_args.kwargs["fileset"] == "agent-source"
+    assert files_client.download.call_args.kwargs["workspace"] == "sources"
 
 
 @pytest.mark.usefixtures("patched_download_fileset")
