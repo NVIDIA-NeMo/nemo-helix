@@ -9,14 +9,9 @@ export const ACTIVE_NAV_ITEM_CLASS =
 // KUI fixes rows at 36px; size them to their content instead.
 export const COMPACT_NAV_ROW_CLASS = 'h-auto min-h-0';
 
-// `px-0` drops KUI's inset so a sub-item's hover spans the same width as a top-level row.
-export const SUB_LIST_CLASS = 'px-0';
-
 // Row padding by role. `classnames` cannot resolve Tailwind conflicts — `cn('px-4', 'pr-10')`
 // emits both and stylesheet order picks the winner — so each role names one padding set.
 export const NAV_ROW_PADDING = {
-  /** Carries the leading indent its sub-list gave up (see SUB_LIST_CLASS). */
-  subItem: 'pl-6 py-1',
   default: 'py-1',
   /** With the list's own 8px inset, centers the icon in the 48px collapsed rail. */
   rail: 'py-1 px-2',
