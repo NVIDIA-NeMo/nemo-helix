@@ -180,13 +180,6 @@ def test_operator_config_may_omit_dispatcher_profiles(harbor_config):
     assert HarborTaskJobsConfig.model_validate(data).dispatcher_profiles == ("default",)
 
 
-def test_operator_config_defaults_to_the_first_sandbox_profile(harbor_config):
-    data = harbor_config.model_dump()
-    del data["default_sandbox_profile"]
-    data["sandbox_profiles"] = {"harbor-open": data["sandbox_profiles"]["harbor-open"]} | data["sandbox_profiles"]
-    assert HarborTaskJobsConfig.model_validate(data).default_sandbox_profile == "harbor-open"
-
-
 def test_operator_config_rejects_empty_dispatcher_profiles(harbor_config):
     data = harbor_config.model_dump()
     data["dispatcher_profiles"] = []

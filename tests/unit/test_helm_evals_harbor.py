@@ -98,7 +98,6 @@ def test_platform_config_profile_is_added_beside_harbor_standard() -> None:
 
     config = HarborTaskJobsConfig.model_validate(harbor)
     assert sorted(config.sandbox_profiles) == ["harbor-open", "harbor-standard"]
-    # Helm renders profiles alphabetically, so the first one is harbor-open; the chart's default keeps harbor-standard.
     assert config.default_sandbox_profile == "harbor-standard"
 
 
