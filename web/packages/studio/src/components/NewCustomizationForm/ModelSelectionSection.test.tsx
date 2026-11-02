@@ -22,6 +22,7 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
             model: 'ws/moe',
             entity: {
               spec: {
+                checkpoint_model_name: 'NemotronHForCausalLM',
                 moe_config: { num_experts: 128, num_experts_per_tok: 6, num_expert_layers: 23 },
               },
             } as ModelEntity,
@@ -35,6 +36,22 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
         onClick={() => onValueChange({ model: 'ws/dense', entity: { spec: {} } as ModelEntity })}
       >
         Dense
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onValueChange({
+            model: 'ws/mixtral',
+            entity: {
+              spec: {
+                checkpoint_model_name: 'MixtralForCausalLM',
+                moe_config: { num_experts: 8, num_experts_per_tok: 2, num_expert_layers: 32 },
+              },
+            } as ModelEntity,
+          })
+        }
+      >
+        Mixtral
       </button>
     </>
   ),
@@ -73,7 +90,7 @@ const Harness: FC<HarnessProps> = ({ gpus, expertParallelSize }) => {
 };
 
 describe('ModelSelectionSection expert parallel size', () => {
-  it('fills the largest valid size when a MoE model is selected', async () => {
+  it('fills the largest valid size when a Nemotron-H MoE model is selected', async () => {
     render(<Harness gpus={4} />);
     await userEvent.click(screen.getByRole('button', { name: 'MoE' }));
     expect(screen.getByTestId('ep')).toHaveTextContent('4');
@@ -87,6 +104,7 @@ describe('ModelSelectionSection expert parallel size', () => {
 
   it.each([
     ['a dense model', 'Dense', 4],
+    ['another MoE architecture', 'Mixtral', 4],
     ['a single GPU', 'MoE', 1],
   ])('leaves the size alone for %s', async (_, button, gpus) => {
     render(<Harness gpus={gpus} />);

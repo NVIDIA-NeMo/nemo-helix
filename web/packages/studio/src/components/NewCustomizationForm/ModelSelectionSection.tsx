@@ -44,7 +44,7 @@ export const ModelSelectionSection = () => {
     modelField.onChange(selection.model);
     if (backend !== 'automodel') return;
     const expertParallelSize = suggestedExpertParallelSize(
-      selection.entity?.spec?.moe_config?.num_experts,
+      selection.entity?.spec,
       getValues('automodel.parallelism') ?? {}
     );
     if (expertParallelSize !== undefined) {

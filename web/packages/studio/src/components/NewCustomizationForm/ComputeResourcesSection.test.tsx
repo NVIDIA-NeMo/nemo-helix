@@ -42,7 +42,10 @@ const Harness: FC<{ expertParallelSize?: number }> = ({ expertParallelSize }) =>
 };
 
 const moeModel = {
-  spec: { moe_config: { num_experts: 128, num_experts_per_tok: 6, num_expert_layers: 23 } },
+  spec: {
+    checkpoint_model_name: 'NemotronHForCausalLM',
+    moe_config: { num_experts: 128, num_experts_per_tok: 6, num_expert_layers: 23 },
+  },
 } as ModelEntity;
 
 const setGpusPerNode = async (gpus: number) => {
@@ -73,7 +76,7 @@ describe('ComputeResourcesSection expert parallel size', () => {
     modelEntity.current = moeModel;
     render(<Harness expertParallelSize={3} />);
     expect(screen.getByText('Expert Parallel Size')).toBeVisible();
-    expect(screen.getByText(/without an expert parallel size of 2, 4/)).toBeInTheDocument();
+    expect(screen.getByText(/need an expert parallel size of 2 or 4/)).toBeInTheDocument();
   });
 
   it('keeps the field in Advanced Parallelism for a dense model', () => {

@@ -33,11 +33,12 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
     control,
     name: ['automodel.model', 'automodel.parallelism'],
   });
-  const numExperts = useModelEntity(model)?.spec?.moe_config?.num_experts;
+  const spec = useModelEntity(model)?.spec;
+  const numExperts = spec?.moe_config?.num_experts;
   const isMoe = !!numExperts && numExperts > 1;
   const warning = expertParallelWarning(numExperts, parallelism ?? {});
   const refillExpertParallelSize = () => {
-    const size = suggestedExpertParallelSize(numExperts, getValues('automodel.parallelism') ?? {});
+    const size = suggestedExpertParallelSize(spec, getValues('automodel.parallelism') ?? {});
     if (size !== undefined) setValue('automodel.parallelism.expert_parallel_size', size);
   };
   const onGpuLayoutChange = {
