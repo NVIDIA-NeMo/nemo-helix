@@ -68,21 +68,12 @@ const decodeSegment = (segment: string): string => {
   }
 };
 
-/** The URL's path alone, so a gateway route in the query or fragment of an external endpoint
- *  doesn't read as one. Relative URLs resolve against a placeholder origin; the path survives. */
-const pathnameOf = (url: string | undefined): string | undefined => {
-  if (!url) return undefined;
-  try {
-    return new URL(url, 'http://placeholder.invalid').pathname;
-  } catch {
-    return undefined;
-  }
-};
-
 export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
   const target = asRecord(asRecord(spec)?.target);
   const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
-  const match = pathnameOf(asNonEmptyString(endpoint?.url))?.match(GATEWAY_ROUTE);
+  // Drop the query and fragment so a route that only appears there doesn't match.
+  const path = asNonEmptyString(endpoint?.url)?.split(/[?#]/, 1)[0];
+  const match = path?.match(GATEWAY_ROUTE);
   if (!match) {
     return null;
   }
