@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from typing import Dict, Optional
+from typing import Annotated, Dict, Optional
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Body, Request, status
 from nhx.guardrails.api.dependencies import RailsServiceDep
 from nhx.guardrails.app.handlers.checks import CheckRequestHandler
 from nhx.guardrails.entities.values.check import (
@@ -40,7 +40,14 @@ def responses_dict(additional: Optional[Dict] = None):
 )
 async def check(
     workspace: str,
-    request_body: GuardrailCheckRequest,
+    request_body: Annotated[
+        GuardrailCheckRequest,
+        Body(
+            openapi_examples={
+                "check": {"value": {"model": "YOUR_MODEL_NAME", "messages": [{"role": "user", "content": "Hello!"}]}}
+            }
+        ),
+    ],
     request: Request,
     rails_service: RailsServiceDep,
 ):

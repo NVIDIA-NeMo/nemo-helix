@@ -5,11 +5,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.intake.span_attributes import GATEWAY_CALL_ATTRIBUTE, USAGE_SUPERSEDED_ATTRIBUTE
 
 OTLP_INGEST = "/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
 TRACES = "/apis/intake/v2/workspaces/default/traces"
@@ -17,6 +18,9 @@ TRACE_METRICS = "/apis/intake/v2/workspaces/default/traces/metrics"
 SESSIONS = "/apis/intake/v2/workspaces/default/sessions"
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 EXPERIMENTS = "/apis/intake/v2/workspaces/default/experiments"
+ATIF_INGEST = "/apis/intake/v2/workspaces/default/ingest/atif"
+DIRECT_INGEST = "/apis/intake/v2/workspaces/default/ingest/spans"
+SPANS = "/apis/intake/v2/workspaces/default/spans"
 
 
 def test_minimal_repro_counts_shared_input_tokens_once(client: TestClient, make_otlp_request) -> None:
@@ -413,6 +417,401 @@ def test_evaluation_views_count_the_three_level_shape_once(client: TestClient, m
     assert body["cost_usd"]["sum"] == pytest.approx(0.012)
 
 
+def _trial_with_linked_gateway_calls(session_id: str, *, evaluation_name: str | None = None) -> list[dict[str, Any]]:
+    """An agent that sends a ``traceparent``: the gateway's span for each call sits beneath the agent's own.
+
+    The agent's own counts are off by a few tokens, as agents' often are; the gateway's are what the provider billed.
+    """
+    return [
+        _span(name="trial", span_id=1, session_id=session_id, evaluation_name=evaluation_name, test_case_name="case"),
+        _span(name="codex-turn", span_id=2, parent_span_id=1, session_id=session_id, kind="AGENT"),
+        _span(
+            name="openai.responses",
+            span_id=3,
+            parent_span_id=2,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=98,
+            output_tokens=9,
+        ),
+        _span(
+            name="openai.responses",
+            span_id=4,
+            parent_span_id=2,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=197,
+            output_tokens=21,
+        ),
+        _span(
+            name="responses",
+            span_id=5,
+            parent_span_id=3,
+            session_id=session_id,
+            input_tokens=100,
+            output_tokens=10,
+            cached_tokens=60,
+            gateway_call=True,
+        ),
+        _span(
+            name="responses",
+            span_id=6,
+            parent_span_id=4,
+            session_id=session_id,
+            input_tokens=200,
+            output_tokens=20,
+            gateway_call=True,
+        ),
+    ]
+
+
+def test_gateway_call_spans_in_the_agents_trace_count_each_call_once(client: TestClient, make_otlp_request) -> None:
+    session_id = "gateway-linked"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(20),
+        spans=_trial_with_linked_gateway_calls(session_id),
+    )
+
+    for totals in (_trace(client, session_id), _session(client, session_id)):
+        assert (totals["input_tokens"], totals["output_tokens"], totals["cached_tokens"]) == (300, 30, 60)
+
+
+def test_the_agents_counts_still_count_when_the_gateway_reports_no_usage(client: TestClient, make_otlp_request) -> None:
+    """A gateway span without a usage field (an aborted call) doesn't hide the agent's own count of it."""
+    session_id = "gateway-no-usage"
+    spans = [span for span in _trial_with_linked_gateway_calls(session_id) if span["name"] != "responses"]
+    spans.append(_span(name="responses", span_id=5, parent_span_id=3, session_id=session_id, gateway_call=True))
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(21), spans=spans)
+
+    assert _trace(client, session_id)["input_tokens"] == 295
+
+
+def test_a_gateway_call_without_usage_leaves_the_agents_counts_for_the_whole_trace(
+    client: TestClient, make_otlp_request
+) -> None:
+    """Counting only the gateway's reported call would drop the other; counting both would double the first."""
+    session_id = "gateway-partial-linked"
+    spans = _trial_with_linked_gateway_calls(session_id)
+    del spans[-1]["attributes"]["gen_ai.usage.input_tokens"], spans[-1]["attributes"]["gen_ai.usage.output_tokens"]
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(23), spans=spans)
+
+    trace = _trace(client, session_id)
+    assert (trace["input_tokens"], trace["output_tokens"]) == (295, 30)
+
+
+def test_a_marked_trajectory_still_counts_when_the_gateway_missed_a_calls_usage(
+    client: TestClient, make_otlp_request
+) -> None:
+    session_id = "gateway-partial-marked"
+    trial, agent = _gateway_and_agent_traces(session_id, marked=True)
+    del trial[-1]["attributes"]["gen_ai.usage.input_tokens"], trial[-1]["attributes"]["gen_ai.usage.output_tokens"]
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(24), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(25), spans=agent)
+
+    session = _session(client, session_id)
+    assert (session["input_tokens"], session["output_tokens"]) == (295, 30)
+
+
+def test_gateway_cost_on_only_some_calls_leaves_the_agents_cost_for_the_trace(
+    client: TestClient, make_otlp_request
+) -> None:
+    """Summing the one priced gateway call would drop the other call's cost; the agent priced both."""
+    session_id = "gateway-partial-cost"
+    spans = _trial_with_linked_gateway_calls(session_id)
+    spans[2]["attributes"]["llm.cost.total"] = 0.03
+    spans[3]["attributes"]["llm.cost.total"] = 0.05
+    spans[4]["attributes"]["llm.cost.total"] = 0.01
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(46), spans=spans)
+
+    trace = _trace(client, session_id)
+    assert trace["input_tokens"] == 300
+    assert trace["cost_usd"] == pytest.approx(0.08)
+
+
+def test_a_gateway_span_reporting_zero_tokens_still_wins(client: TestClient, make_otlp_request) -> None:
+    """A stored 0 is a report: the provider billed nothing, so the agent's estimate doesn't stand in for it."""
+    session_id = "gateway-zero"
+    spans = [span for span in _trial_with_linked_gateway_calls(session_id) if span["name"] != "responses"]
+    spans.append(
+        _span(name="responses", span_id=5, parent_span_id=3, session_id=session_id, input_tokens=0, gateway_call=True)
+    )
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(22), spans=spans)
+
+    assert _trace(client, session_id)["input_tokens"] == 0
+
+
+def _gateway_and_agent_traces(
+    session_id: str,
+    *,
+    marked: bool,
+    evaluation_name: str | None = None,
+    agent_cost_usd: float | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A trial whose agent sent no ``traceparent``: two traces of one session.
+
+    The trial trace holds the gateway's spans for the agent's two calls. The agent's published trajectory is a trace
+    of its own that reports the same two calls again, marked as superseded when the publisher knows the gateway
+    recorded them.
+    """
+    trial = [
+        _span(name="trial", span_id=1, session_id=session_id, evaluation_name=evaluation_name, test_case_name="case"),
+        _span(
+            name="responses",
+            span_id=2,
+            parent_span_id=1,
+            session_id=session_id,
+            input_tokens=100,
+            output_tokens=10,
+            gateway_call=True,
+        ),
+        _span(
+            name="responses",
+            span_id=3,
+            parent_span_id=1,
+            session_id=session_id,
+            input_tokens=200,
+            output_tokens=20,
+            gateway_call=True,
+        ),
+    ]
+    agent = [
+        _span(
+            name="invoke_agent",
+            span_id=11,
+            session_id=session_id,
+            kind="AGENT",
+            evaluation_name=evaluation_name,
+            test_case_name="case",
+            cost_usd=agent_cost_usd,
+            usage_superseded=marked,
+        ),
+        _span(
+            name="chat",
+            span_id=12,
+            parent_span_id=11,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=98,
+            output_tokens=9,
+        ),
+        _span(
+            name="chat",
+            span_id=13,
+            parent_span_id=11,
+            session_id=session_id,
+            kind="LLM",
+            input_tokens=197,
+            output_tokens=21,
+        ),
+    ]
+    return trial, agent
+
+
+def _ingest_both(client: TestClient, make_otlp_request, session_id: str, number: int, **kwargs: Any) -> None:
+    trial, agent = _gateway_and_agent_traces(session_id, **kwargs)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(number), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(number + 1), spans=agent)
+
+
+def test_a_marked_trajectory_doesnt_add_the_calls_the_gateway_recorded(client: TestClient, make_otlp_request) -> None:
+    session_id = "gateway-marked"
+    _ingest_both(client, make_otlp_request, session_id, 30, marked=True)
+
+    session = _session(client, session_id)
+    assert (session["input_tokens"], session["output_tokens"], session["trace_count"]) == (300, 30, 2)
+    metrics = _trace_metrics(client, session_id)
+    assert (metrics["run_count"], metrics["input_tokens"]["sum"], metrics["output_tokens"]["sum"]) == (2, 300, 30)
+
+
+def test_an_unmarked_trajectory_still_adds_its_usage(client: TestClient, make_otlp_request) -> None:
+    """Without the mark Intake can't tell a repeat from other calls, so a session adds up every trace."""
+    session_id = "gateway-unmarked"
+    _ingest_both(client, make_otlp_request, session_id, 32, marked=False)
+
+    assert _session(client, session_id)["input_tokens"] == 595
+    assert _trace_metrics(client, session_id)["input_tokens"]["sum"] == 595
+
+
+def test_a_marked_trajectory_keeps_its_own_totals_for_inspection(client: TestClient, make_otlp_request) -> None:
+    session_id = "gateway-marked-trace"
+    _ingest_both(client, make_otlp_request, session_id, 34, marked=True)
+
+    traces = client.get(TRACES, params={"filter[session_id]": session_id})
+    assert traces.status_code == 200, traces.text
+    assert sorted(trace["input_tokens"] for trace in traces.json()["data"]) == [295, 300]
+
+
+def test_a_metric_the_gateway_doesnt_report_still_counts_from_a_marked_trajectory(
+    client: TestClient, make_otlp_request
+) -> None:
+    session_id = "gateway-no-cost"
+    _ingest_both(client, make_otlp_request, session_id, 36, marked=True, agent_cost_usd=0.02)
+
+    session = _session(client, session_id)
+    assert session["input_tokens"] == 300
+    assert session["cost_usd"] == pytest.approx(0.02)
+    metrics = _trace_metrics(client, session_id)
+    assert metrics["input_tokens"]["sum"] == 300
+    assert metrics["cost_usd"]["sum"] == pytest.approx(0.02)
+
+
+def test_evaluation_views_count_a_marked_sessions_calls_once(client: TestClient, make_otlp_request) -> None:
+    evaluation_name = "gateway-marked-eval"
+    _create_evaluation(client, evaluation_name)
+    _ingest_both(
+        client, make_otlp_request, "gateway-marked-eval-trial", 38, marked=True, evaluation_name=evaluation_name
+    )
+
+    listed = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert listed.status_code == 200, listed.text
+    [row] = listed.json()["data"]
+    assert (row["input_tokens"], row["output_tokens"]) == (300, 30)
+    by_tokens = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions", params={"sort": "-tokens"})
+    assert by_tokens.status_code == 200, by_tokens.text
+    assert by_tokens.json()["data"][0]["input_tokens"] == 300
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert evaluation.status_code == 200, evaluation.text
+    assert evaluation.json()["tokens"]["sum"] == pytest.approx(330)
+
+
+def test_a_marked_trajectory_counts_when_another_trace_holds_gateway_calls_nothing_counted(
+    client: TestClient, make_otlp_request
+) -> None:
+    """Excluding the trajectory because one trace's calls came from the gateway would lose the uncounted call."""
+    session_id = "gateway-uncounted-marked"
+    linked = [
+        _span(name="codex-turn", span_id=21, session_id=session_id, kind="AGENT"),
+        _span(name="chat", span_id=22, parent_span_id=21, session_id=session_id, kind="LLM", input_tokens=98),
+        _span(
+            name="responses",
+            span_id=23,
+            parent_span_id=22,
+            session_id=session_id,
+            input_tokens=100,
+            gateway_call=True,
+        ),
+    ]
+    uncounted = [
+        _span(name="trial", span_id=31, session_id=session_id),
+        _span(name="responses", span_id=32, parent_span_id=31, session_id=session_id, gateway_call=True),
+    ]
+    _, agent = _gateway_and_agent_traces(session_id, marked=True)
+    for number, spans in ((47, linked), (48, uncounted), (49, agent)):
+        _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(number), spans=spans)
+
+    assert _session(client, session_id)["input_tokens"] == 295
+    assert _trace_metrics(client, session_id)["input_tokens"]["sum"] == 295
+
+
+def test_a_marked_trace_with_its_own_gateway_calls_still_counts_them(client: TestClient, make_otlp_request) -> None:
+    """A publisher marks every gateway-recorded trial; when the agent sent a traceparent the calls are in its trace."""
+    session_id = "gateway-linked-marked"
+    spans = _trial_with_linked_gateway_calls(session_id)
+    spans[0]["attributes"][USAGE_SUPERSEDED_ATTRIBUTE] = True
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(42), spans=spans)
+
+    assert _session(client, session_id)["input_tokens"] == 300
+
+
+def test_evaluation_cost_counts_the_gateways_cost_over_a_marked_trajectorys(
+    client: TestClient, make_otlp_request
+) -> None:
+    evaluation_name = "gateway-marked-cost-eval"
+    _create_evaluation(client, evaluation_name)
+    session_id = "gateway-marked-cost-trial"
+    trial, agent = _gateway_and_agent_traces(
+        session_id, marked=True, evaluation_name=evaluation_name, agent_cost_usd=0.05
+    )
+    for span in trial[1:]:
+        span["attributes"]["llm.cost.total"] = 0.01
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(44), spans=trial)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(45), spans=agent)
+
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert evaluation.status_code == 200, evaluation.text
+    assert evaluation.json()["cost_usd"]["sum"] == pytest.approx(0.02)
+
+
+def test_a_marked_atif_trajectory_doesnt_add_the_calls_the_gateway_recorded(
+    client: TestClient, make_otlp_request
+) -> None:
+    session_id = "gateway-marked-atif"
+    trial, _ = _gateway_and_agent_traces(session_id, marked=True)
+    _ingest(client, make_otlp_request, session_id=session_id, trace_id=_trace_id(40), spans=trial)
+    response = client.post(
+        ATIF_INGEST,
+        json={
+            "schema_version": "ATIF-v1.7",
+            "session_id": session_id,
+            "agent": {"name": "codex", "version": "1"},
+            "extra": {USAGE_SUPERSEDED_ATTRIBUTE: True},
+            "steps": [
+                {
+                    "step_id": 1,
+                    "source": "agent",
+                    "message": "hi",
+                    "metrics": {"prompt_tokens": 98, "completion_tokens": 9},
+                },
+                {
+                    "step_id": 2,
+                    "source": "agent",
+                    "message": "done",
+                    "metrics": {"prompt_tokens": 197, "completion_tokens": 21},
+                },
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    session = _session(client, session_id)
+    assert (session["input_tokens"], session["trace_count"]) == (300, 2)
+
+
+def test_direct_span_ingest_stores_both_attributes_where_the_usage_rule_reads_them(client: TestClient) -> None:
+    session_id = "gateway-direct"
+    started = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+
+    def span(trace_id: str, span_id: str, **fields: Any) -> dict[str, Any]:
+        return {"trace_id": trace_id, "span_id": span_id, "session_id": session_id, "started_at": started, **fields}
+
+    response = client.post(
+        DIRECT_INGEST,
+        json={
+            "source": "provider-store",
+            "spans": [
+                span("trial-trace", "trial", name="trial", kind="AGENT"),
+                span(
+                    "trial-trace",
+                    "call",
+                    parent_span_id="trial",
+                    name="responses",
+                    kind="LLM",
+                    attributes={GATEWAY_CALL_ATTRIBUTE: True, "gen_ai.usage.input_tokens": 7},
+                ),
+                span("agent-trace", "agent", name="agent", kind="AGENT", attributes={USAGE_SUPERSEDED_ATTRIBUTE: True}),
+                span(
+                    "agent-trace",
+                    "chat",
+                    parent_span_id="agent",
+                    name="chat",
+                    kind="LLM",
+                    attributes={"gen_ai.usage.input_tokens": 5},
+                ),
+            ],
+        },
+    )
+    assert response.status_code == 201, response.text
+
+    assert _session(client, session_id)["input_tokens"] == 7
+    spans = client.get(SPANS, params={"filter[session_id]": session_id, "page_size": 10})
+    assert spans.status_code == 200, spans.text
+    raw = " ".join(row.get("raw_attributes") or "" for row in spans.json()["data"])
+    assert GATEWAY_CALL_ATTRIBUTE not in raw and USAGE_SUPERSEDED_ATTRIBUTE not in raw
+
+
 def test_evaluation_session_token_sort_uses_deduped_totals(client: TestClient, make_otlp_request) -> None:
     """A parent total must not push a small call ahead of a larger one."""
     evaluation_name = "usage-rollup-sort"
@@ -541,8 +940,14 @@ def _span(
     evaluation_name: str | None = None,
     test_case_name: str | None = None,
     start_time_unix_nano: int | None = None,
+    gateway_call: bool = False,
+    usage_superseded: bool = False,
 ) -> dict[str, Any]:
     attributes: dict[str, Any] = {"gen_ai.conversation.id": session_id}
+    if gateway_call:
+        attributes[GATEWAY_CALL_ATTRIBUTE] = True
+    if usage_superseded:
+        attributes[USAGE_SUPERSEDED_ATTRIBUTE] = True
     if kind is not None:
         attributes["openinference.span.kind"] = kind
     if operation is not None:
