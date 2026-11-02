@@ -54,7 +54,6 @@ import {
   ACTION_SEARCH_PARAM,
   type AgentDetailTab,
   DEFAULT_TAB,
-  DEPLOYMENT_STATUS_TABS,
   EVAL_TABS,
   isAgentDetailTab,
   isOptimizationView,
@@ -123,13 +122,14 @@ export const AgentDetailRoute: FC = () => {
     agentName,
     selectedDeploymentName,
     evalsEnabled: EVAL_TABS.has(selectedTab),
-    pollDeployments: DEPLOYMENT_STATUS_TABS.has(selectedTab),
   });
   const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
   const specSource = agentSpecSource(specFileset);
 
   useEffect(() => {
-    if (selectedTab === 'chat' && agentName) void refetchDeployments({ cancelRefetch: false });
+    if (selectedTab === 'chat' && agentName) {
+      void refetchDeployments({ cancelRefetch: false });
+    }
   }, [selectedTab, agentName, refetchDeployments]);
 
   useBreadcrumbs({

@@ -60,8 +60,6 @@ interface UseAgentPanelParams {
   selectedDeploymentName?: string;
   /** Fetch and poll evaluations; off for tabs that don't show them. */
   evalsEnabled?: boolean;
-  /** Keep polling deployments while idle; transitional deployments are polled regardless. */
-  pollDeployments?: boolean;
 }
 
 export const useAgentDetails = ({
@@ -69,7 +67,6 @@ export const useAgentDetails = ({
   agentName,
   selectedDeploymentName,
   evalsEnabled = true,
-  pollDeployments = true,
 }: UseAgentPanelParams) => {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -90,8 +87,8 @@ export const useAgentDetails = ({
     query: {
       enabled: !!agentName,
       // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
-      // so the panel reflects controller-side progress; fall back to the long interval
-      // otherwise to match the agents table.
+      // so the panel reflects controller-side progress; otherwise use the long interval
+      // to match the agents table.
       refetchInterval: (query) => {
         const deployments = query.state.data?.data ?? [];
         const transitional = deployments.some(
@@ -99,8 +96,10 @@ export const useAgentDetails = ({
             d.agent === agentName &&
             (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
         );
-        if (transitional) return JOB_POLLING_INTERVAL_MS;
-        return pollDeployments ? JOB_POLLING_INTERVAL_LONG : false;
+        if (transitional) {
+          return JOB_POLLING_INTERVAL_MS;
+        }
+        return JOB_POLLING_INTERVAL_LONG;
       },
     },
   });

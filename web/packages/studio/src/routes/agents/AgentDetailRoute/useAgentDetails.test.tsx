@@ -29,11 +29,12 @@ vi.mock('@studio/api/evaluation/evaluator-jobs', () => ({ fetchEvaluatorJobs: vi
 
 const AGENT = 'my-agent';
 
+const queryClient = new QueryClient();
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 );
 
-const render = (opts: { evalsEnabled?: boolean; pollDeployments?: boolean }) =>
+const render = (opts: { evalsEnabled?: boolean }) =>
   renderHook(() => useAgentDetails({ workspace: 'default', agentName: AGENT, ...opts }), {
     wrapper,
   });
@@ -59,14 +60,13 @@ describe('useAgentDetails', () => {
     expect(lastQueryOptions(useListEvaluations).enabled).toBe(true);
   });
 
-  it('stops idle deployment polling when not requested', () => {
-    render({ pollDeployments: false });
-    expect(deploymentInterval('running')).toBe(false);
+  it('polls transitional deployments on the short interval', () => {
+    render({});
     expect(deploymentInterval('pending')).toBe(JOB_POLLING_INTERVAL_MS);
   });
 
-  it('polls idle deployments on the long interval when requested', () => {
-    render({ pollDeployments: true });
+  it('polls idle deployments on the long interval', () => {
+    render({});
     expect(deploymentInterval('running')).toBe(JOB_POLLING_INTERVAL_LONG);
   });
 });
