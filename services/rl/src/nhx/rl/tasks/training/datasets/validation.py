@@ -332,7 +332,7 @@ class DatasetValidator:
                 logger.debug(f"{source}:{line_number} does not conform to the expected schema: {e}")
                 raise DatasetFormatError(f"{source} line {line_number} does not conform to the expected schema: {e}")
             validated_rows += 1
-            self.max_images_per_prompt = max(self.max_images_per_prompt, _count_image_parts(obj))
+            self.max_images_per_prompt = max(self.max_images_per_prompt, _count_prompt_images(obj))
             if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
                 logger.info("Validated %s rows in %s", validated_rows, source)
 
@@ -343,9 +343,20 @@ class DatasetValidator:
         return validated_rows
 
 
+def _count_prompt_images(row: Any) -> int:
+    """Image parts in the Gym prompt. ``info`` and the rest of the row are metadata."""
+    if not isinstance(row, dict):
+        return 0
+    params = row.get("responses_create_params")
+    if not isinstance(params, dict):
+        return 0
+    return _count_image_parts(params.get("input"))
+
+
 def _count_image_parts(value: Any) -> int:
     if isinstance(value, dict):
-        here = 1 if value.get("type") in _IMAGE_PART_TYPES else 0
+        part_type = value.get("type")
+        here = 1 if isinstance(part_type, str) and part_type in _IMAGE_PART_TYPES else 0
         return here + sum(_count_image_parts(child) for child in value.values())
     if isinstance(value, list):
         return sum(_count_image_parts(child) for child in value)

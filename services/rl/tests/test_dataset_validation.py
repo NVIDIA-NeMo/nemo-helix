@@ -70,6 +70,32 @@ def test_agent_specific_fields_are_preserved() -> None:
     assert parsed.model_dump()["expected_answer"] == "4"
 
 
+def test_image_count_reads_the_prompt_and_ignores_metadata(tmp_path: Path) -> None:
+    row = {
+        **VERIFIERS_ROW,
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "a.png"}},
+                        {"type": ["image"]},
+                        {"type": "text", "text": "read"},
+                    ],
+                }
+            ]
+        },
+        "info": {"type": ["image"], "nested": {"type": "image_url"}},
+    }
+    path = tmp_path / "train.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    validator = DatasetValidator(training_type=TrainingType.GRPO)
+    validator.validate_dataset(str(path))
+
+    assert validator.max_images_per_prompt == 1
+
+
 def test_validate_dataset_compiles_schema_once(tmp_path: Path, mocker) -> None:
     path = tmp_path / "train.jsonl"
     path.write_text("".join(json.dumps(VERIFIERS_ROW) + "\n" for _ in range(50)))
