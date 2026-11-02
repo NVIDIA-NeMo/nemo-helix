@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""FastAPI exception handlers for typed client and entity client exceptions.
+"""Shared FastAPI handlers for typed client, entity client, and unexpected errors.
 
 When a service makes an internal typed-client call to another service and receives
 an HTTP error, the client raises ``NemoHTTPError`` (NotFoundError, ConflictError, etc.).
@@ -19,18 +19,11 @@ Usage:
     # In your service's FastAPI app setup:
     register_sdk_exception_handlers(app)
 
-Routes that retain a catch-all for unexpected failures must let handled API
-exceptions reach these handlers. Keep any route-specific error translations
-first, then use::
-
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        # Log and return a generic 500 for unexpected failures only.
-        ...
-
-Do not recover HTTP errors from an arbitrary exception's cause: a route may
-intentionally translate an upstream error into a different public response.
+The base Service registers these handlers once for the entire application.
+Routes should catch only exceptions that require domain-specific translation.
+SDK/entity errors then reach their typed handlers naturally, and unexpected
+errors reach the shared logging and generic-500 fallback. Avoid route-level
+catch-alls: they hide typed errors before FastAPI can dispatch them.
 """
 
 import logging
@@ -44,7 +37,6 @@ from nhx.common.entities.client import (
     EntityStoreError,
     EntityValidationError,
 )
-from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +52,6 @@ ENTITY_ERROR_STATUS_CODES: dict[type[EntityStoreError], int] = {
     EntityConflictError: 409,
     EntityValidationError: 422,
 }
-
-
-# Routes with a catch-all must re-raise these before converting unexpected
-# exceptions to 500s, so FastAPI and the handlers below retain their status/detail.
-# Keep route-specific validation/conflict translations ahead of this fallback.
-HANDLED_API_EXCEPTIONS = (HTTPException, NemoHTTPError, EntityStoreError)
 
 
 async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSONResponse:
@@ -104,6 +90,17 @@ async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSO
     )
 
 
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Log unexpected failures internally and return a safe, consistent 500."""
+    logger.error(
+        "Unhandled service error: %s %s",
+        _scrub_crlf(request.method),
+        _scrub_crlf(request.url.path),
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 async def entity_store_error_handler(request: Request, exc: EntityStoreError) -> JSONResponse:
     """Convert EntityStoreError exceptions to HTTP responses.
 
@@ -112,7 +109,7 @@ async def entity_store_error_handler(request: Request, exc: EntityStoreError) ->
     - EntityNotFoundError -> 404
     - EntityConflictError -> 409 (entity already exists on create, or version mismatch on update)
     - EntityValidationError -> 422
-    - Other EntityStoreError -> 500
+    - Other EntityStoreError -> logged, generic 500
 
     Args:
         request: The FastAPI request object
@@ -123,6 +120,8 @@ async def entity_store_error_handler(request: Request, exc: EntityStoreError) ->
     """
     # Look up status code for specific exception type
     status_code = ENTITY_ERROR_STATUS_CODES.get(type(exc), 500)
+    if status_code == 500:
+        return await unhandled_error_handler(request, exc)
 
     logger.debug(
         "Converting %s to %d: %s %s",
@@ -142,11 +141,12 @@ async def entity_store_error_handler(request: Request, exc: EntityStoreError) ->
 
 
 def register_sdk_exception_handlers(app: FastAPI) -> None:
-    """Register typed client and entity client exception handlers on a FastAPI app.
+    """Register typed error handlers and an unexpected-error fallback on a FastAPI app.
 
     This registers handlers for:
     - NemoHTTPError: Base class for typed client HTTP errors (NotFoundError, ConflictError, etc.)
     - EntityStoreError: Base class for entity client errors (EntityNotFoundError, etc.)
+    - Exception: Log unexpected failures and return a generic 500 response.
 
     Args:
         app: The FastAPI application to register handlers on
@@ -156,10 +156,11 @@ def register_sdk_exception_handlers(app: FastAPI) -> None:
     # flags the narrower signature. The handlers are correct at runtime.
     app.add_exception_handler(NemoHTTPError, nemo_client_error_handler)  # ty: ignore[invalid-argument-type]
     app.add_exception_handler(EntityStoreError, entity_store_error_handler)  # ty: ignore[invalid-argument-type]
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
 
 __all__ = [
-    "HANDLED_API_EXCEPTIONS",
+    "unhandled_error_handler",
     "nemo_client_error_handler",
     "entity_store_error_handler",
     "register_sdk_exception_handlers",

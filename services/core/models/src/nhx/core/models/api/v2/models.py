@@ -28,7 +28,6 @@ from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
-from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client, get_model_entity_service
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
@@ -158,11 +157,6 @@ async def create_model(
             )
         logger.warning(f"Model creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to create model entity - {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model entity")
 
     # add job creation here for checkpoint metadata
     if created_model.fileset:
@@ -222,15 +216,8 @@ async def list_models(
 
         return result
 
-    except HTTPException:
-        raise
     except InvalidFilterError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Failed to list model entities")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model entities")
 
 
 @router.get(
@@ -258,24 +245,14 @@ async def get_model(
     model_name = name
     logger.debug(f"Getting model entity: {workspace}/{model_name}")
 
-    try:
-        # Get the model using service
-        model_entity = await service.get_model_entity(workspace, model_name, verbose=verbose)
+    model_entity = await service.get_model_entity(workspace, model_name, verbose=verbose)
 
-        if model_entity is None:
-            logger.debug(f"Model not found: {workspace}/{model_name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with workspace '{workspace}' and name '{model_name}' not found",
-            )
-
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to get model entity - {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get model entity")
+    if model_entity is None:
+        logger.debug(f"Model not found: {workspace}/{model_name}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model with workspace '{workspace}' and name '{model_name}' not found",
+        )
 
     return model_entity
 
@@ -432,13 +409,6 @@ async def update_model(
     except ValueError as e:
         logger.warning(f"Model update validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to update model entity - {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model entity")
 
     if updated_model.fileset and (updated_model.fileset != original_fileset or not updated_model.spec):
         await start_update_model_spec_job(updated_model)
@@ -478,17 +448,10 @@ async def delete_model(
 
         return None
 
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Failed to delete model entity")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
 
 
 @router.post(
@@ -546,13 +509,6 @@ async def create_model_adapter(
             )
         logger.warning(f"Model adapter creation validation error: {err}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to create model adapter - {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model adapter")
 
     return created_adapter
 
@@ -596,17 +552,10 @@ async def delete_model_adapter(
 
         return None
 
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to delete model entity - {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
 
 
 @router.patch(
@@ -666,15 +615,6 @@ async def update_model_adapter(
     except ValueError as e:
         logger.warning(f"Adapter update validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to update model adapter entity - {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model adapter entity"
-        )
 
 
 async def set_trust_remote_code(

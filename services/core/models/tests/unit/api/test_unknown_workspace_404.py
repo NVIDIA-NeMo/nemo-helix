@@ -26,7 +26,7 @@ from nhx.core.models.api.v2 import deployment_configs, deployments, models, prom
 WS = "no-such-workspace"
 DETAIL = f"Workspace '{WS}' not found"
 
-# Each case covers a changed catch-all, including the deployment-config POST path.
+# Exercise service-wide error handling, including the deployment-config POST path.
 ENDPOINTS = [
     pytest.param(
         deployment_configs,
@@ -35,7 +35,6 @@ ENDPOINTS = [
         "GET",
         "deployment-configs",
         None,
-        "Failed to list deployment configs",
         id="list-deployment-configs",
     ),
     pytest.param(
@@ -50,7 +49,6 @@ ENDPOINTS = [
             "model_spec": {"model_namespace": "nvidia", "model_name": "test-model"},
             "executor_config": {"gpu": 1},
         },
-        "Failed to create deployment config",
         id="create-deployment-config",
     ),
     pytest.param(
@@ -60,7 +58,6 @@ ENDPOINTS = [
         "GET",
         "deployment-configs/test-config",
         None,
-        "Failed to get deployment config",
         id="get-deployment-config",
     ),
     pytest.param(
@@ -70,7 +67,6 @@ ENDPOINTS = [
         "GET",
         "deployments",
         None,
-        "Failed to list deployments",
         id="list-deployments",
     ),
     pytest.param(
@@ -80,7 +76,6 @@ ENDPOINTS = [
         "GET",
         "models",
         None,
-        "Failed to list model entities",
         id="list-models",
     ),
     pytest.param(
@@ -90,7 +85,6 @@ ENDPOINTS = [
         "GET",
         "prompts",
         None,
-        "Internal server error",
         id="list-prompts",
     ),
     pytest.param(
@@ -100,17 +94,14 @@ ENDPOINTS = [
         "GET",
         "providers",
         None,
-        "boom",
         id="list-providers",
     ),
 ]
 
 
-@pytest.mark.parametrize("module,dependency,method,verb,path,payload,generic_detail", ENDPOINTS)
+@pytest.mark.parametrize("module,dependency,method,verb,path,payload", ENDPOINTS)
 @pytest.mark.parametrize("error_kind", ["sdk-not-found", "entity-not-found", "unexpected"])
-def test_workspace_error_response(
-    module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch
-):
+def test_workspace_error_response(module, dependency, method, verb, path, payload, error_kind, monkeypatch):
     if error_kind == "sdk-not-found":
         request = httpx.Request("GET", f"http://entities/apis/entities/v2/workspaces/{WS}/entities")
         error = NotFoundError(httpx.Response(404, json={"detail": DETAIL}, request=request))
@@ -135,7 +126,7 @@ def test_workspace_error_response(
     app.dependency_overrides[dependency] = override_service
     app.dependency_overrides[get_auth_client] = lambda: auth_client
 
-    with TestClient(app) as client:
+    with TestClient(app, raise_server_exceptions=False) as client:
         response = client.request(verb, f"/v2/workspaces/{WS}/{path}", json=payload)
 
     # Prove request validation/dependency resolution reached the intended service call.
@@ -144,6 +135,6 @@ def test_workspace_error_response(
     args, kwargs = service_method.await_args
     assert WS in args or kwargs.get("workspace") == WS
     expected_status = 500 if error_kind == "unexpected" else 404
-    expected_detail = generic_detail if error_kind == "unexpected" else DETAIL
+    expected_detail = "Internal server error" if error_kind == "unexpected" else DETAIL
     assert response.status_code == expected_status, response.text
     assert response.json() == {"detail": expected_detail}

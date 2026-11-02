@@ -8,7 +8,6 @@ from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
 from nhx.core.models.schemas import (
@@ -58,19 +57,13 @@ async def list_prompts(
     """List prompts for a specific workspace."""
     # Discard any workspace override in the filter — always scope to the path workspace.
     parsed_filter.remove("workspace")
-    try:
-        return await service.list_prompts(
-            workspace=workspace,
-            page=page,
-            page_size=page_size,
-            sort=sort,
-            filter_operation=parsed_filter.operation,
-        )
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+    return await service.list_prompts(
+        workspace=workspace,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        filter_operation=parsed_filter.operation,
+    )
 
 
 @router.post(
@@ -102,11 +95,6 @@ async def create_prompt(
             )
         logger.warning(f"Prompt creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt data")
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Failed to create prompt")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.get(
@@ -123,22 +111,14 @@ async def get_prompt(
 ) -> Prompt:
     """Get a prompt by workspace and name."""
     logger.debug(f"Getting prompt: {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
-    try:
-        prompt = await service.get_prompt(GetPromptRequest(workspace=workspace, name=name))
-        if not prompt:
-            logger.warning(f"Prompt not found: {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Prompt not found: {workspace}/{name}",
-            )
-        return prompt
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception(f"Failed to get prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
+    prompt = await service.get_prompt(GetPromptRequest(workspace=workspace, name=name))
+    if not prompt:
+        logger.warning(f"Prompt not found: {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prompt not found: {workspace}/{name}",
+        )
+    return prompt
 
 
 @router.put(
@@ -166,13 +146,6 @@ async def update_prompt(
     except EntityValidationError as e:
         logger.warning(f"Entity store validation error during prompt update: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Failed to update prompt")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
 
 
 @router.delete(
@@ -197,14 +170,7 @@ async def delete_prompt(
                 detail=f"Prompt not found: {workspace}/{name}",
             )
         return None
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception(f"Failed to delete prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

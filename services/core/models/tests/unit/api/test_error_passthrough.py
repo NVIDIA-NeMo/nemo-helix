@@ -69,7 +69,7 @@ def _service_override(service):
 
 @pytest.mark.parametrize("route", ROUTES, ids=lambda route: route.name)
 @pytest.mark.parametrize("status_code", [400, 401, 403, 404, 409, 422, 429, 503, 500, None])
-def test_routes_preserve_sdk_errors(route, status_code, monkeypatch):
+def test_routes_preserve_sdk_errors(route, status_code, monkeypatch, caplog):
     """In particular, a deleted workspace's entity-client 403 must never become 500."""
     detail = "Upstream request denied or resource unavailable"
     if status_code is None:
@@ -118,7 +118,15 @@ def test_routes_preserve_sdk_errors(route, status_code, monkeypatch):
     response = TestClient(app, raise_server_exceptions=False).request(next(iter(route.methods)), path, json=body)
 
     assert response.status_code == (status_code or 500), response.text
-    if status_code is not None:
-        expected_detail = "Internal server error" if status_code >= 500 else detail
-        assert response.json() == {"detail": expected_detail}
+    expected_detail = detail if status_code is not None and status_code < 500 else "Internal server error"
+    assert response.json() == {"detail": expected_detail}
+    if status_code is None or status_code >= 500:
+        handler_errors = [
+            record
+            for record in caplog.records
+            if record.name == "nhx.common.errors.sdk_exception_handlers" and record.levelname == "ERROR"
+        ]
+        assert len(handler_errors) == 1
+        assert handler_errors[0].exc_info[1] is error
+        assert handler_errors[0].exc_info[2] is not None
     assert any(service.mock_calls for service in service_mocks), "Request must reach a service"

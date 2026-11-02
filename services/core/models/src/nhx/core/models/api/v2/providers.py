@@ -12,7 +12,6 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
@@ -64,20 +63,13 @@ async def list_providers(
     """
     # Extract workspace — inject from path param if not in filter
     filter_workspace = parsed_filter.remove("workspace") or workspace
-    try:
-        result = await service.list_model_providers(
-            workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
-            sort=sort,
-            filter_operation=parsed_filter.operation,
-        )
-        return result
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to list model providers for workspace {workspace}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return await service.list_model_providers(
+        workspace=filter_workspace,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        filter_operation=parsed_filter.operation,
+    )
 
 
 @provider_routes.post(
@@ -127,11 +119,6 @@ async def create_provider(
             )
         logger.warning(f"Model provider creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception("Failed to create model provider")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @provider_routes.put(
@@ -176,11 +163,6 @@ async def upsert_provider(
     except ValueError as e:
         logger.warning(f"Model provider upsert validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception("Failed to upsert model provider")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @provider_routes.put(
@@ -222,13 +204,6 @@ async def update_provider_status(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception("Failed to update model provider status fields")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @provider_routes.get(
@@ -248,25 +223,17 @@ async def get_provider(
     """
     logger.debug(f"Getting model provider: {workspace}/{name}")
 
-    try:
-        request = GetModelProviderRequest(workspace=workspace, name=name)
-        provider = await service.get_model_provider(request)
+    request = GetModelProviderRequest(workspace=workspace, name=name)
+    provider = await service.get_model_provider(request)
 
-        if not provider:
-            logger.warning(f"Model provider not found: {workspace}/{name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model provider not found: {workspace}/{name}",
-            )
+    if not provider:
+        logger.warning(f"Model provider not found: {workspace}/{name}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model provider not found: {workspace}/{name}",
+        )
 
-        return provider
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to get model provider {workspace}/{name}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+    return provider
 
 
 @router.delete(
@@ -297,14 +264,7 @@ async def delete_provider(
             )
 
         return None
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception as e:
-        logger.exception(f"Failed to delete model provider {workspace}/{name}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

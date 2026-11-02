@@ -11,7 +11,6 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_model_deployment_service
 from nhx.core.models.api.permissions import check_deployment_config_access
 from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
@@ -70,21 +69,14 @@ async def list_deployments(
 
     logger.debug(f"Listing deployments for workspace: {filter_workspace}")
 
-    try:
-        result = await service.list_deployments(
-            workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
-            sort=sort,
-            filter_operation=parsed_filter.operation,
-            all_versions=all_versions,
-        )
-        return result
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error listing deployments by workspace")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployments")
+    return await service.list_deployments(
+        workspace=filter_workspace,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        filter_operation=parsed_filter.operation,
+        all_versions=all_versions,
+    )
 
 
 @deployment_routes.post(
@@ -131,11 +123,6 @@ async def create_deployment(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error creating deployment")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment")
 
 
 @deployment_routes.get(
@@ -156,21 +143,13 @@ async def get_latest_deployment(
     deployment_name = name
     logger.debug(f"Getting latest deployment: {workspace}/{deployment_name}")
 
-    try:
-        deployment = await service.get_deployment(workspace, deployment_name)
-        if not deployment:
-            logger.warning(f"Deployment not found: {workspace}/{deployment_name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Deployment '{workspace}/{deployment_name}' not found"
-            )
-        return deployment
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error getting deployment")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment")
+    deployment = await service.get_deployment(workspace, deployment_name)
+    if not deployment:
+        logger.warning(f"Deployment not found: {workspace}/{deployment_name}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Deployment '{workspace}/{deployment_name}' not found"
+        )
+    return deployment
 
 
 @router.get(
@@ -193,24 +172,16 @@ async def get_deployment_models(
     deployment_name = name
     logger.debug(f"Getting deployment models: {workspace}/{deployment_name}")
 
-    try:
-        deployment = await service.get_deployment(workspace, deployment_name)
-        if not deployment:
-            logger.warning(f"Deployment not found for models query: {workspace}/{deployment_name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail=f"Deployment '{workspace}/{deployment_name}' not found"
-            )
+    deployment = await service.get_deployment(workspace, deployment_name)
+    if not deployment:
+        logger.warning(f"Deployment not found for models query: {workspace}/{deployment_name}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Deployment '{workspace}/{deployment_name}' not found"
+        )
 
-        # TODO: Query Entity Store for models based on deployment.config
-        # For now, return empty list
-        return {"workspace": workspace, "name": deployment_name, "models": []}
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error getting deployment models")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment models")
+    # TODO: Query Entity Store for models based on deployment.config
+    # For now, return empty list
+    return {"workspace": workspace, "name": deployment_name, "models": []}
 
 
 @deployment_routes.get(
@@ -230,16 +201,7 @@ async def list_deployment_versions(
     deployment_name = name
     logger.debug(f"Listing deployment versions: {workspace}/{deployment_name}")
 
-    try:
-        versions = await service.list_deployment_versions(workspace, deployment_name)
-        return versions
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error listing deployment versions")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployment versions"
-        )
+    return await service.list_deployment_versions(workspace, deployment_name)
 
 
 @deployment_routes.get(
@@ -268,24 +230,14 @@ async def get_deployment_version(
             detail=f"Invalid version '{name}': must be a positive integer",
         )
 
-    try:
-        result = await service.get_deployment(workspace, deployment_name, version_int)
-        if not result:
-            logger.warning(f"Deployment version not found: {workspace}/{deployment_name} version {name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Deployment '{workspace}/{deployment_name}' version '{name}' not found",
-            )
-        return result
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error getting deployment version")
+    result = await service.get_deployment(workspace, deployment_name, version_int)
+    if not result:
+        logger.warning(f"Deployment version not found: {workspace}/{deployment_name} version {name}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment version"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deployment '{workspace}/{deployment_name}' version '{name}' not found",
         )
+    return result
 
 
 @deployment_routes.post(
@@ -328,11 +280,6 @@ async def update_deployment(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error updating deployment")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment")
 
 
 @deployment_routes.post(
@@ -393,15 +340,6 @@ async def update_deployment_status(
     except DeploymentStatusConflictError as e:
         logger.warning(f"Deployment status conflict: {e}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error updating deployment status")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment status"
-        )
 
 
 @router.delete(
@@ -461,17 +399,10 @@ async def delete_all_deployment_versions(
             # Marked for deletion (status set to DELETING)
             response.status_code = status.HTTP_202_ACCEPTED
             return None
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error deleting deployment")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment")
 
 
 @router.delete(
@@ -542,16 +473,7 @@ async def delete_deployment_version(
             # Marked for deletion (status set to DELETING)
             response.status_code = status.HTTP_202_ACCEPTED
             return None
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error deleting deployment version")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment version"
-        )

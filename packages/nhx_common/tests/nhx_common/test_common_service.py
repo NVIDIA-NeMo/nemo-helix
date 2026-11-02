@@ -15,11 +15,13 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
-from fastapi import APIRouter, Body, Depends, FastAPI
+from fastapi import APIRouter, Body, Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_nemo_client as plugin_get_nemo_client
 from nhx.common.config import HelixConfig
+from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.observability.otel import scoped_otel_headers
 from nhx.common.service import DependencyProvider, RouterConfig, Service
 from nhx.common.service import __all__ as service_exports
@@ -128,6 +130,28 @@ class TestServiceBase:
         assert app is not None
         assert app.title == service.title
         assert app.version == service.version
+
+    @pytest.mark.parametrize(
+        ("error", "status_code", "detail"),
+        [
+            (RuntimeError("Private failure details"), 500, "Internal server error"),
+            (PermissionDeniedError(httpx.Response(403, json={"detail": "Access denied"})), 403, "Access denied"),
+            (EntityNotFoundError("Workspace not found"), 404, "Workspace not found"),
+            (HTTPException(409, "Domain conflict"), 409, "Domain conflict"),
+        ],
+    )
+    def test_service_app_registers_shared_error_handling(self, error, status_code, detail):
+        """Service construction installs error handling without per-route wrappers."""
+        app = MockService().create_app()
+
+        @app.get("/failure")
+        async def fail():
+            raise error
+
+        response = TestClient(app, raise_server_exceptions=False).get("/failure")
+
+        assert response.status_code == status_code
+        assert response.json() == {"detail": detail}
 
     def test_service_app_answers_an_unencodable_invalid_body_with_422(self):
         """Every service app gets the shared validation handler, so NaN in a body is a 422, not a 500."""

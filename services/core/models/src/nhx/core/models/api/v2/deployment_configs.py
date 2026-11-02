@@ -11,7 +11,6 @@ from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
-from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_model_deployment_config_service
 from nhx.core.models.api.permissions import check_model_entity_access
 from nhx.core.models.api.service.model_deployment_config_service import (
@@ -90,22 +89,13 @@ async def list_deployment_configs(
 
     logger.info(f"Listing deployment configs for workspace: {filter_workspace}")
 
-    try:
-        result = await service.list_deployment_configs(
-            workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
-            sort=sort,
-            filter_operation=parsed_filter.operation,
-        )
-        return result
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error listing deployment configs by workspace")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployment configs"
-        )
+    return await service.list_deployment_configs(
+        workspace=filter_workspace,
+        page=page,
+        page_size=page_size,
+        sort=sort,
+        filter_operation=parsed_filter.operation,
+    )
 
 
 @router.post(
@@ -153,13 +143,6 @@ async def create_deployment_config(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error creating deployment config")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment config"
-        )
 
 
 @router.get(
@@ -180,22 +163,14 @@ async def get_latest_deployment_config(
     deployment_config_name = name
     logger.info(f"Getting latest deployment config: {workspace}/{deployment_config_name}")
 
-    try:
-        config = await service.get_deployment_config(workspace, deployment_config_name)
-        if not config:
-            logger.warning(f"Deployment config not found: {workspace}/{deployment_config_name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Deployment config '{workspace}/{deployment_config_name}' not found",
-            )
-        return config
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error getting deployment config")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment config")
+    config = await service.get_deployment_config(workspace, deployment_config_name)
+    if not config:
+        logger.warning(f"Deployment config not found: {workspace}/{deployment_config_name}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deployment config '{workspace}/{deployment_config_name}' not found",
+        )
+    return config
 
 
 @router.get(
@@ -215,16 +190,7 @@ async def list_deployment_config_versions(
     deployment_config_name = name
     logger.info(f"Listing deployment config versions: {workspace}/{deployment_config_name}")
 
-    try:
-        versions = await service.list_deployment_config_versions(workspace, deployment_config_name)
-        return versions
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error listing deployment config versions")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployment config versions"
-        )
+    return await service.list_deployment_config_versions(workspace, deployment_config_name)
 
 
 @router.get(
@@ -253,24 +219,14 @@ async def get_deployment_config_version(
             detail=f"Invalid version '{name}': must be a positive integer",
         )
 
-    try:
-        result = await service.get_deployment_config(workspace, deployment_config_name, version_int)
-        if not result:
-            logger.warning(f"Deployment config version not found: {workspace}/{deployment_config_name} version {name}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Deployment config '{workspace}/{deployment_config_name}' version '{name}' not found",
-            )
-        return result
-    except HTTPException:
-        raise
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error getting deployment config version")
+    result = await service.get_deployment_config(workspace, deployment_config_name, version_int)
+    if not result:
+        logger.warning(f"Deployment config version not found: {workspace}/{deployment_config_name} version {name}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment config version"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Deployment config '{workspace}/{deployment_config_name}' version '{name}' not found",
         )
+    return result
 
 
 @router.post(
@@ -315,13 +271,6 @@ async def update_deployment_config(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error updating deployment config")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment config"
-        )
 
 
 @router.delete(
@@ -364,19 +313,10 @@ async def delete_all_deployment_config_versions(
     except ReferentialIntegrityError as e:
         logger.warning(f"Referential integrity violation: {e.message}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error deleting deployment config")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment config"
-        )
 
 
 @router.delete(
@@ -430,16 +370,7 @@ async def delete_deployment_config_version(
     except ReferentialIntegrityError as e:
         logger.warning(f"Referential integrity violation: {e.message}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=e.message)
-    except HTTPException:
-        raise
     except EntityConflictError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except HANDLED_API_EXCEPTIONS:
-        raise
-    except Exception:
-        logger.exception("Unexpected error deleting deployment config version")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment config version"
-        )
