@@ -104,4 +104,11 @@ describe('suggestedExpertParallelSize', () => {
   ])('suggests nothing for %s', (_, modelSpec, p) => {
     expect(suggestedExpertParallelSize(modelSpec, p)).toBeUndefined();
   });
+
+  it.each([
+    ['a single GPU', { num_gpus_per_node: 1, expert_parallel_size: 4 }],
+    ['a GPU count no size fits', { num_gpus_per_node: 3, expert_parallel_size: 4 }],
+  ])('clears a set size on %s', (_, p) => {
+    expect(suggestedExpertParallelSize(nemotronH, p)).toBeNull();
+  });
 });

@@ -48,7 +48,7 @@ export const ModelSelectionSection = () => {
       getValues('automodel.parallelism') ?? {}
     );
     if (expertParallelSize !== undefined) {
-      setValue('automodel.parallelism.expert_parallel_size', expertParallelSize);
+      setValue('automodel.parallelism.expert_parallel_size', expertParallelSize ?? undefined);
     }
   };
 

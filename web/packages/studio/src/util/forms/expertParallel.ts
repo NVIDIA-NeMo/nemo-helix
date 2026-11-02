@@ -44,12 +44,15 @@ export const expertParallelWarning = (
   return undefined;
 };
 
+// undefined leaves the size as is; null clears it.
 export const suggestedExpertParallelSize = (
   spec: ModelEntity['spec'],
   p: AutomodelParallelismSpec
-): number | undefined => {
+): number | null | undefined => {
   const numExperts = spec?.moe_config?.num_experts;
-  if (!isNemotronH(spec) || !numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
-  const sizes = validExpertParallelSizes(numExperts, p);
-  return sizes.includes(p.expert_parallel_size ?? 0) ? undefined : sizes.at(-1);
+  if (!isNemotronH(spec) || !numExperts || numExperts <= 1) return undefined;
+  const ep = p.expert_parallel_size;
+  const sizes = totalGpus(p) > 1 ? validExpertParallelSizes(numExperts, p) : [];
+  if (sizes.length === 0) return ep === undefined ? undefined : null;
+  return sizes.includes(ep ?? 0) ? undefined : sizes.at(-1);
 };

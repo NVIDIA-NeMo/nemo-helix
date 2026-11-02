@@ -65,6 +65,13 @@ describe('ComputeResourcesSection expert parallel size', () => {
     expect(screen.getByTestId('ep')).toHaveTextContent('2');
   });
 
+  it('clears the size when the run drops to one GPU', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={4} />);
+    await setGpusPerNode(1);
+    expect(screen.getByTestId('ep')).toHaveTextContent('unset');
+  });
+
   it('keeps a size that still fits the new GPU count', async () => {
     modelEntity.current = moeModel;
     render(<Harness expertParallelSize={2} />);

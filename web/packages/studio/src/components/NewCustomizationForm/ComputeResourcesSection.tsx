@@ -39,11 +39,17 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
   const warning = expertParallelWarning(spec, parallelism ?? {});
   const refillExpertParallelSize = () => {
     const size = suggestedExpertParallelSize(spec, getValues('automodel.parallelism') ?? {});
-    if (size !== undefined) setValue('automodel.parallelism.expert_parallel_size', size);
+    if (size !== undefined) {
+      setValue('automodel.parallelism.expert_parallel_size', size ?? undefined);
+    }
   };
   const onGpuLayoutChange = {
     Slider: { onValueChange: refillExpertParallelSize },
-    TextInput: { onValueChange: refillExpertParallelSize },
+    TextInput: {
+      onValueChange: (value: string) => {
+        if (value !== '') refillExpertParallelSize();
+      },
+    },
   };
   const expertParallelSize = (
     <ControlledSliderWithTextInput
