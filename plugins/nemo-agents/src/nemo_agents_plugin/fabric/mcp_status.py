@@ -15,6 +15,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -182,3 +183,20 @@ async def probe_mcp_servers(config: AgentConfig) -> McpStatusResponse:
     servers = config.mcp.servers if config.mcp is not None else {}
     statuses = await asyncio.gather(*(probe_mcp_server(name, spec, config) for name, spec in servers.items()))
     return McpStatusResponse(servers=list(statuses), checked_at=datetime.now(UTC))
+
+
+class McpStatusCache:
+    """Single-flight probe with a short TTL so overlapping requests share one set of probe processes."""
+
+    def __init__(self, ttl_seconds: float = 3.0) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._lock = asyncio.Lock()
+        self._cached: tuple[float, McpStatusResponse] | None = None
+
+    async def get(self, config: AgentConfig) -> McpStatusResponse:
+        async with self._lock:
+            if self._cached is not None and time.monotonic() - self._cached[0] < self._ttl_seconds:
+                return self._cached[1]
+            response = await probe_mcp_servers(config)
+            self._cached = (time.monotonic(), response)
+            return response

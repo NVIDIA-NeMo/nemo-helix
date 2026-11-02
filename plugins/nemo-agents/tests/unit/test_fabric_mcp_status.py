@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,8 +14,14 @@ import yaml
 from fastapi.testclient import TestClient
 from mcp.types import ListToolsResult, PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
-from nemo_agents_plugin.fabric import server
-from nemo_agents_plugin.fabric.mcp_status import _list_all_tools, probe_mcp_server, probe_mcp_servers
+from nemo_agents_plugin.fabric import mcp_status, server
+from nemo_agents_plugin.fabric.mcp_status import (
+    McpStatusCache,
+    McpStatusResponse,
+    _list_all_tools,
+    probe_mcp_server,
+    probe_mcp_servers,
+)
 from nemo_agents_plugin.fabric.server import create_fabric_serving_app
 
 _SERVER_SCRIPT = """
@@ -137,6 +145,41 @@ async def test_list_all_tools_follows_cursors() -> None:
             return pages[params.cursor]
 
     assert [tool.name for tool in await _list_all_tools(Session())] == ["a", "b"]  # ty: ignore[invalid-argument-type]
+
+
+async def test_status_cache_shares_one_probe_across_overlapping_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def probe(config: AgentConfig) -> McpStatusResponse:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.05)
+        return McpStatusResponse(servers=[], checked_at=datetime.now(UTC))
+
+    monkeypatch.setattr(mcp_status, "probe_mcp_servers", probe)
+    cache = McpStatusCache(ttl_seconds=60)
+
+    responses = await asyncio.gather(*(cache.get(_config({})) for _ in range(5)))
+
+    assert calls == 1
+    assert len({id(response) for response in responses}) == 1
+
+
+async def test_status_cache_reprobes_after_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = 0
+
+    async def probe(config: AgentConfig) -> McpStatusResponse:
+        nonlocal calls
+        calls += 1
+        return McpStatusResponse(servers=[], checked_at=datetime.now(UTC))
+
+    monkeypatch.setattr(mcp_status, "probe_mcp_servers", probe)
+    cache = McpStatusCache(ttl_seconds=0)
+
+    await cache.get(_config({}))
+    await cache.get(_config({}))
+
+    assert calls == 2
 
 
 def test_mcp_status_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
