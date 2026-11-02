@@ -10,6 +10,11 @@ import {
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { LayoutRows } from '@nemo/icons/icons';
 import { Block, Button, Flex, Modal, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  expectedValue,
+  inputText,
+  scoreCells,
+} from '@studio/components/evaluation/Jobs/datasetEval/rowFields';
 import { MetricScoreChip } from '@studio/components/evaluation/MetricScoreChip';
 import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
@@ -26,34 +31,6 @@ export interface DatasetEvalRow {
 interface DatasetEvalRowResultsPanelProps {
   rows: DatasetEvalRow[];
 }
-
-const EXPECTED_FIELDS = ['label', 'expected', 'reference', 'answer'];
-
-const expectedValue = (item?: Record<string, unknown>): string | null => {
-  if (!item) return null;
-  for (const field of EXPECTED_FIELDS) {
-    const value = item[field];
-    if (typeof value === 'string' && value) return value;
-    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  }
-  return null;
-};
-
-const inputText = (row: DatasetEvalRow): string => {
-  const request = row.requests?.[0]?.request;
-  // `input_message` is the pre-chat-completions body; jobs submitted then still render.
-  const rendered = request?.messages?.at(-1)?.content ?? request?.input_message;
-  if (typeof rendered === 'string' && rendered) return rendered;
-  return row.item ? JSON.stringify(row.item, null, 2) : '';
-};
-
-const scoreCells = (row: DatasetEvalRow): { label: string; value: number | string | undefined }[] =>
-  Object.entries(row.metrics ?? {}).flatMap(([metricType, outputs]) =>
-    (Array.isArray(outputs) ? outputs : []).map((output) => ({
-      label: output?.name ? `${metricType}.${output.name}` : metricType,
-      value: output?.value,
-    }))
-  );
 
 const LongCell: FC<{
   content: string;

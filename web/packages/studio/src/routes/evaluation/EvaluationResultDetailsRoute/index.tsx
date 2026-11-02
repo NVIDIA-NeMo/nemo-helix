@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
+import { DownloadMenu } from '@nemo/common/src/components/DownloadMenu';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { Beaker, IconDocument } from '@nemo/icons/icons';
 import { useEvalsGetEvaluateJob } from '@nemo/sdk/generated/evals/evals-plugin-jobs-routes';
@@ -28,6 +29,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getEvaluationResultsRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
+import { datasetEvalExport } from '@studio/util/resultExports';
 import { FC } from 'react';
 
 const isTerminal = (status?: string) =>
@@ -92,6 +94,21 @@ export const EvaluationResultDetailsRoute: FC = () => {
             Dataset-Driven
           </Badge>
         </Flex>
+      }
+      slotActions={
+        job && (
+          <DownloadMenu
+            fileName={`${job.name ?? id}-results`}
+            disabled={
+              isPending ||
+              hasFailed ||
+              isLoadingScores ||
+              isLoadingRows ||
+              (scores.length === 0 && rows.length === 0)
+            }
+            getData={() => datasetEvalExport(job, scores, rows)}
+          />
+        )
       }
     />
   );

@@ -15,24 +15,20 @@ import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/uti
 import { LayoutColumns } from '@nemo/icons/icons';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useListEvaluatorResults } from '@nemo/sdk/generated/platform/evaluator-results';
-import {
-  listEvaluationSessions,
-  useListEvaluationSessions,
-} from '@nemo/sdk/generated/platform/experiments';
+import { useListEvaluationSessions } from '@nemo/sdk/generated/platform/experiments';
 import type {
-  EvaluationSessionResponsesPage,
   EvaluationSessionFilter,
   EvaluationSessionResponse,
   ListEvaluationSessionsParams,
 } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
+import { listEvaluationSessionsWithModeFallback } from '@studio/components/dataViews/EvaluationSessionsDataView/listEvaluationSessionsWithModeFallback';
 import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakePayloadPreviewCell';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
 import { formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
-import { isAxiosError } from 'axios';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
 type SessionRow = EvaluationSessionResponse & { _rowId: string };
@@ -44,31 +40,6 @@ interface EvaluationSessionsDataViewProps {
 
 const mapStatusForBadge = (status: EvaluationSessionResponse['status']) =>
   status === 'success' ? 'completed' : status;
-
-const isUnsupportedModeError = (error: unknown): boolean => {
-  if (!isAxiosError(error)) return false;
-  if (error.response?.status !== 400 && error.response?.status !== 422) return false;
-  const detail = (error.response.data as { detail?: unknown } | undefined)?.detail;
-  return typeof detail === 'string' && detail === 'Unsupported query parameter(s): mode';
-};
-
-const listEvaluationSessionsWithModeFallback = async (
-  workspace: string,
-  evaluationName: string,
-  params: ListEvaluationSessionsParams,
-  signal: AbortSignal
-): Promise<EvaluationSessionResponsesPage> => {
-  try {
-    return await listEvaluationSessions(workspace, evaluationName, params, signal);
-  } catch (error) {
-    if (params.mode !== 'preview' || !isUnsupportedModeError(error)) {
-      throw error;
-    }
-    const fallbackParams = { ...params };
-    delete fallbackParams.mode;
-    return listEvaluationSessions(workspace, evaluationName, fallbackParams, signal);
-  }
-};
 
 // Column id → API sort field. All session sort fields are direct 1:1 matches so no
 // translation is needed beyond listing the sortable ids.

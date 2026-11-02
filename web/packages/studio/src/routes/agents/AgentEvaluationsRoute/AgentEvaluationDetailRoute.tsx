@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
+import { DownloadMenu } from '@nemo/common/src/components/DownloadMenu';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -53,6 +54,7 @@ import {
   getFilesetRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
+import { agentEvalExport } from '@studio/util/resultExports';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useState } from 'react';
 import { Link } from 'react-router';
@@ -206,6 +208,25 @@ export const AgentEvaluationDetailRoute: FC = () => {
             </Flex>
           }
           slotDescription="Agent evaluation via nemo-evals. Scores aggregate per metric across the evaluated tasks."
+          slotActions={
+            <DownloadMenu
+              fileName={`${jobName}-results`}
+              disabled={
+                !isJobTerminal ||
+                isLoadingResult ||
+                isLoadingBundle ||
+                (allScores.length === 0 && taskDetails.length === 0)
+              }
+              getData={() =>
+                agentEvalExport(
+                  { name: job.name, status: job.status, agent: agentNameForJob(job) },
+                  allScores,
+                  taskDetails,
+                  result?.summary
+                )
+              }
+            />
+          }
         />
 
         <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">
