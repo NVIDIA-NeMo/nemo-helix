@@ -169,9 +169,10 @@ def summed_metric_columns(source_alias: str, metrics: tuple[str, ...] = _ALL_MET
 def session_total(source_alias: str, metric: str) -> str:
     """Per session: one metric's unscaled total over the trace rows of ``source_alias``, or NULL.
 
-    Marked traces don't count once any trace totals the metric from gateway call spans, unless some trace holds
-    gateway calls nothing counted and a marked trace reports the metric: then the traces totalled from gateway call
-    spans don't count instead.
+    A trace marked ``nemo.usage.superseded_by_gateway`` is the agent's own record of calls the gateway also recorded.
+    Once any trace totals the metric from gateway call spans, marked traces are left out, so each call counts once.
+    The exception is a session where some trace holds gateway calls whose usage nothing counted, and a marked trace
+    reports the metric: then the marked traces count and the gateway-totalled traces don't, so those calls aren't lost.
     """
     column = f"{source_alias}.{metric}"
     from_gateway = f"{source_alias}.{metric}_from_gateway"
