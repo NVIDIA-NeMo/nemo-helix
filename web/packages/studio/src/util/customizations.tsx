@@ -762,17 +762,12 @@ export const getGrpoRunConfig = (
   const expertParallel = parallelism.expert_parallel_size ?? 1;
 
   // Megatron is inert for GRPO. The policy worker is always AutomodelPolicyWorker.
-  const trainingLabel =
-    training.finetuning_type === 'lora'
-      ? 'LoRA'
-      : training.finetuning_type === 'lora_merged'
-        ? 'LoRA (merged)'
-        : 'Full weights';
+  const isLora = training.finetuning_type === 'lora';
 
   return {
     environment: spec.environment,
     promptDataset: spec.dataset,
-    trainingBackend: joinParts('Automodel', trainingLabel),
+    trainingBackend: joinParts('Automodel', isLora ? 'LoRA' : 'Full weights'),
     parallelism: joinParts(
       `TP ${tensorParallel}`,
       `PP ${parallelism.pipeline_parallel_size ?? 1}`,
