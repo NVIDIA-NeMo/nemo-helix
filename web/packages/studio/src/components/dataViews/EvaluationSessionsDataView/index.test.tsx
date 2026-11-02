@@ -6,7 +6,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { server } from '@studio/mocks/node';
 import { getEvaluationDetailRoute } from '@studio/routes/utils';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -118,8 +118,16 @@ describe('EvaluationSessionsDataView', () => {
       )
     );
     renderDataView();
-    expect(await screen.findByRole('columnheader', { name: /Cost/ })).toBeInTheDocument();
+    const costHeader = await screen.findByRole('columnheader', { name: /Cost/ });
     expect(await screen.findByText('$0.12')).toBeInTheDocument();
+
+    // Duration and Tokens also render a dash when empty, so check the cell under the Cost header.
+    const costColumn = screen.getAllByRole('columnheader').indexOf(costHeader);
+    const nullCostRow = screen
+      .getAllByRole('row')
+      .find((row) => within(row).queryAllByText('case-2').length > 0);
+    expect(nullCostRow).toBeDefined();
+    expect(within(nullCostRow!).getAllByRole('cell')[costColumn]).toHaveTextContent('—');
   });
 
   it('marks an evaluator that ran but produced no score as failed', async () => {
