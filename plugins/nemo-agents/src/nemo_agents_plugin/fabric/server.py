@@ -22,6 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
+from nemo_agents_plugin.fabric.mcp_status import McpStatusResponse, probe_mcp_servers
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
@@ -374,6 +375,10 @@ def create_fabric_serving_app(
             "runtime_instance_id": runtime_instance_id,
             "runtime_started_at": runtime_started_at.isoformat(),
         }
+
+    @app.get("/mcp/status")
+    async def mcp_status() -> McpStatusResponse:
+        return await probe_mcp_servers(app.state.agent_config)
 
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
