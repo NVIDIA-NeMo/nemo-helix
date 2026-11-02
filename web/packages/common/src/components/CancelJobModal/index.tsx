@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { FormModal } from '@nemo/common/src/components/FormModal';
+import { Flex, Text } from '@nvidia/foundations-react-core';
+import { FC, useRef, useState } from 'react';
+
+export interface CancelJobModalProps {
+  open: boolean;
+  jobName: string;
+  onClose: () => void;
+  /** Rejecting keeps the modal open and shows the error inline. Resolving closes it via onClose. */
+  onConfirm: () => Promise<void>;
+}
+
+export const CancelJobModal: FC<CancelJobModalProps> = ({ open, jobName, onClose, onConfirm }) => {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inFlight = useRef(false);
+
+  const handleClose = () => {
+    if (inFlight.current) return;
+    setError(null);
+    onClose();
+  };
+
+  const handleSubmit = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      await onConfirm();
+      inFlight.current = false;
+      setPending(false);
+      onClose();
+    } catch (e) {
+      inFlight.current = false;
+      setPending(false);
+      setError(getErrorMessage(e as Error, 'Failed to cancel job'));
+    }
+  };
+
+  return (
+    <FormModal
+      open={open}
+      title={`Cancel ${jobName}`}
+      submitButtonText="Cancel Job"
+      errorText={error}
+      onSubmit={(e) => {
+        e.preventDefault();
+        handleSubmit();
+      }}
+      onClose={handleClose}
+      disabled={pending}
+      loading={pending}
+      attributes={{
+        SubmitButton: { color: 'danger', 'aria-label': 'Cancel Job' },
+        CancelButton: { autoFocus: true },
+      }}
+    >
+      <Flex>
+        <Text className="leading-relaxed">
+          Cancelling stops this job and can&apos;t be undone. A cancelled job can&apos;t be resumed
+          or rerun, but it can still be deleted. It may show as Cancelling briefly before it stops.
+        </Text>
+      </Flex>
+    </FormModal>
+  );
+};

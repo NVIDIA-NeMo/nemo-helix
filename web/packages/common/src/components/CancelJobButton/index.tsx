@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { FormModal } from '@nemo/common/src/components/FormModal';
+import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Close } from '@nemo/icons/icons';
@@ -12,7 +11,7 @@ import {
   useJobsCancelJob,
 } from '@nemo/sdk/generated/platform/jobs';
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-import { Button, Flex, Text } from '@nvidia/foundations-react-core';
+import { Button } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
 import { FC, MouseEvent, useState } from 'react';
 
@@ -53,15 +52,6 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
     },
   });
 
-  const handleCancel = async () => {
-    try {
-      await mutateAsync({ workspace, name: jobName });
-      setIsModalOpen(false);
-    } catch (e) {
-      toast.error(getErrorMessage(e as Error, 'Failed to cancel job'));
-    }
-  };
-
   const isCancellable = jobStatus && CJobCancellableStatuses.includes(jobStatus);
   const isCancelling = jobStatus === HelixJobStatus.cancelling;
 
@@ -92,28 +82,14 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
           {isPending || isCancelling ? 'Cancelling...' : 'Cancel Job'}
         </Button>
       )}
-      <FormModal
+      <CancelJobModal
         open={isModalOpen}
-        title={`Cancel ${jobName}`}
-        submitButtonText="Cancel Job"
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleCancel();
-        }}
+        jobName={jobName}
         onClose={() => setIsModalOpen(false)}
-        disabled={isPending}
-        loading={isPending}
-        attributes={{
-          SubmitButton: { color: 'danger' },
+        onConfirm={async () => {
+          await mutateAsync({ workspace, name: jobName });
         }}
-      >
-        <Flex>
-          <Text className="leading-relaxed">
-            Canceling this job will permanently stop it. This action cannot be undone, and the job
-            cannot be relaunched or deleted. Are you sure you want to proceed?
-          </Text>
-        </Flex>
-      </FormModal>
+      />
     </>
   );
 };
