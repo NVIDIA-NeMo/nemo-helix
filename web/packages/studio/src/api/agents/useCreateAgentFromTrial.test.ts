@@ -30,6 +30,13 @@ const httpError = (status: number): Error =>
   Object.assign(new Error(`HTTP ${status}`), { response: { status } });
 
 const GITHUB_STORAGE = { type: 'github', owner: 'nvidia', repo: 'agents', revision: 'abc123' };
+const GIT_STORAGE = {
+  type: 'git',
+  url: 'git@gitlab.example.com:nvidia/agents.git',
+  revision: 'abc123',
+  ssh_key_secret: 'deploy-key',
+  known_hosts: 'gitlab.example.com ssh-ed25519 AAAA',
+};
 
 const mockFilesets = (filesets: Record<string, Record<string, unknown>>) =>
   vi.mocked(filesRetrieveFileset).mockImplementation(async (workspace, name) => {
@@ -94,6 +101,18 @@ describe('createAgentFromTrial', () => {
     expect(filesCreateFileset).toHaveBeenCalledWith(
       'ws',
       expect.objectContaining({ storage: GITHUB_STORAGE })
+    );
+    expect(copyFilesetFiles).not.toHaveBeenCalled();
+  });
+
+  it('points the new fileset at the same Git revision instead of copying its files', async () => {
+    mockFilesets({ 'src/hermes-ethos': { storage: GIT_STORAGE } });
+
+    await createAgentFromTrial(params());
+
+    expect(filesCreateFileset).toHaveBeenCalledWith(
+      'ws',
+      expect.objectContaining({ storage: GIT_STORAGE })
     );
     expect(copyFilesetFiles).not.toHaveBeenCalled();
   });

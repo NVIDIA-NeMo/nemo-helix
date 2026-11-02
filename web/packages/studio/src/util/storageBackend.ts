@@ -17,3 +17,9 @@ const STORAGE_BACKEND_LABELS: Record<StorageBackend, string> = {
 export const formatStorageBackendLabel = (
   type: StorageBackend | null | undefined
 ): string | null => (type ? STORAGE_BACKEND_LABELS[type] : null);
+
+const REPOSITORY_BACKENDS: ReadonlySet<StorageBackend> = new Set(['github', 'git']);
+
+/** Read-only storage pinned to a repository commit, which filesets can share rather than copy. */
+export const isRepositoryBackend = (type: StorageBackend | null | undefined): boolean =>
+  type != null && REPOSITORY_BACKENDS.has(type);

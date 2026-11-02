@@ -156,7 +156,13 @@ def _classify_failure(stderr: str, subject: str) -> Exception:
     detail = _failure_detail(stderr)
     if "Host key verification failed" in stderr or "REMOTE HOST IDENTIFICATION HAS CHANGED" in stderr:
         return GitAccessError(f"The host key for {subject} does not match known_hosts")
-    if "Permission denied (" in stderr or "Load key" in stderr:
+    # "Load key" is ssh failing on the key file written for it, before the remote has judged anything.
+    load_key = next((line.strip() for line in stderr.splitlines() if "Load key" in line), None)
+    if load_key is not None:
+        if "Permission denied" in load_key:
+            return GitServerFault(f"ssh could not read the key file written for {subject}: {load_key}")
+        return GitConfigError(f"The SSH key secret for {subject} is not a usable private key: {load_key}")
+    if "Permission denied (" in stderr:
         return GitAccessError(f"The SSH key was rejected for {subject}: {detail}")
     if any(marker in stderr for marker in _SERVER_FAULTS):
         return GitServerFault(f"git could not write its files on this server reading {subject}: {detail}")
@@ -330,12 +336,19 @@ def default_git_cache_root() -> Path:
     return nhx_user_data_dir() / "git-cache"
 
 
+_durable_storage: StorageImpl | None = None
+
+
 def default_durable_storage() -> StorageImpl:
     """The files service's default storage, which also holds every external backend's file cache."""
-    from nhx.core.files.app.backends.factory import storage_impl_factory
-    from nhx.core.files.config import files_config
+    global _durable_storage
+    if _durable_storage is None:
+        from nhx.core.files.app.backends.factory import storage_impl_factory
+        from nhx.core.files.config import files_config
 
-    return storage_impl_factory(files_config().default_storage_config, {})
+        # Built once: an S3 backend carries a session, and every request would otherwise build its own.
+        _durable_storage = storage_impl_factory(files_config().default_storage_config, {})
+    return _durable_storage
 
 
 _DURABLE_PREFIX = "cache/git"
@@ -504,9 +517,15 @@ class GitStorageImpl(StorageImpl):
     def _repo_dir(self) -> Path:
         return self.cache_root / self._url_digest
 
-    def _listing_key(self, sha: str) -> str:
+    def _commit_key(self, sha: str) -> str:
         scope = hashlib.sha256(self.config.path.encode()).hexdigest()[:16]
-        return f"{_DURABLE_PREFIX}/{self._url_digest}/commits/{sha}/{scope}.json"
+        return f"{_DURABLE_PREFIX}/{self._url_digest}/commits/{sha}/{scope}"
+
+    def _listing_key(self, sha: str) -> str:
+        return f"{self._commit_key(sha)}.json"
+
+    async def _cache_prefix(self) -> str:
+        return f"{self._commit_key(await self._commit())}/files"
 
     def _subject(self) -> str:
         scope = f"{self.config.url}#{self.config.path}" if self.config.path else self.config.url
@@ -579,19 +598,31 @@ class GitStorageImpl(StorageImpl):
         try:
             # The deadline covers the work, not its wait for a thread.
             await running.wait()
-            return await asyncio.wait_for(asyncio.shield(future), self.timeout_seconds)
-        except (TimeoutError, asyncio.CancelledError) as exc:
+            try:
+                return await asyncio.wait_for(asyncio.shield(future), self.timeout_seconds)
+            except TimeoutError:
+                if job.cancel():
+                    raise
+                if vendor is not None:
+                    await asyncio.shield(vendor.stop())
+                    # The thread holds the repository until it returns; with ssh stopped, what it has left is local.
+                    with suppress(Exception):
+                        await asyncio.shield(future)
+                    raise
+                # Local work cannot be stopped. Its result is taken if it lands within a second deadline rather
+                # than discarded; past that the thread finishes on its own.
+                return await asyncio.wait_for(asyncio.shield(future), self.timeout_seconds)
+        except asyncio.CancelledError:
             if not job.cancel():
                 if vendor is not None:
                     await asyncio.shield(vendor.stop())
-                # The thread holds the repository until it returns; with ssh stopped, what it has left is local.
                 with suppress(Exception):
                     await asyncio.shield(future)
-            if isinstance(exc, TimeoutError):
-                raise GitUnavailableError(
-                    f"git timed out after {self.timeout_seconds:.0f}s reading {self._subject()}"
-                ) from None
             raise
+        except TimeoutError:
+            raise GitUnavailableError(
+                f"git timed out after {self.timeout_seconds:.0f}s reading {self._subject()}"
+            ) from None
         except _GIT_FAILURES as exc:
             stderr = await asyncio.to_thread(vendor.stderr) if vendor is not None else ""
             raise _translate_failure(exc, subject, stderr) from exc
@@ -650,6 +681,8 @@ class GitStorageImpl(StorageImpl):
                             remote.path, only_the_commit, local.get_graph_walker(), pack.write, depth=1
                         )
                         pack.flush()
+                        # A second inflation of the pack: entries carry no length, so walking them inflates each
+                        # one, and the indexer in commit() holds whole objects, so the cap cannot wait for it.
                         check_pack_objects(pack.fileno(), _MAX_OBJECT_BYTES)
                     except ObjectTooLargeError as exc:
                         abort()
@@ -734,13 +767,16 @@ class GitStorageImpl(StorageImpl):
         _remember_listing(key, snapshot)
         return snapshot
 
+    def _forget_fetched(self, sha: str) -> None:
+        """Have the next request fetch *sha* again instead of trusting the fetch repository."""
+        _fetched_commits.get(str(self._repo_dir), set()).discard(sha)
+
     def _list_tree(self, sha: str) -> Snapshot:
         with Repo(str(self._repo_dir)) as local:
             try:
                 return self._list_tree_in(local.object_store, sha)
             except KeyError as exc:
-                # The next request fetches the commit again instead of trusting this repository.
-                _fetched_commits.get(str(self._repo_dir), set()).discard(sha)
+                self._forget_fetched(sha)
                 raise GitBackendError(
                     f"The fetch repository for {self.config.url} is missing objects of {self._subject()}"
                 ) from exc
@@ -792,7 +828,7 @@ class GitStorageImpl(StorageImpl):
             return None
         return (await self._snapshot()).get(wanted)
 
-    async def _open_blob(self, repo: Path, blob: str, size: int) -> AsyncGenerator[bytes]:
+    async def _open_blob(self, repo: Path, sha: str, blob: str, size: int) -> AsyncGenerator[bytes]:
         subject = f"{blob} of {self._subject()}"
 
         def open_repository() -> Repo:
@@ -805,7 +841,11 @@ class GitStorageImpl(StorageImpl):
             try:
                 return next(chunks, None)
             except KeyError:
+                self._forget_fetched(sha)
                 raise GitBackendError(f"The fetch repository for {self.config.url} has no {subject}") from None
+            except _CORRUPT_OBJECTS:
+                self._forget_fetched(sha)
+                raise
 
         def close() -> None:
             chunks.close()
@@ -853,17 +893,26 @@ class GitStorageImpl(StorageImpl):
         entry = await self._entry(path)
         if entry is None:
             raise NotFoundError(f"File not found for path: {path}")
-        # Downloads look a file up before their short first-byte deadline starts, so a cold fetch belongs here.
-        await self._prepare_repository()
+        # Downloads look a file up before their short first-byte deadline starts, so a cold fetch belongs here,
+        # unless the download cache already holds the file and the fetch repository is never consulted.
+        if not await self._is_cached(path.strip("/")):
+            await self._prepare_repository()
         return FileInfo(path=path.strip("/"), size=entry[1])
 
+    async def _is_cached(self, path: str) -> bool:
+        try:
+            await self._store.get_file(f"{await self._cache_prefix()}/{path}")
+        except NotFoundError:
+            return False
+        return True
+
     async def get_cache_path_key(self, path: str | None = None) -> str | None:
-        # Keyed by blob, so an update caches only the files that changed.
-        prefix = f"{_DURABLE_PREFIX}/{self._url_digest}/blobs"
+        # Beside the commit's listing, so a cache status check lists one commit's files, not every blob ever cached.
+        prefix = await self._cache_prefix()
         if path is None:
             return prefix
         entry = await self._entry(path)
-        return None if entry is None else f"{prefix}/{entry[0][:2]}/{entry[0]}"
+        return None if entry is None else f"{prefix}/{path.strip('/')}"
 
     async def download(self, path: str, byte_range: ByteRange | None) -> AsyncIterator[bytes]:
         entry = await self._entry(path)
@@ -871,7 +920,7 @@ class GitStorageImpl(StorageImpl):
             raise NotFoundError(f"File not found for path: {path}")
         blob, size = entry
         await self._prepare_repository()
-        return _slice(await self._open_blob(self._repo_dir, blob, size), byte_range)
+        return _slice(await self._open_blob(self._repo_dir, await self._commit(), blob, size), byte_range)
 
     async def validate_storage(self):
         validate_external_host(self.config.remote.host_url)
@@ -881,9 +930,9 @@ class GitStorageImpl(StorageImpl):
             await _finish_even_if_cancelled(self._ensure_commit(self._repo_dir, self._resolved_sha, ask_remote=True))
         else:
             self._resolved_sha = await self._ls_remote()
-        # An empty directory reads like a missing one.
-        if is_commit_sha(self.config.revision) or self.config.path:
-            await self._snapshot()
+        # Listing at create turns the file count, object size and object format limits into 400s rather than 502s
+        # on the first read, and an empty directory reads like a missing one.
+        await self._snapshot()
 
     async def upload(
         self,

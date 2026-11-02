@@ -382,6 +382,18 @@ class TestClassifyFailure:
             ("fatal: Unable to create '/cache/r/shallow.lock': File exists.", GitBackendError),
             ("git@host: Permission denied (password,keyboard-interactive).", GitAccessError),
             ("git@host: Permission denied (gssapi-with-mic).", GitAccessError),
+            (
+                'Load key "/tmp/nhx-git-ssh-x/id": invalid format\ngit@host: Permission denied (publickey).',
+                GitConfigError,
+            ),
+            (
+                'Load key "/tmp/nhx-git-ssh-x/id": error in libcrypto\ngit@host: Permission denied (publickey).',
+                GitConfigError,
+            ),
+            (
+                'Load key "/tmp/nhx-git-ssh-x/id": Permission denied\ngit@host: Permission denied (publickey).',
+                GitServerFault,
+            ),
             ("warning: unrelated\nerror: inflate: data stream error (incorrect header check)", GitBackendError),
             ("fatal: something new", GitBackendError),
             ("Connection closed by 10.0.0.1 port 22", GitUnavailableError),
@@ -555,6 +567,24 @@ class TestGitThreads:
         await asyncio.sleep(0.5)
         release.set()
         assert await asyncio.wait_for(call, 10) == "done"
+
+    async def test_local_work_that_overruns_the_deadline_still_returns_its_result(self, tmp_path):
+        impl = GitStorageImpl(_config("ssh://localhost/x"), SECRETS, cache_root=tmp_path)
+        impl.timeout_seconds = 0.2
+
+        def slow() -> str:
+            time.sleep(0.3)
+            return "done"
+
+        assert await asyncio.wait_for(impl._call(slow, "x"), 10) == "done"
+
+    async def test_local_work_that_overruns_twice_is_a_timeout(self, tmp_path):
+        impl = GitStorageImpl(_config("ssh://localhost/x"), SECRETS, cache_root=tmp_path)
+        impl.timeout_seconds = 0.1
+        began = time.monotonic()
+        with pytest.raises(GitUnavailableError, match="timed out"):
+            await impl._call(lambda: time.sleep(1.0), "x")
+        assert time.monotonic() - began < 0.9
 
     async def test_work_cancelled_while_waiting_for_a_thread_never_runs(self, tmp_path, occupy_remote_threads):
         release = occupy_remote_threads()
@@ -852,18 +882,16 @@ class TestListings:
 
 
 class TestDownloads:
-    async def test_cache_keys_name_blobs_so_unchanged_files_share_them(self, remote, tmp_path):
+    async def test_cache_keys_are_scoped_to_the_commit_and_sit_beside_its_listing(self, remote, tmp_path):
         first = _impl(_config(remote["url"], revision=remote["first"]), tmp_path / "cache")
         main = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
-        prefix = await first.get_cache_path_key()
-        assert prefix == await main.get_cache_path_key()
-        for impl in (first, main):
-            assert (await impl.get_cache_path_key("agents/support/agent.yaml") or "").startswith(f"{prefix}/")
-        assert await first.get_cache_path_key("agents/support/agent.yaml") == await main.get_cache_path_key(
-            "agents/support/agent.yaml"
-        )
-        assert await first.get_cache_path_key("README.md") != await main.get_cache_path_key("README.md")
+        prefix = await main.get_cache_path_key()
+        assert prefix is not None and prefix != await first.get_cache_path_key()
+        assert prefix.startswith(main._listing_key(remote["main"]).removesuffix(".json") + "/")
+        assert await main.get_cache_path_key("agents/support/agent.yaml") == f"{prefix}/agents/support/agent.yaml"
+        assert await main.get_cache_path_key("/README.md") == f"{prefix}/README.md"
         assert await main.get_cache_path_key("missing.md") is None
+        assert await main.get_cache_path_key("../README.md") is None
 
     @pytest.mark.parametrize(("start", "end"), [(0, 0), (3, 8), (4, 7), (9, 9), (0, 9)])
     async def test_byte_ranges_across_chunk_boundaries(self, remote, tmp_path, start, end):
@@ -905,6 +933,29 @@ class TestColdRepositories:
 
         monkeypatch.setattr(GitStorageImpl, "_fetch", no_fetch)
         assert await _read(impl, "README.md") == b"changed\n"
+
+    async def test_a_file_in_the_download_cache_is_described_without_the_fetch_repository(
+        self, remote, tmp_path, monkeypatch
+    ):
+        config = _config(remote["url"], revision=remote["main"])
+        impl = _impl(config, tmp_path / "cache")
+        await impl.list_files()
+        key = await impl.get_cache_path_key("README.md")
+        assert key is not None
+        await _durable(tmp_path / "durable").upload(key, git_backend._single_chunk(b"changed\n"), content_length=8)
+        shutil.rmtree(tmp_path / "cache")
+        shutil.rmtree(remote["dir"])
+        _fetched_commits.clear()
+
+        async def no_fetch(*_args, **_kwargs):
+            raise AssertionError("a cached file was fetched")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(GitStorageImpl, "_ensure_commit", no_fetch)
+            file = await _impl(config, tmp_path / "cache").get_file("README.md")
+        assert (file.path, file.size) == ("README.md", 8)
+        with pytest.raises(GitConfigError):
+            await _impl(config, tmp_path / "cache").get_file("agents/support/agent.yaml")
 
     async def test_reads_keep_a_repository_from_looking_idle(self, remote, tmp_path):
         impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
@@ -1045,6 +1096,19 @@ class TestDamagedFetchRepository:
         assert remote["main"] not in _fetched_commits[str(_fetch_repository(tmp_path / "cache"))]
         assert len(await _impl(config, tmp_path / "cache").list_files()) == 2
 
+    async def test_a_blob_missing_from_the_fetch_repository_is_fetched_again_on_the_next_download(
+        self, remote, tmp_path
+    ):
+        impl = _impl(_config(remote["url"], revision=remote["main"]), tmp_path / "cache")
+        await impl.list_files()
+        repository = _fetch_repository(tmp_path / "cache")
+        for pack in (repository / "objects" / "pack").iterdir():
+            pack.unlink()
+        with pytest.raises(GitBackendError, match="has no"):
+            await _read(impl, "README.md")
+        assert remote["main"] not in _fetched_commits[str(repository)]
+        assert await _read(impl, "README.md") == b"changed\n"
+
 
 class TestAccess:
     async def test_a_cached_commit_is_read_without_contacting_the_remote(self, remote, tmp_path):
@@ -1089,6 +1153,16 @@ class TestAccess:
         impl = _impl(_config(remote["url"], revision=remote["main"], path="agents"), tmp_path / "cache")
         await impl.validate_storage()
         assert checks == 2
+
+    @pytest.mark.parametrize("revision", ["main", "pinned"])
+    async def test_registering_lists_the_commit_so_its_limits_fail_at_create(
+        self, remote, tmp_path, monkeypatch, revision
+    ):
+        monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
+        monkeypatch.setattr(git_backend, "_MAX_LISTED_FILES", 2)
+        config = _config(remote["url"], revision=remote["main"] if revision == "pinned" else revision)
+        with pytest.raises(GitConfigError, match="more than 2 files"):
+            await _impl(config, tmp_path / "cache").validate_storage()
 
     async def test_registering_a_pinned_commit_skips_ls_remote(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
@@ -1140,10 +1214,12 @@ class TestRegistration:
         with pytest.raises(GitConfigError):
             await _impl(_config(remote["url"], revision="a" * 40), tmp_path / "cache").validate_storage()
 
-    async def test_validate_storage_does_not_fetch_a_branch(self, remote, tmp_path, monkeypatch):
+    async def test_validate_storage_fetches_and_lists_a_branch(self, remote, tmp_path, monkeypatch):
         monkeypatch.setattr("nhx.core.files.app.backends.git.validate_external_host", lambda _url: None)
-        await _impl(_config(remote["url"], revision="main"), tmp_path / "cache").validate_storage()
-        assert not (tmp_path / "cache").exists()
+        impl = _impl(_config(remote["url"], revision="main"), tmp_path / "cache")
+        await impl.validate_storage()
+        assert remote["main"] in _fetched_commits[str(_fetch_repository(tmp_path / "cache"))]
+        assert [path.name for path in _durable_files(tmp_path)] == [impl._listing_key(remote["main"]).rsplit("/", 1)[1]]
 
 
 class TestFetchRepositoryPruning:
