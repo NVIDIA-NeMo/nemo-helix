@@ -39,7 +39,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
         (RuntimeError("Private failure details"), 500, "Unexpected failure"),
     ],
 )
-def test_shared_passthrough_preserves_handled_errors(error, status_code, detail):
+def test_shared_passthrough_preserves_handled_errors(error, status_code, detail, caplog):
     app = FastAPI()
     register_sdk_exception_handlers(app)
 
@@ -56,3 +56,15 @@ def test_shared_passthrough_preserves_handled_errors(error, status_code, detail)
 
     assert response.status_code == status_code
     assert response.json() == {"detail": detail}
+    handler_errors = [
+        record
+        for record in caplog.records
+        if record.name == "nhx.common.errors.sdk_exception_handlers" and record.levelname == "ERROR"
+    ]
+    if isinstance(error, InternalServerError):
+        assert len(handler_errors) == 1
+        assert handler_errors[0].exc_info[1] is error
+        assert handler_errors[0].exc_info[2] is not None
+        assert "Private backend details" in caplog.text
+    else:
+        assert not handler_errors

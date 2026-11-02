@@ -85,6 +85,14 @@ async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSO
     # Server errors may contain private backend details. Preserve the status
     # (including retryable 503s), but do not relay their detail or error code.
     is_server_error = exc.status_code >= 500
+    if is_server_error:
+        logger.error(
+            "Upstream service error: %s %s -> %d",
+            _scrub_crlf(request.method),
+            _scrub_crlf(request.url.path),
+            exc.status_code,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
     content: dict[str, str] = {"detail": "Internal server error" if is_server_error else exc.detail}
     # Relay the downstream service's machine-readable reason for client errors.
     code = exc.body.get("code") if isinstance(exc.body, dict) else None
