@@ -51,7 +51,6 @@ from nhx.customization_common.schemas.checkpoint import (
     traits_from_step_model,
 )
 from nhx.customization_common.service.context import NHXJobContext
-from transformers import AutoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -982,6 +981,9 @@ def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tup
         return architecture, num_experts
 
     try:
+        # Import here so test collection does not require transformers.
+        from transformers import AutoConfig
+
         hf_config = AutoConfig.from_pretrained(
             customizer_config.model.path,
             trust_remote_code=customizer_config.model.trust_remote_code,

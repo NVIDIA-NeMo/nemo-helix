@@ -75,8 +75,8 @@ def traits_from_model_spec(spec: Any) -> CheckpointTraits:
     )
     name = getattr(spec, "checkpoint_model_name", None)
     return CheckpointTraits(
-        has_vision_tower=bool(getattr(spec, "has_vision_tower", False)),
-        has_audio_tower=bool(getattr(spec, "has_audio_tower", False)),
+        has_vision_tower="has_vision_tower" in fields and bool(spec.has_vision_tower),
+        has_audio_tower="has_audio_tower" in fields and bool(spec.has_audio_tower),
         expert_count=_expert_count(spec, fields),
         num_nextn_predict_layers=nextn,
         checkpoint_model_name=name if isinstance(name, str) else None,
