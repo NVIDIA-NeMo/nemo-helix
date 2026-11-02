@@ -29,14 +29,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      security:
+      - HelixBearer: []
       x-codeSamples:
       - lang: Python
-        source: 'import requests
+        source: 'import os
+
+          import requests
 
 
           url = "http://localhost:8080/apis/auth/authenticate"
 
-          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
 
 
           response = requests.request("GET", url, headers=headers)
@@ -47,15 +55,47 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
-          , {\n  method: \"GET\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
-          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
-          console.log(await response.json());\n"
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"GET\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+          \ response.json());\n"
       x-fern-examples:
       - code-samples:
         - sdk: curl
-          code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/auth/authenticate\
-            \ \\\n  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN'\n"
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/auth/authenticate\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
+
+            import requests
+
+
+            url = "http://localhost:8080/apis/auth/authenticate"
+
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+            token = os.environ["NHX_ACCESS_TOKEN"]
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+
+            response = requests.request("GET", url, headers=headers)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+            , {\n  method: \"GET\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
     post:
       tags:
       - Authentication
@@ -80,14 +120,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      security:
+      - HelixBearer: []
       x-codeSamples:
       - lang: Python
-        source: 'import requests
+        source: 'import os
+
+          import requests
 
 
           url = "http://localhost:8080/apis/auth/authenticate"
 
-          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
 
 
           response = requests.request("POST", url, headers=headers)
@@ -98,15 +146,47 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
-          , {\n  method: \"POST\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
-          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
-          console.log(await response.json());\n"
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"POST\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+          \ response.json());\n"
       x-fern-examples:
       - code-samples:
         - sdk: curl
-          code: "curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/auth/authenticate\
-            \ \\\n  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN'\n"
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/auth/authenticate\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
+
+            import requests
+
+
+            url = "http://localhost:8080/apis/auth/authenticate"
+
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+            token = os.environ["NHX_ACCESS_TOKEN"]
+
+            headers = {"Authorization": f"Bearer {token}"}
+
+
+            response = requests.request("POST", url, headers=headers)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+            , {\n  method: \"POST\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
   /apis/auth/discovery:
     get:
       tags:
@@ -316,15 +396,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
-      parameters:
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
+      security:
+      - HelixBearer: []
     get:
       tags:
       - Scoped Access Keys
@@ -352,14 +425,6 @@ paths:
           default: 100
           title: Page Size
         description: Number of keys to retrieve per page.
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
       responses:
         '200':
           description: Successful Response
@@ -385,6 +450,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}:
     delete:
       tags:
@@ -401,14 +468,6 @@ paths:
           description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
           title: Jti
         description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
       responses:
         '200':
           description: Successful Response
@@ -440,6 +499,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/rotate:
     post:
       tags:
@@ -456,14 +517,6 @@ paths:
           description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
           title: Jti
         description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
       requestBody:
         content:
           application/json:
@@ -508,6 +561,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/suspend:
     post:
       tags:
@@ -524,14 +579,6 @@ paths:
           description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
           title: Jti
         description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
       responses:
         '200':
           description: Successful Response
@@ -563,6 +610,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/unsuspend:
     post:
       tags:
@@ -579,14 +628,6 @@ paths:
           description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
           title: Jti
         description: Stable JWT ID of the Scoped Access Key for the lifecycle operation.
-      - name: Authorization
-        in: header
-        required: true
-        description: Bearer token for the authenticated caller. Scoped Access Keys
-          must be enabled.
-        schema:
-          type: string
-        example: Bearer YOUR_ACCESS_TOKEN
       responses:
         '200':
           description: Successful Response
@@ -618,6 +659,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/authorize:
     post:
       tags:
@@ -23864,3 +23907,13 @@ components:
       required:
       - data
       title: WorkspacesPage
+  securitySchemes:
+    HelixBearer:
+      type: http
+      scheme: bearer
+      description: Supply a raw Helix access token. The Authorization header's Bearer
+        prefix is added automatically.
+      x-fern-bearer:
+        name: accessToken
+        env: NHX_ACCESS_TOKEN
+        placeholder: YOUR_ACCESS_TOKEN

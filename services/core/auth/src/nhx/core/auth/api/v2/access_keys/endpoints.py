@@ -21,6 +21,7 @@ from nhx.common.auth.access_keys import (
     AccessKeyServiceAttributesForbiddenError,
     AccessKeyValidationError,
 )
+from nhx.common.auth.openapi import BEARER_AUTH_OPENAPI
 from nhx.common.auth.principal_identifier import parse_principal_identifier
 from nhx.common.config import get_auth_config
 from nhx.common.entities import EntityConflictError
@@ -37,20 +38,8 @@ from . import schemas
 
 router = APIRouter(tags=["Scoped Access Keys"])
 
-# Authentication is enforced by platform middleware rather than a FastAPI
-# parameter. Describe it without adding a second runtime authentication path.
-_ACCESS_KEY_AUTH_OPENAPI = {
-    "parameters": [
-        {
-            "name": "Authorization",
-            "in": "header",
-            "required": True,
-            "description": "Bearer token for the authenticated caller. Scoped Access Keys must be enabled.",
-            "schema": {"type": "string"},
-            "example": "Bearer YOUR_ACCESS_TOKEN",
-        }
-    ]
-}
+# Authentication is enforced by middleware, not an additional FastAPI dependency.
+_ACCESS_KEY_AUTH_OPENAPI = BEARER_AUTH_OPENAPI
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
