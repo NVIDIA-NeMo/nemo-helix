@@ -124,6 +124,22 @@ async def test_stdio_probe_inherits_environment_env() -> None:
     assert status.stderr == "from-environment"
 
 
+async def test_stdio_probe_expands_env_references_and_redacts_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBE_TOKEN", "s3cret")
+    spec = McpServerConfig.model_validate(
+        _stdio(
+            "-c",
+            "import os, sys; t = os.environ['TOKEN']; sys.stderr.write(f'{t == os.environ[\"EXPECTED\"]} {t}'); sys.exit(1)",
+            env={"TOKEN": "${PROBE_TOKEN}", "EXPECTED": "s3cret"},
+        )
+    )
+
+    status = await probe_mcp_server("env", spec, _config({}), timeout_seconds=5)
+
+    assert status.stderr == "True ${PROBE_TOKEN}"
+    assert "s3cret" not in status.model_dump_json()
+
+
 async def test_status_never_reports_expanded_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PROBE_SECRET", "s3cret")
     spec = McpServerConfig(transport="http", url="http://127.0.0.1:1/${PROBE_SECRET}")

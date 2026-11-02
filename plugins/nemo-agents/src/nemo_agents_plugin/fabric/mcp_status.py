@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -32,6 +33,7 @@ from pydantic import BaseModel, Field
 
 PROBE_TIMEOUT_SECONDS = 15.0
 _STDERR_TAIL_CHARS = 2000
+_BRACED_VAR = re.compile(r"\$\{([^}]+)\}")
 _STDIO_TRANSPORTS = {"stdio", "command", "process"}
 _STREAMABLE_HTTP_TRANSPORTS = {"", "http", "streamable_http", "streamablehttp"}
 
@@ -74,6 +76,10 @@ def _describe_error(error: BaseException) -> str:
     while isinstance(error, BaseExceptionGroup) and error.exceptions:
         error = error.exceptions[0]
     return str(error) or type(error).__name__
+
+
+def _expand_braced(value: str) -> str:
+    return _BRACED_VAR.sub(lambda match: os.environ.get(match.group(1), match.group(0)), value)
 
 
 def _read_tail(errlog: TextIO) -> str | None:
@@ -133,10 +139,21 @@ async def probe_mcp_server(
     target = os.path.expandvars(raw_target)
     # Report the unexpanded value so credentials substituted from the environment never leave the process.
     status = McpServerStatus(name=name, transport=transport, target=raw_target, args=spec.args, state="failed")
-    env = {**config.environment.env, **spec.env}
+    raw_env = {**config.environment.env, **spec.env}
+    # Match the runtime harnesses, which expand `${VAR}` env references from the process env.
+    env = {key: _expand_braced(value) for key, value in raw_env.items()}
+    pairs = [
+        (raw_target, target),
+        *((raw_env[key], env[key]) for key in env),
+        *((header, os.path.expandvars(header)) for header in spec.custom_headers.values()),
+    ]
+    # Map every environment-substituted value back to its reference for redaction.
+    expanded = {new: old for old, new in pairs if new and new != old}
 
     def redact(text: str | None) -> str | None:
-        return text.replace(target, raw_target) if text and target != raw_target else text
+        for value in sorted(expanded, key=len, reverse=True):
+            text = text.replace(value, expanded[value]) if text else text
+        return text
 
     if transport not in {"stdio", "sse", "streamable_http"}:
         status.state = "unsupported"
