@@ -175,6 +175,9 @@ def handle_errors(func):
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
+        except click.Abort:
+            # A declined confirmation; let Click print "Aborted!" and exit 1.
+            raise
         except Exception as e:
             ctx = None
             if args and hasattr(args[0], "parent") and hasattr(args[0], "info_name"):
