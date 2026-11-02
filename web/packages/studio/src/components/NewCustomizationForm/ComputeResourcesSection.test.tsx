@@ -120,6 +120,24 @@ describe('ComputeResourcesSection expert parallel size', () => {
     expect(screen.getByTestId('ep')).toHaveTextContent('64');
   });
 
+  it('reconciles when the tensor parallel size changes', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={4} />);
+    await userEvent.click(screen.getByText('Advanced Parallelism'));
+    await typeAndBlur('tensor_parallel_size', '2');
+    expect(screen.getByTestId('ep')).toHaveTextContent('2');
+  });
+
+  it.each([
+    ['a dense model', { spec: {} } as ModelEntity],
+    ['a model still loading', undefined],
+  ])('keeps a set size for %s when the GPU count changes', async (_, entity) => {
+    modelEntity.current = entity;
+    render(<Harness expertParallelSize={2} />);
+    await setGpusPerNode(8);
+    expect(screen.getByTestId('ep')).toHaveTextContent('2');
+  });
+
   it('shows the field and a warning for an invalid size on a MoE model', () => {
     modelEntity.current = moeModel;
     render(<Harness expertParallelSize={3} />);

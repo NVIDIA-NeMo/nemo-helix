@@ -109,9 +109,17 @@ describe('suggestedExpertParallelSize', () => {
   it.each([
     ['a single GPU', nemotronH, { num_gpus_per_node: 1, expert_parallel_size: 4 }],
     ['a GPU count no size fits', nemotronH, { num_gpus_per_node: 3, expert_parallel_size: 4 }],
-    ['a dense model', spec('LlamaForCausalLM'), { num_gpus_per_node: 4, expert_parallel_size: 4 }],
   ])('clears a set size on %s', (_, modelSpec, p) => {
     expect(suggestedExpertParallelSize(modelSpec, p)).toBeNull();
+  });
+
+  it.each([
+    ['a model still loading', undefined],
+    ['a dense model', spec('LlamaForCausalLM')],
+  ])('keeps a size set for %s', (_, modelSpec) => {
+    expect(
+      suggestedExpertParallelSize(modelSpec, { num_gpus_per_node: 4, expert_parallel_size: 2 })
+    ).toBeUndefined();
   });
 
   it('keeps a size set for another MoE architecture', () => {
@@ -125,6 +133,15 @@ describe('suggestedExpertParallelSize', () => {
 });
 
 describe('expertParallelSizeOnModelChange', () => {
+  it('clears a carried-over size for a dense model', () => {
+    expect(
+      expertParallelSizeOnModelChange(spec('LlamaForCausalLM'), {
+        num_gpus_per_node: 4,
+        expert_parallel_size: 4,
+      })
+    ).toBeNull();
+  });
+
   it('clears a carried-over size for another MoE architecture', () => {
     expect(
       expertParallelSizeOnModelChange(spec('MixtralForCausalLM', 8), {

@@ -113,6 +113,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
               <ControlledSliderWithTextInput

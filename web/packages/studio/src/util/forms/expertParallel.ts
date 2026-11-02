@@ -52,9 +52,7 @@ export const suggestedExpertParallelSize = (
 ): number | null | undefined => {
   const numExperts = spec?.moe_config?.num_experts;
   const ep = p.expert_parallel_size;
-  // A dense model hides the field, so a size left from an MoE pick would be submitted unseen.
-  if (!numExperts || numExperts <= 1) return ep === undefined ? undefined : null;
-  if (!isNemotronH(spec)) return undefined;
+  if (!isNemotronH(spec) || !numExperts || numExperts <= 1) return undefined;
   const sizes = totalGpus(p) > 1 ? validExpertParallelSizes(numExperts, p) : [];
   if (sizes.length === 0) return ep === undefined ? undefined : null;
   return sizes.includes(ep ?? 0) ? undefined : sizes.at(-1);
