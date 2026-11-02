@@ -3,7 +3,6 @@
 
 import { VerticalNavItem } from '@nvidia/foundations-react-core';
 import {
-  ACTIVE_NAV_ITEM_CLASS,
   COMPACT_NAV_ROW_CLASS,
   NAV_ROW_PADDING,
 } from '@studio/components/Layouts/NavigationDrawer/styles';
@@ -32,13 +31,7 @@ export const StudioNavItem: FC<StudioNavItemProps> = ({
   children,
   ...rest
 }) => {
-  const classes =
-    cn(
-      COMPACT_NAV_ROW_CLASS,
-      NAV_ROW_PADDING[padding],
-      active && ACTIVE_NAV_ITEM_CLASS,
-      className
-    ) || undefined;
+  const classes = cn(COMPACT_NAV_ROW_CLASS, NAV_ROW_PADDING[padding], className) || undefined;
 
   return (
     <VerticalNavItem active={active} {...rest} className={classes} asChild>

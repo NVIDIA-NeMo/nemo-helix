@@ -1,11 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Both `!` are load-bearing: KUI's active rule (0,4,0) outranks plain utilities, and
-// `bg-transparent!` clears its fill so this gradient replaces it.
-export const ACTIVE_NAV_ITEM_CLASS =
-  'bg-transparent! bg-[image:linear-gradient(90deg,color-mix(in_srgb,var(--color-brand)_24%,transparent)_0%,var(--color-translucent-white-000)_50%)]!';
-
 // KUI fixes rows at 36px; size them to their content instead.
 export const COMPACT_NAV_ROW_CLASS = 'h-auto min-h-0';
 

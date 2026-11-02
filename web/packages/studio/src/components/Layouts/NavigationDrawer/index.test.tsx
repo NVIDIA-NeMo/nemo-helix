@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ACTIVE_NAV_ITEM_CLASS } from '@studio/components/Layouts/NavigationDrawer/styles';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { PageLayout } from '@studio/routes/PageLayout';
@@ -11,6 +10,8 @@ import { NAV_ACCORDION_STATE_KEY, SIDE_NAV_OPEN_KEY } from '@studio/util/localSt
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
+
+const KUI_ACTIVE_CLASS = 'nv-vertical-nav-item--active';
 
 const mockItems = [
   { id: 'projects', slotLabel: 'Projects', icon: 'ProjectsIcon', href: ROUTES.workspace.index },
@@ -260,15 +261,13 @@ describe('NavigationDrawer', () => {
       );
 
       // Expanded, the child that matched owns the highlight and the parent stays plain.
-      expect(await screen.findByRole('link', { name: 'Entries' })).toHaveClass(
-        ACTIVE_NAV_ITEM_CLASS
-      );
-      expect(screen.getByRole('link', { name: 'Traces' })).not.toHaveClass(ACTIVE_NAV_ITEM_CLASS);
+      expect(await screen.findByRole('link', { name: 'Entries' })).toHaveClass(KUI_ACTIVE_CLASS);
+      expect(screen.getByRole('link', { name: 'Traces' })).not.toHaveClass(KUI_ACTIVE_CLASS);
 
       // Collapsed, the child is gone, so the parent has to carry it.
       await user.click(screen.getByRole('button', { name: /traces/i }));
       expect(screen.queryByRole('link', { name: 'Entries' })).not.toBeInTheDocument();
-      expect(screen.getByRole('link', { name: 'Traces' })).toHaveClass(ACTIVE_NAV_ITEM_CLASS);
+      expect(screen.getByRole('link', { name: 'Traces' })).toHaveClass(KUI_ACTIVE_CLASS);
     });
 
     it('renders subitems and chevron open/close icons', async () => {
