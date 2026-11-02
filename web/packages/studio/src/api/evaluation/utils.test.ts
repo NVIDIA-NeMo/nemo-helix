@@ -136,6 +136,26 @@ describe('deploymentForEvalSpec', () => {
     expect(deploymentForEvalSpec(spec)).toEqual({ kind: 'default' });
   });
 
+  it('reads a relative or proxy-prefixed gateway URL by its path', () => {
+    const path =
+      '/apis/agents/v2/workspaces/default/deployments/my-agent-k8s/-/v1/chat/completions';
+    const expected = { kind: 'deployment', workspace: 'default', name: 'my-agent-k8s' };
+    expect(deploymentForEvalSpec({ target: { url: path } })).toEqual(expected);
+    expect(
+      deploymentForEvalSpec({ target: { url: `https://proxy.example/helix${path}` } })
+    ).toEqual(expected);
+  });
+
+  it('ignores a gateway route that only appears in the query or fragment', () => {
+    const route = '/apis/agents/v2/workspaces/team/deployments/app/-/v1';
+    expect(
+      deploymentForEvalSpec({ target: { url: `https://other.example/?next=${route}` } })
+    ).toBeNull();
+    expect(
+      deploymentForEvalSpec({ target: { url: `https://other.example/#${route}` } })
+    ).toBeNull();
+  });
+
   it('returns null for targets outside the Agents gateway', () => {
     expect(deploymentForEvalSpec({ target: { url: 'http://127.0.0.1:8000/agent' } })).toBeNull();
     expect(
