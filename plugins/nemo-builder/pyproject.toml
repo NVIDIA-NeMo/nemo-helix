@@ -25,6 +25,9 @@ nemo-helix-plugin = { workspace = true }
 [project.entry-points."nemo.services"]
 builder = "nemo_builder_plugin.service:BuilderService"
 
+[project.entry-points."nemo.controllers"]
+builder-queue = "nemo_builder_plugin.controller:BuildQueueController"
+
 [project.scripts]
 # compile.py emits `nhx-build <step>` as each job step's command.
 nhx-build = "nemo_builder_plugin.run.main:main"

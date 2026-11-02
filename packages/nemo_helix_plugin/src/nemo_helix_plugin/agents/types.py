@@ -527,6 +527,31 @@ class CreateDeploymentRequest(BaseModel):
 CreateAgentDeploymentRequest: TypeAlias = CreateDeploymentRequest
 
 
+class DeploymentModeAvailability(BaseModel):
+    """Whether this platform can run deployments in one ``deployment_mode``."""
+
+    mode: DeploymentMode = Field(description="The deployment mode.")
+    enabled: bool = Field(
+        description="True when a deployment in this mode would run on a matching executor backend.",
+    )
+    requires_image: bool = Field(
+        description="True when a deployment in this mode must set 'image' because no default image is configured.",
+    )
+
+
+class DeploymentModeList(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/deployment-modes``."""
+
+    data: list[DeploymentModeAvailability]
+
+    def default_mode(self) -> DeploymentMode | None:
+        """The first enabled mode that can run without an explicit image, in ``DeploymentMode`` order."""
+        for availability in self.data:
+            if availability.enabled and not availability.requires_image:
+                return availability.mode
+        return None
+
+
 class CreateSessionRequest(BaseModel):
     """Request body for ``POST /v2/workspaces/{workspace}/sessions``."""
 

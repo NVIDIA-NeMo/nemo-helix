@@ -11,7 +11,7 @@ from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickH
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository, ScoreRollup
 from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
-from nhx.intake.spans.span_rollups import USAGE_TIER_EXPRESSION, usage_sql
+from nhx.intake.spans.span_rollups import USAGE_SUPERSEDED_EXPRESSION, USAGE_TIER_EXPRESSION, session_total, usage_sql
 from nhx.intake.spans.storage import float_or_none
 
 
@@ -328,8 +328,8 @@ def _current_session_span_metrics_sql(spans_table: str) -> str:
     The metric rollup then joins that to the sessions, so the join hash table would hold every deduped
     span with its maps — gigabytes on real agent workloads (long trajectories × many spans), which is
     what trips ClickHouse's memory limit. Here we ``argMax`` just the cost and token values (plus a
-    present-flag each, to keep an absent metric distinct from a real 0), the kind and parent id the
-    usage tier needs, and the model/agent strings. The rollup groups those scalars per trace before
+    present-flag each, to keep an absent metric distinct from a real 0), the span's usage tier and
+    superseded flag, and the model/agent strings. The rollup groups those scalars per trace before
     joining, so the join still carries a handful of scalars per trace rather than the attribute maps.
     Deduping by span identity picks each span's latest version.
     """
@@ -340,8 +340,8 @@ def _current_session_span_metrics_sql(spans_table: str) -> str:
                 source_format,
                 trace_id,
                 argMax(session_id, (event_ts, is_deleted)) AS dedup_session_id,
-                argMax(kind, (event_ts, is_deleted)) AS kind,
-                argMax(external_parent_span_id, (event_ts, is_deleted)) AS external_parent_span_id,
+                argMax({USAGE_TIER_EXPRESSION}, (event_ts, is_deleted)) AS usage_tier,
+                argMax({USAGE_SUPERSEDED_EXPRESSION}, (event_ts, is_deleted)) AS usage_superseded,
                 argMax(attributes_number[%(cost_key)s], (event_ts, is_deleted)) AS cost_value,
                 argMax(has(mapKeys(attributes_number), %(cost_key)s), (event_ts, is_deleted)) AS cost_present,
                 argMax(attributes_number[%(input_tokens_key)s], (event_ts, is_deleted)) AS input_tokens_value,
@@ -380,7 +380,9 @@ def _metric_rollups_sql(*, trace_index_table: str, spans_table: str, evaluation_
                 model_name,
                 agent_name,
                 agent_version,
-                {USAGE_TIER_EXPRESSION} AS usage_tier,
+                usage_tier,
+                usage_superseded,
+                input_tokens_present OR output_tokens_present AS reports_usage,
                 input_tokens_present AS reports_input_tokens,
                 input_tokens_value,
                 output_tokens_present AS reports_output_tokens,
@@ -406,15 +408,12 @@ def _metric_rollups_sql(*, trace_index_table: str, spans_table: str, evaluation_
                 sessions.evaluation_name AS evaluation_name,
                 sessions.test_case_name AS test_case_key,
                 sessions.latency_ms AS latency_ms,
+                {session_total("spans", "cost_usd")} / {COST_SCALE} AS cost_usd,
                 if(
-                    countIf(isNotNull(spans.cost_usd)) = 0,
+                    isNull({session_total("spans", "input_tokens")}) AND isNull({session_total("spans", "output_tokens")}),
                     NULL,
-                    sum(spans.cost_usd) / {COST_SCALE}
-                ) AS cost_usd,
-                if(
-                    countIf(isNotNull(spans.input_tokens)) = 0 AND countIf(isNotNull(spans.output_tokens)) = 0,
-                    NULL,
-                    coalesce(sum(spans.input_tokens), 0) + coalesce(sum(spans.output_tokens), 0)
+                    coalesce({session_total("spans", "input_tokens")}, 0)
+                        + coalesce({session_total("spans", "output_tokens")}, 0)
                 ) AS tokens,
                 arrayDistinct(arrayFlatten(groupArray(spans.model_names))) AS model_names,
                 arrayDistinct(arrayFlatten(groupArray(spans.agent_names))) AS agent_names,

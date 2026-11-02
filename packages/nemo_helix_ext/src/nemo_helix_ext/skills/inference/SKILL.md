@@ -475,5 +475,5 @@ done
 
 nemo inference providers delete nvidia-inference --workspace my-workspace
 nemo secrets delete nvidia-inference-key --workspace my-workspace
-nemo workspaces delete my-workspace
+nemo workspaces delete my-workspace --yes
 ```

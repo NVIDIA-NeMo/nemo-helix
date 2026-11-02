@@ -20,7 +20,7 @@ tokenizer:
   _target_: nemo_automodel._transformers.auto_tokenizer.NeMoAutoTokenizer.from_pretrained
   pretrained_model_name_or_path: nvidia/llama-nemotron-embed-1b-v2
 distributed:
-  _target_: nemo_automodel.components.distributed.fsdp2.FSDP2Manager
+  strategy: fsdp2
   dp_size: 1
   tp_size: 1
   pp_size: 1
