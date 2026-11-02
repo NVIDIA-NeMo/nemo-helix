@@ -388,9 +388,13 @@ referenced-artifact checks. It can produce an image that fails at startup.
 
 #### Packaging an agent that already lives on the platform
 
-The CLI above packages a directory on your machine. For an agent created
-through Studio or `nemo agents register`, the source of truth is the
-`{agent}-spec` fileset instead, and the `agents.package` job builds from that:
+The CLI above packages a directory on your machine. The `agents.package-agent`
+job builds from a registered agent's stored config and `reference.fileset`.
+Set the reference under `helix_registration.reference.fileset` in the YAML used
+to register the agent. Without a reference, the job looks for `{agent}-ethos`;
+if that fileset is absent, it can build from the stored config alone when no
+supporting files are required. A missing or inaccessible explicit reference
+fails packaging without falling back.
 
 ```bash
 curl -X POST "$NHX_BASE_URL/apis/agents/v2/workspaces/default/jobs/package" \
@@ -437,9 +441,9 @@ destination; it requires `registry` and must start with
 workspace's image, or redirect the push to a registry other than the one
 declared.
 
-The job downloads the agent's spec fileset into a temporary build context,
-writes `agent.yaml` from the stored config, and runs the same Fabric build the
-CLI runs.
+The job downloads the selected fileset into a temporary build context,
+writes `agent.yaml` from the stored config (replacing any copy in the fileset),
+and runs the same Fabric build the CLI runs.
 
 From the CLI the same job is `nemo agents package-agent`. It is deliberately
 *not* named `package`: the generated job command mounts onto the same Typer app

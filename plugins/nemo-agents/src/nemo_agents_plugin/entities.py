@@ -346,6 +346,10 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
             "vars (never plaintext) for docker/k8s modes; ignored for subprocess."
         ),
     )
+    source_fileset: FilesetRef | None = Field(
+        default=None,
+        description="Agent source fileset snapshotted at creation. When absent, stages <agent>-ethos.",
+    )
     spec_revision: str = Field(
         default="",
         description=(
