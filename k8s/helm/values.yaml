@@ -477,8 +477,10 @@ clickhouse:
   image:
     # -- ClickHouse image repository. Intake is tested against the 26.3 LTS release line.
     repository: docker.io/clickhouse/clickhouse-server
-    # -- ClickHouse image tag.
-    tag: "26.3"
+    # -- ClickHouse image tag. Keep at or above 26.3.62.3, which fixes CVE-2026-116366.
+    tag: "26.3.62.3"
+    # -- ClickHouse image digest (`sha256:...`) pinned with the tag. Set to an empty string to pull by tag only, for example from a mirror that re-signs images.
+    digest: "sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a"
     # -- ClickHouse image pull policy.
     pullPolicy: IfNotPresent
   auth:

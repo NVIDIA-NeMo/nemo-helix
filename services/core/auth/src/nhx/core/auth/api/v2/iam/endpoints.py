@@ -172,20 +172,27 @@ async def create_role_binding(
             detail="Active role binding already exists for this principal/workspace/role combination",
         )
 
-    # Create the role binding
-    # Name is a required field in EntityBase, so we generate a unique name from the binding fields
-    # workspace is both the storage scope and the workspace this binding grants access to
+    # The binding name is deterministic and revoke is a soft delete, so a previously revoked
+    # binding still owns the name. Reactivate it instead of adding a row that would collide.
     binding_name = _generate_binding_name(role_binding.principal, target_workspace, role_binding.role)
-    obj = RoleBindingEntity(
-        name=binding_name,
-        workspace=target_workspace,
-        principal=role_binding.principal,
-        role=role_binding.role,
-        granted_by=granted_by,
-        granted_at=datetime.now(timezone.utc),
-    )
-
-    saved = await entities_client.add(obj)
+    revoked = next((b for b in existing_all.data if b.name == binding_name), None)
+    if revoked is not None:
+        revoked.revoked_at = None
+        revoked.granted_by = granted_by
+        revoked.granted_at = datetime.now(timezone.utc)
+        saved = await entities_client.update(revoked)
+    else:
+        # Name is a required field in EntityBase, so we generate a unique name from the binding fields
+        # workspace is both the storage scope and the workspace this binding grants access to
+        obj = RoleBindingEntity(
+            name=binding_name,
+            workspace=target_workspace,
+            principal=role_binding.principal,
+            role=role_binding.role,
+            granted_by=granted_by,
+            granted_at=datetime.now(timezone.utc),
+        )
+        saved = await entities_client.add(obj)
 
     # Wait for role to propagate if requested
     if wait_role_propagation and saved.workspace:

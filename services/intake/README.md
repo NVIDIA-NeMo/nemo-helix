@@ -76,6 +76,17 @@ Docker daemon must be running.
 Intake is tested and profiled on ClickHouse 26.3 LTS. Other ClickHouse versions
 may not be supported.
 
+The managed image is pinned by tag and digest to ClickHouse 26.3.62.3, which
+fixes CVE-2026-116366 (unauthenticated remote code execution). Do not run an
+older 26.3 build. When Intake finds its managed container on an older
+`clickhouse/clickhouse-server:26.3[.x]` image, it replaces the container on
+startup and keeps the data directory. It does not replace containers from
+another image repository or release line, the `run_clickhouse.sh`
+compatibility container, or any container while `NHX_INTAKE_CLICKHOUSE_IMAGE`
+is set. Those block startup until you remove them with
+`uv run python -m nhx.intake.local_clickhouse --remove`, which keeps the data
+directory.
+
 Start Intake with the platform runner. When `NHX_INTAKE_CLICKHOUSE_URL` is not
 set and the configured URL is the default `http://localhost:8123`, Intake
 automatically provisions a ClickHouse container before initializing its client:
@@ -106,7 +117,7 @@ The managed image and storage location can be overridden through the typed
 Intake configuration surface:
 
 ```bash
-export NHX_INTAKE_CLICKHOUSE_IMAGE=clickhouse/clickhouse-server:26.3
+export NHX_INTAKE_CLICKHOUSE_IMAGE=clickhouse/clickhouse-server:26.3.62.3
 export NHX_INTAKE_CLICKHOUSE_DATA_DIR=/path/to/clickhouse-data
 ```
 
