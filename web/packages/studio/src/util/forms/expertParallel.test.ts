@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { expertParallelWarning, validExpertParallelSizes } from '@studio/util/forms/expertParallel';
+import {
+  expertParallelWarning,
+  suggestedExpertParallelSize,
+  validExpertParallelSizes,
+} from '@studio/util/forms/expertParallel';
 
 describe('validExpertParallelSizes', () => {
   it('lists the divisors of the GPU count that divide the expert count', () => {
@@ -56,5 +60,27 @@ describe('expertParallelWarning', () => {
     ['a dense model', undefined, { num_gpus_per_node: 4 }],
   ])('does not warn on %s', (_, numExperts, p) => {
     expect(expertParallelWarning(numExperts, p)).toBeUndefined();
+  });
+});
+
+describe('suggestedExpertParallelSize', () => {
+  it.each([undefined, 1, 3, 8])('suggests the largest valid size when the size is %s', (size) => {
+    expect(
+      suggestedExpertParallelSize(128, { num_gpus_per_node: 4, expert_parallel_size: size })
+    ).toBe(4);
+  });
+
+  it('keeps a valid size', () => {
+    expect(
+      suggestedExpertParallelSize(128, { num_gpus_per_node: 4, expert_parallel_size: 2 })
+    ).toBeUndefined();
+  });
+
+  it.each([
+    ['a single GPU', 128, { num_gpus_per_node: 1 }],
+    ['a dense model', undefined, { num_gpus_per_node: 4 }],
+    ['a GPU count no size fits', 128, { num_gpus_per_node: 3 }],
+  ])('suggests nothing on %s', (_, numExperts, p) => {
+    expect(suggestedExpertParallelSize(numExperts, p)).toBeUndefined();
   });
 });

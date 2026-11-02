@@ -37,3 +37,12 @@ export const expertParallelWarning = (
   }
   return undefined;
 };
+
+export const suggestedExpertParallelSize = (
+  numExperts: number | undefined,
+  p: AutomodelParallelismSpec
+): number | undefined => {
+  if (!numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
+  const sizes = validExpertParallelSizes(numExperts, p);
+  return sizes.includes(p.expert_parallel_size ?? 0) ? undefined : sizes.at(-1);
+};
