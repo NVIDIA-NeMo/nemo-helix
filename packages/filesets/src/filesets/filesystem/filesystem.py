@@ -124,8 +124,23 @@ class UploadRetriesExhaustedError(NemoClientError):
         self.lpath = lpath
         self.rpath = rpath
         self.attempts = attempts
-        super().__init__(f"Upload of {lpath} to {rpath} failed after {attempts} attempts")
+        super().__init__(lpath, rpath, attempts)
 
+    def __str__(self) -> str:
+        return f"Upload of {self.lpath} to {self.rpath} failed after {self.attempts} attempts"
+
+
+#: Retry policy for clients that upload local files: three attempts, 2s then 4s
+#: apart unless the server sends ``Retry-After``. Uploads are long and storage
+#: throttling clears slowly, so this backs off further than the client default.
+UPLOAD_RETRY_POLICY = RetryPolicy(
+    max_retries=2,
+    backoff_base=2.0,
+    retryable_status_codes=(429,),
+    retry_all_server_errors=True,
+    respect_retry_decision_headers=True,
+    respect_retry_after_headers=True,
+)
 
 _NO_RETRY = RetryPolicy(max_retries=0)
 

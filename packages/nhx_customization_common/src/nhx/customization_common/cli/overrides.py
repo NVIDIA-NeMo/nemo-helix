@@ -30,6 +30,7 @@ from pathlib import Path
 
 import httpx
 import typer
+from filesets import UPLOAD_RETRY_POLICY
 from nemo_helix_plugin.cli_errors import print_http_request_error, print_http_status_error
 from nemo_helix_plugin.cli_options import WorkspaceOption
 from nemo_helix_plugin.cli_state import resolve_cli_workspace
@@ -268,7 +269,9 @@ def _upload_then_validate(
         model_source=model_source,
         dataset_source=dataset_source,
         environment_source=environment_source,
-        files=FilesClient(base_url=resolved_base_url, workspace=workspace, default_headers=headers),
+        files=FilesClient(
+            base_url=resolved_base_url, workspace=workspace, default_headers=headers, retry=UPLOAD_RETRY_POLICY
+        ),
         models=ModelsClient(base_url=resolved_base_url, workspace=workspace, default_headers=headers),
         workspace=workspace,
         exist_ok=exist_ok,

@@ -23,7 +23,7 @@ import logging
 from pathlib import Path
 
 import httpx
-from filesets.filesystem.filesystem import FilesetFileSystem, build_fileset_ref
+from filesets.filesystem.filesystem import UPLOAD_RETRY_POLICY, FilesetFileSystem, build_fileset_ref
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -82,10 +82,9 @@ MAX_RETRIES = 3
 INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 30.0
 
-# Transient failures worth another attempt, for every Files operation this task
-# runs. Uploads run with the client's retry turned off, so this is the one layer
-# that retries them, and it has to catch what the client raises. Those are the
-# Nemo* entries: they wrap transport failures, 5xx responses (raise_for_status
+# Transient failures worth another attempt, for the Files operations this task
+# retries itself (uploads retry inside put_file). It has to catch what the client
+# raises. Those are the Nemo* entries: they wrap transport failures, 5xx responses (raise_for_status
 # maps every 5xx to InternalServerError) and 429 respectively, and are not httpx
 # types. Anything reaching this task through the typed client arrives as one of
 # them, never as the bare httpx error underneath.
@@ -241,7 +240,7 @@ class FileIORunner:
             FileUploadError,
             f"upload from '{src_path}' to '{fileset_name}'",
         ):
-            stats = self._upload_with_retry(
+            stats = self._upload(
                 local_path=local_path,
                 remote_path=remote_path,
                 fileset_name=fileset.name,
@@ -253,14 +252,7 @@ class FileIORunner:
         logger.info(f"Upload complete: {stats.files_uploaded} files, {stats.total_bytes} bytes")
         return stats
 
-    @retry(
-        stop=stop_after_attempt(MAX_RETRIES),
-        wait=wait_exponential(multiplier=2, min=INITIAL_BACKOFF_SECONDS, max=MAX_BACKOFF_SECONDS),
-        retry=retry_if_exception_type(TRANSIENT_FILESYSTEM_EXCEPTIONS),
-        reraise=True,
-        before_sleep=before_sleep_log(logger, logging.WARNING, exc_info=True),
-    )
-    def _upload_with_retry(
+    def _upload(
         self,
         local_path: str,
         remote_path: str,
@@ -269,7 +261,7 @@ class FileIORunner:
         fileset_display_name: str,
         src_path: Path,
     ) -> UploadStats:
-        """Internal method with retry logic for uploading to FilesetFileSystem."""
+        """Upload to FilesetFileSystem; each file retries on its own under UPLOAD_RETRY_POLICY."""
         stats = UploadStats()
         tqdm_callback = TqdmPerFileUploadCallback(src_path=src_path)
         jobs_callback = FileUploadProgressCallback(
@@ -280,9 +272,7 @@ class FileIORunner:
         )
         composite_callback = CompositeCallback(tqdm_callback, jobs_callback)
 
-        # put_file retries under its client's policy; turn that off so this
-        # method's retry stays the only one.
-        upload_client = self.files.with_options(timeout=UPLOAD_TIMEOUT, retry=RetryPolicy(max_retries=0))
+        upload_client = self.files.with_options(timeout=UPLOAD_TIMEOUT, retry=UPLOAD_RETRY_POLICY)
         FilesetFileSystem(client=upload_client).put(
             local_path,
             build_fileset_ref(remote_path, workspace=fileset_workspace, fileset=fileset_name),
