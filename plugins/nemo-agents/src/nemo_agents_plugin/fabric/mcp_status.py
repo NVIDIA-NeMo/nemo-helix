@@ -17,6 +17,7 @@ import re
 import shutil
 import tempfile
 import time
+from collections import defaultdict
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -61,6 +62,10 @@ class McpServerStatus(BaseModel):
 class McpStatusResponse(BaseModel):
     servers: list[McpServerStatus]
     checked_at: datetime
+
+
+def _declared_servers(config: AgentConfig) -> dict[str, McpServerConfig]:
+    return config.mcp.servers if config.mcp is not None else {}
 
 
 def _normalize_transport(transport: str) -> str:
@@ -197,25 +202,29 @@ async def probe_mcp_server(
     return status
 
 
-async def probe_mcp_servers(config: AgentConfig) -> McpStatusResponse:
-    """Probe every MCP server the config declares, concurrently."""
-    servers = config.mcp.servers if config.mcp is not None else {}
-    statuses = await asyncio.gather(*(probe_mcp_server(name, spec, config) for name, spec in servers.items()))
-    return McpStatusResponse(servers=list(statuses), checked_at=datetime.now(UTC))
-
-
 class McpStatusCache:
-    """Single-flight probe with a short TTL so overlapping requests share one set of probe processes."""
+    """Per-server single-flight probes with a short TTL, so overlapping list and single-server requests share one
+    probe process per server."""
 
     def __init__(self, ttl_seconds: float = 3.0) -> None:
         self._ttl_seconds = ttl_seconds
-        self._lock = asyncio.Lock()
-        self._cached: tuple[float, McpStatusResponse] | None = None
+        self._locks: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._cached: dict[str, tuple[float, McpServerStatus]] = {}
+
+    async def get_server(self, config: AgentConfig, name: str) -> McpServerStatus | None:
+        """Status of one declared server, or ``None`` when the config does not declare it."""
+        spec = _declared_servers(config).get(name)
+        if spec is None:
+            return None
+        async with self._locks[name]:
+            cached = self._cached.get(name)
+            if cached is not None and time.monotonic() - cached[0] < self._ttl_seconds:
+                return cached[1]
+            status = await probe_mcp_server(name, spec, config)
+            self._cached[name] = (time.monotonic(), status)
+            return status
 
     async def get(self, config: AgentConfig) -> McpStatusResponse:
-        async with self._lock:
-            if self._cached is not None and time.monotonic() - self._cached[0] < self._ttl_seconds:
-                return self._cached[1]
-            response = await probe_mcp_servers(config)
-            self._cached = (time.monotonic(), response)
-            return response
+        """Status of every declared server, probed concurrently."""
+        statuses = await asyncio.gather(*(self.get_server(config, name) for name in _declared_servers(config)))
+        return McpStatusResponse(servers=[s for s in statuses if s is not None], checked_at=datetime.now(UTC))

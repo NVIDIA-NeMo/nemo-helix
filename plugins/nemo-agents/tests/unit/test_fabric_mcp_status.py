@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -16,11 +15,10 @@ from mcp.types import ListToolsResult, PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
 from nemo_agents_plugin.fabric import mcp_status, server
 from nemo_agents_plugin.fabric.mcp_status import (
+    McpServerStatus,
     McpStatusCache,
-    McpStatusResponse,
     _list_all_tools,
     probe_mcp_server,
-    probe_mcp_servers,
 )
 from nemo_agents_plugin.fabric.server import create_fabric_serving_app
 
@@ -78,9 +76,7 @@ async def test_unresolved_stdio_command() -> None:
 async def test_running_stdio_server_lists_tools_with_policy(server_script: str) -> None:
     config = _config({"calc": _stdio(server_script, blocked_tools=["wipe"])})
 
-    response = await probe_mcp_servers(config)
-
-    [status] = response.servers
+    [status] = (await McpStatusCache().get(config)).servers
     assert status.state == "running"
     assert {tool.name: tool.exposed for tool in status.tools} == {"add": True, "wipe": False}
     assert status.tools[0].description == "Add two numbers."
@@ -90,7 +86,7 @@ async def test_running_stdio_server_lists_tools_with_policy(server_script: str) 
 async def test_global_tool_block_and_allowlist_hide_tools(server_script: str) -> None:
     config = _config({"calc": _stdio(server_script, allowed_tools=["add"])}, tools={"blocked": ["add"]})
 
-    [status] = (await probe_mcp_servers(config)).servers
+    [status] = (await McpStatusCache().get(config)).servers
 
     assert [tool.exposed for tool in status.tools] == [False, False]
 
@@ -172,42 +168,50 @@ async def test_list_all_tools_rejects_repeated_cursor() -> None:
         await _list_all_tools(Session())  # ty: ignore[invalid-argument-type]
 
 
-async def test_status_cache_shares_one_probe_across_overlapping_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
+def _counting_probe(monkeypatch: pytest.MonkeyPatch, delay: float = 0) -> list[str]:
+    calls: list[str] = []
 
-    async def probe(config: AgentConfig) -> McpStatusResponse:
-        nonlocal calls
-        calls += 1
-        await asyncio.sleep(0.05)
-        return McpStatusResponse(servers=[], checked_at=datetime.now(UTC))
+    async def probe(name: str, spec: McpServerConfig, config: AgentConfig) -> McpServerStatus:
+        calls.append(name)
+        await asyncio.sleep(delay)
+        return McpServerStatus(name=name, transport="stdio", target=spec.url, state="running")
 
-    monkeypatch.setattr(mcp_status, "probe_mcp_servers", probe)
+    monkeypatch.setattr(mcp_status, "probe_mcp_server", probe)
+    return calls
+
+
+async def test_status_cache_shares_probes_across_overlapping_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _counting_probe(monkeypatch, delay=0.05)
     cache = McpStatusCache(ttl_seconds=60)
+    config = _config({"a": _stdio(), "b": _stdio()})
 
-    responses = await asyncio.gather(*(cache.get(_config({})) for _ in range(5)))
+    responses, single = await asyncio.gather(
+        asyncio.gather(*(cache.get(config) for _ in range(5))), cache.get_server(config, "a")
+    )
 
-    assert calls == 1
-    assert len({id(response) for response in responses}) == 1
+    assert sorted(calls) == ["a", "b"]
+    assert all(response.servers[0] is single for response in responses)
 
 
 async def test_status_cache_reprobes_after_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
-
-    async def probe(config: AgentConfig) -> McpStatusResponse:
-        nonlocal calls
-        calls += 1
-        return McpStatusResponse(servers=[], checked_at=datetime.now(UTC))
-
-    monkeypatch.setattr(mcp_status, "probe_mcp_servers", probe)
+    calls = _counting_probe(monkeypatch)
     cache = McpStatusCache(ttl_seconds=0)
+    config = _config({"a": _stdio()})
 
-    await cache.get(_config({}))
-    await cache.get(_config({}))
+    await cache.get_server(config, "a")
+    await cache.get_server(config, "a")
 
-    assert calls == 2
+    assert calls == ["a", "a"]
 
 
-def test_mcp_status_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_status_cache_ignores_undeclared_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _counting_probe(monkeypatch)
+
+    assert await McpStatusCache().get_server(_config({"a": _stdio()}), "nope") is None
+    assert calls == []
+
+
+def test_mcp_server_endpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     async def validate(config: AgentConfig, *, base_dir: Path) -> object:
         return object()
 
@@ -219,9 +223,14 @@ def test_mcp_status_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     )
 
     with TestClient(create_fabric_serving_app(config_path)) as client:
-        response = client.get("/mcp/status")
+        listed = client.get("/v1/mcp/servers")
+        single = client.get("/v1/mcp/servers/iocs")
+        missing = client.get("/v1/mcp/servers/nope")
 
-    assert response.status_code == 200
-    body = response.json()
+    assert listed.status_code == 200
+    body = listed.json()
     assert [(s["name"], s["state"]) for s in body["servers"]] == [("iocs", "unresolved")]
     assert body["checked_at"]
+    assert single.status_code == 200
+    assert single.json() == body["servers"][0]
+    assert missing.status_code == 404

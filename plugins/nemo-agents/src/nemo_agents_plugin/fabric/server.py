@@ -22,7 +22,7 @@ from fastapi import FastAPI, Header, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
 from nemo_agents_plugin.fabric.environment import release_runtime_base_dir, resolve_runtime_base_dir
-from nemo_agents_plugin.fabric.mcp_status import McpStatusCache, McpStatusResponse
+from nemo_agents_plugin.fabric.mcp_status import McpServerStatus, McpStatusCache, McpStatusResponse
 from nemo_agents_plugin.fabric.runtime import (
     FabricInvocationRequest,
     FabricRuntimeExecutionError,
@@ -378,9 +378,16 @@ def create_fabric_serving_app(
 
     mcp_status_cache = McpStatusCache()
 
-    @app.get("/mcp/status")
-    async def mcp_status() -> McpStatusResponse:
+    @app.get("/v1/mcp/servers")
+    async def list_mcp_servers() -> McpStatusResponse:
         return await mcp_status_cache.get(app.state.agent_config)
+
+    @app.get("/v1/mcp/servers/{name}")
+    async def get_mcp_server(name: str) -> McpServerStatus:
+        status = await mcp_status_cache.get_server(app.state.agent_config, name)
+        if status is None:
+            raise HTTPException(status_code=404, detail=f"MCP server '{name}' is not declared by this agent.")
+        return status
 
     @app.post("/v1/chat/completions", response_model=None, response_model_exclude_none=True)
     async def chat_completions(
