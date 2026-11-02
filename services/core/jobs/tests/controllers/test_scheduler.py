@@ -384,7 +384,7 @@ def test_admission_deferral_status_write_failure_does_not_skip_later_steps(
     assert mock_jobs_client.update_job_step_status.call_count == 2
 
 
-def test_admission_deferral_skips_write_when_step_already_queued_with_same_message(
+def test_admission_deferral_resends_when_step_already_queued_with_same_message(
     backend_registry: BackendRegistry,
     mock_nemo_client,
     mock_jobs_client,
@@ -398,7 +398,8 @@ def test_admission_deferral_skips_write_when_step_already_queued_with_same_messa
 
     scheduler.step()
 
-    mock_jobs_client.update_job_step_status.assert_not_called()
+    # The dispatcher no-ops the step write but still retries job and attempt propagation.
+    mock_jobs_client.update_job_step_status.assert_called_once()
 
 
 def test_admission_deferral_rewrites_when_reason_changes(
