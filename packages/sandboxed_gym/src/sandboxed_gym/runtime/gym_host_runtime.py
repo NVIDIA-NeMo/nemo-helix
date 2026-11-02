@@ -642,9 +642,10 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     mount, so nothing is fetched from a package index during this installation.
 
     Wheels land in the writable work directory. ``PYTHONPATH`` and ``sys.path`` expose them to
-    Gym's children and to this process. ``UV_OFFLINE`` keeps later server venvs on that
-    wheelhouse; ``--find-links`` still lets uv download a newer index build. Hugging Face stays
-    under ``environment_offline``.
+    Gym's children and to this process. Later server venvs stay on that wheelhouse
+    (``UV_OFFLINE=1``) unless the sandbox payload already set ``UV_OFFLINE=0`` because
+    ``allow_internet`` is on. ``--find-links`` alone still lets uv prefer a newer index build,
+    which is why the default is offline. Hugging Face stays under ``environment_offline``.
 
     A failed install raises ``RuntimeError`` carrying uv's own reason, not the command line.
     """
@@ -695,6 +696,8 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # Server venvs Gym builds next resolve from this wheelhouse only.
     os.environ[UV_FIND_LINKS_ENV_KEY] = wheels_dir
 
+    # Offline unless the payload set UV_OFFLINE=0 for allow_internet. A value already in the
+    # environment wins, including an operator's own setting from the image.
     if UV_OFFLINE_ENV_KEY in os.environ:
         print(
             f"gym-host: wheels-v1 install leaving {UV_OFFLINE_ENV_KEY}={os.environ[UV_OFFLINE_ENV_KEY]} as already set",

@@ -554,24 +554,32 @@ def test_uv_env_passthrough_carries_no_credentials(monkeypatch):
     validate_bootstrap_env(uv_env_passthrough())
 
 
-def _offline_spec(*, environment_offline: bool, reuse_image_gym_install: bool = False):
+def _offline_spec(
+    *,
+    environment_offline: bool,
+    reuse_image_gym_install: bool = False,
+    allow_internet: bool = False,
+    host_env: dict[str, str] | None = None,
+):
     from sandboxed_gym.config import BrokerEndpoint
     from sandboxed_gym.orchestrator import build_gym_host_spec
     from sandboxed_gym.serve_config import SandboxedGymServeConfig
 
-    cfg = SandboxedGymServeConfig.model_validate(
-        {
-            "job_id": "job-1",
-            "environment_offline": environment_offline,
-            "reuse_image_gym_install": reuse_image_gym_install,
-            "sandbox": {
-                "image": "runtime:dev",
-                "network_policy": {"egress_allow": []},
-                "environment_pvc_claim": "env",
-                "workspace_pvc_claim": "work",
-            },
-        }
-    )
+    raw: dict[str, object] = {
+        "job_id": "job-1",
+        "environment_offline": environment_offline,
+        "reuse_image_gym_install": reuse_image_gym_install,
+        "sandbox": {
+            "image": "runtime:dev",
+            "allow_internet": allow_internet,
+            "network_policy": {"egress_allow": []},
+            "environment_pvc_claim": "env",
+            "workspace_pvc_claim": "work",
+        },
+    }
+    if host_env is not None:
+        raw["host_env"] = host_env
+    cfg = SandboxedGymServeConfig.model_validate(raw)
     broker = BrokerEndpoint(url="http://broker:1", host="broker", port=1, token="t")
     return build_gym_host_spec(cfg, broker)
 
@@ -608,11 +616,22 @@ def test_gym_host_spec_forwards_reuse_of_the_image_gym_install():
 
 
 def test_gym_host_spec_leaves_the_index_alone_by_default():
-    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY
+    from sandboxed_gym.runtime.gym_host_runtime import ENVIRONMENT_OFFLINE_ENV_KEY, UV_OFFLINE_ENV_KEY
 
     spec = _offline_spec(environment_offline=False)
 
     assert ENVIRONMENT_OFFLINE_ENV_KEY not in spec.bootstrap_env
+    assert UV_OFFLINE_ENV_KEY not in spec.bootstrap_env
+
+
+def test_allow_internet_sets_uv_offline_to_zero_in_the_sandbox_payload():
+    """The host forces ``UV_OFFLINE=1`` unless the payload already opted the index back in."""
+    from sandboxed_gym.runtime.gym_host_runtime import UV_OFFLINE_ENV_KEY
+
+    spec = _offline_spec(environment_offline=False, allow_internet=True, host_env={UV_OFFLINE_ENV_KEY: "1"})
+
+    assert spec.bootstrap_env[UV_OFFLINE_ENV_KEY] == "0"
+    assert spec.allow_internet is True
 
 
 def test_the_caller_dialect_accepts_an_offline_environment():

@@ -40,6 +40,7 @@ from sandboxed_gym.runtime.gym_host_runtime import (
     ENVIRONMENT_PACKAGE_REQUIRED_ENV_KEY,
     GYM_GLOBAL_CONFIG_ENV_KEY,
     REUSE_IMAGE_GYM_INSTALL_ENV_KEY,
+    UV_OFFLINE_ENV_KEY,
 )
 from sandboxed_gym.serve_config import (
     SandboxedGymServeConfig,
@@ -248,6 +249,12 @@ def build_gym_host_spec(
         bootstrap_extra[ENVIRONMENT_OFFLINE_ENV_KEY] = "true"
     if cfg.reuse_image_gym_install:
         bootstrap_extra[REUSE_IMAGE_GYM_INSTALL_ENV_KEY] = "true"
+    if sandbox.allow_internet:
+        # The host forces UV_OFFLINE=1 for a wheels-v1 install unless the variable is already
+        # set. allow_internet is the operator opt-in, so the payload sets 0 here and the host
+        # leaves it. Assigned after host_env so a job cannot keep uv offline once the operator
+        # opened the index.
+        bootstrap_extra[UV_OFFLINE_ENV_KEY] = "0"
     bootstrap_env = build_bootstrap_env(
         cfg.job_id,
         cfg.environment_path or sandbox.env_mount_path,

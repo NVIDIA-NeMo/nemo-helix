@@ -706,15 +706,16 @@ def test_a_failed_wheel_install_keeps_only_the_last_stderr_lines_and_masks_secre
     assert reason[-1] == "error: token *** rejected"
 
 
-def test_a_wheels_v1_install_stays_offline_even_when_the_sandbox_may_reach_the_network(
+def test_a_wheels_v1_install_stays_offline_unless_the_payload_already_allowed_the_index(
     tmp_path, monkeypatch, isolated_gym_host_process_state
 ):
     """`--find-links` alone is not enough.
 
     A reachable index makes uv prefer a newer build over the staged wheel, so the server venvs
     download packages the wheelhouse already has. An unreachable index makes `uv venv --seed`
-    fail instead of falling back to those wheels. Either way the wheelhouse has to be the only
-    source. Hugging Face stays reachable: that policy belongs to ``environment_offline``.
+    fail instead of falling back to those wheels. The host therefore sets ``UV_OFFLINE=1``
+    unless the sandbox payload already set ``UV_OFFLINE=0`` because ``allow_internet`` is on.
+    Hugging Face stays reachable: that policy belongs to ``environment_offline``.
     """
     package = _stage_wheelhouse(tmp_path, monkeypatch)
     monkeypatch.delenv(runtime.ENVIRONMENT_OFFLINE_ENV_KEY, raising=False)
@@ -726,7 +727,7 @@ def test_a_wheels_v1_install_stays_offline_even_when_the_sandbox_may_reach_the_n
 
 
 def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkeypatch, isolated_gym_host_process_state):
-    """Whoever set it in the image knows something this flag does not."""
+    """A payload ``UV_OFFLINE=0`` (``allow_internet``) or an image setting is left in place."""
     package = _stage_wheelhouse(tmp_path, monkeypatch)
     monkeypatch.setenv(runtime.UV_OFFLINE_ENV_KEY, "0")
 
