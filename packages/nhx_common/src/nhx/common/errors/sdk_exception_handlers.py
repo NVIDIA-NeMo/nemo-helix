@@ -18,6 +18,19 @@ Usage:
 
     # In your service's FastAPI app setup:
     register_sdk_exception_handlers(app)
+
+Routes that retain a catch-all for unexpected failures must let handled API
+exceptions reach these handlers. Keep any route-specific error translations
+first, then use::
+
+    except HANDLED_API_EXCEPTIONS:
+        raise
+    except Exception:
+        # Log and return a generic 500 for unexpected failures only.
+        ...
+
+Do not recover HTTP errors from an arbitrary exception's cause: a route may
+intentionally translate an upstream error into a different public response.
 """
 
 import logging
@@ -31,6 +44,7 @@ from nhx.common.entities.client import (
     EntityStoreError,
     EntityValidationError,
 )
+from starlette.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +60,12 @@ ENTITY_ERROR_STATUS_CODES: dict[type[EntityStoreError], int] = {
     EntityConflictError: 409,
     EntityValidationError: 422,
 }
+
+
+# Routes with a catch-all must re-raise these before converting unexpected
+# exceptions to 500s, so FastAPI and the handlers below retain their status/detail.
+# Keep route-specific validation/conflict translations ahead of this fallback.
+HANDLED_API_EXCEPTIONS = (HTTPException, NemoHTTPError, EntityStoreError)
 
 
 async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSONResponse:
@@ -128,6 +148,7 @@ def register_sdk_exception_handlers(app: FastAPI) -> None:
 
 
 __all__ = [
+    "HANDLED_API_EXCEPTIONS",
     "nemo_client_error_handler",
     "entity_store_error_handler",
     "register_sdk_exception_handlers",

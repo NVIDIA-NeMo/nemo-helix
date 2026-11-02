@@ -11,6 +11,7 @@ from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
@@ -79,6 +80,8 @@ async def create_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     except HTTPException:
         raise
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create adapter - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create adapter")
@@ -120,6 +123,8 @@ async def list_adapters(
             sort=sort,
             parsed_filter=parsed_filter,
         )
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception:
         logger.exception("Failed to list adapter entities")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list adapter entities")
@@ -211,6 +216,8 @@ async def update_adapter(
         logger.warning(f"Adapter update: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
+        raise
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception as e:
         logger.exception(f"Failed to update adapter - {e}")

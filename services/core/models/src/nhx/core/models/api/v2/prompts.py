@@ -8,9 +8,9 @@ from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
+from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
-from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -66,7 +66,7 @@ async def list_prompts(
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
-    except NOT_FOUND_ERRORS:
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception:
         logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
@@ -102,6 +102,8 @@ async def create_prompt(
             )
         logger.warning(f"Prompt creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt data")
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception:
         logger.exception("Failed to create prompt")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
@@ -131,6 +133,8 @@ async def get_prompt(
             )
         return prompt
     except HTTPException:
+        raise
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception:
         logger.exception(f"Failed to get prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
@@ -163,6 +167,8 @@ async def update_prompt(
         logger.warning(f"Entity store validation error during prompt update: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except HTTPException:
+        raise
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception:
         logger.exception("Failed to update prompt")
@@ -197,6 +203,8 @@ async def delete_prompt(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception:
         logger.exception(f"Failed to delete prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

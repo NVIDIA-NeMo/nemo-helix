@@ -28,6 +28,7 @@ from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.client_factory import get_async_nemo_client
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
+from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS
 from nhx.core.models.api.dependencies import get_adapter_entity_service, get_files_client, get_model_entity_service
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
@@ -40,7 +41,6 @@ from nhx.core.models.api.service.model_entity_service import (
     is_trusted_repo_id,
     validate_tool_call_plugin_allowed,
 )
-from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.config import config as models_config
 from nhx.core.models.entities import Model
 from nhx.core.models.schemas import (
@@ -158,6 +158,8 @@ async def create_model(
             )
         logger.warning(f"Model creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model entity")
@@ -224,7 +226,7 @@ async def list_models(
         raise
     except InvalidFilterError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except NOT_FOUND_ERRORS:
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception:
         logger.exception("Failed to list model entities")
@@ -268,6 +270,8 @@ async def get_model(
             )
 
     except HTTPException:
+        raise
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model entity - {e}")
@@ -430,6 +434,8 @@ async def update_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to update model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model entity")
@@ -478,6 +484,8 @@ async def delete_model(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception:
         logger.exception("Failed to delete model entity")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
@@ -540,6 +548,8 @@ async def create_model_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     except HTTPException:
         raise
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create model adapter - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model adapter")
@@ -592,6 +602,8 @@ async def delete_model_adapter(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except HANDLED_API_EXCEPTIONS:
+        raise
     except Exception as e:
         logger.exception(f"Failed to delete model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
@@ -655,6 +667,8 @@ async def update_model_adapter(
         logger.warning(f"Adapter update validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
+        raise
+    except HANDLED_API_EXCEPTIONS:
         raise
     except Exception as e:
         logger.exception(f"Failed to update model adapter entity - {e}")
