@@ -367,8 +367,12 @@ class TestConfigureMoeBackend:
         assert cfg["model"]["backend"]["_target_"] == "nemo_automodel.components.models.common.utils.BackendConfig"
 
     @patch(MODEL_REGISTRY_PATCH)
-    def test_dense_custom_model_no_moe_config(self, mock_registry) -> None:
+    def test_dense_custom_model_no_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
 
         cfg: dict[str, Any] = {"model": {}}
         _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
@@ -377,8 +381,12 @@ class TestConfigureMoeBackend:
         assert "parallelizer" not in cfg
 
     @patch(MODEL_REGISTRY_PATCH)
-    def test_standard_hf_model_no_custom_config(self, mock_registry) -> None:
+    def test_standard_hf_model_no_custom_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
 
         cfg: dict[str, Any] = {"model": {}}
         _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
