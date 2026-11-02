@@ -14,7 +14,10 @@ vi.mock('@nemo/common/src/api/models/useModelEntity', () => ({
   useModelEntity: () => modelEntity.current,
 }));
 
-const Harness: FC<{ expertParallelSize?: number }> = ({ expertParallelSize }) => {
+const Harness: FC<{ expertParallelSize?: number; numNodes?: number }> = ({
+  expertParallelSize,
+  numNodes = 1,
+}) => {
   const form = useForm<CustomizationFormFields>({
     defaultValues: {
       ...FORM_DEFAULTS,
@@ -23,6 +26,7 @@ const Harness: FC<{ expertParallelSize?: number }> = ({ expertParallelSize }) =>
         model: 'ws/model',
         parallelism: {
           ...FORM_DEFAULTS.automodel.parallelism,
+          num_nodes: numNodes,
           num_gpus_per_node: 4,
           expert_parallel_size: expertParallelSize,
         },
@@ -48,14 +52,21 @@ const moeModel = {
   },
 } as ModelEntity;
 
-const setGpusPerNode = async (gpus: number) => {
-  const input = screen
+const input = (name: string) => {
+  const el = screen
     .getAllByRole('spinbutton')
-    .find((el) => el.getAttribute('name') === 'automodel.parallelism.num_gpus_per_node');
-  if (!input) throw new Error('GPUs per Node input not found');
-  await userEvent.clear(input);
-  await userEvent.type(input, String(gpus));
+    .find((candidate) => candidate.getAttribute('name') === `automodel.parallelism.${name}`);
+  if (!el) throw new Error(`${name} input not found`);
+  return el;
 };
+
+const typeAndBlur = async (name: string, value: string) => {
+  await userEvent.clear(input(name));
+  if (value) await userEvent.type(input(name), value);
+  await userEvent.tab();
+};
+
+const setGpusPerNode = (gpus: number) => typeAndBlur('num_gpus_per_node', String(gpus));
 
 describe('ComputeResourcesSection expert parallel size', () => {
   it('replaces an invalid size when the GPU count changes', async () => {
@@ -77,6 +88,36 @@ describe('ComputeResourcesSection expert parallel size', () => {
     render(<Harness expertParallelSize={2} />);
     await setGpusPerNode(8);
     expect(screen.getByTestId('ep')).toHaveTextContent('2');
+  });
+
+  it('reconciles once typing ends, not on the digits on the way', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={8} numNodes={2} />);
+    // At "1" (4 GPUs) 8 would not fit; at 12 nodes (48 GPUs) it does.
+    await typeAndBlur('num_nodes', '12');
+    expect(screen.getByTestId('ep')).toHaveTextContent('8');
+  });
+
+  it('reconciles when the node count is left empty', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={8} numNodes={2} />);
+    await typeAndBlur('num_nodes', '');
+    expect(screen.getByTestId('ep')).toHaveTextContent('4');
+  });
+
+  it('reconciles against the clamped node count', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={16} numNodes={4} />);
+    // 20 clamps to 16 nodes (64 GPUs), where 16 still fits.
+    await typeAndBlur('num_nodes', '20');
+    expect(screen.getByTestId('ep')).toHaveTextContent('16');
+  });
+
+  it('accepts a size up to the total GPU count', async () => {
+    modelEntity.current = moeModel;
+    render(<Harness expertParallelSize={2} numNodes={16} />);
+    await typeAndBlur('expert_parallel_size', '64');
+    expect(screen.getByTestId('ep')).toHaveTextContent('64');
   });
 
   it('shows the field and a warning for an invalid size on a MoE model', () => {

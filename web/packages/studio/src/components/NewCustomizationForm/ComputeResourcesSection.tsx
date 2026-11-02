@@ -19,6 +19,7 @@ import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
   expertParallelWarning,
   suggestedExpertParallelSize,
+  totalGpus,
 } from '@studio/util/forms/expertParallel';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
@@ -43,13 +44,11 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
       setValue('automodel.parallelism.expert_parallel_size', size ?? undefined);
     }
   };
+  // On release and on blur: a value passed through on the way, such as the 1 of a typed 12,
+  // would replace a size that fits the final layout.
   const onGpuLayoutChange = {
-    Slider: { onValueChange: refillExpertParallelSize },
-    TextInput: {
-      onValueChange: (value: string) => {
-        if (value !== '') refillExpertParallelSize();
-      },
-    },
+    Slider: { onValueCommit: refillExpertParallelSize },
+    TextInput: { onBlur: refillExpertParallelSize },
   };
   const expertParallelSize = (
     <ControlledSliderWithTextInput
@@ -61,7 +60,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
       }}
       {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
       min={1}
-      max={32}
+      max={Math.max(1, totalGpus(parallelism ?? {}))}
       step={1}
       disabled={disabled}
     />

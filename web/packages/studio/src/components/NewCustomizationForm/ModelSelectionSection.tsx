@@ -11,7 +11,7 @@ import {
   MODEL_FIELD_BY_BACKEND,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { suggestedExpertParallelSize } from '@studio/util/forms/expertParallel';
+import { expertParallelSizeOnModelChange } from '@studio/util/forms/expertParallel';
 import { useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 
@@ -43,7 +43,7 @@ export const ModelSelectionSection = () => {
   const handleModelChange = (selection: ModelSelection) => {
     modelField.onChange(selection.model);
     if (backend !== 'automodel') return;
-    const expertParallelSize = suggestedExpertParallelSize(
+    const expertParallelSize = expertParallelSizeOnModelChange(
       selection.entity?.spec,
       getValues('automodel.parallelism') ?? {}
     );

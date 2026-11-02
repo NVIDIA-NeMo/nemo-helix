@@ -111,4 +111,15 @@ describe('ModelSelectionSection expert parallel size', () => {
     await userEvent.click(screen.getByRole('button', { name: button }));
     expect(screen.getByTestId('ep')).toHaveTextContent('unset');
   });
+
+  it.each(['Dense', 'Mixtral'])(
+    'clears the Nemotron-H size when %s is selected next',
+    async (button) => {
+      render(<Harness gpus={4} />);
+      await userEvent.click(screen.getByRole('button', { name: 'MoE' }));
+      expect(screen.getByTestId('ep')).toHaveTextContent('4');
+      await userEvent.click(screen.getByRole('button', { name: button }));
+      expect(screen.getByTestId('ep')).toHaveTextContent('unset');
+    }
+  );
 });

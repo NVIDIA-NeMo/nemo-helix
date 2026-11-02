@@ -3,6 +3,7 @@
 
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
+  expertParallelSizeOnModelChange,
   expertParallelWarning,
   suggestedExpertParallelSize,
   validExpertParallelSizes,
@@ -106,9 +107,36 @@ describe('suggestedExpertParallelSize', () => {
   });
 
   it.each([
-    ['a single GPU', { num_gpus_per_node: 1, expert_parallel_size: 4 }],
-    ['a GPU count no size fits', { num_gpus_per_node: 3, expert_parallel_size: 4 }],
-  ])('clears a set size on %s', (_, p) => {
-    expect(suggestedExpertParallelSize(nemotronH, p)).toBeNull();
+    ['a single GPU', nemotronH, { num_gpus_per_node: 1, expert_parallel_size: 4 }],
+    ['a GPU count no size fits', nemotronH, { num_gpus_per_node: 3, expert_parallel_size: 4 }],
+    ['a dense model', spec('LlamaForCausalLM'), { num_gpus_per_node: 4, expert_parallel_size: 4 }],
+  ])('clears a set size on %s', (_, modelSpec, p) => {
+    expect(suggestedExpertParallelSize(modelSpec, p)).toBeNull();
+  });
+
+  it('keeps a size set for another MoE architecture', () => {
+    expect(
+      suggestedExpertParallelSize(spec('MixtralForCausalLM', 8), {
+        num_gpus_per_node: 4,
+        expert_parallel_size: 2,
+      })
+    ).toBeUndefined();
+  });
+});
+
+describe('expertParallelSizeOnModelChange', () => {
+  it('clears a carried-over size for another MoE architecture', () => {
+    expect(
+      expertParallelSizeOnModelChange(spec('MixtralForCausalLM', 8), {
+        num_gpus_per_node: 4,
+        expert_parallel_size: 4,
+      })
+    ).toBeNull();
+  });
+
+  it('keeps a valid size for Nemotron-H', () => {
+    expect(
+      expertParallelSizeOnModelChange(nemotronH, { num_gpus_per_node: 4, expert_parallel_size: 2 })
+    ).toBeUndefined();
   });
 });

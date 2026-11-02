@@ -4,7 +4,8 @@
 import type { AutomodelParallelismSpec } from '@nemo/sdk/generated/customizer/schema/AutomodelParallelismSpec';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
-const totalGpus = (p: AutomodelParallelismSpec) => (p.num_nodes ?? 1) * (p.num_gpus_per_node ?? 1);
+export const totalGpus = (p: AutomodelParallelismSpec) =>
+  (p.num_nodes ?? 1) * (p.num_gpus_per_node ?? 1);
 
 export const validExpertParallelSizes = (
   numExperts: number,
@@ -50,9 +51,21 @@ export const suggestedExpertParallelSize = (
   p: AutomodelParallelismSpec
 ): number | null | undefined => {
   const numExperts = spec?.moe_config?.num_experts;
-  if (!isNemotronH(spec) || !numExperts || numExperts <= 1) return undefined;
   const ep = p.expert_parallel_size;
+  // A dense model hides the field, so a size left from an MoE pick would be submitted unseen.
+  if (!numExperts || numExperts <= 1) return ep === undefined ? undefined : null;
+  if (!isNemotronH(spec)) return undefined;
   const sizes = totalGpus(p) > 1 ? validExpertParallelSizes(numExperts, p) : [];
   if (sizes.length === 0) return ep === undefined ? undefined : null;
   return sizes.includes(ep ?? 0) ? undefined : sizes.at(-1);
+};
+
+// A size carried over from the previous model may not apply to the new one.
+export const expertParallelSizeOnModelChange = (
+  spec: ModelEntity['spec'],
+  p: AutomodelParallelismSpec
+): number | null | undefined => {
+  const size = suggestedExpertParallelSize(spec, p);
+  if (size !== undefined || isNemotronH(spec)) return size;
+  return p.expert_parallel_size === undefined ? undefined : null;
 };
