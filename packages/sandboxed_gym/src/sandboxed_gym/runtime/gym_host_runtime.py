@@ -733,19 +733,26 @@ def _require_vendored_gym_matches_image(package: EnvironmentPackage | None) -> N
     wheel = next((path for path in wheel_files if path.name.startswith("nemo_gym-")), None)
     if wheel is None or library is None or not library.is_dir():
         return
-    with zipfile.ZipFile(wheel) as archive:
-        vendored = {name for name in archive.namelist() if name.startswith("nemo_gym/") and name.endswith(".py")}
-    image = {
-        f"nemo_gym/{path.relative_to(library).as_posix()}"
-        for path in library.rglob("*.py")
-        if "__pycache__" not in path.parts
-    }
-    if vendored != image:
+
+    def _mismatch() -> None:
         raise RuntimeError(
             "Gym version incompatible: the environment's nemo-gym wheel does not match the Gym "
             "in this image. Rebuild the wheelhouse from this image's Gym checkout and replace "
             "the environment fileset."
         )
+
+    with zipfile.ZipFile(wheel) as archive:
+        vendored = {name for name in archive.namelist() if name.startswith("nemo_gym/") and name.endswith(".py")}
+        image = {
+            f"nemo_gym/{path.relative_to(library).as_posix()}"
+            for path in library.rglob("*.py")
+            if "__pycache__" not in path.parts
+        }
+        if vendored != image:
+            _mismatch()
+        for name in vendored:
+            if archive.read(name) != (library.parent / name).read_bytes():
+                _mismatch()
 
 
 def _image_gym_search_root() -> str | None:

@@ -96,6 +96,9 @@ def bbox_giou_reward(
     except ValueError:
         return 0.0, False
 
+    if x2g <= x1g or y2g <= y1g or x2r <= x1r or y2r <= y1r:
+        return 0.0, False
+
     area_g = (x2g - x1g) * (y2g - y1g)
     area_r = (x2r - x1r) * (y2r - y1r)
     area_i = max(0.0, min(x2g, x2r) - max(x1g, x1r)) * max(0.0, min(y2g, y2r) - max(y1g, y1r))
@@ -191,7 +194,7 @@ def score_response(response: str, expected_answer: str, reward_functions: list[A
     """
     if not reward_functions:
         raise ValueError("No reward functions provided")
-    bound: list[tuple[RewardFn, float]] = []
+    bound: list[tuple[float, float]] = []
     format_score: float | None = None
     answer_score: float | None = None
     for spec in reward_functions:
@@ -207,8 +210,10 @@ def score_response(response: str, expected_answer: str, reward_functions: list[A
             format_score = float(score)
         elif name in _ANSWER_REWARD_NAMES:
             answer_score = float(score)
-        bound.append((function, weight))
-    reward, _ = combine_reward_functions(bound)(expected_answer, response)
+        bound.append((float(score), weight))
+    weights = np.array([weight for _, weight in bound])
+    weights = weights / np.sum(weights)
+    reward = float(np.sum(np.array([score for score, _ in bound]) * weights))
     return {
         "reward": float(reward),
         "extracted_answer": _answer_text(response),

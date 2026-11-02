@@ -47,6 +47,16 @@ class _Tokenizer:
         (Path(path) / "tokenizer_config.json").write_text("{}")
 
 
+class _Processor:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> "_Processor":
+        del path, trust_remote_code
+        return _Processor()
+
+    def save_pretrained(self, path: Path) -> None:
+        (Path(path) / "preprocessor_config.json").write_text("{}")
+
+
 class _Peft:
     loaded: _Model | None = None
     adapter: str | None = None
@@ -76,6 +86,7 @@ def _install_ml_stubs(monkeypatch: pytest.MonkeyPatch) -> None:
             AutoModelForCausalLM=_Causal,
             AutoModelForImageTextToText=_ImageText,
             AutoTokenizer=_Tokenizer,
+            AutoProcessor=_Processor,
         ),
     )
 
@@ -113,4 +124,5 @@ def test_merge_loads_the_model_class_for_the_checkpoint(
     assert _Peft.adapter == str(adapter)
     assert (output / "config.json").is_file()
     assert (output / "tokenizer_config.json").is_file()
+    assert (output / "preprocessor_config.json").is_file() is has_vision_tower
     assert not work.exists()

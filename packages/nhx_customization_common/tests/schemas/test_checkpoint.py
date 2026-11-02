@@ -113,6 +113,31 @@ def test_text_moe_without_expert_parallel_is_rejected_on_multiple_gpus() -> None
         )
 
 
+def test_text_moe_expert_parallel_rejection_is_optional() -> None:
+    traits = CheckpointTraits(expert_count=8)
+
+    with pytest.raises(ValueError, match="expert_parallel_size"):
+        reject_incompatible_checkpoint(
+            traits,
+            training_type="grpo",
+            recipe=None,
+            sequence_packing=False,
+            expert_parallel_size=1,
+            num_gpus_per_node=4,
+            num_nodes=1,
+        )
+    reject_incompatible_checkpoint(
+        traits,
+        training_type="grpo",
+        recipe=None,
+        sequence_packing=False,
+        expert_parallel_size=1,
+        num_gpus_per_node=4,
+        num_nodes=1,
+        enforce_text_moe_expert_parallel=False,
+    )
+
+
 def test_a_text_spec_does_not_reject_sequence_packing() -> None:
     reject_incompatible_checkpoint(
         CheckpointTraits(),

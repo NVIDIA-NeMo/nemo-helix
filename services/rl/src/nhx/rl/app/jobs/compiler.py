@@ -770,6 +770,7 @@ async def platform_job_config_compiler(
             expert_parallel_size=parallelism.expert_parallel_size,
             num_gpus_per_node=parallelism.num_gpus_per_node,
             num_nodes=parallelism.num_nodes,
+            enforce_text_moe_expert_parallel=False,
         )
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc

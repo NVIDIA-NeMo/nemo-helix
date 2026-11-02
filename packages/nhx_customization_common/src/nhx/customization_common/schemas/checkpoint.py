@@ -102,6 +102,8 @@ def reject_incompatible_checkpoint(
     expert_parallel_size: int | None,
     num_gpus_per_node: int,
     num_nodes: int,
+    *,
+    enforce_text_moe_expert_parallel: bool = True,
 ) -> None:
     """Reject pairings the training image would otherwise discover after download."""
     if traits.has_vision_tower:
@@ -127,9 +129,12 @@ def reject_incompatible_checkpoint(
 
     # A vision MoE job leaves expert parallel unset and the compiler fills it with the
     # GPUs on the node. A text MoE job has no such default, so reject it here.
+    # GRPO does not run that fill, and its schema defaults expert_parallel_size to 1, so
+    # the RL compiler turns this clause off.
     total_gpus = num_nodes * num_gpus_per_node
     if (
-        experts is not None
+        enforce_text_moe_expert_parallel
+        and experts is not None
         and experts > 1
         and total_gpus > 1
         and not traits.has_vision_tower

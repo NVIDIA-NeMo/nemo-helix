@@ -758,6 +758,22 @@ def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, mon
     )
 
 
+def _nemo_gym_wheel(tmp_path, image_source: str, wheel_source: str):
+    image = tmp_path / "gym"
+    (image / "nemo_gym").mkdir(parents=True)
+    (image / "nemo_gym" / "global_config.py").write_text(image_source)
+    wheel = tmp_path / "nemo_gym-0.7.0rc0-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr("nemo_gym/global_config.py", wheel_source)
+    return image, WheelsV1Package(
+        root=tmp_path / "env",
+        manifest=WheelsV1Manifest(metadata=EnvironmentMetadata(name="clevr")),
+        config_paths=(),
+        wheelhouse_path=tmp_path / "env" / "wheels",
+        wheel_files=(wheel,),
+    )
+
+
 def test_a_stale_nemo_gym_wheel_says_to_rebuild_the_wheelhouse(tmp_path, monkeypatch):
     image = tmp_path / "gym"
     (image / "nemo_gym" / "config").mkdir(parents=True)
@@ -777,6 +793,23 @@ def test_a_stale_nemo_gym_wheel_says_to_rebuild_the_wheelhouse(tmp_path, monkeyp
 
     with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
         runtime._require_vendored_gym_matches_image(package)
+
+
+def test_a_nemo_gym_wheel_with_the_same_paths_and_different_bytes_is_rejected(tmp_path, monkeypatch):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 2\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+
+    with pytest.raises(RuntimeError, match="Rebuild the wheelhouse"):
+        runtime._require_vendored_gym_matches_image(package)
+
+
+def test_a_nemo_gym_wheel_with_matching_bytes_is_accepted(tmp_path, monkeypatch):
+    image, package = _nemo_gym_wheel(tmp_path, "x = 1\n", "x = 1\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(image))
+
+    runtime._require_vendored_gym_matches_image(package)
 
 
 def test_bootstrap_composes_a_wheels_package_like_native_v1(tmp_path, monkeypatch):
