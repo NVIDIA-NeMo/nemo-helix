@@ -9,8 +9,8 @@ import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPa
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getFilesetDetailsRoute, getFilesetFileRoute } from '@studio/routes/utils';
-import { FC, useEffect, useState } from 'react';
-import { generatePath, useNavigate, useParams } from 'react-router';
+import { FC, useEffect, useMemo, useState } from 'react';
+import { generatePath, useLocation, useNavigate, useParams } from 'react-router';
 
 interface PanelManagementProps {
   workspace: string;
@@ -29,7 +29,18 @@ interface PanelManagementProps {
  */
 export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
   const navigate = useNavigate();
+  const { search } = useLocation();
   const { getQueryParam } = useQueryParams();
+
+  // The list's search, filter, sort, and page state lives in the query string;
+  // carry it through panel navigation so the list underneath stays as it was.
+  const listSearch = useMemo(() => {
+    const params = new URLSearchParams(search);
+    params.delete(QUERY_PARAMETERS.filesetFolder);
+    const query = params.toString();
+    return query ? `?${query}` : '';
+  }, [search]);
+  const listRoute = `${generatePath(ROUTES.workspace.filesets, { workspace })}${listSearch}`;
 
   // ==========================================
   // URL PARAMS & OPEN STATE
@@ -82,12 +93,11 @@ export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
   // Dataset panel handlers
   const handleDatasetPanelClose = () => {
     setIsDatasetPanelOpen(false);
-    navigate(generatePath(ROUTES.workspace.filesets, { workspace }), { flushSync: true });
+    navigate(listRoute, { flushSync: true });
   };
 
   const handleFileSelect = (filePath: string) => {
-    const to = getFilesetFileRoute(workspace, datasetFullName, filePath);
-    navigate(to);
+    navigate(`${getFilesetFileRoute(workspace, datasetFullName, filePath)}${listSearch}`);
   };
 
   // ==========================================
@@ -108,7 +118,7 @@ export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
   };
 
   const handleFilePanelOutsideClick = () => {
-    navigate(generatePath(ROUTES.workspace.filesets, { workspace }), { flushSync: true });
+    navigate(listRoute, { flushSync: true });
   };
 
   const handleDatasetClick = () => {
@@ -127,7 +137,7 @@ export const PanelManagement: FC<PanelManagementProps> = ({ workspace }) => {
 
   const handleFileRenameSuccess = (newPath: string) => {
     // Navigate to the renamed file
-    navigate(getFilesetFileRoute(workspace, datasetFullName, newPath));
+    navigate(`${getFilesetFileRoute(workspace, datasetFullName, newPath)}${listSearch}`);
   };
 
   // ==========================================
