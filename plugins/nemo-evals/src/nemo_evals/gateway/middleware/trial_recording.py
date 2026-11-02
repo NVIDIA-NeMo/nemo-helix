@@ -13,7 +13,7 @@ with any other credential is not recorded.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -46,10 +46,13 @@ class TrialRecordingConfig(BaseModel):
 class _ObservedCall:
     """One call through the middleware: what it was, and the usage its response reported."""
 
-    def __init__(self, ctx: InferenceMiddlewareContext, token: str) -> None:
+    def __init__(
+        self, ctx: InferenceMiddlewareContext, token: str, served_model_name: Callable[[str], str | None]
+    ) -> None:
         request = ctx.original_request
         self.ctx = ctx
         self.token = token
+        self.served_model_name = served_model_name
         self.api = CallApi.from_path(request.path)
         self.usage = TokenUsage()
         self.response_model: str | None = None
@@ -78,7 +81,7 @@ class _ObservedCall:
         if isinstance(model, str):
             attributes["gen_ai.request.model"] = model
         if self.response_model is not None:
-            attributes["gen_ai.response.model"] = self.response_model
+            attributes["gen_ai.response.model"] = self._response_model(self.response_model, model)
         return FinishedCall(
             token=self.token,
             name=self.api.value,
@@ -89,6 +92,16 @@ class _ObservedCall:
             attributes=attributes,
             caller=self.caller,
         )
+
+    def _response_model(self, response_model: str, forwarded: object) -> str:
+        """The model the provider says served the call, as the provider named it.
+
+        The gateway renames the served model in a response to its model entity before response middleware runs.
+        """
+        if isinstance(forwarded, str) and forwarded != response_model:
+            if self.served_model_name(response_model) == forwarded:
+                return forwarded
+        return response_model
 
 
 class TrialRecordingMiddleware(NemoInferenceMiddleware):
@@ -127,6 +140,12 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         ctx.state(MIDDLEWARE_NAME).set(STARTED_AT_STATE_KEY, datetime.now(UTC))
         return request
 
+    def _served_model_name(self, model_entity: str) -> str | None:
+        try:
+            return self.get_inference_url_and_model(model_entity).served_model_name
+        except KeyError:
+            return None
+
     async def process_response(
         self,
         ctx: InferenceMiddlewareContext,
@@ -137,7 +156,7 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
         credential = inference_gateway_credential(ctx.original_request.headers)
         if recorder is None or credential is None or not claims_a_trial(credential):
             return response
-        call = _ObservedCall(ctx, credential)
+        call = _ObservedCall(ctx, credential, self._served_model_name)
         started_at = ctx.state(MIDDLEWARE_NAME).get(STARTED_AT_STATE_KEY) or datetime.now(UTC)
         if isinstance(response.result, Mapping):
             call.observe(response.result)

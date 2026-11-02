@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Mapping
 from datetime import UTC, datetime
 from importlib.metadata import entry_points
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from nemo_evals.gateway import tokens as tokens_module
@@ -25,9 +26,11 @@ from nemo_evals.gateway.tokens import TrialClaims, TrialTokenReader, unsigned_to
 from nemo_evals.intake.mapping import SESSION_ID_ATTRIBUTE, TEST_CASE_NAME_ATTRIBUTE
 from nemo_helix_plugin.client.oidc import decode_jwt_claims
 from nemo_helix_plugin.inference_middleware import (
+    InferenceMiddlewareCacheAccessor,
     InferenceMiddlewareContext,
     InferenceRequest,
     InferenceResponse,
+    ModelProviderInferenceTarget,
     NemoInferenceMiddleware,
 )
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, Span
@@ -86,9 +89,21 @@ def _reader(*tokens: str) -> TrialTokenReader:
     return TrialTokenReader(Signed(*tokens))
 
 
+SERVED_MODELS = {"default/agent-model": "meta/llama-3.3-70b"}
+
+
+def _target(model_entity_id: str, append_v1_suffix: bool = True) -> ModelProviderInferenceTarget:
+    return ModelProviderInferenceTarget(
+        model_provider_gateway_url="http://igw/provider", served_model_name=SERVED_MODELS[model_entity_id]
+    )
+
+
 def _middleware(reader: TrialTokenReader, sink: Sink) -> TrialRecordingMiddleware:
     middleware = TrialRecordingMiddleware()
     middleware._recorder = CallRecorder(reader, sink, flush_interval_sec=60)
+    cache = MagicMock(spec=InferenceMiddlewareCacheAccessor)
+    cache.get_inference_url_and_model.side_effect = _target
+    middleware._inject_cache(cache)
     return middleware
 
 
@@ -183,6 +198,20 @@ async def test_a_call_made_with_a_trial_token_is_recorded_in_the_trial() -> None
     assert attributes["gen_ai.usage.output_tokens"] == 5
     assert attributes["gen_ai.request.model"] == "meta/llama-3.3-70b"
     assert attributes["nemo.virtual_model"] == "models/agent-model"
+
+
+async def test_a_call_is_recorded_with_the_model_name_its_provider_reported() -> None:
+    """The gateway renames the served model in a response to its model entity before this middleware sees it."""
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink)
+    body = {"model": "default/agent-model", "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+    await _call(middleware, _ctx({"authorization": f"Bearer {TOKEN}"}), body)
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    assert _attributes(span)["gen_ai.response.model"] == "meta/llama-3.3-70b"
 
 
 CALLER_TRACE = "01a182ecbd457d118e02830498804285"
