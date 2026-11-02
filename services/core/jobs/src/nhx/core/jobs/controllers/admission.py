@@ -32,6 +32,9 @@ class AdmissionController(Protocol):
 
     Called by the scheduler once per ready step, in FIFO (``created_at``) order. A step that is
     not admitted is queued and reconsidered on a later scheduling pass.
+
+    Implementations should return ``AdmissionDecision.defer(...)`` on transient errors rather than
+    raising. If ``check`` does raise, the scheduler logs it and defers the step instead of failing it.
     """
 
     def check(self, step: HelixJobStepWithContext) -> AdmissionDecision: ...

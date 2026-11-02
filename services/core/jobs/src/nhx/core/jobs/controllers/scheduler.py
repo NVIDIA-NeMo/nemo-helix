@@ -102,7 +102,16 @@ class JobScheduler(HeartbeatMixin, Controller):
             ):
                 try:
                     schedule_started_at = time.monotonic()
-                    decision = self._admission.check(step)
+                    try:
+                        decision = self._admission.check(step)
+                    except Exception:
+                        # Admission reads capacity state that can fail transiently; a step that is
+                        # only waiting must be retried, not failed.
+                        logger.exception(
+                            "Admission check failed; deferring step",
+                            extra={"job": step.job, "step": step.name, "workspace": step.workspace},
+                        )
+                        raise AdmissionDeferred("Admission check failed; will retry")
                     if not decision.admitted:
                         raise AdmissionDeferred(decision.reason or "Waiting for capacity")
                     update = self.schedule_step(step)
