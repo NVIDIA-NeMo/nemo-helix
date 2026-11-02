@@ -970,14 +970,15 @@ def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepC
 
 
 def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tuple[str | None, int | None]:
-    """Architecture and expert count from the step, filling gaps from the checkpoint config.
+    """Architecture class and expert count. A class name plus an expert count skips AutoConfig.
 
-    Both traits already recorded means the checkpoint is not opened again. A failed
-    ``AutoConfig`` load leaves the recorded values in place.
+    A hub id or path contains ``/`` and is not a class, so the loaded architecture replaces it.
+    A failed load leaves the recorded values in place.
     """
     architecture = customizer_config.model.checkpoint_model_name
     num_experts = customizer_config.model.num_experts
-    if architecture and num_experts is not None:
+    # Hub ids and paths are not architecture classes.
+    if architecture and "/" not in architecture and num_experts is not None:
         return architecture, num_experts
 
     try:
@@ -1009,7 +1010,9 @@ def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tup
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 loaded_experts = value
                 break
-    return architecture or loaded_architecture, loaded_experts
+    if loaded_architecture and (not architecture or "/" in architecture):
+        architecture = loaded_architecture
+    return architecture, loaded_experts
 
 
 def _configure_datasets(

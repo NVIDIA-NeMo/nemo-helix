@@ -387,6 +387,29 @@ class TestConfigureMoeBackend:
         assert "parallelizer" not in cfg
 
     @patch(MODEL_REGISTRY_PATCH)
+    def test_a_checkpoint_id_uses_the_loaded_architecture(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"MixtralForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["MixtralForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(
+                    architecture="mistralai/Mixtral-8x7B-v0.1",
+                    num_experts=8,
+                    num_gpus_per_node=8,
+                    expert_parallel_size=None,
+                ),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
     def test_missing_architecture_loads_a_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
         monkeypatch.setattr(
