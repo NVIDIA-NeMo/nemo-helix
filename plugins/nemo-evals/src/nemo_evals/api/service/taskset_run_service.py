@@ -336,10 +336,10 @@ class TasksetRunService:
             Exception: Unexpected storage and integrity failures propagate.
         """
         caller = normalize_run_caller(caller)
-        # These checks run before the replay lookup on purpose: a lowered timeout maximum, a removed dispatcher
-        # or sandbox profile, disabled runs or revoked access refuse a retry as they would a new request.
-        # How the Jobs run (images, TTL, egress, deadlines) stays frozen in the accepted plan. Run status stays
-        # readable via GET.
+        # These checks run before the replay lookup on purpose: a lowered timeout maximum, a removed sandbox
+        # profile, a dispatcher profile that became a subprocess one, disabled runs or revoked access refuse a
+        # retry as they would a new request. How the Jobs run (images, TTL, egress, deadlines) stays frozen in the
+        # accepted plan. Run status stays readable via GET.
         timeout = check_timeout(req.timeout_seconds, self._config.runs)
         harbor, policy, dispatcher_profile = await self._check_execution(req)
         await self._authorize(req, workspace)
@@ -428,11 +428,11 @@ class TasksetRunService:
     ) -> tuple[HarborTaskJobsConfig, ResolvedHarborSandboxPolicy, str]:
         """Check the deployment can run the request's execution settings; freeze its sandbox and dispatcher profiles.
 
-        The sandbox profile is frozen with the request's resource overrides. An omitted dispatcher profile
-        is the operator's first ``dispatcher_profiles`` entry.
+        The sandbox profile is frozen with the request's resource overrides; the dispatcher profile is the
+        operator's ``dispatcher_profile``.
 
         Raises:
-            TasksetRunResolutionError: Runs are off, the profile or dispatcher profile can't be used, or a
+            TasksetRunResolutionError: Runs are off, the sandbox or dispatcher profile can't be used, or a
                 resource override exceeds the profile's ceilings.
         """
         harbor = self._config.runs.harbor
@@ -442,10 +442,7 @@ class TasksetRunService:
             policy = resolve_sandbox_policy(harbor, self._platform, req.execution.sandbox)
         except SandboxPolicyError as exc:
             raise TasksetRunResolutionError(str(exc)) from exc
-        profile = req.execution.dispatcher_profile or harbor.dispatcher_profiles[0]
-        if profile not in harbor.dispatcher_profiles:
-            allowed = ", ".join(harbor.dispatcher_profiles)
-            raise TasksetRunResolutionError(f"dispatcher_profile {profile!r} isn't allowed; use one of: {allowed}")
+        profile = harbor.dispatcher_profile
         if await self._task_jobs.is_subprocess_profile(profile):
             raise TasksetRunResolutionError(
                 f"dispatcher_profile {profile!r} runs as a host subprocess; task Jobs need a Kubernetes profile"

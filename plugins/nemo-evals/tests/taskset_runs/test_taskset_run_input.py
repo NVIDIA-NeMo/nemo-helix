@@ -282,7 +282,6 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("spec", "target", "source"), {"name": "oracle"}, {"name": "codex"}),
         (("timeout_seconds",), None, 3600),
         (("execution", "sandbox"), {"profile": "harbor-standard"}, {"profile": "another-profile"}),
-        (("execution", "dispatcher_profile"), "local-k8s", "remote-k8s"),
         (("spec", "target", "artifacts"), ["/a", "/b"], ["/b", "/a"]),
         (("execution", "max_concurrent_task_jobs"), None, 10),
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
@@ -347,7 +346,6 @@ def test_digest_hashes_the_exact_compact_json_projection(run_body):
         },
         "execution": {
             "kind": "harbor-task-jobs",
-            "dispatcher_profile": None,
             "max_concurrent_task_jobs": None,
             "sandbox": None,
         },

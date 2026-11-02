@@ -6186,14 +6186,6 @@ components:
           description: 'Execution strategy: one Kubernetes Job per Harbor task. Future
             strategies add new kinds.'
           default: harbor-task-jobs
-        dispatcher_profile:
-          title: Dispatcher Profile
-          description: Name of a Jobs Service profile that decides where task Jobs
-            run and what resources they get. Operators define the available profiles;
-            omitted uses the first one they list.
-          examples:
-          - local-k8s
-          type: string
         max_concurrent_task_jobs:
           title: Max Concurrent Task Jobs
           description: Maximum number of this run's task Jobs running at once. Omit
@@ -6250,8 +6242,8 @@ components:
         Submit validates this input and freezes the ``sandbox`` profile, with its
         resource
 
-        overrides checked against the profile''s ceilings, the ``dispatcher_profile``,
-        the pinned
+        overrides checked against the profile''s ceilings, the operator''s dispatcher
+        profile, the pinned
 
         dispatcher image and the concurrency cap into the run''s plan, so operator
         config edits

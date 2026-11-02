@@ -256,7 +256,6 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
         "default/full-sel-1234abcd#" + "a" * 64,
         spec_file=spec,
         agent="ignored",
-        dispatcher_profile=None,
         sandbox=SandboxSelection(profile="ignored", cpus=64),
     )
     assert isinstance(request.spec.tasks, TasksetRef)
@@ -267,13 +266,12 @@ def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
 
 
 def test_experiment_publishes_the_run_to_intake(tmp_path):
-    plain = run_request("default/t#" + "a" * 64, spec_file=None, agent="codex", dispatcher_profile=None)
+    plain = run_request("default/t#" + "a" * 64, spec_file=None, agent="codex")
     assert plain.publication is None
     request = run_request(
         "default/t#" + "a" * 64,
         spec_file=None,
         agent="codex",
-        dispatcher_profile=None,
         experiment="swe-agent-tuning",
     )
     assert request.publication is not None and request.publication.intake.experiment == "swe-agent-tuning"
@@ -282,7 +280,7 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
     # With --harbor-hub/--harbor-dir the dataset supplies the tasks, so the file may leave spec.tasks out.
     no_tasks = tmp_path / "no-tasks.json"
     no_tasks.write_text(json.dumps({"spec": {"target": {"kind": "harbor"}}, "execution": {}}))
-    selected = run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
+    selected = run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="")
     assert isinstance(selected.spec.tasks, TasksetRef) and selected.spec.tasks.root == "default/t#" + "a" * 64
     # --experiment replaces the file's publication before validation, so an invalid one doesn't block it.
     no_tasks.write_text(
@@ -298,22 +296,20 @@ def test_experiment_publishes_the_run_to_intake(tmp_path):
         "default/t#" + "a" * 64,
         spec_file=no_tasks,
         agent="",
-        dispatcher_profile=None,
         experiment="x",
     )
     assert overridden.publication is not None and overridden.publication.intake.experiment == "x"
     for bad in ([], {"spec": ["not", "an", "object"]}):
         no_tasks.write_text(json.dumps(bad))
         with pytest.raises(ValueError, match="expected a TasksetRunInput JSON object"):
-            run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="", dispatcher_profile=None)
-    from_file = run_request("default/t#" + "a" * 64, spec_file=spec, agent="", dispatcher_profile=None, experiment="x")
+            run_request("default/t#" + "a" * 64, spec_file=no_tasks, agent="")
+    from_file = run_request("default/t#" + "a" * 64, spec_file=spec, agent="", experiment="x")
     assert from_file.publication is not None and from_file.publication.intake.experiment == "x"
     assert from_file.publication.intake.dataset_name is None  # no Hub dataset: the server uses the taskset
     hub = run_request(
         "default/t#" + "a" * 64,
         spec_file=spec,
         agent="",
-        dispatcher_profile=None,
         experiment="x",
         dataset=("datacurve/deep-swe", "sha256:" + "b" * 64),
     )
@@ -337,7 +333,6 @@ def test_agent_request_carries_the_sandbox_selection(sandbox, expected):
         "default/full#" + "a" * 64,
         spec_file=None,
         agent="oracle",
-        dispatcher_profile=None,
         sandbox=sandbox,
     )
     assert request.model_dump(mode="json", exclude_none=True)["execution"].get("sandbox") == expected
@@ -602,12 +597,7 @@ def test_a_new_or_changed_task_is_published(publishing, tmp_path, stored):
 @pytest.mark.parametrize("spec_key", [None, "from-file"])
 def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
     ref = "default/t#" + "a" * 64
-    assert (
-        run_request(
-            ref, spec_file=None, agent="oracle", dispatcher_profile=None, idempotency_key="k-123"
-        ).idempotency_key
-        == "k-123"
-    )
+    assert run_request(ref, spec_file=None, agent="oracle", idempotency_key="k-123").idempotency_key == "k-123"
     spec = tmp_path / "run.json"
     body = {
         "spec": {"tasks": "default/full", "target": {"kind": "harbor"}},
@@ -615,9 +605,9 @@ def test_an_explicit_idempotency_key_wins(tmp_path, spec_key):
         "idempotency_key": spec_key,
     }
     spec.write_text(json.dumps(body))
-    explicit = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None, idempotency_key="k-123")
+    explicit = run_request(ref, spec_file=spec, agent="", idempotency_key="k-123")
     assert explicit.idempotency_key == "k-123"
-    default = run_request(ref, spec_file=spec, agent="", dispatcher_profile=None)
+    default = run_request(ref, spec_file=spec, agent="")
     assert default.idempotency_key == (spec_key or default.idempotency_key) and default.idempotency_key
 
 

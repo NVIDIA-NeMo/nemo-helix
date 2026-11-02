@@ -543,7 +543,6 @@ def run_request(
     *,
     spec_file: Path | None,
     agent: str,
-    dispatcher_profile: str | None,
     sandbox: SandboxSelection | None = None,
     experiment: str | None = None,
     dataset: tuple[str, str | None] | None = None,
@@ -553,9 +552,8 @@ def run_request(
 
     ``--experiment`` sets ``publication.intake``, replacing the spec file's.
     ``dataset`` is the Harbor Hub dataset or git repo the tasks came from, as ``(name, version or commit)``:
-    the Evaluation's dataset instead of the taskset. ``dispatcher_profile`` and ``sandbox`` apply
-    to ``--agent`` only; a spec file carries its own ``execution``. The idempotency key is
-    ``idempotency_key``, else the spec file's, else a new one.
+    the Evaluation's dataset instead of the taskset. ``sandbox`` applies to ``--agent`` only; a spec file
+    carries its own ``execution``. The idempotency key is ``idempotency_key``, else the spec file's, else a new one.
     """
     publication: dict[str, Any] | None = None
     if experiment is not None:
@@ -574,8 +572,6 @@ def run_request(
         raw["idempotency_key"] = idempotency_key or raw.get("idempotency_key") or str(uuid.uuid4())
         return TasksetRunInput.model_validate(raw)
     execution: dict[str, Any] = {}
-    if dispatcher_profile is not None:
-        execution["dispatcher_profile"] = dispatcher_profile
     if sandbox is not None:
         execution["sandbox"] = sandbox.model_dump(exclude_none=True)
     return TasksetRunInput.model_validate(
@@ -629,7 +625,6 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         sandbox_profile: str | None = typer.Option(
             None, "--sandbox-profile", help="Operator sandbox profile; default: the operator's (without --spec-file)."
         ),
-        dispatcher_profile: str | None = typer.Option(None, "--dispatcher-profile", help="Jobs profile for task Jobs."),
         cpus: int | None = typer.Option(
             None, "--cpus", min=1, help="CPUs for every task's agent sandbox, over task.toml (without --spec-file)."
         ),
@@ -741,7 +736,6 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref,
                 spec_file=spec_file,
                 agent=agent,
-                dispatcher_profile=dispatcher_profile,
                 sandbox=_sandbox_selection(sandbox_profile, cpus, memory_mb, storage_mb),
                 experiment=experiment,
                 dataset=source,

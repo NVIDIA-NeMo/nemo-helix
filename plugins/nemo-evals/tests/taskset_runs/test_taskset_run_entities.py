@@ -211,12 +211,11 @@ def test_execution_input() -> None:
     """Verify caller configuration defaults and reject unsupported execution inputs.
 
     Locally built sandbox settings must apply documented defaults; an invalid
-    limit, unknown fields/kinds (including the removed max_failed_tasks and
-    sandbox_policy) must raise ValidationError before submit resolution.
+    limit, unknown fields/kinds (including the removed max_failed_tasks,
+    sandbox_policy and dispatcher_profile) must raise ValidationError before submit resolution.
     """
     input_model = HarborTaskJobsExecutionInput()
     assert input_model.kind == "harbor-task-jobs"
-    assert input_model.dispatcher_profile is None  # submit resolves the operator's first profile
     assert input_model.sandbox is None  # submit resolves the operator's default sandbox profile
     assert input_model.max_concurrent_task_jobs is None
     for changes in (
@@ -226,6 +225,7 @@ def test_execution_input() -> None:
         {"unexpected": True},
         {"kind": "other"},
         {"sandbox_policy": "harbor-standard"},
+        {"dispatcher_profile": "local-k8s"},  # the operator's evals.runs.harbor.dispatcher_profile, not the caller's
         {"sandbox": {"profile": ""}},
         {"sandbox": {"gpus": 1}},
         {"sandbox": {"root_template": "harbor-cpu-root"}},

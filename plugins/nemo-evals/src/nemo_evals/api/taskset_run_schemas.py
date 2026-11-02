@@ -37,7 +37,7 @@ class HarborTaskJobsExecutionInput(BaseModel):
     than new ``submit`` methods. It never changes benchmark content or which agent runs.
 
     Submit validates this input and freezes the ``sandbox`` profile, with its resource
-    overrides checked against the profile's ceilings, the ``dispatcher_profile``, the pinned
+    overrides checked against the profile's ceilings, the operator's dispatcher profile, the pinned
     dispatcher image and the concurrency cap into the run's plan, so operator config edits
     never reach a running run. Earlier development runs are deleted rather than migrated.
     """
@@ -47,14 +47,6 @@ class HarborTaskJobsExecutionInput(BaseModel):
     kind: Literal["harbor-task-jobs"] = Field(
         default="harbor-task-jobs",
         description="Execution strategy: one Kubernetes Job per Harbor task. Future strategies add new kinds.",
-    )
-    dispatcher_profile: str | None = Field(
-        default=None,
-        description=(
-            "Name of a Jobs Service profile that decides where task Jobs run and what resources they get. "
-            "Operators define the available profiles; omitted uses the first one they list."
-        ),
-        examples=["local-k8s"],
     )
     max_concurrent_task_jobs: int | None = Field(
         default=None,

@@ -76,17 +76,10 @@ async def test_sandbox_override_over_the_ceiling_is_rejected(service, request_bo
     assert not await runs(entity_store)
 
 
-async def test_dispatcher_profile_must_be_allowed(service, request_body):
-    request_body["execution"]["dispatcher_profile"] = "gpu"
-    with pytest.raises(TasksetRunResolutionError, match="isn't allowed; use one of: local-k8s, k8s-cpu"):
-        await submit(service, request_body)
-
-
-async def test_omitted_dispatcher_profile_uses_the_operators_first(
+async def test_task_jobs_run_under_the_operators_dispatcher_profile(
     service, request_body, harbor_config, fake_task_jobs, run_store
 ):
-    request_body["execution"].pop("dispatcher_profile", None)
-    service._config.runs.harbor = harbor_config.model_copy(update={"dispatcher_profiles": ("k8s-cpu", "local-k8s")})
+    service._config.runs.harbor = harbor_config.model_copy(update={"dispatcher_profile": "k8s-cpu"})
     outcome = await submit(service, request_body)
     plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
     assert plan.dispatcher_profile == "k8s-cpu"

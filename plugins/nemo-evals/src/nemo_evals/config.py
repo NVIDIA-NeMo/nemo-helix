@@ -99,12 +99,12 @@ class HarborTaskJobsConfig(BaseModel):
             "nhx-tasks:<platform.image_tag> by tag, so image_tag must be immutable (a release tag, never re-pushed)."
         ),
     )
-    dispatcher_profiles: tuple[str, ...] = Field(
-        default=("default",),
+    dispatcher_profile: str = Field(
+        default="default",
         min_length=1,
         description=(
-            "Jobs execution profiles a request may name as execution.dispatcher_profile; the default nhx-tasks "
-            "dispatcher is used when a request names none."
+            "Jobs execution profile every task Job runs under: where its dispatcher pod is placed. "
+            "Set it to keep task Jobs off the platform's default Jobs profile."
         ),
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(

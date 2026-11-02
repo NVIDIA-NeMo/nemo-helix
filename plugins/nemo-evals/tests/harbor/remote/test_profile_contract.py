@@ -174,10 +174,10 @@ def test_operator_config_may_omit_dispatcher_image(harbor_config):
     assert HarborTaskJobsConfig.model_validate(data).dispatcher_image is None
 
 
-def test_operator_config_may_omit_dispatcher_profiles(harbor_config):
+def test_operator_config_may_omit_dispatcher_profile(harbor_config):
     data = harbor_config.model_dump()
-    del data["dispatcher_profiles"]
-    assert HarborTaskJobsConfig.model_validate(data).dispatcher_profiles == ("default",)
+    del data["dispatcher_profile"]
+    assert HarborTaskJobsConfig.model_validate(data).dispatcher_profile == "default"
 
 
 def test_operator_config_defaults_to_the_first_sandbox_profile(harbor_config):
@@ -187,11 +187,13 @@ def test_operator_config_defaults_to_the_first_sandbox_profile(harbor_config):
     assert HarborTaskJobsConfig.model_validate(data).default_sandbox_profile == "harbor-open"
 
 
-def test_operator_config_rejects_empty_dispatcher_profiles(harbor_config):
-    data = harbor_config.model_dump()
-    data["dispatcher_profiles"] = []
-    with pytest.raises(ValidationError, match="dispatcher_profiles"):
-        HarborTaskJobsConfig.model_validate(data)
+@pytest.mark.parametrize(
+    ("changes", "error"),
+    [({"dispatcher_profile": ""}, "dispatcher_profile"), ({"dispatcher_profiles": ["default"]}, "Extra inputs")],
+)
+def test_operator_config_rejects_a_bad_dispatcher_profile(harbor_config, changes, error):
+    with pytest.raises(ValidationError, match=error):
+        HarborTaskJobsConfig.model_validate(harbor_config.model_dump() | changes)
 
 
 def test_operator_config_requires_the_default_profile(harbor_config):

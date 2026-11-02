@@ -68,7 +68,7 @@ def test_harbor_runs_need_opensandbox_and_builder(
 def test_default_harbor_config_is_valid_with_harbor_standard_only() -> None:
     config = HarborTaskJobsConfig.model_validate(_harbor_config(*RUNS_ON))
 
-    assert config.dispatcher_profiles == ("default",)
+    assert config.dispatcher_profile == "default"
     assert config.default_sandbox_profile == "harbor-standard"
     assert list(config.sandbox_profiles) == ["harbor-standard"]
     standard = config.sandbox_profiles["harbor-standard"]

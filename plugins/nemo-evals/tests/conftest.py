@@ -312,7 +312,7 @@ def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
     """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
     data: dict[str, object] = {
         "dispatcher_image": DISPATCHER_IMAGE,
-        "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
+        "dispatcher_profile": "local-k8s",
         "sandbox_profiles": {
             "harbor-standard": {"egress_allow": ["igw.svc.cluster.local"]},
             "harbor-open": {"egress_allow": ["igw.svc.cluster.local", "inference-api.nvidia.com"]},
