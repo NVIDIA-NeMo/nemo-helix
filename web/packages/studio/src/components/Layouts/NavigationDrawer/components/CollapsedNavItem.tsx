@@ -29,6 +29,7 @@ export const CollapsedNavItem: FC<CollapsedNavItemProps> = ({ item, isActive }) 
       <Tooltip slotContent={item.slotLabel} side="right">
         <StudioNavItem
           active={resolveActive(item, isActive)}
+          padding="rail"
           slotStart={icon}
           {...item.attributes?.VerticalNavItem}
         >
