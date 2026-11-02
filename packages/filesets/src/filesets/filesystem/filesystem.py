@@ -117,17 +117,21 @@ class FilesetPathError(ValueError):
 class UploadRetriesExhaustedError(NemoClientError):
     """Every attempt to upload a local file failed with a retryable error.
 
-    The last failure is the exception's ``__cause__``.
+    The last failure is the exception's ``__cause__``. Pickling drops
+    ``__cause__``, so its summary is also kept in ``last_error`` and the message
+    to survive a process boundary.
     """
 
-    def __init__(self, lpath: str, rpath: str, attempts: int) -> None:
+    def __init__(self, lpath: str, rpath: str, attempts: int, last_error: str = "") -> None:
         self.lpath = lpath
         self.rpath = rpath
         self.attempts = attempts
-        super().__init__(lpath, rpath, attempts)
+        self.last_error = last_error
+        super().__init__(lpath, rpath, attempts, last_error)
 
     def __str__(self) -> str:
-        return f"Upload of {self.lpath} to {self.rpath} failed after {self.attempts} attempts"
+        message = f"Upload of {self.lpath} to {self.rpath} failed after {self.attempts} attempts"
+        return f"{message}: {self.last_error}" if self.last_error else message
 
 
 #: Retry policy for clients that upload local files: three attempts, 2s then 4s
@@ -144,6 +148,9 @@ UPLOAD_RETRY_POLICY = RetryPolicy(
 
 _NO_RETRY = RetryPolicy(max_retries=0)
 
+# Server errors that sending the same file again cannot fix: the server is out of space.
+_NOT_RESENDABLE_STATUSES = frozenset({507})
+
 
 def _resend_delay(
     exc: NemoHTTPError | NemoTransportError, attempt: int, policy: RetryPolicy, lpath: str, rpath: str
@@ -157,10 +164,11 @@ def _resend_delay(
     failure = exc.http_response if isinstance(exc, NemoHTTPError) else exc.error
     # The client already retried a connection that never read the body.
     unsent = isinstance(failure, httpx.TransportError) and not body_was_sent(failure)
-    if attempts == 1 or unsent or not is_retryable(policy, failure):
+    out_of_space = isinstance(failure, httpx.Response) and failure.status_code in _NOT_RESENDABLE_STATUSES
+    if attempts == 1 or unsent or out_of_space or not is_retryable(policy, failure):
         raise exc
     if attempt == attempts - 1:
-        raise UploadRetriesExhaustedError(lpath, rpath, attempts) from exc
+        raise UploadRetriesExhaustedError(lpath, rpath, attempts, str(exc) or type(exc).__name__) from exc
     delay = retry_delay(policy, attempt, failure)
     logger.warning("Upload of %s to %s failed (%r); sending it again in %.1fs", lpath, rpath, exc, delay)
     return delay

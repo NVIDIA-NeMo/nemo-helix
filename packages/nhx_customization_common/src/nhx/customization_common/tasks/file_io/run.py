@@ -84,9 +84,9 @@ MAX_BACKOFF_SECONDS = 30.0
 
 # Transient failures worth another attempt, for the Files operations this task
 # retries itself (uploads retry inside put_file). It has to catch what the client
-# raises. Those are the Nemo* entries: they wrap transport failures, 5xx responses (raise_for_status
-# maps every 5xx to InternalServerError) and 429 respectively, and are not httpx
-# types. Anything reaching this task through the typed client arrives as one of
+# raises. Those are the Nemo* entries: they wrap transport failures, 5xx responses
+# (raise_for_status maps every 5xx to InternalServerError) and 429 respectively,
+# and are not httpx types. Anything reaching this task through the typed client arrives as one of
 # them, never as the bare httpx error underneath.
 TRANSIENT_FILESYSTEM_EXCEPTIONS = (
     httpx.TimeoutException,
