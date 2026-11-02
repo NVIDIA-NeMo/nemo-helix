@@ -76,6 +76,15 @@ def test_bbox_giou_of_a_reversed_box_is_zero() -> None:
     assert correct is False
 
 
+def test_bbox_giou_of_a_non_finite_box_is_zero() -> None:
+    score, correct = MODULE.bbox_giou_reward("[0, 0, 1, 1]", "<answer>[nan, 0, 1, 1]</answer>")
+    assert score == 0.0
+    assert correct is False
+    score, correct = MODULE.bbox_giou_reward("[inf, 0, 1, 1]", "<answer>[0, 0, 1, 1]</answer>")
+    assert score == 0.0
+    assert correct is False
+
+
 def test_math_expr_and_geo3k_grade_a_matching_answer() -> None:
     pytest.importorskip("math_verify")
     score, correct = MODULE.math_expression_reward("2", "<answer>2</answer>")

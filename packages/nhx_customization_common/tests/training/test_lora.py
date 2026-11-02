@@ -45,6 +45,7 @@ class _Tokenizer:
 
     def save_pretrained(self, path: Path) -> None:
         (Path(path) / "tokenizer_config.json").write_text("{}")
+        (Path(path) / "chat_template.jinja").write_text("tokenizer")
 
 
 class _Processor:
@@ -55,6 +56,7 @@ class _Processor:
 
     def save_pretrained(self, path: Path) -> None:
         (Path(path) / "preprocessor_config.json").write_text("{}")
+        (Path(path) / "chat_template.jinja").write_text("processor")
 
 
 class _Peft:
@@ -125,4 +127,5 @@ def test_merge_loads_the_model_class_for_the_checkpoint(
     assert (output / "config.json").is_file()
     assert (output / "tokenizer_config.json").is_file()
     assert (output / "preprocessor_config.json").is_file() is has_vision_tower
+    assert (output / "chat_template.jinja").read_text() == ("processor" if has_vision_tower else "tokenizer")
     assert not work.exists()

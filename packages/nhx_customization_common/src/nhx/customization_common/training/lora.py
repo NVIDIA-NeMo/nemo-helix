@@ -79,6 +79,10 @@ def merge_lora_adapter(
         model = model.merge_and_unload()
         logger.info("Saving merged model to %s...", tmp_path)
         model.save_pretrained(tmp_path, safe_serialization=True)
+        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
+        if tokenizer is None:
+            raise RuntimeError(f"AutoTokenizer.from_pretrained returned no tokenizer for {base_model_path}")
+        tokenizer.save_pretrained(tmp_path)
         if has_vision_tower:
             from transformers import AutoProcessor
 
@@ -86,10 +90,6 @@ def merge_lora_adapter(
             if processor is None:
                 raise RuntimeError(f"AutoProcessor.from_pretrained returned no processor for {base_model_path}")
             processor.save_pretrained(tmp_path)
-        tokenizer = AutoTokenizer.from_pretrained(base_model_path, trust_remote_code=trust_remote_code)
-        if tokenizer is None:
-            raise RuntimeError(f"AutoTokenizer.from_pretrained returned no tokenizer for {base_model_path}")
-        tokenizer.save_pretrained(tmp_path)
         output_path.mkdir(parents=True, exist_ok=True)
         shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged LoRA adapter to %s", output_path)

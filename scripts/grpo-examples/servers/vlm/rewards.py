@@ -10,6 +10,7 @@ Ported so a Gym resources server can score the same way ``VLMEnvironment`` does.
 
 from __future__ import annotations
 
+import math
 import re
 from functools import partial
 from typing import Any, Callable
@@ -96,7 +97,8 @@ def bbox_giou_reward(
     except ValueError:
         return 0.0, False
 
-    if x2g <= x1g or y2g <= y1g or x2r <= x1r or y2r <= y1r:
+    coordinates = (x1g, y1g, x2g, y2g, x1r, y1r, x2r, y2r)
+    if not all(math.isfinite(value) for value in coordinates) or x2g <= x1g or y2g <= y1g or x2r <= x1r or y2r <= y1r:
         return 0.0, False
 
     area_g = (x2g - x1g) * (y2g - y1g)

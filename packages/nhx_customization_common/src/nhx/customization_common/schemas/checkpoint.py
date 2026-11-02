@@ -130,7 +130,7 @@ def reject_incompatible_checkpoint(
     # A vision MoE job leaves expert parallel unset and the compiler fills it with the
     # GPUs on the node. A text MoE job has no such default, so reject it here.
     # GRPO does not run that fill, and its schema defaults expert_parallel_size to 1, so
-    # the RL compiler turns this clause off.
+    # the GRPO compiler turns this clause off. DPO keeps it.
     total_gpus = num_nodes * num_gpus_per_node
     if (
         enforce_text_moe_expert_parallel
