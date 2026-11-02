@@ -3033,6 +3033,67 @@ def test_a_trial_may_also_call_the_models_its_routers_call_back(monkeypatch: pyt
     assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/strong", "ws/judge")
 
 
+def test_a_trial_may_call_what_its_routers_routers_call_back_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The submit check follows routers through any depth; the trial's list must reach as far, or its calls are refused."""
+    callbacks = {"ws/cb": ("ws/router",), "ws/router": ("ws/strong", "ws/cb")}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(
+            closed_book=True, records_calls=True, routes_to=callbacks.get(model.root, ())
+        ),
+    )
+
+    issuer = _issuer(_registered_target(closed_book=True))
+
+    assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/router", "ws/strong")
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        HarborRunnerTarget(
+            source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="openai/gpt-5.4")),
+            closed_book=True,
+        ),
+        _registered_target(closed_book=True),
+    ],
+    ids=["no gateway model", "no platform client"],
+)
+def test_a_closed_book_run_whose_trials_cant_get_closed_tokens_is_refused(target: HarborRunnerTarget) -> None:
+    """Without a trial token naming the run closed, the closed-book middleware has nothing to hold the trial to."""
+    async_client = None if isinstance(target.source, RegisteredAgentSource) else MagicMock()
+
+    with pytest.raises(ValueError, match="can't be held closed-book"):
+        agent_evaluate._trial_credential_issuer(
+            cast(Any, SimpleNamespace(target=target, publication=None)),
+            cast(Any, SimpleNamespace(workspace="evals")),
+            MagicMock(),
+            async_client,
+            "run-1",
+        )
+
+
+def test_a_closed_book_run_of_an_agent_that_calls_no_model_needs_no_trial_tokens() -> None:
+    assert _issuer(HarborRunnerTarget(closed_book=True)) is None
+
+
+async def test_to_spec_refuses_a_closed_book_run_with_no_closed_book_model_route() -> None:
+    """A direct submission is checked the way a taskset run is, before a job exists."""
+    input_spec = AgentEvalInputSpec(
+        tasks=[AgentEvalTaskInput(id="t", intent="Answer.", inputs=TaskInputs(), metrics=[_inline_metric()])],
+        target=HarborRunnerTarget(
+            source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="openai/gpt-5.4")),
+            closed_book=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="closed_book_required"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
+
+
 @pytest.mark.parametrize(
     ("harness_model", "recording", "records_calls"),
     [

@@ -69,6 +69,7 @@ from nemo_evals.jobs.gateway_models import (
     agent_gateway_origin,
     check_gateway_model,
     check_trial_route,
+    closed_book_run,
     fabric_calls_only_gateway,
     fabric_gateway_key_envs,
     fabric_gateway_models,
@@ -76,6 +77,7 @@ from nemo_evals.jobs.gateway_models import (
     gateway_model_id,
     point_agent_at_gateway_model,
     rebase_registered_agent_config,
+    require_closed_book_route,
     sandbox_agent_channel,
     trust_the_gateway_ca,
 )
@@ -282,6 +284,7 @@ class _AgentEvalJobBase(NemoJob):
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
+            await require_closed_book_route(target, (), async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -773,7 +776,13 @@ def _trial_credential_issuer(
 ) -> TrialCredentialIssuer | None:
     """The issuer of each trial's trial token, for a Harbor agent that calls a gateway model."""
     gateway = _trial_gateway(spec.target)
+    closed = closed_book_run(spec.target, ())
     if async_client is None or gateway is None:
+        if closed:
+            raise ValueError(
+                "closed_book: the agent's model calls don't all go through the Inference Gateway, so the run can't "
+                "be held closed-book"
+            )
         return None
     publication = spec.publication.intake if spec.publication is not None else None
     route = check_trial_route(platform_client, gateway[0])
@@ -791,7 +800,6 @@ def _trial_credential_issuer(
         return routes[model.root]
 
     reachable = _with_routed_models(models, route_of) if models is not None else None
-    closed = isinstance(spec.target, HarborRunnerTarget) and spec.target.closed_book
     if closed:
         _require_closed_book_capable(reachable, route_of)
     records_calls = (
@@ -813,13 +821,16 @@ def _trial_credential_issuer(
 
 
 def _with_routed_models(models: list[ModelRef], route_of: Callable[[ModelRef], TrialRoute]) -> list[ModelRef]:
-    """``models``, then the VirtualModels their routers call back through the gateway, each once."""
+    """``models``, then every VirtualModel their routers call back through the gateway, through any depth, each once."""
     reachable = list(models)
-    for model in models:
-        for routed in route_of(model).routes_to:
-            ref = ModelRef(routed)
-            if all(existing.root != ref.root for existing in reachable):
-                reachable.append(ref)
+    seen = {model.root for model in reachable}
+    pending = list(reachable)
+    while pending:
+        for routed in route_of(pending.pop(0)).routes_to:
+            if routed not in seen:
+                seen.add(routed)
+                reachable.append(ModelRef(routed))
+                pending.append(ModelRef(routed))
     return reachable
 
 
