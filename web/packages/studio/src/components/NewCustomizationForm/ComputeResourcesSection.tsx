@@ -13,6 +13,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
+import { AutomodelTrainingMemoryWarning } from '@studio/components/NewCustomizationForm/TrainingMemoryWarning';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
@@ -242,7 +243,10 @@ export const ComputeResourcesSection = () => {
   return (
     <FormSection title="Compute Resources">
       {backend === 'automodel' ? (
-        <AutomodelParallelism disabled={disabled} />
+        <Stack gap="density-lg">
+          <AutomodelParallelism disabled={disabled} />
+          <AutomodelTrainingMemoryWarning />
+        </Stack>
       ) : backend === 'rl' ? (
         <RlParallelism disabled={disabled} />
       ) : (

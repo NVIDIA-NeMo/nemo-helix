@@ -60,6 +60,13 @@ vi.mock('@studio/hooks/useBaseModelDeploymentReadiness', () => ({
   useBaseModelDeploymentReadiness: mockReadiness,
 }));
 
+const mockTrainingMemoryEstimate = vi.hoisted(() => vi.fn());
+
+vi.mock('@studio/hooks/useTrainingMemoryEstimate', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@studio/hooks/useTrainingMemoryEstimate')>()),
+  useTrainingMemoryEstimate: mockTrainingMemoryEstimate,
+}));
+
 vi.mock('@studio/routes/NewDeploymentRoute/useCreateDeploymentBySource', () => ({
   ensureWorkspaceDeploymentConfig: mockCreateDeploymentConfig,
   ensureUnboundDeploymentConfig: mockCreateUnboundConfig,
@@ -120,6 +127,8 @@ describe('NewCustomizationForm', () => {
       status: null,
       isLoading: false,
     });
+    mockTrainingMemoryEstimate.mockReset();
+    mockTrainingMemoryEstimate.mockReturnValue(undefined);
     mockUseParams({ [ROUTE_PARAMS.workspace]: 'default' });
     vi.mocked(useCustomizationDatasetValidation).mockReturnValue(validValidation);
     mockListModels.mockReset();
@@ -304,6 +313,45 @@ describe('NewCustomizationForm', () => {
     const [[call]] = mutateAutomodel.mock.calls;
     expect(call.data.spec.dataset).toMatchObject({ training: 'default/commonsense_qa' });
     expect(call.data.spec.dataset).not.toHaveProperty('validation');
+  });
+
+  it('warns when the run may not fit in GPU memory but still submits', async () => {
+    mockTrainingMemoryEstimate.mockReturnValue({
+      gpu_count: 1,
+      gpu_memory_gb: 80,
+      gpu_memory_assumed: true,
+      data_parallel_size: 1,
+      model_states_gb: 104.7,
+      activations_gb: 6.1,
+      overhead_gb: 15.4,
+      total_gb: 126.1,
+      utilization: 1.58,
+      warning_threshold: 0.85,
+      status: 'exceeds_capacity',
+      limiting_factor: 'model_states',
+    });
+    const initialValues: CustomizationFormFields = {
+      ...FORM_DEFAULTS,
+      backend: 'automodel',
+      outputName: 'my-output',
+      automodel: {
+        ...FORM_DEFAULTS.automodel,
+        model: 'default/qwen3-0-6b',
+        dataset: { ...FORM_DEFAULTS.automodel.dataset, training: 'default/commonsense_qa' },
+      },
+    };
+
+    const user = userEvent.setup();
+    renderRoute(<NewCustomizationForm workspace="default" initialValues={initialValues} />);
+
+    expect(await screen.findByText('Likely to run out of GPU memory')).toBeInTheDocument();
+    expect(mockTrainingMemoryEstimate).toHaveBeenCalledWith(
+      'default/qwen3-0-6b',
+      expect.objectContaining({ max_seq_length: expect.any(Number) })
+    );
+
+    await user.click(await screen.findByRole('button', { name: /Start Fine-Tuning/i }));
+    await waitFor(() => expect(mutateAutomodel).toHaveBeenCalled());
   });
 
   /**
