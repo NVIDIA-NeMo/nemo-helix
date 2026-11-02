@@ -144,6 +144,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       error: null,
       total: 0,
       loadProgress: null,
+      logStatus: undefined,
       refetch: vi.fn(),
     });
     mockUseBreadcrumbs.mockReturnValue({
@@ -304,6 +305,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       error: null,
       total: 3,
       loadProgress: null,
+      logStatus: undefined,
       refetch: vi.fn(),
     });
 
@@ -341,6 +343,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       error: null,
       total: 1,
       loadProgress: null,
+      logStatus: undefined,
       refetch: vi.fn(),
     });
 
@@ -381,6 +384,7 @@ describe('GenerateJobDetailsRoute - Rendering', () => {
       error: null,
       total: 2,
       loadProgress: null,
+      logStatus: undefined,
       refetch: vi.fn(),
     });
 

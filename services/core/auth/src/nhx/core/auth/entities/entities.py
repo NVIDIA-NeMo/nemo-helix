@@ -56,6 +56,7 @@ class AccessKeyEntity(EntityBase):
     issuer: str
     audiences: list[str]
     scope: list[str] = Field(default_factory=list)
+    service_attributes: dict[str, dict[str, Any]] = Field(default_factory=dict)
     issued_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None

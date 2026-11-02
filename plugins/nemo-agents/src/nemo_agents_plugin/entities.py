@@ -16,8 +16,13 @@ from pathlib import Path
 from typing import Any, Self
 
 from nemo_helix_plugin.agents.types import (
+    CONTEXT_SCHEMA_DESCRIPTION,
+    DEFAULT_INPUT_DESCRIPTION,
     LABELS_DESCRIPTION,
+    NOOP_POST_RUN_ACTION_KIND,
+    POST_RUN_ACTIONS_DESCRIPTION,
     Labels,
+    PostRunActionKinds,
     ReferenceConfig,
 )
 from nemo_helix_plugin.agents.types import (
@@ -265,6 +270,7 @@ class AgentInline(BaseModel):
             "`nemo-agents-spec-v1` identifies the Platform-owned agent.yaml spec format."
         ),
     )
+    context_schema: dict[str, Any] | None = Field(default=None, description=CONTEXT_SCHEMA_DESCRIPTION)
 
 
 # TODO: first-class environment, sandbox, and harness specs are planned for the
@@ -281,6 +287,13 @@ class Agent(NemoEntity, AgentInline, entity_type="agent"):
     from ``(workspace, name)``.
     """
 
+    # Kept beside ``config`` rather than inside it: how a run starts is the
+    # platform's concern, and the config belongs to the harness.
+    default_input: str | None = Field(default=None, description=DEFAULT_INPUT_DESCRIPTION)
+    # An agent stored before this field existed reads back as noop-only.
+    post_run_actions: PostRunActionKinds = Field(
+        default_factory=lambda: {NOOP_POST_RUN_ACTION_KIND}, description=POST_RUN_ACTIONS_DESCRIPTION
+    )
     reference: ReferenceConfig | None = Field(default=None, description="Agent source and container references.")
     labels: Labels = Field(default_factory=dict, description=LABELS_DESCRIPTION)
 

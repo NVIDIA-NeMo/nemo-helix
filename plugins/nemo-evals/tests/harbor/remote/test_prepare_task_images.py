@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import httpx
 import pytest
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
 from nemo_evals.api.task_definitions.provenance import TaskProvenance
@@ -205,11 +206,15 @@ async def test_a_rebuild_in_flight_hides_the_older_ready_build(
 async def test_a_ready_build_gives_agent_and_verifier(clients, builds, store_task, sandbox_policy, entity_store):
     digest = await store_task(config=SEPARATE)
     await build(builds, digest)
-    await settle(entity_store, digest, 1, "ready", images=READY)
+    main = image("main", digest_ref("d")).model_copy(
+        update={"runtime_config": ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])}
+    )
+    await settle(entity_store, digest, 1, "ready", images=[main, image("verifier", digest_ref("e"))])
     result = await prepare(task(digest), clients, sandbox_policy)
     assert result.status == "ready" and result.environment is not None
     agent, verifier = result.environment.agent, result.environment.verifier
     assert agent.image_ref == digest_ref("d") and agent.preparation_key == "sha256:" + "d" * 64
+    assert agent.runtime_config == ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"])
     assert agent.builder_image == "harbor-env-main" and agent.source_archive_digest == "a" * 64
     assert verifier is not None and verifier.image_ref == digest_ref("e")
     assert result.images["agent"].source == "built"
@@ -378,7 +383,9 @@ async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy
     ],
 )
 async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, code):
-    rejected = await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
+    rejected = (
+        await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
+    ).error
     assert rejected is not None and rejected.code == code
 
 
@@ -403,7 +410,12 @@ def compose_task(archive, tmp_path):
 
 
 async def check(clients, policy, config=None):
-    """Run the preparer's submit-time check on a task with ``config``, as submit would."""
+    """Run the preparer's submit-time check on a task with ``config``, as submit would; its error, or None."""
+    return (await check_result(clients, policy, config)).error
+
+
+async def check_result(clients, policy, config=None):
+    """The whole result of the preparer's submit-time check: its error and its notices."""
     return await prepare_task_images.check(task("f" * 64, config=config), policy=policy, clients=clients)
 
 
@@ -412,10 +424,23 @@ async def test_check_passes_a_compose_task_the_pod_can_run(clients, sandbox_poli
     assert await check(clients, sandbox_policy) is None
 
 
+async def test_check_passes_a_compose_file_that_only_changes_main(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n")
+    assert await check(clients, sandbox_policy) is None
+
+
+async def test_check_passes_net_admin_on_main_with_a_notice(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  main:\n    cap_add: [NET_ADMIN]\n")
+    result = await check_result(clients, sandbox_policy)
+    assert result.error is None
+    assert result.notices == [
+        "services.main.cap_add: NET_ADMIN isn't granted; the sandbox's egress policy controls outbound traffic instead"
+    ]
+
+
 @pytest.mark.parametrize(
     ("compose", "expected"),
     [
-        ("services:\n  main:\n    environment: {A: b}\n", "compose_override_only"),
         ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
         ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
     ],
@@ -455,7 +480,7 @@ async def test_check_reports_an_unsafe_archive(clients, sandbox_policy, archive)
 
 
 async def test_check_passes_a_dockerfile_task_without_starting_a_build(clients, archive, sandbox_policy, jobs):
-    assert await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients) is None
+    assert (await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients)).error is None
     assert not jobs.created
 
 

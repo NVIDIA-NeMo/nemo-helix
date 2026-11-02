@@ -9,7 +9,7 @@ NeMo Helix v0.8.1 is a patch release for the 0.8 release line with security upda
 
 ## What's fixed
 
-- **OIDC login and token refresh.** Brokered login honors the configured `bearer_token_source`, including providers that use signed ID tokens as API credentials. Brokered CLI token refresh uses the bearer token already selected by the server instead of trying to select it again. See [OIDC Setup](/documentation/access-control/authentication/oidc-setup#selecting-the-api-bearer).
+- **OIDC token refresh.** Brokered CLI token refresh uses the bearer token returned by the server. See [OIDC Setup](/documentation/access-control/authentication/oidc-setup).
 - **Workflow-only Fabric validation.** Otherwise healthy workflow-only Fabric configurations are no longer rejected for the `no resolution strategy selected` warning. Other preflight problems still block validation, and the same warning still blocks harness configurations.
 - **Studio date filters.** Calendar edits remain draft until **Apply**. Cancelling or dismissing the picker restores the committed range when it is reopened, and applied ranges use UTC day boundaries. Opening the picker no longer changes trace filters or triggers a refetch before **Apply**.
 - **Certificate trust and dependency security.** Container builds update system and Python certificate trust stores and embedded TLS clients. LiteLLM is pinned to `1.95.1` for security fixes while preserving the 0.8 release line's garak version.

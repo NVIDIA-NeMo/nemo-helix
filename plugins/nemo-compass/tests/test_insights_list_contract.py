@@ -59,7 +59,7 @@ def test_api_returns_converted_evidence_and_persists_span_updates() -> None:
         }
     )
     insight._id = "insight-a"
-    entity_client.get_by_id.return_value = insight
+    entity_client.find_one.return_value = insight
     entity_client.update.side_effect = lambda item: item
     client = TestClient(_app(entity_client, AsyncMock()))
     response = client.get("/v2/workspaces/default/insights/insight-a")
@@ -104,7 +104,7 @@ def test_api_preserves_optional_ratings_through_create_and_evidence_update(sever
     assert response.status_code == 201
     assert response.json()["severity"] == severity
     assert response.json()["confidence"] == confidence
-    entity_client.get_by_id.return_value = entity_client.create.await_args.args[0]
+    entity_client.find_one.return_value = entity_client.create.await_args.args[0]
     response = client.patch("/v2/workspaces/default/insights/insight-a", json={"evidence": [{"trace_id": "a"}]})
     assert response.status_code == 200
     assert response.json()["severity"] == severity

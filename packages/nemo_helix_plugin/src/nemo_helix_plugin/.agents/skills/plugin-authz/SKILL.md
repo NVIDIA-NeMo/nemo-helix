@@ -130,7 +130,7 @@ def extra_permissions(self) -> list[Permission]: ...
 def extra_role_permissions(self) -> dict[str, list[Permission]]: ...
 ```
 
-**Default role-grant heuristic:** ids ending `.list` or `.read` → Viewer + Editor; everything else → Editor only. Use `extra_role_permissions` to reach a role the heuristic wouldn't — e.g. granting a Viewer an `.invoke` permission (its suffix isn't `read`). Grants are **unioned** with the defaults (never subtractive), each granted permission is also auto-registered in the catalog (no need to also list it in `extra_permissions`), and every permission must live in this service's own namespace or the whole plugin fails closed.
+**Default role-grant heuristic:** ids ending `.list` or `.read` → Viewer + Editor; `.admin` → no automatic role grant; everything else → Editor only. Admin permissions are registered with `has_role: false` so maintenance tools do not assign them automatically. Use `extra_role_permissions` for deliberate grants, including admin permissions or a Viewer's `.invoke` permission. Grants are **unioned** with the defaults (never subtractive), each granted permission is also auto-registered in the catalog (no need to also list it in `extra_permissions`), and every permission must live in this service's own namespace or the whole plugin fails closed.
 
 ## Fail modes — `NHX_AUTH_ON_INVALID_PLUGIN`
 

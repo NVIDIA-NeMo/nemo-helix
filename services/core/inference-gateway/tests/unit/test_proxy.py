@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import aiohttp
 import anthropic.types as anthropic_types
@@ -27,6 +27,7 @@ from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
     InferenceMiddlewareContext,
+    InferenceMiddlewareError,
     InferenceRequest,
     InferenceResponse,
     NemoInferenceMiddleware,
@@ -36,6 +37,9 @@ from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, S
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.core.inference_gateway.api.authz import MODEL_EXEC_PERMISSION
+from nhx.core.inference_gateway.api.metrics import (
+    UpstreamRequestLabels,
+)
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     ResolvedMiddlewareCall,
@@ -44,6 +48,7 @@ from nhx.core.inference_gateway.api.middleware_registry import (
 from nhx.core.inference_gateway.api.model_cache import ModelCache, ModelProviderInfo
 from nhx.core.inference_gateway.api.proxy import (
     NextRequestInfo,
+    UpstreamProviderContext,
     _build_inference_response_with_annotations,
     _parse_sse_stream,
     _rewrite_model_field,
@@ -1323,6 +1328,351 @@ async def test_proxy_request_client_error(mock_proxy_client, next_request_info):
 
     assert "Backend networking error" in str(exc_info.value.detail)
     assert exc_info.value.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# Upstream-requests counter wiring. These patch the counter-recording helper in
+# the proxy module and assert the (upstream_status, gateway_status) pair and the
+# routing labels recorded on each terminal branch of proxy_request and
+# fetch_proxy_response.
+# ---------------------------------------------------------------------------
+
+
+UPSTREAM_CONTEXT = UpstreamProviderContext(
+    workspace="ws",
+    model_name="ws/llama",
+    model_provider_name="nim",
+)
+
+
+def _recorded(record_mock: Mock) -> tuple[UpstreamRequestLabels, int | None, int]:
+    """Return the single ``record_upstream_request`` call's (labels, upstream, gateway)."""
+    record_mock.assert_called_once()
+    args = record_mock.call_args.args
+    labels, upstream_status, gateway_status = args[0], args[1], args[2]
+    return labels, upstream_status, gateway_status
+
+
+def _assert_labels_from_context(labels: UpstreamRequestLabels) -> None:
+    assert labels.workspace == "ws"
+    assert labels.model == "ws/llama"
+    assert labels.model_provider == "nim"
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_success_records_counter(mocker, mock_proxy_client, next_request_info):
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    labels, upstream_status, gateway_status = _recorded(record)
+    _assert_labels_from_context(labels)
+    assert upstream_status == 200
+    assert gateway_status == 200
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_passthrough_error_records_counter(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    mock_proxy_response.status = 503
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 503
+    labels, upstream_status, gateway_status = _recorded(record)
+    _assert_labels_from_context(labels)
+    assert upstream_status == 503
+    assert gateway_status == 503
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_wrapped_rejection_records_upstream_and_gateway_status(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # Upstream 401 is wrapped to a 424 for the client; both statuses are recorded.
+    mock_proxy_response.status = 401
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 424
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 401
+    assert gateway_status == 424
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_network_error_records_none_upstream_502(mocker, mock_proxy_client, next_request_info):
+    mock_proxy_client.request = AsyncMock(side_effect=ClientError("Connection failed"))
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException):
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status is None
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_success_does_not_record_counter(mocker, mock_proxy_client, next_request_info):
+    # Success is NOT counted inside fetch_proxy_response: the caller
+    # (virtual_model_proxy) finalizes the success count AFTER response middleware,
+    # so gateway_status can reflect the true post-middleware client status.
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    record.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_passthrough_error_records_counter(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    mock_proxy_response.status = 429
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 429
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 429
+    assert gateway_status == 429
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_wrapped_rejection_records_upstream_and_gateway_status(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    mock_proxy_response.status = 404
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 424
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 404
+    assert gateway_status == 424
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_network_error_records_none_upstream_502(
+    mocker, mock_proxy_client, next_request_info
+):
+    mock_proxy_client.request = AsyncMock(side_effect=ClientError("Connection failed"))
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException):
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status is None
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_payload_decode_failure_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # Upstream returned a 2xx status but the body could not be decoded; the client
+    # gets a 502. The true upstream status (200) is recorded, gateway status 502.
+    mock_proxy_response.read = AsyncMock(side_effect=aiohttp.ClientPayloadError("invalid gzip body"))
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_unparseable_json_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # 2xx status, body is not valid JSON -> client gets 502; still counted once.
+    mock_proxy_response.read = AsyncMock(return_value=b"not-json")
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_fetch_proxy_response_non_object_json_records_upstream_status_and_502(
+    mocker, mock_proxy_client, mock_proxy_response, next_request_info
+):
+    # 2xx status, JSON parses but is not an object -> client gets 502; counted once.
+    mock_proxy_response.read = AsyncMock(return_value=b"[1, 2, 3]")
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await fetch_proxy_response(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 502
+    _labels, upstream_status, gateway_status = _recorded(record)
+    assert upstream_status == 200
+    assert gateway_status == 502
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_success_records_final_client_status():
+    # The success count is finalized in virtual_model_proxy AFTER response
+    # middleware. An ImmediateResponse (response_status=200) that passes a
+    # response plugin records (200, 200).
+    class _PassthroughResponsePlugin(NemoInferenceMiddleware):
+        async def process_response(
+            self,
+            ctx: InferenceMiddlewareContext,
+            response: InferenceResponse,
+            middleware_config: object,
+        ) -> InferenceResponse:
+            return response
+
+    class _ImmediatePlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> ImmediateResponse:
+            return ImmediateResponse(
+                data={
+                    "id": "raw",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "llama",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                    ],
+                },
+            )
+
+    workspace = "e2e-test"
+    vm_name = "success-metric-router"
+    registry = MiddlewareRegistry(
+        plugins={"request-plugin": _ImmediatePlugin(), "response-plugin": _PassthroughResponsePlugin()}
+    )
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="request-plugin", config_type="t", resolved_config={})
+    ]
+    registry.response_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="response-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    with patch("nhx.core.inference_gateway.api.proxy.record_upstream_request") as record:
+        await virtual_model_proxy(
+            request=request,
+            workspace=workspace,
+            vm_name=vm_name,
+            virtual_model=VirtualModel(name=vm_name, workspace=workspace),
+            trailing_uri="v1/chat/completions",
+            json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+            http_client=Mock(),
+            model_cache=ModelCache(),
+            registry=registry,
+        )
+    record.assert_called_once()
+    _labels, upstream_status, gateway_status = record.call_args.args
+    assert upstream_status == 200
+    assert gateway_status == 200
+
+
+@pytest.mark.asyncio
+async def test_virtual_model_proxy_response_middleware_rejection_records_client_status():
+    # Response middleware rejecting a 2xx result must record gateway_status as the
+    # client-facing rejection status (400), with upstream_status still 200 -- the
+    # row an operator needs when a guardrails redaction turns a 200 into a 400.
+    class _RejectingResponsePlugin(NemoInferenceMiddleware):
+        async def process_response(
+            self,
+            ctx: InferenceMiddlewareContext,
+            response: InferenceResponse,
+            middleware_config: object,
+        ) -> InferenceResponse:
+            raise InferenceMiddlewareError(status_code=400, detail="blocked by guardrails")
+
+    class _ImmediatePlugin(NemoInferenceMiddleware):
+        async def process_request(
+            self,
+            ctx: InferenceMiddlewareContext,
+            request: InferenceRequest,
+            middleware_config: object,
+        ) -> ImmediateResponse:
+            return ImmediateResponse(
+                data={
+                    "id": "raw",
+                    "object": "chat.completion",
+                    "created": 1,
+                    "model": "llama",
+                    "choices": [
+                        {"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}
+                    ],
+                },
+            )
+
+    workspace = "e2e-test"
+    vm_name = "reject-metric-router"
+    registry = MiddlewareRegistry(
+        plugins={"request-plugin": _ImmediatePlugin(), "response-plugin": _RejectingResponsePlugin()}
+    )
+    registry.request_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="request-plugin", config_type="t", resolved_config={})
+    ]
+    registry.response_middleware_calls[(workspace, vm_name)] = [
+        ResolvedMiddlewareCall(plugin_name="response-plugin", config_type="t", resolved_config={})
+    ]
+
+    request = Mock(spec=Request)
+    request.method = "POST"
+    request.headers = {"content-type": "application/json"}
+    request.query_params = {}
+
+    with patch("nhx.core.inference_gateway.api.proxy.record_upstream_request") as record:
+        with pytest.raises(HTTPException) as exc_info:
+            await virtual_model_proxy(
+                request=request,
+                workspace=workspace,
+                vm_name=vm_name,
+                virtual_model=VirtualModel(name=vm_name, workspace=workspace),
+                trailing_uri="v1/chat/completions",
+                json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+                http_client=Mock(),
+                model_cache=ModelCache(),
+                registry=registry,
+            )
+    assert exc_info.value.status_code == 400
+    record.assert_called_once()
+    _labels, upstream_status, gateway_status = record.call_args.args
+    assert upstream_status == 200
+    assert gateway_status == 400
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_without_context_records_unknown_labels(mocker, mock_proxy_client, next_request_info):
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    await proxy_request(mock_proxy_client, next_request_info)
+    labels, _upstream_status, _gateway_status = _recorded(record)
+    assert labels.workspace is None
+    assert labels.model is None
+    assert labels.model_provider is None
+
+
+@pytest.mark.asyncio
+async def test_proxy_request_response_construction_failure_records_once_with_upstream_status(
+    mocker, mock_proxy_client, next_request_info
+):
+    # A 2xx upstream whose response object cannot be constructed (e.g. a header
+    # Starlette rejects) must be counted EXACTLY ONCE as (200, 500) -- not twice
+    # (once as success, once by the generic 500 handler).
+    mocker.patch(
+        "nhx.core.inference_gateway.api.proxy.StreamingResponse",
+        side_effect=UnicodeEncodeError("latin-1", "\u4e2d", 0, 1, "bad header"),
+    )
+    record = mocker.patch("nhx.core.inference_gateway.api.proxy.record_upstream_request")
+    with pytest.raises(HTTPException) as exc_info:
+        await proxy_request(mock_proxy_client, next_request_info, upstream_context=UPSTREAM_CONTEXT)
+    assert exc_info.value.status_code == 500
+    _labels, upstream_status, gateway_status = _recorded(record)  # asserts called exactly once
+    assert upstream_status == 200
+    assert gateway_status == 500
 
 
 @pytest.mark.asyncio

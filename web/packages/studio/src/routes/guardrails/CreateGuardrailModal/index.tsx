@@ -7,7 +7,11 @@ import { BASIC_ALL_MODELS_DROPDOWN_FILTER } from '@nemo/common/src/api/models/us
 import { useModelsFromWorkspace } from '@nemo/common/src/api/models/useModelsFromWorkspace';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { FormModal } from '@nemo/common/src/components/FormModal';
-import { ENTITY_NAME_HELP, entityNameSchema, toCopyName } from '@nemo/common/src/utils/entityName';
+import {
+  sanitizeEntityName,
+  toCopyName,
+  toValidEntityName,
+} from '@nemo/common/src/utils/entityName';
 import { useGuardrailsCreateConfig } from '@nemo/sdk/generated/platform/guardrails';
 import type {
   GuardrailConfig,
@@ -26,7 +30,19 @@ import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
 const createGuardrailFormSchema = z.object({
-  name: entityNameSchema(),
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value
+            ? 'Name must start with a letter and be at least 2 characters.'
+            : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
 });
 
 type FormData = z.infer<typeof createGuardrailFormSchema>;
@@ -58,12 +74,17 @@ export const CreateGuardrailModal: FC<Props> = ({ open, onClose, sourceConfig })
     control,
     handleSubmit,
     reset,
-    formState: { isValid },
+    watch,
+    formState: { errors, isSubmitted, touchedFields },
   } = useForm<FormData>({
     resolver: zodResolver(createGuardrailFormSchema),
     defaultValues: { name: defaultName },
-    mode: 'onChange',
+    mode: 'onTouched',
   });
+
+  const rawName = watch('name');
+  const preview = toValidEntityName(rawName ?? '', '');
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   const {
     mutateAsync: createConfig,
@@ -132,7 +153,7 @@ export const CreateGuardrailModal: FC<Props> = ({ open, onClose, sourceConfig })
       submitButtonText="Create"
       disabled={isPending}
       loading={isPending}
-      submitDisabled={!isValid}
+      submitDisabled={!preview}
       errorText={error ? getErrorMessage(error) : null}
       onSubmit={handleSubmit(onSubmit)}
       onClose={handleClose}
@@ -142,7 +163,15 @@ export const CreateGuardrailModal: FC<Props> = ({ open, onClose, sourceConfig })
           label="Name"
           disabled={isPending}
           useControllerProps={{ name: 'name', control }}
-          formFieldProps={{ slotInfo: ENTITY_NAME_HELP }}
+          formFieldProps={{
+            slotHelp: nameError ? undefined : preview ? (
+              <>
+                Your guardrail will be created as <span className="text-primary">{preview}</span>
+              </>
+            ) : undefined,
+            slotError: nameError,
+            status: nameError ? 'error' : undefined,
+          }}
           attributes={{
             Input: {
               autoComplete: 'off',

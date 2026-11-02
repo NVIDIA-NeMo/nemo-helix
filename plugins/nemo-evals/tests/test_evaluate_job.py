@@ -707,6 +707,42 @@ def test_platform_resolved_target_calls_the_gateway_as_the_job(
     assert "127.0.0.1" not in saved and job_identity not in saved
 
 
+def test_platform_agent_target_calls_the_agents_route_as_the_job(
+    tmp_path: Path, job_identity: str, serve_gateway_completion: Callable[[str, str], list[str | None]]
+) -> None:
+    """Studio's agent URL names the public host; the job calls its agents route through the proxy instead."""
+    route = "/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+    submitted_url = f"https://nhx.invalid{route}"  # nothing answers there
+    authorizations = serve_gateway_completion(route, "Paris")
+    config = EvaluateSpec.model_validate(
+        {
+            "metrics": [
+                _bundle_payload(ExactMatchMetric(reference="{{item.expected}}", candidate="{{sample.output_text}}"))
+            ],
+            "dataset": [{"question": "Capital of France?", "expected": "Paris"}],
+            "target": GenericAgent(
+                url=submitted_url,
+                name="triage",
+                format=AgentFormat.GENERIC,
+                body={"messages": [{"role": "user", "content": "{{question}}"}]},
+                response_path="$.choices[0].message.content",
+            ),
+            "params": RunConfigOnline(),
+            "prompt_template": {"question": "{{item.question}}"},
+        }
+    ).model_dump(mode="json")
+    ctx = _make_job_context(tmp_path)
+
+    run_result = _run_evaluate_job(config, tmp_path, ctx=ctx)
+
+    payload = _load_artifact_payload(run_result)
+    assert payload["aggregate_scores"]["scores"][0]["mean"] == 1.0
+    assert authorizations and set(authorizations) == {f"Bearer {job_identity}"}
+    assert config["target"]["url"] == submitted_url
+    saved = "".join(path.read_text(errors="ignore") for path in ctx.storage.persistent.rglob("*") if path.is_file())
+    assert "127.0.0.1" not in saved and job_identity not in saved
+
+
 async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -752,7 +788,15 @@ async def test_to_spec_points_platform_resolved_judges_at_the_service_url(
     assert judge_urls == [f"http://nemo-api:8080{route}", f"http://localhost:9000{route}"]
 
 
-async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
+@pytest.mark.parametrize(
+    "image_ref",
+    [None, "registry.example.com/eval-tasks:custom", "registry.example.com/eval-tasks@sha256:" + "a" * 64],
+)
+async def test_evaluate_job_compile_produces_cpu_task_step(mocker: MockerFixture, image_ref: str | None) -> None:
+    from nemo_evals.config import EvaluatorConfig
+
+    mocker.patch("nemo_evals.jobs.compiler.get_config", return_value=EvaluatorConfig(container_image_ref=image_ref))
+    qualify = mocker.patch("nemo_evals.jobs.compiler.get_qualified_image", return_value="platform/nhx-tasks:release")
     spec = EvaluateSpec.model_validate(_exact_match_spec())
     compiled = await EvaluateJob.compile(
         workspace="default",
@@ -765,6 +809,12 @@ async def test_evaluate_job_compile_produces_cpu_task_step() -> None:
     assert len(job_spec.steps) == 1
     step = job_spec.steps[0]
     assert step.name == "evaluate"
+    assert step.executor.provider == "cpu"
+    assert step.executor.container.image == (image_ref or "platform/nhx-tasks:release")
+    if image_ref:
+        qualify.assert_not_called()
+    else:
+        qualify.assert_called_once_with("nhx-tasks")
     _assert_metric_step_entrypoint(job_spec)
     assert step.config is not None
     config = cast(dict[str, Any], step.config)

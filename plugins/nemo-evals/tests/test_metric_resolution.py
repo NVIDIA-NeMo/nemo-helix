@@ -26,7 +26,7 @@ from nemo_helix_plugin.virtual_models.client import AsyncVirtualModelsClient
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
 from nhx_evals_sdk.metrics.ragas.metrics import TopicAdherenceMetric
 from nhx_evals_sdk.resolver_protocols import ModelResolver
-from nhx_evals_sdk.values import Model, ModelRef
+from nhx_evals_sdk.values import GenericAgent, Model, ModelRef
 from nhx_evals_sdk.values.common import SecretRef
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
 from pytest_httpserver import HTTPServer
@@ -337,6 +337,42 @@ def test_a_gateway_target_is_called_through_the_judges_proxy_and_never_changed()
         assert proxied_target.port == proxied_judge.port
 
     assert target.url == f"http://nemo-api:8080{target_route}"
+
+
+AGENT_ROUTE = "/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+
+
+def _agent(url: str, **kwargs: object) -> GenericAgent:
+    return GenericAgent.model_validate(
+        {"url": url, "name": "triage", "body": {}, "response_path": "$.choices[0].message.content", **kwargs}
+    )
+
+
+@pytest.mark.usefixtures("job_identity")
+def test_a_platform_agent_target_on_the_public_host_is_called_through_the_job_proxy() -> None:
+    """Studio builds the agent URL from the browser origin, which the job pod may not reach over TLS."""
+    target = _agent(f"https://nhx.example.test{AGENT_ROUTE}")
+
+    with gateway_models_as_job([], target) as called:
+        assert isinstance(called, GenericAgent)
+        proxied = urlsplit(called.url)
+        assert (proxied.scheme, proxied.hostname, proxied.path) == ("http", "127.0.0.1", AGENT_ROUTE)
+
+    assert target.url == f"https://nhx.example.test{AGENT_ROUTE}"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        _agent(f"https://nhx.example.test{AGENT_ROUTE}", api_key_secret="agent-key"),
+        _agent("https://agent.example.test/v1/chat/completions"),
+    ],
+    ids=["keyed", "external"],
+)
+@pytest.mark.usefixtures("job_identity")
+def test_keyed_and_external_agent_targets_are_called_as_written(target: GenericAgent) -> None:
+    with gateway_models_as_job([], target) as called:
+        assert called is target
 
 
 @pytest.mark.parametrize(

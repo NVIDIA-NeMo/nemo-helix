@@ -37,12 +37,17 @@ describe('strictFilesetNameCandidate', () => {
     expect(strictFilesetNameCandidate('  my-data  ')).toBe('my-data');
   });
 
-  it.each([undefined, '', '   ', 'Bad Name', '1starts-with-digit'])(
-    'gives nothing to check for %j, which the form already rejects',
+  it.each([undefined, '', '   '])(
+    'gives nothing to check for %j, which produces no salvageable name',
     (name) => {
       expect(strictFilesetNameCandidate(name)).toBe('');
     }
   );
+
+  it('returns the sanitized name for salvageable inputs', () => {
+    expect(strictFilesetNameCandidate('Bad Name')).toBe('bad-name');
+    expect(strictFilesetNameCandidate('1starts-with-digit')).toBe('starts-with-digit');
+  });
 });
 
 describe('useFilesetNameStatus', () => {

@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from nemo_compass_plugin.analysis.agent_config import EVALUATION_ID_CONTEXT_KEY, SINCE_CONTEXT_KEY
 from nemo_compass_plugin.analysis.run import run_compass_change_set
 from nemo_fabric_adapter_contract import models as contract
 from nemo_fabric_adapters.common import lifecycle
@@ -35,6 +36,10 @@ NEMO_HELIX_CONTEXT_KEY = "nemo_helix"
 
 class CompassAdapterConfigError(ValueError):
     """The Fabric-projected Compass adapter configuration is invalid."""
+
+
+class CompassRequestContextError(ValueError):
+    """The request context does not carry a valid Compass run scope."""
 
 
 class CompassRuntime:
@@ -110,22 +115,22 @@ class CompassRuntime:
         if target_agent is None:
             raise CompassAdapterConfigError("harness.settings.agent is required for Compass adapter")
 
-        workspace = (
-            _string_setting(self._settings, "workspace")
-            or _nemo_helix_context(request.context, "job_workspace")
-            or os.environ.get("NHX_WORKSPACE")
-            or "default"
-        )
+        # The workspace is the job's own: Compass analyzes the workspace it runs in.
+        workspace = _nemo_helix_context(request.context, "job_workspace")
+        if workspace is None:
+            raise CompassRequestContextError(
+                f"context.{NEMO_HELIX_CONTEXT_KEY}.job_workspace is required; run Compass as an execute job"
+            )
         base_url = (
             _string_setting(self._settings, "base_url")
             or os.environ.get("NHX_BASE_URL")
             or os.environ.get("NEMO_BASE_URL")
         )
-        # Every settings read can raise, so resolve them before opening the
-        # client: nothing is worth a live SDK handle that no one closes.
+        # Every settings and context read can raise, so resolve them before
+        # opening the client: nothing is worth a live SDK handle that no one closes.
         ethos = _string_setting(self._settings, "ethos")
-        since = _datetime_setting(self._settings, "since")
-        evaluation_id = _string_setting(self._settings, "evaluation_id")
+        since = _datetime_context(request.context, SINCE_CONTEXT_KEY)
+        evaluation_id = _string_context(request.context, EVALUATION_ID_CONTEXT_KEY)
         enable_observability = bool(self._settings.get("enable_observability", True))
         model_refs = ConfiguredModelRefs(
             default=_default_model_ref(self._settings, self._models),
@@ -199,13 +204,25 @@ def _nemo_helix_context(context: dict[str, Any], key: str) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _datetime_setting(settings: dict[str, Any], key: str) -> datetime | None:
-    value = settings.get(key)
+def _string_context(context: dict[str, Any], key: str) -> str | None:
+    value = context.get(key)
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():
-        raise CompassAdapterConfigError(f"harness.settings.{key} must be an ISO-8601 datetime string")
-    return datetime.fromisoformat(value)
+        raise CompassRequestContextError(f"context.{key} must be a non-empty string")
+    return value
+
+
+def _datetime_context(context: dict[str, Any], key: str) -> datetime | None:
+    value = context.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise CompassRequestContextError(f"context.{key} must be an ISO-8601 datetime string")
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as error:
+        raise CompassRequestContextError(f"context.{key} must be an ISO-8601 datetime string") from error
 
 
 def _default_model_ref(

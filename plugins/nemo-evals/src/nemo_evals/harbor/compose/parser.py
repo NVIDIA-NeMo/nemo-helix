@@ -52,6 +52,7 @@ from nemo_evals.harbor.compose.service_options import (
     parse_readiness,
     parse_resources,
     parse_volume_mounts,
+    parse_working_dir,
 )
 from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, MAX_SERVICES, quantity_value
 
@@ -85,7 +86,7 @@ _COMMON_KEYS = frozenset(
     }
 )
 _SERVICE_KEYS = _COMMON_KEYS | {"shm_size", "cpus", "mem_limit", "deploy"}
-_MAIN_KEYS = _COMMON_KEYS | {"cap_add", "cpus", "mem_limit", "deploy"}
+_MAIN_KEYS = _COMMON_KEYS | {"cap_add", "cpus", "mem_limit", "deploy", "working_dir"}
 
 
 def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTask | None:
@@ -165,6 +166,7 @@ def parse_compose(task_dir: Path, *, read_entrypoint: bool = True) -> ComposeTas
         services=services,
         main=main,
         volumes=[*_mounted_volumes(resolved.document, services, main), *log_volumes],
+        notices=service_parser.notices,
     )
 
 
@@ -182,6 +184,8 @@ class ServiceParser:
         self._declared_volumes = declared_volumes
         self._interpolator = interpolator
         self._problems = problems
+        # What the file asks for that the sandbox does differently without refusing the task, for submit to show.
+        self.notices: list[str] = []
 
     def service(self, name: str, raw_service: dict[str, Any], *, prebuilt: bool) -> ComposeService | None:
         """Read service ``name`` (any service but ``main``) of a task that is ``prebuilt`` or not.
@@ -230,10 +234,18 @@ class ServiceParser:
         """
         path = f"services.{MAIN_SERVICE}"
         self._check_keys(MAIN_SERVICE, raw_main, _MAIN_KEYS)
-        if raw_main.get("command") != harbor_main.get("command"):
-            # The sandbox keeps ``main`` alive itself; a task's own ``command`` for it would be dropped.
-            self._problems.unsupported(f"{path}.command")
         self._check_main_limits(raw_main, task_limits, path)
+
+        # Harbor's own command only keeps `main` alive, which the sandbox does too; a task's own replaces it.
+        command = None
+        if raw_main.get("command") != harbor_main.get("command"):
+            command = parse_argument_list(raw_main.get("command"), f"{path}.command", self._problems)
+            # `command: null` and `command: []` both mean Docker runs the image's own CMD, which isn't known here.
+            # Accepting them would run the sandbox's keep-alive instead, and the CMD's process would never start.
+            if raw_main.get("command") is None:
+                self._problems.unsupported(f"{path}.command: null")
+            elif command == []:
+                self._problems.unsupported(f"{path}.command: an empty command")
 
         environment = self._environment(raw_main, path)
         entrypoint = parse_entrypoint(raw_main.get("entrypoint"), f"{path}.entrypoint", self._problems)
@@ -251,10 +263,12 @@ class ServiceParser:
             depends_on=parse_dependency_conditions(raw_main.get("depends_on"), f"{path}.depends_on", self._problems),
             env=environment,
             readiness=parse_readiness(raw_main.get("healthcheck"), f"{path}.healthcheck", self._problems),
-            add_capabilities=parse_capabilities(raw_main, path, self._problems),
+            add_capabilities=parse_capabilities(raw_main, path, self._problems, self.notices),
             volume_mounts=self._volume_mounts(raw_main, path),
             entrypoint=entrypoint,
             ports=parse_ports(raw_main, path, self._problems),
+            command=command or None,
+            working_dir=parse_working_dir(raw_main.get("working_dir"), f"{path}.working_dir", self._problems),
             platform=parse_platform(raw_main.get("platform"), f"{path}.platform", self._problems),
         )
         return settings, build

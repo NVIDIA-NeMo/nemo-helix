@@ -13,30 +13,12 @@ from typing import Any
 
 import nemo_fabric as fabric
 from nemo_agents_plugin.agent_config import AgentConfig, HarnessConfig, ModelConfig
+from nemo_agents_plugin.fabric.adapters import HARNESS_ADAPTER_IDS, UnknownAdapterError, resolve_adapter_id
 from nemo_agents_plugin.fabric.gateway_credentials import (
     bind_platform_gateway_model_credential,
     platform_gateway_credential_env,
 )
 from nemo_helix_plugin.config import PLATFORM_BASE_URL_ENV_VARS
-
-HARNESS_ADAPTER_IDS = {
-    "claude": "nvidia.fabric.claude",
-    "codex": "nvidia.fabric.codex",
-    "deepagents": "nvidia.fabric.langchain.deepagents",
-    "hermes": "nvidia.fabric.hermes",
-    "remote-agent": "nvidia.fabric.remote-agent",
-    "pi": "nvidia.fabric.pi",
-    "mini-swe-agent": "nvidia.fabric.mini-swe-agent",
-    "nooa-bench-agent": "nvidia.fabric.nooa.bench-agent",
-}
-
-# A harness kind carrying this prefix is already a fully-qualified Fabric
-# adapter id and is passed through verbatim. Plugin-owned adapters ship their
-# own descriptor to <sys.prefix>/share/nemo-fabric/adapters/ and are resolved
-# there by Fabric at runtime, so nemo-agents does not need a short-name entry
-# for each one. A bad id therefore surfaces as a Fabric resolution error rather
-# than a translation error here.
-FABRIC_ADAPTER_ID_PREFIX = "nvidia.fabric."
 
 # Platform location forwarded into the agent process for SDK-backed child tools:
 # the platform base-URL vars (owned by nemo_helix_plugin as
@@ -191,16 +173,10 @@ def _select_harness(config: AgentConfig, harness_name: str | None) -> tuple[str,
 
 
 def _adapter_id_for_harness(harness: HarnessConfig) -> str:
-    if harness.kind.startswith(FABRIC_ADAPTER_ID_PREFIX):
-        return harness.kind
-    adapter_id = HARNESS_ADAPTER_IDS.get(harness.kind)
-    if adapter_id is None:
-        available = ", ".join(sorted(HARNESS_ADAPTER_IDS))
-        raise FabricTranslationError(
-            f"Unsupported harness kind {harness.kind!r}. Supported harness kinds: {available}; "
-            f"or a fully-qualified Fabric adapter id starting with {FABRIC_ADAPTER_ID_PREFIX!r}."
-        )
-    return adapter_id
+    try:
+        return resolve_adapter_id(harness.kind)
+    except UnknownAdapterError as error:
+        raise FabricTranslationError(str(error)) from error
 
 
 def _resolve_model(config: AgentConfig, harness_name: str, harness: HarnessConfig) -> ModelConfig:

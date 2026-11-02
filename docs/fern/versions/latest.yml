@@ -136,6 +136,8 @@ navigation:
                 path: ../../evals/tutorials/run-llm-judge-evaluation.mdx
               - page: Define and Run Custom Python Metrics
                 path: ../../evals/tutorials/define-run-custom-python-metrics.mdx
+              - page: Customize the Evaluator Task Image
+                path: ../../evals/tutorials/custom-task-image.mdx
           - page: Experiments
             slug: experiments
             path: ../../evals/experiments.mdx

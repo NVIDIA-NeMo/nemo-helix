@@ -414,22 +414,22 @@ class _EvaluateJobBase(NemoJob):
         params = resolve_params(spec.params, spec.target)
         metrics = [unbundle_metric(to_runtime_bundle(metric)) for metric in spec.metrics]
         require_resolved_model_refs(metrics, subject="EvaluateSpec")
-        model_target = spec.target if isinstance(spec.target, Model) else None
-        with gateway_models_as_job(metrics, model_target) as called_target:
-            if isinstance(spec.target, Model):
+        with gateway_models_as_job(metrics, spec.target) as called_target:
+            # Generation goes to the proxied copy when there is one; the spec's target stays as
+            # resolved, so results and publication record that rather than the proxy.
+            target = called_target or spec.target
+            if isinstance(target, Model):
                 if not isinstance(params, RunConfigOnlineModel):
                     raise TypeError("model target requires RunConfigOnlineModel")
-                # Generation goes to the proxied copy when there is one; the spec's target stays as
-                # resolved, so results and publication record that rather than the proxy.
                 result = evaluator.run_sync(
                     metrics=metrics,
                     dataset=dataset,
                     config=params,
-                    target=called_target or spec.target,
+                    target=target,
                     field_mapping=spec.field_mapping,
                     prompt_template=spec.prompt_template,
                 )
-            elif isinstance(spec.target, AgentBase):
+            elif isinstance(target, AgentBase):
                 if type(params) is not RunConfigOnline:
                     raise TypeError("agent target requires RunConfigOnline")
                 if spec.prompt_template is None:
@@ -438,7 +438,7 @@ class _EvaluateJobBase(NemoJob):
                     metrics=metrics,
                     dataset=dataset,
                     config=params,
-                    target=spec.target,
+                    target=target,
                     field_mapping=spec.field_mapping,
                     prompt_template=spec.prompt_template,
                 )

@@ -12,7 +12,7 @@ import httpx
 import pytest
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.config import BuilderConfig
-from nemo_builder_plugin.entities import ContainerImage
+from nemo_builder_plugin.entities import ContainerImage, QueuedBuild
 from nemo_builder_plugin.execution import ExecutionBackend
 from nemo_builder_plugin.identity import ImageReference, compose_system_tag
 from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource, ImageSource
@@ -123,6 +123,7 @@ async def _submit(
     config: BuilderConfig | None = None,
     unreadable: frozenset[str] = frozenset(),
     upstream: Mapping[str, str | Exception] | None = None,
+    queue: bool = False,
 ) -> SubmitResult:
     jobs = jobs or FakeJobs(entity_client.events)
 
@@ -146,10 +147,31 @@ async def _submit(
         secret_readable=secret_readable,
         resolve_upstream=resolve_upstream,
         default_platform=(config or _config()).default_platform,
+        queue=queue,
     )
 
 
 class TestOrdering:
+    @pytest.mark.asyncio
+    async def test_a_capped_submit_queues_the_job_instead_of_creating_it(self) -> None:
+        client = FakeEntityClient()
+        jobs = FakeJobs(client.events)
+        result = await _submit(client, jobs, queue=True)
+        assert [i.status for i in result.images] == ["queued", "queued"]
+        assert client.events == ["create:demo-1.img0", "create:demo-1.img1", "create:builder-demo-1"]
+        assert jobs.jobs == {}
+        queued = client.rows["builder-demo-1"]
+        assert isinstance(queued, QueuedBuild)
+        assert (queued.state, queued.images) == ("queued", ["demo-1.img0", "demo-1.img1"])
+        request = CreateHelixJobRequest.model_validate(queued.request)
+        assert (request.name, request.source) == ("builder-demo-1", JOB_SOURCE)
+
+        # A resubmit adopts the rows and the queue entry; it doesn't queue the build twice.
+        client.events.clear()
+        await _submit(client, jobs, queue=True)
+        assert "conflict:builder-demo-1" in client.events
+        assert jobs.jobs == {}
+
     @pytest.mark.asyncio
     async def test_rows_are_created_before_the_job(self) -> None:
         client = FakeEntityClient()

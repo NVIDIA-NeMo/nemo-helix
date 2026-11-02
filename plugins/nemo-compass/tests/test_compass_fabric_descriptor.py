@@ -19,11 +19,15 @@ import nemo_fabric as fabric
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_compass_plugin import fabric_adapter
-from nemo_compass_plugin.analysis.agent_config import COMPASS_ADAPTER_ID, build_compass_agent_config
+from nemo_compass_plugin.analysis.agent_config import (
+    COMPASS_ADAPTER_ID,
+    build_compass_agent_config,
+    build_compass_run_context,
+)
 from nemo_fabric_adapter_contract import models as contract
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-DESCRIPTOR = _PLUGIN_ROOT / "compass.fabric-adapter.json"
+DESCRIPTOR = _PLUGIN_ROOT / "analyst.fabric-adapter.json"
 
 
 _REINSTALL_HINT = "Refresh it with: uv sync --reinstall-package nemo-compass-plugin"
@@ -38,7 +42,7 @@ def _installed_descriptor() -> Path:
     """
     import sys
 
-    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "compass" / DESCRIPTOR.name
+    return Path(sys.prefix) / "share" / "nemo-fabric" / "adapters" / "helix" / "compass" / DESCRIPTOR.name
 
 
 def _require_installed_descriptor() -> Path:
@@ -55,7 +59,6 @@ def _require_installed_descriptor() -> Path:
 def _built_config(**overrides: Any) -> dict[str, Any]:
     return build_compass_agent_config(
         agent="demo-agent",
-        workspace="default",
         default_model="default/test-default",
         fast_model="default/test-fast",
         **overrides,
@@ -125,21 +128,34 @@ def test_compass_adapter_resolves_the_forwarded_pair() -> None:
 def test_optional_read_settings_are_omitted_when_unset() -> None:
     settings = _built_config()["harnesses"]["compass"]["settings"]
 
-    assert set(settings) == {"agent", "workspace"}
+    assert set(settings) == {"agent"}
 
 
 def test_optional_read_settings_are_carried_when_set() -> None:
     settings = _built_config(
-        since=datetime(2026, 8, 1, tzinfo=timezone.utc),
-        evaluation_id="eval-123",
         base_url="http://platform:8080",
         enable_observability=False,
     )["harnesses"]["compass"]["settings"]
 
-    assert settings["since"] == "2026-08-01T00:00:00+00:00"
-    assert settings["evaluation_id"] == "eval-123"
     assert settings["base_url"] == "http://platform:8080"
     assert settings["enable_observability"] is False
+
+
+def test_descriptor_leaves_run_scope_and_workspace_to_the_request_context() -> None:
+    """``since``/``evaluation_id`` come from the job's context and the workspace from the job itself."""
+    properties = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))["settings_schema"]["properties"]
+
+    assert not {"since", "evaluation_id", "workspace"} & set(properties)
+
+
+def test_run_context_is_empty_when_unscoped() -> None:
+    assert build_compass_run_context() == {}
+
+
+def test_run_context_carries_the_read_scope() -> None:
+    context = build_compass_run_context(since=datetime(2026, 8, 1, tzinfo=timezone.utc), evaluation_id="eval-123")
+
+    assert context == {"since": "2026-08-01T00:00:00+00:00", "evaluation_id": "eval-123"}
 
 
 def test_descriptor_declares_the_ethos_setting() -> None:

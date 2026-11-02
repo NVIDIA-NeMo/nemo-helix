@@ -56,6 +56,7 @@ from nhx.studio.assistant_mcp_tools import (
 )
 from nhx.studio.assistant_skills import ClaudeSkillResponse, DuplicateSkillError, list_claude_skill_responses
 from nhx.studio.authz import scope
+from nhx.studio.dependencies import StudioConfigDep
 from nhx.studio.entities import AssistantConversation, AssistantMessage, LegacyAssistantConversation
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.routing import NoMatchFound
@@ -1917,6 +1918,7 @@ async def send_message(
     session_id: str,
     body: MessageRequest,
     request: Request,
+    config: StudioConfigDep,
     entity_store: EntityClient = Depends(get_entity_client),
 ) -> StreamingResponse:
     """Send a message to the deployed NeMo Assistant and stream Studio events."""
@@ -1936,7 +1938,7 @@ async def send_message(
     agent_url = _studio_assistant_url(canonical_workspace)
     studio_base_url = _studio_base_url_from_request(body, request)
     studio_pathname = _studio_pathname_from_request(body, request)
-    enabled_destinations = studio_links.enabled_destinations_from_request(request)
+    enabled_destinations = studio_links.enabled_destinations(studio_links.feature_flags_from_config(config))
     system_prompt = _build_assistant_system_prompt(
         sid,
         canonical_workspace,
@@ -1994,7 +1996,7 @@ async def resolve_agent_input(session_id: str, request_id: str, body: AgentInput
 @router.post("/mcp/{session_id}", name=MCP_ROUTE_NAME, include_in_schema=False)
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[])
-async def mcp_endpoint(session_id: str, request: Request) -> Response:
+async def mcp_endpoint(session_id: str, request: Request, config: StudioConfigDep) -> Response:
     """Minimal MCP endpoint used by Claude's permission-prompt tool."""
     sid = _validate_session_id(session_id)
     try:
@@ -2030,7 +2032,7 @@ async def mcp_endpoint(session_id: str, request: Request) -> Response:
         )
 
     if method == "tools/list":
-        enabled_destinations = studio_links.enabled_destinations_from_request(request)
+        enabled_destinations = studio_links.enabled_destinations(studio_links.feature_flags_from_config(config))
         return JSONResponse(
             {
                 "jsonrpc": "2.0",
@@ -2118,7 +2120,7 @@ async def mcp_endpoint(session_id: str, request: Request) -> Response:
         if name == STUDIO_LINK_TOOL_NAME:
             workspace = _trimmed_string(request.query_params.get("workspace"))
             studio_base_url = _trimmed_string(request.query_params.get("studio_base_url"))
-            enabled_destinations = studio_links.enabled_destinations_from_request(request)
+            enabled_destinations = studio_links.enabled_destinations(studio_links.feature_flags_from_config(config))
             result = studio_links.build_studio_link_result(workspace, studio_base_url, args, enabled_destinations)
             return JSONResponse(
                 {

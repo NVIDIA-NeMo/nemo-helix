@@ -11,13 +11,16 @@ from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, requi
 from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.schema import UpdateDeploymentStatusRequest, UpdateVolumeStatusRequest
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
 
 router = APIRouter()
+deployment_routes = PolicyRoutes(router, AuthContextResponsePolicy(dto_type=Deployment, field="auth_context"))
 
 
-@router.put("/deployments/{name}/status", response_model=Deployment, tags=["Deployment Status"])
+@deployment_routes.put("/deployments/{name}/status", tags=["Deployment Status"])
 @scope.write
 @path_rule(callers=[CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.STATUS_UPDATE])
 async def update_deployment_status(

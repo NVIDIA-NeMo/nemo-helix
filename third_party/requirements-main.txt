@@ -1306,6 +1306,7 @@ httpx==0.28.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-garak-plugin
     #   nemo-helix
     #   nemo-helix-ext
+    #   nemo-helix-plugin
     #   nemo-safe-synthesizer
     #   nemo-safe-synthesizer-plugin
     #   nemo-switchyard-plugin
@@ -1624,6 +1625,7 @@ langchain-community==0.3.31 ; (platform_machine == 'arm64' and sys_platform == '
     # via
     #   nemo-guardrails-plugin
     #   nemo-helix
+    #   nhx-evals-sdk
     #   ragas
 langchain-core==1.6.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:d8bb924cd413955d9d3192ccced140407427c3ff51e50ffb941222648da92cb2 \
@@ -2424,8 +2426,8 @@ opensandbox==0.1.16 ; (platform_machine == 'arm64' and sys_platform == 'darwin')
     --hash=sha256:2e3b7e18e52f69f9696cb563713e2581e10a727d4dc83edc0ec27b1c725c3ce0 \
     --hash=sha256:b9253a58eb9f01bff522fccf317746b464805893c56a6ad447e0f1cc7f37276c
     # via nemo-sandboxed-gym
-openshell==0.1.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:8c409da4f176d42418d92366fe201f47cceef2c0fa432bfbce2bf938649d59cf
+openshell @ https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:a0c5b0e9954ffdbdb4d34110d4a9d0d2dc57579a53e4a67372e0f8dd3b75cd81
     # via
     #   nemo-deployments-plugin
     #   nhx-jobs

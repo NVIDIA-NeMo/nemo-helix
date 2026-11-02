@@ -2277,7 +2277,7 @@ nemo inference deployments [OPTIONS] COMMAND [ARGS]...
 * `create`: Create a new ModelDeployment (version 1).
 * `delete`: Delete all versions of a ModelDeployment.
 * `list`: List ModelDeployments for a specific workspace.
-* `list-models`: Get Latest ModelDeployment's Model Entities from Entity...
+* `list-models`: Retrieve the model list for the latest deployment.
 * `get`: Get the latest version of a ModelDeployment.
 * `update`: Update a ModelDeployment (creates a new immutable version).
 * `update-status`: Update the status of a ModelDeployment (mutable operation).
@@ -2424,13 +2424,10 @@ Filter deployments by workspace, project, status, config, model_provider_id, nam
 
 ##### nemo inference deployments list-models
 
-Get Latest ModelDeployment's Model Entities from Entity Store.
+Retrieve the model list for the latest deployment.
 
-This provides the
-API contract that NIMs expect from Entity Store today, for pulling LoRAs, but
-enables us to enforce AuthZ boundaries.
-
-TODO: Implement model entity retrieval based on deployment config.
+The model list is currently empty; this command does not yet discover models
+or LoRA adapters from the deployment configuration.
 
 **Usage:**
 
@@ -4946,7 +4943,7 @@ nemo jobs steps update-status [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
 
@@ -5016,7 +5013,7 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 * `--step`: (required)
 * `--error-details`: JSON string
 * `--error-stack`
-* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
+* `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--status-details`: JSON string
 
 **Help:**
@@ -6521,7 +6518,7 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess (default), docker, k8s, or openshell. [default: subprocess]
+* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
 * `--image, -i`: Container image for docker/k8s/openshell modes (falls back to deployments.default_image).
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
@@ -7374,7 +7371,7 @@ nemo agents execute [OPTIONS] [COMMAND] [ARGS]...
 **Job Spec:**
 
 * `--agent`: Agent to execute: an Agent entity name or workspace/name ref, or an inline agent definition for a config composed at request time. This flag accepts the string form only; use `--spec` or `--spec-file` for the other union form(s).
-* `--input`: Prompt to pass to the agent.
+* `--input`: Prompt to pass to the agent. Omit to use the Agent entity's default_input; required for an inline agent or an entity that declares none.
 * `--environment`: AgentEnvironment to run under: a "workspace/name" ref to a stored AgentEnvironment, an inline environment, or None. Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the job step at creation time. This flag accepts the string form only; use `--spec` or `--spec-file` for the other union form(s).
 * `--workdir.base-workdir`: Optional Files reference for the initial working directory.
 * `--timeout-seconds <FLOAT>`: Maximum time to wait for Fabric to return an execution result.
@@ -9505,6 +9502,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
 * `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
+* `--publication.intake.max-otlp-request-bytes <INTEGER>`: Largest serialized OTLP request, envelope included, sent to Intake for one trial's trace. A larger trace is split into several requests in span order, keeping each span's ids, parent, and resource and scope metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request body limits; this setting does not change those limits. A trial with a single span too large to fit fails publication before any of its trace is sent.
 
 **Spec Source:**
 
@@ -9566,6 +9564,7 @@ nemo evals evaluate [OPTIONS] [COMMAND] [ARGS]...
 * `--publication.intake.agent-name`: Agent name recorded on each published trajectory. Derived from the target when it names one; required otherwise.
 * `--publication.intake.agent-version`: Agent version recorded on each published trajectory. Neither a Model nor an Agent carries a version, so this defaults to the version the agent's own trajectory records (a Harbor agent's, such as codex's), else 'unknown'.
 * `--publication.intake.required`: Fail the job when publication fails. Defaults to True so a run that asked to publish does not report success with nothing in Experiments. The result bundle is saved before publication runs, so a failed job still leaves the results intact to re-publish. Set False to keep the job successful and report the failure in its output instead.
+* `--publication.intake.max-otlp-request-bytes <INTEGER>`: Largest serialized OTLP request, envelope included, sent to Intake for one trial's trace. A larger trace is split into several requests in span order, keeping each span's ids, parent, and resource and scope metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request body limits; this setting does not change those limits. A trial with a single span too large to fit fails publication before any of its trace is sent.
 * `--publication.intake.test-case-id-field`: Dataset column identifying each row, recorded as the published test case id. Defaults to a hash of the row's content, which keeps a row's id stable across dataset reorderings and revisions so the same test case can be compared run over run; editing a row makes it a new test case. Name a column here when the dataset has a real identifier — it reads better and survives content edits. Values must be unique per row; the run is rejected if they are not.
 
 **Spec Source:**
@@ -9623,7 +9622,7 @@ nemo evals retrieve-eval [OPTIONS] [COMMAND] [ARGS]...
 
 **Job Spec:**
 
-* `--dataset.root`: Reference to a Fileset (format: workspace/fileset-name).
+* `--dataset`: Fileset containing a BEIR test split.
 
 **Spec Source:**
 
@@ -9739,9 +9738,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.training and dataset.validation with
-the new fileset. Automodel finds the train and validation files inside it by
-name, so upload a directory holding both.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Automodel tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -9848,8 +9847,12 @@ Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
-fileset, so point `--upload-dataset` at a local directory holding training.jsonl
-and validation.jsonl. For GRPO, `--upload-environment` takes the environment
+fileset, so point `--upload-dataset` at a local directory holding a training file
+and, optionally, a validation file, named like train*.jsonl and val*.jsonl or
+dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or
+training/) and val/ (or validation/, dev/). Without a validation file, 10% of the
+training rows are held out, except in a sandboxed GRPO run, which skips
+validation. For GRPO, `--upload-environment` takes the environment
 directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
@@ -9954,9 +9957,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization `--upload-model` ... `--upload-dataset` ...' instead to
 create the resources and print their references without creating a job.
 
-One `--upload-dataset` fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Unsloth tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass `--exist-ok`,
 which applies to whichever sources you gave.
@@ -10041,8 +10044,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Override `model` in the spec.
-* `--dataset.training`: Training fileset as 'name', 'workspace/name', or either form with a '#path/' directory.
-* `--dataset.validation`: Override `dataset.validation` in the spec.
+* `--dataset.training`: Dataset fileset as 'name', 'workspace/name', or either form with a '#path/' directory. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.prompt-template`: Override `dataset.prompt_template` in the spec.
 * `--dataset.shuffle`: Reshuffle training examples each epoch. Disable only for a deliberate curriculum order.
 * `--training.lora.rank <INTEGER>`: Override `training.lora.rank` in the spec.
@@ -10113,7 +10115,7 @@ nemo customization automodel.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
@@ -10177,14 +10179,14 @@ nemo customization rl.jobs [OPTIONS] [COMMAND] [ARGS]...
 
 * `--name`: Override `name` in the spec.
 * `--model`: Model entity reference ('name' or 'workspace/name').
-* `--dataset`: Dataset fileset reference. DPO: preference JSONL (training.jsonl + validation.jsonl). GRPO: Gym JSONL (training.jsonl required).
+* `--dataset`: Dataset fileset reference. DPO: preference JSONL; GRPO: Gym JSONL. Holds a training file and, optionally, a validation file, named like train*.jsonl and val*.jsonl or dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or training/) and val/ (or validation/, dev/). Without a validation file, 10% of the training rows are held out, except in a sandboxed GRPO run, which skips validation.
 * `--environment`: Environment fileset reference (required when training.type is grpo).
 * `--integrations.wandb.project`: W&B project name (groups related runs). Defaults to output.name if not set.
 * `--integrations.wandb.name`: W&B run name. Defaults to job_id if not provided.
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.
@@ -10253,10 +10255,9 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--model.load-in-4bit`: bitsandbytes 4-bit. Mutex with load_in_8bit. Default for Unsloth's headline path.
 * `--model.load-in-8bit`: Override `model.load_in_8bit` in the spec.
 * `--model.trust-remote-code`: Override `model.trust_remote_code` in the spec.
-* `--dataset.path`: Training fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Resolved to a local path by the plugin run.
+* `--dataset.path`: Dataset fileset reference: 'name' (uses the job's workspace) or 'workspace/name'. Holds the training files and, optionally, the validation files, told apart by name (train.jsonl, validation.jsonl). Without validation files, schedule.validation_split of the training rows is held out for validation.
 * `--dataset.text-field`: Row field consumed by SFTTrainer.
 * `--dataset.apply-chat-template`: If True, expects rows with a 'messages' field and applies tokenizer.apply_chat_template at training time.
-* `--dataset.validation-path`: Optional validation fileset reference (same format as 'path'). Downloaded under the same scheme.
 * `--dataset.packing`: trl. SFTTrainer packing flag.
 * `--training.lora.rank <INTEGER>`: LoRA rank.
 * `--training.lora.alpha <INTEGER>`: LoRA scaling factor (alpha).
@@ -10273,6 +10274,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--schedule.logging-steps <INTEGER>`: Override `schedule.logging_steps` in the spec.
 * `--schedule.save-steps <INTEGER>`: Override `schedule.save_steps` in the spec.
 * `--schedule.eval-steps <INTEGER>`: Override `schedule.eval_steps` in the spec.
+* `--schedule.validation-split <FLOAT>`: Validation split to use when the dataset has no validation files.
 * `--schedule.progress-reporting.min-report-interval-seconds <FLOAT>`: Least number of seconds between progress reports reaching the Jobs service. Every metric the training library logs is still recorded at full resolution -- this only buffers them in memory and decides how often the accumulated set is sent, which is what the reporting actually costs. 0 sends a report for every step the library logs. Raising it reduces the time training spends blocked on reporting, at the cost of a progress bar and charts that update less often.
 * `--schedule.seed <INTEGER>`: Override `schedule.seed` in the spec.
 * `--batch.per-device-train-batch-size <INTEGER>`: Override `batch.per_device_train_batch_size` in the spec.
@@ -10291,7 +10293,7 @@ nemo customization unsloth.jobs [OPTIONS] [COMMAND] [ARGS]...
 * `--integrations.wandb.entity`: W&B entity (team or username).
 * `--integrations.wandb.notes`: W&B notes/description for the run.
 * `--integrations.wandb.base-url`: Base URL for self-hosted W&B server (e.g., 'https://wandb.mycompany.com'). If not provided, uses the default W&B cloud service.
-* `--integrations.wandb.api-key-secret.root`: Reference to a secret. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
+* `--integrations.wandb.api-key-secret`: Reference to a secret containing the WANDB_API_KEY. Format: 'secret_name' (uses request workspace) or 'workspace/secret_name' (explicit workspace).
 * `--integrations.mlflow.experiment-name`: MLflow experiment name (groups related runs). Defaults to output.name if not set.
 * `--integrations.mlflow.name`: MLflow run name. Defaults to job_id if not provided.
 * `--integrations.mlflow.description`: MLflow run description.

@@ -115,6 +115,18 @@ def test_services_are_placed_by_role_after_egress() -> None:
     assert worker["resources"] == {"limits": {"cpu": "1"}}
 
 
+def test_a_spec_that_only_changes_main_sets_its_working_dir_and_adds_no_containers() -> None:
+    pod_spec = stock_pod_spec()
+    add_services(
+        pod_spec, parse_compose_services({"main": {"command": ["/app/run.sh"], "working_dir": "/app"}}), "Always"
+    )
+
+    sandbox = pod_spec["containers"][0]
+    assert sandbox["workingDir"] == "/app"
+    assert [container["name"] for container in pod_spec["containers"]] == ["sandbox"]
+    assert pod_spec["hostAliases"] == [{"ip": "127.0.0.1", "hostnames": ["main"]}]
+
+
 def test_pod_gets_volumes_host_aliases_and_main_options() -> None:
     pod_spec = stock_pod_spec()
 

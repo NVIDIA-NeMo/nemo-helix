@@ -524,12 +524,12 @@ class TestStudioConfigEnvReplacements:
         monkeypatch.setattr(
             common_config.Configuration,
             "get_global_settings_from_env",
-            lambda: {"auth": {"oidc": {"public_client": {"bearer_token_source": "id_token"}}}},
+            lambda: {"auth": {"oidc": {"public_client": {"bearer_token_source": "access_token"}}}},
         )
 
         replacements = StudioConfig().env_replacements
 
-        assert replacements["STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE"] == "id_token"
+        assert replacements["STUDIO_UI_VITE_AUTH_BEARER_TOKEN_SOURCE"] == "access_token"
 
     def test_env_replacements_empty_global_setting_falls_back_to_config_field(self, monkeypatch: pytest.MonkeyPatch):
         """Empty global settings do not block an explicit StudioConfig field override."""

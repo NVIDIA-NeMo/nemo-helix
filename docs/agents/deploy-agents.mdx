@@ -28,6 +28,12 @@ Select a runtime with `nemo agents deploy --mode`:
 Every mode except `subprocess` runs through the deployments plugin. For when the platform itself
 needs Docker, see [Local Docker and Executors](/documentation/get-started/local-docker-and-executors).
 
+On the `kubernetes` platform runtime, which includes Helm installs, subprocess deployments are off
+unless `agents.subprocess_enabled: true` is set, so deploy with `--mode k8s` there. Without
+`--mode`, `nemo agents deploy` uses `subprocess` when the platform allows it, and otherwise the
+first enabled mode that needs no image. The Python SDK always defaults to `subprocess`, so pass
+`deployment_mode` on Helm installs.
+
 `--mode openshell` uses `agents.deployments.openshell_executor` with either gateway compute driver.
 
 ### Subprocess
@@ -136,9 +142,10 @@ docker network inspect bridge --format '{{ (index .IPAM.Config 0).Gateway }}'
 ### Kubernetes
 
 Helm installs define a `local-k8s` executor in the release namespace and make it the default, so
-`--mode k8s` works there without extra configuration. Elsewhere, add a `k8s` executor and point the
-Agents plugin at it. A `deployments.executors` list replaces the default list, so keep the executors
-you already use:
+`--mode k8s` works there without extra configuration. It is the mode to use on Helm, where
+subprocess deployments are off unless `agents.subprocess_enabled: true` is set. Elsewhere, add a
+`k8s` executor and point the Agents plugin at it. A `deployments.executors` list replaces the
+default list, so keep the executors you already use:
 
 ```yaml
 agents:

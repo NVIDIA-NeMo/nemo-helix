@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nhx_sandbox.harbor_opensandbox_services import ComposeServices, parse_compose_services
+from nhx_sandbox.harbor_opensandbox_services import ComposeServices, keep_alive_entrypoint, parse_compose_services
 from pydantic import ValidationError
 
 
@@ -141,6 +141,26 @@ def test_rejects_a_non_mapping() -> None:
         parse_compose_services(["db"])
 
 
+def test_an_image_without_an_entrypoint_keeps_opensandbox_s_default() -> None:
+    assert keep_alive_entrypoint(None) is None
+    assert keep_alive_entrypoint([]) is None
+
+
+def test_main_falls_back_to_its_image_s_own_entrypoint() -> None:
+    image_entrypoint = ["/bin/bash", "-l", "-c"]
+    assert parse_compose_services(_spec()).sandbox_entrypoint(image_entrypoint) == [
+        "/bin/bash",
+        "-l",
+        "-c",
+        "sh",
+        "-c",
+        "sleep infinity",
+    ]
+    # An entrypoint the compose file sets wins, as Compose's `entrypoint` replaces the image's.
+    with_own = parse_compose_services(_spec(main={"entrypoint": ["/start.sh"]}))
+    assert with_own.sandbox_entrypoint(image_entrypoint) == ["/start.sh", "sh", "-c", "sleep infinity"]
+
+
 def test_sandbox_entrypoint_keeps_main_alive() -> None:
     assert parse_compose_services(_spec()).sandbox_entrypoint() is None
     assert parse_compose_services(_spec(main={"entrypoint": ["/start.sh"]})).sandbox_entrypoint() == [
@@ -149,3 +169,26 @@ def test_sandbox_entrypoint_keeps_main_alive() -> None:
         "-c",
         "sleep infinity",
     ]
+
+
+def test_main_s_command_follows_its_entrypoint_in_place_of_the_keep_alive() -> None:
+    assert keep_alive_entrypoint(["/bin/bash", "-l", "-c"], ["/app/tests/run.sh"]) == [
+        "/bin/bash",
+        "-l",
+        "-c",
+        "/app/tests/run.sh",
+    ]
+    # Without an entrypoint the command runs on its own, as Docker runs it.
+    assert keep_alive_entrypoint(None, ["/app/run.sh"]) == ["/app/run.sh"]
+
+
+def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() -> None:
+    only_main = parse_compose_services({"main": {"command": ["/app/run.sh"], "working_dir": "/app"}})
+    assert only_main.services == [] and only_main.uses_main_settings()
+    assert only_main.sandbox_entrypoint(["/bin/bash", "-l", "-c"]) == ["/bin/bash", "-l", "-c", "/app/run.sh"]
+    assert not parse_compose_services(_spec()).uses_main_settings()
+
+
+def test_main_s_working_dir_must_be_absolute() -> None:
+    with pytest.raises(ValidationError):
+        parse_compose_services(_spec(main={"working_dir": "app"}))

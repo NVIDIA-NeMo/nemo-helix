@@ -15,6 +15,11 @@ def is_default_ngc_api_key(config: HelixConfig, workspace: str, name: str) -> bo
     return workspace == ngc_api_key_secret[0] and name == ngc_api_key_secret[1]
 
 
+def is_default_ngc_api_key_configured(config: HelixConfig) -> bool:
+    """Check if the environment variable backing the default NGC API key secret is set and non-empty."""
+    return bool(os.environ.get(config.ngc_api_key_env_var))
+
+
 def get_default_ngc_api_key(config: HelixConfig) -> HelixSecret:
     """Create the default NGC API key secret."""
     ngc_api_key = os.environ.get(config.ngc_api_key_env_var)

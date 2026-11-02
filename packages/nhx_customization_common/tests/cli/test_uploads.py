@@ -80,12 +80,10 @@ class _FakeModels:
 AUTOMODEL_REFS = SpecRefs(
     model=("model",),
     dataset=("dataset", "training"),
-    dataset_validation=("dataset", "validation"),
 )
 UNSLOTH_REFS = SpecRefs(
     model=("model", "name"),
     dataset=("dataset", "path"),
-    dataset_validation=("dataset", "validation_path"),
 )
 RL_REFS = SpecRefs(model=("model",), dataset=("dataset",), environment=("environment",))
 
@@ -347,23 +345,17 @@ class TestWriteRefs:
     """Each backend holds its references in a different place."""
 
     def test_automodel_paths(self) -> None:
-        """One uploaded fileset fills training and validation; the backend splits them."""
+        """The one dataset fileset holds training and validation files; the backend tells them apart."""
         spec: dict[str, Any] = {"model": "x", "dataset": {"training": "y"}}
         report = _Report(model_ref="default/m", dataset_ref="default/d")
         write_refs(spec, AUTOMODEL_REFS, report)
-        assert spec == {
-            "model": "default/m",
-            "dataset": {"training": "default/d", "validation": "default/d"},
-        }
+        assert spec == {"model": "default/m", "dataset": {"training": "default/d"}}
 
     def test_unsloth_paths(self) -> None:
         spec: dict[str, Any] = {"model": {"name": "x"}, "dataset": {"path": "y"}}
         report = _Report(model_ref="default/m", dataset_ref="default/d")
         write_refs(spec, UNSLOTH_REFS, report)
-        assert spec == {
-            "model": {"name": "default/m"},
-            "dataset": {"path": "default/d", "validation_path": "default/d"},
-        }
+        assert spec == {"model": {"name": "default/m"}, "dataset": {"path": "default/d"}}
 
     def test_rl_has_no_separate_validation_ref(self) -> None:
         spec: dict[str, Any] = {"model": "x", "dataset": "y"}
@@ -383,7 +375,7 @@ class TestWriteRefs:
             (
                 AUTOMODEL_REFS,
                 {"dataset": "stale"},
-                {"dataset": {"training": "default/d", "validation": "default/d"}},
+                {"dataset": {"training": "default/d"}},
             ),
         ],
         ids=["unsloth-null-model", "automodel-string-dataset"],
@@ -485,7 +477,6 @@ class TestSiblingOptionsSurvive:
             "apply_chat_template": True,
             "text_field": "text",
             "path": "default/d",
-            "validation_path": "default/d",
         }
 
     def test_model_options_are_kept(self) -> None:
@@ -496,7 +487,7 @@ class TestSiblingOptionsSurvive:
     def test_a_missing_block_is_created(self) -> None:
         spec: dict[str, Any] = {}
         write_refs(spec, AUTOMODEL_REFS, _Report(dataset_ref="default/d"))
-        assert spec == {"dataset": {"training": "default/d", "validation": "default/d"}}
+        assert spec == {"dataset": {"training": "default/d"}}
 
 
 class TestConflicts:
@@ -506,12 +497,6 @@ class TestConflicts:
         spec: dict[str, Any] = {"model": "default/already-there"}
         conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=True, dataset=False, environment=False)
         assert conflicts == ["model (default/already-there)"]
-
-    def test_the_validation_ref_counts_as_a_dataset_conflict(self) -> None:
-        """The reported bug: only training was replaced, leaving validation stale."""
-        spec: dict[str, Any] = {"dataset": {"validation": "default/old"}}
-        conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=False, dataset=True, environment=False)
-        assert conflicts == ["dataset.validation (default/old)"]
 
     def test_a_field_with_no_matching_flag_is_not_a_conflict(self) -> None:
         spec: dict[str, Any] = {"model": "default/keep"}
@@ -527,10 +512,10 @@ class TestConflicts:
     def test_every_conflicting_field_is_reported_at_once(self) -> None:
         spec: dict[str, Any] = {
             "model": "default/m",
-            "dataset": {"training": "default/t", "validation": "default/v"},
+            "dataset": {"training": "default/t"},
         }
         conflicts = find_conflicts(spec, AUTOMODEL_REFS, model=True, dataset=True, environment=False)
-        assert len(conflicts) == 3
+        assert len(conflicts) == 2
 
     def test_rl_environment_conflict(self) -> None:
         spec: dict[str, Any] = {"environment": "default/env"}

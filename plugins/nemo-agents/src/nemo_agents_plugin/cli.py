@@ -58,6 +58,7 @@ import click
 import httpx
 import typer
 import yaml
+from nemo_agents_plugin.agent_config import AgentRegistration
 from nemo_agents_plugin.deployment_routing import is_deployment_routable
 from nemo_agents_plugin.entities import (
     AGENT_SPEC_FILENAME,
@@ -89,10 +90,10 @@ from nemo_helix_plugin.agents.types import (
     CreateEnvironmentRequest,
     CreateEnvironmentSpecRequest,
     CreateSessionRequest,
+    DeploymentModeList,
     Labels,
     ListAgentsQueryParams,
     ListSessionsQueryParams,
-    ReferenceConfig,
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.cli import NemoCLI
@@ -1087,7 +1088,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """Register an agent on the platform."""
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         base_url = _resolve_base_url()
-        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=name)
+        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=name)
         labels = _parse_labels(label)
         resp = _register_agent_from_validated_config(
             name=name,
@@ -1095,7 +1096,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
             labels=labels,
             config_dict=config_dict,
             config_format=config_format,
-            reference=reference,
+            registration=registration,
             agent_config=agent_config,
             workspace=workspace,
             base_url=base_url,
@@ -1170,10 +1171,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         typer_ctx: typer.Context,
         agent: str = typer.Option(..., "--agent", "-a", help="Name of the agent to deploy."),
         name: Optional[str] = typer.Option(None, "--name", "-n", help="Deployment name (auto-generated if omitted)."),
-        mode: str = typer.Option(
-            "subprocess",
+        mode: Optional[str] = typer.Option(
+            None,
             "--mode",
-            help="Runtime backend: subprocess (default), docker, k8s, or openshell.",
+            help=(
+                "Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the "
+                "platform allows it, otherwise to the first enabled mode that needs no --image."
+            ),
         ),
         image: Optional[str] = typer.Option(
             None,
@@ -1237,13 +1241,13 @@ def _register_platform_commands(app: typer.Typer) -> None:
         """
         workspace = resolve_cli_workspace(typer_ctx, workspace)
         valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
-        if mode not in valid_modes:
+        if mode is not None and mode not in valid_modes:
             typer.echo(f"Invalid --mode {mode!r}; expected {', '.join(valid_modes)}.", err=True)
             raise typer.Exit(code=2)
-        if image and mode == "subprocess":
+        if image and mode in (None, "subprocess"):
             typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
             raise typer.Exit(code=2)
-        if use_image_entrypoint and not supports_image_entrypoint(mode):
+        if use_image_entrypoint and (mode is None or not supports_image_entrypoint(mode)):
             typer.echo(_USE_IMAGE_ENTRYPOINT_MODE_ERROR, err=True)
             raise typer.Exit(code=2)
 
@@ -1251,6 +1255,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
         if environment is not None and not environment.strip():
             typer.echo("--environment must not be empty.", err=True)
             raise typer.Exit(code=2)
+        client = _agents_client(base_url, workspace)
+        if mode is None:
+            mode = _default_deployment_mode(_list_deployment_modes(client, workspace))
         payload: dict[str, Any] = {"agent": agent, "deployment_mode": mode}
         if name:
             payload["name"] = name
@@ -1260,7 +1267,6 @@ def _register_platform_commands(app: typer.Typer) -> None:
             payload["use_image_entrypoint"] = True
         if environment is not None:
             payload["environment"] = environment
-        client = _agents_client(base_url, workspace)
         resp = _run_sdk(
             "POST agent API",
             lambda: _json_from_response(
@@ -1383,8 +1389,9 @@ def _register_platform_commands(app: typer.Typer) -> None:
 
         # 1. Fail-fast: validate the new config client-side, before any teardown.
         #    A bad config aborts here with zero side effects.
-        config_dict, config_format, reference = _validate_agent_config_for_register(agent_config, name=agent)
+        config_dict, config_format, registration = _validate_agent_config_for_register(agent_config, name=agent)
 
+        reference = registration.reference
         if reference is not None and reference.fileset is not None:
             ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
             files_client = shared_cli_client(FilesClient)
@@ -1444,7 +1451,10 @@ def _register_platform_commands(app: typer.Typer) -> None:
                     return only
             return default
 
-        resolved_mode = _detect("deployment_mode", mode, default="subprocess")
+        available_modes = _list_deployment_modes(client, workspace)
+        resolved_mode = _detect("deployment_mode", mode, default=None)
+        if resolved_mode is None:
+            resolved_mode = _default_deployment_mode(available_modes)
         resolved_image = _detect("image", image, default=None)
         resolved_use_entrypoint = bool(_detect("use_image_entrypoint", use_image_entrypoint, default=False))
         resolved_environment = _detect("environment", environment, default=None)
@@ -1452,6 +1462,21 @@ def _register_platform_commands(app: typer.Typer) -> None:
         valid_modes: tuple[str, ...] = ("subprocess", *sorted(CONTAINER_DEPLOYMENT_MODES))
         if resolved_mode not in valid_modes:
             typer.echo(f"Invalid --mode {resolved_mode!r}; expected {', '.join(valid_modes)}.", err=True)
+            raise typer.Exit(code=2)
+        enabled_modes = [availability.mode for availability in available_modes.data if availability.enabled]
+        if resolved_mode not in enabled_modes:
+            typer.echo(
+                f"Error: deployment mode {resolved_mode!r} is disabled on this platform; "
+                f"pass --mode with one of: {', '.join(enabled_modes)}.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        resolved_availability = next(a for a in available_modes.data if a.mode == resolved_mode)
+        if resolved_availability.requires_image and not resolved_image:
+            typer.echo(
+                f"Error: deployment mode {resolved_mode!r} has no default image on this platform; pass --image.",
+                err=True,
+            )
             raise typer.Exit(code=2)
         if resolved_image and resolved_mode == "subprocess":
             typer.echo("--image requires --mode docker, k8s, or openshell.", err=True)
@@ -1504,7 +1529,7 @@ def _register_platform_commands(app: typer.Typer) -> None:
                 labels=labels,
                 config_dict=config_dict,
                 config_format=config_format,
-                reference=reference,
+                registration=registration,
                 agent_config=agent_config,
                 workspace=workspace,
                 base_url=base_url,
@@ -2439,7 +2464,7 @@ def _local_fabric_invoke(config: dict[str, Any], inputs: list[Any], *, base_dir:
     from nemo_agents_plugin.fabric.translator import FabricTranslationError
 
     try:
-        agent_config = AgentConfig.model_validate({key: value for key, value in config.items() if key != "reference"})
+        agent_config = AgentConfig.model_validate(config)
         results = asyncio.run(invoke_agent_config_once(agent_config, inputs, base_dir=base_dir))
     except (FabricRuntimeExecutionError, FabricTranslationError, ValidationError) as error:
         typer.echo(f"Error: Fabric invocation failed: {error}", err=True)
@@ -2924,6 +2949,21 @@ def _agents_client(_base_url: str, _workspace: str) -> AgentsClient:
     return shared_cli_client(AgentsClient)
 
 
+def _list_deployment_modes(client: AgentsClient, workspace: str) -> DeploymentModeList:
+    return _run_sdk("GET agent API", lambda: client.list_deployment_modes(workspace=workspace).data())
+
+
+def _default_deployment_mode(modes: DeploymentModeList) -> str:
+    mode = modes.default_mode()
+    if mode is None:
+        typer.echo(
+            "No deployment mode on this platform can run without an image. Pass --mode with --image.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    return mode
+
+
 def _json_from_response(response: NemoResponse[Any]) -> Any:
     response.data()
     return _json_from_http_response(response.http_response)
@@ -3127,10 +3167,10 @@ def _redeploy_recovery_hint(
 
 def _validate_agent_config_for_register(
     agent_config: Path | None, *, name: str
-) -> tuple[dict[str, Any], str, ReferenceConfig | None]:
+) -> tuple[dict[str, Any], str, AgentRegistration]:
     """Load and validate an agent config **client-side**, with zero network calls.
 
-    Returns the resolved ``(config_dict, config_format, reference)`` ready to POST, or raises
+    Returns the resolved ``(config_dict, config_format, registration)`` ready to POST, or raises
     ``typer.Exit`` on any problem. This is the exact validation the ``register``
     command runs before it touches the API; ``redeploy`` reuses it as a
     fail-fast gate so a bad config aborts before any destructive teardown.
@@ -3138,14 +3178,19 @@ def _validate_agent_config_for_register(
     from nemo_agents_plugin.utils import inject_default_model
 
     if agent_config is None:
-        return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, None
+        return {}, NEMO_AGENTS_SPEC_CONFIG_FORMAT, AgentRegistration()
 
     config_dict = _load_yaml(agent_config)
     if not isinstance(config_dict, dict):
         typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
         raise typer.Exit(code=1)
-    reference = config_dict.pop("reference", None)
-    payload: dict[str, Any] = {"name": name, "config": config_dict, "reference": reference}
+    # The registration block becomes the agent's own fields, never part of its stored config.
+    try:
+        registration = AgentRegistration.model_validate(config_dict.pop("helix_registration", None) or {})
+    except ValidationError as error:
+        typer.echo(f"Error: invalid registration in agent config {agent_config}: {error}", err=True)
+        raise typer.Exit(code=1) from error
+    payload: dict[str, Any] = {"name": name, "config": config_dict, **_registration_fields(registration)}
     if config_dict.keys() <= {"name", "description", "config_format"}:
         payload["config"] = {}
         if "config_format" in config_dict:
@@ -3160,7 +3205,7 @@ def _validate_agent_config_for_register(
         typer.echo(f"Error: unsupported config_format {config_format!r}", err=True)
         raise typer.Exit(code=1)
     if not config_dict:
-        return config_dict, config_format, request.reference
+        return config_dict, config_format, registration
     # Resolve ${NEMO_DEFAULT_MODEL} client-side — the agents service has
     # no user context at deploy time.
     config_dict = inject_default_model(config_dict)
@@ -3176,7 +3221,12 @@ def _validate_agent_config_for_register(
         config_dict = _validate_platform_agent_config_for_cli(config_dict, base_dir=agent_config.parent)
         for line in _spec_package_warning(name, agent_config):
             typer.echo(line, err=True)
-    return config_dict, config_format, request.reference
+    return config_dict, config_format, registration
+
+
+def _registration_fields(registration: AgentRegistration) -> dict[str, Any]:
+    """Return the request fields agent.yaml set, leaving the rest to the API's defaults."""
+    return registration.model_dump(mode="json", exclude_none=True)
 
 
 def _parse_labels(values: list[str]) -> dict[str, str]:
@@ -3202,7 +3252,7 @@ def _register_agent_from_validated_config(
     labels: dict[str, str],
     config_dict: dict[str, Any],
     config_format: str,
-    reference: ReferenceConfig | None,
+    registration: AgentRegistration,
     agent_config: Path | None,
     workspace: str,
     base_url: str,
@@ -3216,8 +3266,7 @@ def _register_agent_from_validated_config(
     payload: dict[str, Any] = {"name": name}
     if description:
         payload["description"] = description
-    if reference is not None:
-        payload["reference"] = reference
+    payload.update(_registration_fields(registration))
     if labels:
         payload["labels"] = labels
     if agent_config is not None:

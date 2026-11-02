@@ -45,6 +45,7 @@ export { FormModal } from '@nemo/common/src/components/FormModal';
 export type { FormModalProps } from '@nemo/common/src/components/FormModal';
 export { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 export { LogViewer } from '@nemo/common/src/components/LogViewer';
+export type { LogStatus } from '@nemo/common/src/utils/logs';
 export { RadioCard } from '@nemo/common/src/components/RadioCard';
 export type { RadioCardProps } from '@nemo/common/src/components/RadioCard';
 export { RelativeTime, useRelativeTimeSince } from '@nemo/common/src/components/RelativeTime';

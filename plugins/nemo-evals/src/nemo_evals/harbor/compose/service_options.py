@@ -501,10 +501,32 @@ def parse_platform(value: Any, path: str, problems: ComposeProblems) -> str | No
     return value or None
 
 
+def parse_working_dir(value: Any, path: str, problems: ComposeProblems) -> str | None:
+    """Read ``working_dir`` as an absolute path in the container; None when it sets none.
+
+    A relative one would be resolved against the image's ``WORKDIR``, which isn't known here, so it's unsupported.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        problems.invalid(path, "expected a path")
+        return None
+    if not value.startswith("/"):
+        problems.unsupported(f"{path}: a relative working directory")
+        return None
+    return value
+
+
 def parse_capabilities(
-    raw_service: Mapping[str, Any], path: str, problems: ComposeProblems
+    raw_service: Mapping[str, Any], path: str, problems: ComposeProblems, notices: list[str]
 ) -> list[Literal["SYS_PTRACE"]]:
-    """Read the capabilities ``main`` adds with ``cap_add``; only ``SYS_PTRACE`` is supported."""
+    """Read the capabilities ``main`` adds with ``cap_add``: only ``SYS_PTRACE`` is granted.
+
+    ``NET_ADMIN`` is accepted but not granted, with a line in ``notices`` saying so. Granting it would let the agent
+    rewrite the pod's network rules and get around the egress policy, and leaving it out only takes a permission
+    away. Tasks ask for it to firewall themselves, as CyberGym's do, and run without it; the sandbox's egress policy
+    already limits where they can connect. Any other capability is unsupported.
+    """
     capabilities = raw_service.get("cap_add")
     if capabilities is None:
         return []
@@ -512,9 +534,12 @@ def parse_capabilities(
         problems.invalid(f"{path}.cap_add", "expected a list")
         return []
 
-    # SYS_PTRACE only lets `main` debug its own processes. Anything broader, such as NET_ADMIN, could let the agent
-    # rewrite the pod's network rules and get around the egress policy.
     for capability in capabilities:
-        if capability != "SYS_PTRACE":
+        if capability == "NET_ADMIN":
+            notices.append(
+                f"{path}.cap_add: NET_ADMIN isn't granted; the sandbox's egress policy controls outbound traffic "
+                "instead"
+            )
+        elif capability != "SYS_PTRACE":
             problems.unsupported(f"{path}.cap_add: {capability}")
     return ["SYS_PTRACE"] if "SYS_PTRACE" in capabilities else []

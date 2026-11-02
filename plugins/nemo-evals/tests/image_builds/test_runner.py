@@ -13,7 +13,7 @@ from unittest.mock import Mock
 
 import httpx
 import pytest
-from nemo_builder_plugin.entities import ContainerImage, Provenance
+from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
@@ -36,6 +36,10 @@ Outcome = Literal["ready", "failed"]
 _SEPARATE_VERIFIER = {"verifier": {"environment_mode": "separate"}}
 
 
+# How every ready image starts, as Builder records it from the image's config.
+RUNTIME_CONFIG = ImageRuntimeConfig(entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app")
+
+
 def _container_image(
     name: str, status: Literal["pending", "ready", "failed"] = "pending", *, detail: str | None = None
 ) -> ContainerImage:
@@ -47,6 +51,7 @@ def _container_image(
         registry="registry.test",
         repository=f"default/{name}",
         digest="sha256:" + "c" * 64 if status == "ready" else None,
+        runtime_config=RUNTIME_CONFIG if status == "ready" else None,
         provenance=Provenance(
             build_set=name.rsplit("-", 1)[0],
             revision=int(name.rsplit("-", 1)[1]),
@@ -190,6 +195,8 @@ async def test_main_and_verifier_built_makes_the_build_ready(entity_store, store
     assert build.error is None
     assert [(image.type, image.status) for image in build.images] == [("main", "ready"), ("verifier", "ready")]
     assert all(image.image_ref and image.builder_image and image.build_job for image in build.images)
+    # How each image starts comes with it, so the task Job can restore its ENTRYPOINT.
+    assert all(image.runtime_config == RUNTIME_CONFIG for image in build.images)
     assert await _stored_build(entity_store, spec) == build
 
 

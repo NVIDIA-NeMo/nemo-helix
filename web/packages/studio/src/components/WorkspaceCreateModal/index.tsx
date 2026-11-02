@@ -13,6 +13,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import {
   getEntitiesListWorkspacesQueryKey,
@@ -21,17 +22,31 @@ import {
 import type { Workspace } from '@nemo/sdk/generated/platform/schema';
 import { FormField, Stack, TextArea, TextInput } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
-import { workspaceCreateSchema } from '@studio/constants/zod';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { AxiosError } from 'axios';
 import { FC } from 'react';
-import { SubmitHandler, useForm } from 'react-hook-form';
+import { SubmitHandler, useController, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
+import { z } from 'zod';
 
-interface FormFields {
-  name: string;
-  description?: string;
-}
+const workspaceFormSchema = z.object({
+  name: z
+    .string()
+    .superRefine((value, ctx) => {
+      if (sanitizeEntityName(value) === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: value
+            ? 'Name must start with a letter and be at least 2 characters.'
+            : 'Name is required.',
+        });
+      }
+    })
+    .transform((value) => toValidEntityName(value, value)),
+  description: z.string().optional(),
+});
+
+type FormFields = z.infer<typeof workspaceFormSchema>;
 
 export type WorkspaceCreateModalProps = Pick<FormModalProps, 'open' | 'onClose'> & {
   onCreate?: (workspace: Workspace) => void;
@@ -46,13 +61,21 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
     reset,
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
-    setValue,
+    formState: { errors, isSubmitted, isSubmitting, touchedFields },
     setError,
+    control,
   } = useForm<FormFields>({
-    resolver: zodResolver(workspaceCreateSchema),
-    mode: 'onChange',
+    resolver: zodResolver(workspaceFormSchema),
+    mode: 'onTouched',
+    defaultValues: { name: '', description: '' },
   });
+
+  const {
+    field: { value: nameValue, onChange: onNameChange, onBlur: onNameBlur },
+  } = useController({ control, name: 'name' });
+
+  const preview = toValidEntityName(nameValue, '');
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   const formDisabled = isSubmitting;
 
@@ -128,19 +151,23 @@ export const WorkspaceCreateModal: FC<WorkspaceCreateModalProps> = ({
       <Stack gap="density-2xl">
         <FormField
           slotLabel="Name"
-          slotError={errors.name?.message}
-          status={errors.name && 'error'}
+          slotError={nameError}
+          slotHelp={
+            nameError ? undefined : preview ? (
+              <>
+                Your workspace will be created as <span className="text-primary">{preview}</span>
+              </>
+            ) : undefined
+          }
+          status={nameError ? 'error' : undefined}
         >
           <TextInput
             autoFocus
             disabled={formDisabled}
-            status={errors.name && 'error'}
-            {...register('name')}
-            onChange={(e) =>
-              setValue('name', (e.target as HTMLInputElement).value.replace(/[\s-]+/g, '-'), {
-                shouldValidate: true,
-              })
-            }
+            status={nameError ? 'error' : undefined}
+            value={nameValue}
+            onChange={(e) => onNameChange((e.target as HTMLInputElement).value)}
+            onBlur={onNameBlur}
           />
         </FormField>
 

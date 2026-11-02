@@ -22,6 +22,7 @@ from nhx.core.entities.app.repository.account_identity import (
     AccountIdentityUnavailableError,
 )
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
+from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
 from nhx.core.entities.app.repository.sqlalchemy.entity import SQLAlchemyEntityRepository
 from nhx.core.entities.app.repository.sqlalchemy.workspace import SQLAlchemyWorkspaceRepository
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
@@ -107,9 +108,12 @@ def dep_workspace_repository(session_maker: async_sessionmaker[AsyncSession]) ->
     return SQLAlchemyWorkspaceRepository(session_maker)
 
 
-def dep_entity_repository(session_maker: async_sessionmaker[AsyncSession]) -> EntityRepositoryInterface:
+def dep_entity_repository(
+    session_maker: async_sessionmaker[AsyncSession],
+    field_policy: EntityFieldPolicy = NO_OP_ENTITY_FIELD_POLICY,
+) -> EntityRepositoryInterface:
     """Dependency function for Entity repository."""
-    return SQLAlchemyEntityRepository(session_maker)
+    return SQLAlchemyEntityRepository(session_maker, field_policy)
 
 
 __all__ = [

@@ -6,6 +6,7 @@ import type {
   ThreadPrimitive,
   ToolCallMessagePartComponent,
 } from '@assistant-ui/react';
+import type { DescribeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import type { MessageContentProps } from '@nemo/common/src/components/Chat/MessageContent';
 import type { PromptData } from '@nemo/sdk/generated/platform/schema';
 import type { ChatCompletionTool } from 'openai/resources/index.mjs';
@@ -86,6 +87,12 @@ export interface AssistantChatProps {
   className?: string;
   initialMessages?: readonly ThreadMessageLike[];
   onError?: (error: Error) => void;
+  /**
+   * Explains a failed reply. Called with the raw error message; a returned title and hint become
+   * the message body, while the raw error stays in the error banner and is what "Copy error"
+   * copies. Omit it (or return `undefined`) to show the generic line above the raw error.
+   */
+  describeError?: DescribeChatError;
   /**
    * Called once per assistant message after the stream completes (or after
    * the non-stream completion lands). Surfaces per-message timing so callers

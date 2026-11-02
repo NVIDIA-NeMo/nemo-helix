@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -107,6 +108,7 @@ from nhx_evals_sdk.agent_eval.trials import (
     AgentEvalTrial,
     AgentEvalTrialStatus,
     AgentOutput,
+    RunnerInfo,
     TrialError,
     TrialMeasurements,
 )
@@ -114,7 +116,15 @@ from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
-from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nhx_evals_sdk.values import (
+    Agent,
+    AgentBase,
+    GenericAgent,
+    Model,
+    RunConfigOnline,
+    RunConfigOnlineModel,
+    SecretRef,
+)
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
@@ -357,6 +367,82 @@ def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_
     [recorded] = fake.received_tasks[0].metrics
     assert isinstance(recorded, LLMJudgeMetric) and isinstance(recorded.model, Model)
     assert recorded.model.url == resolved
+
+
+_PUBLIC_GATEWAY_URL = "https://nhx.example.test/apis/inference-gateway/v2/workspaces/default/model/m/-/v1"
+_PUBLIC_AGENT_URL = "https://nhx.example.test/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+_PLATFORM_ENDPOINT_TARGETS = [
+    ModelTarget(model=Model(url=_PUBLIC_GATEWAY_URL, name="m"), params=RunConfigOnlineModel()),
+    AgentTarget(
+        agent=GenericAgent(url=_PUBLIC_AGENT_URL, name="triage", body={}, response_path="$.choices[0].message.content"),
+        params=RunConfigOnline(),
+    ),
+]
+
+
+class _ProvenanceEvaluator(_FakeEvaluator):
+    """Records the endpoint it called as the run's ``metadata.target``, as ``AgentEvaluator`` does."""
+
+    def run_sync(self, *, target: AgentEvalTarget | None = None, **kwargs: Any) -> AgentEvalResult:
+        result = super().run_sync(target=target, **kwargs)
+        assert isinstance(target, Model | AgentBase)
+        kind = "model" if isinstance(target, Model) else "agent"
+        result.metadata.target = RunnerInfo(name=target.name, kind=kind, config={"url": target.url})
+        return result
+
+
+def _submitted_url(target: Target) -> str:
+    assert isinstance(target, ModelTarget | AgentTarget)
+    return target.model.url if isinstance(target, ModelTarget) else target.agent.url
+
+
+def _run_metadata(ctx: JobContext) -> dict[str, Any]:
+    return json.loads((ctx.storage.persistent / AGENT_BUNDLE_DIR / "metadata.json").read_text())
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+@pytest.mark.usefixtures("job_identity")
+def test_a_key_less_platform_endpoint_is_called_through_the_job_proxy_and_recorded_as_submitted(
+    target: Target, failed: bool, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """With a job identity, the run calls the proxy; ``metadata.json`` still names the submitted URL."""
+    fake = _ProvenanceEvaluator(failed=failed)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    called = urlsplit(getattr(fake.received_target, "url", ""))
+    assert (called.hostname, called.path) == ("127.0.0.1", urlsplit(_submitted_url(target)).path)
+    recorded = _run_metadata(ctx)["target"]
+    assert recorded["config"]["url"] == _submitted_url(target)
+    assert "127.0.0.1" not in json.dumps(recorded)
+
+
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+def test_without_a_job_identity_a_platform_endpoint_is_called_as_submitted(
+    target: Target, tmp_path: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An auth-disabled platform has no identity to forward, so there is no proxy and nothing to restore."""
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    fake = _ProvenanceEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert getattr(fake.received_target, "url", None) == _submitted_url(target)
+    assert _run_metadata(ctx)["target"]["config"]["url"] == _submitted_url(target)
 
 
 def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
@@ -677,6 +763,37 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_resolve_target_routes_platform_fabric_model_through_job_auth_proxy(tmp_path: Path) -> None:
+    platform_url = "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    config = {
+        "metadata": {"name": "a"},
+        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": platform_url,
+                "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
+            }
+        },
+        "environment": {"env": {"NEMO_AGENTS_IGW_API_KEY": "not-used"}},
+    }
+    fabric_target = FabricRunnerTarget(source=FabricConfigSource(config=config))
+
+    target, _, _ = AgentEvalJob._resolve_target(
+        fabric_target,
+        _job_context(tmp_path),
+        fabric_gateway_origin="http://127.0.0.1:9019",
+    )
+
+    assert isinstance(target, FabricAgentRuntime)
+    assert target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert target._config["environment"]["env"]["NEMO_AGENTS_IGW_API_KEY"] == "not-used"
+    assert config["models"]["default"]["base_url"] == platform_url
 
 
 def test_resolve_target_builds_harbor_runtime_from_runner_target(
@@ -1408,6 +1525,7 @@ async def _compile_harbor(*, async_sdk: AsyncNemoClient, profile: str | None = N
         ),
     ],
 )
+@pytest.mark.parametrize("image_ref", [None, "registry.example/custom-tasks:metrics"])
 async def test_compile_produces_cpu_task_step_carrying_each_target(
     mocker: MockerFixture,
     target: Target,
@@ -1415,8 +1533,10 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     expected_endpoint_name: str | None,
     expected_image_name: str,
     expected_entrypoint: Sequence[str],
+    image_ref: str | None,
 ) -> None:
     _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evals.jobs.agent_compiler.get_qualified_image",
@@ -1434,7 +1554,11 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
     assert step.name == "agent-evaluate"
     _assert_agent_eval_step_entrypoint(
         job_spec,
-        expected_image=f"registry.example/{expected_image_name}:test",
+        expected_image=(
+            image_ref
+            if image_ref and expected_image_name == "nhx-tasks"
+            else f"registry.example/{expected_image_name}:test"
+        ),
         expected_entrypoint=expected_entrypoint,
     )
     config = cast(dict[str, Any], step.config)
@@ -1445,8 +1569,38 @@ async def test_compile_produces_cpu_task_step_carrying_each_target(
         assert endpoint["name"] == expected_endpoint_name
 
 
+@pytest.mark.parametrize("image_ref", [None, "registry.example/scorers@sha256:" + "a" * 64])
+async def test_compile_saved_trial_scoring_image(mocker: MockerFixture, image_ref: str | None) -> None:
+    _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
+    qualify = mocker.patch(
+        "nemo_evals.jobs.agent_compiler.get_qualified_image", return_value="registry.example/nhx-tasks:release"
+    )
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=None,
+        trials=[
+            AgentEvalTrial(
+                id="t-1", task_id="task-1", status=AgentEvalTrialStatus.COMPLETED, output=AgentOutput(output_text="4")
+            )
+        ],
+    )
+    compiled = await AgentEvalJob.compile(
+        workspace="default", spec=spec, entity_client=object(), job_name=None, async_sdk=_async_sdk()
+    )
+    _assert_agent_eval_step_entrypoint(
+        HelixJobSpec.model_validate(compiled),
+        expected_image=image_ref or "registry.example/nhx-tasks:release",
+    )
+    if image_ref:
+        qualify.assert_not_called()
+    else:
+        qualify.assert_called_once_with("nhx-tasks")
+
+
 async def test_compile_gym_target_honors_configured_image_override(mocker: MockerFixture) -> None:
     _patch_execution_profiles(mocker, [])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", "registry.example/standard:custom")
     image = "ghcr.io/nvidia-nemo/nemo-helix/nhx-gym-tasks:internal-test"
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", image)
     qualify = mocker.patch("nemo_evals.jobs.agent_compiler.get_qualified_image")
@@ -1508,8 +1662,12 @@ def _enable_fileset_sandbox(mocker: MockerFixture) -> None:
     )
 
 
-async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocker: MockerFixture) -> None:
+@pytest.mark.parametrize("image_ref", [None, "registry.example/eval-tasks:custom"])
+async def test_compile_gym_environment_adds_staging_step_before_evaluation(
+    mocker: MockerFixture, image_ref: str | None
+) -> None:
     _patch_execution_profiles(mocker, [_kubernetes_profile_with_job_storage()])
+    mocker.patch("nemo_evals.jobs.agent_compiler.config.container_image_ref", image_ref)
     mocker.patch("nemo_evals.jobs.agent_compiler.config.gym_tasks_image", None)
     mocker.patch(
         "nemo_evals.jobs.agent_compiler.get_qualified_image",
@@ -1535,7 +1693,7 @@ async def test_compile_gym_environment_adds_staging_step_before_evaluation(mocke
     assert stage_container.command == ["nemo_evals.tasks.stage_environment"]
     assert stage.config == {"environment": "dev/custom-gym"}
     evaluate_container = cast(Any, evaluate.executor).container
-    assert evaluate_container.image == "registry.example/nhx-tasks:test"
+    assert evaluate_container.image == (image_ref or "registry.example/nhx-tasks:test")
     assert evaluate_container.entrypoint == ["python", "-m"]
     assert evaluate_container.command == ["nemo_evals.tasks.agent_evaluate"]
     evaluate_config = cast(dict[str, Any], evaluate.config)
@@ -2267,6 +2425,76 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
         assert getattr(fake.received_target, "name", None) == target.model.name
     else:
         assert getattr(fake.received_target, "name", None) == target.agent.name
+
+
+def test_only_fabric_targets_expose_a_fabric_config() -> None:
+    fabric_config = {"harness": {"adapter_id": "nvidia.fabric.codex"}}
+    fabric = FabricRunnerTarget(source=FabricConfigSource(config=fabric_config))
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    others = [
+        ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+        AgentTarget(agent=_agent()),
+        HarborRunnerTarget(),
+    ]
+
+    assert fabric.fabric_config == fabric_config
+    assert [target.fabric_config for target in others] == [None, None, None]
+
+
+def test_non_fabric_job_starts_no_auth_proxy(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch("nemo_evals.jobs.agent_evaluate.platform_auth_proxy")
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+    )
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity()
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_not_called()
+
+
+def test_sync_fabric_job_uses_auth_proxy_for_platform_model(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.platform_auth_proxy",
+        return_value=nullcontext("http://127.0.0.1:9019"),
+    )
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "a"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+                "models": {
+                    "default": {
+                        "provider": "openai",
+                        "model": "test",
+                        "base_url": "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                    }
+                },
+            }
+        )
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_called_once_with()
+    assert isinstance(fake.received_target, FabricAgentRuntime)
+    assert fake.received_target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
 
 
 def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: MockerFixture) -> None:

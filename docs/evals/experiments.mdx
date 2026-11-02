@@ -508,6 +508,25 @@ runs to NeMo Experiments.
   **1,000 Evaluations** per Experiment. A request that would select more is rejected with `413` rather
   than returned partially sorted. Narrow it with filters.
 - Page size is capped at 1,000 records.
+- Evaluation jobs publish each trial's OTLP trace in requests of at most
+  `publication.intake.max_otlp_request_bytes`, envelope included. The default is 4 MiB (4194304),
+  under Intake's default 5 MiB OTLP body limit. A larger trace is split into several requests in
+  span order, and each span keeps its IDs, parent, and resource and scope metadata. Agent and
+  dataset evaluation jobs accept the same field, and `publish_to_intake(..., max_otlp_request_bytes=...)`
+  takes the same budget. Taskset runs use this default and do not accept the field on the run input.
+  Set a positive value within the request body limits of Intake and any proxy in front of it; this
+  setting does not change those limits.
+
+  ```yaml
+  publication:
+    intake:
+      evaluation_id: my-evaluation
+      max_otlp_request_bytes: 2097152  # 2 MiB
+  ```
+
+  A trial with a single span too large for the budget fails publication before any of its trace is
+  sent. A trial whose later request Intake rejects fails before its scores are sent. Publication is
+  not atomic, so earlier requests from that trial can remain stored; re-publishing replaces them.
 - Metric sorting and filtering require rollups. If ClickHouse is unavailable, a metric sort or filter
   returns `503` rather than a silently unsorted result. Sorting and filtering by entity columns
   (`name`, `created_at`) still works.

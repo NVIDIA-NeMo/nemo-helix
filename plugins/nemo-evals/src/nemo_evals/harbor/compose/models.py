@@ -212,6 +212,13 @@ class ComposeMainSettings(BaseModel):
             "or the sandbox's own containers can't listen on the same port in the shared pod network."
         ),
     )
+    command: list[str] | None = Field(
+        default=None,
+        description="Compose `command` on `main`, which runs after its entrypoint in place of Harbor's keep-alive.",
+    )
+    working_dir: str | None = Field(
+        default=None, description="Compose `working_dir` on `main`: where it starts, and where commands run by default."
+    )
     platform: str | None = Field(
         default=None, description="Compose `platform` on `main`, as written: the platform its image is built for."
     )
@@ -246,4 +253,11 @@ class ComposeTask(BaseModel):
     volumes: list[str] = Field(
         default_factory=list,
         description="The declared volumes something mounts, in file order. Each becomes an empty pod volume.",
+    )
+    notices: list[str] = Field(
+        default_factory=list,
+        description=(
+            "What the file asks for that the sandbox does differently, without refusing the task, such as a "
+            "capability it doesn't grant. Submit shows each one."
+        ),
     )

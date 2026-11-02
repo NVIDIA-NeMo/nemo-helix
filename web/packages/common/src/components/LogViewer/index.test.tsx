@@ -99,6 +99,21 @@ describe('LogViewer', () => {
     expect(screen.getByText(/30 of 1,200 lines/)).toBeInTheDocument();
   });
 
+  it.each([
+    ['live', 'Live'],
+    ['ended', 'Ended'],
+  ] as const)('badges a %s log as %s', (logStatus, label) => {
+    render(<LogViewer logs={[makeLog(0)]} logStatus={logStatus} />);
+
+    expect(screen.getByTestId('nv-badge')).toHaveTextContent(label);
+  });
+
+  it('shows no badge when the log status is unknown', () => {
+    render(<LogViewer logs={[makeLog(0)]} />);
+
+    expect(screen.queryByTestId('nv-badge')).not.toBeInTheDocument();
+  });
+
   it('renders the empty message when there are no logs and nothing is loading', () => {
     render(<LogViewer logs={[]} emptyMessage="No logs for this job." />);
 

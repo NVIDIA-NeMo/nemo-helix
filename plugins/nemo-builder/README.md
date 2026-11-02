@@ -358,6 +358,13 @@ credential for every workload.
 A successful submit returns `201` with the job's name and the `pending` rows. Poll the rows, not the
 job: images in a set finish independently.
 
+With `max_concurrent_builds` set (see [Configuration](#configuration)), the rows come back `queued` and
+the job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
+the build, once fewer than `max_concurrent_builds` builds run across the deployment, oldest submit first,
+and moves the rows to `pending`. If Jobs then
+refuses the job, the rows are failed with the reason in `status_detail` rather than the submit
+returning `403` or `409`.
+
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
@@ -382,11 +389,12 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
+| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
 | `image_ref` | `<registry>/<repository>@<digest>`, the reference to pin. Null until the row is `ready`. |
+| `runtime_config` | How the image starts by default: its `entrypoint`, `cmd` and `working_dir`, read from the image's config when the row becomes `ready`, including what it inherits from its base image. A runtime that replaces the container's entrypoint, such as OpenSandbox, uses it to start the image's own. Null for a row completed before the builder recorded it, or whose config couldn't be read. |
 | `provenance` | The build set, revision, spec and job that produced the image, and `request_digest`, the digest of the request. `spec` is null for the unnamed spec. |
 
 Names come from the request:
@@ -484,7 +492,7 @@ sequenceDiagram
         opt signing is on
             Push->>Registry: sign the digest, and store the signature beside the image
         end
-        Push->>API: POST /container-images/{name}/complete, with the digest
+        Push->>API: POST /container-images/{name}/complete, with the digest and how the image starts
         API-->>Push: the row, ready
     end
     Caller->>API: GET /container-images/{name}
@@ -517,8 +525,11 @@ sequenceDiagram
    not symlinks or FIFOs, under real directories. The registry checks each blob against its digest
    as crane uploads it. For each image whose row is still `pending`, it pushes the caller's tag and
    the system tag with crane, goes on only if crane reports pushing the digest the index names, signs
-   that digest unless signing is off, and asks the builder to complete the image.
-5. **Completing** writes the row `ready` at the digest the push step names, in one write.
+   that digest unless signing is off, and asks the builder to complete the image. It sends along the
+   image's `ENTRYPOINT`, `CMD` and `WORKDIR` from its config, after checking the config against its
+   digest; a config it can't read is sent as none rather than refusing the push.
+5. **Completing** writes the row `ready` at the digest the push step names, with how the image starts,
+   in one write.
 
 One failed Dockerfile, or one sandbox that can't run, doesn't stop the rest of the set: the other
 images still build, push and complete. The failed image's row stays `pending` (see
@@ -635,6 +646,9 @@ builder:
   import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
   # The platform for a spec that names none. Set it to the nodes' architecture; this is the default.
   default_platform: linux/amd64
+  # Most builds running at once, across workspaces; later submits queue. Null, the default, never queues.
+  # The chart sets it from builder.maxConcurrentBuilds (3).
+  max_concurrent_builds: 3
 ```
 
 `registry` has no default; while it is unset, submits fail with a `409` rather than as builds that

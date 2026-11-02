@@ -42,8 +42,8 @@ ttl_secs = 3600
 # mismatched supervisor exits at startup. The supervisor binary is extracted on
 # first start, cached to XDG_DATA_HOME, and reused on restart.
 default_image = "ghcr.io/nvidia/openshell-community/sandboxes/base:latest"
-sandbox_runtime_image = "ghcr.io/nvidia/openshell/sandbox:0.1.2"
-supervisor_image = "ghcr.io/nvidia/openshell/supervisor:0.1.2"
+sandbox_runtime_image = "ghcr.io/nvidia/openshell/sandbox:0.1.6"
+supervisor_image = "ghcr.io/nvidia/openshell/supervisor:0.1.6"
 image_pull_policy = "if_not_present"
 sandbox_label = "openshell"
 app_armor_profile = "Unconfined"

@@ -3,10 +3,12 @@
 
 import asyncio
 import logging
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, call, patch
 
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,7 +17,7 @@ from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.common import PaginatedResult, PaginationData
-from nhx.common.auth.access_keys import AccessKeyValidationError
+from nhx.common.auth.access_keys import ACCESS_KEY_TOKEN_MAX_BYTES, AccessKeyValidationError
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
@@ -199,6 +201,7 @@ class InMemoryAccessKeyRegistry:
             subject_principal=key.principal if key.principal != owner else None,
             entity_type=key.entity_type,
             scope=key.scope or [],
+            service_attributes=key.service_attributes,
             issued_at=key.created_at,
             expires_at=key.expires_at,
             status=self._status(jti, key),
@@ -1611,7 +1614,10 @@ def test_access_key_lifecycle_openapi_documents_error_responses(client):
     assert create_responses["400"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
-    assert create_responses["403"]["description"] == "Service-bound Scoped Access Keys require HelixAdmin"
+    assert create_responses["403"]["description"] == (
+        "Service-bound Scoped Access Keys require HelixAdmin, or service_attributes were set by a caller "
+        "that isn't a platform service"
+    )
     assert create_responses["403"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/AccessKeyErrorResponse"
     }
@@ -1760,6 +1766,7 @@ def test_list_access_keys_returns_current_principals_persisted_keys(client):
             "expires_at": created["expires_at"],
             "grace_period_expires_at": None,
             "last_used_at": None,
+            "service_attributes": {},
             "description": "CI intake automation",
             "status": "ACTIVE",
             "issuer": "http://testserver/apis/auth",
@@ -2141,3 +2148,218 @@ def test_rotate_and_new_key_emit_actor_aware_audit_logs(client, caplog):
     assert events["access_key.rotated"].actor_principal == "alice@example.com"
     assert events["access_key.rotated"].access_key_jti == jti
     assert events["access_key.rotated"].access_key_new_jti == new_jti
+
+
+# --- service attributes ------------------------------------------------------------------------
+
+_TRIAL = {"kind": "trial", "session": "run-1:hello__abc", "attempt": 0, "policy": {"model_access": "closed"}}
+
+
+@contextmanager
+def _acting_as(principal: Principal):
+    token = auth_client_context.set(
+        AuthClient(principal=principal, config=AuthConfig(enabled=True, access_keys=AccessKeyConfig(enabled=True)))
+    )
+    try:
+        yield
+    finally:
+        auth_client_context.reset(token)
+
+
+def _for_alice(service: str) -> Principal:
+    return Principal(
+        id=f"service:{service}",
+        on_behalf_of="alice@example.com",
+        on_behalf_of_email="alice@example.com",
+    )
+
+
+def _claims(token: str) -> dict:
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def test_a_service_acting_for_a_user_signs_attributes_into_the_users_key(client):
+    """The key still belongs to the user; the attributes are signed under the service that set them."""
+    with _acting_as(_for_alice("evals")):
+        response = client.post(
+            "/v2/access-keys", json={"name": "trial", "scope": ["inference"], "service_attributes": _TRIAL}
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["principal"] == "alice@example.com"
+    assert body["service_attributes"] == {"evals": _TRIAL}
+    assert _claims(body["token"])["nhx_service_attributes"] == {"evals": _TRIAL}
+
+
+def test_a_key_without_attributes_has_no_attribute_claim(client):
+    body = client.post("/v2/access-keys", json={"name": "plain"}).json()
+
+    assert body["service_attributes"] == {}
+    assert "nhx_service_attributes" not in _claims(body["token"])
+
+
+@pytest.mark.parametrize(
+    "principal",
+    [
+        pytest.param(Principal(id="alice@example.com", email="alice@example.com"), id="a user"),
+        pytest.param(Principal(id="alice@example.com", on_behalf_of="bob@example.com"), id="a user acting for another"),
+        pytest.param(Principal(id="service-account:ci-bot"), id="a service account"),
+    ],
+)
+def test_only_a_platform_service_may_set_attributes(client, principal):
+    """Otherwise any user could mint a key that claims facts a service never vouched for."""
+    with _acting_as(principal):
+        response = client.post("/v2/access-keys", json={"name": "forged", "service_attributes": _TRIAL})
+
+    assert response.status_code == 403
+    registry = client.app.dependency_overrides[get_access_key_registry]()
+    assert registry.keys == {}
+
+
+def test_a_service_can_only_write_under_its_own_name(client):
+    """Attributes always land under the acting service, so one service can't claim to speak for another."""
+    with _acting_as(_for_alice("intake")):
+        body = client.post("/v2/access-keys", json={"name": "k", "service_attributes": {"kind": "trial"}}).json()
+
+    assert body["service_attributes"] == {"intake": {"kind": "trial"}}
+
+
+def test_the_owner_lists_attributes_but_cannot_set_them(client):
+    with _acting_as(_for_alice("evals")):
+        created = client.post("/v2/access-keys", json={"name": "trial", "service_attributes": _TRIAL}).json()
+
+    listed = client.get("/v2/access-keys").json()["data"]
+
+    assert [key["service_attributes"] for key in listed if key["jti"] == created["jti"]] == [{"evals": _TRIAL}]
+
+
+def test_rotating_a_key_keeps_its_attributes(client):
+    """The owner can rotate a key a service minted for them, and the successor still carries the service's claims."""
+    with _acting_as(_for_alice("evals")):
+        created = client.post(
+            "/v2/access-keys", json={"name": "trial", "expires_in_seconds": 3600, "service_attributes": _TRIAL}
+        ).json()
+
+    rotated = client.post(f"/v2/access-keys/{created['jti']}/rotate")
+
+    assert rotated.status_code == 200, rotated.text
+    new_key = rotated.json()["new_key"]
+    assert new_key["service_attributes"] == {"evals": _TRIAL}
+    assert _claims(new_key["token"])["nhx_service_attributes"] == {"evals": _TRIAL}
+
+
+def test_a_replacement_key_inherits_its_predecessors_attributes(client):
+    with _acting_as(_for_alice("evals")):
+        created = client.post("/v2/access-keys", json={"name": "trial", "service_attributes": _TRIAL}).json()
+
+    replacement = client.post("/v2/access-keys", json={"name": "trial", "rotates": created["jti"]})
+
+    assert replacement.status_code == 200, replacement.text
+    assert replacement.json()["service_attributes"] == {"evals": _TRIAL}
+
+
+@pytest.mark.parametrize("predecessor_attributes", [_TRIAL, None], ids=["with attributes", "without attributes"])
+def test_a_replacement_key_cannot_change_its_predecessors_attributes(client, predecessor_attributes):
+    """Rotation preserves what a service vouched for; changing it means minting a new key."""
+    with _acting_as(_for_alice("evals")):
+        created = client.post(
+            "/v2/access-keys", json={"name": "trial", "service_attributes": predecessor_attributes}
+        ).json()
+        replacement = client.post(
+            "/v2/access-keys",
+            json={"name": "trial", "rotates": created["jti"], "service_attributes": {"kind": "other"}},
+        )
+
+    assert replacement.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "attributes",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"1bad": "x"}, id="name that doesn't start with a letter"),
+        pytest.param({"a b": "x"}, id="name with a space"),
+        pytest.param({"x": "y" * 257}, id="string over 256 characters"),
+        pytest.param({"x": {"y": {"z": 1}}}, id="nested two deep"),
+        pytest.param({"x": [[1]]}, id="array nested in an array"),
+        pytest.param({"x": {"bad key": 1}}, id="nested name with a space"),
+        pytest.param({f"k{i}": i for i in range(33)}, id="33 names"),
+        pytest.param({f"k{i}": "v" * 200 for i in range(12)}, id="over 2 KiB"),
+    ],
+)
+def test_attributes_that_dont_fit_a_token_claim_are_refused(client, attributes):
+    with _acting_as(_for_alice("evals")):
+        response = client.post("/v2/access-keys", json={"name": "k", "service_attributes": attributes})
+
+    assert response.status_code == 422
+
+
+def test_a_key_with_every_field_at_its_limit_fits_a_token(client):
+    attributes = {"x": "v" * 256, **{f"k{i}": "v" * 100 for i in range(16)}}
+    with _acting_as(_for_alice("evals")):
+        response = client.post(
+            "/v2/access-keys",
+            json={
+                "name": "n" * 128,
+                "description": "d" * 1024,
+                "scope": ["inference"],
+                "service_attributes": attributes,
+            },
+        )
+
+    assert response.status_code == 200, response.text
+    assert len(response.json()["token"]) <= ACCESS_KEY_TOKEN_MAX_BYTES
+
+
+def test_a_key_whose_token_would_be_too_large_is_refused(client):
+    """Keys travel in a header, so one a proxy would drop is refused at mint time instead."""
+    principal = Principal(
+        id="alice@example.com",
+        email="alice@example.com",
+        groups=[f"group-with-a-long-name-{i:04d}" for i in range(250)],
+    )
+    with _acting_as(principal):
+        response = client.post("/v2/access-keys", json={"name": "k"})
+
+    assert response.status_code == 400
+    assert str(ACCESS_KEY_TOKEN_MAX_BYTES) in response.json()["detail"]
+    assert client.app.dependency_overrides[get_access_key_registry]().keys == {}
+
+
+def test_with_auth_off_no_caller_counts_as_a_service(client):
+    """With auth off, anyone can claim a service identity in its headers, so nothing it sends is vouched for."""
+    token = auth_client_context.set(
+        AuthClient(
+            principal=_for_alice("evals"), config=AuthConfig(enabled=False, access_keys=AccessKeyConfig(enabled=True))
+        )
+    )
+    try:
+        response = client.post("/v2/access-keys", json={"name": "trial", "service_attributes": _TRIAL})
+    finally:
+        auth_client_context.reset(token)
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Infinity", "-Infinity", "NaN", '{"y": NaN}', r'"\ud800"', r'["ok", "\udfff"]'],
+    ids=["infinity", "negative infinity", "NaN", "nested NaN", "lone surrogate", "lone surrogate in an array"],
+)
+def test_values_a_token_cant_carry_are_refused(client, value):
+    """Python's JSON parser accepts these, but a token carrying them isn't valid JSON or UTF-8.
+
+    FastAPI's default 422 echoes the input, which it then can't render, so without the router's own handling this
+    would be a 500.
+    """
+    with _acting_as(_for_alice("evals")):
+        response = TestClient(client.app, raise_server_exceptions=False).post(
+            "/v2/access-keys",
+            content=f'{{"name": "k", "service_attributes": {{"x": {value}}}}}',
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert response.status_code == 422
+    assert "service_attributes" in response.json()["detail"][0]["msg"]
+    assert client.app.dependency_overrides[get_access_key_registry]().keys == {}

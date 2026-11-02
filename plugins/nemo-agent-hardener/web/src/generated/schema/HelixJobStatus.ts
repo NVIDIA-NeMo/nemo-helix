@@ -12,12 +12,17 @@
  *
  * This enum represents the various states a job can be in during its lifecycle,
  * from creation to a terminal state.
+ *
+ * ``CREATED`` means the controller has not yet considered the job. ``QUEUED`` means
+ * the controller has seen the job but not admitted it (waiting for capacity).
+ * ``PENDING`` means the backend resource exists and is waiting to start.
  */
 export type HelixJobStatus = typeof HelixJobStatus[keyof typeof HelixJobStatus];
 
 
 export const HelixJobStatus = {
   created: 'created',
+  queued: 'queued',
   pending: 'pending',
   active: 'active',
   cancelled: 'cancelled',

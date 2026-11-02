@@ -603,12 +603,86 @@ class TestRenderFabricDockerfile:
             with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
                 render_fabric_dockerfile(config, python_version=version, template_path=str(custom))
 
-    @pytest.mark.parametrize("kind", ["nooa", "nvidia.fabric.nooa"])
-    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path, kind: str) -> None:
+    @pytest.mark.parametrize(
+        "harnesses",
+        [
+            "  analyst:\n    kind: nvidia.helix.compass.analyst\n",
+            # Not the default, but a deployment may still select it.
+            "  main:\n    kind: codex\n  analyst:\n    kind: nvidia.helix.compass.analyst\n",
+        ],
+    )
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_plugin_installed_adapter_is_rejected(self, tmp_path: Path, harnesses: str) -> None:
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        default = "analyst" if harnesses.startswith("  analyst") else "main"
+        config = tmp_path / "agent.yaml"
+        config.write_text(f"default_harness: {default}\nharnesses:\n{harnesses}")
+
+        with pytest.raises(
+            ValueError,
+            match=r"Harness 'analyst' uses Fabric adapter 'nvidia.helix.compass.analyst', "
+            r"which an image packaged without --pyproject doesn't install\. Run it with `nemo agents execute`, "
+            r"or package with --pyproject for a project that installs the adapter \(or --template for a Dockerfile "
+            r"that does\)",
+        ):
+            render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_unknown_adapter_is_rejected_without_config_translation(self, tmp_path: Path) -> None:
+        """``--no-build`` renders without translating the config, so packaging must catch a typo itself."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: main\nharnesses:\n  main:\n    kind: nvidia.fabric.claud\n")
+
+        with pytest.raises(ValueError, match=r"Harness 'main' uses Fabric adapter 'nvidia.fabric.claud'"):
+            render_fabric_dockerfile(config)
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_custom_template_may_supply_its_own_adapter(self, tmp_path: Path) -> None:
+        """A --template Dockerfile can install any adapter, so packaging can't know what the image holds."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: acme.custom.native\n")
+        custom = tmp_path / "Dockerfile.j2"
+        custom.write_text("FROM python:{{ python_version }}\nRUN uv pip install acme-agent\n")
+
+        result = render_fabric_dockerfile(config, template_path=str(custom))
+
+        assert "RUN uv pip install acme-agent" in result
+
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_project_mode_may_supply_its_own_adapter(self, tmp_path: Path) -> None:
+        """A --pyproject image installs the user's project, which may ship the adapter (Bring Your Own Harness)."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "acme"\nversion = "0.1.0"\n')
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: acme\nharnesses:\n  acme:\n    kind: nvidia.helix.compass.analyst\n")
+
+        result = render_fabric_dockerfile(config, tmp_path / "pyproject.toml")
+
+        assert '"nemo-helix[nemo-agents-plugin]==' in result
+
+    @pytest.mark.parametrize("kind", ["nooa-bench-agent", "nvidia.fabric.nooa", "nvidia.fabric.remote-agent"])
+    @pytest.mark.usefixtures("installed_adapter_manifests")
+    def test_adapters_shipped_by_fabric_wheels_are_packageable(self, tmp_path: Path, kind: str) -> None:
         from nemo_agents_plugin.container.template import resolve_fabric_harness_install
 
         config = tmp_path / "agent.yaml"
         config.write_text(f"default_harness: selected\nharnesses:\n  selected:\n    kind: {kind}\n")
+
+        platform_extra, _, _ = resolve_fabric_harness_install(config)
+
+        assert platform_extra in {"nemo-agents-plugin", "nemo-agents-plugin-nooa"}
+
+    def test_generic_nooa_kind_does_not_select_harness_dependencies(self, tmp_path: Path) -> None:
+        from nemo_agents_plugin.container.template import resolve_fabric_harness_install
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa\n")
 
         assert resolve_fabric_harness_install(config) == ("nemo-agents-plugin", False, False)
 
@@ -625,6 +699,20 @@ class TestRenderFabricDockerfile:
         with pytest.raises(ValueError, match="Set --python-version 3.13"):
             render_fabric_dockerfile(config)
         assert "ARG PYTHON_VERSION=3.13" in render_fabric_dockerfile(config, python_version="3.13")
+
+    @pytest.mark.parametrize("version", ["3.12", "3.13", "3.14"])
+    def test_generic_nooa_kind_requires_a_python_that_installs_it(self, tmp_path: Path, version: str) -> None:
+        """nemo-agents-plugin installs the generic NOOA adapter only on Python 3.12 and 3.13."""
+        from nemo_agents_plugin.container.template import render_fabric_dockerfile
+
+        config = tmp_path / "agent.yaml"
+        config.write_text("default_harness: selected\nharnesses:\n  selected:\n    kind: nvidia.fabric.nooa\n")
+
+        if version == "3.14":
+            with pytest.raises(ValueError, match="NOOA requires Python 3.12 or 3.13"):
+                render_fabric_dockerfile(config, python_version=version)
+        else:
+            assert f"ARG PYTHON_VERSION={version}" in render_fabric_dockerfile(config, python_version=version)
 
     def test_unused_nooa_does_not_restrict_container_python(self, tmp_path: Path) -> None:
         from nemo_agents_plugin.container.template import render_fabric_dockerfile

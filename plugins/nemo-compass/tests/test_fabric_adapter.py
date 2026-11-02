@@ -125,14 +125,21 @@ async def test_fabric_adapter_returns_unpersisted_compass_result(monkeypatch) ->
                     "agent": "research-agent",
                     "ethos": "# Ethos",
                     "base_url": "http://platform",
-                    "since": "2026-08-21T12:00:00+00:00",
-                    "evaluation_id": "eval-123",
                 }
             )
         }
     )
 
-    result = await runtime.invoke(_request({"nemo_helix": {"job_workspace": "workspace"}}), _runtime_context())
+    result = await runtime.invoke(
+        _request(
+            {
+                "since": "2026-08-21T12:00:00+00:00",
+                "evaluation_id": "eval-123",
+                "nemo_helix": {"job_workspace": "workspace"},
+            }
+        ),
+        _runtime_context(),
+    )
 
     assert result.status is contract.AgentRunStatus.SUCCEEDED
     assert result.output == {
@@ -168,18 +175,93 @@ async def test_fabric_adapter_reads_job_workspace_only_from_nemo_helix_context(m
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fake_run_compass_change_set)
     monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
-    monkeypatch.delenv("NHX_WORKSPACE", raising=False)
 
     runtime = fabric_adapter.CompassRuntime()
     await runtime.start({"config": _agent_config({"agent": "research-agent"})})
-
-    await runtime.invoke(_request({"job_workspace": "caller"}), _runtime_context())
-    assert seen["workspace"] == "default"
 
     await runtime.invoke(
         _request({"job_workspace": "caller", "nemo_helix": {"job_workspace": "job"}}), _runtime_context()
     )
     assert seen["workspace"] == "job"
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        pytest.param({}, id="no-context"),
+        pytest.param({"job_workspace": "caller"}, id="top-level-only"),
+        pytest.param({"nemo_helix": {"job_workspace": "  "}}, id="blank"),
+    ],
+)
+async def test_fabric_adapter_fails_without_a_job_workspace(monkeypatch, context: dict[str, Any]) -> None:
+    """There is no fallback workspace: outside an execute job, Compass has nowhere to read from."""
+    clients: list[_StubClient] = []
+
+    async def fail_if_called(**kwargs: Any) -> tuple[CompassResult, object]:
+        raise AssertionError("run_compass_change_set should not be reached")
+
+    monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
+    monkeypatch.setenv("NHX_WORKSPACE", "ambient")
+
+    runtime = fabric_adapter.CompassRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(_request(context), _runtime_context())
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert result.error is not None
+    assert "context.nemo_helix.job_workspace is required" in result.error.message
+    assert clients == []
+
+
+async def test_fabric_adapter_runs_unscoped_without_since_or_evaluation_id(monkeypatch) -> None:
+    seen: dict[str, Any] = {}
+
+    async def fake_run_compass_change_set(**kwargs: Any) -> tuple[CompassResult, object]:
+        seen.update(kwargs)
+        return CompassResult(summary="ok"), object()
+
+    monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fake_run_compass_change_set)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
+
+    runtime = fabric_adapter.CompassRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    await runtime.invoke(_request({"nemo_helix": {"job_workspace": "w"}}), _runtime_context())
+
+    assert seen["since"] is None
+    assert seen["evaluation_id"] is None
+
+
+@pytest.mark.parametrize(
+    ("scope", "message"),
+    [
+        pytest.param({"since": "last tuesday"}, "context.since must be an ISO-8601 datetime string", id="bad-since"),
+        pytest.param({"since": 1723000000}, "context.since must be an ISO-8601 datetime string", id="numeric-since"),
+        pytest.param({"evaluation_id": ""}, "context.evaluation_id must be a non-empty string", id="blank-eval"),
+        pytest.param({"evaluation_id": 7}, "context.evaluation_id must be a non-empty string", id="numeric-eval"),
+    ],
+)
+async def test_fabric_adapter_rejects_an_invalid_run_scope(monkeypatch, scope: dict[str, Any], message: str) -> None:
+    """A malformed scope must fail the run, not widen it to every trace."""
+    clients: list[_StubClient] = []
+
+    async def fail_if_called(**kwargs: Any) -> tuple[CompassResult, object]:
+        raise AssertionError("run_compass_change_set should not be reached")
+
+    monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
+    monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory(clients))
+
+    runtime = fabric_adapter.CompassRuntime()
+    await runtime.start({"config": _agent_config({"agent": "research-agent"})})
+
+    result = await runtime.invoke(_request({**scope, "nemo_helix": {"job_workspace": "w"}}), _runtime_context())
+
+    assert result.status is contract.AgentRunStatus.FAILED
+    assert result.error is not None
+    assert result.error.message == message
+    assert clients == []
 
 
 async def test_fabric_adapter_does_not_leak_a_client_when_a_model_ref_is_invalid(monkeypatch) -> None:

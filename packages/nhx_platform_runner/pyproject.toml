@@ -3,7 +3,7 @@
 
 [project]
 name = "nhx-platform-runner"
-description = "Headless local platform runner for Nemo Helix services"
+description = "Headless local platform runner for NeMo Helix services"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "fastapi[standard]>=0.115.4",

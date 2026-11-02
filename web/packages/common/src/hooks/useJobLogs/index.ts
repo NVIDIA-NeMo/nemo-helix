@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { logStatusForJob, type LogLoadProgress, type LogStatus } from '@nemo/common/src/utils/logs';
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobLog,
@@ -18,13 +19,20 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 
 import { LOGS_MAX_FETCH_ITERATIONS, LOGS_MAX_PAGES, LOGS_PAGE_SIZE } from '../../constants';
 import { CJobTerminalStatuses } from '../../constants/query';
-import type { LogLoadProgress } from '../../utils/logs';
 import { getJobRefetchInterval } from '../../utils/query';
 
 // After a job goes terminal, refetchInterval stops polling — but OTLP log
 // shipping can still be in flight, so the final lines would be lost. Refetch a
 // few times post-terminal to capture the tail. Bounded and self-clearing.
 const LOG_SETTLE_DELAYS_MS = [2_000, 6_000, 12_000];
+
+// Some callers (e.g. agent eval jobs) may report legacy aliases for terminal statuses.
+const LEGACY_JOB_STATUSES: Record<string, HelixJobStatus> = {
+  succeeded: 'completed',
+  success: 'completed',
+  failed: 'error',
+  canceled: 'cancelled',
+};
 
 // Progress lives in a module store keyed by query key rather than in component state,
 // for two reasons. The log query key is shared — a viewer and a download button can
@@ -82,6 +90,7 @@ export interface UseJobLogsResult {
    *  resolves and again whenever a new walk starts. Meant for the initial load, which
    *  blocks on every page; refetches already have data on screen. */
   loadProgress: LogLoadProgress | null;
+  logStatus: LogStatus | undefined;
   refetch: (options?: RefetchOptions) => Promise<QueryObserverResult<JobLogsQueryData>>;
 }
 
@@ -100,10 +109,11 @@ export const useJobLogs = ({
   workspace,
   name,
   enabled,
-  jobStatus,
+  jobStatus: rawJobStatus,
   pageSize = LOGS_PAGE_SIZE,
   maxPages = LOGS_MAX_PAGES,
 }: UseJobLogsOptions): UseJobLogsResult => {
+  const jobStatus = rawJobStatus && (LEGACY_JOB_STATUSES[rawJobStatus] ?? rawJobStatus);
   const queryClient = useQueryClient();
   const queryKey = getJobLogsQueryKey(workspace, name);
   const queryKeyHash = hashKey(queryKey);
@@ -188,6 +198,7 @@ export const useJobLogs = ({
     error: query.error,
     total: query.data?.total ?? 0,
     loadProgress,
+    logStatus: logStatusForJob(jobStatus),
     refetch: query.refetch,
   };
 };
