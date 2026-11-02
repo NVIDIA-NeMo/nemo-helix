@@ -400,6 +400,7 @@ nemo-deployments-plugin = [
   "nemo-helix-plugin",
   "pydantic>=2.10.6",
   "pyyaml>=6.0",
+  "sqlalchemy>=2.0.0",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
@@ -462,6 +463,7 @@ nemo-helix-plugin = [
   "openai>=1.109.1",
   "pydantic>=2.12.0",
   "pydantic-settings>=2.8.1",
+  "pyjwt>=2.13.0",
   "pyyaml>=6.0.2",
   "typer>=0.20.0,<0.26",
 ]
