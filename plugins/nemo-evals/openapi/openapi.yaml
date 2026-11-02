@@ -872,14 +872,14 @@ paths:
       tags:
       - Evals Plugin Taskset Run Routes
       summary: Get Taskset Run
-      description: "Read one stored run and its progress, counted from its members, without\
-        \ loading its plan or reading Jobs.\n\nArgs:\n    workspace: Workspace that scopes\
-        \ the record lookup.\n    run_id: Public run name in that workspace.\n    service:\
-        \ Shared request-scoped run service.\n\nReturns:\n    Current stored status with\
-        \ ``progress`` (omitted while the run has no members), excluding null\n    optionals\
-        \ and internal metadata.\n\nRaises:\n    HTTPException: Permission denied (403),\
-        \ the record is absent (404), or an unexpected\n        storage or projection failure\
-        \ occurs (sanitized 500)."
+      description: "Read one stored run and its progress, counted from its members,\
+        \ without loading its plan or reading Jobs.\n\nArgs:\n    workspace: Workspace\
+        \ that scopes the record lookup.\n    run_id: Public run name in that workspace.\n\
+        \    service: Shared request-scoped run service.\n\nReturns:\n    Current\
+        \ stored status with ``progress`` (omitted while the run has no members),\
+        \ excluding null\n    optionals and internal metadata.\n\nRaises:\n    HTTPException:\
+        \ Permission denied (403), the record is absent (404), or an unexpected\n\
+        \        storage or projection failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -968,14 +968,15 @@ paths:
       summary: List Taskset Run Tasks
       description: "Read stored run members in numeric task-index order without inspecting\
         \ Jobs.\n\nArgs:\n    workspace: Workspace containing the run and its children.\n\
-        \    run_id: Public run name whose persisted entity ID scopes the members.\n   \
-        \ phase: Optional stored member phase filter.\n    page: One-based page number,\
-        \ validated by FastAPI.\n    page_size: Maximum page size, from 1 to 1000.\n   \
-        \ service: Shared request-scoped run service.\n\nReturns:\n    Stored task page\
-        \ and filtered counts; existing runs with no members return\n    an empty page.\
-        \ Null Job, Job status and error details are omitted.\n\nRaises:\n    HTTPException:\
-        \ Permission denied (403), the parent run is absent (404), or an unexpected\n  \
-        \      storage or projection failure occurs (sanitized 500)."
+        \    run_id: Public run name whose persisted entity ID scopes the members.\n\
+        \    phase: Optional stored member phase filter.\n    page: One-based page\
+        \ number, validated by FastAPI.\n    page_size: Maximum page size, from 1\
+        \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
+        \    Stored task page and filtered counts; existing runs with no members return\n\
+        \    an empty page. Null Job, Job status and error details are omitted.\n\n\
+        Raises:\n    HTTPException: Permission denied (403), the parent run is absent\
+        \ (404), or an unexpected\n        storage or projection failure occurs (sanitized\
+        \ 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
