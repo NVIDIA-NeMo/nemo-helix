@@ -30,8 +30,9 @@ class HarborSandboxProfileConfig(BaseModel):
     agent_channel: tuple[str, ...] = Field(
         default=(),
         description=(
-            "Hosts a no-network task's sandbox may still reach (e.g. the inference gateway), so an agent "
-            "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
+            "Hosts a no-network or allowlist task's sandbox may also reach (e.g. the inference gateway), so an "
+            "agent running in the sandbox can call its model. Empty keeps no-network tasks fully closed and "
+            "allowlist tasks to their own hosts."
         ),
     )
     agent_setup_egress: tuple[str, ...] = Field(

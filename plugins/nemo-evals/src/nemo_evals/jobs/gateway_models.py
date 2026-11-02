@@ -198,38 +198,40 @@ async def require_closed_book_route(
 
 def no_network_task_ids(tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
     """The ids of the tasks among (task id, task.toml config) pairs whose agent runs, in any step, with no network."""
-    return [task_id for task_id, config in tasks if _agent_runs_without_network(TaskConfig.model_validate(config))]
+    return [task_id for task_id, config in tasks if NetworkMode.NO_NETWORK in _agent_network_modes(config)]
 
 
-def _agent_runs_without_network(task: TaskConfig) -> bool:
+def _agent_network_modes(config: Mapping[str, Any]) -> set[NetworkMode]:
+    """The network modes the agent runs under across a task's steps."""
+    task = TaskConfig.model_validate(config)
     baseline = task.environment.resolve_baseline()
-    return any(
-        resolve_agent_phase_policy(task, TrialAgentConfig(), baseline, step).network_mode == NetworkMode.NO_NETWORK
+    return {
+        resolve_agent_phase_policy(task, TrialAgentConfig(), baseline, step).network_mode
         for step in task.steps or [None]
-    )
+    }
 
 
 def check_tasks_reach_the_gateway(
     target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]], agent_channel: Sequence[str]
 ) -> None:
-    """Refuse no-network tasks whose sandboxes couldn't reach the gateway model the agent calls.
+    """Refuse no-network and allowlist tasks whose sandboxes couldn't reach the gateway model the agent calls.
 
-    ``tasks`` are (task id, task.toml config) pairs. A no-network sandbox reaches only the profile's
-    ``agent_channel`` hosts.
+    ``tasks`` are (task id, task.toml config) pairs. Beyond its own hosts, such a sandbox reaches only the
+    profile's ``agent_channel`` hosts.
 
     Raises:
-        ValueError: Some no-network task's sandbox can't reach the gateway.
+        ValueError: Some no-network or allowlist task's sandbox can't reach the gateway.
     """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
         return
-    no_network = no_network_task_ids(tasks)
-    if not no_network:
+    restricted = [task_id for task_id, config in tasks if _agent_network_modes(config) - {NetworkMode.PUBLIC}]
+    if not restricted:
         return
     host = urlsplit(agent_gateway_origin(sandboxed=True)).hostname or ""
     if agent_channel_name(host, agent_channel) is None:
         raise ValueError(
-            f"gateway_unreachable: no-network tasks {no_network} can't reach the Inference Gateway at {host}: "
-            f"add {host}, its fully qualified name, or an IP range containing it to the sandbox profile's "
+            f"gateway_unreachable: no-network or allowlist tasks {restricted} can't reach the Inference Gateway at "
+            f"{host}: add {host}, its fully qualified name, or an IP range containing it to the sandbox profile's "
             "agent_channel"
         )
 

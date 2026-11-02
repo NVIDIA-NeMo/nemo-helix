@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The agent channel for no-network tasks, and the agent setup egress window."""
+"""The agent channel for no-network and allowlist tasks, and the agent setup egress window."""
 
 import asyncio
 import ipaddress
@@ -21,10 +21,12 @@ from nhx_sandbox.opensandbox_policy import EgressVerificationError
 IGW = "nemo-helix-api.ns.svc.cluster.local"
 
 
-def _environment(mode: NetworkMode, channel: tuple[str, ...], trusted: tuple[str, ...] = ()) -> Any:
+def _environment(
+    mode: NetworkMode, channel: tuple[str, ...], trusted: tuple[str, ...] = (), allowed: tuple[str, ...] = ()
+) -> Any:
     """The environment's egress state only; ``egress_policy`` reads nothing else."""
     environment = object.__new__(AgentChannelOpenSandboxEnvironment)
-    environment._network_policy = NetworkPolicy(network_mode=mode)
+    environment._network_policy = NetworkPolicy(network_mode=mode, allowed_hosts=list(allowed))
     environment._agent_channel_hosts = channel
     environment._trusted_allowed_hosts = trusted
     environment._agent_setup_hosts = ()
@@ -45,6 +47,20 @@ def test_no_network_with_channel_allows_only_the_channel():
     policy = _environment(NetworkMode.NO_NETWORK, (IGW,), trusted=(IGW, "pypi.org")).egress_policy()
     assert policy.default_action == "deny"
     assert IGW in _allowed(policy) and "pypi.org" not in _allowed(policy)
+
+
+def test_allowlist_tasks_get_their_own_hosts_and_the_channel_only():
+    environment = _environment(
+        NetworkMode.ALLOWLIST, (IGW,), trusted=(IGW, "pypi.org", "github.com"), allowed=("pypi.org",)
+    )
+    allowed = _allowed(environment.egress_policy())
+    assert {IGW, "pypi.org"} <= allowed and "github.com" not in allowed
+
+
+def test_allowlist_without_channel_keeps_the_task_hosts():
+    environment = _environment(NetworkMode.ALLOWLIST, (), trusted=(IGW, "pypi.org"), allowed=("pypi.org",))
+    allowed = _allowed(environment.egress_policy())
+    assert "pypi.org" in allowed and IGW not in allowed
 
 
 def test_public_tasks_keep_the_profile_allowlist():
