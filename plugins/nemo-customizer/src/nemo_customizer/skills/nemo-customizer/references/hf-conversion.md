@@ -93,11 +93,11 @@ nemo files filesets create cord-v2 --workspace default --purpose dataset
 nemo files upload /tmp/cord-v2 cord-v2 --workspace default
 ```
 
-`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`.
+`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
 
 `nemo customization automodel --upload-dataset /tmp/cord-v2` uploads that same directory.
 
-Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit.
+Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit. Each directory also holds `test.jsonl` next to `train.jsonl` and `validation.jsonl`, and the whole directory is one fileset. That is the other exception to the own-fileset rule: the trainer reads `train.jsonl` and `validation.jsonl` and does not train on `test.jsonl`.
 
 Unsloth stays on string `content` or pre-rendered `text`. Do not give it image parts.
 

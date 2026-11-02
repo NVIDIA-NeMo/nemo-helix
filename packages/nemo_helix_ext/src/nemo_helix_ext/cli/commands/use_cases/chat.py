@@ -251,6 +251,8 @@ def chat(
         float | None,
         typer.Option(
             help="Sampling temperature (0.0 to 2.0)",
+            min=0,
+            max=2,
             rich_help_panel="Model Options",
         ),
     ] = None,

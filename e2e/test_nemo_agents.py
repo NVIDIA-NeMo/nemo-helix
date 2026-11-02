@@ -405,7 +405,7 @@ def test_agent_deployment_missing_agent_returns_not_found(client: NemoClient, wo
     _assert_http_status(exc_info, 404)
 
 
-@pytest.mark.container_only
+@pytest.mark.subprocess_only
 def test_agent_deployment_create_list_get_delete_lifecycle(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("deployment-agent")
     deployment_name = _unique_name("deployment")
@@ -442,7 +442,7 @@ def test_agent_deployment_create_list_get_delete_lifecycle(client: NemoClient, w
     _assert_http_status(exc_info, 404)
 
 
-@pytest.mark.container_only
+@pytest.mark.subprocess_only
 def test_agent_delete_is_blocked_while_deployment_is_active(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("blocked-delete-agent")
     deployment_name = _unique_name("blocked-delete-deployment")
@@ -479,7 +479,7 @@ def test_agent_gateway_missing_deployment_returns_not_found(client: NemoClient, 
     _assert_http_status(exc_info, 404)
 
 
-@pytest.mark.container_only
+@pytest.mark.subprocess_only
 def test_agent_deployment_reaches_running(client: NemoClient, workspace: str) -> None:
     agent_name = _unique_name("running-agent")
     deployment_name = _unique_name("running-deployment")

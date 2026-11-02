@@ -44,6 +44,12 @@ class SandboxedGymActor:
         install_termination_cleanup(self.shutdown)
         return self._session.descriptor().model_dump(mode="json")
 
+    def list_entries(self) -> dict[str, list[str]]:
+        """Routes this actor's Gym host spawned. NeMo-RL calls this after spinup."""
+        if self._session is None:
+            raise RuntimeError("list_entries() needs a running Gym stack; call spinup() first.")
+        return self._session.list_entries()
+
     def run_rollouts(self, examples: list[dict[str, Any]]) -> list[Any]:
         if self._session is None:
             raise RuntimeError("SandboxedGymActor.spinup has not completed")

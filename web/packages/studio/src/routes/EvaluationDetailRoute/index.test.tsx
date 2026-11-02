@@ -93,4 +93,37 @@ describe('EvaluationDetailRoute with Optimizer enabled', () => {
       `/workspaces/${WORKSPACE}/optimizer/insight-id`
     );
   });
+
+  it('shows the total evaluation cost in the header', async () => {
+    server.use(
+      http.get(mockApiUrl(getGetEvaluationQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({ ...evaluation, cost_usd: { sum: 1.5, mean: 0.5, count: 3 } })
+      ),
+      http.get(mockApiUrl(getGetExperimentQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json(group)
+      ),
+      http.get(mockApiUrl(getListEvaluationSessionsQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({
+          data: [],
+          pagination: {
+            page: 1,
+            page_size: 25,
+            current_page_size: 0,
+            total_pages: 0,
+            total_results: 0,
+          },
+        })
+      ),
+      http.get(mockApiUrl(getCompassGetInsightQueryKey, ':workspace', ':insightId'), () =>
+        HttpResponse.json({ id: 'insight-id', name: 'insight', title: 'Insight', evidence: [] })
+      )
+    );
+
+    renderRoute(<EvaluationDetailRoute />, {
+      history: `/workspaces/${WORKSPACE}/experiment/${GROUP_NAME}/${EVALUATION_NAME}`,
+      routes: [{ path: ROUTES.workspace.evaluationDetail, element: <EvaluationDetailRoute /> }],
+    });
+
+    expect(await screen.findByText('$1.50')).toBeInTheDocument();
+  });
 });
