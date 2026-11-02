@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { VerticalNavTestIds } from '@nvidia/foundations-react-core';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { PageLayout } from '@studio/routes/PageLayout';
@@ -12,6 +13,7 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider, useLocation } from 'react-router';
 
 const KUI_ACTIVE_CLASS = 'nv-vertical-nav-item--active';
+const KUI_COLLAPSED_CLASS = 'nv-vertical-nav-root--collapsed';
 
 const mockItems = [
   { id: 'projects', slotLabel: 'Projects', icon: 'ProjectsIcon', href: ROUTES.workspace.index },
@@ -79,9 +81,12 @@ describe('NavigationDrawer', () => {
       expect(await screen.findByText('Traces')).toBeInTheDocument();
       expect(await screen.findByText('Entries')).toBeInTheDocument();
       expect(await screen.findByText('Export Jobs')).toBeInTheDocument();
-      // Expanded, a group is a heading; only the rail turns it into a divider.
-      expect(await screen.findByText('Evaluate')).toBeInTheDocument();
-      expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+      expect(await screen.findByTestId(VerticalNavTestIds.VerticalNavHeading)).toHaveTextContent(
+        'Evaluate'
+      );
+      expect(screen.getByTestId(VerticalNavTestIds.VerticalNavRoot)).not.toHaveClass(
+        KUI_COLLAPSED_CLASS
+      );
     });
 
     it('respects the local storage if it exists', async () => {
@@ -102,18 +107,20 @@ describe('NavigationDrawer', () => {
       Object.defineProperty(window, 'localStorage', {
         value: localStorageMock,
       });
-      renderWithProjectRoute(
-        <PageLayout
-          sideNav={(collapsed) => <NavigationDrawer items={mockItems} collapsed={collapsed} />}
-        />
-      );
-      // In the rail a label is only ever exposed via its tooltip.
-      expect(
-        screen.queryByText('Projects', { ignore: '[role="tooltip"]' })
-      ).not.toBeInTheDocument();
-      Object.defineProperty(window, 'localStorage', {
-        value: prevLocalStorage,
-      });
+      try {
+        renderWithProjectRoute(
+          <PageLayout
+            sideNav={(collapsed) => <NavigationDrawer items={mockItems} collapsed={collapsed} />}
+          />
+        );
+        expect(await screen.findByTestId(VerticalNavTestIds.VerticalNavRoot)).toHaveClass(
+          KUI_COLLAPSED_CLASS
+        );
+      } finally {
+        Object.defineProperty(window, 'localStorage', {
+          value: prevLocalStorage,
+        });
+      }
     });
 
     it('keeps every link reachable when collapsed, parents and children alike', async () => {
@@ -163,7 +170,7 @@ describe('NavigationDrawer', () => {
       expect(screen.queryByRole('link', { name: 'Datasets' })).not.toBeInTheDocument();
     });
 
-    it('replaces a group heading with a named divider when collapsed', async () => {
+    it('keeps a group heading in the rail for KUI to draw as a divider', async () => {
       const NavigationDrawer = await importNavigationDrawer();
       // Its own fixture: the rail only keeps items that link somewhere, and `mockItems`' Evaluate
       // group is label-only.
@@ -182,8 +189,12 @@ describe('NavigationDrawer', () => {
         />
       );
 
-      expect(await screen.findByRole('separator', { name: 'Evaluate' })).toBeInTheDocument();
-      expect(screen.queryByText('Evaluate')).not.toBeInTheDocument();
+      expect(await screen.findByTestId(VerticalNavTestIds.VerticalNavHeading)).toHaveTextContent(
+        'Evaluate'
+      );
+      expect(screen.getByTestId(VerticalNavTestIds.VerticalNavRoot)).toHaveClass(
+        KUI_COLLAPSED_CLASS
+      );
     });
 
     it('drops a group heading the rail has nothing to put under', async () => {
@@ -210,8 +221,8 @@ describe('NavigationDrawer', () => {
       );
 
       expect(await screen.findByRole('link', { name: 'Jobs' })).toBeInTheDocument();
-      expect(screen.queryByRole('separator', { name: 'Unreachable' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('separator')).not.toBeInTheDocument();
+      expect(screen.queryByText('Unreachable')).not.toBeInTheDocument();
+      expect(screen.queryByTestId(VerticalNavTestIds.VerticalNavHeading)).not.toBeInTheDocument();
     });
 
     it('does not open the collapsed rail with a divider', async () => {
@@ -226,8 +237,10 @@ describe('NavigationDrawer', () => {
         />
       );
 
-      expect(await screen.findByRole('separator', { name: 'System' })).toBeInTheDocument();
-      expect(screen.queryByRole('separator', { name: 'Evaluate' })).not.toBeInTheDocument();
+      expect(await screen.findByTestId(VerticalNavTestIds.VerticalNavHeading)).toHaveTextContent(
+        'System'
+      );
+      expect(screen.queryByText('Evaluate')).not.toBeInTheDocument();
     });
 
     it('moves the highlight onto a parent that is hiding the active child', async () => {

@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  Divider,
   VerticalNavGroup,
   VerticalNavGroupList,
   VerticalNavHeading,
   VerticalNavList,
-  VerticalNavListItem,
   VerticalNavRoot,
 } from '@nvidia/foundations-react-core';
 import { CollapsedNavItem } from '@studio/components/Layouts/NavigationDrawer/components/CollapsedNavItem';
@@ -50,15 +48,6 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
     setAccordionState({ ...accordionState, [itemId]: open });
   };
 
-  // The rail has no room for a heading, so a group announces itself as a rule between icon
-  // sections instead — named, since collapsing drops the only other clue about the grouping.
-  const renderRailDivider = (groupLabel: string, groupIndex: number) =>
-    groupIndex > 0 && (
-      <VerticalNavListItem className="px-2 py-2">
-        <Divider aria-label={groupLabel} />
-      </VerticalNavListItem>
-    );
-
   const renderGroups = (groupList: ReturnType<typeof toGroups>) =>
     groupList
       .map((group) => ({
@@ -68,28 +57,22 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
       // Resolve items before the heading, so a group the rail empties out takes its heading too.
       .filter((group) => group.items.length > 0)
       .map((group, groupIndex) => {
-        if (collapsed) {
-          return (
-            <Fragment key={groupIndex}>
-              {group.groupLabel !== undefined && renderRailDivider(group.groupLabel, groupIndex)}
-              {group.items.map((item) => (
-                <CollapsedNavItem key={item.id} item={item} isActive={isActive} />
-              ))}
-            </Fragment>
-          );
-        }
+        const navItems = group.items.map((item) =>
+          collapsed ? (
+            <CollapsedNavItem key={item.id} item={item} isActive={isActive} />
+          ) : (
+            <NavItem
+              key={item.id}
+              item={item}
+              isActive={isActive}
+              accordionOpen={accordionState[item.id]}
+              onAccordionChange={handleAccordionChange}
+            />
+          )
+        );
 
-        const navItems = group.items.map((item) => (
-          <NavItem
-            key={item.id}
-            item={item}
-            isActive={isActive}
-            accordionOpen={accordionState[item.id]}
-            onAccordionChange={handleAccordionChange}
-          />
-        ));
-
-        if (group.groupLabel === undefined) {
+        // KUI draws a collapsed heading as a rule, which would open the rail with a stray line.
+        if (group.groupLabel === undefined || (collapsed && groupIndex === 0)) {
           return <Fragment key={groupIndex}>{navItems}</Fragment>;
         }
 
@@ -103,11 +86,10 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
 
   return (
     <VerticalNavRoot
-      className={`overflow-y-auto overflow-x-hidden transition-[width] duration-200 ${collapsed ? 'w-12' : 'w-60'}`}
+      collapsed={collapsed}
+      className="overflow-y-auto overflow-x-hidden transition-[width] duration-200"
     >
-      <VerticalNavList className={`${collapsed ? 'py-3' : 'p-3'}`}>
-        {renderGroups(groups)}
-      </VerticalNavList>
+      <VerticalNavList className="p-3">{renderGroups(groups)}</VerticalNavList>
     </VerticalNavRoot>
   );
 };
