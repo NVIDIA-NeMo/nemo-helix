@@ -497,11 +497,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
-  const firstRunningDeployment = runningDeployments[0]?.name;
-
-  useEffect(() => {
-    if (!deployment && firstRunningDeployment) setValue('deployment', firstRunningDeployment);
-  }, [deployment, firstRunningDeployment, setValue]);
+  // The form holds only a deployment the user picked. Until then the first running one stands in,
+  // so nothing is copied into form state when the list arrives.
+  const selectedDeployment = deployment || runningDeployments[0]?.name || '';
 
   const deploymentIssue = (() => {
     if (!selectedAgent || isDeploymentsLoading) return undefined;
@@ -511,10 +509,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (runningDeployments.length === 0) {
       return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
     }
-    if (!runningDeployments.some((d) => d.name === deployment)) {
-      return deployment
-        ? `Deployment ${deployment} is no longer running. Pick another.`
-        : 'Pick a deployment to evaluate.';
+    // Never swapped for another deployment: a pick that stopped is reported, not replaced.
+    if (deployment && !runningDeployments.some((d) => d.name === deployment)) {
+      return `Deployment ${deployment} is no longer running. Pick another.`;
     }
     return undefined;
   })();
@@ -835,7 +832,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         const selections = {
           workspace,
           agent: formData.agent,
-          deployment: formData.deployment,
+          deployment: selectedDeployment,
           filesetName,
           experimentName: nameStem,
           evaluationId,
@@ -1251,9 +1248,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               <ControlledSelect
                 useControllerProps={{ control, name: 'deployment' }}
                 items={deploymentItems}
+                value={selectedDeployment}
                 loading={isDeploymentsLoading}
-                disabled={isPending}
-                placeholder="Select a deployment"
+                disabled={isPending || isDeploymentsLoading}
+                placeholder={
+                  isDeploymentsLoading ? 'Loading deployments...' : 'Select a deployment'
+                }
                 formFieldProps={{
                   slotLabel: 'Deployment',
                   slotHelp:
