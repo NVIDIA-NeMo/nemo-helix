@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
+from nemo_helix_plugin.client.types import RetryPolicy
 from pydantic import ValidationError
 
 
@@ -224,7 +225,8 @@ class TestUploadFileset:
 
         runner.upload_fileset(FileSetRef(workspace="default", name="qwen-test"), src.resolve())
 
-        files.with_options.assert_called_once_with(timeout=UPLOAD_TIMEOUT)
+        # The runner's own retry is the only one; put_file's is turned off.
+        files.with_options.assert_called_once_with(timeout=UPLOAD_TIMEOUT, retry=RetryPolicy(max_retries=0))
         mock_fs_cls.assert_called_once_with(client=files)
 
     @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")

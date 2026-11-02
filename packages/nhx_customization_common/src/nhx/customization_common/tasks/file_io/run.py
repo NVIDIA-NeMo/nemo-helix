@@ -83,9 +83,8 @@ INITIAL_BACKOFF_SECONDS = 1.0
 MAX_BACKOFF_SECONDS = 30.0
 
 # Transient failures worth another attempt, for every Files operation this task
-# runs. Uploads stream a one-shot body, so once it is on the wire the typed client
-# can no longer retry them itself — this is the layer that rebuilds the request
-# from the source file, so it has to catch what the client raises. Those are the
+# runs. Uploads run with the client's retry turned off, so this is the one layer
+# that retries them, and it has to catch what the client raises. Those are the
 # Nemo* entries: they wrap transport failures, 5xx responses (raise_for_status
 # maps every 5xx to InternalServerError) and 429 respectively, and are not httpx
 # types. Anything reaching this task through the typed client arrives as one of
@@ -281,7 +280,10 @@ class FileIORunner:
         )
         composite_callback = CompositeCallback(tqdm_callback, jobs_callback)
 
-        FilesetFileSystem(client=self.files.with_options(timeout=UPLOAD_TIMEOUT)).put(
+        # put_file retries under its client's policy; turn that off so this
+        # method's retry stays the only one.
+        upload_client = self.files.with_options(timeout=UPLOAD_TIMEOUT, retry=RetryPolicy(max_retries=0))
+        FilesetFileSystem(client=upload_client).put(
             local_path,
             build_fileset_ref(remote_path, workspace=fileset_workspace, fileset=fileset_name),
             recursive=True,

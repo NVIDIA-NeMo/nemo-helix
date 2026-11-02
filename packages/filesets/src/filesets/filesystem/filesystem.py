@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import os
+import time
 from collections.abc import AsyncIterator, Coroutine, Iterator, Sequence
 from datetime import datetime, timezone
 from glob import has_magic
@@ -21,8 +23,13 @@ from fsspec.callbacks import DEFAULT_CALLBACK, Callback
 from fsspec.implementations.local import LocalFileSystem, make_path_posix, trailing_sep
 from fsspec.spec import AbstractBufferedFile, AbstractFileSystem
 from fsspec.utils import other_paths
+from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError, NemoTransportError
+from nemo_helix_plugin.client.retry import body_was_sent, is_retryable, retry_delay
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.files.types import FilesetFileOutput, ListFilesQueryParams
+
+logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
@@ -105,6 +112,43 @@ class FileInfo(TypedDict):
 
 class FilesetPathError(ValueError):
     """Error raised when handling a fileset path."""
+
+
+class UploadRetriesExhaustedError(NemoClientError):
+    """Every attempt to upload a local file failed with a retryable error.
+
+    The last failure is the exception's ``__cause__``.
+    """
+
+    def __init__(self, lpath: str, rpath: str, attempts: int) -> None:
+        self.lpath = lpath
+        self.rpath = rpath
+        self.attempts = attempts
+        super().__init__(f"Upload of {lpath} to {rpath} failed after {attempts} attempts")
+
+
+_NO_RETRY = RetryPolicy(max_retries=0)
+
+
+def _resend_delay(
+    exc: NemoHTTPError | NemoTransportError, attempt: int, policy: RetryPolicy, lpath: str, rpath: str
+) -> float:
+    """Seconds to wait before sending the file again after failed attempt ``attempt``.
+
+    Raises ``exc`` when the failure is not one to resend, and
+    :class:`UploadRetriesExhaustedError` when the policy's attempts are used up.
+    """
+    attempts = policy.max_retries + 1
+    failure = exc.http_response if isinstance(exc, NemoHTTPError) else exc.error
+    # The client already retried a connection that never read the body.
+    unsent = isinstance(failure, httpx.TransportError) and not body_was_sent(failure)
+    if attempts == 1 or unsent or not is_retryable(policy, failure):
+        raise exc
+    if attempt == attempts - 1:
+        raise UploadRetriesExhaustedError(lpath, rpath, attempts) from exc
+    delay = retry_delay(policy, attempt, failure)
+    logger.warning("Upload of %s to %s failed (%r); sending it again in %.1fs", lpath, rpath, exc, delay)
+    return delay
 
 
 def parse_fileset_ref(ref: str, *, workspace_fallback: str | None) -> tuple[str, str, str]:
@@ -585,7 +629,11 @@ class FilesetFileSystem(AbstractFileSystem):
         mode: str = "overwrite",
         **kwargs,
     ) -> None:
-        """Upload a local file to a fileset."""
+        """Upload a local file to a fileset.
+
+        Failures the client's retry policy allows are retried by reopening the
+        file and sending it again in full.
+        """
         workspace, fileset, file_path = parse_fileset_ref(rpath, workspace_fallback=self._workspace)
         if not file_path:
             raise ValueError("File path required for upload")
@@ -594,17 +642,20 @@ class FilesetFileSystem(AbstractFileSystem):
         callback.set_size(file_size)
 
         def stream_file() -> Iterator[bytes]:
+            callback.absolute_update(0)
             with open(lpath, "rb") as f:
                 while chunk := f.read(self.blocksize):
                     callback.relative_update(len(chunk))
                     yield chunk
 
-        self._client.with_headers({"Content-Length": str(file_size)}).upload_file(
-            workspace=workspace,
-            name=fileset,
-            path=file_path,
-            content=stream_file(),
-        )
+        client = self._client.with_headers({"Content-Length": str(file_size)})
+        policy = self._client.retry or _NO_RETRY
+        for attempt in range(policy.max_retries + 1):
+            try:
+                client.upload_file(workspace=workspace, name=fileset, path=file_path, content=stream_file())
+                break
+            except (NemoHTTPError, NemoTransportError) as exc:
+                time.sleep(_resend_delay(exc, attempt, policy, lpath, rpath))
         self.invalidate_cache(self._parent(build_fileset_ref(rpath)))
 
     @overload
@@ -1181,6 +1232,8 @@ class AsyncFilesetFileSystem(AsyncFileSystem):
 
         Uses streaming upload to avoid buffering the entire file in memory.
         Supports per-chunk progress via callback.relative_update(chunk_size).
+        Failures the client's retry policy allows are retried by reopening the
+        file and sending it again in full.
         """
         workspace, fileset, file_path = parse_fileset_ref(rpath, workspace_fallback=self._workspace)
         if not file_path:
@@ -1192,17 +1245,20 @@ class AsyncFilesetFileSystem(AsyncFileSystem):
 
         # Create async generator that streams file content with progress
         async def stream_file() -> AsyncIterator[bytes]:
+            callback.absolute_update(0)
             async with await anyio.open_file(lpath, "rb") as f:
                 while chunk := await f.read(self.blocksize):
                     callback.relative_update(len(chunk))
                     yield chunk
 
-        await self._client.with_headers({"Content-Length": str(file_size)}).upload_file(
-            workspace=workspace,
-            name=fileset,
-            path=file_path,
-            content=stream_file(),
-        )
+        client = self._client.with_headers({"Content-Length": str(file_size)})
+        policy = self._client.retry or _NO_RETRY
+        for attempt in range(policy.max_retries + 1):
+            try:
+                await client.upload_file(workspace=workspace, name=fileset, path=file_path, content=stream_file())
+                break
+            except (NemoHTTPError, NemoTransportError) as exc:
+                await anyio.sleep(_resend_delay(exc, attempt, policy, lpath, rpath))
         # Invalidate parent directory's cache since file info is stored there
         self.invalidate_cache(self._parent(build_fileset_ref(rpath)))
 
