@@ -139,4 +139,5 @@ parallelism:
   # Hardware topology (top-level)
   gpus_per_node_default: 8  # Standard node configuration (e.g., DGX H100)
   gpu_memory_gb_default: 80  # Standard GPU memory in GB (e.g., H100 80GB)
+  memory_warning_threshold: 0.85  # Training memory estimates above this fraction of GPU memory report near_capacity
 

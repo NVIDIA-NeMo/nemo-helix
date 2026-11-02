@@ -1645,6 +1645,13 @@ authz:
         scopes:
         - models:write
         - platform:write
+    /apis/models/v2/workspaces/{workspace}/models/{name}/training-memory-estimate:
+      post:
+        permissions:
+        - models.read
+        scopes:
+        - models:read
+        - platform:read
     /apis/models/v2/workspaces/{workspace}/prompts:
       get:
         permissions:

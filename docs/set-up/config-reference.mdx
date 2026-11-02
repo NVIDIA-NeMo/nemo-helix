@@ -612,6 +612,8 @@ models:
     gpus_per_node_default: 8
     # Standard GPU memory in GB (e.g., H100 80GB) | default: 80
     gpu_memory_gb_default: 80
+    # Fraction of GPU memory above which a training memory estimate is reported as near capacity. Matches the utilization cap used to compute minimum GPU counts. | default: 0.85
+    memory_warning_threshold: 0.85
     model_size_thresholds:
       # >300B: Very large models | default: 300.0
       very_large: 300.0

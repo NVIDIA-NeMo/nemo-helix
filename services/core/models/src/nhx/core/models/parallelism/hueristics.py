@@ -44,8 +44,9 @@ from typing import Optional
 from nhx.core.models.parallelism.config import get_config
 from nhx.core.models.parallelism.constants import FP32_BYTES  # Keep for backward compatibility
 from nhx.core.models.parallelism.memory import param_count
-from nhx.core.models.parallelism.models import EstimationParams, ModelSpec
+from nhx.core.models.parallelism.schemas import EstimationParams
 from nhx.core.models.parallelism.utils import divisors
+from nhx.core.models.schemas import ModelSpec
 
 # Module-level logger
 logger = logging.getLogger(__name__)

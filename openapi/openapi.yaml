@@ -9971,6 +9971,64 @@ paths:
           \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
           \  defer { done.signal() }\n  if let error = error { print(error); return\
           \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+  /apis/models/v2/workspaces/{workspace}/models/{name}/training-memory-estimate:
+    post:
+      tags:
+      - Models
+      summary: Estimate Training Memory
+      description: 'Estimate Training Memory.
+
+
+        Estimates per-GPU memory for fine-tuning this model with the given settings
+        and compares it
+
+        with GPU memory. The estimate models Automodel training; it does not cover
+        RL or Unsloth jobs.'
+      operationId: estimate_model_training_memory_apis_models_v2_workspaces__workspace__models__name__training_memory_estimate_post
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrainingMemoryEstimateRequest'
+      responses:
+        '200':
+          description: Estimated per-GPU memory for the training configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TrainingMemoryEstimate'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Model spec has not been computed yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Parallel sizes do not fit the GPU count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /apis/models/v2/workspaces/{workspace}/prompts:
     get:
       tags:
@@ -23437,6 +23495,171 @@ components:
           default: false
       type: object
       title: TracingConfig
+    TrainingMemoryComponent:
+      type: string
+      enum:
+      - model_states
+      - activations
+      - overhead
+      title: TrainingMemoryComponent
+      description: A component of per-GPU training memory.
+    TrainingMemoryEstimate:
+      properties:
+        gpu_count:
+          type: integer
+          title: Gpu Count
+          description: Total GPUs requested (num_nodes x num_gpus_per_node).
+        gpu_memory_gb:
+          type: number
+          title: Gpu Memory Gb
+          description: Memory per GPU the estimate is compared against, in GB.
+        gpu_memory_assumed:
+          type: boolean
+          title: Gpu Memory Assumed
+          description: True when gpu_memory_gb is the platform default rather than
+            a value from the request.
+        data_parallel_size:
+          type: integer
+          title: Data Parallel Size
+          description: Data parallel size implied by the GPU count and parallel sizes.
+        model_states_gb:
+          type: number
+          title: Model States Gb
+          description: Parameters, gradients, and optimizer states per GPU, in GB.
+        activations_gb:
+          type: number
+          title: Activations Gb
+          description: Activation memory per GPU, in GB.
+        overhead_gb:
+          type: number
+          title: Overhead Gb
+          description: Framework overhead per GPU (prefetch, NCCL, grad buffers),
+            in GB.
+        total_gb:
+          type: number
+          title: Total Gb
+          description: Total estimated memory per GPU, in GB.
+        utilization:
+          type: number
+          title: Utilization
+          description: total_gb / gpu_memory_gb.
+        warning_threshold:
+          type: number
+          title: Warning Threshold
+          description: Utilization above which status is near_capacity.
+        status:
+          allOf:
+          - $ref: '#/components/schemas/TrainingMemoryStatus'
+          description: How the estimate compares with GPU memory.
+        limiting_factor:
+          allOf:
+          - $ref: '#/components/schemas/TrainingMemoryComponent'
+          description: The largest memory component.
+      type: object
+      required:
+      - gpu_count
+      - gpu_memory_gb
+      - gpu_memory_assumed
+      - data_parallel_size
+      - model_states_gb
+      - activations_gb
+      - overhead_gb
+      - total_gb
+      - utilization
+      - warning_threshold
+      - status
+      - limiting_factor
+      title: TrainingMemoryEstimate
+      description: Estimated per-GPU memory for a training configuration.
+    TrainingMemoryEstimateRequest:
+      properties:
+        max_seq_length:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Seq Length
+          description: Maximum token sequence length for training.
+        micro_batch_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Micro Batch Size
+          description: Per-GPU micro batch size.
+        num_nodes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Num Nodes
+          description: Number of nodes.
+          default: 1
+        num_gpus_per_node:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Num Gpus Per Node
+          description: Number of GPUs per node.
+          default: 1
+        tensor_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Tensor Parallel Size
+          description: Tensor parallel size.
+          default: 1
+        pipeline_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Pipeline Parallel Size
+          description: Pipeline parallel size.
+          default: 1
+        context_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Context Parallel Size
+          description: Context parallel size.
+          default: 1
+        expert_parallel_size:
+          title: Expert Parallel Size
+          description: Expert parallel size (MoE models).
+          type: integer
+          exclusiveMinimum: 0.0
+        lora_rank:
+          title: Lora Rank
+          description: LoRA rank. Omit to estimate all-weights fine-tuning.
+          type: integer
+          exclusiveMinimum: 0.0
+        sequence_packing:
+          type: boolean
+          title: Sequence Packing
+          description: Whether sequence packing is enabled.
+          default: false
+        packed_sequence_size:
+          title: Packed Sequence Size
+          description: Packed sequence length. Used in place of max_seq_length when
+            sequence_packing is enabled.
+          type: integer
+          exclusiveMinimum: 0.0
+        activation_checkpointing:
+          type: boolean
+          title: Activation Checkpointing
+          description: Whether activation checkpointing is enabled.
+          default: false
+        gpu_memory_gb:
+          title: Gpu Memory Gb
+          description: Memory per GPU in GB. Defaults to the platform's configured
+            assumption.
+          type: number
+          exclusiveMinimum: 0.0
+      type: object
+      required:
+      - max_seq_length
+      - micro_batch_size
+      title: TrainingMemoryEstimateRequest
+      description: Training settings to estimate GPU memory for. Field names match
+        the Automodel customization job.
+    TrainingMemoryStatus:
+      type: string
+      enum:
+      - ok
+      - near_capacity
+      - exceeds_capacity
+      title: TrainingMemoryStatus
+      description: How an estimate compares with GPU memory.
     TrendMicroRailConfig:
       properties:
         v1_url:
