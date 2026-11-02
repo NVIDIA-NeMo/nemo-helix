@@ -34,6 +34,7 @@ from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
     add_gateway_key_placeholder,
+    add_gateway_url_override,
     check_tasks_reach_the_gateway,
 )
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec, PreparedHarborEnvironment
@@ -102,8 +103,8 @@ class HarborTaskDispatchJob(NemoJob):
                     ),
                 ),
                 config=spec.model_dump(mode="json"),
-                environment=add_gateway_key_placeholder(
-                    build_task_environment(_secret_refs(spec.spec)), spec.spec.target
+                environment=add_gateway_url_override(
+                    add_gateway_key_placeholder(build_task_environment(_secret_refs(spec.spec)), spec.spec.target)
                 ),
             )
         )

@@ -251,6 +251,7 @@ class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
 
     uploads: list[tuple[str, str]]
     scripts: list[tuple[str, dict[str, str]]]
+    script_env: list[dict[str, str]]
     result: ExecResult
 
     @override
@@ -260,6 +261,7 @@ class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
     @override
     async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
         self.scripts.append((script, env))
+        self.script_env.append({**self._persistent_env, **env})
         return self.result
 
 
@@ -270,47 +272,56 @@ def _gateway_ca_environment(result: ExecResult) -> _GatewayCAEnvironment:
     environment.logger = logging.getLogger("test")
     environment.uploads = []
     environment.scripts = []
+    environment.script_env = []
     environment.result = result
     return environment
 
 
-async def test_every_later_command_trusts_the_gateway_ca_alongside_the_image_roots():
-    """SSL_CERT_FILE and REQUESTS_CA_BUNDLE replace the image's roots, so they name the combined bundle.
+async def test_every_later_command_trusts_the_gateway_ca_alongside_the_roots_it_trusted():
+    """Each variable names its own bundle: the roots it named before, else the image's, plus the gateway CA.
 
-    Node adds NODE_EXTRA_CA_CERTS to its own roots, so it is given the CA alone.
+    The files live under /tmp, which a non-root image's commands can write; they can't write /etc.
     """
     environment = _gateway_ca_environment(ExecResult(stdout="/etc/ssl/certs/ca-certificates.crt", return_code=0))
 
     await environment._trust_gateway_ca("/etc/nhx/ca.crt")
 
-    assert environment.uploads == [("/etc/nhx/ca.crt", opensandbox_environment.GATEWAY_CA)]
+    assert environment.uploads == [("/etc/nhx/ca.crt", "/tmp/nemo-helix-tls/gateway-ca.pem")]
     assert environment.scripts == [
         (
             opensandbox_environment.TRUST_GATEWAY_CA_SCRIPT,
             {
-                "GATEWAY_CA": opensandbox_environment.GATEWAY_CA,
-                "CA_BUNDLE": opensandbox_environment.CA_BUNDLE,
-                "TASK_BUNDLE": "",
+                "GATEWAY_CA": "/tmp/nemo-helix-tls/gateway-ca.pem",
+                "CA_BUNDLE": "/tmp/nemo-helix-tls/ca-bundle.pem",
+                "REQUESTS_CA_BUNDLE_OUT": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+                "NODE_EXTRA_CA_CERTS_OUT": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
             },
         )
     ]
     assert environment._persistent_env == {
         "PATH": "/agent/bin:/usr/bin",
-        "SSL_CERT_FILE": opensandbox_environment.CA_BUNDLE,
-        "REQUESTS_CA_BUNDLE": opensandbox_environment.CA_BUNDLE,
-        "NODE_EXTRA_CA_CERTS": opensandbox_environment.GATEWAY_CA,
+        "SSL_CERT_FILE": "/tmp/nemo-helix-tls/ca-bundle.pem",
+        "REQUESTS_CA_BUNDLE": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+        "NODE_EXTRA_CA_CERTS": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
     }
 
 
-async def test_a_bundle_the_task_sets_is_the_one_the_gateway_ca_is_added_to():
-    """A task that names its own SSL_CERT_FILE keeps the roots in it, rather than the image's."""
+async def test_the_ca_script_sees_the_trust_settings_the_task_set():
+    """The script reads SSL_CERT_FILE, REQUESTS_CA_BUNDLE and NODE_EXTRA_CA_CERTS to keep what they name.
+
+    Pointing them at the new bundles before it runs would make each bundle start from itself.
+    """
     environment = _gateway_ca_environment(ExecResult(stdout="/task/roots.pem", return_code=0))
-    environment._persistent_env["SSL_CERT_FILE"] = "/task/roots.pem"
+    task = {
+        "SSL_CERT_FILE": "/task/roots.pem",
+        "REQUESTS_CA_BUNDLE": "/task/requests.pem",
+        "NODE_EXTRA_CA_CERTS": "/task/node.pem",
+    }
+    environment._persistent_env.update(task)
 
     await environment._trust_gateway_ca("/etc/nhx/ca.crt")
 
-    assert environment.scripts[0][1]["TASK_BUNDLE"] == "/task/roots.pem"
-    assert environment._persistent_env["SSL_CERT_FILE"] == opensandbox_environment.CA_BUNDLE
+    assert task.items() <= environment.script_env[0].items()
 
 
 async def test_an_image_without_a_ca_bundle_is_warned_about(caplog):

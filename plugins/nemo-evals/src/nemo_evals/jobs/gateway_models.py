@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -71,6 +72,8 @@ async def check_gateway_model(
 AGENT_CHANNEL_HOSTS_KWARG = "agent_channel_hosts"
 #: The OpenSandbox environment setting naming the CA bundle its sandbox trusts for the gateway.
 GATEWAY_CA_FILE_KWARG = "gateway_ca_file"
+#: Step variable carrying the agents plugin's ``deployments.gateway_url_override`` to a task Job.
+GATEWAY_URL_OVERRIDE_ENVVAR = "NEMO_EVALS_GATEWAY_URL_OVERRIDE"
 
 
 def sandbox_agent_channel(environment: HarborEnvironmentConfig | None) -> list[str]:
@@ -83,7 +86,7 @@ def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) 
     """The platform origin an agent reaches from its task container.
 
     ``sandboxed`` is a Kubernetes task Job's OpenSandbox sandbox. It reaches the in-cluster API, or the agents
-    plugin's ``deployments.gateway_url_override`` when that is set, by the name its ``agent_channel`` allows.
+    plugin's ``deployments.gateway_url_override`` the Job was compiled with, by the name its ``agent_channel`` allows.
     Otherwise the task runs in Harbor's Docker task container, which reaches a loopback platform through
     ``host.docker.internal``.
     """
@@ -97,7 +100,7 @@ def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) 
         resolve_agent_gateway_url(
             base_url,
             mode="k8s",
-            override=AgentsConfig.get().deployments.gateway_url_override,
+            override=os.environ.get(GATEWAY_URL_OVERRIDE_ENVVAR) or None,
             internal_base_url=internal_base_url,
         )
     )
@@ -158,6 +161,14 @@ def add_gateway_key_placeholder(environment: list[EnvironmentVariable], target: 
             "use a secret under another name"
         )
     return [*environment, EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
+
+
+def add_gateway_url_override(environment: list[EnvironmentVariable]) -> list[EnvironmentVariable]:
+    """``environment`` plus the agents plugin's ``deployments.gateway_url_override``, which a task Job can't read."""
+    override = AgentsConfig.get().deployments.gateway_url_override
+    if override is None:
+        return environment
+    return [*environment, EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
 
 
 def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dict[str, Any], origin: str) -> None:

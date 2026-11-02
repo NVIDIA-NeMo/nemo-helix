@@ -33,21 +33,27 @@ from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_eg
 
 logger = logging.getLogger(__name__)
 
-GATEWAY_CA = "/etc/nemo-helix-tls/gateway-ca.pem"
-CA_BUNDLE = "/etc/nemo-helix-tls/ca-bundle.pem"
-# The task's own bundle, then Debian/Ubuntu/Alpine, RHEL/Fedora, SUSE, the OpenSSL default some minimal images
-# keep, and last Python's certifi, the bundle Python uses when SSL_CERT_FILE is unset.
+# Under /tmp because a non-root image's commands can't write /etc, even when asked to run as root.
+TLS_DIR = "/tmp/nemo-helix-tls"
+GATEWAY_CA = f"{TLS_DIR}/gateway-ca.pem"
+CA_BUNDLE = f"{TLS_DIR}/ca-bundle.pem"
+REQUESTS_CA_BUNDLE = f"{TLS_DIR}/requests-ca-bundle.pem"
+NODE_EXTRA_CA_CERTS = f"{TLS_DIR}/node-extra-ca-certs.pem"
+# Each variable keeps what it named already and adds the gateway CA. With no SSL_CERT_FILE the base is the first
+# system bundle: Debian/Ubuntu/Alpine, RHEL/Fedora, SUSE, the OpenSSL default some minimal images keep, and last
+# Python's certifi, the bundle Python uses when SSL_CERT_FILE is unset.
 TRUST_GATEWAY_CA_SCRIPT = """\
 set -e
-system=
+first() { for candidate in "$@"; do if [ -s "$candidate" ]; then printf %s "$candidate"; return; fi; done; }
+with_gateway_ca() { { if [ -n "$1" ]; then cat "$1"; echo; fi; cat "$GATEWAY_CA"; } > "$2"; }
 certifi=$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null || true)
-for candidate in "$TASK_BUNDLE" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
-/etc/ssl/ca-bundle.pem /etc/ssl/cert.pem "$certifi"; do
-  if [ -s "$candidate" ]; then system=$candidate; break; fi
-done
-{ if [ -n "$system" ]; then cat "$system"; echo; fi; cat "$GATEWAY_CA"; } > "$CA_BUNDLE"
+system=$(first "${SSL_CERT_FILE:-}" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+/etc/ssl/ca-bundle.pem /etc/ssl/cert.pem "$certifi")
+with_gateway_ca "$system" "$CA_BUNDLE"
+with_gateway_ca "$(first "${REQUESTS_CA_BUNDLE:-}" "$system")" "$REQUESTS_CA_BUNDLE_OUT"
+with_gateway_ca "$(first "${NODE_EXTRA_CA_CERTS:-}")" "$NODE_EXTRA_CA_CERTS_OUT"
 chmod 755 "${CA_BUNDLE%/*}"
-chmod 644 "$GATEWAY_CA" "$CA_BUNDLE"
+chmod 644 "$GATEWAY_CA" "$CA_BUNDLE" "$REQUESTS_CA_BUNDLE_OUT" "$NODE_EXTRA_CA_CERTS_OUT"
 printf %s "$system"
 """
 
@@ -110,7 +116,8 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
             TRUST_GATEWAY_CA_SCRIPT,
             GATEWAY_CA=GATEWAY_CA,
             CA_BUNDLE=CA_BUNDLE,
-            TASK_BUNDLE=self._persistent_env.get("SSL_CERT_FILE", ""),
+            REQUESTS_CA_BUNDLE_OUT=REQUESTS_CA_BUNDLE,
+            NODE_EXTRA_CA_CERTS_OUT=NODE_EXTRA_CA_CERTS,
         )
         if result.return_code != 0:
             raise RuntimeError(
@@ -124,7 +131,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                 self.session_id,
             )
         self._persistent_env.update(
-            SSL_CERT_FILE=CA_BUNDLE, REQUESTS_CA_BUNDLE=CA_BUNDLE, NODE_EXTRA_CA_CERTS=GATEWAY_CA
+            SSL_CERT_FILE=CA_BUNDLE, REQUESTS_CA_BUNDLE=REQUESTS_CA_BUNDLE, NODE_EXTRA_CA_CERTS=NODE_EXTRA_CA_CERTS
         )
 
     @override

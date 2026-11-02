@@ -30,7 +30,9 @@ from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
     GATEWAY_CA_FILE_KWARG,
+    GATEWAY_URL_OVERRIDE_ENVVAR,
     add_gateway_key_placeholder,
+    add_gateway_url_override,
     agent_gateway_origin,
     check_gateway_model,
     check_tasks_reach_the_gateway,
@@ -74,12 +76,18 @@ def _platform(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("NHX_CLIENT_SSL_CERT_FILE", raising=False)
     monkeypatch.delenv("SSL_CERT_FILE", raising=False)
     monkeypatch.setenv("NHX_BASE_URL", "http://localhost:8080")
-    _gateway_url_override(monkeypatch, None)
+    monkeypatch.delenv(GATEWAY_URL_OVERRIDE_ENVVAR, raising=False)
+    _platform_gateway_url_override(monkeypatch, None)
 
 
-def _gateway_url_override(monkeypatch: pytest.MonkeyPatch, override: str | None) -> None:
+def _platform_gateway_url_override(monkeypatch: pytest.MonkeyPatch, override: str | None) -> None:
     config = AgentsConfig(deployments=DeploymentsRunnerConfig(gateway_url_override=override))
     monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
+
+
+def _gateway_url_override(monkeypatch: pytest.MonkeyPatch, override: str) -> None:
+    """The override as a task Job receives it."""
+    monkeypatch.setenv(GATEWAY_URL_OVERRIDE_ENVVAR, override)
 
 
 @pytest.mark.parametrize(
@@ -143,6 +151,28 @@ def test_a_sandbox_reaches_the_gateway_url_deployed_agents_use(
     origin = agent_gateway_origin(sandboxed=True, agent_channel=agent_channel)
 
     assert origin == (expected or "https://nemo-helix-envoy.ns.svc.cluster.local:8080")
+
+
+@pytest.mark.parametrize("override", ["https://nemo-helix-envoy.ns.svc:8080", None], ids=["set", "unset"])
+def test_a_task_job_is_compiled_with_the_gateway_url_override_it_cannot_read(
+    monkeypatch: pytest.MonkeyPatch, override: str | None
+) -> None:
+    """A task Job's pod has no platform config, so the override reaches it only in the step's environment."""
+    _platform_gateway_url_override(monkeypatch, override)
+    storage = EnvironmentVariable(name="STORAGE", value="/data")
+
+    environment = add_gateway_url_override([storage])
+
+    expected = [] if override is None else [EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
+    assert environment == [storage, *expected]
+
+
+def test_a_task_job_without_the_override_ignores_the_platform_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pod's own config never carries the override, so reading it there would only differ in tests."""
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    _platform_gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
+
+    assert agent_gateway_origin(sandboxed=True) == "http://nemo-api.ns.svc:8080"
 
 
 def test_a_docker_trial_ignores_the_gateway_url_override(monkeypatch: pytest.MonkeyPatch) -> None:
