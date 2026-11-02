@@ -9,6 +9,7 @@ import asyncio
 import json
 import socket
 import tempfile
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -17,10 +18,13 @@ from threading import Event
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import jwt
 import pytest
+import time_machine
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
 from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import (
     BindingScope,
+    RegistrationClaims,
     RegistrationDenied,
     RegistrationTickets,
 )
@@ -33,11 +37,10 @@ KEY = b"test-only-registration-key-32-bytes"
 
 
 class Harness:
-    def __init__(self, directory: Path) -> None:
-        self.now = 1_800_000_000
-        self.clock = lambda: self.now
-        self.tickets = RegistrationTickets(KEY, "gateway-a", clock=self.clock)
-        self.registry = BindingRegistry(directory / "bindings.db", self.tickets, clock=self.clock)
+    def __init__(self, directory: Path, traveller: time_machine.Traveller) -> None:
+        self.traveller = traveller
+        self.tickets = RegistrationTickets(KEY, "gateway-a")
+        self.registry = BindingRegistry(directory / "bindings.db", self.tickets)
         self.scope = BindingScope(
             gateway_id="gateway-a",
             gateway_workspace="openshell-team",
@@ -118,8 +121,9 @@ class Harness:
 
 
 @pytest.fixture
-def harness(tmp_path: Path) -> Harness:
-    return Harness(tmp_path)
+def harness(tmp_path: Path) -> Iterator[Harness]:
+    with time_machine.travel(1_800_000_000, tick=False) as traveller:
+        yield Harness(tmp_path, traveller)
 
 
 @pytest.mark.asyncio
@@ -129,7 +133,7 @@ async def test_driver_rejects_mismatched_auth_mode_before_secret_access(harness:
 
     harness.scope = harness.scope.model_copy(update={"principal_id": None if auth_enabled else "user-1"})
     ticket = await harness.issue()
-    driver = CredentialDriver(harness.registry, harness.client, auth_enabled=auth_enabled, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client, auth_enabled=auth_enabled)
     harness.calls.clear()
     with pytest.raises(RegistrationDenied, match="authentication mode"):
         await driver._dispatch("StoreCredential", {**harness.owner.model_dump(), "value": ticket.get_secret_value()})
@@ -156,7 +160,7 @@ async def test_register_restart_retry_and_delete_preserve_user_secret(harness: H
     db_contents = harness.registry.path.read_bytes()
     assert ticket.get_secret_value().encode() not in db_contents
     assert harness.secret.encode() not in db_contents
-    restarted = BindingRegistry(harness.registry.path, harness.tickets, clock=harness.clock)
+    restarted = BindingRegistry(harness.registry.path, harness.tickets)
     assert restarted.resolve(harness.owner, handle).claims.secret_name == "service-token"
     restarted.delete(harness.owner, handle)
     restarted.delete(harness.owner, handle)
@@ -186,17 +190,90 @@ async def test_cross_provider_registration_resolution_and_deletion_denied(harnes
 async def test_ticket_tampering_expiry_and_gateway_audience(harness: Harness) -> None:
     ticket = await harness.issue()
     raw = ticket.get_secret_value()
-    for invalid in (SecretStr("raw-api-key"), SecretStr(raw[:-1] + ("0" if raw[-1] != "0" else "1"))):
+    header, payload, signature = raw.split(".")
+    tampered = f"{header}.{payload}.{'A' if signature[0] != 'A' else 'B'}{signature[1:]}"
+    for invalid in (SecretStr("raw-api-key"), SecretStr(tampered)):
         with pytest.raises(RegistrationDenied):
             harness.registry.register(harness.owner, invalid)
-    other_gateway = RegistrationTickets(KEY, "gateway-b", clock=harness.clock)
+    other_gateway = RegistrationTickets(KEY, "gateway-b")
     with pytest.raises(RegistrationDenied):
         other_gateway.verify(ticket)
     with pytest.raises(ValueError, match="another gateway"):
         BindingRegistry(harness.registry.path, other_gateway)
-    harness.now += 301
+    harness.traveller.shift(299)
+    harness.tickets.verify(ticket)
+    harness.traveller.shift(1)
     with pytest.raises(RegistrationDenied):
         harness.registry.register(harness.owner, ticket)
+
+
+@pytest.mark.asyncio
+async def test_registration_jwt_interoperates_without_changing_stored_claims(harness: Harness) -> None:
+    token = await harness.issue()
+    decoded = jwt.decode_complete(token.get_secret_value(), KEY, algorithms=["HS256"], audience="gateway-a")
+    assert decoded["header"]["typ"] == "nemo-registration+jwt"
+    payload = decoded["payload"]
+    assert payload["aud"] == "gateway-a"
+    assert payload["iat"] == int(time.time())
+    assert payload["exp"] == int(time.time()) + 300
+    assert payload["jti"]
+    claims = harness.tickets.verify(token)
+    stored = claims.model_dump_json()
+    assert {"gateway_id", "ticket_id", "issued_at", "expires_at"} <= json.loads(stored).keys()
+    assert RegistrationClaims.model_validate_json(stored) == claims
+    handle = harness.registry.register(harness.owner, token)
+    restarted = BindingRegistry(harness.registry.path, harness.tickets)
+    assert restarted.resolve(harness.owner, handle).claims == claims
+
+
+@pytest.mark.parametrize("missing", ["aud", "jti", "iat", "exp"])
+def test_registration_requires_standard_claims(harness: Harness, missing: str) -> None:
+    claims = {
+        **harness.scope.model_dump(mode="json", by_alias=True),
+        "jti": "registration-id",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 300,
+        "binding_expires_at": int(time.time()) + 3600,
+    }
+    del claims[missing]
+    token = jwt.encode(claims, KEY, algorithm="HS256", headers={"typ": "nemo-registration+jwt"})
+    with pytest.raises(RegistrationDenied):
+        harness.registry.register(harness.owner, SecretStr(token))
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "key", "token_type", "issued", "expires", "binding_expires"),
+    [
+        ("HS384", KEY, "nemo-registration+jwt", 0, 300, 3600),
+        ("none", "", "nemo-registration+jwt", 0, 300, 3600),
+        ("HS256", b"another-synthetic-key-32-bytes!!!!", "nemo-registration+jwt", 0, 300, 3600),
+        ("HS256", KEY, "JWT", 0, 300, 3600),
+        ("HS256", KEY, "nemo-registration+jwt", 1, 300, 3600),
+        ("HS256", KEY, "nemo-registration+jwt", -300, 0, 3300),
+        ("HS256", KEY, "nemo-registration+jwt", 0, 301, 3600),
+        ("HS256", KEY, "nemo-registration+jwt", 0, 300, 3601),
+        ("HS256", KEY, "nemo-registration+jwt", 0, 300, 299),
+    ],
+)
+def test_registration_rejects_other_token_types_and_invalid_lifetimes(
+    harness: Harness,
+    algorithm: str,
+    key: bytes | str,
+    token_type: str,
+    issued: int,
+    expires: int,
+    binding_expires: int,
+) -> None:
+    claims = {
+        **harness.scope.model_dump(mode="json", by_alias=True),
+        "jti": "registration-id",
+        "iat": int(time.time()) + issued,
+        "exp": int(time.time()) + expires,
+        "binding_expires_at": int(time.time()) + binding_expires,
+    }
+    token = jwt.encode(claims, key, algorithm=algorithm, headers={"typ": token_type})
+    with pytest.raises(RegistrationDenied):
+        harness.registry.register(harness.owner, SecretStr(token))
 
 
 @pytest.mark.asyncio
@@ -223,7 +300,7 @@ async def test_staged_update_does_not_revoke_old_handle_until_gateway_commit(har
     # Gateway rolls back the staged write: old still works.
     harness.registry.delete(harness.owner, new)
     assert harness.registry.resolve(harness.owner, old)
-    harness.now += 3600
+    harness.traveller.shift(3600)
     with pytest.raises(RegistrationDenied):
         harness.registry.resolve(harness.owner, old)
 
@@ -234,7 +311,7 @@ async def test_concurrent_registry_startup_and_registration(harness: Harness, tm
     path = tmp_path / "concurrent.db"
 
     def register(_: int) -> str:
-        registry = BindingRegistry(path, harness.tickets, clock=harness.clock)
+        registry = BindingRegistry(path, harness.tickets)
         return registry.register(harness.owner, ticket)
 
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -285,7 +362,7 @@ async def test_protocol_negotiation_rejects_unmet_contract(harness: Harness, gat
     pytest.importorskip("grpc")
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
 
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client)
     with pytest.raises(RegistrationDenied):
         await driver._dispatch("GetCapabilities", {"gateway": gateway})
 
@@ -298,7 +375,7 @@ async def test_invalid_batch_does_not_read_any_secrets(harness: Harness) -> None
     handle = harness.registry.register(harness.owner, await harness.issue())
     harness.calls.clear()
     lookup = {**harness.owner.model_dump(), "handle": {"driver": "nemo", "handle": handle}, "request_id": "one"}
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client)
     with pytest.raises(RegistrationDenied):
         await driver._dispatch(
             "ResolveCredentials",
@@ -355,7 +432,7 @@ async def test_real_grpc_registration_resolution_and_delete(
 
     if not auth_enabled:
         harness.scope = harness.scope.model_copy(update={"principal_id": None})
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, auth_enabled=auth_enabled)
+    driver = CredentialDriver(harness.registry, harness.client, auth_enabled=auth_enabled)
     socket = socket_directory / "driver.sock"
     async with running_server(driver, socket):
         async with grpc.aio.insecure_channel(f"unix:{socket}") as channel:
@@ -407,7 +484,10 @@ async def test_real_grpc_registration_resolution_and_delete(
             result = await call("ResolveCredentials", {"credentials": [lookup]})
             assert result["credentials"][0]["value"] == harness.secret
             assert result["credentials"][0]["request_id"] == "read-1"
-            assert datetime.fromisoformat(result["credentials"][0]["expiration_time"]).timestamp() == harness.now + 300
+            assert (
+                datetime.fromisoformat(result["credentials"][0]["expiration_time"]).timestamp()
+                == int(time.time()) + 300
+            )
             # Rotation is visible on the next driver resolution; no value cache.
             harness.secret = "rotated-secret"
             result = await call("ResolveCredentials", {"credentials": [lookup]})
@@ -452,11 +532,11 @@ async def test_revoke_or_expiry_during_secret_read_wins(harness: Harness, change
         if change == "revoke":
             harness.registry.revoke_job("job-1")
         else:
-            harness.now += 31
+            harness.traveller.shift(31)
         return response
 
     harness.client.access_secret = AsyncMock(side_effect=access)
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, cache_lifetime=30)
+    driver = CredentialDriver(harness.registry, harness.client, cache_lifetime=30)
     with pytest.raises(RegistrationDenied):
         await driver._dispatch(
             "ResolveCredentials",
@@ -480,8 +560,8 @@ async def test_configured_credential_lifetime_is_capped_by_binding(harness: Harn
 
     handle = harness.registry.register(harness.owner, await harness.issue())
     claims = harness.registry.resolve(harness.owner, handle).claims
-    harness.now = claims.binding_expires_at - 100
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock, cache_lifetime=lifetime)
+    harness.traveller.move_to(claims.binding_expires_at - 100)
+    driver = CredentialDriver(harness.registry, harness.client, cache_lifetime=lifetime)
     response = await driver._dispatch(
         "ResolveCredentials",
         {
@@ -495,7 +575,7 @@ async def test_configured_credential_lifetime_is_capped_by_binding(harness: Harn
         },
     )
     expires = datetime.fromisoformat(wire.data(response)["credentials"][0]["expiration_time"]).timestamp()
-    assert expires == min(harness.now + lifetime, claims.binding_expires_at)
+    assert expires == min(int(time.time()) + lifetime, claims.binding_expires_at)
 
 
 @pytest.mark.parametrize("lifetime", [0, -1, 3601])
@@ -527,7 +607,7 @@ async def test_job_binding_tracks_live_execution_identity(harness: Harness, chan
     )
     handle = harness.registry.register(harness.owner, await harness.issue())
     harness.calls.clear()
-    harness.now += 7200  # A live workload is not limited to a one-hour registration lease.
+    harness.traveller.shift(7200)  # A live workload is not limited to a one-hour registration lease.
     if change in {"completed", "cancelling", "paused"}:
         harness.job_status = change
     elif change == "step-error":
@@ -536,7 +616,7 @@ async def test_job_binding_tracks_live_execution_identity(harness: Harness, chan
         harness.attempt = "attempt-2"
     elif change == "new-step":
         harness.step_id = "step-2"
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client)
     request = {
         "credentials": [
             {**harness.owner.model_dump(), "handle": {"driver": "nemo", "handle": handle}, "request_id": "read"}
@@ -561,7 +641,7 @@ async def test_deployment_binding_tracks_live_entity(harness: Harness, change: s
     from nemo_deployments_plugin.entities import Deployment
     from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    driver = CredentialDriver(harness.registry, harness.client)
     workload = GatewayWorkload(kind="deployment", workspace="helix-team", name="agent", id="dep-1")
     entity = Deployment(
         name="agent",
@@ -588,15 +668,15 @@ async def test_standalone_expiry_after_final_registry_check_denies_response(harn
 
     handle = harness.registry.register(harness.owner, await harness.issue())
     claims = harness.registry.resolve(harness.owner, handle).claims
-    harness.now = claims.binding_expires_at - 1
-    driver = CredentialDriver(harness.registry, harness.client, clock=harness.clock)
+    harness.traveller.move_to(claims.binding_expires_at - 1)
+    driver = CredentialDriver(harness.registry, harness.client)
     checks = 0
 
     async def advance(workload: GatewayWorkload | None) -> None:
         nonlocal checks
         checks += 1
         if checks == 2:
-            harness.now += 2
+            harness.traveller.shift(2)
 
     with patch.object(driver, "_require_active_workload", side_effect=advance):
         with pytest.raises(RegistrationDenied, match="cache lifetime"):

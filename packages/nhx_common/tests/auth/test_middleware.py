@@ -1310,6 +1310,78 @@ class TestBearerTokenAuth:
         mock_authorize.assert_called_once()
 
 
+class TestApiKeyHeaderOnModelRoutes:
+    """Anthropic-style clients send their key as ``x-api-key``; on model routes it authenticates like a bearer token."""
+
+    GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/default/anthropic/-/v1/messages"
+
+    @pytest.fixture
+    def config(self) -> AuthConfig:
+        return AuthConfig(
+            enabled=True,
+            allow_unsigned_jwt=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=OIDCConfig(enabled=False),
+        )
+
+    def _client(self, config: AuthConfig) -> TestClient:
+        app = create_test_app(config)
+
+        @app.post(self.GATEWAY_PATH)
+        async def messages():
+            return {"status": "ok"}
+
+        @app.post("/apis/models/v2/workspaces/default/models")
+        async def models():
+            return {"status": "ok"}
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def _claims(self) -> TokenClaims:
+        return TokenClaims(subject="admin@example.com", email="admin@example.com", groups=[], scopes=[], raw_claims={})
+
+    @pytest.mark.parametrize(
+        ("path", "headers", "validated"),
+        [
+            pytest.param(GATEWAY_PATH, {"x-api-key": "trial-jwt"}, "trial-jwt", id="x-api-key on a model route"),
+            pytest.param(
+                GATEWAY_PATH,
+                {"Authorization": "Bearer bearer-jwt", "x-api-key": "other"},
+                "bearer-jwt",
+                id="a bearer token wins over x-api-key",
+            ),
+            pytest.param(
+                "/apis/models/v2/workspaces/default/models",
+                {"x-api-key": "trial-jwt"},
+                None,
+                id="x-api-key ignored off model routes",
+            ),
+        ],
+    )
+    def test_the_token_authenticated_is_the_bearer_else_x_api_key_on_model_routes(
+        self, config: AuthConfig, path: str, headers: dict[str, str], validated: str | None
+    ) -> None:
+        client = self._client(config)
+        with (
+            patch("nhx.common.auth.jwt.JWTValidator.validate_token", return_value=self._claims()) as validate,
+            patch("nhx.common.auth.client.AuthClient.authorize_request", return_value=MagicMock(allowed=True)),
+        ):
+            response = client.post(path, headers=headers)
+
+        if validated is None:
+            validate.assert_not_called()
+        else:
+            assert validate.call_args.args[0] == validated
+            assert response.status_code == 200
+
+    def test_an_invalid_key_in_x_api_key_is_refused(self, config: AuthConfig) -> None:
+        client = self._client(config)
+        with patch("nhx.common.auth.jwt.JWTValidator.validate_token", return_value=None):
+            response = client.post(self.GATEWAY_PATH, headers={"x-api-key": "not-a-token"})
+
+        assert response.status_code == 401
+
+
 class TestPrincipalHeadersAuth:
     """Tests for X-NHX-Principal-* header authentication."""
 

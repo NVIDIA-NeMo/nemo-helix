@@ -79,11 +79,11 @@ describe('AgentDetailRoute', () => {
 
     expect(await screen.findByTestId('nv-page-header-heading')).toHaveTextContent(agentName);
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Deployments' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Deployment' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Evaluations' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Agent config' })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Configuration' })).not.toBeInTheDocument();
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: 'Run Evaluation' })).toHaveLength(2);
@@ -104,7 +104,7 @@ describe('AgentDetailRoute', () => {
     const user = userEvent.setup();
     renderDetail();
 
-    await user.click(await screen.findByRole('tab', { name: 'Details' }));
+    await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
 
     expect(await screen.findByRole('button', { name: 'Deploy' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Evaluation' })).not.toBeInTheDocument();
@@ -131,7 +131,7 @@ describe('AgentDetailRoute', () => {
     );
     renderDetail();
 
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
 
     expect(await screen.findByText(/does not have a configuration/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
@@ -167,7 +167,7 @@ describe('AgentDetailRoute', () => {
     renderDetail();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
     // The tag lives in the packaging modal now; the trigger is what reports it is ready.
     await screen.findByText('Image ready');
     await user.click(screen.getByRole('button', { name: /Manage image/ }));
@@ -184,7 +184,7 @@ describe('AgentDetailRoute', () => {
     renderDetail();
     const user = userEvent.setup();
 
-    await user.click(await screen.findByRole('tab', { name: 'Deployments' }));
+    await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
     await screen.findByText('Image ready');
     await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
 
@@ -192,24 +192,17 @@ describe('AgentDetailRoute', () => {
     expect(screen.queryByRole('textbox', { name: 'Container Image' })).not.toBeInTheDocument();
   });
 
-  it('shows the agent spec on the details tab and masks secrets', async () => {
+  it('opens the agent config as masked JSON from the settings button', async () => {
     const user = userEvent.setup();
     renderDetail();
 
-    await user.click(await screen.findByRole('tab', { name: 'Details' }));
+    await screen.findByText('nat-workflow-v1');
+    await user.click(screen.getByRole('button', { name: 'Agent config' }));
 
-    expect(screen.getByRole('tab', { name: 'Details' })).toHaveAttribute('aria-selected', 'true');
-    // Structured panels
-    expect(await screen.findByText('Summary')).toBeInTheDocument();
-    expect(screen.getByText('Workflow')).toBeInTheDocument();
-    expect(screen.getByText('Models')).toBeInTheDocument();
-    expect(screen.getByText('Tools')).toBeInTheDocument();
-    // Config values surfaced from the spec
-    expect(screen.getByText('nat-workflow-v1')).toBeInTheDocument();
-    expect(screen.getByText('react_agent')).toBeInTheDocument();
-    // The llm api_key is masked, never shown raw
-    expect(screen.queryByText('not-used')).not.toBeInTheDocument();
-    expect(screen.getByText('••••••••')).toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() => expect(dialog).toHaveTextContent('react_agent'));
+    expect(dialog).toHaveTextContent('••••••••');
+    expect(dialog).not.toHaveTextContent('not-used');
   });
 
   it("shows the agent's description in the overview Details panel, not the page header", async () => {

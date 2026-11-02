@@ -530,6 +530,39 @@ class _FakeExchangeProvider:
 
 
 class TestTaskClientWorkloadIdentity:
+    def test_task_client_uses_injected_subprocess_access_token(self, monkeypatch, tmp_path):
+        token_file = tmp_path / ".nhx-access-token"
+        token_file.write_text("subprocess-task-token", encoding="utf-8")
+        monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
+        monkeypatch.setenv("NHX_PRINCIPAL", '{"id": "user:alice@acme.com"}')
+
+        client = cf.get_task_nemo_client("evals")
+
+        assert client._auth is not None
+        assert client._auth.get_access_token() == "subprocess-task-token"
+        assert "X-NHX-Principal-Id" not in client._default_headers
+        assert client._default_headers.get("X-NHX-Internal") == "true"
+
+    def test_ambient_user_access_token_does_not_replace_the_task_identity(self, monkeypatch):
+        monkeypatch.setenv("NHX_ACCESS_TOKEN", "user-cli-token")
+        monkeypatch.setenv("NHX_PRINCIPAL", '{"id": "user:alice@acme.com"}')
+
+        client = cf.get_task_nemo_client("evals")
+
+        assert client._default_headers["X-NHX-Principal-Id"] == "service:evals"
+
+    async def test_async_task_client_uses_injected_subprocess_access_token(self, monkeypatch, tmp_path):
+        token_file = tmp_path / ".nhx-access-token"
+        token_file.write_text("subprocess-task-token", encoding="utf-8")
+        monkeypatch.setenv("NHX_ACCESS_TOKEN_FILE", str(token_file))
+
+        client = cf.get_async_task_nemo_client("evals")
+
+        assert client._auth is not None
+        assert await client._auth.get_access_token_or_none_async() == "subprocess-task-token"
+        assert "X-NHX-Principal-Id" not in client._default_headers
+        assert client._default_headers.get("X-NHX-Internal") == "true"
+
     @pytest.fixture
     def _stub_exchange(self, monkeypatch: pytest.MonkeyPatch):
         captured: dict[str, str] = {}

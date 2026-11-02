@@ -71,8 +71,10 @@ export const ExpandableMessage: FC<Props> = ({
     <Stack gap="2">
       {content}
       {exceedsLimit && (
-        <Anchor onClick={toggleExpanded} {...attributes?.Anchor}>
-          {isExpanded ? 'Show less' : 'Show more'}
+        <Anchor asChild {...attributes?.Anchor}>
+          <button type="button" aria-expanded={isExpanded} onClick={toggleExpanded}>
+            {isExpanded ? 'Show less' : 'Show more'}
+          </button>
         </Anchor>
       )}
     </Stack>

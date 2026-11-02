@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 _ACTIVE_JOB_STATUSES = [
     "created",
+    "queued",
     "pending",
     "active",
     "cancelling",

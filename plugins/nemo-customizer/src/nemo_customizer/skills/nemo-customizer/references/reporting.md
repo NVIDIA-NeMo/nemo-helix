@@ -53,7 +53,7 @@ For **rl (DPO)** the output is a **full-weight model entity** (no adapter): labe
 | **Output adapter fileset** | `output.name` from job JSON. Label **Output adapter fileset (planned):** when status is `error` or `cancelled` and no output was registered |
 | **Status** | Top-level `status` from `nemo jobs get-status` — not step-level status |
 | **Final train loss** | Last entry in `status_details.metrics.train_loss` (or nested under a step's `status_details.metrics`). Use the **last** `value` in the list — not `status_details.train_loss` alone (that is the most recent logged step, which may differ from epoch-average loss on some backends). Round to 3 decimal places. |
-| **Final validation loss** | Last entry in `status_details.metrics.val_loss`. If the list is empty, report `n/a (no validation run)` and note whether validation data was configured. Automodel validates once per epoch by default. Unsloth validates once per epoch when `dataset.validation_path` is set and `schedule.eval_steps` is omitted (platform default: `max(1, effective_steps - 1)`). |
+| **Final validation loss** | Last entry in `status_details.metrics.val_loss`. If the list is empty, report `n/a (no validation run)` and note whether validation data was configured. Automodel validates once per epoch by default. Unsloth validates once per epoch when `schedule.eval_steps` is omitted (platform default: `max(1, effective_steps - 1)`). |
 | **Base vs tuned** | The two nemo-evals runs (`post-training-eval.md`). If scoring failed, replace the table with `Evaluation failed: <reason>`; the training result stands. GRPO: validation reward at start and end instead |
 | **Notes** | See **Notes by status** below |
 

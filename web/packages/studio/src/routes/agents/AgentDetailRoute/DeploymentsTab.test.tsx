@@ -3,10 +3,12 @@
 
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
+import { server } from '@studio/mocks/node';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
 
 const STAGED = 'a'.repeat(40);
 const MOVED = 'b'.repeat(40);
@@ -20,6 +22,10 @@ const failedDeployment = {
   status: 'failed',
   error: LONG_ERROR,
 } as AgentDeployment;
+
+const DELETING_MESSAGE = 'Waiting for backend to delete deployment';
+
+const DEPLOYMENT_URL = '*/apis/agents/v2/workspaces/:workspace/deployments/:name';
 
 const source = (revision: string): AgentSpecSource => ({
   owner: 'acme',
@@ -127,17 +133,28 @@ describe('DeploymentsTab staged commit', () => {
 });
 
 describe('DeploymentsTab', () => {
+  it('shows why a delete is stuck, which the list endpoint withholds', async () => {
+    server.use(
+      http.get(DEPLOYMENT_URL, ({ params }) =>
+        HttpResponse.json({ name: params.name, status: 'deleting', error: DELETING_MESSAGE })
+      )
+    );
+    renderTab([deployment({ workspace: 'default', status: 'deleting' })]);
+
+    expect(await screen.findByText(DELETING_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText('Show more')).not.toBeInTheDocument();
+  });
+
   it('makes a long failure message readable instead of ellipsising it away', async () => {
+    server.use(http.get(DEPLOYMENT_URL, () => HttpResponse.json(failedDeployment)));
     const user = userEvent.setup();
     renderTab([failedDeployment]);
 
-    const toggle = screen.getByRole('button', { name: 'Show full error' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText(LONG_ERROR)).not.toBeInTheDocument();
 
-    await user.click(toggle);
+    await user.click(await screen.findByText('Show more'));
 
-    const expanded = screen.getByRole('button', { name: 'Show less' });
-    expect(expanded).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Show less')).toBeInTheDocument();
     expect(screen.getByText(LONG_ERROR)).toBeInTheDocument();
   });
 
@@ -158,6 +175,7 @@ describe('DeploymentsTab', () => {
   });
 
   it('offers packaging from the deployments header', () => {
+    server.use(http.get(DEPLOYMENT_URL, () => HttpResponse.json(failedDeployment)));
     renderTab([failedDeployment]);
 
     expect(screen.getByRole('button', { name: /Build image|Manage image/ })).toBeInTheDocument();
@@ -188,6 +206,6 @@ describe('DeploymentsTab', () => {
       } as AgentDeployment,
     ]);
 
-    expect(screen.queryByRole('button', { name: /error/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Show more')).not.toBeInTheDocument();
   });
 });

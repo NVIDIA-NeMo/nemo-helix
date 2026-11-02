@@ -356,7 +356,10 @@ class TasksetRunSubmitResponse(TasksetRunStatus):
 
     warnings: list[str] = Field(
         default_factory=list,
-        description="Advisory notices about this caller's overlapping active runs on the same taskset revision.",
+        description=(
+            "Advisory notices for this submission: this caller's overlapping active runs on the same taskset "
+            "revision, sandbox defaults applied, and what tasks ask for that the run does differently."
+        ),
     )
 
 

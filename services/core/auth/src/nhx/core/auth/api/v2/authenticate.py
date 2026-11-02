@@ -19,8 +19,9 @@ from nemo_helix_plugin.auth.types import (
 from nemo_helix_plugin.auth.types import (
     AuthenticateResponse as AuthenticateResponse,
 )
-from nhx.common.auth.bearer import MalformedBearerTokenError, parse_bearer_authorization_header
+from nhx.common.auth.bearer import MalformedBearerTokenError
 from nhx.common.auth.jwt import JWTValidator
+from nhx.common.auth.middleware import request_bearer_token
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
 from nhx.common.auth.token_resolver import ResolvedBearerToken, resolve_bearer_token
 from nhx.common.config import AuthConfig, get_auth_config
@@ -192,9 +193,12 @@ class TokenIssuerBoundaryMisconfigurationError(Exception):
     """Raised when IdP and NeMo-issued token validation paths overlap."""
 
 
-def _bearer_token_from_request(request: Request) -> str:
+def _bearer_token_from_request(request: Request, original_path: str | None = None) -> str:
+    """The request's bearer token; for an ext-authz callout, read as the original request would carry it."""
     try:
-        token = parse_bearer_authorization_header(request.headers.get("authorization"))
+        token = request_bearer_token(
+            "/" + original_path if original_path is not None else request.url.path, request.headers
+        )
     except MalformedBearerTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid bearer token") from exc
     if token is None:
@@ -405,8 +409,9 @@ async def _resolve_authenticated_bearer_token(
     workload_token_exchange_service: WorkloadTokenExchangeService,
     access_key_registry: AccessKeyRegistry,
     issuer_boundary: _IssuerBoundary,
+    original_path: str | None = None,
 ) -> ResolvedBearerToken:
-    token = _bearer_token_from_request(request)
+    token = _bearer_token_from_request(request, original_path)
     config = issuer_boundary.config
     jwt_validator = issuer_boundary.jwt_validator
 
@@ -465,6 +470,7 @@ async def _ext_authz_bearer_token(
     access_key_registry: AccessKeyRegistry,
     issuer_boundary: _IssuerBoundary,
     credential_store: AccountCredentialStore,
+    original_path: str | None = None,
 ) -> Response:
     if request.headers.get("authorization") is None and request.cookies.get(WEB_SESSION_COOKIE):
         if not web_sessions_enabled(get_auth_config()):
@@ -493,6 +499,7 @@ async def _ext_authz_bearer_token(
         workload_token_exchange_service,
         access_key_registry,
         issuer_boundary,
+        original_path,
     )
     if get_auth_config().oidc.workload is not None:
         return Response(status_code=status.HTTP_200_OK)
@@ -565,11 +572,11 @@ async def ext_authz_bearer_token_prefixed(
     dependencies: AuthenticateDependency,
     credential_store: CredentialStoreDependency,
 ) -> Response:
-    _ = original_path
     return await _ext_authz_bearer_token(
         request,
         dependencies.workload_token_exchange_service,
         dependencies.access_key_registry,
         dependencies.issuer_boundary,
         credential_store,
+        original_path,
     )

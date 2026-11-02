@@ -31,7 +31,7 @@ if [[ "$mode" == git ]]; then
     fi
     uv build --wheel --no-build-isolation --out-dir "$out" "$src"
 elif [[ "$mode" == sdist ]]; then
-    # uv 0.11.33 has no `uv pip download`. Pull the sdist URL from the PyPI JSON API.
+    # uv 0.13.4 has no `uv pip download`. Pull the sdist URL from the PyPI JSON API.
     spec="${2:?sdist mode requires SPEC}"
     name="${spec%%==*}"
     version="${spec#*==}"

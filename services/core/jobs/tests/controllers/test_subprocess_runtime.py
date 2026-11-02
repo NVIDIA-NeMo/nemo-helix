@@ -4,6 +4,7 @@
 import json
 import threading
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,16 +13,27 @@ from nhx.common.auth import Principal
 from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.jobs.constants import NEMO_JOB_SECRETS_ENVVAR
 from nhx.core.jobs.controllers.backends.subprocess_runtime import (
+    DEFAULT_LOG_EXPORT_INTERVAL_MS,
+    DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE,
+    MAX_LOG_EXPORT_MAX_BATCH_SIZE,
     NHX_JOB_LAUNCHER_OTLP_LOGS_SOCKET_PATH_ENVVAR,
     NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR,
+    NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR,
+    NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR,
     SERVICE_JOBS_BEARER_HEADERS,
     SubprocessOtelLogger,
     _build_otlp_log_exporter,
     _UnixSocketOTLPSession,
+    create_otel_logger,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
     parse_secret_references,
+    refresh_subprocess_task_auth,
     start_log_capture,
+    task_access_token_refresh_interval,
+    write_task_access_token,
 )
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
 
 def test_parse_secret_references():
@@ -60,7 +72,11 @@ def test_inject_secret_env_vars():
     response.__enter__.return_value = response
     response.__exit__.return_value = None
 
-    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen:
+    auth_config = SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None))
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
         updated_env = inject_secret_env_vars(env.copy())
 
     assert updated_env["HF_TOKEN"] == "secret-value"
@@ -71,6 +87,132 @@ def test_inject_secret_env_vars():
     assert request.get_header("X-nhx-principal-on-behalf-of") == "creator@example.com"
     assert request.get_header("X-nhx-subject-account-id") == "account-creator"
     assert request.get_header("X-nhx-subject-aliases") == "legacy-creator,creator@example.com"
+
+
+def test_inject_secret_env_vars_uses_delegated_workload_token_when_enabled(tmp_path):
+    token_file = tmp_path / "config" / ".nhx-access-token"
+    principal = Principal(
+        id="creator@example.com",
+        account_id="account-creator",
+        authz_aliases=["creator@example.com"],
+    )
+    env = {
+        NEMO_JOB_SECRETS_ENVVAR: "HF_TOKEN=default/hf-token",
+        NHX_PRINCIPAL_ENVVAR: principal.model_dump_json(exclude_none=True),
+        "NHX_SECRETS_URL": "http://secrets.example",
+    }
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object()))
+    response = MagicMock()
+    response.read.return_value = json.dumps({"value": "secret-value"}).encode("utf-8")
+    response.__enter__.return_value = response
+    response.__exit__.return_value = None
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.urlopen", return_value=response) as mock_urlopen,
+    ):
+        provider_cls.return_value.get_access_token.return_value = "jobs-workload-token"
+        inject_subprocess_task_auth(env, token_file)
+        updated_env = inject_secret_env_vars(env.copy())
+
+    assert updated_env["HF_TOKEN"] == "secret-value"
+    assert "NHX_ACCESS_TOKEN" not in updated_env
+    assert updated_env["NHX_ACCESS_TOKEN_FILE"] == str(token_file)
+    assert token_file.read_text(encoding="utf-8") == "jobs-workload-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
+    provider_cls.assert_called_once_with(auth_config, "jobs", principal)
+    request = mock_urlopen.call_args.args[0]
+    assert request.get_header("Authorization") == "Bearer jobs-workload-token"
+    assert request.get_header("X-nhx-principal-id") is None
+    assert request.get_header("X-nhx-principal-on-behalf-of") is None
+
+
+@pytest.mark.parametrize(
+    ("auth_config", "principal_json"),
+    [
+        pytest.param(SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None)), None, id="auth-disabled"),
+        pytest.param(SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())), None, id="no-principal"),
+        pytest.param(
+            SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())), "{not json", id="bad-principal"
+        ),
+        pytest.param(
+            SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object())),
+            '{"id": ""}',
+            id="empty-principal-id",
+        ),
+    ],
+)
+def test_inject_subprocess_task_auth_withholds_token_without_delegable_principal(auth_config, principal_json, tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    env = {"NHX_ACCESS_TOKEN": "stale", "NHX_ACCESS_TOKEN_FILE": "/stale"}
+    if principal_json is not None:
+        env[NHX_PRINCIPAL_ENVVAR] = principal_json
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+    ):
+        inject_subprocess_task_auth(env, token_file)
+
+    provider_cls.assert_not_called()
+    assert "NHX_ACCESS_TOKEN" not in env
+    assert "NHX_ACCESS_TOKEN_FILE" not in env
+    assert not token_file.exists()
+
+
+def test_write_task_access_token_does_not_follow_a_pre_planted_temp_link(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    victim = tmp_path / "victim"
+    victim.write_text("keep", encoding="utf-8")
+    (tmp_path / ".nhx-access-token.tmp").symlink_to(victim)
+
+    write_task_access_token(token_file, "new-token")
+
+    assert victim.read_text(encoding="utf-8") == "keep"
+    assert token_file.read_text(encoding="utf-8") == "new-token"
+    assert token_file.stat().st_mode & 0o777 == 0o600
+
+
+def test_refresh_subprocess_task_auth_rotates_token_file(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    token_file.write_text("old-token", encoding="utf-8")
+    env = {NHX_PRINCIPAL_ENVVAR: Principal(id="creator@example.com").model_dump_json(exclude_none=True)}
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=object()))
+
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config),
+        patch(
+            "nhx.core.jobs.controllers.backends.subprocess_runtime.ServiceWorkloadAccessTokenProvider"
+        ) as provider_cls,
+    ):
+        provider_cls.return_value.get_access_token.return_value = "new-token"
+        assert refresh_subprocess_task_auth(env, token_file) is True
+
+    assert token_file.read_text(encoding="utf-8") == "new-token"
+
+
+def test_refresh_subprocess_task_auth_reports_when_nothing_could_be_minted(tmp_path):
+    token_file = tmp_path / ".nhx-access-token"
+    auth_config = SimpleNamespace(enabled=False, oidc=SimpleNamespace(workload=None))
+    env = {NHX_PRINCIPAL_ENVVAR: Principal(id="creator@example.com").model_dump_json(exclude_none=True)}
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config):
+        assert refresh_subprocess_task_auth(env, token_file) is False
+
+    assert not token_file.exists()
+
+
+def test_task_access_token_refresh_interval_is_half_the_token_ttl():
+    workload = SimpleNamespace(token_ttl_seconds=300)
+    auth_config = SimpleNamespace(enabled=True, oidc=SimpleNamespace(workload=workload))
+
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime.get_auth_config", return_value=auth_config):
+        assert task_access_token_refresh_interval() == 150
 
 
 def test_inject_secret_env_vars_rejects_missing_value_field():
@@ -200,3 +342,178 @@ def test_build_otlp_log_exporter_rejects_uds_without_socket_path():
             {NHX_JOB_LAUNCHER_OTLP_LOGS_TRANSPORT_ENVVAR: "uds"},
             "http://nemo-helix.local/otlp/v1/logs",
         )
+
+
+def _create_logger_capturing_batch_kwargs(env: dict[str, str]) -> dict:
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs", **env}
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter"),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.BatchLogRecordProcessor") as processor,
+    ):
+        create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    return processor.call_args.kwargs
+
+
+def test_create_otel_logger_uses_low_file_count_batching_defaults():
+    kwargs = _create_logger_capturing_batch_kwargs({})
+
+    assert kwargs["schedule_delay_millis"] == DEFAULT_LOG_EXPORT_INTERVAL_MS
+    assert kwargs["max_export_batch_size"] == DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+    assert kwargs["max_queue_size"] >= kwargs["max_export_batch_size"]
+    # Guard against regressing to the OTEL SDK defaults (5s / 512 records), which create many tiny files.
+    assert kwargs["schedule_delay_millis"] >= 5000
+
+
+def test_create_otel_logger_batching_is_configurable_via_env():
+    kwargs = _create_logger_capturing_batch_kwargs(
+        {NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR: "1500", NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "100"}
+    )
+
+    assert kwargs["schedule_delay_millis"] == 1500
+    assert kwargs["max_export_batch_size"] == 100
+    assert kwargs["max_queue_size"] >= 100
+
+
+def test_create_otel_logger_keeps_default_queue_floor_for_small_batches():
+    kwargs = _create_logger_capturing_batch_kwargs({NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "1"})
+
+    assert kwargs["max_export_batch_size"] == 1
+    assert kwargs["max_queue_size"] == DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+
+
+def test_create_otel_logger_clamps_oversized_batch_size_env():
+    kwargs = _create_logger_capturing_batch_kwargs({NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "1000000000"})
+
+    assert kwargs["max_export_batch_size"] == MAX_LOG_EXPORT_MAX_BATCH_SIZE
+    assert kwargs["max_queue_size"] == MAX_LOG_EXPORT_MAX_BATCH_SIZE * 4
+
+
+@pytest.mark.parametrize("bad_value", ["abc", "0", "-5", "  "])
+def test_create_otel_logger_ignores_invalid_batching_env(bad_value):
+    kwargs = _create_logger_capturing_batch_kwargs(
+        {NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR: bad_value, NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: bad_value}
+    )
+
+    assert kwargs["schedule_delay_millis"] == DEFAULT_LOG_EXPORT_INTERVAL_MS
+    assert kwargs["max_export_batch_size"] == DEFAULT_LOG_EXPORT_MAX_BATCH_SIZE
+
+
+_BLRP_ENVVARS = ("OTEL_BLRP_SCHEDULE_DELAY", "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE", "OTEL_BLRP_MAX_QUEUE_SIZE")
+
+
+def _real_processor_settings(env: dict[str, str]) -> tuple[float, int, int]:
+    """Build the logger with the real SDK processor and return (interval ms, batch size, queue size)."""
+    created: list[BatchLogRecordProcessor] = []
+
+    def _capture(*args, **kwargs):
+        processor = BatchLogRecordProcessor(*args, **kwargs)
+        created.append(processor)
+        return processor
+
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs", **env}
+    with (
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter"),
+        patch("nhx.core.jobs.controllers.backends.subprocess_runtime.BatchLogRecordProcessor", side_effect=_capture),
+    ):
+        otel_logger = create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    assert otel_logger is not None
+    try:
+        batch_processor = created[0]._batch_processor
+        return (
+            batch_processor._schedule_delay_millis,
+            batch_processor._max_export_batch_size,
+            batch_processor._max_queue_size,
+        )
+    finally:
+        otel_logger.close()
+
+
+@pytest.mark.parametrize(
+    ("otel_env", "nhx_env", "expected"),
+    [
+        # No overrides anywhere: our defaults.
+        ({}, {}, (5000, 2048, 8192)),
+        # Each OTEL_BLRP_* setting alone is honored; the others keep our defaults.
+        ({"OTEL_BLRP_SCHEDULE_DELAY": "30000"}, {}, (30000, 2048, 8192)),
+        ({"OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096"}, {}, (5000, 4096, 16384)),
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "16384"}, {}, (5000, 2048, 16384)),
+        # All three together.
+        (
+            {
+                "OTEL_BLRP_SCHEDULE_DELAY": "30000",
+                "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096",
+                "OTEL_BLRP_MAX_QUEUE_SIZE": "16384",
+            },
+            {},
+            (30000, 4096, 16384),
+        ),
+        # An NHX override wins for its own setting without suppressing the unrelated OTEL settings.
+        (
+            {"OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096", "OTEL_BLRP_MAX_QUEUE_SIZE": "16384"},
+            {NHX_JOB_LOG_EXPORT_INTERVAL_MS_ENVVAR: "1500"},
+            (1500, 4096, 16384),
+        ),
+        (
+            {"OTEL_BLRP_SCHEDULE_DELAY": "30000", "OTEL_BLRP_MAX_QUEUE_SIZE": "1024"},
+            {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "100"},
+            (30000, 100, 1024),
+        ),
+        (
+            {"OTEL_BLRP_SCHEDULE_DELAY": "30000", "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE": "4096"},
+            {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "100"},
+            (30000, 100, 2048),
+        ),
+        # An explicitly configured queue is kept, and a batch that would not fit in it is reduced.
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "1024"}, {}, (5000, 1024, 1024)),
+        ({"OTEL_BLRP_MAX_QUEUE_SIZE": "1024"}, {NHX_JOB_LOG_EXPORT_MAX_BATCH_SIZE_ENVVAR: "4096"}, (5000, 1024, 1024)),
+        # Invalid OTEL values fall back to our defaults.
+        ({"OTEL_BLRP_SCHEDULE_DELAY": "abc", "OTEL_BLRP_MAX_QUEUE_SIZE": "0"}, {}, (5000, 2048, 8192)),
+    ],
+)
+def test_create_otel_logger_resolves_batching_per_setting_with_real_processor(monkeypatch, otel_env, nhx_env, expected):
+    for name in _BLRP_ENVVARS:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in otel_env.items():
+        monkeypatch.setenv(name, value)
+
+    assert _real_processor_settings(nhx_env) == expected
+
+
+def test_create_otel_logger_honors_short_otel_schedule_delay(monkeypatch):
+    """A controller-configured 20 ms OTEL_BLRP_SCHEDULE_DELAY must still export a lone record promptly."""
+    for name in _BLRP_ENVVARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OTEL_BLRP_SCHEDULE_DELAY", "20")
+    exported = threading.Event()
+    exporter = MagicMock()
+    exporter.export.side_effect = lambda batch: exported.set() or MagicMock()
+
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs"}
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter", return_value=exporter):
+        otel_logger = create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    assert otel_logger is not None
+    try:
+        otel_logger.emit("one record", "stdout")
+        assert exported.wait(timeout=2)
+    finally:
+        otel_logger.close()
+
+
+def test_create_otel_logger_close_flushes_buffered_records_before_interval():
+    """Records emitted well inside the export interval must still be exported on close."""
+    exported: list[str] = []
+    exporter = MagicMock()
+    exporter.export.side_effect = lambda batch: exported.extend(r.log_record.body for r in batch) or MagicMock()
+
+    env = {"NHX_JOB_LAUNCHER_OTLP_LOGS_ENDPOINT": "http://platform.example/v1/logs"}
+    with patch("nhx.core.jobs.controllers.backends.subprocess_runtime._build_otlp_log_exporter", return_value=exporter):
+        otel_logger = create_otel_logger(env=env, workspace="ws", job="job", attempt_id="a1", step="s", task_id="t")
+    assert otel_logger is not None
+
+    otel_logger.emit("tail line 1", "stdout")
+    otel_logger.emit("tail line 2", "stdout")
+    assert exported == []  # still buffered; the 5s interval has not elapsed
+
+    otel_logger.close()
+
+    assert exported == ["tail line 1", "tail line 2"]

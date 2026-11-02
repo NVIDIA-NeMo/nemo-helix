@@ -48,7 +48,7 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
 
 - **A ref belongs in one place.** Submit **fails**, before creating anything, when the job JSON sets `model` or `dataset` and you also pass the matching flag: the two name different resources. Remove the field to create it at submit, or drop the flag to use the file's ref.
 - **A source is one file or one directory**, as with `nemo files upload`; a directory uploads recursively and keeps local file names. `--upload-model` also takes an HF repo id. `--upload-dataset` takes local files only, so convert an HF dataset first.
-- **One `--upload-dataset` fills both dataset fields:** automodel's `dataset.training` and `dataset.validation`, unsloth's `dataset.path` and `dataset.validation_path`, all pointing at the one fileset. Upload a directory holding both splits (`train.jsonl` + `val.jsonl`); automodel's `train*`/`val*` discovery separates them. `rl` has one `dataset` ref and needs `training.jsonl` + `validation.jsonl` in it.
+- **`--upload-dataset` fills the one dataset reference:** automodel's `dataset.training`, unsloth's `dataset.path`, rl's `dataset`. Upload a directory holding the training file and, optionally, the validation file (`train.jsonl` + `validation.jsonl`); every backend tells them apart by name, and without a validation file holds out a share of the training rows.
 - **`--upload-environment` uploads a Gym package, it does not build one**; the **nemo-gym-environments** skill builds and validates it. automodel and unsloth reject the flag.
 - **Names come from the source** (`nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` → `nvidia-nemotron-3-5-lightning-30b-a3b-bf16`, `sft-data/` → `sft-data`). A name the platform would reject gets a `model-`/`dataset-` prefix (`2024-train.jsonl` → `dataset-2024-train`).
 - **`--exist-ok` applies to whichever sources were passed**, with the same stale-files risk as SKILL.md step 2. The CLI prints `Reused <ref>, which already existed.` when it reuses one.
@@ -59,8 +59,7 @@ Instead of steps 1 and 2, `--upload-model <local path or HF repo id>` and `--upl
 {
   "model": "default/<model-entity>",
   "dataset": {
-    "training": "default/<dataset-fileset>",
-    "validation": "default/<dataset-fileset>"
+    "training": "default/<dataset-fileset>"
   },
   "training": {
     "training_type": "sft",

@@ -19,7 +19,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
-from nhx.common.api.common import GenericSortField, PaginationData
+from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -495,6 +495,7 @@ async def list_filesets(
 @router.get(
     "/v2/workspaces/{workspace}/filesets/{name}",
     summary="Get Fileset by Workspace and Name",
+    responses={404: {"model": ErrorResponse, "description": "Fileset not found"}},
     status_code=HTTP_200_OK,
 )
 async def retrieve_fileset(

@@ -1117,7 +1117,7 @@ def _python_files(path: Path) -> tuple[Path, ...]:
         return (path,) if path.suffix == ".py" else ()
     if not path.is_dir():
         return ()
-    return tuple(sorted(child for child in path.rglob("*.py") if ".venv" not in child.parts))
+    return tuple(sorted(child for child in path.rglob("*.py") if not {".venv", ".flox"}.intersection(child.parts)))
 
 
 def _looks_like_repo_path(token: str, repo_root: Path) -> bool:

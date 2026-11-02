@@ -34,7 +34,7 @@ kubernetes_job backend, so it needs a Kubernetes platform. Run
 
 The job JSON follows the AutomodelJobInput schema:
   model        base model entity, as 'name' or 'workspace/name'
-  dataset      training fileset, plus an optional validation fileset
+  dataset      fileset of training files and optional validation files
   training     sft or distillation, and lora or all_weights
   schedule     epochs, max_steps, seed, validation interval
   batch        global_batch_size, micro_batch_size, sequence packing

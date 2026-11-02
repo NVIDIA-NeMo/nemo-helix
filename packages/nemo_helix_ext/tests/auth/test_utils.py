@@ -57,7 +57,7 @@ def test_discovery_normalizes_legacy_flat_oidc_response(httpserver: HTTPServer) 
                 "device_authorization_endpoint": "https://stg.login.nvidia.com/device/authorize",
                 "client_id": "browser-client",
                 "cli_client_id": "cli-client",
-                "bearer_token_source": "id_token",
+                "bearer_token_source": "access_token",
                 "device_authorization_requires_device_id": True,
                 "device_authorization_display_name": "NeMo Helix CLI",
                 "device_token_request_includes_scope": False,
@@ -82,7 +82,7 @@ def test_discovery_normalizes_legacy_flat_oidc_response(httpserver: HTTPServer) 
             device_authorization_display_name="NeMo Helix CLI",
             device_token_request_includes_scope=False,
             default_scopes="openid profile email offline_access roles",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         ),
     )
 
@@ -178,7 +178,7 @@ class TestDiscoverNhxConfig:
                         "authorization_start_endpoint": "https://nemo.example.com/apis/auth/v2/authorize",
                         "broker_token_endpoint": "https://nemo.example.com/apis/auth/v2/token",
                         "default_scopes": "openid profile",
-                        "bearer_token_source": "id_token",
+                        "bearer_token_source": "access_token",
                         "scope_prefix": "api://nhx/",
                     },
                     {
@@ -192,7 +192,7 @@ class TestDiscoverNhxConfig:
                         "device_authorization_display_name": "NeMo Helix CLI",
                         "device_token_request_includes_scope": False,
                         "default_scopes": "openid profile",
-                        "bearer_token_source": "id_token",
+                        "bearer_token_source": "access_token",
                         "scope_prefix": "api://nhx/",
                     },
                 ],
@@ -213,7 +213,7 @@ class TestDiscoverNhxConfig:
                     authorization_start_endpoint="https://nemo.example.com/apis/auth/v2/authorize",
                     broker_token_endpoint="https://nemo.example.com/apis/auth/v2/token",
                     default_scopes="openid profile",
-                    bearer_token_source="id_token",
+                    bearer_token_source="access_token",
                     scope_prefix="api://nhx/",
                 ),
                 AdvertisedOidcClient(
@@ -227,7 +227,7 @@ class TestDiscoverNhxConfig:
                     device_authorization_display_name="NeMo Helix CLI",
                     device_token_request_includes_scope=False,
                     default_scopes="openid profile",
-                    bearer_token_source="id_token",
+                    bearer_token_source="access_token",
                     scope_prefix="api://nhx/",
                 ),
             ),

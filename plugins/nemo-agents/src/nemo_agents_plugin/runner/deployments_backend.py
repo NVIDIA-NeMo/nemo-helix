@@ -468,11 +468,16 @@ def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) 
     )
 
 
-def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
+def require_deployment_mode_available(agents_config: AgentsConfig, mode: DeploymentMode) -> None:
     """Refuse a mode that could not run, before a deployment is persisted for it."""
     if mode == "subprocess":
+        if not agents_config.resolved_subprocess_enabled():
+            raise ValueError(
+                "deployment_mode 'subprocess' is disabled on this platform. Use a container mode "
+                f"({', '.join(sorted(CONTAINER_DEPLOYMENT_MODES))}), or set 'agents.subprocess_enabled: true'."
+            )
         return
-    executor = _resolve_executor_name(executor_for_mode(config, mode))
+    executor = _resolve_executor_name(executor_for_mode(agents_config.deployments, mode))
     entry = _executor_entry(executor)
     if entry is None:
         if executor:
@@ -525,6 +530,8 @@ def _info_from_deployment(deployment: Deployment) -> DeploymentInfo:
     )
     if info.status == "failed":
         info.error = deployment.status_message or "Deployment failed."
+    elif info.status == "deleting":
+        info.error = deployment.status_message
     return info
 
 
@@ -958,12 +965,15 @@ class DeploymentsRunnerBackend(RunnerBackend):
         Returns ``True`` when the Deployment is gone and DeploymentConfig has
         been deleted (or was already absent) — the agents controller may then
         remove ``AgentDeployment``. Returns ``False`` when the Deployment is
-        still present so a later reconcile can finish cleanup.
+        still present so a later reconcile can finish cleanup. A timed-out
+        delete is left FAILED; only a new user delete reopens it.
         """
         entities = self._entity_client()
         deployment_present = False
         try:
             deployment = await entities.get(Deployment, name=name, workspace=workspace)
+            if deployment.delete_timed_out():
+                return False
             if deployment.status != "DELETING":
                 deployment.status = "DELETING"
                 deployment.desired_state = "STOPPED"

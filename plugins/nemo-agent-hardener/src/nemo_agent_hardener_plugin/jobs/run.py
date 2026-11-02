@@ -16,7 +16,8 @@ and ``run`` sequences the phases. The mechanics live in sibling modules:
 from __future__ import annotations
 
 import logging
-import os
+import tempfile
+from pathlib import Path
 from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
@@ -75,12 +76,9 @@ from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
-    EnvironmentVariable,
     HelixJobSpec,
     HelixJobStep,
-    SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -205,13 +203,13 @@ class AgentHardenerRunJob(NemoJob):
         profile: str | None = None,
         options: dict | None = None,
     ) -> HelixJobSpec:
-        """Single subprocess step running the war-game on the host where `nemo agent-hardener setup` provisioned it.
-
-        Subprocess (not container) executor: the war-game shells out to agent-hardener's CLI + garak venv and
-        launches the Docker victim sandbox, all of which live on the provisioned host today. A Docker-capable
-        container image (`CPUExecutionProviderSpec(container=...)`) is the Phase-2 swap — `run()` is unchanged.
+        """Single step running the war-game: on the host `nemo agent-hardener setup` provisioned when the platform
+        registers a subprocess profile, else in the agent-hardener task image against a configured OpenShell gateway.
         """
         war_game = WarGameSpec.model_validate(spec)
+        executor, environment = await _common.task_step_executor(
+            "nemo_agent_hardener_plugin.tasks.war_game", step="war-game", profile=profile, async_sdk=async_sdk
+        )
 
         # Pre-create the run record now (a Studio war-game submits a manifest_id + service driver) so the UI
         # can open its live view immediately; the worker reuses this record via `run_name` in the step config.
@@ -225,24 +223,11 @@ class AgentHardenerRunJob(NemoJob):
                 source_run=war_game.source_run or "",
             )
 
-        environment = [
-            EnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value=DEFAULT_JOB_STORAGE_PATH),
-        ]
-        # The subprocess executor forwards only PATH/VIRTUAL_ENV, but the war-game's openshell sandbox reads
-        # its gateway registration from $HOME/.config/openshell and reaches Docker via $DOCKER_HOST. Forward
-        # them explicitly from the provisioned host this subprocess runs on (see the executor note above).
-        for name in ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME"):
-            value = os.environ.get(name)
-            if value:
-                environment.append(EnvironmentVariable(name=name, value=value))
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
                     name="war-game",
-                    executor=SubprocessExecutionProviderSpec(
-                        provider="subprocess",
-                        command=["python", "-m", "nemo_agent_hardener_plugin.tasks.war_game"],
-                    ),
+                    executor=executor,
                     config={**war_game.model_dump(mode="json"), **({"run_name": run_name} if run_name else {})},
                     environment=environment,
                 ),
@@ -259,7 +244,10 @@ class AgentHardenerRunJob(NemoJob):
         """
         artifact_capture = ArtifactCapture()
         try:
-            return self._execute(config, ctx=ctx, sdk=sdk, artifact_capture=artifact_capture)
+            with tempfile.TemporaryDirectory(prefix="agent-hardener-openshell-") as openshell_home:
+                return self._execute(
+                    config, ctx=ctx, sdk=sdk, artifact_capture=artifact_capture, openshell_home=Path(openshell_home)
+                )
         except Exception as exc:
             failure = classify_exception(exc)
             logger.exception("agent-hardener war-game failed [%s]: %s", failure.category, failure.message)
@@ -309,7 +297,13 @@ class AgentHardenerRunJob(NemoJob):
         self.report_progress(ctx, work_done=0, work_total=1, status="failed", details=failure.as_error_details())
 
     def _execute(
-        self, config: dict, *, ctx: JobContext, sdk: Any = None, artifact_capture: ArtifactCapture | None = None
+        self,
+        config: dict,
+        *,
+        ctx: JobContext,
+        openshell_home: Path,
+        sdk: Any = None,
+        artifact_capture: ArtifactCapture | None = None,
     ) -> dict:
         if artifact_capture is None:
             artifact_capture = ArtifactCapture()
@@ -333,7 +327,10 @@ class AgentHardenerRunJob(NemoJob):
         models = _effective_models(sdk, config, ctx)
         if models is not None:
             config_overrides["models"] = models.model_dump(mode="json")
-        model_env = _common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)
+        runtime_env = _common.job_runtime_env(
+            plugin_config, sdk=sdk, workspace=ctx.workspace, openshell_home=openshell_home
+        )
+        model_env = {**runtime_env, **_common.build_model_env(models, sdk=sdk, workspace=ctx.workspace)}
         # Preflight user-chosen models against their endpoint before the (minutes-long) sandbox spin-up, so
         # a wrong model name / key fails in seconds with the list of models the credentials can actually reach.
         _preflight_models(
@@ -377,7 +374,10 @@ class AgentHardenerRunJob(NemoJob):
         # carries the provisioned INFERENCE_API_KEY), the manifest's Secrets-store refs and any --env-file.
         _common.warn_shadowed_operator_env(plugin_config)
         _, env_file = _common.prepare_victim_env(
-            invocation_manifest, _build_native_subprocess_env(plugin_config), config.get("env_file"), secret_values
+            invocation_manifest,
+            _build_native_subprocess_env(plugin_config, runtime_env),
+            config.get("env_file"),
+            secret_values,
         )
         agent_name, port = _manifest_facts(invocation_manifest)
 

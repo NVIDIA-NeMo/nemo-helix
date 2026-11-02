@@ -58,6 +58,11 @@ export const badgeStatus: Record<BadgeStatus | 'default', BadgeProps> = {
     color: 'red',
     icon: CloseCircle,
   },
+  queued: {
+    label: 'Queued',
+    color: 'gray',
+    icon: Refresh,
+  },
   pending: {
     label: 'Pending',
     color: 'gray',

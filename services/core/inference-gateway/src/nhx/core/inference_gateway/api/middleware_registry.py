@@ -22,6 +22,7 @@ from nemo_helix_plugin.discovery import discover_inference_middleware
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
+    InferenceAccessRequest,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceRequest,
@@ -771,6 +772,36 @@ async def load_middleware_plugins(
 # ---------------------------------------------------------------------------
 # Pipeline execution
 # ---------------------------------------------------------------------------
+
+
+def _overrides_check_access(plugin: NemoInferenceMiddleware) -> bool:
+    """Whether ``plugin`` implements ``check_access``; the inherited default allows every call, so it is skipped.
+
+    Discovery doesn't require plugins to subclass :class:`NemoInferenceMiddleware`, so one may lack the method.
+    """
+    check = getattr(type(plugin), "check_access", NemoInferenceMiddleware.check_access)
+    return check is not NemoInferenceMiddleware.check_access
+
+
+async def execute_access_checks(plugins: dict[str, NemoInferenceMiddleware], request: InferenceAccessRequest) -> None:
+    """Run each installed plugin's ``check_access`` on a call, refusing the call as soon as one plugin refuses it.
+
+    Raises:
+        :class:`~fastapi.HTTPException`: A plugin refused the call (its status and detail), or raised
+            unexpectedly (500): a check that fails never lets the call through.
+    """
+    for plugin_name, plugin in plugins.items():
+        if not _overrides_check_access(plugin):
+            continue
+        try:
+            await plugin.check_access(request)
+        except InferenceMiddlewareError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        except Exception as exc:
+            logger.exception("Plugin '%s' raised an unexpected error while checking access", plugin_name)
+            raise HTTPException(
+                status_code=500, detail=f"Plugin '{plugin_name}' raised an unexpected error while checking access."
+            ) from exc
 
 
 async def execute_request_middleware(

@@ -904,7 +904,6 @@ components:
       - entity_id
       - parent
       - db_version
-      - auth_context
       title: Deployment
       description: Desired and observed deployment state.
     DeploymentBackendConfig:

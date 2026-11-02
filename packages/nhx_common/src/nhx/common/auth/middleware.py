@@ -4,6 +4,7 @@
 """Authorization middleware for NeMo Helix services."""
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Callable, NamedTuple, Optional
 
 import httpx
@@ -224,6 +225,23 @@ PUBLIC_GET_PATHS = {
     "/openapi.json",  # OpenAPI schema consumed by the documentation UI and client generators
     "/apis/plugins",  # Studio plugin manifest — fetched by the SPA before login completes
 }
+
+
+#: Model clients on these routes may send their key as ``x-api-key`` (Anthropic's convention) instead of a bearer
+#: token. The gateway never forwards either header upstream.
+API_KEY_HEADER_PATH_PREFIXES = ("/apis/inference-gateway/",)
+
+
+def request_bearer_token(path: str, headers: Mapping[str, str]) -> str | None:
+    """The bearer token a request carries: ``Authorization: Bearer``, else ``x-api-key`` on a model route.
+
+    Raises:
+        MalformedBearerTokenError: The ``Authorization`` header uses Bearer but is malformed.
+    """
+    token = parse_bearer_authorization_header(headers.get("authorization"))
+    if token is None and path.startswith(API_KEY_HEADER_PATH_PREFIXES):
+        token = headers.get("x-api-key", "").strip() or None
+    return token
 
 
 def is_auth_middleware_excluded_path(path: str) -> bool:
@@ -530,9 +548,9 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if not self.config.enabled:
             return await self._handle_auth_disabled_request(request, call_next)
 
-        # Try to extract principal from Authorization: Bearer header (native OIDC or unsigned JWT)
+        # Try to extract principal from the bearer token (native OIDC or unsigned JWT)
         try:
-            bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
+            bearer_token = request_bearer_token(path, headers_dict)
         except MalformedBearerTokenError:
             return JSONResponse(status_code=401, content={"detail": "Invalid bearer token"})
         if bearer_token is not None:

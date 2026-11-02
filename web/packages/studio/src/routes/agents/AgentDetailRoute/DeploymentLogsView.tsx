@@ -10,7 +10,7 @@ import {
 import type { AgentDeployment, AgentDeploymentStatus } from '@nemo/sdk/generated/agents/schema';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { withHelixBrowserAuthRequest } from '@nemo/sdk/src/utils/platformRequest';
-import { Block, Select, Stack, Text } from '@nvidia/foundations-react-core';
+import { Block, Stack, Text } from '@nvidia/foundations-react-core';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { streamSse } from '@studio/util/sseStream';
@@ -18,92 +18,26 @@ import { type FC, useEffect, useMemo, useState } from 'react';
 
 interface DeploymentLogsViewProps {
   workspace: string;
-  /** All known deployments for the active agent — any status. */
-  deployments: AgentDeployment[];
-  /** Controlled selection — when provided, the picker reflects this deployment. */
-  selectedDeploymentName?: string;
-  /** Called when the user (or a caller) changes the selected deployment. */
-  onSelectDeployment?: (name: string) => void;
+  /** The header's selection, any status. */
+  deployment?: AgentDeployment;
 }
 
-export const DeploymentLogsView: FC<DeploymentLogsViewProps> = ({
-  workspace,
-  deployments,
-  selectedDeploymentName,
-  onSelectDeployment,
-}) => {
-  const sortedDeployments = useMemo(
-    () =>
-      [...deployments].sort((a, b) => {
-        const aCreated = a.created_at ?? '';
-        const bCreated = b.created_at ?? '';
-        return bCreated.localeCompare(aCreated);
-      }),
-    [deployments]
-  );
-  const [internalName, setInternalName] = useState<string | undefined>(
-    () => selectedDeploymentName ?? sortedDeployments[0]?.name
-  );
-  const isControlled = selectedDeploymentName !== undefined;
-  const selectedName = isControlled ? selectedDeploymentName : internalName;
-  const setSelectedName = (name: string) => {
-    if (!isControlled) setInternalName(name);
-    onSelectDeployment?.(name);
-  };
-
-  useEffect(() => {
-    if (isControlled) return;
-    if (!internalName) {
-      setInternalName(sortedDeployments[0]?.name);
-      return;
-    }
-    const stillPresent = sortedDeployments.some((d) => d.name === internalName);
-    if (!stillPresent) setInternalName(sortedDeployments[0]?.name);
-  }, [sortedDeployments, internalName, isControlled]);
-
-  if (sortedDeployments.length === 0) {
-    return (
-      <Stack gap="density-md" padding="density-md">
-        <Text kind="body/regular/sm" className="text-subtle">
-          No deployments yet for this agent. Deploy first to capture logs.
-        </Text>
-      </Stack>
-    );
-  }
-  const pOffset = '2';
-
-  return (
-    <Stack className="h-full min-h-0 w-full" gap="2">
-      {sortedDeployments.length > 1 && (
-        <Block className="shrink-0" paddingX={pOffset}>
-          <Select
-            value={selectedName ?? ''}
-            items={sortedDeployments.flatMap((d) =>
-              d.name
-                ? [
-                    {
-                      value: d.name,
-                      children: d.status ? `${d.name} · ${d.status}` : d.name,
-                    },
-                  ]
-                : []
-            )}
-            onValueChange={(v) => setSelectedName(v)}
-          />
-        </Block>
-      )}
-      <Block className="flex-1 min-h-0" paddingX={pOffset}>
-        {selectedName ? (
-          <LogsForDeployment
-            workspace={workspace}
-            deploymentName={selectedName}
-            status={sortedDeployments.find((d) => d.name === selectedName)?.status}
-          />
-        ) : null}
-      </Block>
+export const DeploymentLogsView: FC<DeploymentLogsViewProps> = ({ workspace, deployment }) =>
+  deployment?.name ? (
+    <Block className="h-full min-h-0 w-full" paddingX="2">
+      <LogsForDeployment
+        workspace={workspace}
+        deploymentName={deployment.name}
+        status={deployment.status}
+      />
+    </Block>
+  ) : (
+    <Stack gap="density-md" padding="density-md">
+      <Text kind="body/regular/sm" className="text-subtle">
+        No deployments yet for this agent. Deploy first to capture logs.
+      </Text>
     </Stack>
   );
-};
 
 interface LogsForDeploymentProps {
   workspace: string;

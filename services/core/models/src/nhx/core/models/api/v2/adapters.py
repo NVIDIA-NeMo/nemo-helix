@@ -7,7 +7,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -128,6 +128,7 @@ async def list_adapters(
 @router.get(
     "/v2/workspaces/{workspace}/adapters/{name}",
     summary="Get Adapter",
+    responses={404: {"model": ErrorResponse, "description": "Adapter not found"}},
     response_description="Get one adapter by name. Parent model is taken from the adapter's stored parent (entity `parent` field).",
     status_code=status.HTTP_200_OK,
     response_model=Adapter,

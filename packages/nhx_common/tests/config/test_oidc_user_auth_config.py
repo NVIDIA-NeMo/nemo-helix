@@ -27,7 +27,7 @@ def test_oidc_public_client_accepts_provider_overrides() -> None:
     config = OIDCConfig(
         public_client=OIDCPublicClientConfig(
             client_id="nhx-public",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
             device_authorization_requires_device_id=True,
             device_authorization_display_name="NeMo Helix CLI",
             device_token_request_includes_scope=False,
@@ -36,7 +36,7 @@ def test_oidc_public_client_accepts_provider_overrides() -> None:
 
     assert config.public_client is not None
     assert config.public_client.client_id == "nhx-public"
-    assert config.public_client.bearer_token_source == "id_token"
+    assert config.public_client.bearer_token_source == "access_token"
     assert config.public_client.device_authorization_requires_device_id is True
     assert config.public_client.device_authorization_display_name == "NeMo Helix CLI"
     assert config.public_client.device_token_request_includes_scope is False
