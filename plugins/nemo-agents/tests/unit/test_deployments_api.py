@@ -374,14 +374,15 @@ class TestCreateDeployment:
         assert "10.20.0.5" not in resp.json()["detail"]
         mock_entity_client.create.assert_not_called()
 
-    def test_create_rejects_container_deployment_with_no_resolvable_image(self) -> None:
+    @pytest.mark.parametrize("image", ["", "   "])
+    def test_create_rejects_container_deployment_with_no_resolvable_image(self, image: str) -> None:
         mock_entity_client = AsyncMock()
         mock_entity_client.get = AsyncMock(return_value=_make_agent())
         client = _test_client(mock_entity_client)
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/deployments",
-            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker"},
+            json={"agent": "fabric-agent", "name": "fabric-dep", "deployment_mode": "docker", "image": image},
         )
 
         assert resp.status_code == 400
@@ -394,8 +395,15 @@ class TestCreateDeployment:
         ("request_image", "reference_image", "expected_image"),
         [
             ("", None, ""),
+            ("   ", None, ""),
             ("", "registry.example/agent:registered", "registry.example/agent:registered"),
+            ("   ", "registry.example/agent:registered", "registry.example/agent:registered"),
             ("registry.example/agent:override", "registry.example/agent:registered", "registry.example/agent:override"),
+            (
+                "  registry.example/agent:override  ",
+                "registry.example/agent:registered",
+                "registry.example/agent:override",
+            ),
         ],
     )
     def test_create_resolves_container_image(
@@ -700,8 +708,6 @@ class TestCreateDeployment:
             {"deployment_mode": "subprocess"},
             # A subprocess runs in the platform's own environment, whatever image the request names.
             {"deployment_mode": "subprocess", "image": "acme-agent:1"},
-            # A blank image names no image.
-            {"deployment_mode": "docker", "image": "   "},
         ],
     )
     @pytest.mark.usefixtures("installed_adapter_manifests")

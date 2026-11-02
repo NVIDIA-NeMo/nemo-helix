@@ -628,7 +628,7 @@ async def test_stage_fabric_ethos_dir_fails_when_stale_tree_cannot_be_removed(tm
         "nemo_agents_plugin.runner.fabric_artifact_staging.shutil.rmtree",
         side_effect=PermissionError("read-only"),
     ):
-        with pytest.raises(FabricArtifactStagingError, match="stale Ethos artifact"):
+        with pytest.raises(FabricArtifactStagingError, match="stale source artifact"):
             await stage_fabric_ethos_dir(
                 workspace="default",
                 agent_name="fabric-agent",

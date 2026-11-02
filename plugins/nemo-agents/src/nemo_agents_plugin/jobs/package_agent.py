@@ -37,7 +37,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_helix_plugin.agents.validation import require_agent_config
 from nemo_helix_plugin.client.client import AsyncNemoClient
-from nemo_helix_plugin.client.errors import NemoResponseValidationError
+from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.config import get_platform_config
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
@@ -57,7 +57,7 @@ from nemo_helix_plugin.jobs.exceptions import (
     HelixJobDependencyUnavailableError,
 )
 from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_helix_plugin.refs import FilesetRef
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
@@ -226,8 +226,8 @@ class PackageAgentJob(NemoJob):
     ) -> BaseModel:
         """Resolve the agent name into its inline config.
 
-        Reads the entity at submit time so a missing, unconfigured, or non-Fabric agent fails
-        the POST rather than the build.
+        Validates the agent and access to its referenced fileset at submit time so
+        problems fail the POST rather than the build.
         """
         del is_local
         assert isinstance(input_spec, PackageAgentInput), (
@@ -247,11 +247,24 @@ class PackageAgentJob(NemoJob):
                 "a source checkout — use `nemo agents package` locally."
             )
 
+        source_fileset = agent.reference.fileset if agent.reference is not None else None
+        if source_fileset is not None:
+            if async_sdk is None:
+                raise HelixJobCompilationError("Packaging requires a platform client to validate the source fileset.")
+            ref = parse_entity_ref(source_fileset, default_workspace=workspace)
+            files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
+            try:
+                await files_client.get_fileset(workspace=ref.workspace, name=ref.name)
+            except NotFoundError as exc:
+                raise HelixJobCompilationError(f"Fileset '{ref.workspace}/{ref.name}' not found.") from exc
+            except PermissionDeniedError as exc:
+                raise HelixJobCompilationError(f"Access denied to fileset '{ref.workspace}/{ref.name}'.") from exc
+
         return PackageAgentSpec(
             **input_spec.model_dump(),
             workspace=workspace,
             agent_config=agent.config,
-            source_fileset=agent.reference.fileset if agent.reference is not None else None,
+            source_fileset=source_fileset,
         )
 
     @staticmethod

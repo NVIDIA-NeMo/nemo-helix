@@ -131,7 +131,7 @@ async def create_deployment(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    image = body.image
+    image = body.image.strip()
     if not image and is_container_deployment_mode(body.deployment_mode) and agent.reference is not None:
         image = agent.reference.container_image or ""
 

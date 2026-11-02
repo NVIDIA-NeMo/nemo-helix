@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -20,7 +20,7 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentSpec,
 )
 from nemo_helix_plugin.agents.types import ReferenceConfig
-from nemo_helix_plugin.client.errors import NemoResponseValidationError
+from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
@@ -89,6 +89,7 @@ class TestToSpec:
         [
             (None, None),
             (ReferenceConfig(container_image="alpine"), None),
+            (ReferenceConfig(fileset=FilesetRef("agent-source")), "agent-source"),
             (ReferenceConfig(fileset=FilesetRef("sources/agent-source")), "sources/agent-source"),
         ],
     )
@@ -97,18 +98,67 @@ class TestToSpec:
     ) -> None:
         agent = _agent()
         agent.reference = reference
-        spec = await PackageAgentJob.to_spec(
-            PackageAgentInput(agent="my-agent"),
-            workspace="default",
-            entity_client=_StubEntityClient(agent),
-            async_sdk=None,
-            is_local=False,
-        )
+        files_client = AsyncMock()
+        async_sdk = MagicMock()
+        with patch(
+            "nemo_agents_plugin.jobs.package_agent.AsyncFilesClient.from_client", return_value=files_client
+        ) as factory:
+            spec = await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=async_sdk,
+                is_local=False,
+            )
+
+        if source_fileset is not None:
+            factory.assert_called_once_with(async_sdk)
+            files_client.get_fileset.assert_awaited_once_with(
+                workspace="sources" if "/" in source_fileset else "default", name="agent-source"
+            )
+        else:
+            factory.assert_not_called()
 
         assert isinstance(spec, PackageAgentSpec)
         assert spec.workspace == "default"
         assert spec.agent_config == FABRIC_CONFIG
         assert spec.source_fileset == source_fileset
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (NotFoundError(httpx.Response(404)), "Fileset 'sources/agent-source' not found"),
+            (PermissionDeniedError(httpx.Response(403)), "Access denied to fileset 'sources/agent-source'"),
+        ],
+    )
+    async def test_unreadable_source_fails_at_submit(self, error: Exception, message: str) -> None:
+        agent = _agent()
+        agent.reference = ReferenceConfig(fileset=FilesetRef("sources/agent-source"))
+        files_client = AsyncMock()
+        files_client.get_fileset.side_effect = error
+        with (
+            patch("nemo_agents_plugin.jobs.package_agent.AsyncFilesClient.from_client", return_value=files_client),
+            pytest.raises(HelixJobCompilationError, match=message),
+        ):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=MagicMock(),
+                is_local=False,
+            )
+
+    async def test_source_without_client_fails_at_submit(self) -> None:
+        agent = _agent()
+        agent.reference = ReferenceConfig(fileset=FilesetRef("sources/agent-source"))
+        with pytest.raises(HelixJobCompilationError, match="platform client to validate the source fileset"):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=None,
+                is_local=False,
+            )
 
     async def test_missing_agent_fails_at_submit(self) -> None:
         with pytest.raises(HelixJobCompilationError, match="not found in workspace"):

@@ -49,7 +49,7 @@ async def _download_fileset(
     try:
         listing = (await files_client.list_files(workspace=workspace, name=fileset_name)).data()
     except PluginClientNotFoundError as exc:
-        raise FabricEthosFilesetNotFound(f"Ethos fileset {workspace}/{fileset_name} was not found") from exc
+        raise FabricEthosFilesetNotFound(f"Source fileset {workspace}/{fileset_name} was not found") from exc
 
     for file_info in listing.data:
         relative_path = _fileset_relative_path(file_info.path)
@@ -65,7 +65,7 @@ async def _download_fileset(
 def _fileset_relative_path(path: str) -> PurePosixPath:
     relative_path = PurePosixPath(path.lstrip("/"))
     if not relative_path.parts or relative_path.is_absolute() or ".." in relative_path.parts:
-        raise FabricArtifactStagingError(f"Invalid path in Ethos fileset: {path!r}")
+        raise FabricArtifactStagingError(f"Invalid path in source fileset: {path!r}")
     return relative_path
 
 
@@ -82,12 +82,12 @@ def _copy_downloaded_tree(download_root: Path, base_dir: Path, preserved: set[st
         rel_posix = PurePosixPath(rel.as_posix())
         if rel_posix.parts[0] in preserved:
             raise FabricArtifactStagingError(
-                f"Ethos fileset path {rel_posix.as_posix()!r} targets preserved runtime directory "
+                f"Source fileset path {rel_posix.as_posix()!r} targets preserved runtime directory "
                 f"{rel_posix.parts[0]!r}"
             )
         if source.is_symlink():
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         if not source.is_file():
             continue
@@ -95,7 +95,7 @@ def _copy_downloaded_tree(download_root: Path, base_dir: Path, preserved: set[st
         destination = base_dir / rel
         if not destination.resolve(strict=False).is_relative_to(resolved_base):
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         copies.append((source, destination))
 
@@ -147,7 +147,7 @@ async def stage_fabric_ethos_dir(
 
     if (agent_name or source_fileset is not None) and files_client is not None:
         try:
-            with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
+            with tempfile.TemporaryDirectory(prefix=f".fabric-source-{agent_name}-") as tmp:
                 tmp_path = Path(tmp)
                 await _download_fileset(
                     files_client,
@@ -213,7 +213,7 @@ def _clear_staged_tree(base_dir: Path, preserved: set[str]) -> None:
                 child.unlink(missing_ok=True)
         except OSError as exc:
             raise FabricArtifactStagingError(
-                f"Failed to remove stale Ethos artifact {child.name!r} from {base_dir}: {exc}"
+                f"Failed to remove stale source artifact {child.name!r} from {base_dir}: {exc}"
             ) from exc
 
 
@@ -237,7 +237,7 @@ def _collect_staged_dir(base_dir: Path, preserved: set[str]) -> set[PurePosixPat
             continue
         if path.is_symlink() or not path.resolve().is_relative_to(resolved_base):
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         if not path.is_file():
             continue
@@ -379,5 +379,5 @@ def validate_referenced_skill_paths(
             matched = bool(staged_paths)
         if not matched:
             raise FabricArtifactStagingError(
-                f"Referenced skills.paths entry {skill_path!r} was not found in staged Ethos fileset"
+                f"Referenced skills.paths entry {skill_path!r} was not found in staged source fileset"
             )
