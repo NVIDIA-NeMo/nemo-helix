@@ -41,7 +41,7 @@ def test_workspaces_lifecycle(runner, assert_exit_code) -> None:
     assert_exit_code(result, 0)
     assert json.loads(result.stdout)["description"] == "changed"
 
-    result = runner.invoke(app, ["workspaces", "delete", name])
+    result = runner.invoke(app, ["workspaces", "delete", name, "--yes"])
     assert_exit_code(result, 0)
     assert "Workspace marked for deletion" in result.stdout
 

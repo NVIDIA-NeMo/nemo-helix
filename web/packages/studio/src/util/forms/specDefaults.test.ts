@@ -59,8 +59,8 @@ describe('specDefaults', () => {
   });
 
   it('reports undefined for fields the spec leaves without a default', () => {
-    // `policy_backend` is here rather than asserted as 'automodel': the backend derives it
-    // from finetuning_type now, so the spec declares no default.
+    // Generated SDK still has no default until it is regenerated from OpenAPI,
+    // where `policy_backend` now defaults to `automodel`.
     for (const field of [
       'seed',
       'max_steps',

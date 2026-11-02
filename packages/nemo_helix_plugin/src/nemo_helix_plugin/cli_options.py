@@ -170,6 +170,14 @@ OutputColumnsOption = Annotated[
     ),
 ]
 
+# Skip the confirmation for a destructive command. Pair it with
+# :func:`~nemo_helix_plugin.cli_confirm.confirm_destructive`, which also
+# requires it when stdin is not a terminal.
+YesOption = Annotated[
+    bool,
+    typer.Option("--yes", "-y", help="Skip the confirmation prompt. Required when not running interactively."),
+]
+
 AllPagesOption = Annotated[
     bool,
     typer.Option(

@@ -927,6 +927,8 @@ builder:
   control_profile: build-control
   # The one the push step runs on, the only step that holds the registry credential and signing key. | default: 'build-push'
   push_profile: build-push
+  # Most build jobs running at once, across every workspace. Set, every submit returns its images `queued`, and the `builder-queue` controller starts each job, oldest first, while fewer than this many run. Size it to the build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null skips the queue and creates every job as it is submitted; jobs the ResourceQuota then rejects fail without a retry.
+  max_concurrent_builds:
   # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''

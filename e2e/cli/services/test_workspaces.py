@@ -38,7 +38,7 @@ def test_workspaces_lifecycle(workspace: str, nemo_run: NemoRun) -> None:
     assert_exit_0(result, "workspaces update failed")
     assert json.loads(result.stdout).get("description") == "updated description"
 
-    result = nemo_run("workspaces", "delete", name)
+    result = nemo_run("workspaces", "delete", name, "--yes")
     assert_exit_0(result, "workspaces delete failed")
 
     # Workspace deletion is async — skip verify-absent since the workspace may still

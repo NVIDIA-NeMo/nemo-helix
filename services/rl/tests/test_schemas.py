@@ -249,7 +249,7 @@ def test_batching_defaults() -> None:
 
 
 def test_sequence_packing_rejected_under_context_parallel_at_submit() -> None:
-    """DTensorPolicyWorker rejects packing under CP; fail the request, not the GPU job."""
+    """AutomodelPolicyWorker rejects packing under CP; fail the request, not the GPU job."""
     with pytest.raises(ValueError, match="not supported with context_parallel_size"):
         GRPOTraining(
             type="grpo",
@@ -364,21 +364,20 @@ def test_triton_lora_explicitly_disabled_is_allowed_with_tensor_parallelism() ->
     assert t.lora is not None and t.lora.use_triton is False
 
 
-def test_policy_backend_defaults_to_the_backend_that_supports_the_request() -> None:
-    """An unset value follows finetuning_type; one default for both would reject half the configs."""
-    assert GRPOTraining(type="grpo").policy_backend is PolicyBackend.DTENSOR
+def test_policy_backend_defaults_to_automodel() -> None:
+    """LoRA and full weights both train on AutomodelPolicyWorker."""
+    assert GRPOTraining(type="grpo").policy_backend is PolicyBackend.AUTOMODEL
     assert GRPOTraining(type="grpo", finetuning_type="lora").policy_backend is PolicyBackend.AUTOMODEL
 
 
-def test_an_explicit_backend_is_never_overridden_by_the_default() -> None:
-    """The default only fills a gap; a stated value still stands or is rejected outright."""
-    assert GRPOTraining(type="grpo", policy_backend=PolicyBackend.DTENSOR).policy_backend is PolicyBackend.DTENSOR
+def test_an_explicit_automodel_backend_is_kept() -> None:
+    assert GRPOTraining(type="grpo", policy_backend=PolicyBackend.AUTOMODEL).policy_backend is PolicyBackend.AUTOMODEL
 
 
-def test_policy_backend_has_no_megatron_member_yet() -> None:
-    """The image can already run MegatronPolicyWorker, so the enum is the only thing stopping
-    a request from reaching a backend whose megatron_cfg the compiler still emits inert."""
-    assert {b.value for b in PolicyBackend} == {"dtensor", "automodel"}
+def test_policy_backend_has_no_megatron_or_dtensor_member() -> None:
+    """The image prefetches MegatronPolicyWorker, and the compiler still emits an inert megatron_cfg.
+    ``dtensor`` is not a second worker."""
+    assert {b.value for b in PolicyBackend} == {"automodel"}
 
 
 def test_automodel_backend_accepts_full_weight() -> None:
@@ -388,50 +387,21 @@ def test_automodel_backend_accepts_full_weight() -> None:
     assert t.finetuning_type == "all_weights"
 
 
-def test_dtensor_backend_rejects_lora() -> None:
-    """V1 asserts ``lora_cfg.enabled is False`` in the Ray worker; fail before the GPU."""
-    with pytest.raises(ValueError, match="require policy_backend='automodel'"):
-        GRPOTraining(type="grpo", finetuning_type="lora", policy_backend=PolicyBackend.DTENSOR)
-
-
-def test_dtensor_backend_rejects_expert_parallelism() -> None:
-    with pytest.raises(ValueError, match="expert_parallel_size=8"):
-        GRPOTraining(
-            type="grpo",
-            policy_backend=PolicyBackend.DTENSOR,
-            parallelism=ParallelismParams(num_gpus_per_node=8, expert_parallel_size=8),
-        )
-
-
-def test_dtensor_backend_rejects_automodel_kwargs() -> None:
-    with pytest.raises(ValueError, match="automodel_kwargs"):
-        GRPOTraining(
-            type="grpo",
-            policy_backend=PolicyBackend.DTENSOR,
-            automodel_kwargs={"force_hf": True},
-        )
-
-
-def test_dtensor_backend_reports_every_conflict_at_once() -> None:
-    """One submission, one error listing all of it -- not three round-trips."""
-    with pytest.raises(ValueError) as excinfo:
-        GRPOTraining(
-            type="grpo",
-            finetuning_type="lora",
-            policy_backend=PolicyBackend.DTENSOR,
-            parallelism=ParallelismParams(num_gpus_per_node=8, expert_parallel_size=8),
-            automodel_kwargs={"force_hf": True},
-        )
-    message = str(excinfo.value)
-    assert "finetuning_type='lora'" in message
-    assert "expert_parallel_size=8" in message
-    assert "automodel_kwargs" in message
-
-
-def test_dtensor_backend_accepts_plain_full_weight() -> None:
-    """Full-weight with no v2-only feature is exactly what `dtensor` is for."""
-    t = GRPOTraining(type="grpo", policy_backend=PolicyBackend.DTENSOR)
-    assert t.policy_backend is PolicyBackend.DTENSOR
+def test_stored_dtensor_backend_reads_as_automodel() -> None:
+    """Full-weight jobs persisted ``policy_backend: dtensor``. List and get revalidate that JSON."""
+    t = GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "all_weights", "policy_backend": "dtensor"})
+    assert t.policy_backend is PolicyBackend.AUTOMODEL
+    job = RlJobOutput.model_validate(
+        {
+            "model": "default/base",
+            "dataset": "default/gym-data",
+            "environment": "default/env",
+            "training": {"type": "grpo", "finetuning_type": "all_weights", "policy_backend": "dtensor"},
+            "output": {"name": "out", "type": "model", "fileset": "out-fs"},
+        }
+    )
+    assert isinstance(job.training, GRPOTraining)
+    assert job.training.policy_backend is PolicyBackend.AUTOMODEL
 
 
 def test_grpo_lora_rejects_lora_merged() -> None:
@@ -543,6 +513,49 @@ def test_expert_parallel_size_defaults_to_one() -> None:
     assert ParallelismParams().expert_parallel_size == 1
 
 
+def test_vllm_expert_parallel_size_cannot_span_nodes() -> None:
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_nodes=2, num_gpus_per_node=4),
+            vllm_expert_parallel_size=8,
+            batch_size=8,
+            num_generations_per_prompt=8,
+        ),
+    )
+    with pytest.raises(ValueError, match="vllm_expert_parallel_size"):
+        job.validate_for_training()
+
+
+def test_vllm_expert_parallel_must_match_resolved_tensor_parallel() -> None:
+    """async_engine is always on, so EP 4 with a resolved TP of 1 fails inside vLLM."""
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_gpus_per_node=4),
+            vllm_expert_parallel_size=4,
+            batch_size=4,
+            num_generations_per_prompt=4,
+        ),
+    )
+    with pytest.raises(ValueError, match="vllm_expert_parallel_size"):
+        job.validate_for_training()
+
+
+def test_vllm_expert_parallel_matching_tensor_parallel_is_accepted() -> None:
+    job = _grpo_job(
+        GRPOTraining(
+            type="grpo",
+            parallelism=ParallelismParams(num_gpus_per_node=4),
+            vllm_tensor_parallel_size=4,
+            vllm_expert_parallel_size=4,
+            batch_size=4,
+            num_generations_per_prompt=4,
+        ),
+    )
+    job.validate_for_training()
+
+
 def test_vllm_tensor_parallel_size_cannot_span_nodes() -> None:
     """One vLLM engine lives inside a node; TP above the node size is unsatisfiable."""
     job = _grpo_job(
@@ -572,10 +585,26 @@ def test_vllm_tensor_parallel_size_must_divide_total_gpus() -> None:
         job.validate_for_training()
 
 
+def test_vllm_kwargs_rejects_hf_overrides() -> None:
+    with pytest.raises(ValueError, match="hf_overrides"):
+        GRPOTraining(type="grpo", vllm_kwargs={"hf_overrides": {"rope_scaling": {}}})
+
+
+def test_vllm_kwargs_rejects_worker_owned_keys() -> None:
+    with pytest.raises(ValueError, match="enable_prefix_caching"):
+        GRPOTraining(type="grpo", vllm_kwargs={"enable_prefix_caching": False, "moe_backend": "triton"})
+
+
+def test_vllm_kwargs_accepts_engine_options() -> None:
+    t = GRPOTraining(type="grpo", vllm_kwargs={"moe_backend": "triton"})
+    assert t.vllm_kwargs == {"moe_backend": "triton"}
+
+
 def test_backend_settings_default_to_unset() -> None:
     """Unset means the compiler picks, so a plain job compiles without any of these."""
     t = GRPOTraining(type="grpo")
     assert t.vllm_tensor_parallel_size is None  # falls back to min(training tp, gpus per node)
+    assert t.vllm_expert_parallel_size == 1
     assert t.vllm_gpu_memory_utilization == 0.5
     assert t.automodel_kwargs is None
     assert t.router_aux_loss_coef is None

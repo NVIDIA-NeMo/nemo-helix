@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 import typer
+from nemo_helix_plugin.cli_confirm import confirm_destructive
+from nemo_helix_plugin.cli_options import YesOption
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import (
     CreateWorkspaceMemberRequest,
@@ -203,6 +205,7 @@ def create_workspaces(
 def delete_workspaces(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
+    yes: YesOption = False,
 ) -> None:
     """Delete a workspace.
 
@@ -212,11 +215,18 @@ def delete_workspaces(
 
     Role bindings are immediately deleted to revoke access.
 
+    Asks for confirmation first; pass --yes to skip it (required when not
+    running interactively).
+
     Example:
 
     ```
     DELETE /apis/entities/v2/workspaces/ml-team
     ```"""
+    confirm_destructive(
+        f"Delete workspace '{name}' and everything in it? This cannot be undone.",
+        yes=yes,
+    )
     state: CLIContext = ctx.obj
     result = state.typed_client(WorkspacesClient).delete_workspace(name=name)
     typer.echo(result.data().message)

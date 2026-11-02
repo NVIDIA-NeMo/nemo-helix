@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from nemo_helix_plugin.intake.span_attributes import USAGE_SUPERSEDED_ATTRIBUTE
 from nhx.intake.spans.api.spans_schemas import Span
 from nhx.intake.spans.domain import NEMO_STEP_ID_ATTRIBUTE, SpanKind, SpanStatus
 from nhx.intake.spans.ingest.atif import AtifIngestRequest
@@ -961,6 +962,31 @@ def test_atif_mapping_ignores_non_object_root_extra_error(error: Any) -> None:
     )[0]
 
     assert root.status == SpanStatus.SUCCESS
+
+
+@pytest.mark.parametrize(
+    ("marker", "superseded"),
+    [(True, True), ("true", True), (False, False), ("false", False), ("yes", False), (1, False)],
+)
+def test_atif_mapping_reads_the_usage_superseded_marker_as_spans_do(marker: Any, superseded: bool) -> None:
+    """An ATIF trajectory marks its usage superseded with the same values an OTLP span may use; others are ignored."""
+    trajectory = AtifTrajectory.model_validate(
+        {
+            "schema_version": "ATIF-v1.7",
+            "session_id": "trace-session-id",
+            "agent": {"name": "sample-agent", "version": "1.0.0"},
+            "extra": {USAGE_SUPERSEDED_ATTRIBUTE: marker},
+            "steps": [{"step_id": 1, "source": "agent", "message": "answer"}],
+        }
+    )
+
+    root = trajectory_to_spans(
+        workspace="default",
+        trajectory=trajectory,
+        ingested_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+    )[0]
+
+    assert root.attributes_bool.get(USAGE_SUPERSEDED_ATTRIBUTE, False) is superseded
 
 
 def test_atif_mapping_span_ids_are_trace_native_and_ignore_evaluation_run_id() -> None:

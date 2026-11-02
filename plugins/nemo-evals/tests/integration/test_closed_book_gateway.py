@@ -4,7 +4,7 @@
 """The closed-book middleware loaded by the Inference Gateway from its entry point, on a closed-book VirtualModel."""
 
 import pytest
-from nemo_evals.closed_book import CONFIG_TYPE, MIDDLEWARE_NAME
+from nemo_evals.gateway.middleware.closed_book import CONFIG_TYPE, MIDDLEWARE_NAME
 from nhx.core.inference_gateway.testing.fixtures import _igw_app_context, _igw_extra_services, igw_plugin_harness
 from nhx.core.inference_gateway.testing.harness import IGWPluginHarness
 from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
