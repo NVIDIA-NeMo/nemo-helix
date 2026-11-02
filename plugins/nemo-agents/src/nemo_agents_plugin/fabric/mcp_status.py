@@ -25,6 +25,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
+from mcp.types import PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
 from pydantic import BaseModel, Field
 
@@ -89,10 +90,10 @@ def _is_exposed(tool: str, spec: McpServerConfig, config: AgentConfig) -> bool:
 
 @asynccontextmanager
 async def _open_streams(
-    transport: str, target: str, spec: McpServerConfig, errlog: TextIO
+    transport: str, target: str, spec: McpServerConfig, env: dict[str, str], errlog: TextIO
 ) -> AsyncGenerator[tuple[Any, Any]]:
     if transport == "stdio":
-        params = StdioServerParameters(command=target, args=spec.args, env=spec.env or None)
+        params = StdioServerParameters(command=target, args=spec.args, env=env or None)
         async with stdio_client(params, errlog=errlog) as streams:
             yield streams
         return
@@ -105,6 +106,17 @@ async def _open_streams(
         yield read, write
 
 
+async def _list_all_tools(session: ClientSession) -> list[Tool]:
+    tools: list[Tool] = []
+    cursor: str | None = None
+    while True:
+        page = await session.list_tools(params=PaginatedRequestParams(cursor=cursor))
+        tools.extend(page.tools)
+        cursor = page.nextCursor
+        if not cursor:
+            return tools
+
+
 async def probe_mcp_server(
     name: str,
     spec: McpServerConfig,
@@ -114,8 +126,14 @@ async def probe_mcp_server(
 ) -> McpServerStatus:
     """Connect to one declared server and list its tools."""
     transport = _normalize_transport(spec.transport)
-    target = os.path.expandvars(spec.url).strip()
-    status = McpServerStatus(name=name, transport=transport, target=target, args=spec.args, state="failed")
+    raw_target = spec.url.strip()
+    target = os.path.expandvars(raw_target)
+    # Report the unexpanded value so credentials substituted from the environment never leave the process.
+    status = McpServerStatus(name=name, transport=transport, target=raw_target, args=spec.args, state="failed")
+    env = {**config.environment.env, **spec.env}
+
+    def redact(text: str | None) -> str | None:
+        return text.replace(target, raw_target) if text and target != raw_target else text
 
     if transport not in {"stdio", "sse", "streamable_http"}:
         status.state = "unsupported"
@@ -124,7 +142,7 @@ async def probe_mcp_server(
 
     if transport == "stdio":
         # Resolve against the PATH the server inherits, but keep host paths out of the response.
-        search_path = spec.env.get("PATH", os.environ.get("PATH", ""))
+        search_path = env.get("PATH", os.environ.get("PATH", ""))
         if not target or shutil.which(target, path=search_path) is None:
             status.state = "unresolved"
             status.error = f"Command '{target}' was not found on the runtime PATH."
@@ -133,17 +151,17 @@ async def probe_mcp_server(
     with tempfile.TemporaryFile(mode="w+") as errlog:
         try:
             with anyio.fail_after(timeout_seconds):
-                async with _open_streams(transport, target, spec, errlog) as (read, write):
+                async with _open_streams(transport, target, spec, env, errlog) as (read, write):
                     async with ClientSession(read, write) as session:
                         await session.initialize()
-                        tools = (await session.list_tools()).tools
+                        tools = await _list_all_tools(session)
         except TimeoutError:
             status.error = f"No response from the MCP server within {timeout_seconds:g}s."
-            status.stderr = _read_tail(errlog)
+            status.stderr = redact(_read_tail(errlog))
             return status
         except Exception as error:
-            status.error = _describe_error(error)
-            status.stderr = _read_tail(errlog)
+            status.error = redact(_describe_error(error))
+            status.stderr = redact(_read_tail(errlog))
             return status
 
     status.state = "running"

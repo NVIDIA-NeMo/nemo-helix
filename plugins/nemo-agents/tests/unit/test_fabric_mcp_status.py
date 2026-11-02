@@ -10,9 +10,10 @@ from typing import Any
 import pytest
 import yaml
 from fastapi.testclient import TestClient
+from mcp.types import ListToolsResult, PaginatedRequestParams, Tool
 from nemo_agents_plugin.agent_config import AgentConfig, McpServerConfig
 from nemo_agents_plugin.fabric import server
-from nemo_agents_plugin.fabric.mcp_status import probe_mcp_server, probe_mcp_servers
+from nemo_agents_plugin.fabric.mcp_status import _list_all_tools, probe_mcp_server, probe_mcp_servers
 from nemo_agents_plugin.fabric.server import create_fabric_serving_app
 
 _SERVER_SCRIPT = """
@@ -102,6 +103,40 @@ async def test_unsupported_transport() -> None:
     status = await probe_mcp_server("ws", spec, _config({}))
 
     assert status.state == "unsupported"
+
+
+async def test_stdio_probe_inherits_environment_env() -> None:
+    spec = McpServerConfig.model_validate(
+        _stdio("-c", "import os, sys; sys.stderr.write(os.environ['PROBE_VAR']); sys.exit(1)")
+    )
+    config = _config({}, environment={"env": {"PROBE_VAR": "from-environment"}})
+
+    status = await probe_mcp_server("env", spec, config, timeout_seconds=5)
+
+    assert status.stderr == "from-environment"
+
+
+async def test_status_never_reports_expanded_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PROBE_SECRET", "s3cret")
+    spec = McpServerConfig(transport="http", url="http://127.0.0.1:1/${PROBE_SECRET}")
+
+    status = await probe_mcp_server("remote", spec, _config({}), timeout_seconds=5)
+
+    assert status.target == "http://127.0.0.1:1/${PROBE_SECRET}"
+    assert "s3cret" not in status.model_dump_json()
+
+
+async def test_list_all_tools_follows_cursors() -> None:
+    pages = {
+        None: ListToolsResult(tools=[Tool(name="a", inputSchema={})], nextCursor="p2"),
+        "p2": ListToolsResult(tools=[Tool(name="b", inputSchema={})]),
+    }
+
+    class Session:
+        async def list_tools(self, *, params: PaginatedRequestParams) -> ListToolsResult:
+            return pages[params.cursor]
+
+    assert [tool.name for tool in await _list_all_tools(Session())] == ["a", "b"]  # ty: ignore[invalid-argument-type]
 
 
 def test_mcp_status_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
