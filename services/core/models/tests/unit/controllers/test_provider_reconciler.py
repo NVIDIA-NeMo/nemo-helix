@@ -2958,6 +2958,48 @@ def test_handle_model_deployment_provider_unmatched_skipped(reconciler):
     assert out[0].model_entity_id == "ws/base"
 
 
+@pytest.mark.parametrize("with_entity", [False, True])
+@pytest.mark.asyncio
+async def test_relative_deployment_model_id_creates_passthrough_virtual_model(reconciler, mock_client, with_entity):
+    """Relative config IDs must match vLLM's qualified discovery ID before VM creation."""
+    ctx = _deployment_backed_ctx()
+    ctx.model_deployment_config.model_entity_id = "base-entity"
+    ctx.model_deployment_config.model_spec = MagicMock(model_namespace="ws")
+    ctx.model_entity = _base_entity([]) if with_entity else None
+    mock_client.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
+        await reconciler.reconcile_model_providers([ctx])
+
+    served = _provider_status_call(mock_client.models_client.update_provider_status)["served_models"]
+    assert {mapping.model_entity_id for mapping in served} == {
+        "ws/base-entity",
+        "ws/base-entity&adapters/default/pirate-speak",
+    }
+    create = mock_client.virtual_models_client.create_virtual_model
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["workspace"] == "ws"
+    assert create.call_args.kwargs["body"].name == "base-entity"
+    assert create.call_args.kwargs["body"].default_model_entity == "ws/base-entity"
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "entity_workspace", "model_namespace", "expected"),
+    [
+        ("base", "model-ws", "ignored", "model-ws/base"),
+        ("base", None, "model-ws", "model-ws/base"),
+        ("other/base", "ignored", "ignored", "other/base"),
+        ("base", None, None, "base"),
+    ],
+)
+def test_resolve_relative_base_backend_model_id(entity_id, entity_workspace, model_namespace, expected):
+    config = MagicMock()
+    config.model_entity_id = entity_id
+    config.model_spec = MagicMock(model_namespace=model_namespace)
+    entity = MagicMock(workspace=entity_workspace) if entity_workspace else None
+    assert _resolve_base_backend_model_id(config, entity) == expected
+
+
 def test_resolve_base_backend_model_id_from_nim_deployment_only():
     """When model_entity_id is unset, nim_deployment model_namespace/model_name resolves base id."""
     config = MagicMock()

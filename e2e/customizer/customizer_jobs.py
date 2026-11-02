@@ -304,7 +304,7 @@ def deploy_vllm_model(
         body=CreateModelDeploymentConfigRequest(
             name=deployment_config_name,
             description=f"E2E vLLM deployment for {model_entity}",
-            model_entity_id=model_entity,
+            model_entity_id=f"{workspace}/{model_entity}",
             engine=Engine.VLLM,
             model_spec=ModelDeploymentConfigModelSpec(
                 model_name=model_entity,

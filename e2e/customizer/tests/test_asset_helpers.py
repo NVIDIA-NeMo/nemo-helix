@@ -9,11 +9,12 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 
-from e2e.customizer import mine_embedding_data, stage_assets
+from e2e.customizer import customizer_jobs, mine_embedding_data, stage_assets
 from e2e.customizer.assets_manifest import load, local_only_formats, repo_root
 from e2e.customizer.generate_grpo_assets import (
     ADAPTER_ENV_FORMAT,
@@ -26,6 +27,21 @@ from e2e.customizer.generate_grpo_assets import (
 from e2e.customizer.mine_embedding_data import _download_resumable, _write_subsampled, _write_training_sample
 
 _PAYLOAD = bytes(range(256)) * 40  # 10,240 bytes
+
+
+def test_vllm_deployment_uses_qualified_model_entity_id() -> None:
+    """The config identity must match vLLM's namespace/name discovery identity."""
+    client = MagicMock()
+    with (
+        patch.object(customizer_jobs.ModelsClient, "from_client") as from_client,
+        patch.object(customizer_jobs, "wait_until_routable"),
+    ):
+        customizer_jobs.deploy_vllm_model(client, "e2e-ws", "base-model")
+
+    request = from_client.return_value.create_deployment_config.call_args.kwargs["body"]
+    assert request.model_entity_id == "e2e-ws/base-model"
+    assert request.model_spec.model_namespace == "e2e-ws"
+    assert request.model_spec.model_name == "base-model"
 
 
 class _DroppingStream(httpx.SyncByteStream):

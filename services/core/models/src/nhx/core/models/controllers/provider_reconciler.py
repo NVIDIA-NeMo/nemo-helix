@@ -335,6 +335,14 @@ def _resolve_base_backend_model_id(
     """
     if config and config.model_entity_id:
         model_workspace, model_name, _revision = parse_model_name_revision(model_name=config.model_entity_id)
+        if not model_workspace:
+            # Explicit relative IDs are preserved by the config API, but deployment
+            # backends advertise namespace/name. Resolve the namespace before comparing
+            # discovery IDs or the provider silently serves nothing (and gets no VirtualModel).
+            if base_model_entity is not None:
+                model_workspace = base_model_entity.workspace
+            elif config.model_spec is not None:
+                model_workspace = config.model_spec.model_namespace
         if model_workspace and model_name:
             return f"{model_workspace}/{model_name}"
         return config.model_entity_id
