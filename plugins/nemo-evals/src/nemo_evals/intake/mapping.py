@@ -74,9 +74,9 @@ DEFAULT_AGENT_VERSION = "unknown"
 
 # Span attribute keys Intake reads identity back from; see its span attribute catalog. The
 # session id has two accepted keys and this is the one that wins.
-_SESSION_ID_ATTRIBUTE = "gen_ai.conversation.id"
-_EVALUATION_NAME_ATTRIBUTE = "nemo.evaluation.name"
-_TEST_CASE_NAME_ATTRIBUTE = "nemo.test_case.name"
+SESSION_ID_ATTRIBUTE = "gen_ai.conversation.id"
+EVALUATION_NAME_ATTRIBUTE = "nemo.evaluation.name"
+TEST_CASE_NAME_ATTRIBUTE = "nemo.test_case.name"
 
 
 def session_id_for(run_id: str, trial_id: str) -> str:
@@ -211,9 +211,9 @@ async def otlp_ingest_for_trial(
     set_span_attributes(
         resource_spans,
         {
-            _SESSION_ID_ATTRIBUTE: session_id,
-            _EVALUATION_NAME_ATTRIBUTE: evaluation_name,
-            _TEST_CASE_NAME_ATTRIBUTE: trial.task_id,
+            SESSION_ID_ATTRIBUTE: session_id,
+            EVALUATION_NAME_ATTRIBUTE: evaluation_name,
+            TEST_CASE_NAME_ATTRIBUTE: trial.task_id,
         },
     )
     set_root_span_attributes(resource_spans, _trial_totals(trial, measurements))
