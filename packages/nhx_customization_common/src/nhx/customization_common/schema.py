@@ -25,9 +25,10 @@ stable.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from collections.abc import Mapping, Sequence
+from typing import ClassVar, TypedDict
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 # ``type(BaseModel)`` is pydantic's ``ModelMetaclass``; deriving from it this way
 # avoids importing pydantic internals.
@@ -57,3 +58,30 @@ class NamespacedModel(BaseModel, metaclass=_NamespacedMeta):
     # class-creation time to compute the emitted schema name.
     __schema_namespace__: ClassVar[str | None] = None
     model_config = ConfigDict(extra="forbid")  # the config every backend model already sets
+
+
+LEARNING_RATE_DEFAULTS_KEY = "x-learning-rate-defaults"
+"""OpenAPI extension listing a schema's per-selection learning-rate defaults, read by Studio."""
+
+
+class LearningRateDefault(TypedDict):
+    """``value`` applies when every dotted path in ``when``, relative to the schema, equals its value."""
+
+    when: dict[str, str]
+    value: float
+
+
+def match_learning_rate_default(rules: Sequence[LearningRateDefault], values: Mapping[str, object]) -> float | None:
+    """The first matching rule's rate, or ``None`` to keep the field's own default."""
+    for rule in rules:
+        if all(values.get(path) == expected for path, expected in rule["when"].items()):
+            return rule["value"]
+    return None
+
+
+def learning_rate_defaults_schema_extra(rules: Sequence[LearningRateDefault]) -> dict[str, JsonValue]:
+    """``json_schema_extra`` that publishes ``rules`` under :data:`LEARNING_RATE_DEFAULTS_KEY`."""
+    published: list[JsonValue] = [
+        {"when": {path: value for path, value in rule["when"].items()}, "value": rule["value"]} for rule in rules
+    ]
+    return {LEARNING_RATE_DEFAULTS_KEY: published}

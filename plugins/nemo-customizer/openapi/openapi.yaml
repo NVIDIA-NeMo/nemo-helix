@@ -2638,6 +2638,16 @@ components:
       - training
       title: AutomodelJobInput
       description: POST body / CLI JSON.
+      x-learning-rate-defaults:
+      - value: 1.0e-05
+        when:
+          training.recipe: bi_encoder
+      - value: 3.0e-06
+        when:
+          training.recipe: cross_encoder
+      - value: 5.0e-06
+        when:
+          training.finetuning_type: all_weights
     AutomodelJobOutput:
       properties:
         name:
@@ -4851,6 +4861,10 @@ components:
         ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
 
         ``lora_merged`` is not supported for GRPO on the Automodel path.'
+      x-learning-rate-defaults:
+      - value: 1.0e-05
+        when:
+          finetuning_type: lora
     RlJobInput:
       properties:
         name:
@@ -5603,6 +5617,10 @@ components:
       - dataset
       title: UnslothJobInput
       description: POST body / CLI JSON for ``nemo customization unsloth --job-json``.
+      x-learning-rate-defaults:
+      - value: 2.0e-05
+        when:
+          training.finetuning_type: all_weights
     UnslothJobOutput:
       properties:
         name:

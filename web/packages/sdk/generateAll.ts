@@ -113,6 +113,7 @@ const computeInputHash = (): string => {
     path.join(ORVAL_DIR, 'generateCustomFetcher.ts'),
     path.join(ORVAL_DIR, 'operationNameOverride.ts'),
     path.join(ORVAL_DIR, 'generate-capabilities.ts'),
+    path.join(ORVAL_DIR, 'generate-schema-extensions.ts'),
     path.join(__dirname, 'generateAll.ts'),
   ];
   for (const file of generatorSources) {
@@ -186,6 +187,8 @@ const main = async () => {
     execSync(concurrentlyCommand, { stdio: 'inherit' });
     console.log('\n🧰 Generating LLM capability registry...');
     execSync('pnpm run gen:capabilities', { stdio: 'inherit' });
+    console.log('\n🧩 Generating schema extension modules...');
+    execSync('pnpm run gen:schema-extensions', { stdio: 'inherit' });
     writeHash(currentHash);
     console.log('\n🎉 All type generation completed successfully!');
   } catch {

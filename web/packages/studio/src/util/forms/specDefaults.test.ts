@@ -5,18 +5,27 @@ import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customi
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
 import {
+  AUTOMODEL_DEFAULT_SPEC,
   AUTOMODEL_SEED,
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   GRPO_SPEC_DEFAULTS,
+  RL_DPO_DEFAULT_SPEC,
+  RL_GRPO_DEFAULT_SPEC,
   UNSET_PLACEHOLDER,
   UNSLOTH_SEED,
+  UNSLOTH_DEFAULT_SPEC,
   UNSLOTH_SPEC_DEFAULTS,
   booleanDefault,
+  hasLearningRate,
+  learningRateDefault,
+  learningRateSliderProps,
   numberDefault,
   placeholderFor,
+  resolveAutomodelRecipe,
   rlSeed,
   stringDefault,
+  withoutLearningRate,
 } from '@studio/util/forms/specDefaults';
 
 /**
@@ -122,5 +131,106 @@ describe('specDefaults', () => {
         expect(table.size).toBeGreaterThan(0);
       }
     });
+  });
+});
+
+describe('learningRateDefault', () => {
+  it('matches the backend validators for every selection', () => {
+    expect(
+      learningRateDefault({ backend: 'automodel', finetuningType: 'lora', recipe: 'auto' })
+    ).toBe(5e-5);
+    expect(
+      learningRateDefault({ backend: 'automodel', finetuningType: 'all_weights', recipe: 'sft' })
+    ).toBe(5e-6);
+    expect(
+      learningRateDefault({ backend: 'automodel', finetuningType: 'lora', recipe: 'bi_encoder' })
+    ).toBe(1e-5);
+    expect(
+      learningRateDefault({
+        backend: 'automodel',
+        finetuningType: 'all_weights',
+        recipe: 'cross_encoder',
+      })
+    ).toBe(3e-6);
+    expect(learningRateDefault({ backend: 'unsloth', finetuningType: 'lora' })).toBe(2e-4);
+    expect(learningRateDefault({ backend: 'unsloth', finetuningType: 'all_weights' })).toBe(2e-5);
+    expect(learningRateDefault({ backend: 'rl', method: 'grpo', finetuningType: 'lora' })).toBe(
+      1e-5
+    );
+    expect(
+      learningRateDefault({ backend: 'rl', method: 'grpo', finetuningType: 'all_weights' })
+    ).toBe(5e-6);
+    expect(learningRateDefault({ backend: 'rl', method: 'dpo' })).toBe(5e-6);
+  });
+
+  it('takes the LoRA rate from the generated spec so a backend change to it is not shadowed', () => {
+    expect(learningRateDefault({ backend: 'automodel', finetuningType: 'lora' })).toBe(
+      numberDefault(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_learning_rate')
+    );
+    expect(learningRateDefault({ backend: 'unsloth', finetuningType: 'lora' })).toBe(
+      numberDefault(UNSLOTH_SPEC_DEFAULTS, 'optimizer_learning_rate')
+    );
+  });
+});
+
+describe('unset learning rate', () => {
+  it('leaves it out of every default spec', () => {
+    expect(hasLearningRate('automodel', AUTOMODEL_DEFAULT_SPEC)).toBe(false);
+    expect(hasLearningRate('unsloth', UNSLOTH_DEFAULT_SPEC)).toBe(false);
+    expect(hasLearningRate('rl', RL_DPO_DEFAULT_SPEC)).toBe(false);
+    expect(hasLearningRate('rl', RL_GRPO_DEFAULT_SPEC)).toBe(false);
+  });
+
+  it('keeps the rest of the group', () => {
+    expect(AUTOMODEL_DEFAULT_SPEC.optimizer?.weight_decay).toBe(
+      numberDefault(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_weight_decay')
+    );
+  });
+
+  it('removes only the learning rate, without touching the input', () => {
+    const spec = { optimizer: { learning_rate: 1e-4, weight_decay: 0.1 } };
+    expect(withoutLearningRate('automodel', spec)).toEqual({ optimizer: { weight_decay: 0.1 } });
+    expect(spec.optimizer.learning_rate).toBe(1e-4);
+    expect(hasLearningRate('rl', { training: { learning_rate: 1e-5 } })).toBe(true);
+  });
+
+  it('shows the per-selection rate as the placeholder and resets to unset', () => {
+    expect(
+      learningRateSliderProps({ backend: 'automodel', finetuningType: 'all_weights' })
+    ).toEqual({ defaultValue: undefined, unsetPlaceholder: String(5e-6), unsetValue: 5e-6 });
+    expect(
+      learningRateSliderProps({ backend: 'rl', method: 'grpo', finetuningType: 'lora' })
+    ).toMatchObject({ defaultValue: undefined, unsetValue: 1e-5 });
+  });
+});
+
+describe('resolveAutomodelRecipe', () => {
+  it('follows the checkpoint head while the recipe is auto', () => {
+    expect(resolveAutomodelRecipe('auto', { head_type: 'embedding' })).toBe('bi_encoder');
+    expect(resolveAutomodelRecipe('auto', { head_type: 'cross_encoder' })).toBe('cross_encoder');
+    expect(resolveAutomodelRecipe('auto', { head_type: 'causal_lm' })).toBe('auto');
+  });
+
+  it('falls back to is_embedding_model when the head is unknown or missing', () => {
+    expect(resolveAutomodelRecipe('auto', { head_type: 'unknown', is_embedding_model: true })).toBe(
+      'bi_encoder'
+    );
+    expect(resolveAutomodelRecipe('auto', { is_embedding_model: true })).toBe('bi_encoder');
+    expect(resolveAutomodelRecipe('auto', { head_type: 'unknown' })).toBe('auto');
+  });
+
+  it('keeps an explicit recipe, and auto when the model is not loaded', () => {
+    expect(resolveAutomodelRecipe('sft', { head_type: 'embedding' })).toBe('sft');
+    expect(resolveAutomodelRecipe('auto', undefined)).toBe('auto');
+  });
+
+  it('gives an embedding checkpoint on auto its recipe rate', () => {
+    expect(
+      learningRateDefault({
+        backend: 'automodel',
+        finetuningType: 'lora',
+        recipe: resolveAutomodelRecipe('auto', { head_type: 'embedding' }),
+      })
+    ).toBe(1e-5);
   });
 });

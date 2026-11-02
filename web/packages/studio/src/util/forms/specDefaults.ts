@@ -9,6 +9,13 @@ import {
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
+import { type ModelSpec } from '@nemo/sdk/generated/platform/schema';
+import {
+  LEARNING_RATE_DEFAULTS,
+  type LearningRateDefaultRule,
+} from '@nemo/sdk/generated/schema-extensions/learningRateDefaults';
+import { type CustomizationBackend } from '@studio/util/customizationBackend';
+import { isPlainObject } from '@studio/util/functions';
 
 /**
  * Backend defaults for the customizer forms, taken from the Zod schemas Orval generates
@@ -78,20 +85,51 @@ export const rlSeed = (type: 'dpo' | 'grpo') => ({
 const specOf = <T>(schema: { parse: (input: unknown) => { spec: T } }, seed: unknown): T =>
   schema.parse({ spec: seed }).spec;
 
-/** Fully-defaulted spec objects. Bind forms to these directly. */
-export const AUTOMODEL_DEFAULT_SPEC = specOf<AutomodelJobInput>(
+const LEARNING_RATE_GROUP = {
+  automodel: 'optimizer',
+  unsloth: 'optimizer',
+  rl: 'training',
+} as const satisfies Record<CustomizationBackend, string>;
+
+export const hasLearningRate = (backend: CustomizationBackend, spec: unknown): boolean => {
+  const group = isPlainObject(spec) ? spec[LEARNING_RATE_GROUP[backend]] : undefined;
+  return isPlainObject(group) && group.learning_rate != null;
+};
+
+/**
+ * The backend only resolves a per-selection learning rate when the request omits it; the
+ * spec's single `default:` is the LoRA rate and would pin the wrong value for full weights.
+ */
+export const withoutLearningRate = <T extends object>(
+  backend: CustomizationBackend,
+  spec: T
+): T => {
+  const key = LEARNING_RATE_GROUP[backend];
+  const group = (spec as Record<string, unknown>)[key];
+  if (!isPlainObject(group)) {
+    return spec;
+  }
+  const rest = { ...group };
+  delete rest.learning_rate;
+  return { ...spec, [key]: rest };
+};
+
+const AUTOMODEL_PARSED_SPEC = specOf<AutomodelJobInput>(
   CustomizationCreateAutomodelJobBody,
   AUTOMODEL_SEED
 );
-export const UNSLOTH_DEFAULT_SPEC = specOf<UnslothJobInput>(
+const UNSLOTH_PARSED_SPEC = specOf<UnslothJobInput>(
   CustomizationCreateUnslothJobBody,
   UNSLOTH_SEED
 );
-export const RL_DPO_DEFAULT_SPEC = specOf<RlJobInput>(CustomizationCreateRlJobBody, rlSeed('dpo'));
-export const RL_GRPO_DEFAULT_SPEC = specOf<RlJobInput>(
-  CustomizationCreateRlJobBody,
-  rlSeed('grpo')
-);
+const RL_DPO_PARSED_SPEC = specOf<RlJobInput>(CustomizationCreateRlJobBody, rlSeed('dpo'));
+const RL_GRPO_PARSED_SPEC = specOf<RlJobInput>(CustomizationCreateRlJobBody, rlSeed('grpo'));
+
+/** Fully-defaulted spec objects, minus the learning rate. Bind forms to these directly. */
+export const AUTOMODEL_DEFAULT_SPEC = withoutLearningRate('automodel', AUTOMODEL_PARSED_SPEC);
+export const UNSLOTH_DEFAULT_SPEC = withoutLearningRate('unsloth', UNSLOTH_PARSED_SPEC);
+export const RL_DPO_DEFAULT_SPEC = withoutLearningRate('rl', RL_DPO_PARSED_SPEC);
+export const RL_GRPO_DEFAULT_SPEC = withoutLearningRate('rl', RL_GRPO_PARSED_SPEC);
 
 /**
  * Flattened `snake_case` view of a parsed spec, e.g. `optimizer_learning_rate`. The slider
@@ -114,11 +152,12 @@ const flatten = (
   return out;
 };
 
-export const AUTOMODEL_SPEC_DEFAULTS = flatten(AUTOMODEL_DEFAULT_SPEC);
-export const UNSLOTH_SPEC_DEFAULTS = flatten(UNSLOTH_DEFAULT_SPEC);
+/** Flattened from the parsed specs so the learning rate's spec default is kept. */
+export const AUTOMODEL_SPEC_DEFAULTS = flatten(AUTOMODEL_PARSED_SPEC);
+export const UNSLOTH_SPEC_DEFAULTS = flatten(UNSLOTH_PARSED_SPEC);
 /** Keyed off `training`, so callers use `epochs` / `parallelism_num_nodes`. */
-export const DPO_SPEC_DEFAULTS = flatten(RL_DPO_DEFAULT_SPEC.training);
-export const GRPO_SPEC_DEFAULTS = flatten(RL_GRPO_DEFAULT_SPEC.training);
+export const DPO_SPEC_DEFAULTS = flatten(RL_DPO_PARSED_SPEC.training);
+export const GRPO_SPEC_DEFAULTS = flatten(RL_GRPO_PARSED_SPEC.training);
 
 /** Reads a spec default, narrowed to the type the caller expects. `undefined` means unset. */
 const reader =
@@ -143,6 +182,9 @@ export const stringDefault = reader(isString);
  */
 export const UNSET_PLACEHOLDER = 'Unset';
 
+export const LEARNING_RATE_UNSET_HINT =
+  'Leave it empty to use the backend default for the selected fine-tuning type, shown in the field.';
+
 /**
  * Placeholder for a slider: the backend's own default when the spec has one, so the user
  * can see what will happen without the form sending a value, and `Unset` when it does not.
@@ -166,3 +208,86 @@ export const specSliderProps = (
   defaultValue: numberDefault(defaults, field),
   unsetPlaceholder: placeholderFor(defaults, field),
 });
+
+/**
+ * The backend's per-selection learning rate, published as `x-learning-rate-defaults` and
+ * matched the way `match_learning_rate_default` matches it: the first rule wins.
+ */
+const matchLearningRateDefault = (
+  rules: readonly LearningRateDefaultRule[],
+  values: Readonly<Record<string, string | undefined>>
+): number | undefined =>
+  rules.find((rule) => Object.entries(rule.when).every(([path, value]) => values[path] === value))
+    ?.value;
+
+/**
+ * Resolves `auto` from the base model's head type, as `AutomodelJobInput.with_resolved_recipe`
+ * does. Stays `auto` (SFT) for a causal LM or an unknown head.
+ */
+export const resolveAutomodelRecipe = (
+  recipe: string | undefined,
+  modelSpec: Pick<ModelSpec, 'head_type' | 'is_embedding_model'> | undefined
+): string | undefined => {
+  if (recipe !== 'auto' || !modelSpec) {
+    return recipe;
+  }
+  const head =
+    modelSpec.head_type && modelSpec.head_type !== 'unknown'
+      ? modelSpec.head_type
+      : modelSpec.is_embedding_model
+        ? 'embedding'
+        : 'unknown';
+  if (head === 'embedding') {
+    return 'bi_encoder';
+  }
+  if (head === 'cross_encoder') {
+    return 'cross_encoder';
+  }
+  return recipe;
+};
+
+export type LearningRateSelection =
+  | { backend: 'automodel'; finetuningType?: string; recipe?: string }
+  | { backend: 'unsloth'; finetuningType?: string }
+  | { backend: 'rl'; method: 'dpo' | 'grpo'; finetuningType?: string };
+
+/** Pass the recipe through {@link resolveAutomodelRecipe} first; `auto` reads as SFT. */
+export const learningRateDefault = (selection: LearningRateSelection): number | undefined => {
+  switch (selection.backend) {
+    case 'automodel':
+      return (
+        matchLearningRateDefault(LEARNING_RATE_DEFAULTS.AutomodelJobInput, {
+          'training.recipe': selection.recipe,
+          'training.finetuning_type': selection.finetuningType,
+        }) ?? numberDefault(AUTOMODEL_SPEC_DEFAULTS, 'optimizer_learning_rate')
+      );
+    case 'unsloth':
+      return (
+        matchLearningRateDefault(LEARNING_RATE_DEFAULTS.UnslothJobInput, {
+          'training.finetuning_type': selection.finetuningType,
+        }) ?? numberDefault(UNSLOTH_SPEC_DEFAULTS, 'optimizer_learning_rate')
+      );
+    case 'rl': {
+      if (selection.method === 'dpo') {
+        return numberDefault(DPO_SPEC_DEFAULTS, 'learning_rate');
+      }
+      return (
+        matchLearningRateDefault(LEARNING_RATE_DEFAULTS.RlGRPOTraining, {
+          finetuning_type: selection.finetuningType,
+        }) ?? numberDefault(GRPO_SPEC_DEFAULTS, 'learning_rate')
+      );
+    }
+  }
+};
+
+/** Leaves the rate unset for the backend to pick, showing that pick as the placeholder. */
+export const learningRateSliderProps = (
+  selection: LearningRateSelection
+): { defaultValue: undefined; unsetPlaceholder: string; unsetValue: number | undefined } => {
+  const rate = learningRateDefault(selection);
+  return {
+    defaultValue: undefined,
+    unsetPlaceholder: rate === undefined ? UNSET_PLACEHOLDER : String(rate),
+    unsetValue: rate,
+  };
+};

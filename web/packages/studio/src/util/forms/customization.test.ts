@@ -13,6 +13,7 @@ import {
   RL_GRPO_TRAINING_DEFAULTS,
   customizationFormSchema,
   formToAutomodelCreate,
+  formToRlCreate,
   formToUnslothCreate,
   getInitialFormValuesFromState,
   jobToFormFields,
@@ -373,7 +374,6 @@ describe('GRPO defaults', () => {
   const training = RL_GRPO_TRAINING_DEFAULTS as unknown as Record<string, unknown>;
 
   it('takes every value from the GRPO arm of the spec', () => {
-    expect(training.learning_rate).toBe(numberDefault(GRPO_SPEC_DEFAULTS, 'learning_rate'));
     expect(training.adam_eps).toBe(numberDefault(GRPO_SPEC_DEFAULTS, 'adam_eps'));
     expect(training.batch_size).toBe(numberDefault(GRPO_SPEC_DEFAULTS, 'batch_size'));
   });
@@ -391,6 +391,39 @@ describe('GRPO defaults', () => {
       expect(training[field]).toBeUndefined();
     }
   );
+  it('leaves learning_rate unset so the backend picks it for the fine-tuning type', () => {
+    expect(training.learning_rate).toBeUndefined();
+    expect(
+      (RL_DPO_TRAINING_DEFAULTS as unknown as Record<string, unknown>).learning_rate
+    ).toBeUndefined();
+  });
+});
+
+describe('learning rate', () => {
+  // Over the wire, as the backend sees it: JSON drops undefined-valued keys.
+  const wire = (request: unknown) => JSON.parse(JSON.stringify(request));
+
+  it('omits an unset rate so the backend resolves it for the selection', () => {
+    expect(wire(formToAutomodelCreate(validAutomodel())).spec.optimizer).not.toHaveProperty(
+      'learning_rate'
+    );
+    expect(wire(formToUnslothCreate(validUnsloth())).spec.optimizer).not.toHaveProperty(
+      'learning_rate'
+    );
+    expect(wire(formToRlCreate(validGrpo())).spec.training).not.toHaveProperty('learning_rate');
+  });
+
+  it('sends a rate the user set', () => {
+    const data = validAutomodel();
+    data.automodel.optimizer = { ...data.automodel.optimizer, learning_rate: 2e-5 };
+    expect(formToAutomodelCreate(data).spec.optimizer?.learning_rate).toBe(2e-5);
+  });
+
+  it('accepts an unset rate in validation', () => {
+    expect(messages(validAutomodel())).toEqual([]);
+    expect(messages(validUnsloth())).toEqual([]);
+    expect(messages(validGrpo())).toEqual([]);
+  });
 });
 
 describe('GRPO form validation', () => {
