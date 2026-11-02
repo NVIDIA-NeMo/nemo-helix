@@ -74,7 +74,7 @@ def test_default_harbor_config_is_valid_with_harbor_standard_only() -> None:
     standard = config.sandbox_profiles["harbor-standard"]
     assert standard.agent_channel == (API_HOST,)
     assert standard.egress_allow == (API_HOST,)
-    assert "registry.npmjs.org" in standard.agent_setup_egress
+    assert {"registry.npmjs.org"} <= set(standard.agent_setup_egress)
 
 
 def test_platform_config_list_replaces_the_chart_list() -> None:
