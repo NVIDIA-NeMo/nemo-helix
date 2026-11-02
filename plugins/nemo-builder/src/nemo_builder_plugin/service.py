@@ -91,7 +91,8 @@ def _build_router() -> APIRouter:
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
-        Creates one `pending` ``ContainerImage`` per spec, then the job that builds them.
+        Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. With
+        `max_concurrent_builds` set, the images are `queued` instead, and the job starts once a slot is free.
         """
         refusal = submit_refusal(caller)
         if refusal is not None:
@@ -134,6 +135,7 @@ def _build_router() -> APIRouter:
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
                 default_platform=config.default_platform,
+                queue=config.max_concurrent_builds is not None,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -171,7 +173,7 @@ def _build_router() -> APIRouter:
             default=None, max_length=128, description="Only the images of the build set with this `name`."
         ),
         revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
-        status: Literal["pending", "ready", "failed"] | None = Query(
+        status: Literal["queued", "pending", "ready", "failed"] | None = Query(
             default=None, description="Only images in this state."
         ),
         page: int = Query(default=1, ge=1),

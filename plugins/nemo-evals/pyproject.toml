@@ -14,6 +14,7 @@ dependencies = [
     "nhx-evals-sdk[harbor]",
     "nemo-helix-plugin",
     "nhx-sandbox",
+    "opentelemetry-proto>=1.27.0",
     "pydantic>=2.12.0",
     "typer>=0.20.0",
 ]
@@ -34,7 +35,9 @@ evals = "nemo_evals.sdk.resources:evaluator_sdk_resources"
 "evals.retrieve-eval" = "nemo_evals.jobs.retrieve_eval:RetrieveEvalJob"
 
 [project.entry-points."nemo.inference_middleware"]
-nemo-evals-closed-book = "nemo_evals.closed_book:ClosedBookMiddleware"
+nemo-evals-closed-book = "nemo_evals.gateway.middleware.closed_book:ClosedBookMiddleware"
+nemo-evals-access = "nemo_evals.gateway.middleware.evals_access:EvalsAccessMiddleware"
+nemo-evals-trial-recording = "nemo_evals.gateway.middleware.trial_recording:TrialRecordingMiddleware"
 
 [project.entry-points."nemo.controllers"]
 evals-taskset-runs = "nemo_evals.taskset_runs.controller:EvaluatorRunController"

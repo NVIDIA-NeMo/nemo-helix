@@ -53,7 +53,8 @@ numpy==2.2.6
 opt-einsum==3.4.0
 prv-accountant==0.2.0
 safetensors==0.8.0
-sentence-transformers==5.2.3
+# GHSA-jhr6-gm9c-rqjv: replace NSS's vulnerable 5.2.3 pin.
+sentence-transformers==5.6.1
 tokenizers==0.22.2
 triton==3.7.1
 torch==2.13.0+cu129

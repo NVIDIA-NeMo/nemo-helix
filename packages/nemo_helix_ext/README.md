@@ -194,7 +194,7 @@ echo '{"id": "prod"}' | nemo workspaces create --input-file -
 # Update a resource
 nemo workspaces update my-workspace --input-file updates.json
 
-# Delete a resource
+# Delete a resource (asks for confirmation; --yes skips it)
 nemo workspaces delete my-workspace
 
 # Generate Python SDK code

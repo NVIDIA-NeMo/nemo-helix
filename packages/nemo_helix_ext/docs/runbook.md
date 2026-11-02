@@ -117,6 +117,8 @@ nemo workspaces update my-workspace --input-data '{"description": "Updated"}'
 
 ### Delete Resource
 
+Destructive deletes ask for confirmation. Pass `--yes` to skip the prompt in scripts.
+
 ```bash
 nemo workspaces delete my-workspace
 ```

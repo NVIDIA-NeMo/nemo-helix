@@ -338,7 +338,7 @@ Remove the demo job and workspace if you created them:
 
 ```bash
 uv run nemo --context "$AUTHENTIK_CONTEXT" jobs delete "$JOB_NAME" --workspace "$WORKSPACE"
-uv run nemo --context "$AUTHENTIK_CONTEXT" workspaces delete "$WORKSPACE"
+uv run nemo --context "$AUTHENTIK_CONTEXT" workspaces delete "$WORKSPACE" --yes
 ```
 
 Then clean up the runtime you chose.

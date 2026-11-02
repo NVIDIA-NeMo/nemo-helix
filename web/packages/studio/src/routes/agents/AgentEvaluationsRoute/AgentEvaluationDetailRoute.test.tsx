@@ -54,6 +54,43 @@ describe('AgentEvaluationDetailRoute', () => {
     expect(await screen.findByText('Not Found')).toBeInTheDocument();
   });
 
+  describe('cost', () => {
+    const publishedJob = {
+      ...completedJob,
+      spec: { ...completedJob.spec, publication: { intake: { evaluation_id: 'published-eval' } } },
+    };
+
+    const serveJob = (cost: unknown) =>
+      server.use(
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+          () => HttpResponse.json(publishedJob)
+        ),
+        http.get(
+          `${PLATFORM_BASE_URL}/apis/intake/v2/workspaces/${workspace}/evaluations/published-eval`,
+          () =>
+            HttpResponse.json({
+              name: 'published-eval',
+              workspace,
+              ...(cost ? { cost_usd: cost } : {}),
+            })
+        )
+      );
+
+    it('shows the total cost of the published evaluation', async () => {
+      serveJob({ sum: 0.42, mean: 0.14, count: 3 });
+      renderDetail();
+      expect(await screen.findByText('$0.42')).toBeInTheDocument();
+    });
+
+    it('shows a dash when no cost was reported', async () => {
+      serveJob(undefined);
+      renderDetail();
+      expect(await screen.findByText('Cost')).toBeInTheDocument();
+      expect(screen.queryByText(/^\$/)).not.toBeInTheDocument();
+    });
+  });
+
   describe('run outcome', () => {
     const failedJob = {
       ...completedJob,

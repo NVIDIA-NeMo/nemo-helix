@@ -55,6 +55,7 @@ import {
   getFilesetRoute,
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
+import { formatCost } from '@studio/util/intakeTelemetry';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useState } from 'react';
 import { Link } from 'react-router';
@@ -231,6 +232,7 @@ export const AgentEvaluationDetailRoute: FC = () => {
                 }
               />
               <KVPair label="Agent" value={agentNameForJob(job) ?? '-'} />
+              <KVPair label="Cost" value={formatCost(evaluation?.cost_usd?.sum)} />
               <KVPair label="Tasks" value={String(job.spec.tasks?.length ?? '-')} />
               {evalConfigName(job) && (
                 <KVPair

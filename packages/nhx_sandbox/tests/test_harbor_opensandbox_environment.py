@@ -16,7 +16,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,8 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
+from nhx_sandbox.core.errors import ExecInterrupted
+from nhx_sandbox.core.termination import TERMINATION_GLOB
 from nhx_sandbox.harbor_opensandbox_cleanup import APPLIED_EGRESS_GLOB, applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import OpenSandboxDriver, SandboxExpiredError
 from nhx_sandbox.harbor_opensandbox_environment import (
@@ -54,7 +56,14 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Server:
     real_client = httpx.AsyncClient
 
     def client(**kwargs: Any) -> httpx.AsyncClient:
-        transport = httpx.MockTransport(lambda request: server.endpoint_route(request) or httpx.Response(404))
+        transport = httpx.MockTransport(
+            lambda request: (
+                server.endpoint_route(request)
+                or server.sandbox_route(request)
+                or server.events_route(request)
+                or httpx.Response(404)
+            )
+        )
         return real_client(transport=transport, **kwargs)
 
     monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
@@ -804,3 +813,247 @@ async def test_a_slowly_answered_pod_ip_lookup_still_stops_at_its_budget(
     assert time.monotonic() - started < 5
     assert _record(tmp_path, sandbox.id)["ip"] is None
     assert server.live() == {sandbox.id}
+
+
+def _terminations(tmp_path: Path) -> list[dict[str, Any]]:
+    """Every termination record in the trial directory, by file name."""
+    return [json.loads(path.read_text()) for path in sorted((tmp_path / TRIAL).glob(TERMINATION_GLOB))]
+
+
+async def test_stop_records_nothing_for_a_sandbox_that_is_still_running(tmp_path: Path, server: Server) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+
+    await environment.stop(delete=True)
+
+    assert _terminations(tmp_path) == []
+    assert server.live() == set()
+
+
+async def test_stop_records_an_eviction_before_it_kills_the_sandbox(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Server 1.1 reports an evicted sandbox as Pending; the cause comes from its warning event."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    server.states = ["Pending"]
+    server.status_reason, server.status_message = "CREATING", "Sandbox is being created"
+    server.events_content = (
+        "[2026-10-30 20:05:07+00:00] Warning  Evicted  Pod ephemeral local storage usage exceeds the total limit of containers 200Mi.\n"
+        "[2026-10-30 20:05:07+00:00] Normal   Killing  Stopping container sandbox\n"
+    )
+    real_kill = sandbox.kill
+    recorded_at_kill: list[list[dict[str, Any]]] = []
+
+    async def kill() -> None:
+        recorded_at_kill.append(_terminations(tmp_path))
+        await real_kill()
+
+    monkeypatch.setattr(sandbox, "kill", kill)
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert recorded_at_kill == [[termination]]
+    assert (termination["backend"], termination["sandbox_id"], termination["role"]) == (
+        "opensandbox",
+        sandbox.id,
+        "agent",
+    )
+    assert termination["cause"] == "evicted"
+    assert termination["evidence"] == {
+        "state": "Pending",
+        "reason": "CREATING",
+        "message": "Sandbox is being created",
+        "events": ["Evicted: Pod ephemeral local storage usage exceeds the total limit of containers 200Mi."],
+    }
+    assert server.live() == set()
+
+
+async def test_a_separate_verifiers_sandbox_is_recorded_as_the_verifiers(tmp_path: Path, server: Server) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, session_id=f"{TRIAL}__verifier__tests")
+    await environment.start(force_build=False)
+    server.states = ["Failed"]
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert (termination["role"], termination["cause"]) == ("verifier", "unknown")
+    assert termination["detail"] == "the sandbox stopped; server reported Failed: image pull failed"
+
+
+async def test_a_sandbox_gone_before_its_lifetime_ended_was_deleted(tmp_path: Path, server: Server) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    server.gone.add(_sandbox(environment).id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert (termination["cause"], termination["evidence"]) == ("deleted", {})
+
+
+async def test_a_sandbox_gone_after_its_lifetime_reached_it(tmp_path: Path, server: Server) -> None:
+    """The server deletes a sandbox at the end of its lifetime, so a 404 after then is the lifetime, not a deletion."""
+    server.expiry_override = datetime.now(UTC) - timedelta(seconds=1)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    server.gone.add(_sandbox(environment).id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "lifetime_reached"
+
+
+async def test_the_expiry_is_the_one_the_server_reports_for_the_sandbox_a_retry_created(
+    tmp_path: Path, server: Server
+) -> None:
+    """A retried create starts the successful sandbox's lifetime late, so the expiry is read back, never computed.
+
+    The lifetime sent here is a millisecond, so an expiry computed before create would already
+    have passed at stop and turned this deletion into ``lifetime_reached``.
+    """
+    server.create_failures.append(SandboxApiException("transient"))
+    server.expiry_override = datetime.now(UTC) + timedelta(hours=1)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK, sandbox_timeout_sec=0.001)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    assert len(server.creates) == 2
+    assert environment._server_expires_at == server.expiry_override
+    server.gone.add(sandbox.id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "deleted"
+
+
+async def test_a_sandbox_gone_without_a_reported_expiry_is_unknown(tmp_path: Path, server: Server) -> None:
+    """Without the server's expiry, a deletion and an expiry look the same, so the record doesn't pick one."""
+    server.reports_expiry = False
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    server.gone.add(_sandbox(environment).id)
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "unknown"
+
+
+async def test_an_unreadable_expiry_does_not_fail_the_create(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+
+    async def expires_at(sandbox: Any) -> datetime | None:
+        raise SandboxApiException("server unavailable", status_code=503)
+
+    monkeypatch.setattr(environment._driver, "expires_at", expires_at)
+    await environment.start(force_build=False)
+
+    assert environment._server_expires_at is None
+    assert "Could not read sandbox" in caplog.text
+    assert server.live() == {_sandbox(environment).id}
+
+
+async def test_unreadable_events_still_record_the_stop(tmp_path: Path, server: Server) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    server.states = ["Pending"]
+    server.events_content = None
+
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert (termination["cause"], termination["evidence"]["events"]) == ("unknown", [])
+
+
+async def test_an_oom_kill_the_server_still_reports_running_is_waited_for(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Seen on dev-blue: stop ran 2s after a command's sandbox was OOM-killed, while the server still said Running."""
+    monkeypatch.setattr(environment_module, "TERMINATION_POLL_INTERVAL_SEC", 0)
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    _sandbox(environment).commands.results["python3 hog.py"] = execution(exit_code=None)
+    server.states = ["Running", "Running", "Pending"]
+    server.status_reason, server.status_message = "CREATING", "Sandbox is being created"
+
+    with pytest.raises(ExecInterrupted):
+        await environment.exec("python3 hog.py")
+    await environment.stop(delete=True)
+
+    [termination] = _terminations(tmp_path)
+    assert termination["cause"] == "unknown"
+    assert termination["evidence"]["state"] == "Pending"
+
+
+async def test_a_check_that_cannot_start_still_kills_and_releases_without_raising(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An error from stop becomes the trial's, and a skipped kill leaves the sandbox running until its lifetime ends."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+
+    def broken_server() -> Any:
+        raise ValueError("bad connection config")
+
+    monkeypatch.setattr(environment, "_server", broken_server)
+    await environment.stop(delete=True)
+
+    assert "Could not check whether sandbox" in caplog.text
+    assert server.live() == set()
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
+async def test_a_cancelled_check_still_kills_and_releases(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+
+    async def cancelled(*args: Any, **kwargs: Any) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(environment_module, "check_termination", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await environment.stop(delete=True)
+
+    assert server.live() == set()
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
+async def test_stop_of_a_sandbox_already_gone_does_not_raise(tmp_path: Path, server: Server) -> None:
+    """Harbor records an error from stop as the trial's, so a sandbox gone after the trial finished must not fail it."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    sandbox = _sandbox(environment)
+    server.gone.add(sandbox.id)
+
+    await environment.stop(delete=True)
+
+    assert sandbox.closed
+    assert environment._sandbox is None
+
+
+async def test_a_failed_status_read_records_nothing_and_still_stops(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A status read that fails says nothing about the sandbox, so nothing is recorded and the kill still goes out."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    await environment.start(force_build=False)
+    monkeypatch.setattr(
+        server, "sandbox_route", lambda request: httpx.Response(503) if request.method == "GET" else None
+    )
+
+    await environment.stop(delete=True)
+
+    assert _terminations(tmp_path) == []
+    assert "Could not check whether sandbox" in caplog.text
+    assert server.live() == set()

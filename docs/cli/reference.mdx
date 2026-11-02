@@ -1098,7 +1098,7 @@ nemo chat [OPTIONS] [PROMPT]
 
 **Model Options:**
 
-* `--temperature <FLOAT>`: Sampling temperature (0.0 to 2.0)
+* `--temperature <FLOAT RANGE>`: Sampling temperature (0.0 to 2.0)
 * `--max-tokens <INTEGER>`: Maximum tokens to generate
 * `--system-message`: System message to set context for the conversation
 
@@ -5816,6 +5816,9 @@ will handle deletion of all entities and external resources.
 
 Role bindings are immediately deleted to revoke access.
 
+Asks for confirmation first; pass `--yes` to skip it (required when not
+running interactively).
+
 **Examples:**
 
 
@@ -5832,6 +5835,10 @@ nemo workspaces delete [OPTIONS] NAME
 **Arguments:**
 
 * `<NAME>`
+
+**Options:**
+
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6484,7 +6491,7 @@ nemo agents delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6518,8 +6525,8 @@ nemo agents deploy [OPTIONS]
 
 * `--agent, -a`: Name of the agent to deploy.
 * `--name, -n`: Deployment name (auto-generated if omitted).
-* `--mode`: Runtime backend: subprocess (default), docker, k8s, or openshell. [default: subprocess]
-* `--image, -i`: Container image for docker/k8s/openshell modes (falls back to deployments.default_image).
+* `--mode`: Runtime backend: subprocess, docker, k8s, or openshell. Defaults to subprocess when the platform allows it, otherwise to the first enabled mode that needs no `--image`.
+* `--image, -i`: Container image for docker/k8s/openshell modes. Falls back to the agent's reference.container_image, then deployments.default_image.
 * `--use-image-entrypoint`: For docker/k8s modes, preserve the image ENTRYPOINT/CMD instead of injecting the platform-owned agent server command.
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref (e.g. 'default/repo-research-ben'). Its EnvironmentSpec is merged into the agent config and its ComputeSpec/secret refs are snapshotted onto the deployment at create time.
 * `--wait, --no-wait`: Wait for the deployment to reach a terminal status (running or failed) before returning.  Exits 0 only on running; exits 1 with the failure reason if runtime startup fails or readiness times out. Pass `--no-wait` for fire-and-forget behaviour (the original default — returns the pending deployment immediately as JSON).
@@ -6563,7 +6570,7 @@ nemo agents redeploy [OPTIONS]
 * `--environment, -e`: AgentEnvironment to deploy under, as a 'workspace/name' ref. Auto-detected from the existing deployment when omitted; pass an empty string to deploy with no environment.
 * `--wait, --no-wait`: Wait for the new deployment to reach a terminal status (running or failed) before returning. Exits 0 only on running; exits 1 on failure or timeout. Pass `--no-wait` to return the pending deployment immediately as JSON.
 * `--timeout, -t <INTEGER>`: Maximum seconds to wait for a terminal status (only with `--wait`). [default: 300]
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Help:**
@@ -6626,7 +6633,7 @@ nemo agents undeploy [OPTIONS] [NAME]
 
 * `--agent, --all, -a`: Remove all deployments for this agent.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6724,7 +6731,7 @@ nemo agents deployments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -6877,7 +6884,7 @@ nemo agents environment-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7005,7 +7012,7 @@ nemo agents environments delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7127,7 +7134,7 @@ nemo agents compute-specs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -7288,7 +7295,7 @@ nemo agents sessions close [OPTIONS] NAME
 **Options:**
 
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
-* `--yes, -y`: Skip confirmation prompt.
+* `--yes, -y`: Skip the confirmation prompt. Required when not running interactively.
 
 **Help:**
 
@@ -11766,6 +11773,7 @@ nemo intake traces [OPTIONS] COMMAND [ARGS]...
 * `get-metrics`: Get Trace Metrics
 * `list`: List Traces
 * `get`: Get Trace
+* `show`: Show one trace as a transcript.
 
 ##### nemo intake traces get-metrics
 
@@ -11879,3 +11887,39 @@ nemo intake traces get [OPTIONS] ID
 **Output Options:**
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo intake traces show
+
+Show one trace as a transcript.
+
+Prints one block per model turn and tool call in started_at order, with the span's model or tool
+name, its input (a tool's arguments) and output (a tool's result) cut to `--max-chars`, and its token
+counts and duration. When an LLM span's input is a chat message list, the text view shows only its
+last message, the one new in that turn. Spans of other kinds are counted by kind; show them with
+`--kinds`.
+
+**Usage:**
+
+```shell
+nemo intake traces show [OPTIONS] ID
+```
+
+**Arguments:**
+
+* `<ID>`: Trace ID.
+
+**Options:**
+
+* `--workspace`
+* `--max-chars <INTEGER RANGE>`: Cut each block's input and output to this many characters. Ignored with `--no-truncate`. [default: 500]
+* `--kinds KINDS`: Comma-separated span kinds to show as blocks, e.g. LLM,TOOL,RETRIEVER, or 'all'. Defaults to LLM,TOOL. TOOL also selects spans of any other kind that carry a tool name.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--no-truncate`: Print each block's full input and output.
+* `--output-format, --output, -f <CHOICE>`: text prints the transcript; json and yaml print the same blocks as structured data. Defaults to text, even when piped, unless the configured output format is json or yaml. [possible values: text, json, yaml]
+* `--output-schema`: Print the JSON Schema of the json and yaml output, then exit. Needs no trace ID.

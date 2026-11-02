@@ -131,6 +131,11 @@ builder:
   # `ttl_seconds_before_active`. Longer than the 30-minute profile default: a burst of builds (113 for one DeepSWE run)
   # queues steps behind the Jobs controller, and that queue time counts.
   ttlSecondsBeforeActive: 3600
+  # -- Most builds running at once, across all workspaces: the builder's `max_concurrent_builds`. Set, every submit
+  # returns its images `queued`, and they start oldest first while fewer than this many run. Size it to
+  # `resourceQuota`: each running build holds a sandbox and a step pod. Null skips the queue and starts every build
+  # as it is submitted; builds the quota then rejects fail without a retry.
+  maxConcurrentBuilds: 3
   # -- Extra labels for the build namespace, such as one that has a cluster tool copy an image pull secret into it.
   namespaceLabels: {}
   # -- The work volume every build step and sandbox mounts.
@@ -477,15 +482,17 @@ clickhouse:
   image:
     # -- ClickHouse image repository. Intake is tested against the 26.3 LTS release line.
     repository: docker.io/clickhouse/clickhouse-server
-    # -- ClickHouse image tag.
-    tag: "26.3"
+    # -- ClickHouse image tag. Keep at or above 26.3.62.3, which fixes CVE-2026-116366.
+    tag: "26.3.62.3"
+    # -- ClickHouse image digest (`sha256:...`) pinned with the tag. Set to an empty string to pull by tag only, for example from a mirror that re-signs images.
+    digest: "sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a"
     # -- ClickHouse image pull policy.
     pullPolicy: IfNotPresent
   auth:
     # -- ClickHouse username used by Intake.
     username: nemo
-    # -- ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password.
-    password: null
+    # -- ClickHouse password used when auth.existingSecret is empty. If unset, the chart generates a random password and keeps it across upgrades. Editing that Secret later does not roll the API or ClickHouse; restart those workloads manually.
+    password: ""
     # -- ClickHouse database used by Intake.
     database: intake
     # -- Name of an existing Secret containing the ClickHouse password. If empty, the chart creates one.
