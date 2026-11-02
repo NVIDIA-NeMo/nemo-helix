@@ -11766,6 +11766,7 @@ nemo intake traces [OPTIONS] COMMAND [ARGS]...
 * `get-metrics`: Get Trace Metrics
 * `list`: List Traces
 * `get`: Get Trace
+* `show`: Show one trace as a transcript.
 
 ##### nemo intake traces get-metrics
 
@@ -11879,3 +11880,38 @@ nemo intake traces get [OPTIONS] ID
 **Output Options:**
 
 * `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo intake traces show
+
+Show one trace as a transcript.
+
+Prints one block per model turn and tool call in started_at order, with the span's model or tool
+name, its input (a tool's arguments) and output (a tool's result) cut to `--max-chars`, and its token
+counts and duration. When an LLM span's input is a chat message list, the text view shows only its
+last message, the one new in that turn. Spans of other kinds are counted by kind; show them with
+`--kinds`.
+
+**Usage:**
+
+```shell
+nemo intake traces show [OPTIONS] ID
+```
+
+**Arguments:**
+
+* `<ID>`: Trace ID.
+
+**Options:**
+
+* `--workspace`
+* `--max-chars <INTEGER RANGE>`: Cut each block's input and output to this many characters. Ignored with `--no-truncate`. [default: 500]
+* `--kinds KINDS`: Comma-separated span kinds to show as blocks, e.g. LLM,TOOL,RETRIEVER, or 'all'. Defaults to LLM,TOOL. TOOL also selects spans of any other kind that carry a tool name.
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--no-truncate`: Print each block's full input and output.
+* `--output-format, --output, -f <CHOICE>`: text prints the transcript; json and yaml print the same blocks as structured data. [possible values: text, json, yaml]
