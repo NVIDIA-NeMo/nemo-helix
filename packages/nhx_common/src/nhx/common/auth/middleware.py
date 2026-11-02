@@ -675,7 +675,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
         # Auth enabled - perform PDP check with the parsed principal headers. The HF-compatible
-        # flow synthesizes these from its Bearer service token without mutating request.headers.
+        # flow synthesizes the header from a bare service token only when auth is disabled.
         return await self._handle_auth_check(request, call_next, headers_dict)
 
     async def _handle_bearer_token_request(self, request: Request, call_next: Callable, token: str) -> Response:

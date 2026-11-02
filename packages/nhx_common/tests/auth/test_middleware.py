@@ -1575,7 +1575,14 @@ class TestCompatibilityAuth:
     )
     def test_hf_endpoint_bearer_token_auth_disabled(self, auth_config_disabled, token, expected_status):
         """With auth disabled, HF endpoints keep accepting service:* Bearer tokens for local setups."""
-        app = create_test_app(auth_config_disabled)
+        app = FastAPI()
+
+        @app.get("/apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}")
+        async def hf_download(auth_client: AuthClient = Depends(get_auth_client)):
+            return {"principal": auth_client.principal.id}
+
+        Configuration.set_override(auth_config_disabled)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
         client = TestClient(app, raise_server_exceptions=False)
 
         response = client.get(
@@ -1584,6 +1591,8 @@ class TestCompatibilityAuth:
         )
 
         assert response.status_code == expected_status
+        if expected_status == 200:
+            assert response.json() == {"principal": token}
 
     @pytest.mark.parametrize("token", ["service:nim", "service:jobs", "service:not-a-real-service", "invalid-token"])
     @pytest.mark.parametrize("config_fixture", ["auth_config_enabled", "auth_config_token_exchange"])
@@ -1628,7 +1637,10 @@ class TestCompatibilityAuth:
         )
 
         with (
-            patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock(return_value=resolved)),
+            patch(
+                "nhx.common.auth.middleware.resolve_workload_access_token",
+                new=AsyncMock(return_value=resolved),
+            ) as access_resolver,
             patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
         ):
             mock_authorize.return_value = MagicMock(allowed=True)
@@ -1638,6 +1650,7 @@ class TestCompatibilityAuth:
             )
 
         assert response.status_code == 200
+        access_resolver.assert_awaited_once_with(auth_config_token_exchange, "signed-workload-token")
         auth_client = mock_authorize.call_args.args[0]
         assert auth_client.principal.id == "service:models"
 
