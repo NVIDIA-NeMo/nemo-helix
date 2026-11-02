@@ -409,6 +409,18 @@ def test_super_vl_user_args_replace_defaults(raw: list[str]):
     assert args[-len(raw) :] == raw
 
 
+@pytest.mark.parametrize(
+    "opt_in",
+    [["--enable-expert-parallel"], ["--skip-mm-profiling"], ["--mm-encoder-attn-backend", "TORCH_SDPA"]],
+)
+def test_super_vl_opt_in_flags_pass_through_with_defaults(opt_in: list[str]):
+    # Off by default; a user who adds one keeps every platform default alongside it.
+    args = vllm_compiler.compile_vllm_args(_view(gpu=8), _super_vl())
+    with_opt_in = vllm_compiler.compile_vllm_args(_view(gpu=8, additional_args=opt_in), _super_vl())
+    assert opt_in[0] not in args
+    assert with_opt_in == [*args, *opt_in]
+
+
 def test_super_vl_configured_tool_parser_wins():
     model = _super_vl(tool_call_config=ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=False))
     args = vllm_compiler.compile_vllm_args(_view(gpu=4), model)

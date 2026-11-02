@@ -134,6 +134,13 @@ When comparing several adapters, for example different epoch counts, score each 
 
 vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
 
+**Nemotron 3.5 Super VL.** Register the model entity with `trust_remote_code: true`; without it the platform cannot read the checkpoint's config and sets none of the model's vLLM flags. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform sets the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) for the model (context length, reasoning and tool parsers, image limit, MTP on the base model only); flags in `additional_args` replace them. Two flags stay off unless the user opts in; describe the tradeoff and let the user choose:
+
+- `--enable-expert-parallel`: whole experts per GPU, for high-concurrency serving. NVIDIA's cookbook uses it only in text-only throughput setups.
+- `--skip-mm-profiling`: faster startup, but vLLM stops reserving vision-encoder memory, so large images under load can run out of GPU memory.
+
+On Blackwell GPUs add `--mm-encoder-attn-backend TORCH_SDPA`. Send images to the deployment as `data:` URLs; it does not read fileset paths.
+
 **Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
 
 - Prefer the **model-free NIM** (`nvcr.io/nim/nvidia/vllm-model-free-nim`, the platform default NIM image, tag `latest`). It is the NIM 2.x successor to the multi-LLM NIM, not a rename, and the platform sets the configuration it reads. Supported models: [model-free NIM support matrix](https://docs.nvidia.com/nim/large-language-models/latest/reference/support-matrix.html#model-free-nim).

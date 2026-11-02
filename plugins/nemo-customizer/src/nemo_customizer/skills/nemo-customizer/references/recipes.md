@@ -9,6 +9,7 @@ Before you write job JSON for a named model, start from a benchmarked recipe in 
 |---|---|---|---|
 | `automodel` | [Automodel](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples) | `r0.6.0` | `examples/llm_finetune/<family>/`, `examples/llm_kd/` |
 | `rl` | [NeMo-RL](https://github.com/NVIDIA-NeMo/RL/tree/r0.8.0/examples/configs) | `r0.8.0` | `examples/configs/recipes/llm/*-fsdp2*`, `*-automodel*`, and the base configs they extend. Customizer trains on `AutomodelPolicyWorker`, so `*-megatron*` recipes do not apply. |
+| any (serving and end-to-end) | [Nemotron usage cookbooks](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook) | `main` | `usage-cookbook/<model>/`: the model team's tested `vllm serve` commands per GPU type, and end-to-end fine-tune-and-serve walkthroughs. Use them for deployment flags, the checkpoint to serve, and dataset prep. Translate their training configs through the field maps below like any recipe. |
 
 ## Workflow
 
@@ -33,6 +34,10 @@ Nemotron 3.5 Lightning 30B-A3B and Nemotron 3 Nano 30B-A3B share the `NemotronH`
 | | DPO | NeMo-RL [`dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml). Only LR, β, batch, and length transfer, because customizer DPO has no `expert_parallel_size`. |
 | Nemotron 3 Super 120B-A12B | LoRA / full SFT | Automodel [`nemotron_super_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_super_v3_hellaswag_peft.yaml), [`nemotron_super_v3_hellaswag.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_super_v3_hellaswag.yaml) |
 | | GRPO | NeMo-RL [`grpo-nemotron3-super-120BA12B-16n8g-automodel-ep8.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nemotron3-super-120BA12B-16n8g-automodel-ep8.v2.yaml) |
+| Nemotron 3.5 Super VL 120B-A12B | LoRA (CORD-v2, rank 64, 8 GPUs, EP 8) | Automodel [`nemotron_3_5_super_vl_cord_v2_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/vlm_finetune/nemotron_3_5_super_vl/nemotron_3_5_super_vl_cord_v2_peft.yaml) |
+| | Full SFT, text-only, 4 nodes | Automodel [`nemotron_3_5_super_vl_tulu3_text_100steps.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/vlm_finetune/nemotron_3_5_super_vl/nemotron_3_5_super_vl_tulu3_text_100steps.yaml) |
+| | Three finance LoRA adapters, then serving them together | Cookbook [`lora-finance/`](https://github.com/NVIDIA-NeMo/Nemotron/tree/main/usage-cookbook/Nemotron-3.5-Super-VL/lora-finance) (`scripts/import_finance.py` reproduces its data prep) |
+| | Serving (vLLM flags per GPU type, BF16 vs NVFP4) | Cookbook [`vllm_cookbook.ipynb`](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) |
 | Nemotron 3 Ultra | LoRA | Automodel [`nemotron_ultra_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_ultra_v3_hellaswag_peft.yaml) |
 | Nemotron Nano 9B v2 | LoRA / full SFT | Automodel [`nemotron_nano_9b_squad_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_nano_9b_squad_peft.yaml), [`nemotron_nano_9b_squad.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_nano_9b_squad.yaml) |
 | Nemotron Nano 12B v2 | GRPO | NeMo-RL [`grpo-nano-v2-12b-2n8g-fsdp2tp1.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nano-v2-12b-2n8g-fsdp2tp1.yaml) |
