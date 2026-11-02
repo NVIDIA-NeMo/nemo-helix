@@ -113,6 +113,22 @@ def test_scheduling_deferred_preserves_step_resuming_with_visible_status_details
     assert body.status_details == {"message": "capacity full"}
 
 
+def test_scheduling_deferred_resends_unchanged_resuming_step(
+    job_scheduler: JobScheduler,
+    mock_nemo_client,
+    mock_jobs_client,
+    test_step_resuming: HelixJobStepWithContext,
+):
+    resuming_step = test_step_resuming.model_copy(update={"status_details": {"message": "capacity full"}})
+    mock_jobs_client.list_steps.return_value = paginated_response([resuming_step])
+
+    with patch.object(job_scheduler, "schedule_step", side_effect=SchedulingDeferred("capacity full")):
+        job_scheduler.step()
+
+    # The dispatcher no-ops the step write but still retries job and attempt propagation.
+    mock_jobs_client.update_job_step_status.assert_called_once()
+
+
 def test_scheduling_deferred_status_write_failure_does_not_skip_later_steps(
     job_scheduler: JobScheduler,
     mock_nemo_client,

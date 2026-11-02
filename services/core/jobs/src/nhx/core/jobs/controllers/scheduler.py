@@ -183,14 +183,14 @@ class JobScheduler(HeartbeatMixin, Controller):
                     deferred_status = self._deferred_status(step, e)
                     if (
                         HelixJobStatus(step.status) == deferred_status
-                        and deferred_status != HelixJobStatus.QUEUED
+                        and deferred_status not in (HelixJobStatus.QUEUED, HelixJobStatus.RESUMING)
                         and (step.status_details or {}).get("message") == e.message
                     ):
                         # Already recorded on an earlier pass; skip the write so API and DB load
-                        # does not grow with queue depth times poll frequency. Queued steps are
-                        # excluded: re-sending lets the dispatcher retry job and attempt status
-                        # propagation after a partial failure. The dispatcher treats the unchanged
-                        # step write as a no-op.
+                        # does not grow with queue depth times poll frequency. Queued and resuming
+                        # steps are excluded: re-sending lets the dispatcher retry job and attempt
+                        # status propagation after a partial failure. The dispatcher treats the
+                        # unchanged step write as a no-op.
                         continue
                     try:
                         self._update_step_status_with_timing(
