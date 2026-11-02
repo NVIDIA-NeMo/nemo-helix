@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ActionMenuItem, ActionsMenu } from '@nemo/common/src/components/ActionsMenu';
+import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
+import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getDataDesignerListCreateJobsQueryKey,
   useDataDesignerCancelCreateJob,
@@ -29,14 +31,12 @@ interface DataDesignerJobActionsMenuProps {
   onViewConfig?: () => void;
   /** Called after the job is successfully deleted, e.g. to navigate away from the details page. */
   onDeleted?: () => void;
-  /** Surface a cancel error (or `undefined` to clear) so the caller can render it. */
-  onCancelError?: (message: string | undefined) => void;
 }
 
 /**
  * Actions menu for a single Data Designer job: any caller-supplied actions, View details
  * (optional), Clone, Cancel (when cancellable), and Delete. Shared by the jobs table and the job details page so both
- * expose the same actions. Owns its own delete modal; cancel errors are surfaced via callback.
+ * expose the same actions. Owns its own delete and cancel-confirmation modals.
  */
 export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = ({
   job,
@@ -45,12 +45,13 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
   includeViewDetails = false,
   onViewConfig,
   onDeleted,
-  onCancelError,
 }) => {
   const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const toast = useToast();
 
   const cancelJobMutation = useDataDesignerCancelCreateJob({
     mutation: {
@@ -58,10 +59,7 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
         queryClient.resetQueries({
           queryKey: getDataDesignerListCreateJobsQueryKey(workspace),
         });
-        onCancelError?.(undefined);
-      },
-      onError: (error) => {
-        onCancelError?.(error instanceof Error ? error.message : 'Failed to cancel job');
+        toast.success('Job cancelled successfully.');
       },
     },
   });
@@ -76,13 +74,8 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
 
   const handleCancel = useCallback(async () => {
     if (!job.workspace || !job.name) return;
-    try {
-      onCancelError?.(undefined);
-      await cancelJobMutation.mutateAsync({ workspace: job.workspace, name: job.name });
-    } catch {
-      // Error is surfaced via the mutation's onError callback.
-    }
-  }, [job.workspace, job.name, cancelJobMutation, onCancelError]);
+    await cancelJobMutation.mutateAsync({ workspace: job.workspace, name: job.name });
+  }, [job.workspace, job.name, cancelJobMutation]);
 
   const isCancellable = job.status != null && CJobCancellableStatuses.includes(job.status);
 
@@ -116,7 +109,7 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
       ? [
           {
             label: 'Cancel',
-            onSelect: handleCancel,
+            onSelect: () => setShowCancelModal(true),
           },
         ]
       : []),
@@ -141,6 +134,12 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
           onDeleted={onDeleted}
         />
       )}
+      <CancelJobModal
+        open={showCancelModal}
+        jobName={job.name ?? ''}
+        onClose={() => setShowCancelModal(false)}
+        onConfirm={handleCancel}
+      />
     </>
   );
 };
