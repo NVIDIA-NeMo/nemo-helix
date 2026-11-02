@@ -100,16 +100,32 @@ class HarborTaskJobsConfig(BaseModel):
         ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
-        min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
+        default=("default",),
+        min_length=1,
+        description=(
+            "Jobs execution profiles a request may name as execution.dispatcher_profile; the default nhx-tasks "
+            "dispatcher is used when a request names none."
+        ),
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
         min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox.profile."
     )
     default_sandbox_profile: str = Field(
-        default="harbor-standard",
         min_length=1,
-        description="The sandbox_profiles key a request gets when execution.sandbox.profile is omitted.",
+        description=(
+            "The sandbox_profiles key a request gets when execution.sandbox.profile is omitted; "
+            "if not set, the first profile is used."
+        ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_to_the_first_profile(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("default_sandbox_profile") is None:
+            profiles = data.get("sandbox_profiles")
+            if isinstance(profiles, dict) and profiles:
+                data = {**data, "default_sandbox_profile": next(iter(profiles))}
+        return data
 
     @model_validator(mode="after")
     def _default_profile_exists(self) -> Self:
