@@ -297,6 +297,9 @@ class _Api:
         if self._delete:
             raise self._delete
 
+    def list_namespaced_pod(self, **kwargs: object) -> None:
+        """Only named: the faked Watch streams the pods."""
+
 
 class TestEachSandboxFailsAlone:
     NAME = "nhx-sbx-abc-g0"
@@ -375,6 +378,34 @@ class TestEachSandboxFailsAlone:
             self._build(monkeypatch, _Api(), log="STEP 1/2\nSTEP 2/2\n" + self.BUILT)
         messages = [record.getMessage() for record in caplog.records]
         assert "  STEP 1/2" in messages and "  STEP 2/2" in messages
+
+
+def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    killed = k8s.V1ContainerStatus(
+        name="sandbox",
+        image="nhx-kaniko:test",
+        image_id="",
+        ready=False,
+        restart_count=0,
+        state=k8s.V1ContainerState(terminated=k8s.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")),
+    )
+    pod = k8s.V1Pod(status=k8s.V1PodStatus(phase="Failed", container_statuses=[killed]))
+
+    class Watch:
+        def stream(self, *args: object, **kwargs: object) -> list[dict[str, object]]:
+            return [{"object": pod}]
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
+    with caplog.at_level(logging.ERROR, logger=supervise.__name__):
+        failures = _build_group(
+            cast(k8s.CoreV1Api, _Api()), name="nhx-sbx-abc-g0", manifest=_pod(), group=_group(1), namespace="b"
+        )
+    assert failures == 1
+    assert "no result recorded (sandbox phase Failed: sandbox OOMKilled (exit 137))" in caplog.text
 
 
 class TestResultParsing:

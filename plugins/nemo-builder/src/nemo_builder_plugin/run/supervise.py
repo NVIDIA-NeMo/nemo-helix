@@ -202,12 +202,24 @@ def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
             logger.info("sandbox %s: %s", sanitize_for_log(name), sanitize_for_log(phase))
             if phase in ("Succeeded", "Failed"):
                 watcher.stop()
-                return phase
+                return phase + _terminations(event["object"])
             if time.monotonic() > deadline:
                 break
     finally:
         watcher.stop()
     return "Unknown"
+
+
+def _terminations(pod: k8s.V1Pod) -> str:
+    """How each ended container ended, such as ``: sandbox OOMKilled (exit 137)``; read here because the sandbox
+    is deleted as soon as it ends."""
+    statuses = (pod.status.container_statuses if pod.status else None) or []
+    ended = [
+        f"{s.name} {s.state.terminated.reason} (exit {s.state.terminated.exit_code})"
+        for s in statuses
+        if s.state and s.state.terminated
+    ]
+    return f": {', '.join(ended)}" if ended else ""
 
 
 def _read_pod_log(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
