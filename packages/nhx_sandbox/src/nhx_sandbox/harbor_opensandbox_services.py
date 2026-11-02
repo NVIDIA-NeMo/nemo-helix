@@ -89,7 +89,7 @@ EGRESS_API_PORT = 18080
 # The ports the API can move to. We pick the first one no service needs.
 EGRESS_API_FALLBACK_PORTS = range(18081, 18100)
 # The extension records the moved port on the sandbox under this annotation. The server reads it back to attach the
-# egress auth token when a client asks for that port.
+# egress auth token when a client asks for that port, and only that port, so a service on 18080 never receives it.
 EGRESS_API_PORT_ANNOTATION = "opensandbox.io/nemo-egress-api-port"
 
 # A Kubernetes DNS label short enough that "nemo-vol-<name>" and "nemo-shm-<name>" still fit in 63.

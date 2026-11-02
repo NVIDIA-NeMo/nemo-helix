@@ -24,6 +24,9 @@ The stock server copies each extension onto the pod as an annotation (``POD_ANNO
     which aren't ready yet.
   * ``POST /v1/nemo-ext/sandboxes/{id}/services/{name}/exec``: runs a command in one service.
 
+``attach_egress_auth_headers`` replaces the stock service's attachment of the egress token to endpoints, which
+only knows port 18080, so that the token follows the egress policy API when a compose service takes 18080.
+
 ``NemoComposeProvider.get_status`` reports such a sandbox ``Allocated`` once its pod has an IP,
 so create returns while the services start; the client waits for ``main`` (which Kubernetes starts
 after the services) itself, and reads failures from the services route.
@@ -58,8 +61,11 @@ from nhx_sandbox.harbor_opensandbox_services import (
 from opensandbox_server.config import CONFIG_ENV_VAR
 from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY, SANDBOX_ID_LABEL
 from opensandbox_server.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
-from opensandbox_server.services.k8s import provider_factory
+from opensandbox_server.services.k8s import kubernetes_service, provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from opensandbox_server.services.k8s.endpoint_resolver import (
+    _attach_egress_auth_headers as stock_attach_egress_auth_headers,
+)
 from pydantic import BaseModel, ConfigDict, Field
 
 try:
@@ -88,6 +94,26 @@ LOG_TAIL_LINES = 20
 
 # The provider the server built; None if it runs another runtime.
 _provider: NemoComposeProvider | None = None
+
+
+def attach_egress_auth_headers(endpoint: Any, workload: Any, port: int) -> None:
+    """Put the egress token on ``endpoint`` for the port the egress policy API listens on, and no other.
+
+    The stock service calls this (as its own ``_attach_egress_auth_headers``) on every endpoint it hands out,
+    and only ever targets 18080. When we moved the API because a compose service listens on 18080, the token
+    must follow it: an endpoint for the service on 18080 that carried the token would let a client pass it on
+    to the service, which could then reach the sidecar on localhost and widen the sandbox's network access.
+    A sandbox whose API wasn't moved is handled by the stock code.
+    """
+    annotations = (workload.get("metadata") or {}).get("annotations") or {} if isinstance(workload, dict) else {}
+    moved_egress_port = annotations.get(EGRESS_API_PORT_ANNOTATION)
+    if moved_egress_port is None:
+        stock_attach_egress_auth_headers(endpoint, workload, port)
+        return
+
+    token = annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
+    if token and moved_egress_port == str(port):
+        endpoint.headers = merge_endpoint_headers(endpoint.headers, build_egress_auth_headers(token))
 
 
 class NemoComposeProvider(BatchSandboxProvider):
@@ -127,28 +153,9 @@ class NemoComposeProvider(BatchSandboxProvider):
             # has no egress sidecar, so there's nothing to move or record.
             if services.egress_api_port is not None and move_egress_api(template["spec"], services.egress_api_port):
                 # Record the moved port on the BatchSandbox, next to the egress token the server stores there, so
-                # get_endpoint_info can find both later.
+                # attach_egress_auth_headers can find both later.
                 workload_annotations = batchsandbox.setdefault("metadata", {}).setdefault("annotations", {})
                 workload_annotations[EGRESS_API_PORT_ANNOTATION] = str(services.egress_api_port)
-
-    def get_endpoint_info(self, workload: dict[str, Any], port: int, sandbox_id: str) -> Any:
-        """The stock endpoint, plus the egress auth token when ``port`` is where we moved the egress policy API.
-
-        The stock server only attaches the token for port 18080, so without this the egress API would reject our
-        client's calls on the moved port. The server still attaches the token for 18080, where a compose service now
-        listens, but our client never calls that port on these sandboxes.
-        """
-        endpoint = super().get_endpoint_info(workload, port, sandbox_id)
-        if endpoint is None:
-            return None
-
-        annotations = (workload.get("metadata") or {}).get("annotations") or {}
-        moved_egress_port = annotations.get(EGRESS_API_PORT_ANNOTATION)
-        token = annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
-        if token and moved_egress_port == str(port):
-            endpoint.headers = merge_endpoint_headers(endpoint.headers, build_egress_auth_headers(token))
-
-        return endpoint
 
     def get_status(self, workload: dict[str, Any]) -> dict[str, Any]:
         """The stock status, except a sandbox with services or a bundle is ``Allocated`` once its pod has an IP.
@@ -409,10 +416,13 @@ def install(argv: list[str]) -> None:
         "_create_workload_from_pool",
         "get_status",
         "_parse_pod_ip",
-        "get_endpoint_info",
     ):
         if not callable(getattr(BatchSandboxProvider, name, None)):
             raise RuntimeError(f"BatchSandboxProvider.{name} is missing; this server version is unsupported")
+    if not callable(getattr(kubernetes_service, "_attach_egress_auth_headers", None)):
+        raise RuntimeError(
+            "KubernetesSandboxService no longer attaches the egress token; this server version is unsupported"
+        )
     if "--reload" in argv:
         raise RuntimeError("--reload starts the server in a subprocess, without the extension")
 
@@ -421,6 +431,8 @@ def install(argv: list[str]) -> None:
     if "--config" in argv:
         os.environ[CONFIG_ENV_VAR] = argv[argv.index("--config") + 1]
     provider_factory.register_provider(provider_factory.PROVIDER_TYPE_BATCHSANDBOX, NemoComposeProvider)
+    # The service looks this up by name in its own module on every endpoint request, so this takes effect there.
+    kubernetes_service._attach_egress_auth_headers = attach_egress_auth_headers
     import opensandbox_server.main as server_main
 
     server_main.app.include_router(router)

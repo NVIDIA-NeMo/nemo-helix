@@ -42,7 +42,7 @@ from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from opensandbox_server.extensions import apply_extensions_to_annotations
 from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
 from opensandbox_server.services.endpoint_auth import build_egress_auth_headers
-from opensandbox_server.services.k8s import provider_factory
+from opensandbox_server.services.k8s import kubernetes_service, provider_factory
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
 
@@ -473,10 +473,16 @@ def test_install_registers_the_provider_before_the_server_builds_it(monkeypatch:
     monkeypatch.delitem(sys.modules, "opensandbox_server.main", raising=False)
     monkeypatch.delattr(opensandbox_server, "main", raising=False)
     monkeypatch.setattr(sys, "meta_path", [FakeMain(), *sys.meta_path])
+    # Install replaces this; setting it here has monkeypatch put the stock one back afterwards.
+    monkeypatch.setattr(
+        kubernetes_service, "_attach_egress_auth_headers", kubernetes_service._attach_egress_auth_headers
+    )
 
     ext.install(["opensandbox-server", "--config", "/etc/opensandbox/config.toml"])
 
     assert seen == {"provider": ext.NemoComposeProvider, "config": "/etc/opensandbox/config.toml"}
+    # The service's own token attachment is replaced, so the token follows a moved egress policy API.
+    assert kubernetes_service._attach_egress_auth_headers is ext.attach_egress_auth_headers
     app = sys.modules["opensandbox_server.main"].app
     # 503 rather than 404: the route is there, but this test built no provider.
     assert TestClient(app).get("/v1/nemo-ext/health").status_code == 503
@@ -530,18 +536,48 @@ def test_a_stock_sandbox_keeps_the_egress_api_on_18080(provider: ext.NemoCompose
     assert EGRESS_API_PORT_ANNOTATION not in manifest["metadata"].get("annotations", {})
 
 
+@pytest.fixture
+def endpoint_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The extension's endpoint auth, installed in the server's service layer as ``install`` does."""
+    monkeypatch.setattr(kubernetes_service, "_attach_egress_auth_headers", ext.attach_egress_auth_headers)
+
+
+def _get_endpoint(provider: ext.NemoComposeProvider, workload: dict[str, Any], port: int) -> Any:
+    """What a client gets from the stock service's ``get_endpoint``, which attaches the auth headers."""
+    provider.get_workload = lambda **_: workload  # ty: ignore[invalid-assignment]
+    service = types.SimpleNamespace(workload_provider=provider, namespace="nemo", validate_port=lambda _: None)
+    return KubernetesSandboxService.get_endpoint(service, SANDBOX_ID, port)  # ty: ignore[invalid-argument-type]
+
+
+def _egress_workload(moved_port: int | None) -> dict[str, Any]:
+    """A running sandbox with an egress token, whose egress policy API was moved to ``moved_port`` if given."""
+    workload = _workload({POD_ANNOTATION: SPEC_ON_18080}, "Running", "10.0.0.5")
+    workload["metadata"]["annotations"][SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = "egress-token"
+    if moved_port is not None:
+        workload["metadata"]["annotations"][EGRESS_API_PORT_ANNOTATION] = str(moved_port)
+    return workload
+
+
+@pytest.mark.usefixtures("endpoint_auth")
 @pytest.mark.parametrize(("port", "authorized"), [(18081, True), (18080, False), (5432, False)])
 def test_the_egress_token_goes_only_to_the_moved_api(
     provider: ext.NemoComposeProvider, port: int, authorized: bool
 ) -> None:
-    workload = _workload({POD_ANNOTATION: SPEC_ON_18080}, "Running", "10.0.0.5")
-    workload["metadata"]["annotations"].update(
-        {SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token", EGRESS_API_PORT_ANNOTATION: "18081"}
-    )
+    # Through the service, which attaches the token after the provider has built the endpoint: a client that
+    # reuses the returned headers for a service on 18080 would otherwise hand it the sidecar's credential.
+    endpoint = _get_endpoint(provider, _egress_workload(moved_port=18081), port)
 
-    endpoint = provider.get_endpoint_info(workload, port, SANDBOX_ID)
+    token_headers = build_egress_auth_headers("egress-token")
+    assert (token_headers.items() <= (endpoint.headers or {}).items()) is authorized
 
-    assert endpoint is not None
+
+@pytest.mark.usefixtures("endpoint_auth")
+@pytest.mark.parametrize(("port", "authorized"), [(18080, True), (5432, False)])
+def test_the_egress_token_stays_on_18080_when_the_api_was_not_moved(
+    provider: ext.NemoComposeProvider, port: int, authorized: bool
+) -> None:
+    endpoint = _get_endpoint(provider, _egress_workload(moved_port=None), port)
+
     token_headers = build_egress_auth_headers("egress-token")
     assert (token_headers.items() <= (endpoint.headers or {}).items()) is authorized
 
