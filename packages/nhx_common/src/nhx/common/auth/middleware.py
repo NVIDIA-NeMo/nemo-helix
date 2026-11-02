@@ -4,6 +4,7 @@
 """Authorization middleware for NeMo Helix services."""
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -35,6 +36,32 @@ logger = logging.getLogger(__name__)
 
 class PrincipalExtractionError(RuntimeError):
     """Raised when principal extraction returns an impossible success state."""
+
+
+_ENTITY_ROUTE = re.compile(
+    r"/apis/entities/v2/workspaces/(?P<workspace>[A-Za-z0-9._-]+)/entities/[^/]+(?P<item>/[^/]+)?/?"
+)
+_ENTITY_ACTIONS = {
+    ("POST", False): "create",
+    ("GET", False): "list",
+    ("GET", True): "read",
+    ("PUT", True): "update",
+    ("DELETE", True): "delete",
+}
+
+
+def _forbidden_detail(method: str, path: str) -> str:
+    """Return the 403 detail for a PDP denial.
+
+    Generic entities routes name the denied action and workspace so end users see the same detail
+    as the entities handler gives delegated callers. Both come from the request the caller sent,
+    so nothing about the denied workspace is disclosed. Every other route keeps the bare detail.
+    """
+    match = _ENTITY_ROUTE.fullmatch(path)
+    action = _ENTITY_ACTIONS.get((method.upper(), bool(match and match["item"]))) if match else None
+    if match is None or action is None:
+        return "Forbidden"
+    return f"Not allowed to {action} entities in workspace '{match['workspace']}'"
 
 
 def _require_principal(principal: Principal | None) -> Principal:
@@ -479,10 +506,8 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             self.service_name or "unknown",
             result.reason,
         )
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": "Unauthorized" if status_code == 401 else "Forbidden"},
-        )
+        detail = "Unauthorized" if status_code == 401 else _forbidden_detail(request.method, request.url.path)
+        return JSONResponse(status_code=status_code, content={"detail": detail})
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Main entry point - routes requests through the appropriate authorization flow.
