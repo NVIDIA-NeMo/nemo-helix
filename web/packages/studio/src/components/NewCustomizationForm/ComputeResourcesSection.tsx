@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useModelEntity } from '@nemo/common/src/api/models/useModelEntity';
 import { ControlledSliderWithTextInput } from '@nemo/common/src/components/form/ControlledSliderWithTextInput';
 import { ControlledSwitch } from '@nemo/common/src/components/form/ControlledSwitch';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
@@ -9,20 +10,28 @@ import {
   AccordionItem,
   AccordionRoot,
   AccordionTrigger,
+  Banner,
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
+import { expertParallelWarning } from '@studio/util/forms/expertParallel';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
-import { useFormContext } from 'react-hook-form';
+import { useFormContext, useWatch } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
   const { control } = useFormContext<CustomizationFormFields>();
+  const [model, parallelism] = useWatch({
+    control,
+    name: ['automodel.model', 'automodel.parallelism'],
+  });
+  const numExperts = useModelEntity(model)?.spec?.moe_config?.num_experts;
+  const warning = expertParallelWarning(numExperts, parallelism ?? {});
   return (
     <Stack gap="density-lg">
       <ControlledSliderWithTextInput
@@ -51,7 +60,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         formFieldProps={{
           slotLabel: 'Expert Parallel Size',
           slotInfo:
-            "Shards a Mixture-of-Experts model's experts across GPUs, so each holds only its share. MoE models such as Nemotron 3.5 need a value above 1 that divides the expert count to train on more than one GPU. Must divide data parallel × context parallel size, and tensor parallel size must be 1 when this is above 1.",
+            "Shards a Mixture-of-Experts model's experts across GPUs. On more than one GPU, MoE models need a value above 1 that divides both the expert count and data parallel × context parallel size.",
         }}
         {...specSliderProps(AUTOMODEL_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
         min={1}
@@ -59,6 +68,11 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         step={1}
         disabled={disabled}
       />
+      {warning && (
+        <Banner kind="inline" status="warning">
+          {warning}
+        </Banner>
+      )}
       <AccordionRoot multiple>
         <AccordionItem value="advanced-parallelism" className="border-b-0">
           <AccordionTrigger>
