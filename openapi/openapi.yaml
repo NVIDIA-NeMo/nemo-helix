@@ -20514,6 +20514,18 @@ components:
           type: string
           title: Family
           description: Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')
+        architectures:
+          title: Architectures
+          description: Architectures declared in the checkpoint's top-level config.json.
+            For a multimodal checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'),
+            while the other fields describe its language model.
+          items:
+            type: string
+          type: array
+        checkpoint_size_bytes:
+          title: Checkpoint Size Bytes
+          description: Total size of the files in the model's fileset, in bytes
+          type: integer
         num_layers:
           type: integer
           title: Num Layers

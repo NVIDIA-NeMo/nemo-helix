@@ -13,6 +13,7 @@ a ``docker run`` container; the k8s backend renders it into native Kubernetes
 objects. Keep this module free of backend-specific imports so both can reuse it.
 """
 
+import json
 from logging import getLogger
 from typing import Optional
 
@@ -30,6 +31,9 @@ VLLM_HF_ALTERNATE_PATH = f"{MODEL_STORE_PATH}/alternates/hf"
 VLLM_LORA_CACHE_DIR = "/scratch/loras"
 # vLLM's OpenAI-compatible server port (matches the NIM container port mapping).
 VLLM_SERVER_PORT = 8000
+# Top-level config.json architectures of the Nemotron 3.5 Super VL checkpoints (BF16 and NVFP4).
+# The spec's language-model fields alone look like a text NemotronH model.
+NEMOTRON_SUPER_VL_ARCHITECTURES = frozenset({"NemotronH_Omni_Reasoning_V3", "NemotronH_Super_Omni_Reasoning_V3"})
 
 
 def _served_model_name(view: DeploymentConfigView) -> str | None:
@@ -62,13 +66,49 @@ def _model_path(model_entity: Optional[ModelEntity]) -> str:
 
 
 def _user_set_args(additional_args: list[str] | None) -> set[str]:
-    """Flag names the user already supplied via additional_args (so we don't inject ours)."""
+    """Flag names the user already supplied via additional_args (so we don't inject ours).
+
+    vLLM reads ``_`` in a flag name as ``-`` and lets a JSON flag be set one key at a
+    time (``--speculative-config.method mtp``), so those spellings count as the flag.
+    """
     flags: set[str] = set()
     for arg in additional_args or []:
         if isinstance(arg, str) and arg.startswith("--"):
             # Handle both "--flag value" and "--flag=value".
-            flags.add(arg.split("=", 1)[0])
+            name = "--" + arg[2:].split("=", 1)[0].replace("_", "-")
+            flags.add(name)
+            flags.add(name.split(".", 1)[0])
     return flags
+
+
+def _is_nemotron_super_vl(model_entity: Optional[ModelEntity]) -> bool:
+    architectures = getattr(getattr(model_entity, "spec", None), "architectures", None) or []
+    return any(arch in NEMOTRON_SUPER_VL_ARCHITECTURES for arch in architectures)
+
+
+def _nemotron_super_vl_args(
+    view: DeploymentConfigView, model_entity: Optional[ModelEntity], user_flags: set[str]
+) -> list[str]:
+    """Nemotron 3.5 Super VL serving defaults, from NVIDIA's vLLM cookbook for the model."""
+    defaults = [
+        # Without a cap vLLM sizes the KV cache for the native 1M-token context and exits.
+        ("--max-model-len", "114688"),
+        ("--reasoning-parser", "nemotron_v3"),
+        ("--mamba-ssm-cache-dtype", "float32"),
+        ("--limit-mm-per-prompt", json.dumps({"image": 1, "video": 1})),
+    ]
+    if view.lora_enabled:
+        # Recipe adapters are rank 64; vLLM defaults to rank 16 and one adapter per batch.
+        defaults += [("--max-lora-rank", "64"), ("--max-loras", "4")]
+    elif not getattr(model_entity, "base_model", None):
+        # Speculative decoding drafts with the checkpoint's MTP layer. Fine-tuning drops that
+        # layer, and adapters are served without it, so only the released base model gets it.
+        defaults.append(("--speculative-config", json.dumps({"method": "mtp", "num_speculative_tokens": 3})))
+    args: list[str] = []
+    for flag, value in defaults:
+        if flag not in user_flags:
+            args.extend([flag, value])
+    return args
 
 
 def _divisors(n: int) -> list[int]:
@@ -84,11 +124,12 @@ def compute_tensor_parallel_size(
 ) -> int:
     """Compute ``--tensor-parallel-size`` from GPU count and model architecture.
 
-    Mirrors the constraints the NeMo parallelism heuristic applies: a valid TP
-    degree must divide the GPU count and the model's ``hidden_size``,
-    ``num_attention_heads``, and ``num_kv_heads`` (critical for GQA/MQA). We pick
-    the largest valid divisor so every allocated GPU is used. When ``gpu <= 1``
-    (including CPU-only) TP is 1 and no computation runs.
+    Mirrors the constraints vLLM checks at startup: a valid TP degree must divide
+    the GPU count and the model's ``hidden_size`` and ``num_attention_heads``, and
+    must either divide ``num_kv_heads`` or be a multiple of it (vLLM copies KV
+    heads across ranks when there are fewer of them than ranks, as with GQA/MQA).
+    We pick the largest valid divisor so every allocated GPU is used. When
+    ``gpu <= 1`` (including CPU-only) TP is 1 and no computation runs.
 
     This intentionally re-implements the small divisor/divisibility check inline
     rather than importing ``nhx.core.models.parallelism`` -- that package pulls in
@@ -118,7 +159,10 @@ def compute_tensor_parallel_size(
     candidates = [
         tp
         for tp in _divisors(gpu)
-        if tp <= tp_cap and hidden_size % tp == 0 and num_heads % tp == 0 and num_kv_heads % tp == 0
+        if tp <= tp_cap
+        and hidden_size % tp == 0
+        and num_heads % tp == 0
+        and (num_kv_heads % tp == 0 or tp % num_kv_heads == 0)
     ]
     if not candidates:
         logger.warning("No valid tensor-parallel-size candidates for model; defaulting to 1")
@@ -168,6 +212,13 @@ def compile_vllm_args(
         if view.tool_call_config.auto_tool_choice is not None:
             auto_tool_choice = view.tool_call_config.auto_tool_choice
 
+    super_vl = _is_nemotron_super_vl(model_entity)
+    if super_vl and tool_call_parser is None and tool_call_plugin is None:
+        # The tool-call format the model's chat template produces.
+        tool_call_parser = "qwen3_coder"
+        if auto_tool_choice is None:
+            auto_tool_choice = True
+
     if tool_call_plugin and not tool_call_plugin_path and "--tool-parser-plugin" not in user_flags:
         logger.warning(
             "vLLM tool-call plugin is configured but has no mounted path; skipping inferred parser and auto tool choice"
@@ -192,6 +243,9 @@ def compile_vllm_args(
     # (EngineArgs.trust_remote_code -> --trust-remote-code).
     if model_entity and getattr(model_entity, "trust_remote_code", False) and "--trust-remote-code" not in user_flags:
         args.append("--trust-remote-code")
+
+    if super_vl:
+        args.extend(_nemotron_super_vl_args(view, model_entity, user_flags))
 
     # User-supplied raw args appended verbatim (highest precedence; e.g. --max-lora-rank).
     args.extend(view.additional_args or [])

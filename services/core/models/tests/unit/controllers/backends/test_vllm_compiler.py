@@ -331,6 +331,98 @@ def test_compile_vllm_args_cpu_only_no_tp():
     assert "--tensor-parallel-size" not in args
 
 
+@pytest.mark.parametrize("raw", [["--served_model_name", "custom"], ["--served_model_name=custom"]])
+def test_compile_vllm_args_underscore_spelling_counts_as_user_flag(raw: list[str]):
+    # vLLM accepts underscores in flag names, so the compiler must not add a second one.
+    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="qwen", additional_args=raw), None)
+    assert args == ["/model-store", *raw]
+
+
+# ---------------------------------------------------------------------------
+# Nemotron 3.5 Super VL defaults
+# ---------------------------------------------------------------------------
+
+
+def _super_vl(*, base_model=None, tool_call_config=None, architecture="NemotronH_Omni_Reasoning_V3") -> SimpleNamespace:
+    """The spec the model spec task records: language-model dims plus the top-level architecture."""
+    spec = _spec(num_kv_heads=2, architectures=[architecture], tool_call_config=tool_call_config)
+    return _model_entity(spec=spec, trust_remote_code=True, base_model=base_model)
+
+
+_SUPER_VL_DEFAULTS = [
+    "--max-model-len",
+    "114688",
+    "--reasoning-parser",
+    "nemotron_v3",
+    "--mamba-ssm-cache-dtype",
+    "float32",
+    "--limit-mm-per-prompt",
+    '{"image": 1, "video": 1}',
+]
+_MTP = ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
+
+
+@pytest.mark.parametrize("architecture", sorted(vllm_compiler.NEMOTRON_SUPER_VL_ARCHITECTURES))
+def test_super_vl_base_model_gets_cookbook_defaults_and_mtp(architecture: str):
+    view = _view(gpu=8, model_namespace="nvidia", model_name="super-vl")
+    args = vllm_compiler.compile_vllm_args(view, _super_vl(architecture=architecture))
+    assert args == [
+        "/model-store",
+        "--served-model-name",
+        "nvidia/super-vl",
+        "--tensor-parallel-size",
+        "8",
+        "--tool-call-parser",
+        "qwen3_coder",
+        "--enable-auto-tool-choice",
+        "--trust-remote-code",
+        *_SUPER_VL_DEFAULTS,
+        *_MTP,
+    ]
+
+
+def test_super_vl_with_lora_raises_adapter_limits_and_skips_mtp():
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, lora_enabled=True), _super_vl())
+    assert args[args.index("--max-lora-rank") + 1] == "64"
+    assert args[args.index("--max-loras") + 1] == "4"
+    assert "--speculative-config" not in args
+
+
+def test_super_vl_fine_tuned_checkpoint_skips_mtp():
+    # Fine-tuning drops the MTP layer, so a derived checkpoint has nothing to draft with.
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4), _super_vl(base_model="default/super-vl-base"))
+    assert args[-len(_SUPER_VL_DEFAULTS) :] == _SUPER_VL_DEFAULTS
+    assert "--speculative-config" not in args
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        ["--max-model-len", "32768", "--speculative-config", '{"method": "ngram"}'],
+        ["--max_model_len=32768", "--speculative_config.method", "ngram"],
+    ],
+)
+def test_super_vl_user_args_replace_defaults(raw: list[str]):
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, additional_args=raw), _super_vl())
+    assert args.count("114688") == 0
+    assert "--speculative-config" not in args[: -len(raw)]
+    assert args[-len(raw) :] == raw
+
+
+def test_super_vl_configured_tool_parser_wins():
+    model = _super_vl(tool_call_config=ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=False))
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4), model)
+    assert args[args.index("--tool-call-parser") + 1] == "hermes"
+    assert "--enable-auto-tool-choice" not in args
+
+
+def test_text_nemotron_h_gets_no_super_vl_defaults():
+    # Same language-model dims, but a text checkpoint: none of the multimodal defaults apply.
+    model = _model_entity(spec=_spec(num_kv_heads=2, architectures=["NemotronHForCausalLM"]))
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4), model)
+    assert args == ["/model-store", "--tensor-parallel-size", "4"]
+
+
 def test_compile_vllm_args_user_tp_not_overridden():
     model_entity = _model_entity(spec=_spec())
     view = _view(gpu=4, model_name="qwen", additional_args=["--tensor-parallel-size", "2"])
@@ -363,10 +455,17 @@ def test_compute_tp_picks_largest_valid_divisor():
     assert vllm_compiler.compute_tensor_parallel_size(4, model_entity) == 4
 
 
-def test_compute_tp_respects_kv_head_constraint():
-    # num_kv_heads=2 only divides by 1 and 2 (not 4) -> TP capped at 2.
+@pytest.mark.parametrize("gpu", [4, 8])
+def test_compute_tp_copies_kv_heads_when_fewer_than_ranks(gpu: int):
+    # vLLM copies 2 KV heads across 4 or 8 ranks; Nemotron 3.5 Super VL needs TP 4+ to fit.
     model_entity = _model_entity(spec=_spec(hidden_size=4096, num_attention_heads=32, num_kv_heads=2))
-    assert vllm_compiler.compute_tensor_parallel_size(4, model_entity) == 2
+    assert vllm_compiler.compute_tensor_parallel_size(gpu, model_entity) == gpu
+
+
+def test_compute_tp_rejects_kv_heads_that_do_not_tile_the_ranks():
+    # 3 KV heads neither split across 2 or 4 ranks nor copy evenly onto them.
+    model_entity = _model_entity(spec=_spec(hidden_size=3072, num_attention_heads=24, num_kv_heads=3))
+    assert vllm_compiler.compute_tensor_parallel_size(4, model_entity) == 1
 
 
 def test_compute_tp_no_valid_divisor_defaults_to_one():

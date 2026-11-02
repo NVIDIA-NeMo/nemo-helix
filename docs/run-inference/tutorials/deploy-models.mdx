@@ -645,7 +645,7 @@ A deployment loads adapters up to a maximum rank and refuses adapters of a highe
 
 | Engine and Image | Default Maximum Rank | To Raise It |
 | ---------------- | -------------------- | ----------- |
-| vLLM | 16 | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
+| vLLM | 16; 64 for [Nemotron 3.5 Super VL](#deploy-nemotron-super-vl) | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
 | Model-free NIM, vLLM | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Model-free NIM, SGLang | 16 if the server starts with no adapters; otherwise the highest rank among the adapters present when it starts | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM | 32 | `executor_config.additional_envs`: `{"NIM_MAX_LORA_RANK": "<rank>"}` |
@@ -806,6 +806,150 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 The default vLLM image is configurable by the platform operator. To override the image per deployment, set `image_name` / `image_tag` on `executor_config`. To pass raw `vllm serve` flags (for example `--max-model-len`), use `additional_args` on `executor_config`.
 
 </Tip>
+
+<a id="deploy-nemotron-super-vl"></a>
+### Deploy Nemotron 3.5 Super VL
+
+Nemotron 3.5 Super VL is a vision-language model: 120B parameters with 12B active per token, on a hybrid Mamba and Transformer mixture-of-experts backbone. vLLM needs several model-specific flags to serve it, and the platform sets them when the model entity is registered with `trust_remote_code` enabled. The checkpoint ships its own configuration code; without `trust_remote_code` the platform cannot read the checkpoint's configuration, so it sets none of these flags and cannot size tensor parallelism.
+
+Two checkpoints are published:
+
+| Checkpoint | Size | Use It For | GPUs |
+| ---------- | ---- | ---------- | ---- |
+| [`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16) | 249 GB | The base model, LoRA adapters, and models fine-tuned with Customizer. Training uses the BF16 weights, so adapters and fine-tuned models must be served on this checkpoint. | 4x 80 GB or more |
+| [`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4) | 75 GB | The base model only | 2x 80 GB or more |
+
+The platform adds these `vllm serve` flags:
+
+| Flag | Value | When | Why |
+| ---- | ----- | ---- | --- |
+| `--max-model-len` | `114688` | Always | vLLM cannot fit a KV cache for the model's native 1M-token context and exits at startup. |
+| `--reasoning-parser` | `nemotron_v3` | Always | Returns the model's thinking in `reasoning_content`, separate from the answer in `content`. |
+| `--tool-call-parser`, `--enable-auto-tool-choice` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
+| `--mamba-ssm-cache-dtype` | `float32` | Always | Precision of the state the Mamba layers carry between tokens. |
+| `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | Always | At most one image and one video per request. |
+| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model without LoRA | Faster generation; see below. |
+| `--max-lora-rank`, `--max-loras` | `64`, `4` | LoRA enabled | Recipe adapters are rank 64, and vLLM otherwise loads rank 16 and one adapter per batch. |
+
+The speculative config turns on multi-token prediction (MTP). The checkpoint includes a small layer that guesses the next few tokens; vLLM drafts three tokens with it and keeps those the full model confirms, so output is unchanged and arrives faster. The platform turns it on only for the base model: fine-tuning recipes drop that layer, and deployments with LoRA run without it.
+
+A flag you set in `executor_config.additional_args` replaces the platform's value, whether you spell it with `-` or `_`, or set one key of it (for example `--speculative-config.num_speculative_tokens 5`). For example, to accept up to 8 page images per request:
+
+```json
+"additional_args": ["--limit-mm-per-prompt", "{\"image\": 8, \"video\": 1}"]
+```
+
+On Blackwell GPUs, also add `["--mm-encoder-attn-backend", "TORCH_SDPA"]` to `additional_args`. The platform does not know the GPU type, so it does not set this flag.
+
+On Kubernetes, the weights volume is sized to the checkpoint plus 20%, and never below the platform's default volume size (`200Gi` unless the operator changed it). The BF16 checkpoint gets `279Gi`. Set `executor_config.disk_size` to choose the size yourself.
+
+Send images in the request as `data:` URLs. The server does not read file or fileset paths.
+
+<Tabs>
+
+<Tab title="CLI">
+
+```bash
+nemo files filesets create "super-vl-bf16" \
+  --storage '{
+    "type": "huggingface",
+    "repo_id": "nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16",
+    "repo_type": "model"
+  }'
+
+# The checkpoint ships its own configuration code
+nemo models create "super-vl-bf16" \
+  --fileset "default/super-vl-bf16" \
+  --trust-remote-code
+
+nemo inference deployment-configs create "super-vl-config" \
+  --engine "vllm" \
+  --model-spec '{
+    "model_namespace": "default",
+    "model_name": "super-vl-bf16"
+  }' \
+  --executor-config '{
+    "gpu": 4
+  }'
+
+nemo inference deployments create "super-vl-deployment" \
+  --config "super-vl-config"
+
+nemo wait inference deployment super-vl-deployment
+```
+
+</Tab>
+<Tab title="Python SDK">
+
+```python
+import base64
+
+client.files.create_fileset(
+    body=CreateFilesetRequest(
+        name="super-vl-bf16",
+        storage=HuggingfaceStorageConfig(
+            repo_id="nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16", repo_type="model"
+        ),
+    ),
+    exist_ok=True,
+)
+
+# The checkpoint ships its own configuration code
+client.models.create_model(
+    body=CreateModelEntityRequest(
+        name="super-vl-bf16", fileset="default/super-vl-bf16", trust_remote_code=True
+    ),
+)
+
+client.models.create_deployment_config(
+    body=CreateModelDeploymentConfigRequest(
+        name="super-vl-config",
+        engine=Engine.VLLM,
+        model_spec=ModelDeploymentConfigModelSpec(
+            model_namespace="default",
+            model_name="super-vl-bf16",
+        ),
+        executor_config=ContainerExecutorConfig(gpu=4),
+    ),
+)
+
+client.models.create_deployment(
+    body=CreateModelDeploymentRequest(
+        name="super-vl-deployment",
+        config="super-vl-config",
+    ),
+)
+
+client.models.wait_for_deployment_status(
+    deployment_name="super-vl-deployment",
+    desired_status="READY",
+)
+
+# Send the image bytes inline as a data: URL
+with open("receipt.png", "rb") as f:
+    image_url = "data:image/png;base64," + base64.b64encode(f.read()).decode()
+
+response = InferenceGatewayClient.from_client(client).provider_post(
+    name="super-vl-deployment",
+    trailing_uri="v1/chat/completions",
+    body=JsonBody({
+        "model": "default/super-vl-bf16",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "text", "text": "What is the total on this receipt?"},
+            ],
+        }],
+        # Thinking tokens count toward max_tokens
+        "max_tokens": 2048,
+    }),
+)
+```
+
+</Tab>
+
+</Tabs>
 
 ---
 

@@ -19,7 +19,13 @@ class DeploymentsPluginConfig(BaseModel):
     )
     max_restart_count: int = 5
     default_storage_class: str | None = None
-    default_pvc_size: str = "200Gi"
+    default_pvc_size: str = Field(
+        default="200Gi",
+        description=(
+            "Weights volume size for a deployment that sets no disk_size. When the model spec "
+            "records a larger checkpoint, the volume gets the checkpoint size plus 20% instead."
+        ),
+    )
     default_pod_annotations: dict[str, str] = Field(
         default_factory=dict,
         description=(
@@ -60,7 +66,7 @@ class DeploymentsPluginConfig(BaseModel):
         default="docker.io/vllm/vllm-openai",
         description="Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names.",
     )
-    default_vllm_image_tag: str = "v0.22.1"
+    default_vllm_image_tag: str = "v0.32.0"
     default_user_id: int | None = 1000
     default_group_id: int | None = 2000
     default_vllm_user_id: int | None = 2000

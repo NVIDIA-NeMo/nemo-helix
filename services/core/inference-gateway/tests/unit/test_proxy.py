@@ -112,6 +112,31 @@ async def test_build_next_request(mock_request):
     assert "x-forwarded-for" not in result.headers
 
 
+@pytest.mark.asyncio
+async def test_build_next_request_forwards_image_parts_unchanged(mock_request):
+    """A vision model reads the image bytes the client inlined as a data: URL."""
+    # Large enough to stand in for a real page image (~3 MB of base64).
+    image_url = "data:image/png;base64," + "iVBORw0KGgo" * 300_000
+    body = {
+        "model": "default/super-vl",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "text", "text": "Describe this image."},
+                ],
+            }
+        ],
+    }
+    mock_request.body = AsyncMock(return_value=json.dumps(body).encode())
+
+    result = await build_next_request(mock_request, "http://example.com", "v1/chat/completions")
+
+    assert _json_request_body(result) == body
+    assert result.headers["content-length"] == str(len(result.body or b""))
+
+
 # Below was claudes work that I need to fix up massively
 @pytest.mark.asyncio
 async def test_proxy_request_success(mock_proxy_client, next_request_info):

@@ -124,6 +124,33 @@ def test_k8s_weights_volume_has_no_docker_init_chmod() -> None:
     assert compiled.volume.backend_config.docker is None
 
 
+@pytest.mark.parametrize(
+    ("checkpoint_bytes", "disk_size", "default_size", "expected"),
+    [
+        # A spec recorded before checkpoint sizes were measured keeps the default.
+        (None, None, "200Gi", "200Gi"),
+        (16 * 2**30, None, "200Gi", "200Gi"),
+        # Nemotron 3.5 Super VL BF16 (248.9 GB) outgrows the default; 20% headroom on top.
+        (248_900_000_000, None, "200Gi", "279Gi"),
+        (248_900_000_000, None, "1Ti", "1Ti"),
+        (248_900_000_000, "500Gi", "200Gi", "500Gi"),
+        # An unparseable default is passed through untouched.
+        (248_900_000_000, None, "lots", "lots"),
+    ],
+)
+def test_weights_volume_grows_to_fit_the_checkpoint(
+    checkpoint_bytes: int | None, disk_size: str | None, default_size: str, expected: str
+) -> None:
+    resolved = _resolved("vllm")
+    resolved.view.disk_size = disk_size
+    model_entity = SimpleNamespace(spec=SimpleNamespace(checkpoint_size_bytes=checkpoint_bytes, tool_call_config=None))
+    compiled = compile_model_deployment(
+        replace(resolved, model_entity=model_entity), DeploymentsPluginConfig(default_pvc_size=default_size)
+    )
+    assert compiled.volume is not None
+    assert compiled.volume.size == expected
+
+
 def test_vllm_server_command_image_args_and_gpu() -> None:
     resolved = _resolved("vllm")
     resolved = ResolvedPluginDeployment(
@@ -143,7 +170,7 @@ def test_vllm_server_command_image_args_and_gpu() -> None:
     server = compiled.server_config.containers[0]
     assert server.command == ["vllm", "serve"]
     assert server.args[0] == MODEL_STORE_PATH
-    assert server.image == "docker.io/vllm/vllm-openai:v0.22.1"
+    assert server.image == "docker.io/vllm/vllm-openai:v0.32.0"
     assert server.resources is not None
     assert server.resources.limits["nvidia.com/gpu"] == "1"
     assert compiled.puller_config is not None

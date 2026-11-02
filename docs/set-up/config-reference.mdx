@@ -548,7 +548,7 @@ models:
         # default: 5
         max_restart_count: 5
         default_storage_class:
-        # default: '200Gi'
+        # Weights volume size for a deployment that sets no disk_size. When the model spec records a larger checkpoint, the volume gets the checkpoint size plus 20% instead. | default: '200Gi'
         default_pvc_size: 200Gi
         # Platform-default pod annotations applied to every k8s model deployment/job (all engines). Merged key-wise into the compiled K8sDeploymentConfig; a per-entity annotation for the same key wins over the platform default. Used to ship the Istio native-sidecar annotation so a mesh-injected proxy terminates when a puller Job's main container exits.
         default_pod_annotations: {}
@@ -566,8 +566,8 @@ models:
         default_nimservice_image_tag: latest
         # Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names. | default: 'docker.io/vllm/vllm-openai'
         default_vllm_image: docker.io/vllm/vllm-openai
-        # default: 'v0.22.1'
-        default_vllm_image_tag: v0.22.1
+        # default: 'v0.32.0'
+        default_vllm_image_tag: v0.32.0
         # default: 1000
         default_user_id: 1000
         # default: 2000

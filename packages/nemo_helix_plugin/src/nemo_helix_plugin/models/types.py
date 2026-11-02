@@ -319,6 +319,15 @@ class ModelSpec(BaseModel):
     # Basic model information
     checkpoint_model_name: str = Field(description="Checkpoint Model identifier or model path")
     family: str = Field(description="Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')")
+    architectures: list[str] | None = Field(
+        default=None,
+        description="Architectures declared in the checkpoint's top-level config.json. For a multimodal "
+        "checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'), while the other fields "
+        "describe its language model.",
+    )
+    checkpoint_size_bytes: int | None = Field(
+        default=None, description="Total size of the files in the model's fileset, in bytes"
+    )
 
     # Architecture dimensions
     num_layers: int = Field(description="Number of transformer layers")
