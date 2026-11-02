@@ -27,7 +27,7 @@ import { IntakePayloadPreviewCell } from '@studio/components/IntakeLists/IntakeP
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getEvaluationSessionTraceDetailRoute } from '@studio/routes/utils';
 import { tooltipClassName } from '@studio/styles/common';
-import { formatInteger } from '@studio/util/intakeTelemetry';
+import { formatCost, formatInteger } from '@studio/util/intakeTelemetry';
 import { keepPreviousData } from '@tanstack/react-query';
 import { type ComponentProps, type FC, useMemo, useState } from 'react';
 
@@ -46,6 +46,7 @@ const mapStatusForBadge = (status: EvaluationSessionResponse['status']) =>
 const SESSION_SORT_FIELD_MAP: Readonly<Record<string, string>> = {
   test_case_name: 'test_case_name',
   latency_ms: 'latency_ms',
+  cost_total_usd: 'cost_total_usd',
   status: 'status',
   tokens: 'tokens',
 };
@@ -298,6 +299,12 @@ export const EvaluationSessionsDataView: FC<EvaluationSessionsDataViewProps> = (
         },
       }
     ),
+    accessor('cost_total_usd', {
+      header: 'Cost',
+      enableSorting: true,
+      meta: { alignment: 'right' },
+      cell: ({ row }) => <Text>{formatCost(row.original.cost_total_usd)}</Text>,
+    }),
   ];
 
   return (
