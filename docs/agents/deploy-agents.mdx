@@ -38,7 +38,7 @@ first enabled mode that needs no image. The Python SDK always defaults to `subpr
 
 For Docker, Kubernetes, and OpenShell, image selection is: `--image` (API `image`), then the
 agent's `reference.container_image`, then `agents.deployments.default_image`. Set the agent reference
-under `helix_registration.reference.container_image` when
+under `helix_registration.reference.container_image` alongside a runnable config when
 [registering the agent](/documentation/agents/register-agents#register-with-references) to deploy
 without repeating `--image`. Deployment fails if no image is available; a pull or startup failure
 does not trigger fallback to another image.
@@ -252,18 +252,17 @@ To build an agent that is already registered, run the build as a platform job:
 nemo agents package-agent --agent calculator-agent --tag calculator-agent:1.0.0 --registry nvcr.io/my-org
 ```
 
-The job builds from the agent's stored config and uses its `reference.fileset` for
-source files. Set it through `helix_registration.reference.fileset` when
+The image build job uses the stored config and `reference.fileset`. Include
+`helix_registration.reference.fileset` alongside a runnable config when
 [registering the agent](/documentation/agents/register-agents#register-with-references).
-Without a reference, the job looks for `<name>-ethos`; if that fileset is absent, it can build from
-the stored config alone when no supporting files are required. An explicit reference that is missing
-or inaccessible fails packaging without falling back. The stored config takes precedence over any
-`agent.yaml` in the fileset.
+Without a reference, it uses the `<name>-ethos` fileset in the agent's workspace, or the config alone
+if that fileset is absent and no supporting files are needed. Missing or inaccessible explicit
+references fail packaging. `ETHOS.md` is not required. The stored config overrides any `agent.yaml`
+in the fileset.
 
-The build runs on the platform host and needs a `subprocess` execution profile and, to push, a host
-that is logged in to the registry. Images are
-tagged `nemo-agents/<workspace>/<tag>`; read the final reference from the job's `package_result`
-result.
+The platform host (local or remote) needs a `subprocess` execution profile, the Docker CLI,
+a reachable Docker daemon, and registry login to push.
+Images are tagged `nemo-agents/<workspace>/<tag>`; read the final reference from `package_result`.
 
 ## Agent Environments
 
