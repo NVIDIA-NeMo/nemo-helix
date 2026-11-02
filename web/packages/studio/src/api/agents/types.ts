@@ -20,8 +20,16 @@ export type UseCreateAgentFromTrialOptions = Omit<
   'mutationFn'
 >;
 
-/** Probe outcome for one MCP server, reported by the deployment's Fabric server. */
-export type McpServerState = 'running' | 'unresolved' | 'failed' | 'unsupported';
+/**
+ * Mirrors `McpStatusResponse` in `plugins/nemo-agents/src/nemo_agents_plugin/fabric/mcp_status.py`.
+ * Both sides are checked against `@studio/mocks/mcpStatusResponse.json`; update all three together.
+ */
+export const KNOWN_MCP_SERVER_STATES = ['running', 'unresolved', 'failed', 'unsupported'] as const;
+
+export type KnownMcpServerState = (typeof KNOWN_MCP_SERVER_STATES)[number];
+
+/** Probe outcome for one MCP server; newer runtimes may report states this UI predates. */
+export type McpServerState = KnownMcpServerState | (string & {});
 
 export interface McpToolStatus {
   name: string;

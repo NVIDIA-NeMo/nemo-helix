@@ -112,6 +112,15 @@ describe('AgentToolsPanel', () => {
     expect(tools.getByText('Add two numbers.')).toBeInTheDocument();
   });
 
+  it('falls back to an unknown badge for states this UI predates', () => {
+    const [server] = status.servers;
+    const data = { ...status, servers: [{ ...server, state: 'auth_required', error: null }] };
+    mocks.useMcpStatus.mockReturnValue(queryResult({ data }));
+    render(<AgentToolsPanel workspace="default" config={config} deployment={running} />);
+
+    expect(screen.getByText('Unknown')).toBeInTheDocument();
+  });
+
   it('reports a probe error', () => {
     mocks.useMcpStatus.mockReturnValue(queryResult({ error: new Error('gateway timeout') }));
     render(<AgentToolsPanel workspace="default" config={config} deployment={running} />);

@@ -5,7 +5,12 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { Refresh } from '@nemo/icons/icons';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Badge, Banner, Button, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
-import type { DeclaredMcpServer, McpServerState, McpServerStatus } from '@studio/api/agents/types';
+import type {
+  DeclaredMcpServer,
+  KnownMcpServerState,
+  McpServerState,
+  McpServerStatus,
+} from '@studio/api/agents/types';
 import { getDeclaredMcpServers, useMcpStatus } from '@studio/api/agents/useMcpStatus';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { ChatSidePane } from '@studio/routes/agents/AgentDetailRoute/ChatSidePane';
@@ -13,15 +18,20 @@ import { McpToolRow } from '@studio/routes/agents/AgentDetailRoute/McpToolRow';
 import { AxiosError } from 'axios';
 import type { ComponentProps, FC, ReactNode } from 'react';
 
-type BadgeColor = ComponentProps<typeof Badge>['color'];
+interface StateBadge {
+  label: string;
+  color: ComponentProps<typeof Badge>['color'];
+}
 
-const STATE_BADGES: Record<McpServerState | 'not_started', { label: string; color: BadgeColor }> = {
+const UNKNOWN_STATE_BADGE: StateBadge = { label: 'Unknown', color: 'gray' };
+
+const STATE_BADGES: Partial<Record<string, StateBadge>> = {
   running: { label: 'Running', color: 'green' },
   unresolved: { label: 'Not on PATH', color: 'red' },
   failed: { label: 'Failed to start', color: 'red' },
-  unsupported: { label: 'Unknown', color: 'gray' },
+  unsupported: UNKNOWN_STATE_BADGE,
   not_started: { label: 'Not started', color: 'gray' },
-};
+} satisfies Record<KnownMcpServerState | 'not_started', StateBadge>;
 
 /** Long unbroken strings (URLs, paths, stderr) must wrap inside the narrow pane. */
 const WRAP_ANYWHERE = '[overflow-wrap:anywhere]';
@@ -37,41 +47,45 @@ interface ServerGroupProps {
 }
 
 /** A bordered group whose shaded header names the server and whose body holds its tools. */
-const ServerGroup: FC<ServerGroupProps> = ({ server, state, toolCount, children }) => (
-  <Stack
-    role="group"
-    aria-label={`${server.name} MCP server`}
-    className="overflow-hidden rounded-md border border-base"
-  >
-    <Stack gap="density-xs" className="bg-surface-sunken px-density-md py-density-sm">
-      <Flex align="center" justify="between" gap="density-sm">
-        <Text kind="label/bold/md" className="truncate">
-          {server.name}
+const ServerGroup: FC<ServerGroupProps> = ({ server, state, toolCount, children }) => {
+  const badge = STATE_BADGES[state] ?? UNKNOWN_STATE_BADGE;
+
+  return (
+    <Stack
+      role="group"
+      aria-label={`${server.name} MCP server`}
+      className="overflow-hidden rounded-md border border-base"
+    >
+      <Stack gap="density-xs" className="bg-surface-sunken px-density-md py-density-sm">
+        <Flex align="center" justify="between" gap="density-sm">
+          <Text kind="label/bold/md" className="truncate">
+            {server.name}
+          </Text>
+          <Badge kind="solid" color={badge.color} size="small" className="shrink-0">
+            {badge.label}
+          </Badge>
+        </Flex>
+        <Text kind="body/regular/xs" className="text-secondary">
+          {[server.transport, toolCount === undefined ? undefined : pluralize(toolCount, 'tool')]
+            .filter(Boolean)
+            .join(' · ')}
         </Text>
-        <Badge kind="solid" color={STATE_BADGES[state].color} size="small" className="shrink-0">
-          {STATE_BADGES[state].label}
-        </Badge>
-      </Flex>
-      <Text kind="body/regular/xs" className="text-secondary">
-        {[server.transport, toolCount === undefined ? undefined : pluralize(toolCount, 'tool')]
-          .filter(Boolean)
-          .join(' · ')}
-      </Text>
-      {/* The command usually echoes the server name; it only helps diagnose a failed launch, and an
+        {/* The command usually echoes the server name; it only helps diagnose a failed launch, and an
           unresolved one already names it in its error. */}
-      {state === 'failed' ? (
-        <Text kind="body/regular/xs" className={`font-mono text-secondary ${WRAP_ANYWHERE}`}>
-          {server.target}
-        </Text>
+        {state === 'failed' ? (
+          <Text kind="body/regular/xs" className={`font-mono text-secondary ${WRAP_ANYWHERE}`}>
+            {server.target}
+          </Text>
+        ) : null}
+      </Stack>
+      {children ? (
+        <Stack gap="density-sm" className="border-t border-base px-density-md py-density-sm">
+          {children}
+        </Stack>
       ) : null}
     </Stack>
-    {children ? (
-      <Stack gap="density-sm" className="border-t border-base px-density-md py-density-sm">
-        {children}
-      </Stack>
-    ) : null}
-  </Stack>
-);
+  );
+};
 
 const ServerSection: FC<{ server: McpServerStatus }> = ({ server }) => {
   const hasBody = Boolean(server.error || server.stderr || server.tools.length);
