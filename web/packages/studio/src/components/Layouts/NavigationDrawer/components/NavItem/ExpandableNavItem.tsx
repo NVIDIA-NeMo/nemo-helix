@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight } from '@nemo/icons/icons';
 import { Button, VerticalNavListItem, VerticalNavSubList } from '@nvidia/foundations-react-core';
 import { NavSubItem } from '@studio/components/Layouts/NavigationDrawer/components/NavItem/NavSubItem';
 import { StudioNavItem } from '@studio/components/Layouts/NavigationDrawer/components/StudioNavItem';
-import { SUB_LIST_CLASS } from '@studio/components/Layouts/NavigationDrawer/styles';
 import type { NavItem as NavItemData } from '@studio/components/Layouts/NavigationDrawer/types';
 import { resolveActive } from '@studio/components/Layouts/NavigationDrawer/utils';
 import type { FC } from 'react';
@@ -84,11 +83,7 @@ export const ExpandableNavItem: FC<ExpandableNavItemProps> = ({
         )}
       </div>
       {isOpen && (
-        <VerticalNavSubList
-          id={subListId}
-          className={SUB_LIST_CLASS}
-          {...item.attributes?.VerticalNavSubList}
-        >
+        <VerticalNavSubList id={subListId} {...item.attributes?.VerticalNavSubList}>
           {subItems.map((sub) => (
             <NavSubItem key={sub.id} item={sub} isActive={isActive} />
           ))}
