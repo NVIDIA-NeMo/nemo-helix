@@ -19,3 +19,39 @@ export type UseCreateAgentFromTrialOptions = Omit<
   UseMutationOptions<Agent, Error, CreateAgentFromTrialParams>,
   'mutationFn'
 >;
+
+/** Probe outcome for one MCP server, reported by the deployment's Fabric server. */
+export type McpServerState = 'running' | 'unresolved' | 'failed' | 'unsupported';
+
+export interface McpToolStatus {
+  name: string;
+  description?: string | null;
+  /** JSON Schema for the tool's arguments. */
+  input_schema?: Record<string, unknown>;
+  /** False when the agent's tool policy hides the tool from the model. */
+  exposed: boolean;
+}
+
+export interface McpServerStatus {
+  name: string;
+  transport: string;
+  /** Command for stdio servers, URL otherwise. */
+  target: string;
+  args: string[];
+  state: McpServerState;
+  tools: McpToolStatus[];
+  error?: string | null;
+  stderr?: string | null;
+}
+
+export interface McpStatusResponse {
+  servers: McpServerStatus[];
+  checked_at: string;
+}
+
+/** An MCP server as the agent config declares it, before any deployment probes it. */
+export interface DeclaredMcpServer {
+  name: string;
+  transport: string;
+  target: string;
+}

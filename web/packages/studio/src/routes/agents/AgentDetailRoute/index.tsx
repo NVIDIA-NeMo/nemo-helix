@@ -9,6 +9,7 @@ import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimizatio
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import {
   Badge,
+  Block,
   Button,
   Flex,
   PageHeader,
@@ -36,6 +37,8 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { AgentConfigPanel } from '@studio/routes/agents/AgentDetailRoute/AgentConfigPanel';
 import { AgentDetailCTAs } from '@studio/routes/agents/AgentDetailRoute/AgentDetailCTAs';
+import { AgentRuntimePanel } from '@studio/routes/agents/AgentDetailRoute/AgentRuntimePanel';
+import { AgentToolsPanel } from '@studio/routes/agents/AgentDetailRoute/AgentToolsPanel';
 import {
   BuildThenDeploy,
   type PendingImageBuild,
@@ -443,21 +446,34 @@ export const AgentDetailRoute: FC = () => {
             <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
           </TabsContent>
 
-          <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 pt-6" value="chat">
-            <div className="mx-auto flex h-full w-full max-w-4xl flex-col">
-              <ChatPlaygroundContent
-                workspace={workspace}
-                agentName={agentName}
-                deployment={selectedDeployment}
-                hasHealthyDeployments={healthyDeployments.length > 0}
-                isDeploymentsLoading={isDeploymentsLoading}
-                isDeploying={isDeploying}
-                chatAreaRef={chatAreaRef}
-                onDeploy={onDeploy}
-                canDeploy={canDeploy}
-                isAgentPending={isAgentPending}
-              />
-            </div>
+          <TabsContent className="min-h-0 flex-1 overflow-hidden p-0" value="chat">
+            <Flex className="h-full min-h-0 w-full">
+              {/* Side panes give way to the conversation on narrow viewports. */}
+              <Block className="hidden h-full w-[240px] shrink-0 xl:block">
+                <AgentRuntimePanel deployment={selectedDeployment} modelNames={modelNames} />
+              </Block>
+              <Block className="h-full min-w-0 flex-1">
+                <ChatPlaygroundContent
+                  workspace={workspace}
+                  agentName={agentName}
+                  deployment={selectedDeployment}
+                  hasHealthyDeployments={healthyDeployments.length > 0}
+                  isDeploymentsLoading={isDeploymentsLoading}
+                  isDeploying={isDeploying}
+                  chatAreaRef={chatAreaRef}
+                  onDeploy={onDeploy}
+                  canDeploy={canDeploy}
+                  isAgentPending={isAgentPending}
+                />
+              </Block>
+              <Block className="hidden h-full w-[320px] shrink-0 lg:block">
+                <AgentToolsPanel
+                  workspace={workspace}
+                  config={agent?.config}
+                  deployment={selectedDeployment}
+                />
+              </Block>
+            </Flex>
           </TabsContent>
         </TabsRoot>
       </Stack>
