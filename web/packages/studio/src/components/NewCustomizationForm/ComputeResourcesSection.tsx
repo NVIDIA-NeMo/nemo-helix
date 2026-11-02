@@ -16,20 +16,16 @@ import {
 } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
-import {
-  expertParallelWarning,
-  suggestedExpertParallelSize,
-} from '@studio/util/forms/expertParallel';
+import { expertParallelWarning } from '@studio/util/forms/expertParallel';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
   specSliderProps,
 } from '@studio/util/forms/specDefaults';
-import { useEffect } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
-  const { control, getValues, setValue } = useFormContext<CustomizationFormFields>();
+  const { control } = useFormContext<CustomizationFormFields>();
   const [model, parallelism] = useWatch({
     control,
     name: ['automodel.model', 'automodel.parallelism'],
@@ -37,33 +33,6 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
   const numExperts = useModelEntity(model)?.spec?.moe_config?.num_experts;
   const isMoe = !!numExperts && numExperts > 1;
   const warning = expertParallelWarning(numExperts, parallelism ?? {});
-
-  // Expert parallel size is left out of the deps so a value the user is typing is never replaced.
-  const {
-    num_nodes,
-    num_gpus_per_node,
-    tensor_parallel_size,
-    pipeline_parallel_size,
-    context_parallel_size,
-  } = parallelism ?? {};
-  useEffect(() => {
-    const suggested = suggestedExpertParallelSize(
-      numExperts,
-      getValues('automodel.parallelism') ?? {}
-    );
-    if (suggested !== undefined) {
-      setValue('automodel.parallelism.expert_parallel_size', suggested, { shouldDirty: true });
-    }
-  }, [
-    numExperts,
-    num_nodes,
-    num_gpus_per_node,
-    tensor_parallel_size,
-    pipeline_parallel_size,
-    context_parallel_size,
-    getValues,
-    setValue,
-  ]);
   const expertParallelSize = (
     <ControlledSliderWithTextInput
       useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}

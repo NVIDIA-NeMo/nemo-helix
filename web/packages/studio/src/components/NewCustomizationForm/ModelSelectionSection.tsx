@@ -11,12 +11,14 @@ import {
   MODEL_FIELD_BY_BACKEND,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
+import { suggestedExpertParallelSize } from '@studio/util/forms/expertParallel';
 import { useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 
 export const ModelSelectionSection = () => {
   const workspace = useWorkspaceFromPath();
-  const { control, watch, formState } = useFormContext<CustomizationFormFields>();
+  const { control, watch, formState, getValues, setValue } =
+    useFormContext<CustomizationFormFields>();
   const backend = watch('backend');
   const disabled = formState.isSubmitting;
 
@@ -40,6 +42,14 @@ export const ModelSelectionSection = () => {
 
   const handleModelChange = (selection: ModelSelection) => {
     modelField.onChange(selection.model);
+    if (backend !== 'automodel') return;
+    const expertParallelSize = suggestedExpertParallelSize(
+      selection.entity?.spec?.moe_config?.num_experts,
+      getValues('automodel.parallelism') ?? {}
+    );
+    if (expertParallelSize !== undefined) {
+      setValue('automodel.parallelism.expert_parallel_size', expertParallelSize);
+    }
   };
 
   return (
