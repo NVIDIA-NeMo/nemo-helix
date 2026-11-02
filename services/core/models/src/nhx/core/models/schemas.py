@@ -1263,6 +1263,69 @@ class UpdateModelEntityRequest(BaseModel):
     )
 
 
+class TrainingMemoryEstimateRequest(BaseModel):
+    """Training settings to estimate GPU memory for. Field names match the Automodel customization job."""
+
+    max_seq_length: int = Field(gt=0, description="Maximum token sequence length for training.")
+    micro_batch_size: int = Field(gt=0, description="Per-GPU micro batch size.")
+    num_nodes: int = Field(default=1, gt=0, description="Number of nodes.")
+    num_gpus_per_node: int = Field(default=1, gt=0, description="Number of GPUs per node.")
+    tensor_parallel_size: int = Field(default=1, gt=0, description="Tensor parallel size.")
+    pipeline_parallel_size: int = Field(default=1, gt=0, description="Pipeline parallel size.")
+    context_parallel_size: int = Field(default=1, gt=0, description="Context parallel size.")
+    expert_parallel_size: Optional[int] = Field(default=None, gt=0, description="Expert parallel size (MoE models).")
+    lora_rank: Optional[int] = Field(
+        default=None, gt=0, description="LoRA rank. Omit to estimate all-weights fine-tuning."
+    )
+    sequence_packing: bool = Field(default=False, description="Whether sequence packing is enabled.")
+    packed_sequence_size: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description="Packed sequence length. Used in place of max_seq_length when sequence_packing is enabled.",
+    )
+    activation_checkpointing: bool = Field(default=False, description="Whether activation checkpointing is enabled.")
+    gpu_memory_gb: Optional[float] = Field(
+        default=None,
+        gt=0,
+        description="Memory per GPU in GB. Defaults to the platform's configured assumption.",
+    )
+
+
+class TrainingMemoryStatus(StrEnum):
+    """How an estimate compares with GPU memory."""
+
+    OK = "ok"
+    NEAR_CAPACITY = "near_capacity"
+    EXCEEDS_CAPACITY = "exceeds_capacity"
+
+
+class TrainingMemoryComponent(StrEnum):
+    """A component of per-GPU training memory."""
+
+    MODEL_STATES = "model_states"
+    ACTIVATIONS = "activations"
+    OVERHEAD = "overhead"
+
+
+class TrainingMemoryEstimate(BaseModel):
+    """Estimated per-GPU memory for a training configuration."""
+
+    gpu_count: int = Field(description="Total GPUs requested (num_nodes x num_gpus_per_node).")
+    gpu_memory_gb: float = Field(description="Memory per GPU the estimate is compared against, in GB.")
+    gpu_memory_assumed: bool = Field(
+        description="True when gpu_memory_gb is the platform default rather than a value from the request."
+    )
+    data_parallel_size: int = Field(description="Data parallel size implied by the GPU count and parallel sizes.")
+    model_states_gb: float = Field(description="Parameters, gradients, and optimizer states per GPU, in GB.")
+    activations_gb: float = Field(description="Activation memory per GPU, in GB.")
+    overhead_gb: float = Field(description="Framework overhead per GPU (prefetch, NCCL, grad buffers), in GB.")
+    total_gb: float = Field(description="Total estimated memory per GPU, in GB.")
+    utilization: float = Field(description="total_gb / gpu_memory_gb.")
+    warning_threshold: float = Field(description="Utilization above which status is near_capacity.")
+    status: TrainingMemoryStatus = Field(description="How the estimate compares with GPU memory.")
+    limiting_factor: TrainingMemoryComponent = Field(description="The largest memory component.")
+
+
 class UpdateAdapterRequest(BaseModel):
     """Request model for updating Adapter Sub Entity metadata."""
 

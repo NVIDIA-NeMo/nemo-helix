@@ -145,6 +145,13 @@ class ParallelismConfig(BaseModel):
 
     gpus_per_node_default: int = Field(default=8, description="Standard node configuration (e.g., DGX H100)")
     gpu_memory_gb_default: int = Field(default=80, description="Standard GPU memory in GB (e.g., H100 80GB)")
+    memory_warning_threshold: float = Field(
+        default=0.85,
+        gt=0.0,
+        le=1.0,
+        description="Fraction of GPU memory above which a training memory estimate is reported as near capacity. "
+        "Matches the utilization cap used to compute minimum GPU counts.",
+    )
     model_size_thresholds: ModelSizeThresholds = Field(default_factory=ModelSizeThresholds)
     memory: ParallelismMemoryConfig = Field(default_factory=ParallelismMemoryConfig)
     tensor_parallelism: TensorParallelismConfig = Field(default_factory=TensorParallelismConfig)

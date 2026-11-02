@@ -43,6 +43,7 @@ from nhx.core.models.api.service.model_entity_service import (
 from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.config import config as models_config
 from nhx.core.models.entities import Model
+from nhx.core.models.parallelism.training_memory import InvalidTrainingLayoutError, estimate_training_memory
 from nhx.core.models.schemas import (
     Adapter,
     CreateModelAdapterRequest,
@@ -50,6 +51,8 @@ from nhx.core.models.schemas import (
     ModelEntity,
     ModelEntityFilter,
     ModelEntitySortField,
+    TrainingMemoryEstimate,
+    TrainingMemoryEstimateRequest,
     UpdateAdapterRequest,
     UpdateModelEntityRequest,
 )
@@ -342,6 +345,55 @@ async def start_update_model_spec_job(model_entity: ModelEntity):
         logger.warning(f"Failed to create model spec job. {err}")
     finally:
         await client.close()
+
+
+@router.post(
+    "/v2/workspaces/{workspace}/models/{name}/training-memory-estimate",
+    summary="Estimate Training Memory",
+    response_description="Estimated per-GPU memory for the training configuration",
+    responses={
+        404: {"model": ErrorResponse, "description": "Model not found"},
+        409: {"model": ErrorResponse, "description": "Model spec has not been computed yet"},
+        422: {"model": ErrorResponse, "description": "Parallel sizes do not fit the GPU count"},
+    },
+    status_code=status.HTTP_200_OK,
+    response_model=TrainingMemoryEstimate,
+)
+async def estimate_model_training_memory(
+    workspace: str,
+    name: str,
+    request: TrainingMemoryEstimateRequest,
+    service: ModelEntityService = Depends(get_model_entity_service),
+) -> TrainingMemoryEstimate:
+    """
+    Estimate Training Memory.
+
+    Estimates per-GPU memory for fine-tuning this model with the given settings and compares it
+    with GPU memory. The estimate models Automodel training; it does not cover RL or Unsloth jobs.
+    """
+    model_entity = await service.get_model_entity(workspace, name)
+    if model_entity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Model with workspace '{workspace}' and name '{name}' not found",
+        )
+    if model_entity.spec is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Model '{workspace}/{name}' has no spec yet; it is computed after the model is created",
+        )
+
+    parallelism_config = models_config.parallelism
+    try:
+        return estimate_training_memory(
+            model_entity.spec,
+            request,
+            gpu_memory_gb=request.gpu_memory_gb or parallelism_config.gpu_memory_gb_default,
+            gpu_memory_assumed=request.gpu_memory_gb is None,
+            warning_threshold=parallelism_config.memory_warning_threshold,
+        )
+    except InvalidTrainingLayoutError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e)) from e
 
 
 @router.patch(

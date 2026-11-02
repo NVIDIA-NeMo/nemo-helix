@@ -14,6 +14,7 @@ This module contains:
 """
 
 import math
+from dataclasses import dataclass
 from typing import Optional
 
 from nhx.core.models.parallelism.constants import (
@@ -22,8 +23,9 @@ from nhx.core.models.parallelism.constants import (
     DEFAULT_INCLUDE_PATTERNS,
     FP32_BYTES,
 )
-from nhx.core.models.parallelism.models import EstimationParams, ModelSpec
+from nhx.core.models.parallelism.schemas import EstimationParams
 from nhx.core.models.parallelism.utils import compile_patterns, name_matches
+from nhx.core.models.schemas import ModelSpec
 
 # ============================================================================
 # Parameter Counting Functions
@@ -594,6 +596,57 @@ def calculate_training_overhead_gb(
     total_overhead_gb = fsdp_prefetch_gb + nccl_buffer_gb + grad_accum_gb
 
     return total_overhead_gb
+
+
+@dataclass(frozen=True)
+class RankMemory:
+    """Estimated memory per rank for one parallelism layout and microbatch size, in GB."""
+
+    static_gb: float
+    act_gb_per_mb1: float
+    activations_gb: float
+    overhead_gb: float
+    total_gb: float
+
+
+def calculate_memory_per_rank(
+    args: EstimationParams,
+    model_cfg: ModelSpec,
+    param_counts: dict[str, int],
+    tp: int,
+    pp: int,
+    dp: int,
+    cp: int,
+    ep: int,
+    microbatch: int,
+) -> RankMemory:
+    """
+    Estimate memory per rank for a fixed parallelism layout and microbatch size.
+
+    Total = static (params + grads + optimizer) + activations + training overhead.
+    """
+    static_b = calculate_static_memory_per_rank(args, tp, pp, dp, ep, param_counts)
+    act_tok_b, kv_tok_b, scr_tok_b = calculate_activation_bytes_per_token(args, model_cfg, tp, cp)
+
+    per_rank_static_gb = round(static_b / 1024**3, 2)
+    effective_seq_len = args.seq_len // cp
+    est_act_gb_per_mb1 = round(((act_tok_b + kv_tok_b + scr_tok_b) * effective_seq_len) / 1024**3, 2)
+    training_overhead_gb = calculate_training_overhead_gb(
+        per_rank_static_gb=per_rank_static_gb,
+        num_layers=model_cfg.num_layers,
+        tp=tp,
+        pp=pp,
+        dp=dp,
+    )
+    activations_gb = est_act_gb_per_mb1 * microbatch
+
+    return RankMemory(
+        static_gb=per_rank_static_gb,
+        act_gb_per_mb1=est_act_gb_per_mb1,
+        activations_gb=activations_gb,
+        overhead_gb=training_overhead_gb,
+        total_gb=round(per_rank_static_gb + activations_gb + training_overhead_gb, 2),
+    )
 
 
 def find_max_microbatch(

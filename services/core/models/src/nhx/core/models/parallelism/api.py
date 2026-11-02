@@ -19,15 +19,13 @@ from nhx.core.models.parallelism.hueristics import (
 )
 from nhx.core.models.parallelism.memory import (
     calculate_activation_bytes_per_token,
+    calculate_memory_per_rank,
     calculate_param_counts,
     calculate_static_memory_per_rank,
-    calculate_training_overhead_gb,
     find_max_microbatch,
     param_count,
 )
 from nhx.core.models.parallelism.models import (
-    EstimationParams,
-    ModelSpec,
     ParallelizationConfig,
     ParallelizationRecommendation,
     detect_gated_mlp_from_cfg,
@@ -38,8 +36,9 @@ from nhx.core.models.parallelism.models import (
     extract_basic_config,
     try_load_nemo_yaml_config,
 )
+from nhx.core.models.parallelism.schemas import EstimationParams
 from nhx.core.models.parallelism.utils import is_huggingface_model_directory
-from nhx.core.models.schemas import LinearLayerSpec
+from nhx.core.models.schemas import LinearLayerSpec, ModelSpec
 from transformers import AutoConfig, AutoModel, AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
@@ -320,11 +319,12 @@ def estimate(args: EstimationParams, model_cfg: ModelSpec) -> list[Parallelizati
                     if best_mb == 0:
                         continue  # Config doesn't fit
 
+                    # Calculate memory breakdown for reporting
+                    rank_memory = calculate_memory_per_rank(args, model_cfg, param_counts, tp, pp, dp, cp, ep, best_mb)
+
                     # Calculate communication cost score
                     num_experts = model_cfg.moe_config.num_experts if model_cfg.moe_config else 0
                     param_count_b = param_counts["base"] / 1e9  # Convert to billions
-                    # Calculate memory breakdown for reporting
-                    per_rank_static_gb = round(static_b / 1024**3, 2)
 
                     score = comm_cost_proxy(
                         n_layers,
@@ -337,24 +337,8 @@ def estimate(args: EstimationParams, model_cfg: ModelSpec) -> list[Parallelizati
                         args.seq_len,
                         num_experts,
                         param_count_b,
-                        static_memory_gb=per_rank_static_gb,
+                        static_memory_gb=rank_memory.static_gb,
                         gpu_memory_gb=args.gpu_mem_gb,
-                    )
-                    effective_seq_len = args.seq_len // cp
-                    est_act_gb_per_mb1 = round(((act_tok_b + kv_tok_b + scr_tok_b) * effective_seq_len) / 1024**3, 2)
-
-                    # Calculate training framework overhead (FSDP2 prefetch, NCCL buffers, grad accumulation)
-                    training_overhead_gb = calculate_training_overhead_gb(
-                        per_rank_static_gb=per_rank_static_gb,
-                        num_layers=n_layers,
-                        tp=tp,
-                        pp=pp,
-                        dp=dp,
-                    )
-
-                    # Total memory = static + activations + training overhead
-                    total_memory_per_rank_gb = round(
-                        per_rank_static_gb + (est_act_gb_per_mb1 * best_mb) + training_overhead_gb, 2
                     )
 
                     # Create configuration
@@ -365,9 +349,9 @@ def estimate(args: EstimationParams, model_cfg: ModelSpec) -> list[Parallelizati
                         cp=cp,
                         ep=ep,
                         microbatch_per_dp=best_mb,
-                        per_rank_static_gb=per_rank_static_gb,
-                        est_act_gb_per_mb1=est_act_gb_per_mb1,
-                        total_memory_per_rank_gb=total_memory_per_rank_gb,
+                        per_rank_static_gb=rank_memory.static_gb,
+                        est_act_gb_per_mb1=rank_memory.act_gb_per_mb1,
+                        total_memory_per_rank_gb=rank_memory.total_gb,
                         score=int(score),
                     )
                     results.append(config)

@@ -17,10 +17,8 @@ from nhx.core.models.parallelism.constants import (
     DEFAULT_EXCLUDE_PATTERNS,
     DEFAULT_INCLUDE_PATTERNS,
 )
-from nhx.core.models.parallelism.models import (
-    EstimationParams,
-    ParallelizationRecommendation,
-)
+from nhx.core.models.parallelism.models import ParallelizationRecommendation
+from nhx.core.models.parallelism.schemas import EstimationParams
 
 logger = logging.getLogger(__name__)
 

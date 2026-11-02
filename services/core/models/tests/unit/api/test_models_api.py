@@ -19,7 +19,7 @@ from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_hand
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import ModelEntityService
 from nhx.core.models.api.v2.models import router, start_update_model_spec_job
-from nhx.core.models.schemas import ModelEntity
+from nhx.core.models.schemas import ModelEntity, ModelSpec
 
 
 @pytest.fixture
@@ -645,3 +645,89 @@ def test_get_model_with_verbose_true(client, mock_model_entity_service, sample_m
 
     assert response.status_code == 200
     mock_model_entity_service.get_model_entity.assert_called_once_with("nvidia", "my-model", verbose=True)
+
+
+_ESTIMATE_URL = "/apis/models/v2/workspaces/nvidia/models/llama-3-8b-instruct/training-memory-estimate"
+
+
+@pytest.fixture
+def model_entity_with_spec(sample_model_entity):
+    return sample_model_entity.model_copy(
+        update={
+            "spec": ModelSpec(
+                checkpoint_model_name="LlamaForCausalLM",
+                family="llama",
+                num_layers=32,
+                hidden_size=4096,
+                num_attention_heads=32,
+                num_kv_heads=8,
+                ffn_hidden_size=14336,
+                vocab_size=128256,
+                tied_embeddings=False,
+                gated_mlp=True,
+                base_num_parameters=8_030_261_248,
+                precision="bfloat16",
+            )
+        }
+    )
+
+
+def test_training_memory_estimate_uses_default_gpu_memory(client, mock_model_entity_service, model_entity_with_spec):
+    mock_model_entity_service.get_model_entity.return_value = model_entity_with_spec
+
+    response = client.post(_ESTIMATE_URL, json={"max_seq_length": 4096, "micro_batch_size": 1})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gpu_memory_gb"] == 80
+    assert body["gpu_memory_assumed"] is True
+    assert body["warning_threshold"] == 0.85
+    assert body["status"] == "exceeds_capacity"
+    assert body["limiting_factor"] == "model_states"
+    mock_model_entity_service.get_model_entity.assert_awaited_once_with("nvidia", "llama-3-8b-instruct")
+
+
+def test_training_memory_estimate_uses_requested_gpu_memory(client, mock_model_entity_service, model_entity_with_spec):
+    mock_model_entity_service.get_model_entity.return_value = model_entity_with_spec
+
+    response = client.post(
+        _ESTIMATE_URL,
+        json={"max_seq_length": 4096, "micro_batch_size": 1, "lora_rank": 16, "gpu_memory_gb": 141},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["gpu_memory_gb"] == 141
+    assert body["gpu_memory_assumed"] is False
+    assert body["status"] == "ok"
+
+
+def test_training_memory_estimate_model_not_found(client, mock_model_entity_service):
+    mock_model_entity_service.get_model_entity.return_value = None
+
+    response = client.post(_ESTIMATE_URL, json={"max_seq_length": 4096, "micro_batch_size": 1})
+
+    assert response.status_code == 404
+
+
+def test_training_memory_estimate_without_spec_conflicts(client, mock_model_entity_service, sample_model_entity):
+    mock_model_entity_service.get_model_entity.return_value = sample_model_entity
+
+    response = client.post(_ESTIMATE_URL, json={"max_seq_length": 4096, "micro_batch_size": 1})
+
+    assert response.status_code == 409
+    assert "no spec" in response.json()["detail"]
+
+
+def test_training_memory_estimate_rejects_layout_that_does_not_divide_gpus(
+    client, mock_model_entity_service, model_entity_with_spec
+):
+    mock_model_entity_service.get_model_entity.return_value = model_entity_with_spec
+
+    response = client.post(
+        _ESTIMATE_URL,
+        json={"max_seq_length": 4096, "micro_batch_size": 1, "num_gpus_per_node": 8, "tensor_parallel_size": 3},
+    )
+
+    assert response.status_code == 422
+    assert "must divide the GPU count" in response.json()["detail"]
