@@ -236,7 +236,9 @@ kubectl apply -f "${EXAMPLES}/opensandbox-ext-rbac.yaml"
 kubectl rollout restart deploy/opensandbox-server -n opensandbox-system
 ```
 
-`configmap.yaml` is generated from the extension's source files by
+`configmap.yaml` is generated from the extension's source files, which live in
+`packages/nhx_sandbox/opensandbox_ext` (plus the shared Compose services model in
+`packages/nhx_sandbox/src/nhx_sandbox/harbor_opensandbox_services.py`), by
 `script/generate_opensandbox_ext_configmap.py`, and CI fails if the committed
 copy is out of date. Don't edit it by hand.
 

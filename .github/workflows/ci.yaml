@@ -1218,6 +1218,10 @@ jobs:
         run: uv run --frozen --group scaled-evals pytest plugins/_temporary-scaled-evals/tests -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # The OpenSandbox server extension is tested against the real opensandbox-server package, which only
+      # the opt-in `opensandbox-ext` group installs; without it these tests skip themselves.
+      - name: Run OpenSandbox server extension tests
+        run: uv run --frozen --group opensandbox-ext pytest packages/nhx_sandbox/tests/opensandbox_ext -v
       # The workspace venv carries a single Harbor release, but NemoOpenSandboxEnvironment must run on
       # every runner harbor_opensandbox accepts: those whose requirements pin the OpenSandbox SDK.
       # Build each runner's venv from its own requirements, as the image does, and run the tests there.
