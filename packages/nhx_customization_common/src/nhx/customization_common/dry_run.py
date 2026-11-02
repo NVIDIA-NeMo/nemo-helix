@@ -4,14 +4,15 @@
 """The checks of a customization dry run (create with ``?dry_run=true``).
 
 Besides the execution-profile check every dry run makes, a customization dry run reads
-the first rows of each file training would read and checks them with the backend's own
-validator. It reads byte ranges from the Files service, so nothing is downloaded to job
-storage and nothing is created.
+the first rows of each file training would read, or every row with ``?dry_run_full=true``,
+and checks them with the backend's own validator. It reads byte ranges, or for every row a
+stream, from the Files service, so nothing is downloaded to job storage and nothing is created.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,18 +38,18 @@ class DatasetRows:
     #: Training's own file picker: relative paths in, the files training reads out.
     select_files: Callable[[list[str]], list[str]]
     #: The backend's row validator: ``(lines, source)``; raises on a bad row.
-    validate_lines: Callable[[list[str], str], object]
+    validate_lines: Callable[[Iterable[str], str], object]
 
 
 async def check_dataset_rows(
-    datasets: list[DatasetRows], workspace: str, async_sdk: AsyncNemoClient
+    datasets: list[DatasetRows], workspace: str, async_sdk: AsyncNemoClient, *, full: bool = False
 ) -> list[JobDryRunCheck]:
-    """Check the first rows of every file each dataset's training would read."""
+    """Check the first rows of every file each dataset's training would read, or with *full*, every row."""
     files = AsyncFilesClient.from_client(async_sdk)
-    return [await _check_fileset(files, dataset, workspace) for dataset in datasets]
+    return [await _check_fileset(files, dataset, workspace, full=full) for dataset in datasets]
 
 
-def check_local_dataset_rows(dataset: DatasetRows, path: Path) -> JobDryRunCheck:
+def check_local_dataset_rows(dataset: DatasetRows, path: Path, *, full: bool = False) -> JobDryRunCheck:
     """Check a local file or directory the way :func:`check_dataset_rows` checks a fileset."""
     try:
         # Upload puts a lone file at the fileset root under its own name, so training picks it by that name.
@@ -59,14 +60,19 @@ def check_local_dataset_rows(dataset: DatasetRows, path: Path) -> JobDryRunCheck
         selected = {rel: listing[rel] for rel in dataset.select_files(sorted(listing))}
         for file in selected.values():
             with file.open("rb") as handle:
+                if full:
+                    dataset.validate_lines(_lines(lambda: handle.read(_CHUNK_BYTES) or None, str(file)), str(file))
+                    continue
                 head = handle.read(_MAX_BYTES)
             _validate_head(dataset, head, at_end=len(head) == file.stat().st_size, source=str(file))
     except Exception as e:
         return JobDryRunCheck(name=dataset.name, passed=False, message=str(e))
-    return _passed(dataset, list(selected))
+    return _passed(dataset, list(selected), full=full)
 
 
-async def _check_fileset(files: AsyncFilesClient, dataset: DatasetRows, workspace: str) -> JobDryRunCheck:
+async def _check_fileset(
+    files: AsyncFilesClient, dataset: DatasetRows, workspace: str, *, full: bool
+) -> JobDryRunCheck:
     try:
         ref = FileSetRef.model_validate(dataset.fileset)
         fileset_workspace = ref.workspace or workspace
@@ -81,12 +87,61 @@ async def _check_fileset(files: AsyncFilesClient, dataset: DatasetRows, workspac
         selected = dataset.select_files(sorted(sizes))
         for rel in selected:
             path = f"{prefix}{rel}"
-            head = await _read_head(files, fileset_workspace, ref.name, path, sizes[rel])
             source = f"{fileset_workspace}/{ref.name}#{path}"
+            if full:
+                await _validate_whole_file(files, dataset, fileset_workspace, ref.name, path, source=source)
+                continue
+            head = await _read_head(files, fileset_workspace, ref.name, path, sizes[rel])
             _validate_head(dataset, head, at_end=len(head) >= sizes[rel], source=source)
     except Exception as e:
         return JobDryRunCheck(name=dataset.name, passed=False, message=str(e))
-    return _passed(dataset, selected)
+    return _passed(dataset, selected, full=full)
+
+
+async def _validate_whole_file(
+    files: AsyncFilesClient, dataset: DatasetRows, workspace: str, name: str, path: str, *, source: str
+) -> None:
+    """Validate every row of a file as it streams in from the Files service.
+
+    The validator runs in a worker thread and pulls the next chunk when it needs more lines,
+    so memory stays flat, the service keeps answering other requests, and a bad row stops
+    the download.
+    """
+    loop = asyncio.get_running_loop()
+    response = await files.download_file(workspace=workspace, name=name, path=path)
+    async with response.stream(_CHUNK_BYTES) as chunks:
+
+        def next_chunk() -> bytes | None:
+            return asyncio.run_coroutine_threadsafe(_next_chunk(chunks), loop).result()
+
+        await asyncio.to_thread(dataset.validate_lines, _lines(next_chunk, source), source)
+
+
+async def _next_chunk(chunks: AsyncIterator[bytes]) -> bytes | None:
+    return await anext(chunks, None)
+
+
+def _lines(next_chunk: Callable[[], bytes | None], source: str) -> Iterator[str]:
+    """The lines of a file read chunk by chunk, decoded as the validator asks for them."""
+    pending, number, rows = b"", 0, 0
+    while (chunk := next_chunk()) is not None:
+        *complete, pending = (pending + chunk).split(b"\n")
+        for line in complete:
+            number += 1
+            rows += bool(line.strip())
+            yield _decode(line, number, source)
+    if pending:
+        rows += bool(pending.strip())
+        yield _decode(pending, number + 1, source)
+    if rows == 0:
+        raise ValueError(f"{source} is empty.")
+
+
+def _decode(line: bytes, number: int, source: str) -> str:
+    try:
+        return line.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{source} line {number} is not UTF-8 text: {e}") from e
 
 
 async def _read_head(files: AsyncFilesClient, workspace: str, name: str, path: str, size: int) -> bytes:
@@ -131,9 +186,11 @@ def _validate_head(dataset: DatasetRows, head: bytes, *, at_end: bool, source: s
     dataset.validate_lines(kept, source)
 
 
-def _passed(dataset: DatasetRows, files: list[str]) -> JobDryRunCheck:
-    return JobDryRunCheck(
-        name=dataset.name,
-        passed=True,
-        message=f"The first {ROWS_TO_CHECK} rows of {', '.join(files)} match what training reads.",
+def _passed(dataset: DatasetRows, files: list[str], *, full: bool) -> JobDryRunCheck:
+    names = ", ".join(files)
+    message = (
+        f"Every row of {names} matches what training reads."
+        if full
+        else f"The first {ROWS_TO_CHECK} rows of {names} match what training reads."
     )
+    return JobDryRunCheck(name=dataset.name, passed=True, message=message)

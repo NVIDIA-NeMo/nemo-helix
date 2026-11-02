@@ -40,21 +40,37 @@ paths:
             references resolved and its steps compiled, as create does. The dry run
             then checks that each step's execution profile exists and runs the job
             type's own checks, such as reading the first rows of each dataset file.
-            If every check passes, returns 200 with the unsaved job and the checks
-            in status_details.checks. If a check fails, returns 422 with detail.message
-            naming the failed checks and detail.checks listing all of them. Errors
-            before the checks, such as an invalid spec or a missing reference, are
-            the same as create's.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
           default: false
           title: Dry Run
         description: Check the job without creating it. The job is validated, its
           references resolved and its steps compiled, as create does. The dry run
           then checks that each step's execution profile exists and runs the job type's
           own checks, such as reading the first rows of each dataset file. If every
-          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
-          If a check fails, returns 422 with detail.message naming the failed checks
-          and detail.checks listing all of them. Errors before the checks, such as
-          an invalid spec or a missing reference, are the same as create's.
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:
@@ -935,21 +951,37 @@ paths:
             references resolved and its steps compiled, as create does. The dry run
             then checks that each step's execution profile exists and runs the job
             type's own checks, such as reading the first rows of each dataset file.
-            If every check passes, returns 200 with the unsaved job and the checks
-            in status_details.checks. If a check fails, returns 422 with detail.message
-            naming the failed checks and detail.checks listing all of them. Errors
-            before the checks, such as an invalid spec or a missing reference, are
-            the same as create's.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
           default: false
           title: Dry Run
         description: Check the job without creating it. The job is validated, its
           references resolved and its steps compiled, as create does. The dry run
           then checks that each step's execution profile exists and runs the job type's
           own checks, such as reading the first rows of each dataset file. If every
-          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
-          If a check fails, returns 422 with detail.message naming the failed checks
-          and detail.checks listing all of them. Errors before the checks, such as
-          an invalid spec or a missing reference, are the same as create's.
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:
@@ -1648,21 +1680,37 @@ paths:
             references resolved and its steps compiled, as create does. The dry run
             then checks that each step's execution profile exists and runs the job
             type's own checks, such as reading the first rows of each dataset file.
-            If every check passes, returns 200 with the unsaved job and the checks
-            in status_details.checks. If a check fails, returns 422 with detail.message
-            naming the failed checks and detail.checks listing all of them. Errors
-            before the checks, such as an invalid spec or a missing reference, are
-            the same as create's.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
           default: false
           title: Dry Run
         description: Check the job without creating it. The job is validated, its
           references resolved and its steps compiled, as create does. The dry run
           then checks that each step's execution profile exists and runs the job type's
           own checks, such as reading the first rows of each dataset file. If every
-          check passes, returns 200 with the unsaved job and the checks in status_details.checks.
-          If a check fails, returns 422 with detail.message naming the failed checks
-          and detail.checks listing all of them. Errors before the checks, such as
-          an invalid spec or a missing reference, are the same as create's.
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:

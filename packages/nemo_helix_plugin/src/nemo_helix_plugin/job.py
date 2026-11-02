@@ -317,6 +317,7 @@ class NemoJob(_NamedPlugin):
         platform_spec: HelixJobSpec,
         workspace: str,
         async_sdk: AsyncNemoClient,
+        full: bool = False,
     ) -> list[JobDryRunCheck]:
         """This job's checks in a dry run (create with ``?dry_run=true``), after :meth:`to_spec` and :meth:`compile`.
 
@@ -329,11 +330,13 @@ class NemoJob(_NamedPlugin):
             platform_spec: The compiled job: its steps, their images and execution profiles.
             workspace: Workspace scope.
             async_sdk: The request-scoped :class:`AsyncNemoClient`.
+            full: ``?dry_run_full=true``: check in full rather than on a sample, such as every row
+                of the job's data rather than the first few.
 
         Returns:
             One entry per check. The default adds none.
         """
-        del spec, platform_spec, workspace, async_sdk
+        del spec, platform_spec, workspace, async_sdk, full
         return []
 
     # ------------------------------------------------------------------ #

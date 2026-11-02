@@ -178,7 +178,7 @@ See [Knowledge Distillation constraints](/documentation/customizer-reference/man
 
 A dry run checks a job the way submit does, then stops before creating it. It validates and compiles the job, checks that its execution profile exists, and checks the first 10 rows of each dataset file training reads with the backend's own validator. A failed row check names the file and line, so a dataset error is found before the job is scheduled. A dry run creates nothing.
 
-Pass `dry_run=True` to `create`. It is the same call as a submit, with `?dry_run=true` on the request. When every check passes, it returns the job it would create, unsaved (no `id` or `status`), with the checks in `status_details["checks"]`. When a check fails, it raises `UnprocessableEntityError` (HTTP 422), whose body lists every check, passed and failed:
+Pass `dry_run=True` to `create`. It is the same call as a submit, with `?dry_run=true` on the request. When every check passes, it returns the job it would create, unsaved (no `id` or `status`, and named as you named it or `dry-run-job`), with the checks in `status_details["checks"]`. When a check fails, it raises `UnprocessableEntityError` (HTTP 422), whose body lists every check, passed and failed:
 
 ```python
 from nemo_helix_plugin.client.errors import UnprocessableEntityError
@@ -198,7 +198,13 @@ From the CLI, add `--dry-run` to the submit command. It exits non-zero when a ch
 nemo customization automodel --job-json job.json --dry-run
 ```
 
-With `--upload-model`, `--upload-dataset` or `--upload-environment`, the dry run uploads nothing and runs on your machine. It checks the job JSON and, with `--upload-dataset`, the first 10 rows of the local dataset. The model and dataset references and the execution profile do not exist yet, so submit checks them after the upload.
+The first 10 rows catch a dataset in the wrong format, but not a bad row further down. To check every row of each file instead, use `--dry-run-full` from the CLI, or `dry_run_full=True` in the SDK (`?dry_run=true&dry_run_full=true` on the request). The platform answers only after it has read and checked every row, so the larger the dataset, the longer it takes. The CLI shows a spinner with the time elapsed while it waits:
+
+```bash
+nemo customization automodel --job-json job.json --dry-run-full
+```
+
+With `--upload-model`, `--upload-dataset` or `--upload-environment`, the dry run uploads nothing and runs on your machine. It checks the job JSON and, with `--upload-dataset`, the first 10 rows of the local dataset, or every row with `--dry-run-full`. The model and dataset references and the execution profile do not exist yet, so submit checks them after the upload.
 
 ---
 

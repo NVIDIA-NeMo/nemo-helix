@@ -321,10 +321,10 @@ def _adapt_dry_run_checks(job_cls: type["NemoJob"]) -> "Callable[..., Any]":
     """Bridge ``NemoJob.dry_run_checks`` to the factory's ``dry_run_checks`` shape."""
 
     async def dry_run_checks_adapter(
-        transformed_spec: Any, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+        transformed_spec: Any, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient, full: bool
     ) -> Any:
         return await job_cls.dry_run_checks(
-            transformed_spec, platform_spec=platform_spec, workspace=workspace, async_sdk=async_client
+            transformed_spec, platform_spec=platform_spec, workspace=workspace, async_sdk=async_client, full=full
         )
 
     return dry_run_checks_adapter

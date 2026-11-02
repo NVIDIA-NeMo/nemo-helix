@@ -197,6 +197,15 @@ def _replace_job_callback(
                 "first 10 rows of the local --upload-dataset files."
             ),
         ),
+        dry_run_full: bool = typer.Option(
+            False,
+            "--dry-run-full",
+            help=(
+                "--dry-run that checks every row of each dataset file training reads, not the first 10, "
+                "so a bad row anywhere is found before submit. The platform answers only after it has read "
+                "and checked every row, so the larger the dataset, the longer it takes."
+            ),
+        ),
     ) -> None:
         if typer_ctx.invoked_subcommand is not None:
             return
@@ -210,7 +219,7 @@ def _replace_job_callback(
         if wait and watch:
             raise typer.BadParameter("Use either --wait or --watch, not both.")
 
-        if dry_run:
+        if dry_run or dry_run_full:
             if job_cls is None:
                 raise typer.BadParameter(f"The {backend} backend does not support --dry-run.")
             if wait or watch:
@@ -230,6 +239,7 @@ def _replace_job_callback(
                 model_source=upload_model,
                 dataset_source=upload_dataset,
                 environment_source=upload_environment,
+                full=dry_run_full,
             )
 
         if upload_model is None and upload_dataset is None and upload_environment is None:
@@ -335,6 +345,7 @@ def _dry_run(
     model_source: str | None,
     dataset_source: str | None,
     environment_source: str | None,
+    full: bool,
 ) -> None:
     """Check the job as submit would, create nothing, and exit with the result."""
     if model_source is None and dataset_source is None and environment_source is None:
@@ -347,6 +358,7 @@ def _dry_run(
             profile=profile,
             options=options,
             options_file=options_file,
+            full=full,
         )
     if refs is None or validate_job_spec is None:
         raise typer.BadParameter(f"The {backend} backend cannot create resources at submit time.")
@@ -354,7 +366,9 @@ def _dry_run(
     model, dataset, environment = (s is not None for s in (model_source, dataset_source, environment_source))
     _reject_conflicts(spec, refs, model=model, dataset=dataset, environment=environment)
     validated = _precheck(spec, refs, validate_job_spec, model=model, dataset=dataset, environment=environment)
-    dry_run_local(typer_ctx, job_cls, json.loads(validated), workspace=workspace, dataset_source=dataset_source)
+    dry_run_local(
+        typer_ctx, job_cls, json.loads(validated), workspace=workspace, dataset_source=dataset_source, full=full
+    )
 
 
 def _reject_conflicts(

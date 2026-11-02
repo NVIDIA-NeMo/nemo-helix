@@ -3,6 +3,8 @@
 
 import json
 import re
+from collections.abc import AsyncIterator, Iterable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -17,11 +19,13 @@ from nhx.customization_common.dry_run import (
 
 
 class _FakeFiles:
-    """Serves one fileset's files, honoring the Range header like the Files service."""
+    """Serves one fileset's files, honoring the Range header like the Files service, or streaming a whole file."""
 
     def __init__(self, files: dict[str, bytes]) -> None:
         self.files = files
         self.ranges: list[tuple[str, str]] = []
+        #: The path of each chunk a whole-file stream sent.
+        self.streamed: list[str] = []
         self._range: str | None = None
 
     def with_headers(self, headers: dict[str, str]) -> "_FakeFiles":
@@ -38,7 +42,8 @@ class _FakeFiles:
         return response
 
     async def download_file(self, *, workspace: str, name: str, path: str) -> SimpleNamespace:
-        assert self._range is not None, "a dry run must read byte ranges, not whole files"
+        if self._range is None:
+            return SimpleNamespace(stream=lambda chunk_size: self._stream(path, chunk_size))
         self.ranges.append((path, self._range))
         match = re.fullmatch(r"bytes=(\d+)-(\d+)", self._range)
         assert match is not None
@@ -49,16 +54,30 @@ class _FakeFiles:
 
         return SimpleNamespace(read=read)
 
+    @asynccontextmanager
+    async def _stream(self, path: str, chunk_size: int) -> AsyncIterator[AsyncIterator[bytes]]:
+        content = self.files[path]
+
+        async def chunks() -> AsyncIterator[bytes]:
+            for start in range(0, len(content), chunk_size):
+                self.streamed.append(path)
+                yield content[start : start + chunk_size]
+
+        yield chunks()
+
 
 def _rows(n: int, row: dict | None = None) -> bytes:
     return b"".join(json.dumps(row or {"text": f"row {i}"}).encode() + b"\n" for i in range(n))
 
 
-def _require_text(lines: list[str], source: str) -> int:
+def _require_text(lines: Iterable[str], source: str) -> int:
+    """Stands in for a backend validator: it iterates *lines* once, as a stream allows."""
+    count = 0
     for number, line in enumerate(lines, start=1):
         if line.strip() and "text" not in json.loads(line):
             raise ValueError(f"{source} line {number} has no 'text'")
-    return len(lines)
+        count += 1
+    return count
 
 
 def _dataset(fileset: str = "ws/data") -> DatasetRows:
@@ -70,9 +89,9 @@ def _dataset(fileset: str = "ws/data") -> DatasetRows:
     )
 
 
-async def _check(files: _FakeFiles, dataset: DatasetRows) -> dry_run.JobDryRunCheck:
+async def _check(files: _FakeFiles, dataset: DatasetRows, *, full: bool = False) -> dry_run.JobDryRunCheck:
     with patch.object(dry_run.AsyncFilesClient, "from_client", return_value=files):
-        [check] = await check_dataset_rows([dataset], "ws", MagicMock())
+        [check] = await check_dataset_rows([dataset], "ws", MagicMock(), full=full)
     return check
 
 
@@ -168,3 +187,46 @@ def test_a_local_file_is_picked_by_its_name_as_upload_lays_it_out(tmp_path: Path
     assert check_local_dataset_rows(dataset, tmp_path / "rows.json").message == "No training files found."
     check = check_local_dataset_rows(dataset, tmp_path / "train.json")
     assert (check.passed, check.message) == (False, f"{tmp_path}/train.json line 3 has no 'text'")
+
+
+async def test_a_full_dry_run_finds_a_bad_row_past_the_first_ten() -> None:
+    files = _FakeFiles({"train.jsonl": _rows(15) + json.dumps({"bad": True}).encode() + b"\n" + _rows(5)})
+
+    assert (await _check(files, _dataset())).passed
+    check = await _check(files, _dataset(), full=True)
+    assert (check.passed, check.message) == (False, "ws/data#train.jsonl line 16 has no 'text'")
+
+
+async def test_a_full_dry_run_streams_every_row_instead_of_reading_ranges() -> None:
+    files = _FakeFiles({"train.jsonl": _rows(5_000)})
+
+    check = await _check(files, _dataset(), full=True)
+
+    assert (check.passed, check.message) == (True, "Every row of train.jsonl matches what training reads.")
+    assert files.ranges == []
+    assert files.streamed
+
+
+async def test_a_bad_row_stops_a_full_dry_run_from_reading_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(dry_run, "_CHUNK_BYTES", 64)
+    content = json.dumps({"bad": True}).encode() + b"\n" + _rows(1_000)
+    files = _FakeFiles({"train.jsonl": content})
+
+    assert not (await _check(files, _dataset(), full=True)).passed
+    assert len(files.streamed) < 5 < len(content) // 64
+
+
+async def test_a_full_dry_run_fails_an_empty_or_non_utf8_file() -> None:
+    empty = await _check(_FakeFiles({"train.jsonl": b"\n \n"}), _dataset(), full=True)
+    assert empty.message == "ws/data#train.jsonl is empty."
+
+    latin1 = await _check(_FakeFiles({"train.jsonl": _rows(2) + b'{"text": "\xe9"}\n'}), _dataset(), full=True)
+    assert latin1.message.startswith("ws/data#train.jsonl line 3 is not UTF-8 text")
+
+
+def test_a_full_local_dry_run_checks_every_row(tmp_path: Path) -> None:
+    (tmp_path / "train.jsonl").write_bytes(_rows(12) + json.dumps({"x": 1}).encode() + b"\n")
+
+    assert check_local_dataset_rows(_dataset(), tmp_path).passed
+    check = check_local_dataset_rows(_dataset(), tmp_path, full=True)
+    assert (check.passed, check.message) == (False, f"{tmp_path}/train.jsonl line 13 has no 'text'")

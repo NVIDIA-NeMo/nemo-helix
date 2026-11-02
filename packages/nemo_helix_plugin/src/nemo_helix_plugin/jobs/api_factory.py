@@ -586,8 +586,9 @@ JobNameGenerator = Callable[[], str]
 
 # The plugin's checks a ``DRY_RUN`` create runs after transform and compile, after the
 # execution-profile check every dry run makes.
-# Signature: (transformed_spec, platform_spec, workspace, async_client) -> checks
-DryRunChecks = Callable[[Any, HelixJobSpec, str, AsyncNemoClient], Awaitable[list[JobDryRunCheck]]]
+# Signature: (transformed_spec, platform_spec, workspace, async_client, full) -> checks, where
+# ``full`` (``?dry_run_full=true``) asks for every check in full, such as every dataset row, not a sample.
+DryRunChecks = Callable[[Any, HelixJobSpec, str, AsyncNemoClient, bool], Awaitable[list[JobDryRunCheck]]]
 
 
 def _unwrap_annotated_schema(obj: object) -> object:
@@ -940,7 +941,8 @@ def job_route_factory(
             ``spec.<field>``.
         dry_run_checks: The plugin's checks a ``DRY_RUN`` create runs after transform and compile,
             given the canonical spec and the compiled platform spec, such as reading a few dataset
-            rows. Every dry run first checks that each step's execution profile is configured.
+            rows, or every row with ``?dry_run_full=true``. Every dry run first checks that each
+            step's execution profile is configured.
 
     Example with separate input/output types:
         ```python
@@ -1289,13 +1291,15 @@ def job_route_factory(
             workspace: str,
             request: TypedJobRequest,
             response: Response,
-            dry_run: bool = Depends(dry_run_dependency),
+            dry_run: _DryRun | None = Depends(dry_run_dependency),
             async_client: AsyncNemoClient = Depends(get_nemo_client),
             entity_client: EntityClient = Depends(get_entity_client),
         ) -> TypedJobResponse:
             f"""Create a new job for the {service_name} microservice."""
 
-            job_name = _resolve_job_name(request.name, generate_job_name)
+            # A dry run creates no job, so it generates no id: it takes the requested name, or a placeholder.
+            dry_run_name = request.name or _DRY_RUN_JOB_NAME
+            job_name = dry_run_name if dry_run is not None else _resolve_job_name(request.name, generate_job_name)
             input_spec = _without_job_discriminator(cast(JobInputT, request.spec))
             job_spec = await _transform_input_to_output(
                 input_to_output,
@@ -1320,12 +1324,13 @@ def job_route_factory(
                     options=request.options,
                 ),
             )
-            if dry_run:
-                checks = await _dry_run_checks(platform_spec, job_spec, workspace, async_client, dry_run_checks)
+            if dry_run is not None:
+                checks = await _dry_run_checks(
+                    platform_spec, job_spec, workspace, async_client, dry_run_checks, full=dry_run.full
+                )
                 response.status_code = status.HTTP_200_OK
                 return TypedJobResponse(
-                    # Without a generator, the Jobs service names the job at create; a dry run has no name.
-                    name=job_name or "",
+                    name=dry_run_name,
                     workspace=workspace,
                     description=request.description,
                     project=request.project,
@@ -2015,21 +2020,43 @@ _DRY_RUN_DESCRIPTION = (
     "Check the job without creating it. The job is validated, its references resolved and its steps "
     "compiled, as create does. The dry run then checks that each step's execution profile exists and "
     "runs the job type's own checks, such as reading the first rows of each dataset file. If every check "
-    "passes, returns 200 with the unsaved job and the checks in status_details.checks. If a check fails, "
+    "passes, returns 200 with the unsaved job, named as requested or dry-run-job, and the checks in "
+    "status_details.checks. If a check fails, "
     "returns 422 with detail.message naming the failed checks and detail.checks listing all of them. "
     "Errors before the checks, such as an invalid spec or a missing reference, are the same as create's."
 )
 
+_DRY_RUN_FULL_DESCRIPTION = (
+    "With dry_run=true, run the job type's checks in full rather than on a sample, such as checking every "
+    "row of each dataset file instead of the first rows. The response comes only after every row is read "
+    "and checked, so the larger the data, the longer it takes."
+)
 
-def _dry_run_query(dry_run: bool = Query(default=False, description=_DRY_RUN_DESCRIPTION)) -> bool:
-    return dry_run
+#: The name of the unsaved job a dry run returns when the request names none.
+_DRY_RUN_JOB_NAME = "dry-run-job"
 
 
-def _no_dry_run(request: Request) -> bool:
-    # Undeclared, the flag would be ignored and a client asking for a dry run would get a real job.
-    if "dry_run" in request.query_params:
+@dataclass(frozen=True)
+class _DryRun:
+    """A create with ``?dry_run=true``; ``full`` when ``?dry_run_full=true`` asks for every check in full."""
+
+    full: bool
+
+
+def _dry_run_query(
+    dry_run: bool = Query(default=False, description=_DRY_RUN_DESCRIPTION),
+    dry_run_full: bool = Query(default=False, description=_DRY_RUN_FULL_DESCRIPTION),
+) -> _DryRun | None:
+    if dry_run_full and not dry_run:
+        # Alone, the flag would be ignored and a client asking for a full dry run would get a real job.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="dry_run_full needs dry_run=true.")
+    return _DryRun(full=dry_run_full) if dry_run else None
+
+
+def _no_dry_run(request: Request) -> None:
+    # Undeclared, the flags would be ignored and a client asking for a dry run would get a real job.
+    if {"dry_run", "dry_run_full"} & request.query_params.keys():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This job type does not support dry_run.")
-    return False
 
 
 async def _dry_run_checks(
@@ -2038,11 +2065,13 @@ async def _dry_run_checks(
     workspace: str,
     async_client: AsyncNemoClient,
     plugin_checks: DryRunChecks | None,
+    *,
+    full: bool,
 ) -> list[JobDryRunCheck]:
     """Check the execution profiles, then run the plugin's checks; raise 422 with all of them when any fails."""
     checks = [await _check_execution_profiles(platform_spec, async_client)]
     if plugin_checks:
-        checks += await plugin_checks(job_spec, platform_spec, workspace, async_client)
+        checks += await plugin_checks(job_spec, platform_spec, workspace, async_client, full)
     failed = [check.name for check in checks if not check.passed]
     if failed:
         raise HTTPException(

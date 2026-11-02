@@ -5,10 +5,12 @@
 
 ``--dry-run`` submits the job with ``?dry_run=true``: the backend validates and compiles it
 as submit would, checks the execution profile and the first rows of the dataset, and
-creates nothing.
+creates nothing. ``--dry-run-full`` adds ``?dry_run_full=true`` to check every row.
 """
 
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,9 @@ from nemo_helix_plugin.scheduler import NemoJobScheduler
 from nhx.customization_common.contributor.jobs import BaseSubmitJob
 from nhx.customization_common.dry_run import check_local_dataset_rows
 
+# A full dry run answers only once it has read the whole dataset.
+_FULL_DRY_RUN_TIMEOUT = 1800.0
+
 
 def dry_run_remote(
     typer_ctx: typer.Context,
@@ -34,6 +39,7 @@ def dry_run_remote(
     profile: str | None,
     options: list[str],
     options_file: Path | None,
+    full: bool = False,
 ) -> None:
     """Dry-run a job whose references all exist, on the platform, then exit with its result."""
     try:
@@ -45,17 +51,19 @@ def dry_run_remote(
         raise typer.Exit(code=1) from exc
     headers = resolve_submit_auth_headers(typer_ctx)
     try:
-        job = NemoJobScheduler().submit_remote(
-            job_cls,
-            json.loads(spec_json),
-            base_url=resolve_submit_base_url(typer_ctx),
-            workspace=workspace,
-            profile=profile,
-            options=merged_options or None,
-            headers=headers or None,
-            timeout=60.0,
-            dry_run=True,
-        )
+        with _waiting(full, "Checking every row of the dataset on the platform"):
+            job = NemoJobScheduler().submit_remote(
+                job_cls,
+                json.loads(spec_json),
+                base_url=resolve_submit_base_url(typer_ctx),
+                workspace=workspace,
+                profile=profile,
+                options=merged_options or None,
+                headers=headers or None,
+                timeout=_FULL_DRY_RUN_TIMEOUT if full else 60.0,
+                dry_run=True,
+                dry_run_full=full,
+            )
     except httpx.HTTPStatusError as exc:
         # A failed check is a 422 that lists every check; any other error is printed as submit would.
         checks = _failed_checks(exc.response)
@@ -88,6 +96,7 @@ def dry_run_local(
     *,
     workspace: str,
     dataset_source: str | None,
+    full: bool = False,
 ) -> None:
     """Dry-run a job whose references --upload-model, --upload-dataset or --upload-environment would create.
 
@@ -99,7 +108,8 @@ def dry_run_local(
         [training, *_] = job_cls._dry_run_datasets(input_spec, workspace)
         path = Path(dataset_source).expanduser()
         if path.exists():
-            checks.append(check_local_dataset_rows(training, path))
+            with _waiting(full, f"Checking every row of {path}"):
+                checks.append(check_local_dataset_rows(training, path, full=full))
         else:
             checks.append(JobDryRunCheck(name=training.name, passed=False, message=f"{path} does not exist."))
     report = {
@@ -112,6 +122,26 @@ def dry_run_local(
         report,
         note="The model and dataset references and the execution profile are checked at submit, after the upload.",
     )
+
+
+@contextmanager
+def _waiting(full: bool, description: str) -> Generator[None, None, None]:
+    """While a full dry run reads every row, show a spinner and the time elapsed on stderr.
+
+    A full dry run has no partial result to show, so this tells the user it is still working.
+    It is gone when the check returns, leaving stdout to the report.
+    """
+    if not full:
+        yield
+        return
+    # Imported here: Rich is only needed for a full dry run.
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+    columns = (SpinnerColumn(), TextColumn("{task.description}"), TimeElapsedColumn())
+    with Progress(*columns, console=Console(stderr=True), transient=True) as progress:
+        progress.add_task(description, total=None)
+        yield
 
 
 def _report(typer_ctx: typer.Context, report: dict[str, Any], *, note: str | None = None) -> None:

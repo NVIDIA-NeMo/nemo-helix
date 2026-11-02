@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
@@ -59,7 +61,10 @@ def _compiler(
 
 
 def _client(
-    *, dry_run_checks: DryRunChecks | None = None, route_options: list[JobRouteOption] | None = None
+    *,
+    dry_run_checks: DryRunChecks | None = None,
+    route_options: list[JobRouteOption] | None = None,
+    generate_job_name: Callable[[], str] | None = None,
 ) -> TestClient:
     router = job_route_factory(
         service_name="widgets",
@@ -70,6 +75,7 @@ def _client(
         platform_job_config_compiler=_compiler,
         route_options=route_options or [JobRouteOption.CORE, JobRouteOption.DRY_RUN],
         dry_run_checks=dry_run_checks,
+        generate_job_name=generate_job_name,
     )
     app = FastAPI()
     app.include_router(router, prefix="/apis/widgets/v2/workspaces/{workspace}")
@@ -95,9 +101,9 @@ def test_a_passing_dry_run_returns_the_unsaved_job_and_its_checks() -> None:
     seen: list[tuple[object, list[str], str]] = []
 
     async def checks(
-        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient, full: bool
     ) -> list[JobDryRunCheck]:
-        del async_client
+        del async_client, full
         seen.append((spec, [step.name for step in platform_spec.steps], workspace))
         return [JobDryRunCheck(name="dataset rows", passed=True, message="10 rows match.")]
 
@@ -120,9 +126,9 @@ def test_a_passing_dry_run_returns_the_unsaved_job_and_its_checks() -> None:
 
 def test_a_failed_check_is_a_422_that_lists_every_check() -> None:
     async def checks(
-        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient
+        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient, full: bool
     ) -> list[JobDryRunCheck]:
-        del spec, platform_spec, workspace, async_client
+        del spec, platform_spec, workspace, async_client, full
         return [JobDryRunCheck(name="dataset rows", passed=False, message="Row 3 has no 'messages'.")]
 
     jobs = _create_job_spy()
@@ -164,11 +170,12 @@ def test_a_step_profile_the_platform_does_not_have_fails_and_lists_the_configure
     jobs.create_job.assert_not_called()
 
 
-def test_without_the_dry_run_option_the_flag_is_refused_not_ignored() -> None:
+@pytest.mark.parametrize("params", [_DRY_RUN, {**_DRY_RUN, "dry_run_full": "true"}, {"dry_run_full": "true"}])
+def test_without_the_dry_run_option_the_flag_is_refused_not_ignored(params: dict[str, str]) -> None:
     jobs = _create_job_spy()
     with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
         response = _client(route_options=[JobRouteOption.CORE]).post(
-            _CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}}
+            _CREATE_URL, params=params, json={"spec": {"label": "x"}}
         )
 
     assert response.status_code == 400
@@ -188,7 +195,7 @@ def test_the_flag_is_only_in_the_schema_when_the_option_is_on() -> None:
         operation = _create_operation(route_options)
         return [param["name"] for param in operation.get("parameters", []) if param["in"] == "query"]
 
-    assert create_params([JobRouteOption.CORE, JobRouteOption.DRY_RUN]) == ["dry_run"]
+    assert create_params([JobRouteOption.CORE, JobRouteOption.DRY_RUN]) == ["dry_run", "dry_run_full"]
     assert create_params([JobRouteOption.CORE]) == []
 
 
@@ -203,3 +210,41 @@ def test_the_schema_documents_the_dry_run_responses() -> None:
     assert dry_run["422"] == "#/components/schemas/JobDryRunValidationErrorResponse"
     assert schema_refs([JobRouteOption.CORE])["422"] == "#/components/schemas/HTTPValidationError"
     assert "200" not in schema_refs([JobRouteOption.CORE])
+
+
+@pytest.mark.parametrize(("params", "full"), [(_DRY_RUN, False), ({**_DRY_RUN, "dry_run_full": "true"}, True)])
+def test_dry_run_full_asks_the_plugin_for_every_check_in_full(params: dict[str, str], full: bool) -> None:
+    seen: list[bool] = []
+
+    async def checks(
+        spec: object, platform_spec: HelixJobSpec, workspace: str, async_client: AsyncNemoClient, full: bool
+    ) -> list[JobDryRunCheck]:
+        del spec, platform_spec, workspace, async_client
+        seen.append(full)
+        return []
+
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=_create_job_spy()):
+        response = _client(dry_run_checks=checks).post(_CREATE_URL, params=params, json={"spec": {"label": "x"}})
+
+    assert response.status_code == 200, response.text
+    assert seen == [full]
+
+
+def test_dry_run_full_without_dry_run_is_refused_not_a_real_job() -> None:
+    jobs = _create_job_spy()
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=jobs):
+        response = _client().post(_CREATE_URL, params={"dry_run_full": "true"}, json={"spec": {"label": "x"}})
+
+    assert (response.status_code, response.json()["detail"]) == (400, "dry_run_full needs dry_run=true.")
+    jobs.create_job.assert_not_called()
+
+
+def test_a_dry_run_without_a_name_is_named_dry_run_job_and_generates_no_id() -> None:
+    generate = MagicMock(return_value="widget-generated")
+
+    with patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=_create_job_spy()):
+        response = _client(generate_job_name=generate).post(_CREATE_URL, params=_DRY_RUN, json={"spec": {"label": "x"}})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "dry-run-job"
+    generate.assert_not_called()

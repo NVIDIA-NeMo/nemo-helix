@@ -153,7 +153,9 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         platform_spec: HelixJobSpec,
         workspace: str,
         async_sdk: AsyncNemoClient,
+        full: bool = False,
     ) -> list[JobDryRunCheck]:
-        """Check the first rows of every file training would read."""
+        """Check the first rows of every file training would read, or with *full*, every row."""
         del platform_spec
-        return await check_dataset_rows(cls._dry_run_datasets(cast(JobOutputT, spec), workspace), workspace, async_sdk)
+        datasets = cls._dry_run_datasets(cast(JobOutputT, spec), workspace)
+        return await check_dataset_rows(datasets, workspace, async_sdk, full=full)

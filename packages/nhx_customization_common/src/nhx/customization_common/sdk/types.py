@@ -62,6 +62,7 @@ class CustomizationJob(BaseModel):
 
 class CreateCustomizationJobQueryParams(TypedDict, total=False):
     dry_run: NotRequired[bool]
+    dry_run_full: NotRequired[bool]
 
 
 class ListCustomizationJobsQueryParams(TypedDict, total=False):

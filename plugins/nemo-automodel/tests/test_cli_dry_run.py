@@ -113,3 +113,37 @@ def test_table_output_reads_as_one_line_per_check(tmp_path: Path) -> None:
         "FAIL training dataset: ws/d#train.jsonl line 3 ...",
         "Dry run failed. Nothing was created.",
     ]
+
+
+@respx.mock
+def test_dry_run_full_asks_the_platform_to_check_every_row(tmp_path: Path) -> None:
+    job = _job_json(tmp_path, model="default/m", dataset={"training": "default/d"})
+    create = respx.post(_CREATE, params={"dry_run": "true", "dry_run_full": "true"}).respond(
+        200, json={"name": "j", "spec": {"m": 1}, "status_details": {"checks": _checks(True)}}
+    )
+
+    result = CliRunner().invoke(AutomodelContributor().get_cli(), ["--job-json", str(job), "--dry-run-full"])
+
+    assert result.exit_code == 0, result.output
+    assert create.call_count == 1
+
+
+def test_dry_run_full_with_upload_checks_every_local_row(tmp_path: Path) -> None:
+    job = _job_json(tmp_path)
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "train.jsonl").write_text(
+        "".join(json.dumps(_CHAT) + "\n" for _ in range(12)) + json.dumps({"q": 1}) + "\n"
+    )
+    args = ["--job-json", str(job), "--upload-model", "Qwen/Qwen3-0.6B", "--upload-dataset", str(data)]
+
+    with patch("nhx.customization_common.cli.overrides.run_uploads") as uploads:
+        first_rows = CliRunner().invoke(AutomodelContributor().get_cli(), [*args, "--dry-run"])
+        every_row = CliRunner().invoke(AutomodelContributor().get_cli(), [*args, "--dry-run-full"])
+
+    assert first_rows.exit_code == 0, first_rows.output
+    assert every_row.exit_code == 1, every_row.output
+    assert json.loads(every_row.output)["checks"][1]["message"].startswith(
+        f"{data}/train.jsonl line 13 does not conform"
+    )
+    uploads.assert_not_called()

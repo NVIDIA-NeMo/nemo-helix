@@ -217,6 +217,18 @@ def test_jobs_resource_create_dry_run_sends_the_flag_and_returns_the_unsaved_job
     assert job.status_details == {"checks": checks}
 
 
+def test_jobs_resource_create_dry_run_full_sends_both_flags() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json={"name": "j", "spec": {"model": "default/qwen"}, "status_details": {}})
+
+    _dry_run_resource(handler).jobs.create(spec=_Spec(model="default/qwen"), workspace="team-a", dry_run_full=True)
+
+    assert dict(captured[0].url.params) == {"dry_run": "true", "dry_run_full": "true"}
+
+
 def test_jobs_resource_create_dry_run_failure_raises_with_every_check() -> None:
     from nemo_helix_plugin.client.errors import UnprocessableEntityError
 
