@@ -378,17 +378,9 @@ export const NewCustomizationForm: FC<NewCustomizationFormProps> = ({
     // dataset — do not apply. Format, training-data presence, and encoding checks
     // remain required for every backend.
     const skipSchemaAndCompleteness = backend === 'unsloth' && !unslothApplyChatTemplate;
-    // For native Unsloth a root .json that matched no Customizer pattern still
-    // counts as training, provided it passed format and encoding checks.
-    // For every other backend only the Customizer-discovered training files count.
-    const hasTraining =
-      datasetValidation.hasTraining ||
-      (skipSchemaAndCompleteness &&
-        datasetValidation.unmatchedRootJson.length > 0 &&
-        datasetValidation.unmatchedRootJsonValid);
     if (
       datasetValidation.discoveryError ||
-      !hasTraining ||
+      !datasetValidation.hasTraining ||
       !datasetValidation.format.ok ||
       (!skipSchemaAndCompleteness && !datasetValidation.schema) ||
       (!skipSchemaAndCompleteness && datasetValidation.schemaMismatchedFiles.length > 0) ||

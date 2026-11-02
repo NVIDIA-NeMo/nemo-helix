@@ -22,6 +22,10 @@ versions:
 - display-name: Latest
   path: versions/latest.yml
   slug: latest
+  announcement:
+    message: >-
+      These are unreleased development docs from main and may differ from the
+      released product.
 
 redirects:
   # Sources are site-relative: Fern adds the instance basepath when matching.

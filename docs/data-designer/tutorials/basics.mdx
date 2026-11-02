@@ -35,7 +35,7 @@ MODEL_ALIAS = "text"
 
 model_configs = [
     dd.ModelConfig(
-        provider="system/nvidia-build",
+        provider="default/nvidia-build",
         model=MODEL_ID,  # Use the `served_model_name` from the provider
         alias=MODEL_ALIAS,
         inference_parameters=dd.ChatCompletionInferenceParams(

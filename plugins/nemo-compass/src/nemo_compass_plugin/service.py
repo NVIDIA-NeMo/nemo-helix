@@ -232,17 +232,7 @@ def _build_insights_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> Insight:
         """Get a single Insight by its store-assigned id."""
-        try:
-            insight = await entity_client.get_by_id(Insight, entity_id=insight_id)
-        except NemoEntityNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Insight '{insight_id}' not found in workspace '{workspace}'.",
-            ) from exc
-        except Exception as exc:
-            logger.exception("Failed to get insight")
-            raise HTTPException(status_code=500, detail="Failed to get insight.") from exc
-        return insight
+        return await _get_insight(entity_client, workspace=workspace, insight_id=insight_id)
 
     @router.patch(
         "/insights/{insight_id}",
@@ -258,16 +248,7 @@ def _build_insights_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> Insight:
         """Partially update an Insight by id. Omitted fields are unchanged."""
-        try:
-            insight = await entity_client.get_by_id(Insight, entity_id=insight_id)
-        except NemoEntityNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Insight '{insight_id}' not found in workspace '{workspace}'.",
-            ) from exc
-        except Exception as exc:
-            logger.exception("Failed to fetch insight for update")
-            raise HTTPException(status_code=500, detail="Failed to fetch insight.") from exc
+        insight = await _get_insight(entity_client, workspace=workspace, insight_id=insight_id)
 
         if body.title is not None:
             insight.title = body.title
@@ -289,10 +270,7 @@ def _build_insights_router() -> APIRouter:
         try:
             saved = await entity_client.update(insight)
         except NemoEntityNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Insight '{insight_id}' not found in workspace '{workspace}'.",
-            ) from exc
+            raise _insight_not_found(insight_id, workspace) from exc
         except NemoEntityValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
@@ -313,13 +291,17 @@ def _build_insights_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> None:
         """Delete an Insight by its store-assigned id. Returns 204 on success."""
+        insight = await _get_insight(entity_client, workspace=workspace, insight_id=insight_id)
         try:
-            await entity_client.delete_by_id(Insight, entity_id=insight_id)
+            await entity_client.delete(
+                Insight,
+                insight.name,
+                workspace=workspace,
+                parent=insight.parent,
+                expected_db_version=insight.db_version,
+            )
         except NemoEntityNotFoundError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Insight '{insight_id}' not found in workspace '{workspace}'.",
-            ) from exc
+            raise _insight_not_found(insight_id, workspace) from exc
         except NemoEntityConflictError as exc:
             raise HTTPException(status_code=409, detail="Concurrent modification - please retry.") from exc
         except Exception as exc:
@@ -327,6 +309,29 @@ def _build_insights_router() -> APIRouter:
             raise HTTPException(status_code=500, detail="Failed to delete insight.") from exc
 
     return router
+
+
+def _insight_not_found(insight_id: str, workspace: str) -> HTTPException:
+    """Standard 404 for an Insight that is missing or in another workspace."""
+    return HTTPException(
+        status_code=404,
+        detail=f"Insight '{insight_id}' not found in workspace '{workspace}'.",
+    )
+
+
+async def _get_insight(entity_client: NemoEntitiesClient, *, workspace: str, insight_id: str) -> Insight:
+    """Load an Insight by id within ``workspace``.
+
+    The lookup is scoped to the path's workspace, which authorization checks against,
+    so an Insight in another workspace is reported as not found.
+    """
+    try:
+        return await entity_client.find_one(Insight, workspace=workspace, filter_obj={"id": insight_id})
+    except NemoEntityNotFoundError as exc:
+        raise _insight_not_found(insight_id, workspace) from exc
+    except Exception as exc:
+        logger.exception("Failed to get insight")
+        raise HTTPException(status_code=500, detail="Failed to get insight.") from exc
 
 
 def _config_not_found(agent: str, workspace: str) -> str:

@@ -15,7 +15,8 @@ from nhx.core.entities.app.repository import AccountCredentialStore, AccountIden
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-NOW = datetime.now()
+# Relative to the real clock, which the registry's active check reads, so the keys stay unexpired.
+NOW = datetime.now(UTC)
 
 
 @pytest_asyncio.fixture

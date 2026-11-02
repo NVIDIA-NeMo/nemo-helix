@@ -7,14 +7,16 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
 from nhx.core.models.api.v2.providers import router
 from nhx.core.models.schemas import ModelProvider, ModelProviderStatus
+from starlette.middleware.base import RequestResponseEndpoint
 
 
 @pytest.fixture
@@ -58,6 +60,14 @@ def test_app(mock_model_provider_service, mock_auth_client, mock_secrets_client)
     app.dependency_overrides[get_auth_client] = lambda: mock_auth_client
     app.dependency_overrides[get_secrets_client] = lambda: mock_secrets_client
     app.include_router(router, prefix="/apis/models")
+
+    @app.middleware("http")
+    async def bind_auth(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        token = auth_client_context.set(mock_auth_client)
+        try:
+            return await call_next(request)
+        finally:
+            auth_client_context.reset(token)
 
     return app
 

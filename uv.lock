@@ -117,6 +117,7 @@ constraints = [
     { name = "nemo-fabric-collector", specifier = ">=0.5.0,<0.6.0" },
     { name = "nemo-fabric-runtime", specifier = ">=0.5.0,<0.6.0" },
     { name = "nltk", specifier = ">=3.10.3" },
+    { name = "opensandbox", specifier = "==1.2.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pip", specifier = ">=26.2.2" },
     { name = "postcss", specifier = ">=8.5.10" },
@@ -4148,6 +4149,7 @@ dependencies = [
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -4170,6 +4172,7 @@ dependencies = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 
 [package.optional-dependencies]
@@ -4206,6 +4209,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "jinja2", marker = "extra == 'test'", specifier = ">=3.1" },
+    { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "langchain-aws", specifier = "==1.1.0" },
     { name = "mcp", specifier = ">=1.28.1,<2" },
     { name = "nemo-agent-config-example-email-security-triage", editable = "plugins/nemo-agents/examples/nemo-agent-config/email-security-triage" },
@@ -4236,6 +4240,7 @@ requires-dist = [
     { name = "pytest-httpserver", marker = "extra == 'test'", specifier = ">=1.0.0" },
     { name = "python-on-whales", specifier = ">=0.60" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "referencing", specifier = ">=0.28.4" },
 ]
 provides-extras = ["claude", "codex", "deepagents", "mini-swe-agent", "nooa", "container", "test"]
 
@@ -4448,6 +4453,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "fastapi" },
+    { name = "pillow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
@@ -4463,6 +4469,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=0.25.3" },
     { name = "ruff", specifier = ">=0.11.8" },
@@ -4500,6 +4507,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -4527,7 +4535,7 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'data-designer-nemo'" },
     { name = "duckdb", marker = "extra == 'test'" },
     { name = "fastapi" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.27.0,<1" },
@@ -4543,6 +4551,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'data-designer-nemo'", specifier = ">=2" },
     { name = "pydantic", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.12.0" },
     { name = "pydantic-settings", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.8.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-plugin'", specifier = ">=6.0.2" },
@@ -4624,6 +4633,7 @@ dependencies = [
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-sandbox" },
+    { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
 ]
@@ -4651,6 +4661,7 @@ requires-dist = [
     { name = "nhx-evals-sdk", extras = ["harbor"], editable = "packages/nhx_evals_sdk" },
     { name = "nhx-evals-sdk", extras = ["harbor"], marker = "extra == 'harbor'", editable = "packages/nhx_evals_sdk" },
     { name = "nhx-sandbox", editable = "packages/nhx_sandbox" },
+    { name = "opentelemetry-proto", specifier = ">=1.27.0" },
     { name = "pydantic", specifier = ">=2.12.0" },
     { name = "typer", specifier = ">=0.20.0" },
 ]
@@ -5076,6 +5087,7 @@ all = [
     { name = "python-multipart" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
     { name = "requests" },
     { name = "rich" },
     { name = "sqlalchemy" },
@@ -5314,6 +5326,7 @@ nemo-agents-plugin = [
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5335,12 +5348,14 @@ nemo-agents-plugin = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-agents-plugin-claude = [
     { name = "boto3" },
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5362,12 +5377,14 @@ nemo-agents-plugin-claude = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-agents-plugin-codex = [
     { name = "boto3" },
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5389,12 +5406,14 @@ nemo-agents-plugin-codex = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-agents-plugin-deepagents = [
     { name = "boto3" },
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5416,12 +5435,14 @@ nemo-agents-plugin-deepagents = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-agents-plugin-mini-swe-agent = [
     { name = "boto3" },
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5443,12 +5464,14 @@ nemo-agents-plugin-mini-swe-agent = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-agents-plugin-nooa = [
     { name = "boto3" },
     { name = "botocore" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "langchain-aws" },
     { name = "mcp" },
     { name = "nemo-agent-config-example-email-security-triage" },
@@ -5470,6 +5493,7 @@ nemo-agents-plugin-nooa = [
     { name = "nvidia-nat-opentelemetry" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
 ]
 nemo-anonymizer-plugin = [
     { name = "data-designer" },
@@ -5541,6 +5565,7 @@ nemo-evals-plugin = [
     { name = "nemo-builder-plugin" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
+    { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
 ]
@@ -5585,6 +5610,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -5719,6 +5745,7 @@ plugins = [
     { name = "gunicorn" },
     { name = "httpx" },
     { name = "jinja2" },
+    { name = "jsonschema" },
     { name = "kubernetes" },
     { name = "langchain" },
     { name = "langchain-aws" },
@@ -5763,6 +5790,7 @@ plugins = [
     { name = "nvidia-nat-langchain" },
     { name = "nvidia-nat-opentelemetry" },
     { name = "opentelemetry-exporter-otlp" },
+    { name = "opentelemetry-proto" },
     { name = "opentelemetry-sdk" },
     { name = "optuna" },
     { name = "pandas" },
@@ -5771,6 +5799,7 @@ plugins = [
     { name = "python-multipart" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
     { name = "requests" },
     { name = "sqlalchemy" },
     { name = "typer" },
@@ -5891,6 +5920,7 @@ services = [
     { name = "python-multipart" },
     { name = "python-on-whales" },
     { name = "pyyaml" },
+    { name = "referencing" },
     { name = "requests" },
     { name = "rich" },
     { name = "sqlalchemy" },
@@ -6054,7 +6084,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'nemo-compass-plugin'", specifier = ">=0.115" },
     { name = "fastapi", marker = "extra == 'nemo-data-designer-plugin'" },
     { name = "fastapi", marker = "extra == 'nemo-deployments-plugin'", specifier = ">=0.115" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = ">=0.115.8" },
     { name = "fastapi", marker = "extra == 'plugins'" },
     { name = "fastapi", marker = "extra == 'plugins'", specifier = ">=0.115" },
@@ -6169,8 +6199,15 @@ requires-dist = [
     { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'automodel-service'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'harbor'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'nemo-helix-plugin'", specifier = ">=4.0.0" },
     { name = "jsonschema", marker = "extra == 'nhx-evals-sdk'", specifier = ">=4.23.0" },
+    { name = "jsonschema", marker = "extra == 'plugins'", specifier = ">=4.23.0" },
     { name = "jsonschema", marker = "extra == 'services'", specifier = ">=4.23.0" },
     { name = "kubernetes", marker = "extra == 'all'", specifier = ">=29.0.0" },
     { name = "kubernetes", marker = "extra == 'all'", specifier = ">=30.1.0" },
@@ -6598,7 +6635,9 @@ requires-dist = [
     { name = "opentelemetry-proto", marker = "extra == 'files-service'", specifier = ">=1.28.2" },
     { name = "opentelemetry-proto", marker = "extra == 'harbor'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'intake-service'", specifier = ">=1.27.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'nemo-evals-plugin'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'nhx-evals-sdk'", specifier = ">=1.27.0" },
+    { name = "opentelemetry-proto", marker = "extra == 'plugins'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.27.0" },
     { name = "opentelemetry-proto", marker = "extra == 'services'", specifier = ">=1.28.2" },
     { name = "opentelemetry-sdk", marker = "extra == 'all'", specifier = ">=1.27.0,<2.0.0" },
@@ -6720,6 +6759,7 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.6.1,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'services'", specifier = ">=2.8.1" },
     { name = "pydantic-settings", marker = "extra == 'unsloth-service'", specifier = ">=2.6.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'nhx-common'", specifier = ">=2.13.0" },
     { name = "pyleak", marker = "extra == 'all'", specifier = ">=0.1.0" },
     { name = "pyleak", marker = "extra == 'services'", specifier = ">=0.1.0" },
@@ -6773,6 +6813,15 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'services'", specifier = ">=6.0.3" },
     { name = "ragas", marker = "extra == 'harbor'", specifier = "==0.4.3" },
     { name = "ragas", marker = "extra == 'nhx-evals-sdk'", specifier = "==0.4.3" },
+    { name = "referencing", marker = "extra == 'all'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin-deepagents'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin-mini-swe-agent'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'plugins'", specifier = ">=0.28.4" },
+    { name = "referencing", marker = "extra == 'services'", specifier = ">=0.28.4" },
     { name = "requests", marker = "extra == 'all'", specifier = ">=2.31.0" },
     { name = "requests", marker = "extra == 'garak-service'", specifier = ">=2.32.3,<3.0.0" },
     { name = "requests", marker = "extra == 'guardrails-service'", specifier = ">=2.31.0" },
@@ -6951,6 +7000,7 @@ dependencies = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -7000,7 +7050,7 @@ requires-dist = [
     { name = "anyio", marker = "extra == 'filesets'", specifier = ">=4.0.0" },
     { name = "certifi", specifier = ">=2026.10.19" },
     { name = "docker", marker = "extra == 'nemo-helix-ext'", specifier = ">=7.0.0" },
-    { name = "fastapi", specifier = ">=0.115.4" },
+    { name = "fastapi", specifier = ">=0.121.1" },
     { name = "filesets", editable = "packages/filesets" },
     { name = "fsspec", marker = "extra == 'filesets'", specifier = ">=2023.1.0" },
     { name = "httpx", specifier = ">=0.27.0,<1" },
@@ -7029,6 +7079,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nemo-helix-ext'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.10.6" },
     { name = "pydantic-settings", specifier = ">=2.8.1" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytrec-eval-terrier", marker = "extra == 'nhx-evals-sdk'", specifier = "==0.5.10" },
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "pyyaml", marker = "extra == 'nemo-helix-ext'", specifier = ">=6.0.0" },
@@ -7279,6 +7330,7 @@ nemo-helix-plugin = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "typer" },
 ]
@@ -7295,7 +7347,7 @@ requires-dist = [
     { name = "certifi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2026.10.19" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "fastapi", specifier = ">=0.115.8" },
-    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.115.4" },
+    { name = "fastapi", marker = "extra == 'nemo-helix-plugin'", specifier = ">=0.121.1" },
     { name = "fastapi", marker = "extra == 'test'", specifier = ">=0.115" },
     { name = "fsspec", specifier = ">=2024.10.0" },
     { name = "gunicorn", specifier = ">=23.0.0" },
@@ -7312,6 +7364,7 @@ requires-dist = [
     { name = "pydantic", extras = ["email"], specifier = ">=2.9.2" },
     { name = "pydantic-settings", specifier = ">=2.2.1" },
     { name = "pydantic-settings", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.8.1" },
+    { name = "pyjwt", marker = "extra == 'nemo-helix-plugin'", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.23" },
     { name = "python-multipart", specifier = "~=0.0.9" },
@@ -7566,6 +7619,7 @@ dependencies = [
 
 [package.dev-dependencies]
 agents-deepagents-e2e-services = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agents-plugin", extra = ["deepagents"] },
     { name = "nemo-anonymizer-plugin" },
     { name = "nemo-automodel-plugin" },
@@ -7643,6 +7697,7 @@ core-services = [
     { name = "nhx-secrets" },
 ]
 cpu-tasks = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agent-optimization-plugin" },
     { name = "nemo-agents-plugin", extra = ["claude", "codex", "deepagents"] },
     { name = "nemo-anonymizer-plugin" },
@@ -7743,6 +7798,7 @@ enabled-plugins = [
     { name = "nhx-jobs", extra = ["openshell"] },
 ]
 functional-services = [
+    { name = "nemo-agent-hardener-plugin" },
     { name = "nemo-agents-plugin" },
     { name = "nemo-anonymizer-plugin" },
     { name = "nemo-automodel-plugin" },
@@ -7843,6 +7899,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 agents-deepagents-e2e-services = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-agents-plugin", extras = ["deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
@@ -7921,6 +7978,7 @@ core-services = [
     { name = "nhx-secrets", editable = "services/core/secrets" },
 ]
 cpu-tasks = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agent-optimization-plugin", editable = "plugins/nemo-agent-optimization" },
     { name = "nemo-agents-plugin", extras = ["claude", "codex", "deepagents"], editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
@@ -8023,6 +8081,7 @@ enabled-plugins = [
     { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
 ]
 functional-services = [
+    { name = "nemo-agent-hardener-plugin", editable = "plugins/nemo-agent-hardener" },
     { name = "nemo-agents-plugin", editable = "plugins/nemo-agents" },
     { name = "nemo-anonymizer-plugin", editable = "plugins/nemo-anonymizer" },
     { name = "nemo-automodel-plugin", editable = "plugins/nemo-automodel" },
@@ -9837,18 +9896,20 @@ wheels = [
 
 [[package]]
 name = "opensandbox"
-version = "0.1.16"
+version = "1.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "httpx-sse" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/15/3db0638f9a4f2ace097e8ebfc9a592eff5a864f36933ee0579fce88350b5/opensandbox-0.1.16.tar.gz", hash = "sha256:b9253a58eb9f01bff522fccf317746b464805893c56a6ad447e0f1cc7f37276c", size = 253711, upload-time = "2026-08-26T04:07:41.242Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/2f/6682d18a69043b5ad29e8a411e969e2ee4216127dbc2257752690f502287/opensandbox-1.2.0.tar.gz", hash = "sha256:e7936d0bf3f7defa4e26571b0634089b4c3eb15d023909f6da9d940b95736c54", size = 329030, upload-time = "2026-10-27T12:36:39.214Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/a3/5431e516c1ed4027c4b011b1969b46b7ec6754c47e2b5a1427a99f8827a6/opensandbox-0.1.16-py3-none-any.whl", hash = "sha256:2e3b7e18e52f69f9696cb563713e2581e10a727d4dc83edc0ec27b1c725c3ce0", size = 583522, upload-time = "2026-08-26T04:07:39.503Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/18/2de1578aead2e5da094c352e2c1610d750c399070769feac02cb42ff8941/opensandbox-1.2.0-py3-none-any.whl", hash = "sha256:15a0f3c3245018afa43b75fb14e892a64c2c8807276a0fdaf2a1a469f5e214ea", size = 744130, upload-time = "2026-10-27T12:36:37.805Z" },
 ]
 
 [[package]]

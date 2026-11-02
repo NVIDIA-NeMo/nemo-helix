@@ -27,6 +27,7 @@ from nemo_evals.config import EvaluatorConfig, HarborTaskJobsConfig, platform_co
 from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparer,
+    PreparationCheck,
     PreparationClients,
     TaskPreparation,
     prepare_task_images,
@@ -365,7 +366,7 @@ class TasksetRunService:
             except ValueError as exc:
                 raise TasksetRunResolutionError(str(exc)) from exc
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
-            prepared = await self._prepare_images(spec.tasks, policy, caller=caller)
+            prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,
@@ -381,6 +382,7 @@ class TasksetRunService:
             # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
             # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
             notices = await self._ensure_run_evaluation(plan) if intake is not None else []
+            notices += task_notices
             # Until its first task gets a slot, the run's deadlines count the queue timeout from acceptance; the
             # run controller restarts them from that slot with the execution budget (TasksetRunStore.start).
             runs = self._config.runs
@@ -452,8 +454,8 @@ class TasksetRunService:
 
     async def _prepare_images(
         self, tasks: list[ResolvedTask], policy: ResolvedHarborSandboxPolicy, *, caller: str
-    ) -> list[PreparedHarborEnvironment]:
-        """Each task's prepared images, in task order.
+    ) -> tuple[list[PreparedHarborEnvironment], list[str]]:
+        """Each task's prepared images, in task order, and the checks' notices, each prefixed with its task's id.
 
         Every task is checked before any task's builds are read. Up to ``MAX_CONCURRENT_IMAGE_PREPARATIONS`` run
         at once, so submit time doesn't grow task by task. All or nothing: an exception from any task cancels the others and fails the submit.
@@ -466,10 +468,9 @@ class TasksetRunService:
         )
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
 
-        async def check(task: ResolvedTask) -> str | None:
+        async def check(task: ResolvedTask) -> PreparationCheck:
             async with limit:
-                error = await self._preparer.check(task, policy=policy, clients=clients)
-            return f"{task.id}: {error.code}: {error.detail}" if error is not None else None
+                return await self._preparer.check(task, policy=policy, clients=clients)
 
         async def prepare(task: ResolvedTask) -> TaskPreparation:
             async with limit:
@@ -477,14 +478,22 @@ class TasksetRunService:
                     task, None, policy=policy, caller=caller, clients=clients, deadline=self._clock()
                 )
 
-        rejected = [reason for reason in await _all(check(task) for task in tasks) if reason is not None]
+        checks = await _all(check(task) for task in tasks)
+        rejected = [
+            f"{task.id}: {result.error.code}: {result.error.detail}"
+            for task, result in zip(tasks, checks, strict=True)
+            if result.error is not None
+        ]
         if rejected:
             raise TasksetRunResolutionError(f"tasks without images: {'; '.join(rejected)}")
+        notices = [
+            f"{task.id}: {notice}" for task, result in zip(tasks, checks, strict=True) for notice in result.notices
+        ]
         preparations = await _all(prepare(task) for task in tasks)
         rejected = [_unprepared(task, p) for task, p in zip(tasks, preparations, strict=True) if p.environment is None]
         if rejected:
             raise TasksetRunResolutionError(f"tasks without images: {'; '.join(rejected)}")
-        return [p.environment for p in preparations if p.environment is not None]
+        return [p.environment for p in preparations if p.environment is not None], notices
 
     def _image_builds(self, workspace: str) -> ImageBuildService:
         """The image build service for tasks in ``workspace``; the preparer only reads builds through it."""

@@ -18,6 +18,7 @@ from collections.abc import AsyncGenerator, Generator
 from typing import Protocol, runtime_checkable
 
 import httpx
+from nemo_helix_plugin.client.constants import get_env_access_token
 
 # ---------------------------------------------------------------------------
 # Protocols
@@ -77,6 +78,26 @@ class ServicePrincipalTokenProvider(ABC):
 # ---------------------------------------------------------------------------
 # StaticToken
 # ---------------------------------------------------------------------------
+
+
+class EnvAccessToken:
+    """Token provider that resolves the env-supplied token on every call, so a rotated token file is picked up."""
+
+    def get_access_token(self) -> str:
+        token = get_env_access_token()
+        if token is None:
+            raise RuntimeError("No access token available: NHX_ACCESS_TOKEN_FILE is not set")
+        return token
+
+    def set_http_client(self, http_client: httpx.AsyncClient) -> None:
+        _ = http_client
+        return None
+
+    async def get_access_token_async(self) -> str:
+        return self.get_access_token()
+
+    async def get_access_token_or_none_async(self) -> str:
+        return self.get_access_token()
 
 
 class StaticToken:

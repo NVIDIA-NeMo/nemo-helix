@@ -64,14 +64,7 @@ describe('FilesetNewRoute', () => {
     expect(heading).toHaveTextContent('Create Fileset');
   });
 
-  it('renders Custom Fileset and Sample Dataset tabs', async () => {
-    renderRoute();
-
-    expect(await screen.findByRole('radio', { name: 'Custom Fileset' })).toBeInTheDocument();
-    expect(await screen.findByRole('radio', { name: 'Sample Dataset' })).toBeInTheDocument();
-  });
-
-  it('shows custom fileset form when Custom Fileset tab is selected', async () => {
+  it('shows custom fileset form by default', async () => {
     renderRoute();
 
     expect(await screen.findByRole('textbox', { name: 'Fileset Name' })).toBeInTheDocument();
@@ -112,18 +105,6 @@ describe('FilesetNewRoute', () => {
 
     expect(await screen.findByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Create Fileset' })).toBeInTheDocument();
-  });
-
-  it('switches to Sample Dataset tab and shows sample dataset cards', async () => {
-    const user = userEvent.setup();
-    renderRoute();
-
-    await user.click(await screen.findByText('Sample Dataset'));
-
-    expect(
-      await screen.findByText('Choose from the following pre-configured sample datasets.')
-    ).toBeInTheDocument();
-    expect(await screen.findByText('Q&A Generation Dataset')).toBeInTheDocument();
   });
 
   it('shows External storage URL and secret select when External tab is selected', async () => {
@@ -216,7 +197,6 @@ describe('FilesetNewRoute', () => {
   describe('name uniqueness', () => {
     const FILESETS_URL = mockApiUrl(getFilesListFilesetsQueryKey, ':workspace');
     const FILESET_URL = mockApiUrl(getFilesRetrieveFilesetQueryKey, ':workspace', ':name');
-    const SAMPLE_NAME = 'qa-generation-dataset-default';
 
     it('says where the name must be unique before anything is typed', async () => {
       renderRoute();
@@ -256,53 +236,6 @@ describe('FilesetNewRoute', () => {
         )
       );
       expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled();
-    });
-
-    it('flags a sample whose name is already taken and blocks submit', async () => {
-      server.use(
-        http.get(FILESETS_URL, ({ request }) => {
-          const taken = new URL(request.url).searchParams.get('filter[name]') === SAMPLE_NAME;
-          return HttpResponse.json({
-            data: taken ? [{ ...dataset, name: SAMPLE_NAME }] : [],
-            pagination: { total_results: taken ? 1 : 0 },
-          });
-        })
-      );
-      const user = userEvent.setup();
-      renderRoute();
-
-      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
-
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        `A fileset named ${SAMPLE_NAME} already exists in the default workspace`
-      );
-      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeDisabled();
-    });
-
-    it('reports a failed sample name check and reruns it on retry', async () => {
-      let checkFails = true;
-      server.use(
-        http.get(FILESETS_URL, () =>
-          checkFails
-            ? HttpResponse.json({ detail: 'unavailable' }, { status: 500 })
-            : HttpResponse.json({ data: [], pagination: { total_results: 0 } })
-        )
-      );
-      const user = userEvent.setup();
-      renderRoute();
-
-      await user.click(await screen.findByRole('radio', { name: 'Sample Dataset' }));
-
-      expect(await screen.findByText("Couldn't check name availability.")).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Create Fileset' })).toBeEnabled();
-
-      checkFails = false;
-      await user.click(screen.getByRole('button', { name: 'Retry' }));
-
-      await waitFor(() =>
-        expect(screen.queryByText(/Couldn't check name availability/)).not.toBeInTheDocument()
-      );
-      expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
     });
 
     it('puts a 409 on submit on the name field and rechecks the name', async () => {
@@ -524,21 +457,6 @@ describe('FilesetNewRoute', () => {
 
       expect(screen.queryByText(/all quality checks passed/i)).not.toBeInTheDocument();
       expect(mockCheckDatasetQuality).not.toHaveBeenCalled();
-    });
-
-    it('clears quality reports when switching to the Sample Dataset tab', async () => {
-      mockCheckDatasetQuality.mockResolvedValue(
-        makeQualityReport({ hasErrors: false, hasWarnings: false })
-      );
-      const user = userEvent.setup();
-      renderRoute();
-
-      await uploadFile(user, makeJsonlFile());
-      await screen.findByText(/all quality checks passed/i);
-
-      await user.click(await screen.findByText('Sample Dataset'));
-
-      expect(screen.queryByText(/all quality checks passed/i)).not.toBeInTheDocument();
     });
 
     it('shows scanned-lines note when file has more lines than the scan limit', async () => {

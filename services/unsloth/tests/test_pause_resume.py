@@ -227,7 +227,7 @@ def run_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
     monkeypatch.setattr(unsloth_sft.NHXJobContext, "from_env", staticmethod(lambda: SimpleNamespace()))
     monkeypatch.setattr(unsloth_sft, "apply_integrations_to_sft_config", lambda **kwargs: ([], {}, {}))
-    monkeypatch.setattr(unsloth_sft, "_load_training_dataset", lambda **kwargs: ["row"])
+    monkeypatch.setattr(unsloth_sft, "_load_datasets", lambda **kwargs: (["row"], None))
     monkeypatch.setattr(unsloth_sft, "_save_model", lambda *args, **kwargs: seen.update(saved=True) or args[2])
     monkeypatch.setattr(
         "nhx.unsloth.tasks.training.backends.hf_trainer_callback.create_hf_trainer_progress_callback",

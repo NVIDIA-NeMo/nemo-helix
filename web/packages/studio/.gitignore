@@ -42,3 +42,6 @@ vite.config.*.timestamp-*
 
 # Test Artifacts
 tests/report
+
+# Screenshot output (screenshots/screenshot.ts)
+/screenshots/out/

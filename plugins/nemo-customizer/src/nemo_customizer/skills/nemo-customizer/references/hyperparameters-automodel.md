@@ -46,7 +46,6 @@ Full template:
   "model": "default/<model-entity>",
   "dataset": {
     "training": "default/<dataset-fileset>",
-    "validation": "default/<dataset-fileset>",
     "prompt_template": null
   },
   "training": {

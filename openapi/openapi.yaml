@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
-  title: Nemo Helix API
-  description: API for Nemo Helix services
+  title: NeMo Helix API
+  description: API for NeMo Helix services
   version: 0.0.0
 paths:
   /apis/auth/authenticate:
@@ -29,6 +29,106 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/auth/authenticate"
+
+          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+
+
+          response = requests.request("GET", url, headers=headers)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"GET\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
+          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.json());\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\
+          \nfunc main() {\n\treq, err := http.NewRequest(\"GET\", \"http://localhost:8080/apis/auth/authenticate\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\"\
+          , \"Bearer YOUR_ACCESS_TOKEN\")\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
+          \t}\n\tfmt.Println(string(data))\n}\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/authenticate\"\
+          )\nrequest = Net::HTTP::Get.new(uri)\nrequest[\"Authorization\"] = \"Bearer\
+          \ YOUR_ACCESS_TOKEN\"\nresponse = Net::HTTP.start(uri.hostname, uri.port,\
+          \ use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\nputs response.body\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/auth/authenticate");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
+
+          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer YOUR_ACCESS_TOKEN"]);
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          $body = curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          echo $body, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/authenticate\"\
+          ))\n        .header(\"Authorization\", \"Bearer YOUR_ACCESS_TOKEN\")\n \
+          \       .method(\"GET\", HttpRequest.BodyPublishers.noBody())\n        .build();\n\
+          \    HttpResponse<String> response = HttpClient.newHttpClient()\n      \
+          \  .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
+          \    System.out.println(response.body());\n  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("GET"), "http://localhost:8080/apis/auth/authenticate");
+
+          request.Headers.Add("Authorization", "Bearer YOUR_ACCESS_TOKEN");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          Console.WriteLine(await response.Content.ReadAsStringAsync());
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/authenticate\"\
+          )!)\nrequest.httpMethod = \"GET\"\nrequest.setValue(\"Bearer YOUR_ACCESS_TOKEN\"\
+          , forHTTPHeaderField: \"Authorization\")\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { data, response, error\
+          \ in\n  defer { done.signal() }\n  if let error = error { print(error);\
+          \ return }\n  print((response as! HTTPURLResponse).statusCode)\n  if let\
+          \ data = data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\n\
+          done.wait()\n"
     post:
       tags:
       - Authentication
@@ -53,6 +153,106 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/auth/authenticate"
+
+          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+
+
+          response = requests.request("POST", url, headers=headers)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"POST\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
+          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.json());\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\
+          \nfunc main() {\n\treq, err := http.NewRequest(\"POST\", \"http://localhost:8080/apis/auth/authenticate\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\"\
+          , \"Bearer YOUR_ACCESS_TOKEN\")\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
+          \t}\n\tfmt.Println(string(data))\n}\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/authenticate\"\
+          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Authorization\"] = \"Bearer\
+          \ YOUR_ACCESS_TOKEN\"\nresponse = Net::HTTP.start(uri.hostname, uri.port,\
+          \ use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\nputs response.body\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/auth/authenticate");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
+
+          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer YOUR_ACCESS_TOKEN"]);
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          $body = curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          echo $body, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/authenticate\"\
+          ))\n        .header(\"Authorization\", \"Bearer YOUR_ACCESS_TOKEN\")\n \
+          \       .method(\"POST\", HttpRequest.BodyPublishers.noBody())\n       \
+          \ .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
+          \    System.out.println(response.body());\n  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/auth/authenticate");
+
+          request.Headers.Add("Authorization", "Bearer YOUR_ACCESS_TOKEN");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          Console.WriteLine(await response.Content.ReadAsStringAsync());
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/authenticate\"\
+          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"Bearer YOUR_ACCESS_TOKEN\"\
+          , forHTTPHeaderField: \"Authorization\")\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { data, response, error\
+          \ in\n  defer { done.signal() }\n  if let error = error { print(error);\
+          \ return }\n  print((response as! HTTPURLResponse).statusCode)\n  if let\
+          \ data = data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\n\
+          done.wait()\n"
   /apis/auth/discovery:
     get:
       tags:
@@ -175,6 +375,114 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkloadTokenExchangeErrorResponse'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/auth/token"
+
+          headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+          payload = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt"
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/auth/token\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-www-form-urlencoded\"\
+          },\n  body: \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+          ,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.json());\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\
+          \"strings\"\n)\n\nfunc main() {\n\treq, err := http.NewRequest(\"POST\"\
+          , \"http://localhost:8080/apis/auth/token\", strings.NewReader(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+          ))\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Content-Type\"\
+          , \"application/x-www-form-urlencoded\")\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
+          \t}\n\tfmt.Println(string(data))\n}\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/token\"\
+          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Content-Type\"] = \"application/x-www-form-urlencoded\"\
+          \nrequest.body = \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+          \nresponse = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme\
+          \ == \"https\") do |http|\n  http.request(request)\nend\n\nputs response.code\n\
+          puts response.body\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/auth/token");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
+
+          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/x-www-form-urlencoded"]);
+
+          curl_setopt($ch, CURLOPT_POSTFIELDS, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          $body = curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          echo $body, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/token\"\
+          ))\n        .header(\"Content-Type\", \"application/x-www-form-urlencoded\"\
+          )\n        .method(\"POST\", HttpRequest.BodyPublishers.ofString(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+          ))\n        .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
+          \    System.out.println(response.body());\n  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/auth/token");
+
+          request.Content = new StringContent("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt",
+          Encoding.UTF8, "application/x-www-form-urlencoded");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          Console.WriteLine(await response.Content.ReadAsStringAsync());
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/token\"\
+          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"application/x-www-form-urlencoded\"\
+          , forHTTPHeaderField: \"Content-Type\")\nrequest.httpBody = Data(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+          .utf8)\nlet done = DispatchSemaphore(value: 0)\nURLSession.shared.dataTask(with:\
+          \ request) { data, response, error in\n  defer { done.signal() }\n  if let\
+          \ error = error { print(error); return }\n  print((response as! HTTPURLResponse).statusCode)\n\
+          \  if let data = data { print(String(decoding: data, as: UTF8.self)) }\n\
+          }.resume()\ndone.wait()\n"
   /apis/auth/v2/access-keys:
     post:
       tags:
@@ -742,6 +1050,12 @@ paths:
               description: Redirect target
               schema:
                 type: string
+        '503':
+          description: OIDC server-side login is not configured or is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -827,6 +1141,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WebSessionResponse'
+        '401':
+          description: Missing or invalid web session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /apis/auth/v2/token:
     post:
       tags:
@@ -1998,6 +2318,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Project'
+        '404':
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2225,6 +2551,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FilesetOutput'
+        '404':
+          description: Fileset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -2672,6 +3004,152 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
+          started\"}}]}]}]}"
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: \"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
+          \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
+          \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\"\
+          :\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
+          \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
+          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\",\n});\nif (!response.ok)\
+          \ throw new Error(`HTTP ${response.status}`);\nconsole.log(await response.json());\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\
+          \"strings\"\n)\n\nfunc main() {\n\treq, err := http.NewRequest(\"POST\"\
+          , \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+          , strings.NewReader(\"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
+          \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
+          \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\"\
+          :\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
+          \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
+          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\"))\n\tif err !=\
+          \ nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Content-Type\", \"application/json\"\
+          )\n\tres, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\tpanic(err)\n\
+          \t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\tdata, err :=\
+          \ io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tfmt.Println(string(data))\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Content-Type\"] = \"application/json\"\
+          \nrequest.body = \"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
+          \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
+          \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\"\
+          :\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
+          \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
+          \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
+          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\"\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\nputs response.body\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
+
+          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+
+          curl_setopt($ch, CURLOPT_POSTFIELDS, "{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
+          started\"}}]}]}]}");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          $body = curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          echo $body, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+          ))\n        .header(\"Content-Type\", \"application/json\")\n        .method(\"\
+          POST\", HttpRequest.BodyPublishers.ofString(\"{\\\"resourceLogs\\\":[{\\\
+          \"resource\\\":{\\\"attributes\\\":[{\\\"key\\\":\\\"job\\\",\\\"value\\\
+          \":{\\\"stringValue\\\":\\\"my-job\\\"}},{\\\"key\\\":\\\"job_attempt\\\"\
+          ,\\\"value\\\":{\\\"stringValue\\\":\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\
+          \",\\\"value\\\":{\\\"stringValue\\\":\\\"train\\\"}},{\\\"key\\\":\\\"\
+          job_task\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"0\\\"}}]},\\\"scopeLogs\\\
+          \":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\":\\\"1767225600000000000\\\
+          \",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\":{\\\"stringValue\\\":\\\
+          \"Training started\\\"}}]}]}]}\"))\n        .build();\n    HttpResponse<String>\
+          \ response = HttpClient.newHttpClient()\n        .send(request, HttpResponse.BodyHandlers.ofString());\n\
+          \    System.out.println(response.statusCode());\n    System.out.println(response.body());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs");
+
+          request.Content = new StringContent("{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
+          started\"}}]}]}]}", Encoding.UTF8, "application/json");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          Console.WriteLine(await response.Content.ReadAsStringAsync());
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"application/json\"\
+          , forHTTPHeaderField: \"Content-Type\")\nrequest.httpBody = Data(\"{\\\"\
+          resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\":[{\\\"key\\\":\\\
+          \"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\"}},{\\\"key\\\
+          \":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"1\\\"}},{\\\
+          \"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"train\\\
+          \"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\":\\\
+          \"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\"\
+          :\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
+          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\".utf8)\nlet done\
+          \ = DispatchSemaphore(value: 0)\nURLSession.shared.dataTask(with: request)\
+          \ { data, response, error in\n  defer { done.signal() }\n  if let error\
+          \ = error { print(error); return }\n  print((response as! HTTPURLResponse).statusCode)\n\
+          \  if let data = data { print(String(decoding: data, as: UTF8.self)) }\n\
+          }.resume()\ndone.wait()\n"
   /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
     post:
       tags:
@@ -3395,6 +3873,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OpenAIModelResp'
+        '404':
+          description: Virtual model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -4154,6 +4638,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/intake/v2/workspaces/{workspace}/annotations:
     post:
       tags:
@@ -4318,6 +4884,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations:
     post:
       tags:
@@ -4600,6 +5248,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations/{name}/pin:
     post:
       tags:
@@ -5126,6 +5856,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/atif:
     post:
       tags:
@@ -6841,6 +7653,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel:
     post:
       tags:
@@ -7371,6 +8265,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Adapter'
+        '404':
+          description: Adapter not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -7405,6 +8305,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
     patch:
       tags:
       - Adapters
@@ -7638,6 +8620,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}:
     get:
       tags:
@@ -7665,6 +8729,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeploymentConfig'
+        '404':
+          description: Deployment configuration not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -7758,6 +8828,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}/versions:
     get:
       tags:
@@ -8040,6 +9192,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelDeployment'
+        '404':
+          description: Deployment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8150,15 +9308,12 @@ paths:
       tags:
       - ModelDeployments
       summary: Get Latest ModelDeployment's Model Entities
-      description: 'Get Latest ModelDeployment''s Model Entities from Entity Store.
-
-        This provides the API contract that NIMs expect from Entity Store today, for
-        pulling LoRAs,
-
-        but enables us to enforce AuthZ boundaries.
+      description: 'Return the workspace, name, and model list for the latest deployment.
 
 
-        TODO: Implement model entity retrieval based on deployment config.'
+        The model list is currently empty; this endpoint does not yet discover models
+
+        or LoRA adapters from the deployment configuration.'
       operationId: get_deployment_models_apis_models_v2_workspaces__workspace__deployments__name__models_get
       parameters:
       - name: workspace
@@ -8470,6 +9625,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
     patch:
       tags:
       - Models
@@ -8555,6 +9792,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelEntity'
+        '404':
+          description: Model not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8646,6 +9889,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/models/my-model");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/models/v2/workspaces/{workspace}/prompts:
     get:
       tags:
@@ -8773,6 +10098,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Prompt'
+        '404':
+          description: Prompt not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -8845,6 +10176,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/models/v2/workspaces/{workspace}/providers:
     get:
       tags:
@@ -9007,6 +10420,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ModelProvider'
+        '404':
+          description: Model provider not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9041,6 +10460,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/models/v2/workspaces/{workspace}/providers/{name}/status:
     put:
       tags:
@@ -9215,6 +10716,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixSecretResponse'
+        '404':
+          description: Secret not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -9293,6 +10800,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret"
+
+
+          response = requests.request("DELETE", url)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+          , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
+      - lang: Go
+        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
+          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
+          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
+          }\n"
+      - lang: Ruby
+        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
+          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
+          end\n\nputs response.code\n"
+      - lang: PHP
+        source: '<?php
+
+          $ch = curl_init("http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret");
+
+          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+          curl_exec($ch);
+
+          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+
+          curl_close($ch);
+
+
+          echo $status, PHP_EOL;
+
+          '
+      - lang: Java
+        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
+          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
+          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
+          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
+          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
+          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
+          \  }\n}\n"
+      - lang: C#
+        source: 'using System;
+
+          using System.Net.Http;
+
+          using System.Text;
+
+
+          using var client = new HttpClient();
+
+          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret");
+
+          using var response = await client.SendAsync(request);
+
+          Console.WriteLine((int)response.StatusCode);
+
+          '
+      - lang: Swift
+        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
+          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
+          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
+          \  defer { done.signal() }\n  if let error = error { print(error); return\
+          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
   /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access:
     get:
       tags:
@@ -11353,9 +12942,7 @@ components:
           title: Default
         bearer_token_source:
           type: string
-          enum:
-          - access_token
-          - id_token
+          const: access_token
           title: Bearer Token Source
           default: access_token
         default_scopes:
@@ -12504,6 +14091,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 8
         storage:
           allOf:
           - $ref: '#/components/schemas/DockerJobStorageConfig'
@@ -12866,6 +14460,17 @@ components:
       - name
       title: EnvironmentMetadataContent
       description: Content for environment-type filesets (GRPO Gym packages).
+    ErrorResponse:
+      properties:
+        detail:
+          type: string
+          title: Detail
+          description: A human-readable error message describing what went wrong.
+          example: Error message
+      type: object
+      required:
+      - detail
+      title: ErrorResponse
     EvaluationContext:
       properties:
         evaluation_name:
@@ -15767,6 +17372,7 @@ components:
       type: string
       enum:
       - created
+      - queued
       - pending
       - active
       - cancelled
@@ -15782,7 +17388,15 @@ components:
 
         This enum represents the various states a job can be in during its lifecycle,
 
-        from creation to a terminal state.'
+        from creation to a terminal state.
+
+
+        ``CREATED`` means the controller has not yet considered the job. ``QUEUED``
+        means
+
+        the controller has seen the job but not admitted it (waiting for capacity).
+
+        ``PENDING`` means the backend resource exists and is waiting to start.'
     HelixJobStatusResponse:
       properties:
         id:
@@ -16993,6 +18607,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 500
         ttl_seconds_image_pull:
           type: integer
           minimum: 0.0
@@ -20105,9 +21726,7 @@ components:
           title: Default
         bearer_token_source:
           type: string
-          enum:
-          - access_token
-          - id_token
+          const: access_token
           title: Bearer Token Source
           default: access_token
         default_scopes:
@@ -21444,6 +23063,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 8
         working_directory:
           type: string
           title: Working Directory
@@ -22761,6 +24387,13 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        max_active_jobs:
+          type: integer
+          minimum: 1.0
+          title: Max Active Jobs
+          description: Maximum number of jobs admitted to run concurrently on this
+            executor.
+          default: 500
         ttl_seconds_image_pull:
           type: integer
           minimum: 0.0

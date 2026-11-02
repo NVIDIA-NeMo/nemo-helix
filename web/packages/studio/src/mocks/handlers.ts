@@ -21,7 +21,6 @@ import { filesetsHandlers } from '@studio/mocks/handlers/filesets';
 import { guardrailsHandlers } from '@studio/mocks/handlers/guardrails';
 import { insightsHandlers } from '@studio/mocks/handlers/insights';
 import { modelsHandlers } from '@studio/mocks/handlers/models';
-import { sampleDatasetsHandlers } from '@studio/mocks/handlers/sampleDatasets';
 import { secretsHandlers } from '@studio/mocks/handlers/secrets';
 import { workspacesHandlers } from '@studio/mocks/handlers/workspaces';
 import {
@@ -124,8 +123,6 @@ export const handlers = [
   http.get(`${PLATFORM_BASE_URL}/apis/auth/discovery`, () =>
     HttpResponse.json({ auth_enabled: false, oidc: null })
   ),
-
-  ...sampleDatasetsHandlers,
 
   // Evaluator V2 — fixtures loaded on first use to keep initial handler graph smaller
   http.get(

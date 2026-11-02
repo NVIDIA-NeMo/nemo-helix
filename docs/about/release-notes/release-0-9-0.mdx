@@ -5,12 +5,11 @@
 title: "v0.9.0 - 2026-11-03"
 description: ""
 ---
-NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor taskset runs, and NeMo Compass trace analysis. Studio expands evaluation and optimization workflows, while deployment and evaluation changes strengthen isolation and make failures easier to diagnose.
+NeMo Helix v0.9.0 adds checkpoint-aware training controls and NeMo Compass trace analysis. Studio expands evaluation and optimization workflows, while deployment and evaluation changes strengthen isolation and make failures easier to diagnose.
 
 ## Highlights
 
 - **Pause and recover training.** Pause supported training steps to save a checkpoint and release GPUs, resume them later, or rerun a failed job while retaining its attempt history and experiment-tracker continuity.
-- **Scale Harbor tasksets on Kubernetes.** Submit a taskset as individual task Jobs, build task images, size sandboxes, and publish results to an Intake experiment. (documentation not yet available)
 - **Evidence-backed analysis with NeMo Compass.** Analyze agent traces on demand or on a schedule, with structured trace and span evidence, severity, and confidence on insights.
 - **More complete Studio evaluation workflows.** Run agent and model evaluations through full-page wizards, compare experiment results against a baseline, and inspect token counts alongside evaluation scores.
 
@@ -31,7 +30,6 @@ NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor tas
 
 ### Agent Evaluation
 
-- Kubernetes Harbor taskset runs freeze the selected task revisions, build their images, and launch one task Job per task. The `nemo evals runs` commands support submission and inspection, including task imports from a pinned public Git repository, sandbox resource overrides, idempotent submission, and publication to an Intake experiment. (documentation not yet available)
 - Sandboxed Gym hosts can run complete `wheels-v1` environments offline when no egress is allowed. Failed trials, including trials where the agent never runs, are reported as errors rather than successes; failed metric results can be published to Intake and shown in Studio. See [Configure Sandboxed Gym](/documentation/evaluate-models/agent-eval/gym-sandbox-configuration) and [Reading Results](/documentation/evaluate-models/agent-eval/reading-results).
 - Custom Python metrics serialized with `cloudpickle` are disabled by default. Creating or submitting these metrics requires an explicit deployment-wide opt-in; built-in metrics remain available without it. See [Define and Run Custom Python Metrics](/documentation/evaluate-models/tutorials/define-and-run-custom-python-metrics#enable-cloudpickle-metrics-on-the-deployment).
 
@@ -39,9 +37,9 @@ NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor tas
 
 - Agent and model evaluations run through full-page wizards. Agent evaluations can select an evaluator config from a fileset, and model evaluations map OpenAI messages arrays to input and reference fields. See [Studio Agents](/documentation/studio/agents) and [Model Evaluations](/documentation/studio/model-evaluations).
 - Experiments support evaluation comparison, scorecards with a selectable baseline, and token counts on Pareto-chart axes. Trace lists refresh automatically as new telemetry arrives. See [Studio Experiments](/documentation/studio/experiments) and [Traces](/documentation/studio/traces).
-- Optimization forms render the available strategy options, including Switchyard routing, and Switchyard results expose routing tests and deployment actions. (documentation not yet available)
-- Model chat renders streamed reasoning and tool calls in collapsible sections, and the workspace dashboard shows recent jobs with live elapsed time and service-specific navigation. (documentation not yet available)
-- Data Designer previews show generated rows in a table alongside preview-run logs. The preview panel can collapse without stopping generation, and a separate stop action ends an in-progress preview. (documentation not yet available)
+- Optimization forms render the available strategy options, including Switchyard routing, and Switchyard results expose routing tests and deployment actions. See [Optimize an Agent in Studio](/documentation/studio/agents#optimize-an-agent).
+- Model chat renders streamed reasoning and tool calls in collapsible sections, and the workspace dashboard shows recent jobs with live elapsed time and service-specific navigation. See [Model Chat](/documentation/studio#models) and [Workspace Dashboard](/documentation/studio#dashboard).
+- Data Designer previews show generated rows in a table alongside preview-run logs. The preview panel can collapse without stopping generation, and a separate stop action ends an in-progress preview. See [Preview a Data Designer Job](/documentation/studio/data-designer#preview-a-job).
 - Fine-tuning can draft a job configuration with AI for review before submission. Model lists show in-progress fine-tuning runs, link adapters to the runs that produced them, and explain when a finished training step is still uploading or registering its model. See [Custom Models](/documentation/studio/customization).
 - Ability to view VirtualModels when Guardrails or Agent Optimizations are enabled.
 
@@ -53,7 +51,7 @@ NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor tas
 ### Platform, CLI, and Deployment
 
 - Job APIs, logs, and results distinguish execution attempts. Use `nemo jobs attempts list <job-name>` to inspect history and attempt selectors to inspect a particular run. Job updates separate mutable metadata from the definition used by future attempts. See [Manage Jobs](/documentation/kubernetes-deployment/setup/jobs).
-- Filesets return creator and updater metadata and support filtering by those identities. (documentation not yet available)
+- Filesets return creator and updater metadata and support filtering by those identities. See [Inspect and Filter by Creator or Updater](/documentation/get-started/core-concepts/manage-files#inspect-and-filter-by-creator-or-updater).
 - Entity `$contains` filters match individual array elements, and filters that cannot apply to a field return HTTP 400 instead of silently producing misleading results. See [Filtering](/documentation/get-started/core-concepts/filtering).
 - Setup prefers OpenRouter among automatically detected provider keys. `NVIDIA_API_KEY` alone no longer auto-creates a provider; NVIDIA Build remains available interactively or through the explicit custom-provider settings. See [Setup](/documentation/get-started/setup#non-interactive-setup).
 - Authentication reuses cached identity-provider discovery and signing keys rather than refetching them on each authorization check. The CLI also accepts older servers' flat OIDC discovery documents. Studio direct OIDC login attempts to create a workspace from the user's email prefix, subject to authorization. See [Workspaces](/documentation/get-started/core-concepts/workspaces#workspace-creation-on-login).
@@ -69,7 +67,6 @@ NeMo Helix v0.9.0 adds checkpoint-aware training controls, Kubernetes Harbor tas
 
 ## Current constraints
 
-- Kubernetes Harbor taskset runs require configured task-image builds, Kubernetes job execution, and OpenSandbox resources. Their generated CLI reference is available, but a task-oriented guide is not yet available.
 - Secure sandboxed GRPO requires an enforcing CNI, both `networkPolicies.enabled` and `networkPolicies.jobSteps.enabled`, and Kata for a separate guest kernel. A successful training run alone does not establish those isolation guarantees.
 - The OpenShell executor cannot supply an OIDC bearer token to a gateway that requires user authentication. The default Landlock `best_effort` setting does not provide filesystem confinement on unsupported kernels; use `hard_requirement` when that boundary is required.
 - Compass is included in the PyPI `all` extra on Python 3.12 and 3.13. The user-sentiment signal remains skipped because analysis runs do not configure an embedding backend.

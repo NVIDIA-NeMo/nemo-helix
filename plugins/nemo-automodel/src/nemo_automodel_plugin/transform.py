@@ -39,8 +39,6 @@ async def transform_input_to_output(
     """Enrich submitter input into canonical AutomodelJobOutput."""
     model_entity = await fetch_model_entity(input_spec.model, workspace, platform)
     await check_dataset_access(platform, input_spec.dataset.training, workspace)
-    if input_spec.dataset.validation:
-        await check_dataset_access(platform, input_spec.dataset.validation, workspace)
 
     checkpoint_head_type = "unknown"
     if model_entity.spec:

@@ -27,7 +27,7 @@ from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, reso
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
+from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
@@ -58,8 +58,11 @@ from nemo_agents_plugin.schema import (
     DeploymentPage,
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
+from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -74,12 +77,14 @@ from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=AgentDeployment, field="auth_context")
+deployment_routes = PolicyRoutes(router, deployment_policy)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 _DELETE_MARK_ATTEMPTS = 3
 
 
-@router.post("/deployments", response_model=AgentDeployment, status_code=201, tags=["Agent Deployments"])
+@deployment_routes.post("/deployments", status_code=201, tags=["Agent Deployments"])
 @scope.write
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -122,7 +127,7 @@ async def create_deployment(
 
     # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
     try:
-        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get(), body.deployment_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -249,27 +254,27 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
 )
 async def list_deployment_modes(workspace: str) -> DeploymentModeList:
     """List every deployment mode and whether this platform can run it."""
-    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+    return await asyncio.to_thread(deployment_modes, AgentsConfig.get())
 
 
-def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
-    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
+def deployment_modes(agents_config: AgentsConfig) -> DeploymentModeList:
+    return DeploymentModeList(data=[_mode_availability(agents_config, mode) for mode in get_args(DeploymentMode)])
 
 
-def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+def _mode_availability(agents_config: AgentsConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
     try:
-        require_deployment_mode_available(runner_config, mode)
+        require_deployment_mode_available(agents_config, mode)
         enabled = True
     except ValueError:
         enabled = False
     return DeploymentModeAvailability(
         mode=mode,
         enabled=enabled,
-        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
+        requires_image=is_container_deployment_mode(mode) and not agents_config.deployments.default_image,
     )
 
 
-@router.get("/deployments", response_model=DeploymentPage, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -311,7 +316,7 @@ async def list_deployments(
     )
 
 
-@router.get("/deployments/{name}", response_model=AgentDeployment, tags=["Agent Deployments"])
+@deployment_routes.get("/deployments/{name}", tags=["Agent Deployments"])
 @scope.read
 @path_rule(
     callers=[CallerKind.PRINCIPAL],
@@ -396,6 +401,8 @@ async def _mark_deployment_deleting_once(
         logger.exception("Failed to look up deployment '%s' before delete", name)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc
 
+    if is_container_deployment_mode(dep.deployment_mode):
+        await _reopen_timed_out_backend_delete(entity_client, workspace=workspace, name=name)
     if dep.status == "deleting":
         return
 
@@ -405,3 +412,14 @@ async def _mark_deployment_deleting_once(
     except NemoEntityNotFoundError:
         logger.info("Deployment '%s' already deleted before status update", name)
         return
+
+
+async def _reopen_timed_out_backend_delete(entity_client: NemoEntitiesClient, *, workspace: str, name: str) -> None:
+    """Retry a backend teardown that timed out; the runner leaves it FAILED until the user deletes again."""
+    try:
+        backend_dep = await entity_client.get(Deployment, name=name, workspace=workspace)
+    except NemoEntityNotFoundError:
+        return
+    if backend_dep.delete_timed_out():
+        backend_dep.status = "DELETING"
+        await entity_client.update(backend_dep)

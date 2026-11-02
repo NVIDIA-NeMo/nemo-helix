@@ -4,7 +4,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -110,6 +110,7 @@ async def create_prompt(
 @router.get(
     "/v2/workspaces/{workspace}/prompts/{name}",
     summary="Get Prompt",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     response_description="Return prompt details",
     status_code=status.HTTP_200_OK,
 )

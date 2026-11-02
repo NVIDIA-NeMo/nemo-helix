@@ -115,18 +115,6 @@ export const CustomizationFilesetSelect: FC<CustomizationFilesetSelectProps> = (
     });
   }, [backend, detectedVariant, setValue]);
 
-  /** Automodel and unsloth point their validation reference at the training fileset. */
-  const { hasValidation, isPending: isDiscovering, discoveryError } = validation;
-  useEffect(() => {
-    if (backend === 'rl') return;
-    const field =
-      backend === 'automodel' ? 'automodel.dataset.validation' : 'unsloth.dataset.validation_path';
-    const ref = (selectedRef as string) || undefined;
-    if (!ref || isDiscovering || discoveryError) return;
-
-    setValue(field, hasValidation ? ref : undefined, { shouldValidate: false });
-  }, [backend, hasValidation, isDiscovering, discoveryError, selectedRef, setValue]);
-
   const handleSelectChange = (value: string) => {
     if (value === NEW_DATASET_VALUE) {
       onRequestNewDataset();

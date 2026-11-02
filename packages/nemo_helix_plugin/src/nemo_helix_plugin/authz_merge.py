@@ -39,6 +39,8 @@ def _permission_id_to_nested(permission_id: str, description: str) -> dict[str, 
         cursor[part] = {}
         cursor = cursor[part]
     cursor[parts[-1]] = {"description": description}
+    if not _default_roles_for_permission(permission_id):
+        cursor[parts[-1]]["has_role"] = False
     return node
 
 
@@ -50,8 +52,10 @@ def _merge_flat_permissions_into(registry: dict[str, Any], flat_permissions: dic
 
 
 def _default_roles_for_permission(permission_id: str) -> list[str]:
-    """Mirror ``auth-tools update`` role assignment heuristics."""
+    """Assign ordinary action defaults while leaving admin grants explicit."""
     suffix = permission_id.rsplit(".", 1)[-1]
+    if suffix == "admin":
+        return []
     if suffix in {"list", "read"}:
         return ["Viewer", "Editor"]
     return ["Editor"]
@@ -68,7 +72,8 @@ def merge_authz_contributions(
     - ``permissions``: flat ``permission_id -> description`` for the registry
     - ``endpoints``: ``path -> {method: {permissions, scopes?}}``
     - ``role_permissions``: optional ``role -> [permission_id, ...]`` extra grants
-      (defaults: ``.list``/``.read`` → Viewer+Editor, else Editor only)
+      (defaults: ``.list``/``.read`` → Viewer+Editor, ``.admin`` → none,
+      else Editor only)
 
     Later contributions override endpoint methods for the same path+method.
     """

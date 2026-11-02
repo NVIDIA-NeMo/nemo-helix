@@ -104,7 +104,6 @@ class TestEntrypointCachePaths:
             update={
                 "model_path": "/run/scratch/job/model",
                 "dataset_path": "/run/scratch/job/dataset",
-                "validation_path": "/run/scratch/job/validation_dataset",
                 "output_path": "/run/scratch/job/output_model",
             },
         )
@@ -124,7 +123,6 @@ class TestEntrypointCachePaths:
                 {
                     "model_path": kwargs["model_path"],
                     "dataset_path": kwargs["dataset_path"],
-                    "validation_path": kwargs["validation_path"],
                     "output_path": kwargs["output_path"],
                 },
             )
@@ -138,7 +136,6 @@ class TestEntrypointCachePaths:
         assert captured == {
             "model_path": str(storage / "model"),
             "dataset_path": str(storage / "dataset"),
-            "validation_path": str(storage / "validation_dataset"),
             "output_path": str(storage / "output_model"),
         }
 

@@ -16,7 +16,7 @@ import logging
 import textwrap
 
 from fastapi import APIRouter, HTTPException, Query, status
-from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
+from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.core.entities.api.dependencies import EntityRepository
 from nhx.core.entities.api.v2.projects.schemas import (
     Project,
@@ -172,6 +172,7 @@ async def list_projects(
     response_model=Project,
     tags=[API_TAG],
     summary="Get project by name",
+    responses={404: {"model": ErrorResponse, "description": "Project not found"}},
     description=textwrap.dedent("""
         Get a specific project by its workspace and name.
 
