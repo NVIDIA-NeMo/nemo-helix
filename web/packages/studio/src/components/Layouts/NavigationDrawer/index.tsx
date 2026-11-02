@@ -3,7 +3,9 @@
 
 import {
   Divider,
-  Text,
+  VerticalNavGroup,
+  VerticalNavGroupList,
+  VerticalNavHeading,
   VerticalNavList,
   VerticalNavListItem,
   VerticalNavRoot,
@@ -50,18 +52,10 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
 
   // The rail has no room for a heading, so a group announces itself as a rule between icon
   // sections instead — named, since collapsing drops the only other clue about the grouping.
-  const renderGroupLabel = (groupLabel: string, groupIndex: number) =>
-    collapsed ? (
-      groupIndex > 0 && (
-        <VerticalNavListItem className="px-2 py-2">
-          <Divider aria-label={groupLabel} />
-        </VerticalNavListItem>
-      )
-    ) : (
-      <VerticalNavListItem className={groupIndex > 0 ? 'py-1 px-3 mt-4' : 'px-3'}>
-        <Text kind="body/semibold/sm" className="text-subtle">
-          {groupLabel}
-        </Text>
+  const renderRailDivider = (groupLabel: string, groupIndex: number) =>
+    groupIndex > 0 && (
+      <VerticalNavListItem className="px-2 py-2">
+        <Divider aria-label={groupLabel} />
       </VerticalNavListItem>
     );
 
@@ -73,24 +67,39 @@ export const NavigationDrawer: FC<Props> = ({ items, collapsed = false }) => {
       }))
       // Resolve items before the heading, so a group the rail empties out takes its heading too.
       .filter((group) => group.items.length > 0)
-      .map((group, groupIndex) => (
-        <Fragment key={groupIndex}>
-          {group.groupLabel !== undefined && renderGroupLabel(group.groupLabel, groupIndex)}
-          {collapsed
-            ? group.items.map((item) => (
+      .map((group, groupIndex) => {
+        if (collapsed) {
+          return (
+            <Fragment key={groupIndex}>
+              {group.groupLabel !== undefined && renderRailDivider(group.groupLabel, groupIndex)}
+              {group.items.map((item) => (
                 <CollapsedNavItem key={item.id} item={item} isActive={isActive} />
-              ))
-            : group.items.map((item) => (
-                <NavItem
-                  key={item.id}
-                  item={item}
-                  isActive={isActive}
-                  accordionOpen={accordionState[item.id]}
-                  onAccordionChange={handleAccordionChange}
-                />
               ))}
-        </Fragment>
-      ));
+            </Fragment>
+          );
+        }
+
+        const navItems = group.items.map((item) => (
+          <NavItem
+            key={item.id}
+            item={item}
+            isActive={isActive}
+            accordionOpen={accordionState[item.id]}
+            onAccordionChange={handleAccordionChange}
+          />
+        ));
+
+        if (group.groupLabel === undefined) {
+          return <Fragment key={groupIndex}>{navItems}</Fragment>;
+        }
+
+        return (
+          <VerticalNavGroup key={groupIndex}>
+            <VerticalNavHeading className="h-8 min-h-8">{group.groupLabel}</VerticalNavHeading>
+            <VerticalNavGroupList>{navItems}</VerticalNavGroupList>
+          </VerticalNavGroup>
+        );
+      });
 
   return (
     <VerticalNavRoot
