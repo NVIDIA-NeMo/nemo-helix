@@ -16,7 +16,10 @@ import {
 } from '@nvidia/foundations-react-core';
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
-import { expertParallelWarning } from '@studio/util/forms/expertParallel';
+import {
+  expertParallelWarning,
+  suggestedExpertParallelSize,
+} from '@studio/util/forms/expertParallel';
 import {
   AUTOMODEL_SPEC_DEFAULTS,
   DPO_SPEC_DEFAULTS,
@@ -25,7 +28,7 @@ import {
 import { useFormContext, useWatch } from 'react-hook-form';
 
 const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
-  const { control } = useFormContext<CustomizationFormFields>();
+  const { control, getValues, setValue } = useFormContext<CustomizationFormFields>();
   const [model, parallelism] = useWatch({
     control,
     name: ['automodel.model', 'automodel.parallelism'],
@@ -33,6 +36,14 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
   const numExperts = useModelEntity(model)?.spec?.moe_config?.num_experts;
   const isMoe = !!numExperts && numExperts > 1;
   const warning = expertParallelWarning(numExperts, parallelism ?? {});
+  const refillExpertParallelSize = () => {
+    const size = suggestedExpertParallelSize(numExperts, getValues('automodel.parallelism') ?? {});
+    if (size !== undefined) setValue('automodel.parallelism.expert_parallel_size', size);
+  };
+  const onGpuLayoutChange = {
+    Slider: { onValueChange: refillExpertParallelSize },
+    TextInput: { onValueChange: refillExpertParallelSize },
+  };
   const expertParallelSize = (
     <ControlledSliderWithTextInput
       useControllerProps={{ name: 'automodel.parallelism.expert_parallel_size', control }}
@@ -57,6 +68,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         min={1}
         max={16}
         step={1}
+        attributes={onGpuLayoutChange}
         disabled={disabled}
       />
       <ControlledSliderWithTextInput
@@ -69,6 +81,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
         min={1}
         max={8}
         step={1}
+        attributes={onGpuLayoutChange}
         disabled={disabled}
       />
       {isMoe && expertParallelSize}
@@ -109,6 +122,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
               <ControlledSliderWithTextInput
@@ -125,6 +139,7 @@ const AutomodelParallelism = ({ disabled }: { disabled: boolean }) => {
                 min={1}
                 max={8}
                 step={1}
+                attributes={onGpuLayoutChange}
                 disabled={disabled}
               />
               {!isMoe && expertParallelSize}
