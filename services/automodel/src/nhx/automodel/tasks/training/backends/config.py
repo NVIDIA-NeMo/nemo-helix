@@ -969,6 +969,33 @@ def _configure_moe_backend(cfg: dict[str, Any], customizer_config: TrainingStepC
         )
 
 
+def _config_value(config: Any, name: str) -> Any:
+    return config.get(name) if isinstance(config, dict) else getattr(config, name, None)
+
+
+def _expert_count_from_config(root: Any) -> int | None:
+    """First positive expert count on the root config or a nested language config.
+
+    Mirrors the model-spec checkpoint inspector: Nemotron Omni keeps
+    ``n_routed_experts`` on a nested language config, which may be a dict or an object.
+    """
+    blocks = [root]
+    seen = {id(root)}
+    while blocks:
+        block = blocks.pop(0)
+        for key in ("num_local_experts", "num_experts", "n_routed_experts"):
+            value = _config_value(block, key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return value
+        for key in ("text_config", "thinker_config", "language_config", "llm_config"):
+            child = _config_value(block, key)
+            if child is None or id(child) in seen or isinstance(child, (str, int, float, bool, list, tuple)):
+                continue
+            seen.add(id(child))
+            blocks.append(child)
+    return None
+
+
 def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tuple[str | None, int | None]:
     """Architecture class and expert count. A class name plus an expert count skips AutoConfig.
 
@@ -1002,14 +1029,7 @@ def _recorded_or_loaded_moe_traits(customizer_config: TrainingStepConfig) -> tup
         loaded_architecture = None
     loaded_experts = num_experts
     if loaded_experts is None:
-        for value in (
-            getattr(hf_config, "num_local_experts", None),
-            getattr(hf_config, "num_experts", None),
-            getattr(hf_config, "n_routed_experts", None),
-        ):
-            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-                loaded_experts = value
-                break
+        loaded_experts = _expert_count_from_config(hf_config)
     if loaded_architecture and (not architecture or "/" in architecture):
         architecture = loaded_architecture
     return architecture, loaded_experts

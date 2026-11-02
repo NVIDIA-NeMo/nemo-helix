@@ -410,6 +410,26 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
+    def test_a_nested_language_config_supplies_the_expert_count(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronH_Omni": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronH_Omni"],
+                text_config={"n_routed_experts": 128},
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"num_experts=128"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
     def test_missing_architecture_loads_a_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
         monkeypatch.setattr(
