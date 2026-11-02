@@ -15,7 +15,7 @@ export const getMcpStatusQueryKey = (workspace: string, deployment: string) =>
 /** Served by the deployment's Fabric server through the agents gateway; not in the OpenAPI spec. */
 export const fetchMcpStatus = (workspace: string, deployment: string, signal?: AbortSignal) =>
   customFetch<McpStatusResponse>({
-    url: `/apis/agents/v2/workspaces/${encodeURIComponent(workspace)}/deployments/${encodeURIComponent(deployment)}/-/mcp/status`,
+    url: `/apis/agents/v2/workspaces/${encodeURIComponent(workspace)}/deployments/${encodeURIComponent(deployment)}/-/v1/mcp/servers`,
     method: 'GET',
     signal,
   });
