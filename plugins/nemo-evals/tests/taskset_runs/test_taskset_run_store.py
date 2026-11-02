@@ -15,6 +15,7 @@ import httpx
 import pytest
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity, TasksetRunMemberEntity, TasksetRunPhase
 from nemo_evals.taskset_runs.identifiers import derive_run_id
+from nemo_evals.taskset_runs.plan_storage import PlanStoragePermissionDeniedError
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.store import (
     _ACCEPT_RETRY_POLICY,
@@ -23,7 +24,7 @@ from nemo_evals.taskset_runs.store import (
     RunRequestConflict,
     TasksetRunStore,
 )
-from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
+from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -927,3 +928,32 @@ async def test_list_members_typed_client_wire_filters_and_sort(files_client, fil
         "$and": [{"parent": {"$eq": "taskset_run-parent"}}, {"data.phase": {"$eq": "failed"}}],
     }
     assert not files_service.calls
+
+
+@pytest.mark.parametrize("operation", ["create", "upload"])
+@pytest.mark.parametrize("cleanup_fails", [False, True], ids=["cleanup-succeeds", "cleanup-fails"])
+async def test_plan_write_permission_denial_preserves_typed_error_and_cleanup(
+    store, entity_store, files_service, acceptance, operation, cleanup_fails
+) -> None:
+    """Create/upload denials keep a typed error even if rollback fails, without accepting a run."""
+    denied = PermissionDeniedError(
+        httpx.Response(
+            403,
+            headers={"x-request-id": "files-denial"},
+            json={"detail": "private Files denial"},
+            request=httpx.Request("POST", "http://files.invalid"),
+        )
+    )
+    files_service.failures[operation] = denied
+    if cleanup_fails:
+        files_service.failures["delete"] = RuntimeError("cleanup failed")
+    with pytest.raises(PlanStoragePermissionDeniedError) as exc:
+        await store.accept(acceptance)
+    assert isinstance(exc.value, PlanStorageError)
+    assert exc.value.permission_error is denied
+    assert exc.value.permission_error.http_response.headers["x-request-id"] == "files-denial"
+    assert not entity_store.entities
+    assert bool(files_service.filesets) == (operation == "upload" and cleanup_fails)
+    assert [op for op, _, _ in files_service.calls] == (
+        ["create"] if operation == "create" else ["create", "upload", "delete"]
+    )

@@ -3,10 +3,14 @@
 
 """Fan-out creates each task Job once, and adopts an existing one only when it is provably ours."""
 
+from unittest.mock import AsyncMock
+
+import httpx
 import pytest
 from nemo_evals.jobs.harbor_task_dispatch import TASK_JOB_SOURCE
 from nemo_evals.jobs.harbor_task_spec import HarborTaskJobSpec, PreparedHarborEnvironment, PreparedImage
 from nemo_evals.taskset_runs.task_jobs import TaskJobsIncompleteError, create_task_jobs, task_job_request
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 IMAGE = PreparedImage(image_ref="registry.invalid/agent@sha256:" + "a" * 64, preparation_key="k")
@@ -82,3 +86,29 @@ async def test_failed_adoption_check_is_missing_and_other_tasks_continue(fake_ta
         await create_task_jobs(fake_task_jobs, harbor_plan, harbor_run, [ENVIRONMENT, ENVIRONMENT])
     assert [index for index, _ in exc.value.missing] == [0]
     assert [request.name for request in fake_task_jobs.created] == [NAMES[1]]
+
+
+@pytest.mark.parametrize("stage", ["create", "adopt-job", "adopt-steps"])
+async def test_permission_denial_propagates_from_creation_and_adoption(
+    fake_task_jobs, harbor_plan, harbor_run, monkeypatch, stage
+):
+    """Job creation and adoption preserve the typed denial rather than suggesting a transient retry."""
+    denied = PermissionDeniedError(
+        httpx.Response(
+            403,
+            json={"detail": "private Jobs denial"},
+            request=httpx.Request("POST", "http://jobs.test/jobs"),
+        )
+    )
+    match stage:
+        case "create":
+            monkeypatch.setattr(fake_task_jobs, "create", AsyncMock(side_effect=denied))
+        case "adopt-job":
+            fake_task_jobs.refuse = {NAMES[0]}
+            monkeypatch.setattr(fake_task_jobs, "get", AsyncMock(side_effect=denied))
+        case "adopt-steps":
+            await create_task_jobs(fake_task_jobs, harbor_plan, harbor_run, [ENVIRONMENT, ENVIRONMENT])
+            monkeypatch.setattr(fake_task_jobs, "has_steps", AsyncMock(side_effect=denied))
+    with pytest.raises(PermissionDeniedError) as exc:
+        await create_task_jobs(fake_task_jobs, harbor_plan, harbor_run, [ENVIRONMENT, ENVIRONMENT])
+    assert exc.value is denied

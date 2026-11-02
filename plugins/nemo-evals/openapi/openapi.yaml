@@ -779,6 +779,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '403':
+          description: Caller lacks permission to access a source or run resource.
         '409':
           description: The idempotency key already belongs to a different request.
         '422':
@@ -799,8 +801,8 @@ paths:
         \    caller: Effective principal supplied by the platform dependency.\n  \
         \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
         \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
-        \   HTTPException: Unexpected storage or projection failure, sanitized to\
-        \ 500."
+        \   HTTPException: Permission denied (403), or unexpected storage or projection\
+        \ failure (500)."
       operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
       parameters:
       - name: workspace
@@ -855,6 +857,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatussPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '422':
           description: Validation Error
           content:
@@ -870,9 +874,9 @@ paths:
         \ and Jobs.\n\nArgs:\n    workspace: Workspace that scopes the record lookup.\n\
         \    run_id: Public run name in that workspace.\n    service: Shared request-scoped\
         \ run service.\n\nReturns:\n    Current stored status, excluding null optionals\
-        \ and internal metadata.\n\nRaises:\n    HTTPException: The record is absent\
-        \ (404), or an unexpected storage or\n        projection failure occurs (sanitized\
-        \ 500)."
+        \ and internal metadata.\n\nRaises:\n    HTTPException: Permission denied\
+        \ (403), the record is absent (404), or an unexpected\n        storage or\
+        \ projection failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -894,6 +898,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatus'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
@@ -915,8 +921,8 @@ paths:
         \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
         \    Stored task page and filtered counts; existing runs with no members return\n\
         \    an empty page. Null Job/error details are omitted.\n\nRaises:\n    HTTPException:\
-        \ The parent run is absent (404), or unexpected storage or\n        projection\
-        \ failure occurs (sanitized 500)."
+        \ Permission denied (403), the parent run is absent (404), or an unexpected\n\
+        \        storage or projection failure occurs (sanitized 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
@@ -968,6 +974,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunTasksPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
