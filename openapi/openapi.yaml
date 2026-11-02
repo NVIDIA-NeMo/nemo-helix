@@ -6555,6 +6555,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/job-groups/{name}/retry:
+    post:
+      tags:
+      - Job Groups
+      summary: Retry Job Group
+      description: 'Retry the non-succeeded members of a job group.
+
+
+        Recovering a large run where some members did not succeed is one operation
+        for the
+
+        caller, not a rerun per member: this resolves the group and returns it immediately,
+
+        then fans the per-member retry out as a background task off the caller''s
+        request path.
+
+        Each ``error`` or ``cancelled`` member is rerun through the normal per-job
+        rerun path
+
+        (a fresh attempt, not a delete-and-recreate); only ``completed`` members are
+        left
+
+        untouched. Retry is a group-level operation, so a fail-fast group''s collateral-
+
+        cancelled members restart alongside the errored one. As retried members re-enter
+
+        ``created`` the group re-opens to a non-terminal status.
+
+
+        A group that is cancelling is refused (409): retrying members while a cancel
+        sweep drives
+
+        them to ``cancelled`` would fight that sweep. A group with no non-succeeded
+        members is a
+
+        no-op that returns the group unchanged, so a repeat or racing retry is harmless.
+        The
+
+        background retry is best-effort and not durable: if it is lost before it runs,
+        re-
+
+        requesting retry is how a caller drives it again.'
+      operationId: retry_job_group_apis_jobs_v2_workspaces__workspace__job_groups__name__retry_post
+      parameters:
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Name
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      responses:
+        '200':
+          description: Retry requested; failed members are being rerun
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobGroupResponse'
+        '404':
+          description: Job group not found
+        '409':
+          description: The job group is cancelling and cannot be retried
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/jobs/v2/workspaces/{workspace}/jobs:
     post:
       tags:

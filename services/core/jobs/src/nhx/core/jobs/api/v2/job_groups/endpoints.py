@@ -233,3 +233,57 @@ async def cancel_job_group(
         # already returned the group, and cancel_group_members walks the members itself.
         background_tasks.add_task(dispatcher.cancel_group_members, group.id, workspace)
         return group
+
+
+@router.post(
+    "/v2/workspaces/{workspace}/job-groups/{name}/retry",
+    status_code=status.HTTP_200_OK,
+    responses={
+        status.HTTP_200_OK: {"description": "Retry requested; failed members are being rerun"},
+        status.HTTP_404_NOT_FOUND: {"description": "Job group not found"},
+        status.HTTP_409_CONFLICT: {"description": "The job group is cancelling and cannot be retried"},
+    },
+)
+async def retry_job_group(
+    name: str,
+    workspace: str,
+    background_tasks: BackgroundTasks,
+    auth_client: AuthClient = Depends(get_auth_client),
+    dispatcher: JobDispatcher = Depends(dep_dispatcher),
+) -> JobGroupResponse:
+    """Retry the non-succeeded members of a job group.
+
+    Recovering a large run where some members did not succeed is one operation for the
+    caller, not a rerun per member: this resolves the group and returns it immediately,
+    then fans the per-member retry out as a background task off the caller's request path.
+    Each ``error`` or ``cancelled`` member is rerun through the normal per-job rerun path
+    (a fresh attempt, not a delete-and-recreate); only ``completed`` members are left
+    untouched. Retry is a group-level operation, so a fail-fast group's collateral-
+    cancelled members restart alongside the errored one. As retried members re-enter
+    ``created`` the group re-opens to a non-terminal status.
+
+    A group that is cancelling is refused (409): retrying members while a cancel sweep drives
+    them to ``cancelled`` would fight that sweep. A group with no non-succeeded members is a
+    no-op that returns the group unchanged, so a repeat or racing retry is harmless. The
+    background retry is best-effort and not durable: if it is lost before it runs, re-
+    requesting retry is how a caller drives it again.
+    """
+    with scoped_app_ctx(JobContext(id=name)):
+        try:
+            group = await dispatcher.retry_job_group(name, workspace)
+        except JobOperationConflictError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        if group is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Job group '{name}' not found in workspace '{workspace}'.",
+            )
+        # Fan the per-member rerun out off the caller's request path, carrying the caller's
+        # auth so each rerun runs as the requester (job-level rerun honors auth_context).
+        background_tasks.add_task(
+            dispatcher.retry_group_members,
+            group.id,
+            workspace,
+            AuthContext.from_principal(auth_client.principal),
+        )
+        return group
