@@ -20,7 +20,6 @@ from harbor.models.task.verifier_mode import resolve_effective_verifier_env_conf
 from harbor.models.trial.config import AgentConfig, ResourceMode
 from harbor.models.trial.config import EnvironmentConfig as TrialEnvironmentConfig
 from harbor.models.trial.paths import TrialPaths
-from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.filesets import FilesetRef
 from nemo_evals.harbor.agent_setup_egress import INNER_AGENT_KWARG, SETUP_EGRESS_AGENT, SETUP_HOSTS_KWARG
@@ -136,11 +135,12 @@ async def test_compiled_job_has_one_dispatch_step_without_sandbox_credentials(ta
     assert not {name for name in names if "API_KEY" in name}
 
 
-async def test_the_task_job_carries_the_gateway_url_override(task_spec, monkeypatch):
-    config = AgentsConfig(deployments=DeploymentsRunnerConfig(gateway_url_override="https://envoy.ns.svc:8080"))
-    monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
-
-    (step,) = (await HarborTaskDispatchJob.compile(spec=task_spec, profile="k8s-cpu")).steps
+async def test_the_task_job_carries_the_gateway_url_override(task_spec):
+    (step,) = (
+        await HarborTaskDispatchJob.compile(
+            spec=task_spec, profile="k8s-cpu", gateway_url_override="https://envoy.ns.svc:8080"
+        )
+    ).steps
 
     assert {v.name: v.value for v in step.environment or []}[GATEWAY_URL_OVERRIDE_ENVVAR] == "https://envoy.ns.svc:8080"
 

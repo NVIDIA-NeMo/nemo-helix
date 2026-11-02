@@ -38,22 +38,31 @@ TLS_DIR = "/tmp/nemo-helix-tls"
 GATEWAY_CA = f"{TLS_DIR}/gateway-ca.pem"
 CA_BUNDLE = f"{TLS_DIR}/ca-bundle.pem"
 REQUESTS_CA_BUNDLE = f"{TLS_DIR}/requests-ca-bundle.pem"
+CURL_CA_BUNDLE = f"{TLS_DIR}/curl-ca-bundle.pem"
 NODE_EXTRA_CA_CERTS = f"{TLS_DIR}/node-extra-ca-certs.pem"
-# Each variable keeps what it named already and adds the gateway CA. With no SSL_CERT_FILE the base is the first
+# Each variable keeps what it named already, a file or a directory of certificates, and adds the gateway CA. Requests
+# falls back to CURL_CA_BUNDLE, as it does without REQUESTS_CA_BUNDLE. With no SSL_CERT_FILE the base is the first
 # system bundle: Debian/Ubuntu/Alpine, RHEL/Fedora, SUSE, the OpenSSL default some minimal images keep, and last
 # Python's certifi, the bundle Python uses when SSL_CERT_FILE is unset.
 TRUST_GATEWAY_CA_SCRIPT = """\
 set -e
 first() { for candidate in "$@"; do if [ -s "$candidate" ]; then printf %s "$candidate"; return; fi; done; }
-with_gateway_ca() { { if [ -n "$1" ]; then cat "$1"; echo; fi; cat "$GATEWAY_CA"; } > "$2"; }
+with_gateway_ca() {
+  {
+    if [ -d "$1" ]; then for cert in "$1"/*; do if [ -f "$cert" ]; then cat "$cert"; echo; fi; done
+    elif [ -n "$1" ]; then cat "$1"; echo; fi
+    cat "$GATEWAY_CA"
+  } > "$2"
+}
 certifi=$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null || true)
 system=$(first "${SSL_CERT_FILE:-}" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
 /etc/ssl/ca-bundle.pem /etc/ssl/cert.pem "$certifi")
 with_gateway_ca "$system" "$CA_BUNDLE"
-with_gateway_ca "$(first "${REQUESTS_CA_BUNDLE:-}" "$system")" "$REQUESTS_CA_BUNDLE_OUT"
+with_gateway_ca "$(first "${REQUESTS_CA_BUNDLE:-}" "${CURL_CA_BUNDLE:-}" "$system")" "$REQUESTS_CA_BUNDLE_OUT"
+with_gateway_ca "$(first "${CURL_CA_BUNDLE:-}" "$system")" "$CURL_CA_BUNDLE_OUT"
 with_gateway_ca "$(first "${NODE_EXTRA_CA_CERTS:-}")" "$NODE_EXTRA_CA_CERTS_OUT"
 chmod 755 "${CA_BUNDLE%/*}"
-chmod 644 "$GATEWAY_CA" "$CA_BUNDLE" "$REQUESTS_CA_BUNDLE_OUT" "$NODE_EXTRA_CA_CERTS_OUT"
+chmod 644 "$GATEWAY_CA" "$CA_BUNDLE" "$REQUESTS_CA_BUNDLE_OUT" "$CURL_CA_BUNDLE_OUT" "$NODE_EXTRA_CA_CERTS_OUT"
 printf %s "$system"
 """
 
@@ -117,6 +126,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
             GATEWAY_CA=GATEWAY_CA,
             CA_BUNDLE=CA_BUNDLE,
             REQUESTS_CA_BUNDLE_OUT=REQUESTS_CA_BUNDLE,
+            CURL_CA_BUNDLE_OUT=CURL_CA_BUNDLE,
             NODE_EXTRA_CA_CERTS_OUT=NODE_EXTRA_CA_CERTS,
         )
         if result.return_code != 0:
@@ -131,7 +141,10 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                 self.session_id,
             )
         self._persistent_env.update(
-            SSL_CERT_FILE=CA_BUNDLE, REQUESTS_CA_BUNDLE=REQUESTS_CA_BUNDLE, NODE_EXTRA_CA_CERTS=NODE_EXTRA_CA_CERTS
+            SSL_CERT_FILE=CA_BUNDLE,
+            REQUESTS_CA_BUNDLE=REQUESTS_CA_BUNDLE,
+            CURL_CA_BUNDLE=CURL_CA_BUNDLE,
+            NODE_EXTRA_CA_CERTS=NODE_EXTRA_CA_CERTS,
         )
 
     @override

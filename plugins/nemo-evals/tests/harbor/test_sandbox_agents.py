@@ -294,6 +294,7 @@ async def test_every_later_command_trusts_the_gateway_ca_alongside_the_roots_it_
                 "GATEWAY_CA": "/tmp/nemo-helix-tls/gateway-ca.pem",
                 "CA_BUNDLE": "/tmp/nemo-helix-tls/ca-bundle.pem",
                 "REQUESTS_CA_BUNDLE_OUT": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+                "CURL_CA_BUNDLE_OUT": "/tmp/nemo-helix-tls/curl-ca-bundle.pem",
                 "NODE_EXTRA_CA_CERTS_OUT": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
             },
         )
@@ -302,12 +303,13 @@ async def test_every_later_command_trusts_the_gateway_ca_alongside_the_roots_it_
         "PATH": "/agent/bin:/usr/bin",
         "SSL_CERT_FILE": "/tmp/nemo-helix-tls/ca-bundle.pem",
         "REQUESTS_CA_BUNDLE": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+        "CURL_CA_BUNDLE": "/tmp/nemo-helix-tls/curl-ca-bundle.pem",
         "NODE_EXTRA_CA_CERTS": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
     }
 
 
 async def test_the_ca_script_sees_the_trust_settings_the_task_set():
-    """The script reads SSL_CERT_FILE, REQUESTS_CA_BUNDLE and NODE_EXTRA_CA_CERTS to keep what they name.
+    """The script reads SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE and NODE_EXTRA_CA_CERTS to keep what they name.
 
     Pointing them at the new bundles before it runs would make each bundle start from itself.
     """
@@ -315,6 +317,7 @@ async def test_the_ca_script_sees_the_trust_settings_the_task_set():
     task = {
         "SSL_CERT_FILE": "/task/roots.pem",
         "REQUESTS_CA_BUNDLE": "/task/requests.pem",
+        "CURL_CA_BUNDLE": "/task/curl.pem",
         "NODE_EXTRA_CA_CERTS": "/task/node.pem",
     }
     environment._persistent_env.update(task)

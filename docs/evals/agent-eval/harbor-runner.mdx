@@ -776,11 +776,13 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   does is refused.
 - On Kubernetes, `agents.deployments.gateway_url_override` replaces the in-cluster address, as it
   does for deployed agents. Set it to an HTTPS gateway, such as the platform's Envoy, to keep the
-  agent's key off plain HTTP. When the job trusts a private CA for the platform
+  agent's key off plain HTTP. A run uses the override set when it was submitted. Give an HTTPS
+  override the name `agent_channel` lists, with a certificate for that name: a run that would reach it
+  by another name is refused. When the job trusts a private CA for the platform
   (`NHX_CLIENT_SSL_CERT_FILE`, else `SSL_CERT_FILE`), each sandbox trusts it too. `SSL_CERT_FILE`,
-  `REQUESTS_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` keep the certificates they named before, or the
-  image's CA bundle, and add that CA. The files are under `/tmp/nemo-helix-tls`, so images that run
-  as a non-root user work too.
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` keep the certificates they named
+  before, a file or a directory, or the image's CA bundle, and add that CA. The files are under
+  `/tmp/nemo-helix-tls`, so images that run as a non-root user work too.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
   disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
   already uses the key variable's name; that job is refused rather than handing the agent the other

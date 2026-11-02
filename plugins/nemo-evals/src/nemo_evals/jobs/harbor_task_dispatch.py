@@ -84,7 +84,9 @@ class HarborTaskDispatchJob(NemoJob):
     input_spec_schema: ClassVar[type[BaseModel] | None] = HarborTaskJobSpec
 
     @classmethod
-    async def compile(cls, *, spec: HarborTaskJobSpec, profile: str, **_: Any) -> HelixJobSpec:  # ty: ignore[invalid-method-override]
+    async def compile(
+        cls, *, spec: HarborTaskJobSpec, profile: str, gateway_url_override: str | None = None, **_: Any
+    ) -> HelixJobSpec:  # ty: ignore[invalid-method-override]
         """A staging step for a registered agent's files, if any, then the dispatcher step; both on the dispatcher image.
 
         No OpenSandbox variables: Jobs injects OPEN_SANDBOX_DOMAIN and OPEN_SANDBOX_API_KEY into every pod.
@@ -105,7 +107,8 @@ class HarborTaskDispatchJob(NemoJob):
                 ),
                 config=spec.model_dump(mode="json"),
                 environment=add_gateway_url_override(
-                    add_gateway_key_placeholder(build_task_environment(_secret_refs(spec.spec)), spec.spec.target)
+                    add_gateway_key_placeholder(build_task_environment(_secret_refs(spec.spec)), spec.spec.target),
+                    gateway_url_override,
                 ),
             )
         )

@@ -133,13 +133,9 @@ def test_a_sandbox_cannot_reach_a_loopback_platform() -> None:
         agent_gateway_origin(sandboxed=True)
 
 
-@pytest.mark.parametrize(
-    ("agent_channel", "expected"),
-    [([], "https://nemo-helix-envoy.ns.svc:8080"), (["nemo-helix-envoy.ns.svc.cluster.local"], None)],
-    ids=["as-set", "by-agent-channel-name"],
-)
+@pytest.mark.parametrize("agent_channel", [[], ["nemo-helix-envoy.ns.svc"]], ids=["no-channel", "on-the-channel"])
 def test_a_sandbox_reaches_the_gateway_url_deployed_agents_use(
-    monkeypatch: pytest.MonkeyPatch, agent_channel: list[str], expected: str | None
+    monkeypatch: pytest.MonkeyPatch, agent_channel: list[str]
 ) -> None:
     """Operators set the agents plugin's gateway_url_override to send container traffic through the HTTPS gateway.
 
@@ -148,20 +144,27 @@ def test_a_sandbox_reaches_the_gateway_url_deployed_agents_use(
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
     _gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
 
-    origin = agent_gateway_origin(sandboxed=True, agent_channel=agent_channel)
+    assert agent_gateway_origin(sandboxed=True, agent_channel=agent_channel) == "https://nemo-helix-envoy.ns.svc:8080"
 
-    assert origin == (expected or "https://nemo-helix-envoy.ns.svc.cluster.local:8080")
+
+def test_an_https_gateway_is_never_reached_by_another_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its certificate names the host the operator set, so a sandbox calling it by another name fails TLS in every trial.
+
+    The sandbox resolves only the names its agent_channel allows, so going back to the configured name isn't an
+    option either: the job fails before any trial, naming the override that works.
+    """
+    _gateway_url_override(monkeypatch, "https://nemo-helix-envoy.ns.svc:8080")
+
+    with pytest.raises(ValueError, match=r"https://nemo-helix-envoy\.ns\.svc\.cluster\.local:8080"):
+        agent_gateway_origin(sandboxed=True, agent_channel=["nemo-helix-envoy.ns.svc.cluster.local"])
 
 
 @pytest.mark.parametrize("override", ["https://nemo-helix-envoy.ns.svc:8080", None], ids=["set", "unset"])
-def test_a_task_job_is_compiled_with_the_gateway_url_override_it_cannot_read(
-    monkeypatch: pytest.MonkeyPatch, override: str | None
-) -> None:
+def test_a_task_job_is_compiled_with_the_gateway_url_override_it_cannot_read(override: str | None) -> None:
     """A task Job's pod has no platform config, so the override reaches it only in the step's environment."""
-    _platform_gateway_url_override(monkeypatch, override)
     storage = EnvironmentVariable(name="STORAGE", value="/data")
 
-    environment = add_gateway_url_override([storage])
+    environment = add_gateway_url_override([storage], override)
 
     expected = [] if override is None else [EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
     assert environment == [storage, *expected]

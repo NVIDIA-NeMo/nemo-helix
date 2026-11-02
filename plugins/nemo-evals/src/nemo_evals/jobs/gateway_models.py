@@ -89,6 +89,10 @@ def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) 
     plugin's ``deployments.gateway_url_override`` the Job was compiled with, by the name its ``agent_channel`` allows.
     Otherwise the task runs in Harbor's Docker task container, which reaches a loopback platform through
     ``host.docker.internal``.
+
+    Raises:
+        ValueError: The gateway is HTTPS and the sandbox would have to reach it by a name other than its own,
+            which its certificate may not cover.
     """
     base_url = get_base_url()
     if not sandboxed:
@@ -107,6 +111,12 @@ def agent_gateway_origin(*, sandboxed: bool, agent_channel: Sequence[str] = ()) 
     name = agent_channel_name(origin.hostname or "", agent_channel)
     if name is None or name == origin.hostname:
         return origin.geturl()
+    if origin.scheme == "https":
+        raise ValueError(
+            f"gateway_name_mismatch: sandboxes reach the gateway as {name}, but its certificate is for "
+            f"{origin.hostname}: set deployments.gateway_url_override to https://{name}"
+            f"{'' if origin.port is None else f':{origin.port}'}, with a certificate for that name"
+        )
     netloc = name if origin.port is None else f"{name}:{origin.port}"
     return urlunsplit(origin._replace(netloc=netloc))
 
@@ -163,9 +173,13 @@ def add_gateway_key_placeholder(environment: list[EnvironmentVariable], target: 
     return [*environment, EnvironmentVariable(name=env.api_key_env, value=GATEWAY_PLACEHOLDER_KEY)]
 
 
-def add_gateway_url_override(environment: list[EnvironmentVariable]) -> list[EnvironmentVariable]:
-    """``environment`` plus the agents plugin's ``deployments.gateway_url_override``, which a task Job can't read."""
-    override = AgentsConfig.get().deployments.gateway_url_override
+def platform_gateway_url_override() -> str | None:
+    """The agents plugin's ``deployments.gateway_url_override``, which a task Job can't read."""
+    return AgentsConfig.get().deployments.gateway_url_override
+
+
+def add_gateway_url_override(environment: list[EnvironmentVariable], override: str | None) -> list[EnvironmentVariable]:
+    """``environment`` plus ``override``, for :func:`agent_gateway_origin` in the task Job."""
     if override is None:
         return environment
     return [*environment, EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
