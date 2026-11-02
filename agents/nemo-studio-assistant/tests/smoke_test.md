@@ -71,7 +71,7 @@ After verification, remove the temporary workspace, then undeploy and delete
 the agent so another smoke-test run starts cleanly:
 
 ```bash
-nemo workspaces delete nemo-studio-assistant-smoke-test
+nemo workspaces delete nemo-studio-assistant-smoke-test --yes
 nemo agents undeploy nemo-studio-assistant-fabric-deployment --yes
 nemo agents delete nemo-studio-assistant --yes
 ```

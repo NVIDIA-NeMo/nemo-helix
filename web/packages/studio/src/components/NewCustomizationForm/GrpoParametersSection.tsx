@@ -716,7 +716,7 @@ export const GrpoParametersSection = () => {
                   slotLabel: 'Use Triton Kernels',
                   labelPosition: 'left',
                   slotInfo:
-                    'DTensor v2 Triton LoRA kernels. The backend disables them automatically when tensor_parallel_size > 1, so this flag only applies to single-GPU-per-shard runs.',
+                    'Automodel Triton LoRA kernels. Leave this unset. An explicit on with tensor_parallel_size > 1 is rejected, because the kernels take raw tensors and tensor parallelism shards the adapter weights.',
                 }}
                 disabled={disabled}
               />

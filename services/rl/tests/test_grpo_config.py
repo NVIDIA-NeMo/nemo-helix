@@ -183,7 +183,7 @@ def test_compile_grpo_config_sandboxed_paths(
     # job_id is a sandbox pod label; without it every job shares one default.
     assert nemo_gym["job_id"] == "job-123"
     # Full-weight omits lora_cfg entirely rather than emitting enabled=False.
-    assert "lora_cfg" not in cfg["policy"]["dtensor_cfg"]
+    assert "lora_cfg" not in cfg["policy"]["automodel_cfg"]
 
     sandbox = nemo_gym["sandbox"]
     assert sandbox["environment_pvc_claim"] == "nhx-job-storage"
@@ -330,13 +330,16 @@ def test_compiled_config_selects_only_prefetched_actors(
     step, _ = _prepared_step(tmp_path)
     cfg = compile_grpo_config(step, job_ctx)
 
-    # policy_backend defaults to `automodel` -> DTensorPolicyWorkerV2 -> the
-    # `automodel` venv, matching upstream NeMo-RL's reference grpo config.
-    assert cfg["policy"]["dtensor_cfg"]["_v2"] is True
+    # policy_backend defaults to `automodel` -> AutomodelPolicyWorker -> the
+    # `automodel` venv. Upstream no longer reads `_v2`.
+    assert "_v2" not in cfg["policy"]["automodel_cfg"]
     # megatron_cfg would select MegatronPolicyWorker -> `mcore`.
     assert cfg["policy"]["megatron_cfg"]["enabled"] is False
+    assert cfg["policy"]["offload_policy_before_refit"] is False
+    assert cfg["policy"]["offload_optimizer_for_refit"] is True
     # vLLM is the only prefetched generation backend (`vllm`); sglang/trtllm are not.
     assert cfg["policy"]["generation"]["backend"] == "vllm"
+    assert "lora_refit_mode" not in cfg["policy"]["generation"]
 
 
 def test_compile_grpo_config_enables_lora(
@@ -349,12 +352,13 @@ def test_compile_grpo_config_enables_lora(
         lora=LoRAConfig(rank=32, alpha=64, use_triton=True),
     )
     cfg = compile_grpo_config(step, job_ctx)
-    lora_cfg = cfg["policy"]["dtensor_cfg"]["lora_cfg"]
+    lora_cfg = cfg["policy"]["automodel_cfg"]["lora_cfg"]
     assert lora_cfg["enabled"] is True
     assert lora_cfg["dim"] == 32
     assert lora_cfg["alpha"] == 64
     assert lora_cfg["use_triton"] is True
-    assert cfg["policy"]["dtensor_cfg"]["_v2"] is True
+    assert "_v2" not in cfg["policy"]["automodel_cfg"]
+    assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
 
 
 def test_compiled_config_has_master_config_required_fields(
@@ -476,17 +480,15 @@ def test_lora_cfg_follows_finetuning_type_under_automodel(
     lora: LoRAConfig | None,
     expected: bool,
 ) -> None:
-    """``finetuning_type`` drives ``lora_cfg``, and nothing else does. ``_v2`` stays true
-    across all three cases: the backend is the caller's choice, not a function of LoRA.
-    """
+    """``finetuning_type`` drives ``lora_cfg``. ``_v2`` stays absent: the backend is not a function of LoRA."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, finetuning_type=finetuning_type, lora=lora)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     # Read exactly the way NeMo-RL does, so "key omitted" and "enabled: False" are
     # equivalent here and the test does not depend on which one we emit.
     assert dtensor_cfg.get("lora_cfg", {}).get("enabled", False) is expected
-    assert dtensor_cfg["_v2"] is True
+    assert "_v2" not in dtensor_cfg
 
 
 @pytest.mark.parametrize(
@@ -512,7 +514,7 @@ def test_unset_triton_is_resolved_from_tensor_parallel_size(
     # Batch divisibility for tp=2 on 1 gpu would fail validate_for_training — this is the
     # compiler path only, so TP is just a knob on lora_cfg here.
     cfg = compile_grpo_config(step, job_ctx)
-    assert cfg["policy"]["dtensor_cfg"]["lora_cfg"]["use_triton"] is expected
+    assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["use_triton"] is expected
 
 
 @pytest.mark.parametrize("requested", [True, False])
@@ -531,7 +533,7 @@ def test_explicit_triton_is_passed_through_verbatim(
         lora=LoRAConfig(rank=16, use_triton=requested),
     )
     cfg = compile_grpo_config(step, job_ctx)
-    assert cfg["policy"]["dtensor_cfg"]["lora_cfg"]["use_triton"] is requested
+    assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["use_triton"] is requested
 
 
 def test_sandbox_egress_comes_from_the_compiled_step_not_service_config(
@@ -917,7 +919,7 @@ def test_lora_exclude_modules_turns_off_match_all_linear(
         finetuning_type=FinetuningType.LORA,
         lora=LoRAConfig(rank=128, alpha=512, exclude_modules=["*out_proj*"], use_triton=False),
     )
-    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["lora_cfg"]
+    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]
 
     assert lora_cfg["exclude_modules"] == ["*out_proj*"]
     assert lora_cfg["target_modules"] == []
@@ -933,7 +935,7 @@ def test_lora_target_modules_turn_off_match_all_linear(
         finetuning_type=FinetuningType.LORA,
         lora=LoRAConfig(rank=16, target_modules=["*_proj"]),
     )
-    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["lora_cfg"]
+    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]
 
     assert lora_cfg["target_modules"] == ["*_proj"]
     assert lora_cfg["match_all_linear"] is False
@@ -949,24 +951,11 @@ def test_lora_without_module_lists_matches_all_linear(
         finetuning_type=FinetuningType.LORA,
         lora=LoRAConfig(rank=16),
     )
-    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["lora_cfg"]
+    lora_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["lora_cfg"]
 
     assert lora_cfg["match_all_linear"] is True
     assert lora_cfg["target_modules"] == []
     assert lora_cfg["exclude_modules"] == []
-
-
-def test_policy_backend_dtensor_omits_v2(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """``dtensor`` must reach V1 -- the `fsdp` venv, stock HF modules, no Transformer
-    Engine. NeMo-RL reads ``.get("_v2", False)``, so absent and false are equivalent."""
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
-
-    assert "_v2" not in dtensor_cfg
-    assert dtensor_cfg["enabled"] is True
 
 
 def test_automodel_all_weights_requests_consolidated_safetensors(
@@ -975,8 +964,9 @@ def test_automodel_all_weights_requests_consolidated_safetensors(
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
     compiled = compile_grpo_config(step, job_ctx)
-    checkpoint = compiled["policy"]["dtensor_cfg"]["checkpoint"]
+    checkpoint = compiled["policy"]["automodel_cfg"]["checkpoint"]
 
+    assert "_v2" not in compiled["policy"]["automodel_cfg"]
     assert checkpoint["model_save_format"] == "safetensors"
     assert checkpoint["save_consolidated"] == "every"
     assert "model_save_format" not in compiled["checkpointing"]
@@ -990,7 +980,7 @@ def test_v4_compatible_defaults_on_for_consolidated_export(
     vLLM the platform serves the published model with cannot read."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
-    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["checkpoint"]
 
     assert checkpoint["v4_compatible"] is True
 
@@ -1000,7 +990,7 @@ def test_v4_compatible_can_be_turned_off(
 ) -> None:
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, v4_compatible=False)
-    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["checkpoint"]
 
     assert checkpoint["v4_compatible"] is False
 
@@ -1050,22 +1040,6 @@ def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
     assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
 
 
-def test_dtensor_requests_consolidated_safetensors(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """DTensor v2 is the only policy worker, so ``dtensor`` needs the same checkpoint block."""
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path, policy_backend=PolicyBackend.DTENSOR)
-    compiled = compile_grpo_config(step, job_ctx)
-    checkpoint = compiled["policy"]["dtensor_cfg"]["checkpoint"]
-
-    assert checkpoint["model_save_format"] == "safetensors"
-    assert checkpoint["save_consolidated"] == "every"
-    assert "model_save_format" not in compiled["checkpointing"]
-    assert "save_consolidated" not in compiled["checkpointing"]
-    assert "v4_compatible" not in compiled["checkpointing"]
-
-
 def test_automodel_lora_still_requests_consolidated_export(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1075,7 +1049,7 @@ def test_automodel_lora_still_requests_consolidated_export(
         finetuning_type=FinetuningType.LORA,
         lora=LoRAConfig(rank=8, alpha=16),
     )
-    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["checkpoint"]
+    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["checkpoint"]
 
     assert checkpoint["save_consolidated"] == "every"
     assert checkpoint["model_save_format"] == "safetensors"
@@ -1084,16 +1058,13 @@ def test_automodel_lora_still_requests_consolidated_export(
 def test_expert_parallel_size_reaches_dtensor(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``automodel/setup.py`` is the sole reader of ``dtensor_cfg.expert_parallel_size``.
-    Without ``_v2`` the V1 worker ignores it and shards nothing, so a MoE run OOMs with no
-    sign why -- hence ``GRPOTraining`` rejects the pairing rather than letting it compile.
-    """
+    """``automodel_cfg.expert_parallel_size`` is what Automodel shards experts with."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, expert_parallel_size=8)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     assert dtensor_cfg["expert_parallel_size"] == 8
-    assert dtensor_cfg["_v2"] is True
+    assert "_v2" not in dtensor_cfg
 
 
 def test_activation_checkpointing_on_moe_ignores_the_router(
@@ -1108,7 +1079,7 @@ def test_activation_checkpointing_on_moe_ignores_the_router(
     """
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path, expert_parallel_size=8, activation_checkpointing=True)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     assert dtensor_cfg["activation_checkpointing"] is True
     assert dtensor_cfg["moe_parallelizer"] == {"ignore_router_for_ac": True}
@@ -1131,7 +1102,7 @@ def test_moe_parallelizer_omitted_without_both_moe_and_checkpointing(
         expert_parallel_size=expert_parallel_size,
         activation_checkpointing=activation_checkpointing,
     )
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     assert "moe_parallelizer" not in dtensor_cfg
 
@@ -1141,7 +1112,7 @@ def test_expert_parallel_size_omitted_when_unused(
 ) -> None:
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     assert "expert_parallel_size" not in dtensor_cfg
 
@@ -1149,16 +1120,16 @@ def test_expert_parallel_size_omitted_when_unused(
 def test_automodel_kwargs_reach_dtensor(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """force_hf is what makes NemotronH loadable at all on the DTensor path."""
+    """force_hf is what makes NemotronH loadable at all on the Automodel path."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(
         tmp_path,
         grpo=GRPOConfig(num_generations_per_prompt=4, automodel_kwargs={"force_hf": True}),
     )
-    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    dtensor_cfg = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
     assert dtensor_cfg["automodel_kwargs"] == {"force_hf": True}
-    assert dtensor_cfg["_v2"] is True
+    assert "_v2" not in dtensor_cfg
 
 
 def test_automodel_kwargs_omitted_when_unset(
@@ -1167,7 +1138,7 @@ def test_automodel_kwargs_omitted_when_unset(
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(tmp_path)
 
-    assert "automodel_kwargs" not in compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]
+    assert "automodel_kwargs" not in compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]
 
 
 def test_router_aux_loss_coef_becomes_an_hf_config_override(
@@ -1208,7 +1179,7 @@ def test_vllm_tensor_parallel_size_is_independent_of_training_tp(
     policy = compile_grpo_config(step, job_ctx)["policy"]
 
     assert policy["generation"]["vllm_cfg"]["tensor_parallel_size"] == 4
-    assert policy["dtensor_cfg"]["tensor_parallel_size"] == 1
+    assert policy["automodel_cfg"]["tensor_parallel_size"] == 1
 
 
 def test_vllm_tensor_parallel_size_falls_back_to_the_coupled_default(
@@ -1221,6 +1192,31 @@ def test_vllm_tensor_parallel_size_falls_back_to_the_coupled_default(
     vllm_cfg = compile_grpo_config(step, job_ctx)["policy"]["generation"]["vllm_cfg"]
     # _prepared_step pins num_gpus_per_node=1, so the min clamps to it.
     assert vllm_cfg["tensor_parallel_size"] == 1
+
+
+def test_vllm_expert_parallel_size_defaults_to_one(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path, expert_parallel_size=8)
+
+    vllm_cfg = compile_grpo_config(step, job_ctx)["policy"]["generation"]["vllm_cfg"]
+    assert vllm_cfg["expert_parallel_size"] == 1
+
+
+def test_vllm_expert_parallel_size_is_independent_of_training_ep(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(
+        tmp_path,
+        expert_parallel_size=2,
+        grpo=GRPOConfig(num_generations_per_prompt=4, vllm_expert_parallel_size=4),
+    )
+    policy = compile_grpo_config(step, job_ctx)["policy"]
+
+    assert policy["generation"]["vllm_cfg"]["expert_parallel_size"] == 4
+    assert policy["automodel_cfg"]["expert_parallel_size"] == 2
 
 
 def test_vllm_gpu_memory_utilization_is_configurable(
@@ -1499,7 +1495,7 @@ def test_batching_rejects_budget_below_max_seq_length(
 def test_sequence_packing_rejected_under_context_parallel(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """DTensorPolicyWorker rejects packing under CP; catch it at compile time instead."""
+    """AutomodelPolicyWorker rejects packing under CP; catch it at compile time instead."""
     monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
     step, _ = _prepared_step(
         tmp_path,
@@ -1509,7 +1505,7 @@ def test_sequence_packing_rejected_under_context_parallel(
     with pytest.raises(ValueError, match="not supported with context_parallel_size"):
         compile_grpo_config(step, job_ctx)
 
-    # dynamic has no such restriction on the GRPO + DTensor path.
+    # dynamic has no such restriction on the GRPO Automodel path.
     assert step.training.grpo is not None
     step.training.grpo.batching_strategy = BatchingStrategy.DYNAMIC
     assert compile_grpo_config(step, job_ctx)["policy"]["dynamic_batching"]["enabled"] is True
@@ -1598,7 +1594,7 @@ class TestGrpoPassthroughKnobs:
         step, _ = _prepared_step(tmp_path)
         step.parallelism.env_vars = {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
 
-        env = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["env_vars"]
+        env = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["env_vars"]
 
         assert env["PYTORCH_CUDA_ALLOC_CONF"] == "expandable_segments:True"
 
@@ -1614,7 +1610,7 @@ class TestGrpoPassthroughKnobs:
         )
         step.parallelism.num_gpus_per_node = 2
 
-        moe = compile_grpo_config(step, job_ctx)["policy"]["dtensor_cfg"]["moe_parallelizer"]
+        moe = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["moe_parallelizer"]
 
         assert moe == {"ignore_router_for_ac": True, "some_other_knob": 7}
 
