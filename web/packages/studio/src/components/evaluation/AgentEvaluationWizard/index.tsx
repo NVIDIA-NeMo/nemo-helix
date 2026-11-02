@@ -1181,7 +1181,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
               <DatasetPanel
                 slotLabel={<Text kind="label/bold/xl">Dataset File</Text>}
                 acceptedFileTypes={DATASET_FILE_TYPES}
-                allowMultipleUpload
                 showMapping={false}
               >
                 {shards ? (

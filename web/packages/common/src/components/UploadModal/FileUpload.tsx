@@ -36,11 +36,7 @@ export const FileUpload: FC<FileUploadProps> = ({
   onFileAccepted,
 }) => {
   const [state, dispatch] = useUploadModalContext();
-  const {
-    acceptableFileTypes: acceptableFileTypesState,
-    acceptableFileSize,
-    allowMultipleFileSelection,
-  } = state;
+  const { acceptableFileTypes: acceptableFileTypesState, acceptableFileSize } = state;
   const handleFileChange = (fileOrFiles: FileUploadItem | FileUploadItem[]) => {
     const files = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles];
     dispatch({
@@ -60,7 +56,6 @@ export const FileUpload: FC<FileUploadProps> = ({
         className="w-full"
         accept={acceptedFileTypes?.join(',') ?? acceptableFileTypesState.join(',')}
         disabled={disabled}
-        multiple={allowMultipleFileSelection}
         onValueChange={handleFileChange}
       >
         Up to {formatFileSize(acceptableFileSize ?? 0)}
