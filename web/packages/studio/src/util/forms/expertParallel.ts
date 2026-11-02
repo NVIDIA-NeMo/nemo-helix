@@ -20,34 +20,36 @@ export const validExpertParallelSizes = (
   return sizes;
 };
 
+// Only Nemotron-H is confirmed to need expert parallelism. Automodel rejects it for MoE models on
+// its Hugging Face path, such as Mixtral, so it is only filled in for Nemotron-H.
+const isNemotronH = (spec: ModelEntity['spec']) =>
+  spec?.checkpoint_model_name === 'NemotronHForCausalLM';
+
 export const expertParallelWarning = (
-  numExperts: number | undefined,
+  spec: ModelEntity['spec'],
   p: AutomodelParallelismSpec
 ): string | undefined => {
+  const numExperts = spec?.moe_config?.num_experts;
   if (!numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
-  if ((p.tensor_parallel_size ?? 1) > 1) {
-    return 'Some Mixture-of-Experts models do not support tensor parallelism. If training fails, set Tensor Parallel Size to 1.';
-  }
+  const needs = isNemotronH(spec) ? 'This model needs' : 'Mixture-of-Experts models usually need';
+  if ((p.tensor_parallel_size ?? 1) > 1) return `${needs} Tensor Parallel Size set to 1.`;
   const sizes = validExpertParallelSizes(numExperts, p);
   if (sizes.length === 0) {
-    return `Some Mixture-of-Experts models need expert parallelism on more than one GPU, but no expert parallel size fits ${totalGpus(p)} GPUs for this model's ${numExperts} experts.`;
+    return `${needs} expert parallelism on more than one GPU, but no expert parallel size fits ${totalGpus(p)} GPUs and ${numExperts} experts.`;
   }
   const ep = p.expert_parallel_size;
   if (ep === undefined || !sizes.includes(ep)) {
-    return `Some Mixture-of-Experts models need an expert parallel size of ${sizes.join(' or ')} to train on ${totalGpus(p)} GPUs, while others train only with it unset. Check your model's requirements.`;
+    return `${needs} an expert parallel size of ${sizes.join(' or ')} to train on ${totalGpus(p)} GPUs.`;
   }
   return undefined;
 };
 
-// Only Nemotron-H is confirmed to need expert parallelism. Automodel rejects it for MoE models on
-// its Hugging Face path, such as Mixtral, so filling it in for every MoE model would break those.
 export const suggestedExpertParallelSize = (
   spec: ModelEntity['spec'],
   p: AutomodelParallelismSpec
 ): number | undefined => {
-  if (spec?.checkpoint_model_name !== 'NemotronHForCausalLM') return undefined;
-  const numExperts = spec.moe_config?.num_experts;
-  if (!numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
+  const numExperts = spec?.moe_config?.num_experts;
+  if (!isNemotronH(spec) || !numExperts || numExperts <= 1 || totalGpus(p) <= 1) return undefined;
   const sizes = validExpertParallelSizes(numExperts, p);
   return sizes.includes(p.expert_parallel_size ?? 0) ? undefined : sizes.at(-1);
 };

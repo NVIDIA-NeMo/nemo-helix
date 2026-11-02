@@ -76,7 +76,9 @@ describe('ComputeResourcesSection expert parallel size', () => {
     modelEntity.current = moeModel;
     render(<Harness expertParallelSize={3} />);
     expect(screen.getByText('Expert Parallel Size')).toBeVisible();
-    expect(screen.getByText(/need an expert parallel size of 2 or 4/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/This model needs an expert parallel size of 2 or 4/)
+    ).toBeInTheDocument();
   });
 
   it('keeps the field in Advanced Parallelism for a dense model', () => {
