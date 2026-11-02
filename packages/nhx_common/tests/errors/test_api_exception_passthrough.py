@@ -7,7 +7,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import InternalServerError, PermissionDeniedError
 from nhx.common.entities.client import EntityConflictError, EntityNotFoundError, EntityValidationError
 from nhx.common.errors.sdk_exception_handlers import HANDLED_API_EXCEPTIONS, register_sdk_exception_handlers
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -17,6 +17,20 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
     ("error", "status_code", "detail"),
     [
         (PermissionDeniedError(httpx.Response(403, json={"detail": "Access denied"})), 403, "Access denied"),
+        (
+            InternalServerError(
+                httpx.Response(500, json={"detail": "Private backend details", "code": "private-code"})
+            ),
+            500,
+            "Internal server error",
+        ),
+        (
+            InternalServerError(
+                httpx.Response(503, json={"detail": "Private backend details", "code": "private-code"})
+            ),
+            503,
+            "Internal server error",
+        ),
         (EntityNotFoundError("Workspace not found"), 404, "Workspace not found"),
         (EntityConflictError("Stale version"), 409, "Stale version"),
         (EntityValidationError("Invalid entity"), 422, "Invalid entity"),

@@ -119,5 +119,6 @@ def test_routes_preserve_sdk_errors(route, status_code, monkeypatch):
 
     assert response.status_code == (status_code or 500), response.text
     if status_code is not None:
-        assert response.json() == {"detail": detail}
+        expected_detail = "Internal server error" if status_code >= 500 else detail
+        assert response.json() == {"detail": expected_detail}
     assert any(service.mock_calls for service in service_mocks), "Request must reach a service"

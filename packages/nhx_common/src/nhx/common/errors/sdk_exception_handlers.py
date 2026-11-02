@@ -72,8 +72,8 @@ async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSO
     """Convert NemoClient HTTP exceptions back to HTTP responses.
 
     The typed ``NemoClient`` raises ``NemoHTTPError`` (and subclasses) on
-    non-2xx service-to-service responses; convert them to proper HTTP
-    responses with the same status code and detail.
+    non-2xx service-to-service responses; retain their status code and 4xx
+    details, but redact upstream server-error details from public responses.
     """
     logger.debug(
         "Converting NemoClient exception to HTTP response: %s %s -> %d",
@@ -82,10 +82,13 @@ async def nemo_client_error_handler(request: Request, exc: NemoHTTPError) -> JSO
         exc.status_code,
     )
 
-    content: dict[str, str] = {"detail": exc.detail}
-    # Relay the downstream service's machine-readable reason, if it sent one.
+    # Server errors may contain private backend details. Preserve the status
+    # (including retryable 503s), but do not relay their detail or error code.
+    is_server_error = exc.status_code >= 500
+    content: dict[str, str] = {"detail": "Internal server error" if is_server_error else exc.detail}
+    # Relay the downstream service's machine-readable reason for client errors.
     code = exc.body.get("code") if isinstance(exc.body, dict) else None
-    if isinstance(code, str):
+    if not is_server_error and isinstance(code, str):
         content["code"] = code
     return JSONResponse(
         status_code=exc.status_code,
