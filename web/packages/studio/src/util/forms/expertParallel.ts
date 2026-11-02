@@ -5,7 +5,6 @@ import type { AutomodelParallelismSpec } from '@nemo/sdk/generated/customizer/sc
 
 const totalGpus = (p: AutomodelParallelismSpec) => (p.num_nodes ?? 1) * (p.num_gpus_per_node ?? 1);
 
-/** Expert parallel sizes above 1 that divide both data × context parallel size and the expert count. */
 export const validExpertParallelSizes = (
   numExperts: number,
   p: AutomodelParallelismSpec
@@ -20,7 +19,6 @@ export const validExpertParallelSizes = (
   return sizes;
 };
 
-/** Why multi-GPU training of a Mixture-of-Experts model is likely to fail, or `undefined`. */
 export const expertParallelWarning = (
   numExperts: number | undefined,
   p: AutomodelParallelismSpec
