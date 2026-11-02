@@ -3,13 +3,14 @@
 
 """Docker network selection tests; no Docker daemon or network access."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from backends.docker.docker_helpers import lora_config, sample_config
 from docker.errors import NotFound
 from nemo_deployments_plugin.backends.docker.backend import DockerDeploymentBackend
 from nemo_deployments_plugin.backends.docker.config import DockerExecutorConfig
+from nemo_deployments_plugin.backends.labels import RESTART_POLICY_LABEL
 from nemo_deployments_plugin.entities import DeploymentBackendConfig, DockerDeploymentConfig
 from nemo_deployments_plugin.schema import CreateDeploymentConfigRequest
 from pydantic import ValidationError
@@ -46,6 +47,42 @@ async def test_client_network_rejected_before_container_creation(
     mock_docker_client.containers.create.assert_not_called()
     mock_docker_client.images.pull.assert_not_called()
     mock_docker_client.volumes.create.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("network", ["host", "container:other", "unapproved-network"])
+@pytest.mark.parametrize("restart_policy", ["Never", "OnFailure"])
+async def test_rejected_network_preserves_exited_container_and_identity(
+    docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
+    mock_docker_client: MagicMock,
+    network: str,
+    restart_policy: str,
+) -> None:
+    config = sample_config()
+    config.backend_config = DeploymentBackendConfig(docker=DockerDeploymentConfig(network=network))
+    mock_entities.get.return_value = config
+    existing = MagicMock(status="exited", labels={RESTART_POLICY_LABEL: restart_policy})
+    mock_docker_client.containers.get.return_value = existing
+
+    with (
+        patch.object(docker_backend, "_container_matches_deployment", return_value=True),
+        patch.object(docker_backend, "_revoke_workload_delegations_for_deployment", AsyncMock()) as revoke,
+        patch.object(docker_backend, "_cleanup_workload_identity_volumes", AsyncMock()) as cleanup,
+    ):
+        update = await docker_backend.create_deployment(
+            workspace="default", name="srv", config_name="cfg1", labels={}, backend_config={}
+        )
+
+    assert update.status == "FAILED"
+    assert "network" in update.status_message.lower()
+    existing.remove.assert_not_called()
+    existing.logs.assert_not_called()
+    revoke.assert_not_awaited()
+    cleanup.assert_not_awaited()
+    mock_docker_client.containers.create.assert_not_called()
+    mock_docker_client.volumes.create.assert_not_called()
+    mock_docker_client.volumes.list.assert_not_called()
 
 
 @pytest.mark.parametrize("network", ["host", "HOST", "container:other", "", " bridge "])
