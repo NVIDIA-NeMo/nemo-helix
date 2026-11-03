@@ -69,7 +69,7 @@ def _parse_operand(value: object) -> int | float:
     try:
         text = str(value)
     except ValueError:
-        if isinstance(value, int) and not isinstance(value, bool):
+        if isinstance(value, int):
             return math.inf if value > 0 else -math.inf
         raise
     return _parse_number_answer(text)
