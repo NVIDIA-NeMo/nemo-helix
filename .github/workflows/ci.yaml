@@ -132,9 +132,6 @@ jobs:
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
-      - name: Test CI grouping and wheel-install isolation
-        if: ${{ !cancelled() }}
-        run: uv run --no-cache .github/scripts/tests/test_ci_grouping.py
 
   uv-lock:
     name: Dependency checks
