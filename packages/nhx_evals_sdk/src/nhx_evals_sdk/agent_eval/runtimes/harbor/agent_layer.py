@@ -8,9 +8,10 @@ agent can start from it: Harbor's installed agents, and :class:`FabricInstalledA
 it. Local Docker runs and Kubernetes runs build their layers differently but key them the same way:
 :meth:`AgentInstall.layer_key` over the environment image and :func:`agent_install`'s description of the install.
 
-Only what changes the installed files is in the key: the agent, its version and install options, the proxy and
-package-index settings its install runs with, and the Harbor version whose install code runs. The model, prompts,
-turn limits and secrets aren't, so trials that differ only in those share a layer.
+Only what changes the installed files is in the key: the agent, its version and install options (and where a
+Fabric agent installs to), the proxy and package-index settings its install runs with, and the Harbor version whose
+install code runs. The model, prompts, turn limits and secrets aren't, so trials that differ only in those share a
+layer.
 """
 
 from __future__ import annotations
@@ -160,4 +161,8 @@ def _fabric_install(
         str(agent_kwargs.get("fabric_python_version") or DEFAULT_FABRIC_PYTHON_VERSION),
         str(agent_kwargs.get("fabric_uv_version") or DEFAULT_UV_VERSION),
     )
-    return AgentInstall(agent="fabric", inputs={"install": spec, **_env_inputs(env)}, harbor_version=harbor_version)
+    inputs = {"install": spec, **_env_inputs(env)}
+    # Setup looks for the install where this run's agent puts it, so a layer installed elsewhere is no use to it.
+    if venv := agent_kwargs.get("fabric_venv_path"):
+        inputs["venv"] = str(venv)
+    return AgentInstall(agent="fabric", inputs=inputs, harbor_version=harbor_version)

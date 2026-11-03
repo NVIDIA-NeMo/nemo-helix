@@ -87,6 +87,7 @@ def test_a_registered_fabric_agent_is_keyed_by_its_install_not_its_config() -> N
         {"fabric_package": "nemo-fabric[deepagents,relay]==0.5.0"},
         {"fabric_python_version": "3.13"},
         {"fabric_uv_version": "0.13.0"},
+        {"fabric_venv_path": "/opt/fabric-b"},
     ):
         assert _key(import_path=FABRIC_INSTALLED_AGENT, **{**_FABRIC, **change}) != base
 
