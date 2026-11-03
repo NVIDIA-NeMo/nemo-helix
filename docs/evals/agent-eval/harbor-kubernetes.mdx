@@ -349,8 +349,8 @@ With `--spec-file`, the sandbox flags are rejected. Set them in `execution`:
 ```
 
 - `max_concurrent_task_jobs`: the most task Jobs of this run running at once. Omit it for the deployment's per-run cap (20 by default); a value above the cap has no effect.
-- `timeout_seconds`: the run's time budget, counted from its first task Job's start. Omit it for the deployment's default (24 hours).
-- Before its first task starts, a run waits at most the deployment's queue timeout (48 hours by default), then expires.
+- `timeout_seconds`: the run's time budget, counted from when its first task gets a slot, so scheduling and starting task Jobs count against it. Omit it for the deployment's default (24 hours).
+- Until its first task gets a slot, a run waits at most the deployment's queue timeout (48 hours by default), then expires.
 - The trials within one task Job run one after another.
 
 ## Intake integration
