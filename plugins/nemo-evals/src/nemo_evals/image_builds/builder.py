@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
@@ -16,7 +17,7 @@ from filesets import parse_fileset_ref
 from nemo_builder_plugin.client import AsyncBuilderClient
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import ImageIdentityError, normalize_reference
-from nemo_builder_plugin.schema import BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import BuildMount, BuildSet, BuildSpec, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_builder_plugin.upstream import UpstreamError, UpstreamRegistry
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
@@ -49,6 +50,7 @@ class ImageBuilder(Protocol):
         source: FileSetSource | ImageSource,
         dockerfile: str | None,
         platform: str | None,
+        mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
         """Submit (or rejoin) one build, or copy, of one image; for the deployment's platform when ``platform`` is None."""
         ...
@@ -129,6 +131,7 @@ async def adopt_or_build(
     name: str,
     source: FileSetSource | ImageSource,
     dockerfile: str | None,
+    mounts: Sequence[BuildMount] = (),
     platform: str | None = None,
     built_after: datetime | None = None,
 ) -> ContainerImage:
@@ -145,7 +148,7 @@ async def adopt_or_build(
             return newest
         try:
             submitted = await builder.submit(
-                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform, mounts=mounts
             )
         except ConflictError:
             logger.info("Another request submitted %s-%d first; using its build", name, revision)
@@ -225,13 +228,16 @@ class HttpImageBuilder:
         source: FileSetSource | ImageSource,
         dockerfile: str | None,
         platform: str | None,
+        mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
-        # Only what is set: the client serializes with `exclude_unset`, and a copy takes no dockerfile.
-        options: dict[str, str] = {}
+        # Only what is set: the client serializes with `exclude_unset`, and a copy takes no dockerfile or mounts.
+        options: dict[str, object] = {}
         if dockerfile is not None:
             options["dockerfile"] = dockerfile
         if platform is not None:
             options["platform"] = platform
+        if mounts:
+            options["mounts"] = list(mounts)
         spec = BuildSpec.model_validate({"source": source, **options})
         build_set = BuildSet(name=name, revision=revision, build_specs=[spec])
         return (await self._builder.submit_build(workspace=self._workspace, body=build_set)).data()

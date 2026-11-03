@@ -5,9 +5,11 @@
 
 Builder's builds hold no registry credential, so a layer can't start ``FROM`` the environment image the platform
 built: it builds the environment again, from the task's own Dockerfile (a prebuilt image is public, so it starts
-``FROM`` that), and appends one step to the final stage. That step mounts the agent installer (a standalone Python
-with Harbor) from the build context, so none of it lands in a layer, and runs the agent's own setup as root; the
-setup switches to the task's agent user for what it installs as the agent. The final stage's ``USER`` is restored.
+``FROM`` that), and appends one step to the final stage. That step runs the agent's own setup as root, with the
+agent installer (a standalone Python with Harbor) and the agent to install read from Builder mounts. They are outside
+the build context, so the task's ``COPY . .`` doesn't copy them and its ``.dockerignore`` doesn't hide them, and the
+image holds none of them. The setup switches to the task's agent user for what it installs as the agent. The final
+stage's ``USER`` is restored.
 """
 
 from __future__ import annotations
@@ -15,10 +17,11 @@ from __future__ import annotations
 import json
 import re
 
-#: Where the build context holds the installer, and where the step mounts it: the venv's interpreter path is absolute.
+#: Where the mounts' archive holds the installer, and where the build mounts it: the venv's interpreter path is
+#: absolute.
 INSTALLER_DIR = "nhx-agent-installer"
 INSTALLER_MOUNT = "/opt/nhx-agent-installer"
-#: Where the build context holds the agent to install, and where the step mounts it.
+#: Where the mounts' archive holds the agent to install, and where the build mounts it.
 AGENT_DIR = "nhx-agent-layer"
 AGENT_MOUNT = "/opt/nhx-agent-layer"
 AGENT_FILE = "agent.json"
@@ -37,9 +40,7 @@ def layer_dockerfile(*, environment_dockerfile: str | None, base_image: str | No
     base = environment_dockerfile if environment_dockerfile is not None else f"FROM {base_image}\n"
     user = final_stage_user(base)
     install = (
-        f"RUN --mount=type=bind,source={INSTALLER_DIR},target={INSTALLER_MOUNT} "
-        f"--mount=type=bind,source={AGENT_DIR},target={AGENT_MOUNT} "
-        f"{json.dumps([f'{INSTALLER_MOUNT}/venv/bin/python', '-m', INSTALL_MODULE, f'{AGENT_MOUNT}/{AGENT_FILE}'])}"
+        f"RUN {json.dumps([f'{INSTALLER_MOUNT}/venv/bin/python', '-m', INSTALL_MODULE, f'{AGENT_MOUNT}/{AGENT_FILE}'])}"
     )
     lines = [
         base.rstrip("\n"),

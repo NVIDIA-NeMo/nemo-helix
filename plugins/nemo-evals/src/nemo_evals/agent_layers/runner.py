@@ -3,9 +3,9 @@
 
 """The agent-layer Job's work: make the layer's build context, have Builder build it, and record the result.
 
-The context is the task's environment context (or nothing, for a prebuilt image), the generated Dockerfile, the agent
-to install, and the agent installer the Job's first step put on job storage. It goes up as a tar archive in a
-fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
+The context is the task's environment context (or nothing, for a prebuilt image) and the generated Dockerfile. The
+agent to install, and the agent installer the Job's first step put on job storage, are the build's mounts, apart
+from the context. Each goes up as a tar archive in a fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
 the agent install, the installer and the platform), so tasks with the same environment share one build.
 """
 
@@ -24,10 +24,11 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from nemo_builder_plugin.identity import normalize_reference
-from nemo_builder_plugin.schema import FileSetSource
+from nemo_builder_plugin.schema import BuildMount, FileSetSource
 from nemo_evals.agent_layers.dockerfile import (
     AGENT_DIR,
     AGENT_FILE,
+    AGENT_MOUNT,
     INSTALLER_DIR,
     INSTALLER_MOUNT,
     LAYER_DOCKERFILE,
@@ -52,6 +53,9 @@ DEFAULT_POLL_INTERVAL_SECONDS = 10.0
 DEFAULT_TIMEOUT_SECONDS = 60 * 60
 CONTEXT_ARCHIVE = "context.tar.gz"
 CONTEXT_ROOT = "context"
+#: The installer and the agent to install, which the build mounts rather than holding them in its context.
+MOUNTS_ARCHIVE = "mounts.tar.gz"
+MOUNTS_ROOT = "mounts"
 _BUILDER_NAME_PREFIX = "harbor-agent-"
 
 
@@ -152,16 +156,18 @@ async def _submit(
                 layer_dockerfile(environment_dockerfile=environment_dockerfile, base_image=base_image),
                 encoding="utf-8",
             )
-            (context / AGENT_DIR).mkdir()
+            mounted = Path(scratch) / MOUNTS_ROOT
+            (mounted / AGENT_DIR).mkdir(parents=True)
             agent = {**layer.agent.model_dump(mode="json"), "user": user}
-            (context / AGENT_DIR / AGENT_FILE).write_text(json.dumps(agent), encoding="utf-8")
-            await asyncio.to_thread(_unpack, installer, context / INSTALLER_DIR)
-            source = await _upload_context(files, spec.workspace, name, Path(scratch))
+            (mounted / AGENT_DIR / AGENT_FILE).write_text(json.dumps(agent), encoding="utf-8")
+            await asyncio.to_thread(_unpack, installer, mounted / INSTALLER_DIR)
+            source, mounts = await _upload_context(files, spec.workspace, name, Path(scratch))
             built = await adopt_or_build(
                 builder,
                 name=name,
                 source=source,
                 dockerfile=LAYER_DOCKERFILE,
+                mounts=mounts,
                 platform=main.platform,
                 built_after=layer.built_after,
             )
@@ -191,7 +197,8 @@ def _base_image(image: str, digest: str | None) -> str:
 def layer_builder_name(*, environment: str, agent_key: str, user: str | int | None, platform: str | None) -> str:
     """Builder build-set name for a layer: keyed by the environment it builds on, the agent install, the task's agent
     user (installs write into that user's home) and the platform."""
-    document = {"v": 1, "environment": environment, "agent": agent_key, "user": user, "platform": platform}
+    # v2: the installer and agent are mounted, not in the context, where a task's `COPY . .` copied them.
+    document = {"v": 2, "environment": environment, "agent": agent_key, "user": user, "platform": platform}
     key = json.dumps(document, sort_keys=True)
     return f"{_BUILDER_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
 
@@ -247,20 +254,30 @@ def relative_link(member: str, link: str) -> str:
     return posixpath.relpath(str(target.relative_to(mount)), str(PurePosixPath(member).parent))
 
 
-async def _upload_context(files: AsyncFilesClient, workspace: str, name: str, scratch: Path) -> FileSetSource:
-    """Upload the context as a tar archive in a fileset named for the build; returns Builder's source for it."""
-    archive = scratch / CONTEXT_ARCHIVE
-    await asyncio.to_thread(_pack, scratch / CONTEXT_ROOT, archive)
+async def _upload_context(
+    files: AsyncFilesClient, workspace: str, name: str, scratch: Path
+) -> tuple[FileSetSource, list[BuildMount]]:
+    """Upload the context and the mounts, each a tar archive, to a fileset named for the build; returns Builder's
+    source and mounts for them."""
     await files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=name), exist_ok=True)
-    with archive.open("rb") as stream:
-        content = stream.read()
-    await files.upload_file(workspace=workspace, name=name, path=CONTEXT_ARCHIVE, content=content)
-    return FileSetSource(fileset=f"{workspace}/{name}", archive=CONTEXT_ARCHIVE, context_path=CONTEXT_ROOT)
+    for root, archive in ((CONTEXT_ROOT, CONTEXT_ARCHIVE), (MOUNTS_ROOT, MOUNTS_ARCHIVE)):
+        await asyncio.to_thread(_pack, scratch / root, scratch / archive, root)
+        content = await asyncio.to_thread((scratch / archive).read_bytes)
+        await files.upload_file(workspace=workspace, name=name, path=archive, content=content)
+    fileset = f"{workspace}/{name}"
+    mounts = [
+        BuildMount(
+            source=FileSetSource(fileset=fileset, archive=MOUNTS_ARCHIVE, context_path=f"{MOUNTS_ROOT}/{directory}"),
+            target=target,
+        )
+        for directory, target in ((INSTALLER_DIR, INSTALLER_MOUNT), (AGENT_DIR, AGENT_MOUNT))
+    ]
+    return FileSetSource(fileset=fileset, archive=CONTEXT_ARCHIVE, context_path=CONTEXT_ROOT), mounts
 
 
-def _pack(context: Path, archive: Path) -> None:
+def _pack(directory: Path, archive: Path, arcname: str) -> None:
     with tarfile.open(archive, "w:gz") as tar:
-        tar.add(context, arcname=CONTEXT_ROOT)
+        tar.add(directory, arcname=arcname)
 
 
 async def _fail(entities: EntityClient, layer: AgentLayerEntity, error: str) -> AgentLayerEntity:

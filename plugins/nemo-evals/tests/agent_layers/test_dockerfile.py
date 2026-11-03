@@ -39,11 +39,8 @@ def test_the_install_runs_as_root_in_the_final_stage_and_restores_its_user() -> 
     assert layered.startswith(original.rstrip("\n"))
     tail = layered.splitlines()[-3:]
     assert tail[0] == "USER root"
-    assert tail[1].startswith(
-        f"RUN --mount=type=bind,source=nhx-agent-installer,target={INSTALLER_MOUNT} "
-        f"--mount=type=bind,source=nhx-agent-layer,target={AGENT_MOUNT} "
-    )
-    command = json.loads(tail[1].split(" ", 3)[3])
+    assert tail[1].startswith("RUN [")
+    command = json.loads(tail[1].removeprefix("RUN "))
     assert command == [f"{INSTALLER_MOUNT}/venv/bin/python", "-m", INSTALL_MODULE, f"{AGENT_MOUNT}/agent.json"]
     assert tail[2] == "USER agent"
 
@@ -52,7 +49,7 @@ def test_a_prebuilt_environment_starts_from_its_image() -> None:
     layered = layer_dockerfile(environment_dockerfile=None, base_image="docker.io/library/python:3.12")
 
     assert layered.splitlines()[0] == "FROM docker.io/library/python:3.12"
-    assert layered.splitlines()[-1].startswith("RUN --mount=")  # no USER to restore
+    assert layered.splitlines()[-1].startswith("RUN [")  # no USER to restore
 
 
 def test_exactly_one_base_is_given() -> None:

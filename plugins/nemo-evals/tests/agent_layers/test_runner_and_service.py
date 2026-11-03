@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
-from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_evals.agent_layers.dockerfile import AGENT_MOUNT, INSTALLER_MOUNT
 from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
 from nemo_evals.agent_layers.runner import (
     AgentLayerBuildSpec,
@@ -83,17 +84,21 @@ def _ready(name: str, created_at: datetime | None = None) -> ContainerImage:
 
 
 class _Builder:
-    """Builder whose builds are ready once submitted; records each submit's source and Dockerfile."""
+    """Builder whose builds are ready once submitted; records each submit's source, Dockerfile and mounts."""
 
     def __init__(self) -> None:
         self.rows: dict[str, ContainerImage] = {}
         self.submits: list[tuple[str, FileSetSource | ImageSource, str | None]] = []
+        self.mounts: list[list[BuildMount]] = []
 
     async def get_image(self, name: str) -> ContainerImage | None:
         return self.rows.get(name)
 
-    async def submit(self, *, name: str, revision: int, source: Any, dockerfile: str | None, platform: str | None):
+    async def submit(
+        self, *, name: str, revision: int, source: Any, dockerfile: str | None, platform: str | None, mounts: Any = ()
+    ):
         self.submits.append((name, source, dockerfile))
+        self.mounts.append(list(mounts))
         self.rows[f"{name}-{revision}"] = _ready(f"{name}-{revision}")
         return SubmitBuildResponse(job=f"builder-{name}-{revision}", images=[self.rows[f"{name}-{revision}"]])
 
@@ -213,19 +218,26 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
     assert name.startswith("harbor-agent-") and dockerfile == "Dockerfile.nhx-agent-layer"
     assert isinstance(source, FileSetSource) and source.fileset == f"default/{name}"
     context = _context(files.uploads[(name, "context.tar.gz")])
-    # The environment's own files, the generated Dockerfile, the agent and the installer; nothing else of the task.
-    assert context["context/setup.sh"] == b"echo hi\n"
+    # The environment's own files and the generated Dockerfile; nothing else of the task, and nothing of the install,
+    # which a task's `COPY . .` would copy into its image.
+    assert set(context) == {"context/setup.sh", "context/Dockerfile", "context/Dockerfile.nhx-agent-layer"}
     assert context["context/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
-    agent = json.loads(context["context/nhx-agent-layer/agent.json"])
+    # The agent and the installer are the build's mounts, from an archive of their own.
+    (mounts,) = builder.mounts
+    assert [(m.source.archive, m.source.context_path, m.target) for m in mounts] == [
+        ("mounts.tar.gz", "mounts/nhx-agent-installer", INSTALLER_MOUNT),
+        ("mounts.tar.gz", "mounts/nhx-agent-layer", AGENT_MOUNT),
+    ]
+    mounted = _context(files.uploads[(name, "mounts.tar.gz")])
+    agent = json.loads(mounted["mounts/nhx-agent-layer/agent.json"])
     assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "env": {}, "user": "agent"}
-    assert "context/nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3" in context
+    assert "mounts/nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3" in mounted
     # Builder refuses a link to an absolute path: the installer's links are relative, to the same files.
-    links = _links(files.uploads[(name, "context.tar.gz")])
+    links = _links(files.uploads[(name, "mounts.tar.gz")])
     assert links == {
-        "context/nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu": "cpython-3.12.15-linux-x86_64-gnu",
-        "context/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
+        "mounts/nhx-agent-installer/python/cpython-3.12-linux-x86_64-gnu": "cpython-3.12.15-linux-x86_64-gnu",
+        "mounts/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
     }
-    assert not any("instruction.md" in path or "task.toml" in path for path in context)
 
 
 async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
@@ -280,7 +292,7 @@ async def test_tasks_whose_environments_hold_the_same_files_share_one_build(
 
     assert layer.status == "ready"
     assert len(builder.submits) == 1
-    assert files.upload_calls == 1  # the second task found the build and uploaded no context
+    assert files.upload_calls == 2  # the first task's context and mounts; the second task found the build
 
 
 async def test_a_compose_task_gets_no_layer(entity_store, store_task, monkeypatch, tmp_path) -> None:
