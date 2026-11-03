@@ -55,6 +55,7 @@ async def _seed_run(client: AsyncNemoClient, workspace: str) -> None:
             plan_digest="b" * 64,
             request_digest="c" * 64,
             accepted_at=now,
+            timeout_seconds=3600,
             execution_deadline_at=now + timedelta(hours=1),
             finalization_deadline_at=now + timedelta(hours=2),
         )
