@@ -295,9 +295,14 @@ class SshRemote:
         return f"ssh://{user}{self.host}{port}/{self.path}"
 
     @property
+    def authority(self) -> str:
+        """``host[:port]``, the host as shown to a user."""
+        return f"{self.host}:{self.port}" if self.port else self.host
+
+    @property
     def host_url(self) -> str:
         """The ``ssh://host[:port]`` authority checked against the external-host allowlist."""
-        return f"ssh://{self.host}:{self.port}" if self.port else f"ssh://{self.host}"
+        return f"ssh://{self.authority}"
 
 
 def parse_ssh_remote(url: str) -> SshRemote:

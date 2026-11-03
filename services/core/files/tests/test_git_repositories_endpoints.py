@@ -3,13 +3,21 @@
 
 """Tests for the git repository lookup endpoints."""
 
+from collections.abc import Iterator
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from nemo_helix_plugin.files.types import FindGitRepositoryFilesRequest, ScanSshHostKeysRequest, SshHostKey
 from nhx.common.api.common import SecretRef
-from nhx.core.files.api.v2.git_repositories.endpoints import find_git_repository_files, scan_ssh_host_keys
+from nhx.common.auth import get_auth_client
+from nhx.common.service.dependencies import get_nemo_client
+from nhx.core.files.api.v2.git_repositories.endpoints import (
+    find_git_repository_files,
+    router,
+    scan_ssh_host_keys,
+)
 from nhx.core.files.app.backends.base import FileInfo
 from nhx.core.files.app.backends.git import (
     GitAccessError,
@@ -26,12 +34,11 @@ KEY = SshHostKey(key_type="ssh-ed25519", fingerprint="SHA256:abc", known_hosts_l
 
 @pytest.fixture
 def config(monkeypatch: pytest.MonkeyPatch) -> FilesConfig:
-    # The environment outranks constructor arguments in service configs.
     monkeypatch.delenv("NHX_FILES_ALLOWED_EXTERNAL_HOSTS", raising=False)
     return FilesConfig(allowed_external_hosts="ssh://gitlab.example.com:2222")
 
 
-SCAN = "nhx.core.files.api.v2.git_repositories.endpoints.scan_host_keys"
+SCAN = "nhx.core.files.app.backends.git.scan_host_keys"
 
 
 async def test_returns_keys_for_an_allowed_host(config):
@@ -101,7 +108,7 @@ async def _find(files: list[FileInfo] | None = None, error: Exception | None = N
     fake = type("Fake", (_FakeGit,), {"files": files or [], "error": error})
     with (
         patch(f"{MODULE}.resolve_storage_secrets_for_user", AsyncMock(return_value={"ssh_key": "k"})),
-        patch(f"{MODULE}.GitStorageImpl", fake),
+        patch("nhx.core.files.app.backends.git.GitStorageImpl", fake),
     ):
         return await find_git_repository_files(
             "default",
@@ -148,6 +155,48 @@ def test_find_files_takes_a_bare_file_name(file_name):
 async def test_find_files_leaves_a_server_fault_to_the_server_error_handler():
     with pytest.raises(GitServerFault):
         await _find(error=GitServerFault("git is not installed in the files service"))
+
+
+@pytest.fixture
+def http(config: FilesConfig) -> Iterator[TestClient]:
+    app = FastAPI()
+    app.state.service_configs = {FilesConfig: config}
+    app.dependency_overrides[get_nemo_client] = lambda: AsyncMock()
+    app.dependency_overrides[get_auth_client] = lambda: AsyncMock()
+    app.include_router(router)
+    with TestClient(app) as client:
+        yield client
+
+
+def test_scan_is_routed_under_the_workspace(http):
+    with patch(SCAN, AsyncMock(return_value=[KEY])):
+        response = http.post(
+            "/v2/workspaces/default/ssh-host-keys/scan", json={"url": "ssh://gitlab.example.com:2222/org/repo.git"}
+        )
+    assert response.status_code == 200
+    assert response.json()["keys"][0]["fingerprint"] == KEY.fingerprint
+
+
+def test_find_files_is_routed_under_the_workspace(http):
+    fake = type("Fake", (_FakeGit,), {"files": [FileInfo(path="a/agent.yaml", size=1)]})
+    with (
+        patch(f"{MODULE}.resolve_storage_secrets_for_user", AsyncMock(return_value={"ssh_key": "k"})),
+        patch("nhx.core.files.app.backends.git.GitStorageImpl", fake),
+    ):
+        response = http.post(
+            "/v2/workspaces/default/git-repositories/find-files",
+            json={
+                "storage": {
+                    "type": "git",
+                    "url": STORAGE.url,
+                    "ssh_key_secret": "key",
+                    "known_hosts": STORAGE.known_hosts,
+                },
+                "file_name": "agent.yaml",
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["paths"] == ["a/agent.yaml"]
 
 
 async def test_scan_leaves_a_server_fault_to_the_server_error_handler(config):

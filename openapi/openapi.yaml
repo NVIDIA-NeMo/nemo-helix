@@ -3523,9 +3523,10 @@ paths:
 
         Runs the same checks as creating a fileset with this storage, without creating
 
-        one. The commit it fetches is cached, so a fileset created from it afterwards
+        one. A fileset created afterwards from the same branch or tag resolves it
+        again,
 
-        does not fetch again.'
+        so if the branch has moved since, its files may differ from the paths returned.'
       operationId: find_git_repository_files_apis_files_v2_workspaces__workspace__git_repositories_find_files_post
       parameters:
       - name: workspace
@@ -3580,7 +3581,10 @@ paths:
         fingerprints.
 
 
-        The caller confirms a fingerprint before using the keys as a git fileset''s
+        Each key type is fetched over its own unauthenticated connection, so confirm
+        one
+
+        key''s fingerprint and use only that key''s `known_hosts_line` as a git fileset''s
 
         `known_hosts`. Only hosts in the allowed external hosts list are scanned.'
       operationId: scan_ssh_host_keys_apis_files_v2_workspaces__workspace__ssh_host_keys_scan_post
@@ -23577,7 +23581,8 @@ components:
         known_hosts_line:
           type: string
           title: Known Hosts Line
-          description: The key as a known_hosts line, ready for `known_hosts`
+          description: The key as a known_hosts line. Store only the line of the key
+            whose fingerprint was confirmed
       type: object
       required:
       - key_type

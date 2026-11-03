@@ -438,6 +438,59 @@ class TestHostKeyScan:
         with pytest.raises(GitServerFault, match="ssh-keyscan is not installed"):
             await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
 
+    @staticmethod
+    def _fake_keyscan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+        script = tmp_path / "ssh-keyscan"
+        script.write_text(f"#!/bin/sh\n{body}\n")
+        script.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
+
+    async def test_scan_returns_keys_from_ssh_keyscan(self, tmp_path, monkeypatch):
+        self._fake_keyscan(
+            tmp_path, monkeypatch, f"echo '# host:22 SSH-2.0-x' >&2; echo 'host ssh-ed25519 {GITLAB_KEY}'"
+        )
+        keys = await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+        assert [key.key_type for key in keys] == ["ssh-ed25519"]
+
+    async def test_scan_reports_why_ssh_keyscan_found_no_keys(self, tmp_path, monkeypatch):
+        self._fake_keyscan(
+            tmp_path, monkeypatch, "echo 'getaddrinfo nosuchhost: nodename nor servname provided' >&2; exit 1"
+        )
+        with pytest.raises(GitUnavailableError, match="getaddrinfo nosuchhost"):
+            await scan_host_keys(parse_ssh_remote("git@nosuchhost:org/repo.git"))
+
+    async def test_scan_with_no_output_reports_a_timeout(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "echo '# host:22 SSH-2.0-x' >&2")
+        with pytest.raises(GitUnavailableError, match="before the scan timed out"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+
+    async def test_scan_kills_a_hung_ssh_keyscan(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "exec sleep 30")
+        monkeypatch.setattr(git_backend.asyncio, "wait_for", _wait_for_with_timeout(0.2))
+        with pytest.raises(GitUnavailableError, match="Timed out scanning host keys of host"):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+
+    async def test_cancelling_a_scan_after_ssh_keyscan_exits_still_cancels(self, tmp_path, monkeypatch):
+        self._fake_keyscan(tmp_path, monkeypatch, "exit 0")
+        real_communicate = asyncio.subprocess.Process.communicate
+
+        async def exit_then_cancel(self, *args, **kwargs):
+            await real_communicate(self, *args, **kwargs)
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(asyncio.subprocess.Process, "communicate", exit_then_cancel)
+        with pytest.raises(asyncio.CancelledError):
+            await scan_host_keys(parse_ssh_remote("git@host:org/repo.git"))
+
+
+def _wait_for_with_timeout(seconds: float):
+    real_wait_for = asyncio.wait_for
+
+    async def wait_for(awaitable, timeout):
+        return await real_wait_for(awaitable, seconds)
+
+    return wait_for
+
 
 class TestProcessGroups:
     async def test_stopping_a_group_lets_it_clean_up_first(self, tmp_path, monkeypatch):
