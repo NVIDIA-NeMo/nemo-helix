@@ -4,7 +4,8 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nhx.common.api.common import Page
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -68,6 +69,8 @@ async def list_prompts(
         )
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
@@ -102,6 +105,8 @@ async def create_prompt(
             )
         logger.warning(f"Prompt creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt data")
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Failed to create prompt")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")
@@ -110,6 +115,7 @@ async def create_prompt(
 @router.get(
     "/v2/workspaces/{workspace}/prompts/{name}",
     summary="Get Prompt",
+    responses={404: {"model": ErrorResponse, "description": "Prompt not found"}},
     response_description="Return prompt details",
     status_code=status.HTTP_200_OK,
 )
@@ -130,6 +136,8 @@ async def get_prompt(
             )
         return prompt
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception(f"Failed to get prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
@@ -162,6 +170,8 @@ async def update_prompt(
         logger.warning(f"Entity store validation error during prompt update: {e}")
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception("Failed to update prompt")
@@ -196,6 +206,8 @@ async def delete_prompt(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception(f"Failed to delete prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error")

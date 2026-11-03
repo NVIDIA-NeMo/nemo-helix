@@ -105,14 +105,14 @@ print(job["name"], job["status"])
 | Field | Required | Description |
 | --- | --- | --- |
 | `agent` | Yes | An Agent entity name, a `workspace/name` ref, or an [inline agent definition](#inline-agents). |
-| `input` | Yes | The prompt handed to the agent. |
-| `context` | No | [Per-run parameters](#run-context) handed to the agent alongside the prompt. |
+| `input` | Yes, unless the agent declares a [`default_input`](#declare-how-an-agent-runs) | The prompt handed to the agent. |
+| `context` | No | [Per-run parameters](#run-context) handed to the agent alongside the prompt. Must match the agent's [`context_schema`](#declare-how-an-agent-runs) when it declares one. |
 | `environment` | No | A `workspace/name` ref to a stored `AgentEnvironment`, or an inline environment. Supplies secrets, environment variables, tool settings, and compute. |
 | `workdir` | No | The [working directory](#working-directories) the agent starts from. |
 | `timeout_seconds` | No | Maximum time to wait for a result. Defaults to 3600 (one hour). |
 | `auto_telemetry` | No | Automatically configures supported ATIF telemetry to export to Intake. Defaults to `true`. |
 | `image` | No | The [container image](#execution-image) to run the agent in. Defaults to the platform's task image. |
-| `post_run_action` | No | A [post-run action](#post-run-actions) contributed by an installed plugin. Defaults to `agents.noop`. |
+| `post_run_action` | Depends | A [post-run action](#post-run-actions) contributed by an installed plugin. Required only when the agent declares several actions and not `agents.noop`. |
 
 The CLI generates one flag per spec field (`--agent`, `--input`,
 `--environment`, `--workdir.base-workdir`, `--timeout-seconds`,
@@ -379,6 +379,95 @@ The agent receives:
 `context` is stored on the job spec in plaintext. Use it for parameters, not
 secrets; bind secrets through an [environment](#environments-secrets-and-compute).
 
+When the agent declares a [`context_schema`](#declare-how-an-agent-runs), the
+job's `context` is validated against it before the platform adds `nemo_helix`.
+A context that does not match fails the create request.
+
+<a id="declare-how-an-agent-runs"></a>
+
+## Declare How an Agent Runs
+
+An Agent entity can declare the runs it accepts, so a caller learns about a
+mistake when it creates the job rather than when the agent misreads it. Set
+these fields under `helix_registration` in the `agent.yaml` you pass to
+`nemo agents register`, or as top-level fields of the register request when you
+use the API:
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `context_schema` | None (any context) | A JSON Schema the job's `context` must match. Also accepted on an [inline agent](#inline-agents). |
+| `default_input` | None | The prompt a job uses when it omits `input`. |
+| `post_run_actions` | `["agents.noop"]` | The [post-run action](#post-run-actions) kinds a job may choose. Must name at least one installed kind. |
+
+<Tabs>
+<Tab title="agent.yaml">
+
+```yaml
+config_format: nemo-agents-spec-v1
+name: analyst
+helix_registration:
+  context_schema:
+    type: object
+    properties:
+      since: {type: string, format: date-time}
+    required: [since]
+    additionalProperties: false
+  default_input: Analyze recent runs.
+  post_run_actions: [insights.analysis]
+# ...harnesses, models, and the rest of the agent config
+```
+
+</Tab>
+<Tab title="API">
+
+```json
+{
+  "name": "analyst",
+  "config": {"...": "..."},
+  "context_schema": {
+    "type": "object",
+    "properties": {"since": {"type": "string", "format": "date-time"}},
+    "required": ["since"],
+    "additionalProperties": false
+  },
+  "default_input": "Analyze recent runs.",
+  "post_run_actions": ["insights.analysis"]
+}
+```
+
+A `helix_registration` block inside the request's `config` is rejected: over the API,
+these are fields of the agent, not of its config.
+
+</Tab>
+</Tabs>
+
+With this agent, a job can omit `input`, must pass `context.since` as an
+RFC 3339 timestamp, and is rejected if it misspells a key such as `sinse`.
+
+Registration checks that `context_schema` is a valid JSON Schema (Draft 2020-12
+unless it names another dialect in `$schema`) and that every kind in
+`post_run_actions` is installed. A `context_schema` cannot use references
+(`$ref`, `$dynamicRef`, or `$recursiveRef`); write each property's constraints
+in place.
+
+A job that omits `post_run_action` gets one from the agent's declaration:
+
+| Declared `post_run_actions` | Job omits `post_run_action` | Job names a kind |
+| --- | --- | --- |
+| Includes `agents.noop` | Runs `agents.noop` | Must be a declared kind |
+| Exactly one kind | Runs that kind with an empty config | Must be that kind |
+| Several kinds, not `agents.noop` | Rejected: the job must choose | Must be a declared kind |
+| Inline agent (no declaration) | Runs `agents.noop` | Any installed kind |
+
+<Note>
+An Agent registered without `post_run_actions`, including one registered before
+the field existed, allows only `agents.noop`. A job for that agent that names
+any other action is rejected. Add the actions its jobs need under
+`helix_registration.post_run_actions` in its `agent.yaml`, then run
+`nemo agents delete` and `nemo agents register` again. For a deployed agent,
+`nemo agents redeploy` does both and redeploys it.
+</Note>
+
 <a id="post-run-actions"></a>
 
 ## Post-Run Actions
@@ -398,8 +487,11 @@ it found.
   `fabric_run_result`.
 
 An action is named by `post_run_action.kind` and configured by
-`post_run_action.config`. Omitting `post_run_action` runs `agents.noop`, which
-does nothing. Only kinds installed on the platform are accepted, and the config
+`post_run_action.config`. An Agent entity limits the kinds its jobs may choose
+to its [`post_run_actions`](#declare-how-an-agent-runs), and decides what an
+omitted `post_run_action` means. An inline agent declares nothing, so its job
+may name any installed kind, and omitting `post_run_action` runs `agents.noop`,
+which does nothing. Only kinds installed on the platform are accepted, and the config
 is validated against the action's own schema; an unknown kind or a malformed
 config fails the create request rather than the run. The plugin that provides
 the action must also be installed in the job's [execution image](#execution-image);

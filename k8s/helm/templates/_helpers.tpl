@@ -179,6 +179,18 @@ Effective platform API URL for pods and managed workloads.
 {{- end -}}
 
 {{/*
+Client-facing platform origin: platform.advertised_base_url when set, otherwise
+platform.base_url. Pods whose NHX_BASE_URL differs (the API pod under embedded
+PDP) must advertise this value so every pod derives the same public URLs and
+workload token issuer.
+*/}}
+{{- define "nemo-helix.advertisedBaseUrl" -}}
+{{- $config := include "nemo-helix.calculatedConfig" . | fromYaml -}}
+{{- $platform := default (dict) $config.platform -}}
+{{- default (get $platform "base_url") (get $platform "advertised_base_url") | trimSuffix "/" -}}
+{{- end -}}
+
+{{/*
 Loopback API URL for the API pod itself when embedded auth must call back into the
 local process instead of the cluster Service.
 */}}
@@ -497,28 +509,6 @@ password
 {{- end -}}
 {{- else -}}
 {{- required "externalClickhouse.existingSecretPasswordKey is required when clickhouse.enabled=false" .Values.externalClickhouse.existingSecretPasswordKey -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
-Checksum of the ClickHouse password used by Intake. Prefer an explicitly
-configured password for a chart-managed Secret, then the live Secret value, so
-credential changes roll both API and ClickHouse pods together. During first
-install with a generated password, use a deterministic fallback until the
-Secret exists.
-*/}}
-{{- define "nemo-common.clickhouse.credentialsChecksum" -}}
-{{- $_ := include "nemo-common.clickhouse.url" . -}}
-{{- $secretName := include "nemo-common.clickhouse.secretName" . -}}
-{{- $passwordKey := include "nemo-common.clickhouse.passwordKey" . -}}
-{{- $secret := lookup "v1" "Secret" .Release.Namespace $secretName -}}
-{{- $passwordData := get ($secret.data | default dict) $passwordKey | default "" -}}
-{{- if and .Values.clickhouse.enabled (not .Values.clickhouse.auth.existingSecret) .Values.clickhouse.auth.password -}}
-{{- .Values.clickhouse.auth.password | toString | b64enc | sha256sum -}}
-{{- else if $passwordData -}}
-{{- $passwordData | sha256sum -}}
-{{- else -}}
-{{- printf "%s:%s" $secretName $passwordKey | sha256sum -}}
 {{- end -}}
 {{- end -}}
 

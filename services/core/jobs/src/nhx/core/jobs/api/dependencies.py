@@ -3,7 +3,7 @@
 
 """FastAPI dependencies for the Jobs API."""
 
-from fastapi import Depends, Request
+from fastapi import Depends
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -17,17 +17,13 @@ def dep_files_client(client: AsyncNemoClient = Depends(get_nemo_client)) -> Asyn
     return AsyncFilesClient.from_client(client)
 
 
-def dep_system_entity_client(request: Request) -> EntityClient:
+def dep_system_entity_client(entity_client: EntityClient = Depends(get_entity_client)) -> EntityClient:
     """Entity client acting as the jobs service, for records kept in the system workspace.
 
-    The request-scoped client acts for the caller, and callers only read the system workspace.
-    The platform runner merges every service into one app and keeps this one as
-    ``app.state.jobs_service``; a standalone Jobs app keeps it as ``app.state.service``.
+    The request-scoped client acts for the caller. Derive a service-principal
+    handle without changing its pooled HTTP transport.
     """
-    service = getattr(request.app.state, "jobs_service", None) or getattr(request.app.state, "service", None)
-    if service is None:
-        raise RuntimeError("The Jobs service is not registered on the app, so it cannot act as service:jobs.")
-    return service.dependency_provider.get_service_entity_client(service.name)
+    return entity_client.as_service("jobs", internal=True)
 
 
 async def dep_dispatcher(

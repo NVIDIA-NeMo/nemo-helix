@@ -39,6 +39,7 @@ overrides:
   trl: Apache-2.0
   cffi: MIT-0
   data-designer-retrieval-sdg: Apache-2.0 # NVIDIA-NeMo/DataDesignerPlugins — https://github.com/NVIDIA-NeMo/DataDesignerPlugins/blob/main/LICENSE
+  openshell: Apache-2.0 # NVIDIA/OpenShell release wheel — https://github.com/NVIDIA/OpenShell/blob/v0.1.6/LICENSE
   # PyTorch Ecosystem
   torch: Apache-2.0 AND Apache-2.0 WITH LLVM-exception AND BSD-2-Clause AND BSD-3-Clause AND BSL-1.0 AND MIT # https://github.com/pytorch/pytorch
   torchaudio: BSD-3-Clause # https://github.com/pytorch/audio

@@ -84,6 +84,24 @@ describe('Message', () => {
       expect(screen.getByText('Show more')).toBeInTheDocument();
     });
 
+    it('toggles with the keyboard and reports aria-expanded', async () => {
+      const user = userEvent.setup();
+      render(<ExpandableMessage message={longMessage} />);
+
+      const toggle = screen.getByRole('button', { name: 'Show more' });
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+      await user.tab();
+      expect(toggle).toHaveFocus();
+      await user.keyboard('{Enter}');
+
+      expect(screen.getByText(longMessage)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
     it('respects custom character limit', () => {
       const customLimit = 50;
       const messageJustOverLimit = 'B'.repeat(60);

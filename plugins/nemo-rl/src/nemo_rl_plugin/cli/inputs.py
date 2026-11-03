@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_rl_plugin.jobs.jobs import RlJob
 from nemo_rl_plugin.schema import RlJobInput
 
 _JOB_JSON_HELP = "Path to NeMo-RL job JSON (RlJobInput schema)."
@@ -58,8 +59,12 @@ Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
 create the resources and print their references without creating a job.
 
 Uploaded files keep their local names. NeMo-RL reads both splits from one
-fileset, so point --upload-dataset at a local directory holding training.jsonl
-and validation.jsonl. For GRPO, --upload-environment takes the environment
+fileset, so point --upload-dataset at a local directory holding a training file
+and, optionally, a validation file, named like train*.jsonl and val*.jsonl or
+dev*.jsonl (training.jsonl, validation.jsonl), or placed directly in train/ (or
+training/) and val/ (or validation/, dev/). Without a validation file, 10% of the
+training rows are held out, except in a sandboxed GRPO run, which skips
+validation. For GRPO, --upload-environment takes the environment
 directory. Build and validate that package first; the job command only uploads it.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
@@ -101,4 +106,5 @@ def apply_rl_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=RlJob,
     )

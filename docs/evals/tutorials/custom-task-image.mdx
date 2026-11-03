@@ -1,0 +1,106 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Customize the Evaluator Task Image"
+description: "Add dependencies to nhx-tasks and select an Eval-only or platform-wide image."
+---
+
+Remote Python metrics execute inside the Evaluator task container, not your local Python environment. If a metric needs additional packages, build an image derived from `nhx-tasks` and configure the deployment to use it. Serializing a metric with cloudpickle does not install its dependencies on the worker. The API also unbundles custom metrics during submission: importable scorer packages may be required in **both the API and worker images**, not just the worker. Maintaining the image and its dependencies is the end user's responsibility.
+
+## Build an image based on nhx-tasks
+
+Use the `nhx-tasks` image from the same NeMo Helix release as your deployment. Preserve the existing Python interpreter, virtual environment, Eval packages, and task entrypoints. Cloudpickled metrics must be packaged with the same Python minor version as the worker; use compatible dependency versions locally and remotely.
+
+Create a pinned `requirements-eval.txt` containing your additional dependencies, then build with this Dockerfile:
+
+```dockerfile
+ARG HELIX_VERSION
+FROM nvcr.io/nvidia/nemo-helix/nhx-tasks:${HELIX_VERSION}
+
+USER 0
+COPY requirements-eval.txt /tmp/requirements-eval.txt
+RUN uv pip install --python /app/.venv/bin/python \
+    --requirement /tmp/requirements-eval.txt
+```
+
+The base image includes `uv`; do not assume it includes pip or a system package manager. Review dependency resolution so additions do not unintentionally replace the platform's runtime packages. For reproducible builds, pin the base by digest and lock additional dependencies.
+
+```bash
+# Replace these values with your deployed release and writable registry.
+export HELIX_VERSION=0.9.0
+export CUSTOM_IMAGE=registry.example.com/team/eval-tasks:custom
+
+docker build --build-arg HELIX_VERSION="$HELIX_VERSION" -t "$CUSTOM_IMAGE" .
+docker run --rm --entrypoint /app/.venv/bin/python "$CUSTOM_IMAGE" \
+    -c 'import nemo_evals.tasks.evaluate; import nhx_evals_sdk'
+# Also verify imports of your additional packages and run a representative metric.
+docker push "$CUSTOM_IMAGE"
+```
+
+The import check is a smoke test, not an end-to-end evaluation. Validate a representative remote evaluation before rolling out the image broadly. Build for the worker nodes' CPU architecture and ensure those nodes can pull the image (including any private-registry credentials).
+
+## Install submission-time dependencies in the API
+
+Submission can deserialize custom metric bundles before a worker starts. A scorer serialized by reference to an importable package, or code that imports third-party packages while unbundling, requires those packages in the API process too. A worker-only image change cannot fix a submission-time `ModuleNotFoundError`.
+
+Build a companion image from the same release's `nvcr.io/nvidia/nemo-helix/nhx-api`, installing the same scorer package and compatible dependency versions into `/app/.venv` using `uv` in your build environment. Preserve the API image's interpreter, runtime packages, and entrypoint. Do not assume `uv` is installed in the API runtime image; supply it in a build stage if needed. Make private scorer wheels available to both builds without baking registry credentials into either image.
+
+Select the companion image using the chart's API deployment image settings, independently of the worker override:
+
+```yaml
+api:
+  image:
+    repository: registry.example.com/team/eval-api
+    tag: custom
+platformConfig:
+  evals:
+    container_image_ref: registry.example.com/team/eval-tasks:custom
+```
+
+Verify scorer imports in both images, then submit a representative custom metric through the API and confirm its remote score. Import checks alone do not verify bundle deserialization. For deployments that host the Eval API separately, install the dependencies in the image of that API process as well.
+
+## Override Eval evaluation steps
+
+Add this to your Helm values override:
+
+```yaml
+platformConfig:
+  evals:
+    container_image_ref: registry.example.com/team/eval-tasks:custom
+```
+
+`container_image_ref` is a complete image reference, including a tag or digest. It bypasses platform registry/tag qualification for the `evaluate` step of standard online and offline evaluations and for `agent-evaluate` steps that otherwise use `nhx-tasks`. This includes saved-trial/offline scoring (such as scoring imported Harbor trials), non-Gym agent evaluation, and sandboxed Gym orchestration. For saved trials, submit the trials without a generation target; this uses the CPU `agent-evaluate` scoring step. When unset, the step uses `<platform.image_registry>/nhx-tasks:<platform.image_tag>` as before.
+
+This does not change other plugins, environment staging, retrieval, image-build jobs, or the API deployment image. Colocated Gym evaluation still uses its separate `evals.gym_tasks_image` setting, and Gym sandbox hosts use `evals.sandbox_runtime_image`. Harbor taskset dispatchers use `evals.runs.harbor.dispatcher_image` (a digest-pinned reference); that separate taskset-run path is not overridden by `container_image_ref`.
+
+The legacy agent-evaluation Harbor runner requires a subprocess execution profile on this release. Its evaluation command runs in the subprocess host's Python environment, not in a selected task container. Install scorer dependencies in that host environment as well as the API; changing a task image does not change subprocess execution. This is distinct from CPU scoring of already-saved Harbor trials.
+
+For non-Helm deployments, use the same `evals.container_image_ref` key in platform configuration. Apply the configuration through your normal deployment process and restart the API/controller processes that compile evaluations; existing jobs retain their compiled image.
+
+## Replace the shared nhx-tasks image
+
+For a broader override, publish your custom image as `nhx-tasks` under the configured platform registry and tag:
+
+```yaml
+platformConfig:
+  platform:
+    image_registry: registry.example.com/team
+    image_tag: custom-release
+```
+
+The shared CPU image then resolves to `registry.example.com/team/nhx-tasks:custom-release`. This also changes **all other image references constructed from the platform registry and tag**, not just CPU tasks. Mirror the matching release's other required images into that registry under the same tag. Do not overwrite a published release tag to customize a deployment. Explicit image references, including `evals.container_image_ref`, are unaffected.
+
+If you only want to change the Jobs service fallback image for steps that omit `container.image`, use execution-profile defaults instead:
+
+```yaml
+platformConfig:
+  jobs:
+    executor_defaults:
+      kubernetes_job:
+        default_task_image: registry.example.com/team/nhx-tasks:custom
+      volcano_job:
+        default_task_image: registry.example.com/team/nhx-tasks:custom
+```
+
+These defaults do not override explicit job-step images. In particular, Eval's `evaluate` and `agent-evaluate` steps explicitly select their images, so use `evals.container_image_ref` for their `nhx-tasks` runtime rather than `default_task_image`.

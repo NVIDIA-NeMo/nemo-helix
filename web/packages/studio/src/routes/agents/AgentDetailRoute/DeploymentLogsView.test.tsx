@@ -4,8 +4,8 @@
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema';
 import { withHelixBrowserAuthRequest } from '@nemo/sdk/src/utils/platformRequest';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
-import { streamSse } from '@studio/util/sseStream';
-import { render, waitFor } from '@testing-library/react';
+import { streamSse, type StreamSseOptions } from '@studio/util/sseStream';
+import { render, screen, waitFor } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   loggerWarn: vi.fn(),
@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@nemo/common/src/components/LogViewer', () => ({
-  LogViewer: () => <div data-testid="log-viewer" />,
+  LogViewer: ({ logStatus }: { logStatus?: string }) => (
+    <div data-testid="log-viewer" data-log-status={logStatus ?? 'none'} />
+  ),
 }));
 
 vi.mock('@nemo/common/src/utils/logger', () => ({
@@ -68,7 +70,7 @@ describe('DeploymentLogsView', () => {
   });
 
   it('streams deployment logs with server-session credentials and no stale bearer token', async () => {
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() => expect(withHelixBrowserAuthRequest).toHaveBeenCalled());
     await waitFor(() => expect(streamSse).toHaveBeenCalled());
@@ -83,7 +85,7 @@ describe('DeploymentLogsView', () => {
   it('logs an accurate setup failure when authentication request setup fails', async () => {
     mocks.withHelixBrowserAuthRequest.mockRejectedValue(new Error('discovery unavailable'));
 
-    render(<DeploymentLogsView workspace="default" deployments={[deployment]} />);
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
 
     await waitFor(() =>
       expect(mocks.loggerWarn).toHaveBeenCalledWith(
@@ -92,5 +94,39 @@ describe('DeploymentLogsView', () => {
       )
     );
     expect(streamSse).not.toHaveBeenCalled();
+    expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'none');
+  });
+
+  it('badges the log as live while the stream is open', async () => {
+    mocks.streamSse.mockReturnValue(new Promise(() => {}));
+
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
+
+    await waitFor(() => expect(streamSse).toHaveBeenCalled());
+    expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'live');
+  });
+
+  it.each(['failed', 'deleting'] as const)(
+    'badges the log as ended for a %s deployment even while the stream is open',
+    async (status) => {
+      mocks.streamSse.mockReturnValue(new Promise(() => {}));
+
+      render(<DeploymentLogsView workspace="default" deployment={{ ...deployment, status }} />);
+
+      await waitFor(() => expect(streamSse).toHaveBeenCalled());
+      expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'ended');
+    }
+  );
+
+  it('drops the live badge once the stream gives up, e.g. on a 401', async () => {
+    mocks.streamSse.mockImplementation(async (_url: string, options: StreamSseOptions) => {
+      options.onError?.(new Error('SSE request failed: 401'));
+    });
+
+    render(<DeploymentLogsView workspace="default" deployment={deployment} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('log-viewer')).toHaveAttribute('data-log-status', 'none')
+    );
   });
 });

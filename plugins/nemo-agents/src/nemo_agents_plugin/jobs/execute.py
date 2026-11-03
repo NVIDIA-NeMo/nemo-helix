@@ -21,6 +21,7 @@ from typing import Any, ClassVar, NamedTuple, cast
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import resolve_agent_config_for_deployment
 from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.context_schema import check_context_schema, validate_context
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
@@ -214,11 +215,18 @@ class ExecuteAgentJobConfig(BaseModel):
             "agent definition for a config composed at request time."
         ),
     )
-    input: str = Field(description="Prompt to pass to the agent.")
+    input: str | None = Field(
+        default=None,
+        description=(
+            "Prompt to pass to the agent. Omit to use the Agent entity's default_input; "
+            "required for an inline agent or an entity that declares none."
+        ),
+    )
     context: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Per-run parameters handed to the agent as the top level of the Fabric request context. "
+            "Must match the agent's context_schema when it declares one. "
             f"The {NEMO_HELIX_CONTEXT_KEY!r} key is reserved for platform fields. Stored on the job "
             "spec in plaintext: pass parameters here, not secrets."
         ),
@@ -266,7 +274,10 @@ class ExecuteAgentJobConfig(BaseModel):
         default=None,
         description=(
             "Plugin-provided action to run after a successful agent invocation, inside the execute "
-            f"step; its failure fails the job. Defaults to {NOOP_POST_RUN_ACTION_KIND!r}."
+            "step; its failure fails the job. An Agent entity limits the kinds to its post_run_actions; "
+            f"when omitted, the job runs {NOOP_POST_RUN_ACTION_KIND!r} if the entity allows it, or the "
+            "entity's only kind. An inline agent may name any installed kind and defaults to "
+            f"{NOOP_POST_RUN_ACTION_KIND!r}."
         ),
     )
 
@@ -299,6 +310,8 @@ class ExecuteAgentJobConfig(BaseModel):
         _validate_agent_config_format(value.config_format)
         if not value.config:
             raise ValueError("Inline agent definitions require a non-empty config.")
+        if value.context_schema is not None:
+            check_context_schema(value.context_schema)
         return value
 
     @field_validator("context")
@@ -331,6 +344,9 @@ class ResolvedAgentConfig(BaseModel):
 class ExecuteAgentStepConfig(BaseModel):
     request: ExecuteAgentJobConfig
     agent: ResolvedAgentConfig
+    # The prompt the run uses: the request's own, or the entity's default_input
+    # as it stood at create time.
+    input: str
     # Fully qualified ``workspace/name`` of the Agent entity this job ran, so job
     # listing can filter by agent with ``filter[spec.agent_ref]``. None for an
     # inline agent, which is not an entity and so belongs to no agent's runs.
@@ -359,6 +375,10 @@ class ExecuteAgentStepConfig(BaseModel):
         request = data.get("request")
         if isinstance(request, dict) and "extension" in request:
             data = {**data, "request": _translate_legacy_extension(request)}
+        # Jobs created before ``input`` became optional required it on the
+        # request and stored no resolved copy.
+        if "input" not in data and isinstance(request, dict) and isinstance(request.get("input"), str):
+            data = {**data, "input": request["input"]}
         return data
 
 
@@ -402,6 +422,10 @@ class ExecuteAgentJob(NemoJob):
         request = cast(ExecuteAgentJobConfig, input_spec)
         typed_entity_client = cast(Any, entity_client)
         source = await _resolve_agent_source(request.agent, workspace=workspace, entity_client=typed_entity_client)
+        agent_input = _resolve_input(request.input, source)
+        # The caller's context only: the platform's own key is added at run time.
+        if source.context_schema is not None:
+            validate_context(request.context, source.context_schema)
 
         _validate_agent_config_format(source.config_format)
         resolved_agent_config = resolve_agent_config_for_deployment(
@@ -443,7 +467,7 @@ class ExecuteAgentJob(NemoJob):
             files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
             workdir = await validate_agent_workdir(request.workdir, files_client, default_workspace=workspace)
 
-        post_run_action = request.post_run_action or _make_noop_post_run_action_config()
+        post_run_action = _resolve_post_run_action_config(request.post_run_action, source.post_run_actions)
         validate_post_run_action_config(post_run_action.kind, post_run_action.config)
 
         return ExecuteAgentStepConfig(
@@ -454,6 +478,7 @@ class ExecuteAgentJob(NemoJob):
                 config=merged.config,
                 config_format=source.config_format,
             ),
+            input=agent_input,
             agent_ref=source.ref,
             workdir=workdir,
             compute=resolved_env.compute_spec,
@@ -622,7 +647,7 @@ class ExecuteAgentJob(NemoJob):
                             # Injected via the translator's runtime-override layer, not the
                             # agent config, so the task process's direct URL cannot clobber it.
                             proxy_origin=proxy_origin,
-                            input=step_config.request.input,
+                            input=step_config.input,
                             base_dir=fabric_dirs.base,
                             request_id=ctx.job_id,
                             caller_context=_caller_context(step_config.request.context, ctx=ctx, agent_ref=agent_ref),
@@ -856,6 +881,49 @@ class _AgentSource(BaseModel):
     config_format: str
     ref: str | None = None
     """``workspace/name`` of the Agent entity, or None for an inline agent."""
+    context_schema: dict[str, Any] | None = None
+    default_input: str | None = None
+    post_run_actions: set[str] | None = None
+    """Kinds the Agent entity allows, or None for an inline agent, which declares none."""
+
+
+def _resolve_input(requested: str | None, source: _AgentSource) -> str:
+    """Return the prompt the run uses, rejecting a request that has none."""
+    if requested is not None:
+        return requested
+    if source.default_input is not None:
+        return source.default_input
+    if source.ref is None:
+        raise ValueError("'input' is required for an inline agent.")
+    raise ValueError(f"'input' is required: agent '{source.ref}' declares no default_input.")
+
+
+def _resolve_post_run_action_config(
+    requested: PostRunActionConfig | None, declared: set[str] | None
+) -> PostRunActionConfig:
+    """Pick the run's post-run action from the request and the agent's declaration.
+
+    An inline agent declares nothing, so its run may name any installed kind
+    and defaults to noop. An entity's run is held to the declared kinds; when
+    it names none, noop is chosen if declared, else the only declared kind,
+    and a declaration offering several real actions makes the caller choose.
+    """
+    if declared is None:
+        return requested or _make_noop_post_run_action_config()
+    if requested is not None:
+        if requested.kind not in declared:
+            allowed = ", ".join(sorted(declared))
+            raise ValueError(
+                f"Post-run action {requested.kind!r} is not one this agent declares. Declared post-run actions: "
+                f"{allowed}."
+            )
+        return requested
+    if NOOP_POST_RUN_ACTION_KIND in declared:
+        return _make_noop_post_run_action_config()
+    if len(declared) == 1:
+        return PostRunActionConfig(kind=next(iter(declared)))
+    allowed = ", ".join(sorted(declared))
+    raise ValueError(f"This agent declares several post-run actions; set post_run_action.kind to one of: {allowed}.")
 
 
 async def _resolve_agent_source(
@@ -889,6 +957,7 @@ async def _resolve_agent_source(
             workspace=workspace,
             config=agent.config,
             config_format=agent.config_format,
+            context_schema=agent.context_schema,
         )
 
     agent_ref = parse_entity_ref(agent, default_workspace=workspace)
@@ -902,6 +971,9 @@ async def _resolve_agent_source(
         config=entity.config,
         config_format=entity.config_format,
         ref=f"{entity.workspace}/{entity.name}",
+        context_schema=entity.context_schema,
+        default_input=entity.default_input,
+        post_run_actions=entity.post_run_actions,
     )
 
 

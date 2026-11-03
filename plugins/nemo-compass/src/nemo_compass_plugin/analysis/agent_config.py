@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any
 
 COMPASS_AGENT_NAME = "compass"
-COMPASS_ADAPTER_ID = "nvidia.fabric.insights-analyst"
+COMPASS_ADAPTER_ID = "nvidia.helix.compass.analyst"
 COMPASS_HARNESS_NAME = "compass"
 AGENT_CONFIG_FORMAT = "nemo-agents-spec-v1"
 

@@ -1037,3 +1037,49 @@ def test_compute_resources_shm_size_validation():
 
     with pytest.raises(ValidationError):
         ComputeResources(shm_size="   ")
+
+
+def test_jobs_concurrency_defaults_when_absent():
+    """Configs that predate the concurrency fields still load and resolve to defaults."""
+    config = Configuration.global_settings_to_service_config({"jobs": {}}, JobsServiceConfig)
+
+    assert config.max_active_jobs_per_user == 50
+    assert config.max_active_jobs_per_workspace == 200
+    assert config.executor_defaults.docker.max_active_jobs == 8
+    assert config.executor_defaults.subprocess.max_active_jobs == 8
+    assert config.executor_defaults.kubernetes_job.max_active_jobs == 500
+    assert config.executor_defaults.volcano_job.max_active_jobs == 500
+
+
+def test_jobs_concurrency_yaml_overrides():
+    global_settings = {
+        "jobs": {
+            "max_active_jobs_per_user": 5,
+            "max_active_jobs_per_workspace": 20,
+            "executor_defaults": {"kubernetes_job": {"max_active_jobs": 100}, "docker": {"max_active_jobs": 2}},
+        }
+    }
+    config = Configuration.global_settings_to_service_config(global_settings, JobsServiceConfig)
+
+    assert config.max_active_jobs_per_user == 5
+    assert config.max_active_jobs_per_workspace == 20
+    assert config.executor_defaults.kubernetes_job.max_active_jobs == 100
+    assert config.executor_defaults.docker.max_active_jobs == 2
+    assert config.executor_defaults.subprocess.max_active_jobs == 8
+
+
+def test_jobs_concurrency_env_overrides(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NHX_JOBS_MAX_ACTIVE_JOBS_PER_USER", "7")
+    monkeypatch.setenv("NHX_JOBS_MAX_ACTIVE_JOBS_PER_WORKSPACE", "30")
+    config = JobsServiceConfig()
+
+    assert config.max_active_jobs_per_user == 7
+    assert config.max_active_jobs_per_workspace == 30
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_jobs_concurrency_rejects_non_positive(value: int):
+    with pytest.raises(ValueError):
+        Configuration.global_settings_to_service_config(
+            {"jobs": {"max_active_jobs_per_user": value}}, JobsServiceConfig
+        )

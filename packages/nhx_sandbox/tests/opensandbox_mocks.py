@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import re
 import shlex
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,7 +20,12 @@ import httpx
 
 
 class SandboxApiException(Exception):
-    """Same name as the SDK's transient API error, so the driver retries it."""
+    """Same name as the SDK's transient API error, so the driver retries it; carries the HTTP status like the SDK's."""
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        """An API error with the server's HTTP status, when it answered with one."""
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class Server:
@@ -40,6 +46,17 @@ class Server:
         self.readback = True
         # States get_info reports, one per call; the last one repeats.
         self.states: list[str] = ["Running"]
+        # The reason and message every status read reports with the state.
+        self.status_reason: str | None = None
+        self.status_message: str | None = "image pull failed"
+        # Sandbox IDs the server no longer knows; reading their status answers 404.
+        self.gone: set[str] = set()
+        # The expiry get_info reports for each new sandbox; by default its create time plus the lifetime sent.
+        self.expiry_override: datetime | None = None
+        # False makes get_info report no expiry, as a server that doesn't track one.
+        self.reports_expiry = True
+        # What the runtime events route reports as its text content; None answers it with a 500.
+        self.events_content: str | None = ""
         self.healthy = True
         # How many health probes raise before they start answering.
         self.health_errors = 0
@@ -79,8 +96,48 @@ class Server:
         sandbox_id, port = match.groups()
         return httpx.Response(200, json={"endpoint": f"{self.pod_ip(sandbox_id)}:{port}"})
 
+    def next_status(self) -> dict[str, str | None]:
+        """The next state from ``states``, with ``status_reason`` and ``status_message``."""
+        state = self.states.pop(0) if len(self.states) > 1 else self.states[0]
+        return {"state": state, "reason": self.status_reason, "message": self.status_message}
+
+    def sandbox_route(self, request: httpx.Request) -> httpx.Response | None:
+        """Answer ``GET /v1/sandboxes/{id}`` with the sandbox's status, or the server's 404 once it is gone.
+
+        Returns ``None`` for any other route, so a test's own handler can answer it.
+        """
+        match = re.fullmatch(r"/v1/sandboxes/([^/]+)", request.url.path)
+        if match is None or request.method != "GET":
+            return None
+        if match[1] in self.gone:
+            return httpx.Response(404, json={"code": "KUBERNETES::SANDBOX_NOT_FOUND", "message": "not found"})
+        return httpx.Response(200, json={"id": match[1], "status": self.next_status()})
+
+    def events_route(self, request: httpx.Request) -> httpx.Response | None:
+        """Answer ``GET /v1/sandboxes/{id}/diagnostics/events?scope=runtime`` as server 1.1's stable descriptor.
+
+        Returns ``None`` for any other route, so a test's own handler can answer it.
+        """
+        match = re.fullmatch(r"/v1/sandboxes/([^/]+)/diagnostics/events", request.url.path)
+        if match is None or request.url.params.get("scope") != "runtime":
+            return None
+        if self.events_content is None:
+            return httpx.Response(500, json={"code": "KUBERNETES::EVENTS_UNAVAILABLE", "message": "unavailable"})
+        return httpx.Response(
+            200,
+            json={
+                "sandboxId": match[1],
+                "kind": "events",
+                "scope": "runtime",
+                "delivery": "inline",
+                "content": self.events_content,
+            },
+        )
+
     def kill(self, sandbox_id: str) -> None:
-        """Record a kill, or raise for a sandbox listed in ``unkillable``."""
+        """Record a kill; a 404 for a sandbox in ``gone``, and an error for one in ``unkillable``."""
+        if sandbox_id in self.gone:
+            raise SandboxApiException(f"Kill sandbox {sandbox_id} failed: not found", status_code=404)
         if sandbox_id in self.unkillable:
             raise SandboxApiException(f"kill {sandbox_id} failed")
         self.killed.append(sandbox_id)
@@ -111,10 +168,10 @@ class Files:
             self.modes[entry.path] = entry.mode
 
     async def read_bytes(self, path: str) -> bytes:
-        """Return a file's bytes; directories, missing and unreadable paths raise."""
+        """Return a file's bytes; directories, missing and unreadable paths raise the server's 404, as the SDK does."""
         data = self.tree.get(path)
         if path in self.unreadable or data is None:
-            raise FileNotFoundError(path)
+            raise SandboxApiException(f"file not found. open {path}: no such file or directory", status_code=404)
         return data
 
     async def search(self, entry: SimpleNamespace) -> list[SimpleNamespace]:
@@ -189,10 +246,13 @@ class Commands:
 class Sandbox:
     """A live sandbox handle, as ``Sandbox.create`` returns it."""
 
-    def __init__(self, server: Server, sandbox_id: str, policy: dict[str, Any] | None) -> None:
+    def __init__(
+        self, server: Server, sandbox_id: str, policy: dict[str, Any] | None, expires_at: datetime | None = None
+    ) -> None:
         """A sandbox the server created with ``policy``; ``None`` means no egress policy was sent."""
         self._server = server
         self.id = sandbox_id
+        self.expires_at = expires_at
         self._policy = policy or {"defaultAction": "allow", "egress": []}
         self.files = Files()
         self.commands = Commands(server, self.files)
@@ -208,10 +268,11 @@ class Sandbox:
         return SimpleNamespace(default_action=default, egress=rules)
 
     async def get_info(self) -> SimpleNamespace:
-        """The next state from ``Server.states``, with a failure message for terminal states."""
-        states = self._server.states
-        state = states.pop(0) if len(states) > 1 else states[0]
-        return SimpleNamespace(status=SimpleNamespace(state=state, message="image pull failed"))
+        """The next state from ``Server.states``, with the server's reason and message, and the sandbox's expiry."""
+        return SimpleNamespace(
+            status=SimpleNamespace(**self._server.next_status()),
+            expires_at=self.expires_at if self._server.reports_expiry else None,
+        )
 
     async def is_healthy(self) -> bool:
         """Raise for the first ``Server.health_errors`` probes, then report ``Server.healthy``."""
@@ -289,7 +350,9 @@ def mock_sdk(server: Server) -> dict[str, Any]:
                 # The server created the sandbox, but the client never got a handle for it.
                 raise server.create_failures.pop(0)
             policy = kwargs["network_policy"].payload if kwargs["network_policy"] is not None else None
-            return Sandbox(server, sandbox_id, policy)
+            # The server starts the lifetime when the create reaches it.
+            expires_at = server.expiry_override or datetime.now(UTC) + kwargs["timeout"]
+            return Sandbox(server, sandbox_id, policy, expires_at)
 
     class MockManager:
         """``opensandbox.manager.SandboxManager``: only ``create`` is called on the class."""

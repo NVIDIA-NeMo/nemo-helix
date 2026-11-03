@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient, _retry_after
+from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -20,6 +20,7 @@ from nemo_helix_plugin.client.errors import (
     NotFoundError,
 )
 from nemo_helix_plugin.client.method import method
+from nemo_helix_plugin.client.retry import _retry_after
 from nemo_helix_plugin.client.types import BinaryContent, PreparedRequest, RetryPolicy, Stream
 from pydantic import BaseModel
 
@@ -669,7 +670,7 @@ class TestRetryPolicy:
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
-            patch("nemo_helix_plugin.client.client.wall_time", return_value=1_000_000),
+            patch("nemo_helix_plugin.client.retry.wall_time", return_value=1_000_000),
             patch("nemo_helix_plugin.client.client.sleep") as sleep,
         ):
             client.send(GET_ITEM(name="alice"))
@@ -705,7 +706,7 @@ class TestRetryPolicy:
         client = NemoClient(base_url=BASE, http_client=mock_http, retry=PLATFORM_RETRY)
 
         with (
-            patch("nemo_helix_plugin.client.client.wall_time", return_value=1_000_000),
+            patch("nemo_helix_plugin.client.retry.wall_time", return_value=1_000_000),
             patch("nemo_helix_plugin.client.client.sleep") as sleep,
         ):
             client.send(GET_ITEM(name="alice"))
@@ -719,7 +720,7 @@ class TestRetryPolicy:
             request=httpx.Request("GET", f"{BASE}/apis/test/v2/items/alice"),
         )
         with patch(
-            "nemo_helix_plugin.client.client.email.utils.parsedate_to_datetime",
+            "nemo_helix_plugin.client.retry.email.utils.parsedate_to_datetime",
             side_effect=OverflowError("date value out of range"),
         ):
             assert _retry_after(response) is None
@@ -734,7 +735,7 @@ class TestRetryPolicy:
         overflowing.tzinfo = timezone.utc
         overflowing.timestamp.side_effect = OverflowError("timestamp out of range")
         with patch(
-            "nemo_helix_plugin.client.client.email.utils.parsedate_to_datetime",
+            "nemo_helix_plugin.client.retry.email.utils.parsedate_to_datetime",
             return_value=overflowing,
         ):
             assert _retry_after(response) is None

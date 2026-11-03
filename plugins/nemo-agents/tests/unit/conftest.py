@@ -273,7 +273,7 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     """Install a manifest root laid out like the real one, so tests don't depend on which plugins are installed."""
     root = tmp_path / "nemo-fabric"
     for relative_path, adapter_id in {
-        "adapters/compass/compass.fabric-adapter.json": "nvidia.fabric.insights-analyst",
+        "adapters/helix/compass/analyst.fabric-adapter.json": "nvidia.helix.compass.analyst",
         "adapters/nooa/nooa.fabric-adapter.json": "nvidia.fabric.nooa",
         "adapters/nooa/nooa-bench.fabric-adapter.json": "nvidia.fabric.nooa.bench-agent",
     }.items():
@@ -283,3 +283,9 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(adapters, "ADAPTER_MANIFEST_ROOT", root)
     monkeypatch.delenv(adapters.ADAPTER_PYTHON_ENV, raising=False)
     return root
+
+
+@pytest.fixture
+def interactive_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat stdin as a terminal so confirmation prompts read ``CliRunner`` input."""
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)

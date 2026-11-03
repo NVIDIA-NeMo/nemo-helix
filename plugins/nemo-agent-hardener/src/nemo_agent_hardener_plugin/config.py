@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from nemo_helix_plugin.config import NemoConfig
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 # Env var agent-hardener reads to locate the garak venv its agent_breaker attacker spawns. The plugin
 # exports it (to ``garak_python``) for both ``agent-hardener setup`` (provision) and ``agent-hardener run``.
@@ -84,7 +84,11 @@ def write_env_file(path: Path, values: Mapping[str, str]) -> None:
     default umask (typically 0644), leaving the credentials world-readable until the chmod lands.
     Every dotenv this plugin writes holds provider keys, so both call sites go through here.
     """
-    body = "".join(f"{key}={value}\n" for key, value in values.items())
+    write_private_file(path, "".join(f"{key}={value}\n" for key, value in values.items()))
+
+
+def write_private_file(path: Path, body: str) -> None:
+    """Write *body* to *path* readable only by its owner, whether or not the file already exists."""
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(body)
@@ -227,6 +231,56 @@ class AgentHardenerConfig(NemoConfig):
         default="agent-hardener-inference-key",
         description="NeMo Secret name `setup` reads agent-hardener's own inference key from, if present.",
     )
+    container_jobs: bool = Field(
+        default=False,
+        description=(
+            "Allow war-game and benign-suite jobs to run in the nhx-agent-hardener-tasks image when the "
+            "platform registers no subprocess profile (Helm). Off by default: OpenShell 0.1.0 and later "
+            "create sandboxes only from a registry image, and agent-hardener still builds the victim from a "
+            "Dockerfile, so these jobs cannot finish yet. Set NEMO_AGENT_HARDENER_CONTAINER_JOBS to override."
+        ),
+    )
+    openshell_gateway_endpoint: str | None = Field(
+        default=None,
+        description=(
+            "OpenShell gateway a war-game job registers before it runs, for jobs that run in a container "
+            "rather than on a host provisioned by `setup` (e.g. the in-cluster "
+            "`http://openshell.openshell.svc.cluster.local:8080` on Helm). An http:// endpoint is plaintext; "
+            "an https:// endpoint uses mTLS and needs the three openshell_*_secret fields. Unset keeps the "
+            "gateway `setup` registered on the host. Set NEMO_AGENT_HARDENER_OPENSHELL_GATEWAY_ENDPOINT to override."
+        ),
+    )
+    openshell_ca_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM CA that verifies an https:// OpenShell gateway.",
+    )
+    openshell_client_cert_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM client certificate for an https:// OpenShell gateway.",
+    )
+    openshell_client_key_secret: str | None = Field(
+        default=None,
+        description="NeMo Secret holding the PEM client key for an https:// OpenShell gateway.",
+    )
+
+    @field_validator("openshell_gateway_endpoint")
+    @classmethod
+    def _require_gateway_scheme(cls, value: str | None) -> str | None:
+        if value and urlsplit(value).scheme not in {"http", "https"}:
+            raise ValueError("NEMO_AGENT_HARDENER_OPENSHELL_GATEWAY_ENDPOINT must be an http:// or https:// URL.")
+        return value
+
+    @model_validator(mode="after")
+    def _require_mtls_secrets(self) -> AgentHardenerConfig:
+        endpoint = self.openshell_gateway_endpoint
+        if not endpoint or urlsplit(endpoint).scheme != "https":
+            return self
+        if not (self.openshell_ca_secret and self.openshell_client_cert_secret and self.openshell_client_key_secret):
+            raise ValueError(
+                "An https:// OpenShell gateway uses mTLS: set openshell_ca_secret, openshell_client_cert_secret "
+                "and openshell_client_key_secret, or use the gateway's http:// endpoint."
+            )
+        return self
 
     @property
     def state_dir(self) -> Path:

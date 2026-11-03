@@ -17,7 +17,8 @@ A NeMo Safe Synthesizer job progresses through several states:
 ### Job States
 
 - **created**: Job has been created but not yet started
-- **pending**: Job is queued and waiting for resources (GPU)
+- **queued**: Job has been seen by the platform but is not yet admitted to run, for example while waiting for concurrency capacity
+- **pending**: Job has been admitted and is waiting for resources (GPU) to start
 - **active**: Job is processing your data
 - **completed**: Job finished successfully - results are ready
 - **error**: Job encountered an error - check logs for details

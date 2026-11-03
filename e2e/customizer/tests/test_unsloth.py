@@ -23,8 +23,7 @@ def test_unsloth_sft_uplift(
     client: NemoClient,
     customizer_workspace: str,
     platform_base_url: str,
-    unsloth_train_fileset: str,
-    unsloth_val_fileset: str,
+    squad_fileset: str,
     squad_val_rows: list[dict],
     unsloth_base_entity: str,
     require_uplift: bool,
@@ -42,8 +41,7 @@ def test_unsloth_sft_uplift(
         {
             "model": {"name": f"{ws}/{base_entity}", "max_seq_length": 1024, "load_in_4bit": False},
             "dataset": {
-                "path": f"{ws}/{unsloth_train_fileset}",
-                "validation_path": f"{ws}/{unsloth_val_fileset}",
+                "path": f"{ws}/{squad_fileset}",
                 "apply_chat_template": True,
             },
             "training": {"finetuning_type": finetuning_type},

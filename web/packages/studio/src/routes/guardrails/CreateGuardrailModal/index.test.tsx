@@ -170,11 +170,11 @@ describe('CreateGuardrailModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('rejects a name that does not match the entity name pattern', async () => {
+  it('blocks submit when the name has no letters or numbers', async () => {
     const user = userEvent.setup();
     renderModal();
 
-    await user.type(screen.getByRole('textbox'), 'Not Valid');
+    await user.type(screen.getByRole('textbox'), '!!!');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();

@@ -37,9 +37,11 @@ from nhx.common.jobs.schemas import (
 )
 from nhx.core.files.app.backends.base import StorageImpl
 from nhx.core.files.exceptions import InvalidFilterError
+from opentelemetry import trace
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 DuckDBQueryParam = str | int | datetime
 
@@ -157,19 +159,38 @@ class DuckDBLogRepository:
 
     @classmethod
     def _connect(cls, storage: StorageImpl) -> duckdb.DuckDBPyConnection:
-        conn = duckdb.connect(
-            ":memory:",
-            config={
-                "autoload_known_extensions": "false",
-                "autoinstall_known_extensions": "false",
-            },
-        )
-        from nhx.core.files.app.backends.s3 import S3StorageImpl
+        with tracer.start_as_current_span("logs.duckdb.connect"):
+            conn = duckdb.connect(
+                ":memory:",
+                config={
+                    "autoload_known_extensions": "false",
+                    "autoinstall_known_extensions": "false",
+                },
+            )
+            from nhx.core.files.app.backends.s3 import S3StorageImpl
 
-        if isinstance(storage, S3StorageImpl):
-            cls._load_s3_extensions(conn)
-            cls._configure_s3_secret(conn, storage.config)
-        return conn
+            if isinstance(storage, S3StorageImpl):
+                with tracer.start_as_current_span("logs.duckdb.load_s3_extensions"):
+                    cls._load_s3_extensions(conn)
+                with tracer.start_as_current_span("logs.duckdb.configure_s3_secret"):
+                    cls._configure_s3_secret(conn, storage.config)
+            return conn
+
+    @classmethod
+    def _run_query(
+        cls, conn: duckdb.DuckDBPyConnection, query: str, params: list[DuckDBQueryParam], mode: str
+    ) -> list[QueriedLogEntry]:
+        """Execute a log query, timing DuckDB execution separately from row fetch/validation."""
+        with tracer.start_as_current_span("logs.duckdb.query") as span:
+            span.set_attribute("logs.query.mode", mode)
+            with tracer.start_as_current_span("logs.duckdb.execute"):
+                result = conn.execute(query, params)
+            with tracer.start_as_current_span("logs.duckdb.fetch") as fetch_span:
+                rows = cls._fetch_queried_logs(result)
+                fetch_span.set_attribute("logs.rows_returned", len(rows))
+            if rows:
+                span.set_attribute("logs.total_count", rows[0].total_count)
+            return rows
 
     @staticmethod
     def _load_s3_extensions(conn: duckdb.DuckDBPyConnection) -> None:
@@ -240,6 +261,15 @@ class DuckDBLogRepository:
         return "/".join(path_parts)
 
     @staticmethod
+    def _sql_string_literal(value: str) -> str:
+        """Quote ``value`` as a DuckDB string literal.
+
+        Storage paths come from fileset storage config and can contain apostrophes, which would otherwise end
+        the literal early. DuckDB string literals have no backslash escapes, so doubling ``'`` is sufficient.
+        """
+        return "'" + value.replace("'", "''") + "'"
+
+    @staticmethod
     def _ensure_single_statement(query: str) -> None:
         sql = query.strip()
         if ";" in sql.rstrip(" ;\n\t"):
@@ -257,7 +287,7 @@ class DuckDBLogRepository:
                 if key in cls.PARTITION_COLUMNS and not cls.SAFE_PARTITION_VALUE.fullmatch(str(value)):
                     raise InvalidFilterError(f"Invalid partition value: {value} for key: {key}.")
         query_path = cls._build_query_path(base_path, filters)
-        base_table = f"read_parquet('{query_path}', hive_partitioning=1)"
+        base_table = f"read_parquet({cls._sql_string_literal(query_path)}, hive_partitioning=1)"
 
         # Determine which filters were pushed into path vs need WHERE clause.
         # Filters are pushed contiguously from the start of PARTITION_COLUMNS.
@@ -364,39 +394,91 @@ class DuckDBLogRepository:
         ).encode()
 
     @classmethod
-    def _build_tail_query(cls, base_table: str, where_clause: str) -> str:
+    def _build_count_query(cls, base_table: str, where_clause: str) -> str:
+        """Exact row count. With no non-partition filters DuckDB answers this from parquet footers."""
+        return f"SELECT COUNT(*) FROM {base_table} WHERE {where_clause}"
+
+    @classmethod
+    def _build_tail_query(cls, base_table: str, where_clause: str, total_count: int = 0) -> str:
+        """Newest ``LIMIT`` rows ordered by (timestamp DESC, row_hash DESC).
+
+        Phase 1 reads only ``timestamp`` to find the cutoff: the timestamp of the LIMIT-th newest row.
+        Phase 2 keeps every row at or after the cutoff (so ties at the cutoff are all present) and only
+        then hashes and sorts that small set, so SHA-256 is never evaluated for the rest of the log.
+        ``total_count`` is computed separately and inlined as an int.
+        """
         return f"""
-            SELECT
-                {cls.SELECT_LOG_COLUMNS_SQL},
-                {cls.ROW_HASH_SQL} AS row_hash,
-                COUNT(*) OVER() as _total_count
-            FROM {base_table}
-            WHERE {where_clause}
+            WITH cutoff AS (
+                SELECT MIN(timestamp) AS ts
+                FROM (
+                    SELECT timestamp FROM {base_table}
+                    WHERE {where_clause}
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                )
+            ),
+            candidates AS (
+                SELECT {cls.SELECT_LOG_COLUMNS_SQL}
+                FROM {base_table}
+                WHERE {where_clause} AND timestamp >= (SELECT ts FROM cutoff)
+            )
+            SELECT *, {cls.ROW_HASH_SQL} AS row_hash, {int(total_count)} AS _total_count
+            FROM candidates
             ORDER BY timestamp DESC, row_hash DESC
             LIMIT ?
         """
 
     @classmethod
-    def _build_cursor_v1_query(cls, base_table: str, where_clause: str) -> str:
+    def _build_cursor_v1_query(cls, base_table: str, where_clause: str, total_count: int = 0) -> str:
+        """Rows at or before the boundary (timestamp, row_hash), newest first.
+
+        Same two-phase shape as the tail query. The cutoff is taken over rows strictly older than the
+        boundary timestamp, because rows tied with the boundary may be excluded by the row_hash check and
+        so cannot be counted toward the LIMIT. All rows tied with the boundary timestamp are candidates.
+        """
         return f"""
-            WITH filtered AS (
-                SELECT
-                    {cls.SELECT_LOG_COLUMNS_SQL},
-                    {cls.ROW_HASH_SQL} AS row_hash,
-                    COUNT(*) OVER() as _total_count
+            WITH cutoff AS (
+                SELECT MIN(timestamp) AS ts
+                FROM (
+                    SELECT timestamp FROM {base_table}
+                    WHERE {where_clause} AND timestamp < ?
+                    ORDER BY timestamp DESC
+                    LIMIT ?
+                )
+            ),
+            candidates AS (
+                SELECT {cls.SELECT_LOG_COLUMNS_SQL}
                 FROM {base_table}
                 WHERE {where_clause}
+                    AND (timestamp = ? OR (timestamp < ? AND timestamp >= (SELECT ts FROM cutoff)))
             ),
-            eligible AS (
-                SELECT *
-                FROM filtered
-                WHERE timestamp < ? OR (timestamp = ? AND row_hash <= ?)
+            hashed AS (
+                SELECT *, {cls.ROW_HASH_SQL} AS row_hash
+                FROM candidates
             )
-            SELECT *
-            FROM eligible
+            SELECT *, {int(total_count)} AS _total_count
+            FROM hashed
+            WHERE timestamp < ? OR (timestamp = ? AND row_hash <= ?)
             ORDER BY timestamp DESC, row_hash DESC
             LIMIT ?
         """
+
+    @classmethod
+    def _count_rows(cls, conn: duckdb.DuckDBPyConnection, base_table: str, where_clause: str, params: list[str]) -> int:
+        """Total rows for the filters, read in a separate statement from the page.
+
+        A writer can append between this count and the page query, so for a job that is still logging
+        the page may include rows newer than ``total``. Pinning one file list for both statements would
+        close that gap, but an explicit file list makes DuckDB HEAD every object (measured ~3x slower on
+        269 small S3 objects), so the gap is accepted: ``total`` is a moving value for a live job anyway.
+        """
+        query = cls._build_count_query(base_table, where_clause)
+        cls._ensure_single_statement(query)
+        with tracer.start_as_current_span("logs.duckdb.count") as span:
+            row = conn.execute(query, params).fetchone()
+            total = int(row[0]) if row else 0
+            span.set_attribute("logs.total_count", total)
+            return total
 
     @classmethod
     def _query_offset_page(
@@ -410,8 +492,8 @@ class DuckDBLogRepository:
     ) -> HelixJobLogPage:
         """Query the legacy page-number cursor mode.
 
-        Uses a window function (COUNT(*) OVER()) to get total count in a single
-        query pass, avoiding the overhead of a separate COUNT query.
+        The total is a separate COUNT(*), which DuckDB answers from parquet footers when
+        there are no non-partition filters; a window count would force full materialization.
 
         Optimizes glob pattern by pushing partition filters into the path,
         reducing filesystem scanning when filtering by job/attempt/step/task.
@@ -423,12 +505,13 @@ class DuckDBLogRepository:
             query_direction = "ASC" if direction == PaginationDirection.FORWARD else "DESC"
             offset = (current_page - 1) * page_size
 
-            # Single query with window function for total count.
+            total_rows = cls._count_rows(conn, base_table, where_clause, params)
+
             # Fetch page_size + 1 to check if there are more results.
             query = f"""
                 SELECT
                     {cls.SELECT_LOG_COLUMNS_SQL},
-                    COUNT(*) OVER() as _total_count
+                    {total_rows} AS _total_count
                 FROM {base_table}
                 WHERE {where_clause}
                 ORDER BY timestamp {query_direction}
@@ -436,7 +519,7 @@ class DuckDBLogRepository:
             """
             cls._ensure_single_statement(query)
             query_params: list[DuckDBQueryParam] = [*params, page_size + 1, offset]
-            logs = cls._fetch_queried_logs(conn.execute(query, query_params))
+            logs = cls._run_query(conn, query, query_params, mode="offset")
 
             # Extract total count from first row (all rows have same _total_count).
             total_count = logs[0].total_count if logs else 0
@@ -489,10 +572,11 @@ class DuckDBLogRepository:
         conn = cls._connect(storage)
         try:
             base_table, where_clause, params = cls._prepare_query(base_path, filters)
-            query = cls._build_tail_query(base_table, where_clause)
+            total_rows = cls._count_rows(conn, base_table, where_clause, params)
+            query = cls._build_tail_query(base_table, where_clause, total_rows)
             cls._ensure_single_statement(query)
-            query_params: list[DuckDBQueryParam] = [*params, page_size + 1]
-            rows = cls._fetch_queried_logs(conn.execute(query, query_params))
+            query_params: list[DuckDBQueryParam] = [*params, page_size + 1, *params, page_size + 1]
+            rows = cls._run_query(conn, query, query_params, mode="tail")
 
             total_count = rows[0].total_count if rows else 0
             has_previous_window = len(rows) > page_size
@@ -529,19 +613,26 @@ class DuckDBLogRepository:
         conn = cls._connect(storage)
         try:
             base_table, where_clause, params = cls._prepare_query(base_path, filters)
-            query = cls._build_cursor_v1_query(base_table, where_clause)
+            total_rows = cls._count_rows(conn, base_table, where_clause, params)
+            query = cls._build_cursor_v1_query(base_table, where_clause, total_rows)
             cls._ensure_single_statement(query)
-            rows = cls._fetch_queried_logs(
-                conn.execute(
-                    query,
-                    [
-                        *params,
-                        cursor.boundary_timestamp,
-                        cursor.boundary_timestamp,
-                        cursor.boundary_row_hash,
-                        page_size + cursor.emitted_boundary_rows + 1,
-                    ],
-                )
+            limit = page_size + cursor.emitted_boundary_rows + 1
+            rows = cls._run_query(
+                conn,
+                query,
+                [
+                    *params,
+                    cursor.boundary_timestamp,
+                    limit,
+                    *params,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_timestamp,
+                    cursor.boundary_row_hash,
+                    limit,
+                ],
+                mode="cursor_v1",
             )
 
             total_count = rows[0].total_count if rows else 0
@@ -601,7 +692,7 @@ class DuckDBLogRepository:
                     SELECT workspace, job, job_attempt, job_step, job_task, log_message, timestamp
                     FROM {table_name}
                     ORDER BY timestamp
-                ) TO '{base_path}' (
+                ) TO {cls._sql_string_literal(base_path)} (
                     FORMAT PARQUET,
                     PARTITION_BY (job, job_attempt, job_step, job_task),
                     APPEND

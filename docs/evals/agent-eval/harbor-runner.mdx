@@ -591,6 +591,13 @@ completed
   one agent: `{"name": "oracle", "model": {"name": ...}}` for a built-in agent or
   `{"import_path": "my_agent_module:MyAgent", "model_name": ...}` for your own. A built-in agent can
   also take a gateway model, `{"ref": ...}`; see [Run a closed-book evaluation](#run-a-closed-book-evaluation).
+
+  <Note>
+  Starting in 0.10, a built-in agent names its model as `model: {"name": ...}` (or a gateway model,
+  `{"ref": ...}`) instead of the flat `model_name`. The 0.9 spelling `{"name": "oracle", "model_name": ...}`
+  is still accepted in 0.10 with a deprecation warning and will be removed in 0.11; giving both
+  `model_name` and `model` is an error. An imported agent keeps `model_name`, which is not deprecated.
+  </Note>
 - **`agent_kwargs`** — keyword arguments forwarded to the agent's constructor, the equivalent of
   Harbor's `--ak key=value` flags. Values must be JSON (strings, numbers, booleans, lists, mappings).
   Do not put secrets here. Harbor copies its config into the job directory's `config.json` and
@@ -638,8 +645,9 @@ the agent's constructor. `agent_dir` is an SDK-only local import aid, not an `Ag
 ```text
 HarborRuntimeConfig  (on the platform, HarborRunnerTarget.source fills the three agent lines)
         │
-        ├─ agent_import_path   → Harbor AgentConfig.import_path
-        ├─ agent_model_name    → Harbor AgentConfig.model_name
+        ├─ agent_name          → Harbor AgentConfig.name          (source.name; "oracle" when unset)
+        ├─ agent_import_path   → Harbor AgentConfig.import_path   (source.import_path; overrides agent_name)
+        ├─ agent_model_name    → Harbor AgentConfig.model_name    (source.model; source.model_name for an imported agent)
         ├─ agent_kwargs        → Harbor AgentConfig.kwargs
         └─ env_secrets/env_vars → Harbor AgentConfig.env ({NAME: "${<source var>}"} + literals)
                                        │
@@ -763,26 +771,55 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
   Kubernetes. On Kubernetes the agent gets the address by the name the sandbox profile's
   `agent_channel` lists for it, such as `nemo-helix-api.<namespace>.svc.cluster.local`, because the
-  sandbox resolves only the names it allows. A run with no-network tasks is refused when no
-  `agent_channel` entry names the platform. Don't set the base URL variable yourself; a target that
+  sandbox resolves only the names it allows. No-network and allowlist tasks reach the platform only
+  through `agent_channel`, so a run with such tasks is refused when no `agent_channel` entry names
+  the platform. Don't set the base URL variable yourself; a target that
   does is refused.
+- On Kubernetes, `agents.deployments.gateway_url_override` replaces the in-cluster address, as it
+  does for deployed agents. Set it to an HTTPS gateway, such as the platform's Envoy, to keep the
+  agent's key off plain HTTP. A run uses the override set when it was submitted. Give an HTTPS
+  override the name `agent_channel` lists, with a certificate for that name: a run that would reach it
+  by another name is refused. When the job trusts a private CA for the platform
+  (`NHX_CLIENT_SSL_CERT_FILE`, else `SSL_CERT_FILE`), each sandbox trusts it too. `SSL_CERT_FILE`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` keep the certificates they named
+  before, a file or a directory, or the image's CA bundle, and add that CA. The files are under
+  `/tmp/nemo-helix-tls`, so images that run as a non-root user work too.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
   disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
   already uses the key variable's name; that job is refused rather than handing the agent the other
   secret. With platform authentication enabled, put a Helix access key scoped to `inference` in
   `env_secrets` under the key variable; a target without one is refused.
-- With platform authentication enabled, `claude-code` can't call the gateway yet, so its target is
-  refused: it sends its key as `x-api-key`, and the gateway accepts only bearer tokens.
+- Each trial calls the gateway with its own trial token, which names the trial and the models it
+  may call; the gateway refuses the trial's calls to any other model. With platform
+  authentication disabled, it is an unsigned token. With it enabled, it is a key minted for the trial
+  from yours, scoped to `inference`, signed by the platform with the trial's details, and revoked once
+  Harbor won't run the trial again. The job fails if a key can't be minted. A virtual model that
+  runs the `nemo-evals-trial-recording` middleware reads the token to record the trial's model calls
+  in Intake; see
+  [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials)
+  and [Hold Trials to Their Models](/documentation/models-and-inference/virtual-models#hold-trials-to-their-models).
+- With platform authentication enabled, `claude-code` sends its access key as `x-api-key`, which
+  the gateway accepts on model routes like a bearer token.
 
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
 
-A taskset run on Kubernetes enforces this for tasks whose agent runs with `network_mode = "no-network"`,
-whether set under `[environment]`, `[agent]` or one of the task's steps. Their sandbox still reaches
-the agent's model route, so the run is refused at submit, naming those tasks, unless the agent's
-`model` is a `ref` to a virtual model whose `request_middleware` ends with `nemo-evals-closed-book`,
-and you can read that virtual model. Agents that call no model, `oracle` and `nop`, are exempt. A
-built-in agent with a model by `name`, an imported agent, and a registered agent are refused for such
+Label the run closed-book with `closed_book: true` on the target (`HarborRunnerTarget(closed_book=True, ...)`).
+Each trial's token is then closed: the gateway holds the trial to closed-book capable virtual models,
+and closed-book middleware set to `apply: closed_credential` applies to its calls. The job fails
+before any trial runs unless every virtual model the agent can reach, including the ones a router's
+virtual model lists in `routes_to`, ends its `request_middleware` with `nemo-evals-closed-book`.
+Without the label, the same virtual models serve the run open.
+
+A taskset run on Kubernetes labels the run closed-book itself for tasks whose agent runs with
+`network_mode = "no-network"`, whether set under `[environment]`, `[agent]` or one of the task's
+steps. Their sandbox still reaches the agent's model route, so a closed-book run, labelled or not, is
+refused at submit, naming those tasks, unless every model the agent calls through the gateway, and
+each virtual model those list in `routes_to`, is a virtual model whose `request_middleware` ends with
+`nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
+`model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
+is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a
+model by `name`, an imported agent, and a registered agent with no gateway model are refused for such
 tasks, since evals can't check where their model calls go.
 
 ## How scoring works

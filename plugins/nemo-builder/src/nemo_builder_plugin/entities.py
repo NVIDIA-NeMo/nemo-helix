@@ -3,7 +3,8 @@
 
 """``ContainerImage``: one row per image a build publishes.
 
-The builder writes a row ``pending`` when the build is submitted. It becomes ``ready`` when the image's push
+The builder writes a row ``pending`` when the build is submitted, or ``queued`` when builds are capped and the job
+waits for a slot (see ``QueuedBuild``). It becomes ``ready`` when the image's push
 step has pushed and signed the image and completes it, or ``failed`` when the submit is refused. The builder's
 routes never change a row after that, but they aren't the only way to write one: see the README's Security
 limitations.
@@ -14,9 +15,10 @@ from __future__ import annotations
 from typing import Literal
 
 from nemo_builder_plugin.identity import DIGEST_PATTERN
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, PrivateAttr, computed_field
 
 
 class UpstreamImage(BaseModel):
@@ -72,7 +74,7 @@ class ImageRuntimeConfig(BaseModel):
 class ContainerImage(NemoEntity, entity_type="container_image"):
     """One image. ``name`` is ``<set>-<revision>.<spec>``, or ``<set>-<revision>`` for the set's unnamed spec."""
 
-    status: Literal["pending", "ready", "failed"] = "pending"
+    status: Literal["queued", "pending", "ready", "failed"] = "pending"
     status_detail: str | None = None
 
     registry: str = Field(description="Registry host the image is published to.")
@@ -103,3 +105,24 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
         if self.digest is None:
             return None
         return f"{self.registry}/{self.repository}@{self.digest}"
+
+
+class QueuedBuild(NemoEntity, entity_type="builder_queued_build"):
+    """A build job waiting for a slot under ``max_concurrent_builds``. ``name`` is the job's name.
+
+    The submit writes it with its images ``queued``; the queue controller creates the job as ``created_by``,
+    moves the images to ``pending`` and marks it ``started``, then deletes it once the job ends.
+    """
+
+    request: dict = Field(description="The `CreateHelixJobRequest` the controller creates the job from, as JSON.")
+    images: list[str] = Field(description="The `ContainerImage` rows the job builds.")
+    state: Literal["queued", "started"] = "queued"
+
+    # The submitter's full principal (id, email, account id, groups, aliases): the controller creates the job as
+    # them, and the platform can't look a user's groups up later. The entity store gives it back only to a
+    # service-principal client. None with auth off.
+    _auth_context: AuthContext | None = PrivateAttr(default=None)
+
+    @property
+    def auth_context(self) -> AuthContext | None:
+        return self._auth_context

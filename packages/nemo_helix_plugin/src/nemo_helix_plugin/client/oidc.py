@@ -42,7 +42,7 @@ from nemo_helix_plugin.client.tls import httpx_tls_config_from_env
 
 logger = logging.getLogger(__name__)
 
-BearerTokenSource = Literal["access_token", "id_token"]
+BearerTokenSource = Literal["access_token"]
 OidcClientName = Literal["public", "confidential"]
 OidcClientAuthentication = Literal["public", "client_secret_basic"]
 TokenRefreshKind = Literal["provider", "broker"]
@@ -52,9 +52,7 @@ def parse_bearer_token_source(value: object) -> BearerTokenSource:
     """Validate a bearer-token response field received from discovery."""
     if value == "access_token":
         return "access_token"
-    if value == "id_token":
-        return "id_token"
-    raise ValueError("OIDC bearer_token_source must be 'access_token' or 'id_token'")
+    raise ValueError("OIDC bearer_token_source must be 'access_token'; ID-token API bearers are no longer supported")
 
 
 def _parse_bearer_token_source(value: object) -> BearerTokenSource:
@@ -76,7 +74,7 @@ class TokenPersistenceError(RuntimeError):
 
 def _select_bearer_token(token_data: dict, source: BearerTokenSource) -> str:
     source = _parse_bearer_token_source(source)
-    token = token_data.get(source)
+    token = token_data.get("access_token")
     if not isinstance(token, str) or not token:
         raise RuntimeError(f"OIDC refresh response did not include the configured {source}")
     return token
@@ -696,11 +694,7 @@ def _validate_expiry(value: object, field_name: str) -> float | None:
 
 @dataclass
 class TokenSet:
-    """An API bearer + refresh token pair with expiry metadata.
-
-    ``access_token`` keeps its historical name but may contain the configured
-    ID token when that is the bearer accepted by the platform.
-    """
+    """An access token and refresh token pair with expiry metadata."""
 
     access_token: str = field(repr=False)
     refresh_token: str | None = field(default=None, repr=False)
@@ -775,6 +769,7 @@ class OIDCTokenProvider:
 
     def get_access_token(self) -> str:
         """Return a valid access token, refreshing if necessary."""
+        _parse_bearer_token_source(self.bearer_token_source)
         with self._lock:
             if self.tokens.is_expired(self.refresh_margin_seconds):
                 self._refresh()
@@ -868,10 +863,7 @@ class OIDCTokenProvider:
                     certificate_authority=self.certificate_authority,
                 )
 
-            # The broker already selected the provider bearer and normalized it to access_token.
-            # Only direct provider responses still need configured token-source selection.
-            token_source = "access_token" if self.refresh_kind == "broker" else self.bearer_token_source
-            new_access_token = _select_bearer_token(token_data, token_source)
+            new_access_token = _select_bearer_token(token_data, self.bearer_token_source)
             # The IdP may rotate the refresh token.
             old_refresh_token = self.tokens.refresh_token
             new_refresh_token = token_data.get("refresh_token", old_refresh_token)

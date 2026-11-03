@@ -36,6 +36,7 @@ from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentC
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
@@ -1764,6 +1765,27 @@ async def test_get_deployment_status_projects_endpoints() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_deployment_status_surfaces_deleting_message() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        return_value=Deployment(
+            name="hello-dep",
+            workspace="default",
+            deployment_config="hello-dep",
+            status="DELETING",
+            status_message="Waiting for backend to delete deployment: docker paused",
+        )
+    )
+    backend._entities = entities
+
+    info = await backend.get_deployment_status("default", "hello-dep")
+    assert info is not None
+    assert info.status == "deleting"
+    assert info.error == "Waiting for backend to delete deployment: docker paused"
+
+
+@pytest.mark.asyncio
 async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     backend = _backend()
     entities = AsyncMock()
@@ -1792,6 +1814,26 @@ async def test_delete_waits_for_deployment_gone_before_config_delete() -> None:
     assert delete_call is not None
     assert delete_call.args[0] is DeploymentConfig
     assert delete_call.kwargs["expected_db_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_leaves_timed_out_teardown_failed() -> None:
+    backend = _backend()
+    entities = AsyncMock()
+    entities.get = AsyncMock(
+        return_value=Deployment(
+            name="hello-dep",
+            workspace="default",
+            deployment_config="hello-dep",
+            status="FAILED",
+            error_details={"reason": "deleting_timeout"},
+        )
+    )
+    backend._entities = entities
+
+    assert not await backend.delete_deployment("default", "hello-dep")
+    entities.update.assert_not_awaited()
+    entities.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1828,7 +1870,8 @@ def test_agent_deployment_defaults_are_subprocess() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> None:
+@pytest.mark.parametrize("source_fileset", [None, FilesetRef("sources/agent-source")])
+async def test_create_deployment_fabric_docker_stages_fileset_artifacts(source_fileset: FilesetRef | None) -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
     backend._entities = entities
@@ -1866,6 +1909,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
             port=0,
             deployment_mode="docker",
             agent="fabric-agent",
+            source_fileset=source_fileset,
         )
 
     assert info.status == "starting"
@@ -1873,6 +1917,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
     stage_args = mock_stage.await_args
     assert stage_args is not None
     assert stage_args.kwargs["files_client"] is files_client
+    assert stage_args.kwargs["source_fileset"] == source_fileset
     created_config = entities.create.await_args_list[0].args[0]
     assert len(created_config.config_files) == 2
     assert not any(e.name == "STAGED_CONFIG_FILES_B64_JSON" for e in created_config.containers[0].env)

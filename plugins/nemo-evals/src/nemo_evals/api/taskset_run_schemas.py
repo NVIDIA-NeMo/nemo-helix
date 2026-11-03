@@ -233,10 +233,14 @@ def request_digest(req: TasksetRunInput) -> str:
 
     Returns:
         SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
-        ``publication`` is left out too, so requests from before the field existed keep their digest.
+        ``publication``, and a Harbor target's unset ``closed_book``, are left out too, so requests from before
+        those fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
     body = req.model_dump(mode="json", exclude=exclude)
+    target = body["spec"].get("target")
+    if isinstance(req.spec.target, HarborRunnerTarget) and not req.spec.target.closed_book and isinstance(target, dict):
+        target.pop("closed_book", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -356,7 +360,10 @@ class TasksetRunSubmitResponse(TasksetRunStatus):
 
     warnings: list[str] = Field(
         default_factory=list,
-        description="Advisory notices about this caller's overlapping active runs on the same taskset revision.",
+        description=(
+            "Advisory notices for this submission: this caller's overlapping active runs on the same taskset "
+            "revision, sandbox defaults applied, and what tasks ask for that the run does differently."
+        ),
     )
 
 

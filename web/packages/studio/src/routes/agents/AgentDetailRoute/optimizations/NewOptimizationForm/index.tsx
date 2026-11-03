@@ -69,7 +69,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
 
   const methods = useForm<OptimizationFormValues, unknown, OptimizationFormOutput>({
     resolver: zodResolver(optimizationFormSchema),
-    mode: 'onBlur',
+    mode: 'onTouched',
     defaultValues: {
       name: agentName ? buildOptimizationName(agentName, DEFAULT_INTENT) : '',
       intent: DEFAULT_INTENT,
@@ -85,7 +85,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
     watch,
     setValue,
     handleSubmit,
-    formState: { errors, touchedFields, isSubmitting },
+    formState: { errors, isSubmitted, isSubmitting, touchedFields },
   } = methods;
 
   const {
@@ -124,7 +124,7 @@ export const NewOptimizationForm: FC<NewOptimizationFormProps> = ({
   const target = targets.find((candidate) => candidate.experimentId === experimentId);
   const { rowCount, error: rowsError } = useStudyRowCount(workspace, target);
 
-  const nameError = touchedFields.name ? errors.name?.message : undefined;
+  const nameError = touchedFields.name || isSubmitted ? errors.name?.message : undefined;
 
   // First failing check wins, in the order the user meets them on the page.
   const blockingChecks: [boolean, string][] = [

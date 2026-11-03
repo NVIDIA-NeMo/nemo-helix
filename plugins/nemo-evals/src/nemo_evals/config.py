@@ -30,8 +30,9 @@ class HarborSandboxProfileConfig(BaseModel):
     agent_channel: tuple[str, ...] = Field(
         default=(),
         description=(
-            "Hosts a no-network task's sandbox may still reach (e.g. the inference gateway), so an agent "
-            "running in the sandbox can call its model. Empty keeps no-network tasks fully closed."
+            "Hosts a no-network or allowlist task's sandbox may also reach (e.g. the inference gateway), so an "
+            "agent running in the sandbox can call its model. Empty keeps no-network tasks fully closed and "
+            "allowlist tasks to their own hosts."
         ),
     )
     agent_setup_egress: tuple[str, ...] = Field(
@@ -100,7 +101,12 @@ class HarborTaskJobsConfig(BaseModel):
         ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
-        min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
+        default=("default",),
+        min_length=1,
+        description=(
+            "Jobs execution profiles a request may name as execution.dispatcher_profile; the default nhx-tasks "
+            "dispatcher is used when a request names none."
+        ),
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
         min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox.profile."
@@ -257,6 +263,17 @@ class EvaluatorConfig(NemoConfig):
     runs: TasksetRunsConfig = Field(
         default_factory=TasksetRunsConfig,
         description="Operator execution timeout defaults, maximum request budget and finalization grace for taskset runs.",
+    )
+
+    container_image_ref: str | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional fully qualified image reference for evaluate and CPU agent-evaluate steps, including "
+            "saved-trial scoring and sandboxed Gym orchestration. When unset, uses "
+            "platform.image_registry/nhx-tasks:platform.image_tag. Does not override colocated Gym, "
+            "Gym sandbox hosts, Harbor taskset dispatchers, staging, retrieval, or image-build jobs."
+        ),
     )
 
     gym_tasks_image: str | None = Field(

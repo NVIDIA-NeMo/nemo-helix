@@ -11,7 +11,7 @@ import { mockTracesPage } from '@studio/mocks/intake/telemetry';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getAgentDetailRoute, getIntakeTracesRoute } from '@studio/routes/utils';
-import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import { within } from '@testing-library/react';
@@ -88,10 +88,9 @@ describe('IntakeTracesTable', () => {
       history: '/workspaces/default/intake/traces',
     });
 
-    expect(await screen.findByRole('link', { name: 'react-agent' })).toHaveAttribute(
-      'href',
-      getAgentDetailRoute('default', 'react-agent')
-    );
+    expect(
+      await screen.findByRole('link', { name: 'react-agent' }, { timeout: LG_SELECTOR_TIMEOUT })
+    ).toHaveAttribute('href', getAgentDetailRoute('default', 'react-agent'));
     expect(screen.getByText('unregistered-agent')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'unregistered-agent' })).not.toBeInTheDocument();
   });
@@ -125,7 +124,9 @@ describe('IntakeTracesTable', () => {
       ],
     });
 
-    await user.click(await screen.findByRole('link', { name: 'react-agent' }));
+    await user.click(
+      await screen.findByRole('link', { name: 'react-agent' }, { timeout: LG_SELECTOR_TIMEOUT })
+    );
 
     expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
       getAgentDetailRoute('default', 'react-agent')

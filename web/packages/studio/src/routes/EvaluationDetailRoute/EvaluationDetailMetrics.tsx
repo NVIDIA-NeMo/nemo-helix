@@ -12,6 +12,7 @@ import { ChangesetBadge } from '@studio/components/ChangesetBadge';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useEvaluationJob } from '@studio/routes/EvaluationDetailRoute/useEvaluationJob';
 import { tooltipClassName } from '@studio/styles/common';
+import { formatCost } from '@studio/util/intakeTelemetry';
 import { type FC } from 'react';
 import { Link } from 'react-router';
 
@@ -116,6 +117,13 @@ export const EvaluationDetailMetrics: FC<EvaluationDetailMetricsProps> = ({ eval
         />
       </Flex>
       <Flex align="stretch" gap="density-3xl">
+        <KVPair
+          label="Cost"
+          value={formatCost(experiment?.cost_usd?.sum)}
+          loading={isLoading}
+          orientation="vertical"
+        />
+        <Divider orientation="vertical" className="grow-0 self-stretch" />
         <KVPair label="Tokens" value={totalTokens} loading={isLoading} orientation="vertical" />
         <Divider orientation="vertical" className="grow-0 self-stretch" />
         <KVPair

@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Iterable, Iterator
+from importlib.metadata import EntryPoint
+
 import pytest
+from nemo_helix_plugin import discovery as plugin_discovery
 from nhx.core.auth.app import account_resolution
 from nhx.core.auth.app.account_resolution import (
     AccountResolver,
@@ -199,6 +203,54 @@ async def test_customization_task_service_principal_is_allowed(fake_store: _Fake
     }
     assert fake_store.calls[0]["subject"] == service_name
     assert fake_store.calls[0]["account_type"] == "service"
+
+
+@pytest.fixture
+def installed_middleware(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Install a ``nemo.inference_middleware`` entry point named ``test-middleware``."""
+
+    real_entry_points = plugin_discovery.entry_points
+
+    def _entry_points(*, group: str) -> Iterable[EntryPoint]:
+        if group != "nemo.inference_middleware":
+            return real_entry_points(group=group)
+        return [EntryPoint(name="test-middleware", value="pkg.mod:Middleware", group=group)]
+
+    monkeypatch.setattr(plugin_discovery, "entry_points", _entry_points)
+    plugin_discovery.discover_entry_points.cache_clear()
+    yield
+    plugin_discovery.discover_entry_points.cache_clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_middleware")
+async def test_inference_middleware_service_principal_is_allowed(fake_store: _FakeStore):
+    resolver = AccountResolver(AuthServiceConfig())
+
+    context = await resolver.resolve_authz_input({"principal_id": "service:test-middleware"})
+
+    assert context.to_policy_fields() == {
+        "caller_kind": "service_principal",
+        "actor_account_id": "account-for-test-middleware",
+        "actor_aliases": ["service:test-middleware"],
+    }
+    assert fake_store.calls[0]["subject"] == "test-middleware"
+    assert fake_store.calls[0]["account_type"] == "service"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("installed_middleware")
+async def test_disallowed_inference_middleware_service_principal_fails_closed(
+    fake_store: _FakeStore, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("NEMO_PLUGIN_INFERENCE_MIDDLEWARE_ALLOWLIST", "")
+    plugin_discovery.discover_entry_points.cache_clear()
+    resolver = AccountResolver(AuthServiceConfig())
+
+    with pytest.raises(ServicePrincipalNotAllowedError, match="Unknown service principal"):
+        await resolver.resolve_authz_input({"principal_id": "service:test-middleware"})
+
+    assert fake_store.calls == []
 
 
 @pytest.mark.asyncio

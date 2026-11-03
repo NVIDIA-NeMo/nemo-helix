@@ -6,7 +6,7 @@
 A kind is accepted when it is a stock short name, a stock adapter ID, or the ID
 declared by an adapter manifest installed anywhere below the Python environment's
 ``share/nemo-fabric/`` data directory. Plugins ship their adapters there (Compass
-installs ``adapters/compass/compass.fabric-adapter.json``), and Fabric discovers
+installs ``adapters/helix/compass/analyst.fabric-adapter.json``), and Fabric discovers
 installed adapters from the same tree, so an ID accepted here is one Fabric can load.
 
 When ``ADAPTER_PYTHON`` names another interpreter, Fabric discovers adapters
@@ -64,9 +64,10 @@ def installed_adapter_ids(root: Path | None = None) -> frozenset[str]:
     set, that interpreter's tree. Each root is scanned once per process: installing
     an adapter means installing a package, which already takes a restart to load.
 
-    The ID comes from the manifest, not its directory (``compass/`` holds
-    ``nvidia.fabric.insights-analyst``), and one directory may hold several
-    manifests (``nooa/`` holds ``nooa`` and ``nooa-bench``). An unreadable
+    The ID comes from the manifest, not its path (``nooa/nooa-bench.fabric-adapter.json``
+    holds ``nvidia.fabric.nooa.bench-agent``), manifests may sit at any depth
+    (``helix/compass/``), and one directory may hold several manifests (``nooa/``
+    holds ``nooa`` and ``nooa-bench``). An unreadable
     manifest is skipped so one broken plugin can't block every other adapter.
     """
     if root is not None:

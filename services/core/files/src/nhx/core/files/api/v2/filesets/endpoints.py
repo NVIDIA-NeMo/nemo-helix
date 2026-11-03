@@ -19,7 +19,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
-from nhx.common.api.common import GenericSortField, PaginationData
+from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -121,54 +121,6 @@ if (!response.ok) {
 }
 console.log(response.status);
 console.log(Object.fromEntries(response.headers));""",
-    },
-    {
-        "lang": "Go",
-        "source": """package main
-
-import (
-  "fmt"
-  "net/http"
-)
-
-func main() {
-  req, err := http.NewRequest("HEAD", "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt", nil)
-  if err != nil {
-    panic(err)
-  }
-  res, err := http.DefaultClient.Do(req)
-  if err != nil {
-    panic(err)
-  }
-  defer res.Body.Close()
-
-  fmt.Println(res.Status)
-  fmt.Println(res.Header)
-}""",
-    },
-    {
-        "lang": "Ruby",
-        "source": """require "net/http"
-
-uri = URI("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt")
-response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
-  http.request(Net::HTTP::Head.new(uri))
-end
-
-puts response.code
-puts response.to_hash""",
-    },
-    {
-        "lang": "PHP",
-        "source": """<?php
-$ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
-curl_setopt($ch, CURLOPT_NOBODY, true);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_exec($ch);
-$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-curl_close($ch);
-
-echo $status;""",
     },
 ]
 
@@ -495,6 +447,7 @@ async def list_filesets(
 @router.get(
     "/v2/workspaces/{workspace}/filesets/{name}",
     summary="Get Fileset by Workspace and Name",
+    responses={404: {"model": ErrorResponse, "description": "Fileset not found"}},
     status_code=HTTP_200_OK,
 )
 async def retrieve_fileset(

@@ -133,6 +133,7 @@ class AccessKeyRegistry:
             issuer=key.issuer,
             audiences=key.audiences,
             scope=key.scope,
+            service_attributes=key.service_attributes,
             issued_at=key.created_at,
             expires_at=key.expires_at,
         )
@@ -189,7 +190,7 @@ class AccessKeyRegistry:
             page=page,
             page_size=page_size,
         )
-        records = result.data
+        records = [self._legacy(record) for record in result.data]
         if not include_service_accounts:
             records = [record for record in records if record.entity_type != "SERVICE_ACCOUNT"]
         credential_has_more = False
@@ -519,19 +520,29 @@ class AccessKeyRegistry:
             return record
         raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found")
 
+    def _legacy(self, record: AccessKeyEntity) -> AccessKeyEntity:
+        """An entity-store record, without service attributes when the credential store holds every new key.
+
+        The generic Entities API can write entity records, so only the credential store vouches for attributes.
+        """
+        if self._credential_adapter is None or not record.service_attributes:
+            return record
+        return record.model_copy(update={"service_attributes": {}})
+
     async def _get(self, jti: str) -> AccessKeyEntity:
         if self._credential_adapter is not None:
             record = await self._credential_adapter.get(jti)
             if record is not None:
                 return record
         try:
-            return await self._entity_client.get(
+            record = await self._entity_client.get(
                 AccessKeyEntity,
                 name=jti,
                 workspace=ACCESS_KEY_WORKSPACE,
             )
         except EntityNotFoundError as exc:
             raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found") from exc
+        return self._legacy(record)
 
     async def _update(self, record: AccessKeyEntity) -> None:
         if self._credential_adapter is not None and await self._credential_adapter.get(record.name) is not None:
@@ -557,6 +568,7 @@ class AccessKeyRegistry:
             issuer=record.issuer,
             audiences=list(dict.fromkeys(record.audiences)),
             scope=list(dict.fromkeys(record.scope)),
+            service_attributes=record.service_attributes,
             created_at=record.issued_at,
             expires_at=record.expires_at,
             grace_period_expires_at=record.grace_period_expires_at if effective_status == "ROTATING" else None,
@@ -706,8 +718,9 @@ class PersistentAccessKeyIssuer:
         *,
         admin_override: AdminOverride | None = None,
         caller_scope: list[str] | None = None,
+        acting_service: str | None = None,
     ) -> None:
-        self._issuer = AccessKeyIssuerService(config=config, principal=principal)
+        self._issuer = AccessKeyIssuerService(config=config, principal=principal, acting_service=acting_service)
         self._config = config
         self._registry = registry
         self._workspaces_client = workspaces_client
@@ -764,11 +777,13 @@ class PersistentAccessKeyIssuer:
             # verified HelixAdmin status before setting this flag (see AdminOverride).
             if not await self.is_platform_admin():
                 raise AccessKeyValidationError("Service-bound Scoped Access Keys require HelixAdmin")
+        inherited_service_attributes = None
         if request.rotates is not None:
             # Fail fast on an invalid rotation target instead of minting an orphan key.
             old_record = await self._registry.get_for_rotation(
                 request.rotates, self.principal, admin_override=self._admin_override
             )
+            inherited_service_attributes = old_record.service_attributes
             if request.scope is None:
                 # No --scope given: inherit the predecessor's scope instead of widening to unscoped.
                 request = request.model_copy(update={"scope": old_record.scope or None})
@@ -781,7 +796,11 @@ class PersistentAccessKeyIssuer:
                     "omit --scope to inherit it automatically, or create a separate key instead"
                 )
         self._enforce_caller_scope(request)
-        key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
+        key = await self._issuer.create_async(
+            request,
+            allow_service_account=allow_service_account,
+            inherited_service_attributes=inherited_service_attributes,
+        )
         try:
             await self._registry.add(
                 key,
@@ -1048,7 +1067,11 @@ class PersistentAccessKeyIssuer:
         )
         # get_rotatable only checks ownership, not scope — enforce that separately.
         self._enforce_caller_scope(request)
-        new_key = await self._issuer.create_async(request, allow_service_account=allow_service_account)
+        new_key = await self._issuer.create_async(
+            request,
+            allow_service_account=allow_service_account,
+            inherited_service_attributes=old_record.service_attributes,
+        )
         try:
             await self._registry.add(
                 new_key,

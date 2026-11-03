@@ -421,6 +421,7 @@ const TERMINAL_TASK_STATUSES: Record<string, true> = {
 /** Step statuses where the pod's own phase would be stale or wrong, so the status is the detail. */
 const STEP_STATUS_DETAILS: Record<string, string> = {
   created: 'starting',
+  queued: 'starting',
   pending: 'starting',
   resuming: 'resuming',
   pausing: 'pausing',
@@ -760,20 +761,13 @@ export const getGrpoRunConfig = (
   const tensorParallel = parallelism.tensor_parallel_size ?? 1;
   const expertParallel = parallelism.expert_parallel_size ?? 1;
 
-  // Megatron is inert for GRPO, so the policy is always DTensor; only v2 implements LoRA, expert
-  // parallelism and `automodel_kwargs`, matching `_build_dtensor_cfg`.
+  // Megatron is inert for GRPO. The policy worker is always AutomodelPolicyWorker.
   const isLora = training.finetuning_type === 'lora';
-  // Keys, not truthiness: unset means "auto-detect", and `{}` is a truthy that would claim v2.
-  const hasAutomodelKwargs = Object.keys(training.automodel_kwargs ?? {}).length > 0;
-  const needsV2 = isLora || expertParallel > 1 || hasAutomodelKwargs;
 
   return {
     environment: spec.environment,
     promptDataset: spec.dataset,
-    trainingBackend: joinParts(
-      needsV2 ? 'DTensor v2' : 'DTensor',
-      isLora ? 'LoRA' : 'Full weights'
-    ),
+    trainingBackend: joinParts('Automodel', isLora ? 'LoRA' : 'Full weights'),
     parallelism: joinParts(
       `TP ${tensorParallel}`,
       `PP ${parallelism.pipeline_parallel_size ?? 1}`,

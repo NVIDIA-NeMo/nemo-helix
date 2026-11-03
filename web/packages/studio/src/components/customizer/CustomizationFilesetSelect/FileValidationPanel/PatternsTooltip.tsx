@@ -14,14 +14,14 @@ const PatternsTooltipContent: FC = () => (
         Both <code>.jsonl</code> and <code>.json</code> are accepted everywhere below.
       </Text>
       <Text kind="body/regular/sm">
-        <strong>Training (required):</strong> any <code>.jsonl</code>/<code>.json</code> inside{' '}
-        <code>train/</code> or <code>training/</code>, OR root files whose names start with{' '}
+        <strong>Training (required):</strong> any <code>.jsonl</code>/<code>.json</code> directly
+        inside <code>train/</code> or <code>training/</code>, OR root files whose names start with{' '}
         <code>train</code> or <code>training</code>.
       </Text>
       <Text kind="body/regular/sm">
-        <strong>Validation (optional):</strong> any <code>.jsonl</code>/<code>.json</code> inside{' '}
-        <code>val/</code>, <code>validation/</code>, or <code>dev/</code>, OR root files whose names
-        start with <code>val</code>, <code>validation</code>, or <code>dev</code>.
+        <strong>Validation (optional):</strong> any <code>.jsonl</code>/<code>.json</code> directly
+        inside <code>val/</code>, <code>validation/</code>, or <code>dev/</code>, OR root files
+        whose names start with <code>val</code>, <code>validation</code>, or <code>dev</code>.
       </Text>
       <Text kind="body/regular/sm">
         If nothing else matches, root-level <code>.jsonl</code> files (only) are claimed as training

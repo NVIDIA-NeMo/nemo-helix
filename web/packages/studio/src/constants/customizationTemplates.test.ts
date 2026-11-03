@@ -25,9 +25,8 @@ describe('CUSTOMIZATION_TEMPLATES', () => {
       expect(fields.automodel.model.startsWith(`${WORKSPACE}/`)).toBe(true);
     });
 
-    it('wires the created dataset into training and validation', () => {
+    it('wires the created dataset into training', () => {
       expect(fields.automodel.dataset.training).toBe(DATASET_REF);
-      expect(fields.automodel.dataset.validation).toBe(DATASET_REF);
     });
 
     it('pins the cookbook seed so a rerun reproduces the first run', () => {

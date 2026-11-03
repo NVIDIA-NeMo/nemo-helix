@@ -53,10 +53,8 @@ describe('validateDraft', () => {
     it('replaces whatever references the model wrote', () => {
       const { values } = expectValid(validate(automodelDraft()));
       expect(values.automodel.model).toBe('default/llama-8b');
-      expect(values.automodel.dataset).toMatchObject({
-        training: 'default/tickets',
-        validation: 'default/tickets',
-      });
+      expect(values.automodel.dataset).toMatchObject({ training: 'default/tickets' });
+      expect(values.automodel.dataset).not.toHaveProperty('validation');
     });
 
     it('leaves the teacher for the user to pick in the form', () => {

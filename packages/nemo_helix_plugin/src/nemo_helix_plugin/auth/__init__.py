@@ -15,9 +15,10 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping, Sequence
-from typing import Protocol, Self
+from typing import Any, Protocol, Self
 
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.requests import Request
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,31 @@ class RuntimePrincipal(Protocol):
     @property
     def effective_principal(self) -> RuntimePrincipal:
         raise NotImplementedError
+
+
+class RuntimeAuthPrincipal(Protocol):
+    @property
+    def id(self) -> str: ...
+
+    @property
+    def caller_kind(self) -> str: ...
+
+    @property
+    def is_delegated(self) -> bool: ...
+
+
+class RuntimeAuthClient(Protocol):
+    @property
+    def auth_enabled(self) -> bool: ...
+
+    @property
+    def principal(self) -> RuntimeAuthPrincipal: ...
+
+
+def current_auth_client(request: Request) -> RuntimeAuthClient:
+    from nhx.common.auth.dependencies import get_auth_client
+
+    return get_auth_client(request)
 
 
 class AuthContext(BaseModel):
@@ -232,6 +258,43 @@ def platform_auth_enabled() -> bool:
         return False
 
 
+async def verified_access_key_claims(token: str) -> dict[str, Any] | None:
+    """The claims of ``token`` if it is a Scoped Access Key this platform signed and it hasn't expired.
+
+    Applies the platform's own checks: the signature against its access-key signing keys, the algorithm, issuer,
+    audience and lifetime. It doesn't check revocation. ``None`` for any other token, when access keys are off,
+    and outside the platform process.
+
+    Raises:
+        httpx.HTTPError: The platform's signing keys couldn't be fetched.
+    """
+    try:
+        from nhx.common.auth.access_keys import validate_access_key_token
+        from nhx.common.config import get_auth_config
+    except ImportError:
+        return None
+    claims = await validate_access_key_token(get_auth_config(), token)
+    return None if claims is None else dict(claims.raw_claims)
+
+
+def inference_gateway_credential(headers: Mapping[str, str]) -> str | None:
+    """The credential an Inference Gateway call carries: ``Authorization: Bearer``, else ``x-api-key``.
+
+    Read the way the platform's auth reads it on gateway routes. ``None`` when the call carries neither, when its
+    ``Authorization`` header uses Bearer but is malformed, and outside the platform process.
+    """
+    try:
+        from nhx.common.auth.bearer import MalformedBearerTokenError
+        from nhx.common.auth.middleware import API_KEY_HEADER_PATH_PREFIXES, request_bearer_token
+    except ImportError:
+        return None
+    lowered = {name.lower(): value for name, value in headers.items()}
+    try:
+        return request_bearer_token(API_KEY_HEADER_PATH_PREFIXES[0], lowered)
+    except MalformedBearerTokenError:
+        return None
+
+
 def is_service_principal_id(principal_id: str) -> bool:
     """Return True for a well-formed Helix service principal.
 
@@ -249,4 +312,13 @@ def is_service_principal_id(principal_id: str) -> bool:
     return is_service_principal(principal_id)
 
 
-__all__ = ["AuthContext", "current_auth_context", "is_service_principal_id", "platform_auth_enabled"]
+__all__ = [
+    "AuthContext",
+    "RuntimeAuthClient",
+    "current_auth_client",
+    "current_auth_context",
+    "inference_gateway_credential",
+    "is_service_principal_id",
+    "platform_auth_enabled",
+    "verified_access_key_claims",
+]

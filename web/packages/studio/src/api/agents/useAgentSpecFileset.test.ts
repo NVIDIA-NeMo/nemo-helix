@@ -64,6 +64,32 @@ describe('agentSpecSource', () => {
     expect(source?.trackedRevision).toBeUndefined();
   });
 
+  it('links commits on GitHub', () => {
+    const source = agentSpecSource(
+      fileset({ type: 'github', owner: 'acme', repo: 'agents', revision: 'abc' })
+    );
+
+    expect(source?.commitUrl?.('def')).toBe('https://github.com/acme/agents/commit/def');
+  });
+
+  it('reads a repository registered over SSH, which has no web view to link', () => {
+    const source = agentSpecSource(
+      fileset({
+        type: 'git',
+        url: 'git@gitlab.example.com:acme/agents.git',
+        revision: 'a'.repeat(40),
+        original_revision: 'main',
+        path: 'agents/calc',
+      })
+    );
+
+    expect(source).toEqual({
+      repository: 'git@gitlab.example.com:acme/agents.git#agents/calc',
+      trackedRevision: 'main',
+      revision: 'a'.repeat(40),
+    });
+  });
+
   it('ignores a fileset that is not repository-backed', () => {
     expect(agentSpecSource(fileset({ type: 'local', path: '/data/calc' }))).toBeUndefined();
     expect(agentSpecSource(undefined)).toBeUndefined();

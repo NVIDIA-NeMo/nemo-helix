@@ -497,6 +497,71 @@ async def test_delete_retains_deleting_when_backend_returns_failed(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "delete_deployment",
+    [
+        AsyncMock(return_value=BackendStatusUpdate(status="FAILED", status_message="docker paused")),
+        AsyncMock(side_effect=RuntimeError("docker paused")),
+    ],
+)
+async def test_delete_retry_surfaces_backend_reason_without_resetting_timeout(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+    delete_deployment: AsyncMock,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS - 1)
+    history = list(dep.status_history)
+    mock_backend.delete_deployment = delete_deployment
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status == "DELETING"
+    assert dep.status_message == "Waiting for backend to delete deployment: docker paused"
+    assert dep.status_history == history
+    mock_entities.update.assert_awaited_once()
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_retry_omits_empty_backend_reason(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=0)
+    mock_backend.delete_status = BackendStatusUpdate(status="DELETING")
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status_message == "Waiting for backend to delete deployment"
+
+
+@pytest.mark.asyncio
+async def test_delete_uses_db_version_from_deleting_save(
+    deployment_reconciler: DeploymentReconciler,
+    mock_entities: AsyncMock,
+) -> None:
+    dep = make_deployment()
+    dep.desired_state = "STOPPED"
+    saved = dep.model_copy(deep=True)
+    saved._db_version = dep.db_version + 1
+    mock_entities.update.side_effect = lambda entity: saved
+
+    await deployment_reconciler.reconcile_one(dep, deployments_by_name={}, volumes_by_name=NO_VOLUMES)
+
+    mock_entities.delete.assert_awaited_once_with(
+        Deployment,
+        name="dep1",
+        workspace="default",
+        expected_db_version=saved.db_version,
+    )
+
+
+@pytest.mark.asyncio
 async def test_delete_timeout_fails_at_boundary(
     patch_reconciler_now,
     mock_entities: AsyncMock,
@@ -510,6 +575,30 @@ async def test_delete_timeout_fails_at_boundary(
     assert dep.status == "FAILED"
     assert dep.error_details is not None
     assert dep.error_details["reason"] == "deleting_timeout"
+    mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_timeout_keeps_deleting_reason(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS)
+    dep.status_message = "Waiting for backend to delete deployment: container still stopping"
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status == "FAILED"
+    assert dep.status_message.endswith(
+        "Last status: Waiting for backend to delete deployment: container still stopping"
+    )
+    assert dep.error_details is not None
+    assert dep.error_details["reason"] == "deleting_timeout"
+    assert dep.error_details["last_status_message"] == (
+        "Waiting for backend to delete deployment: container still stopping"
+    )
     mock_entities.delete.assert_not_awaited()
 
 
@@ -533,6 +622,27 @@ async def test_delete_timeout_failure_is_not_re_evaluated(
 
     mock_entities.update.assert_not_awaited()
     mock_entities.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_reopened_after_timeout_retries_backend(
+    patch_reconciler_now,
+    mock_entities: AsyncMock,
+    mock_backend: MockDeploymentBackend,
+) -> None:
+    reconciler = _starting_timeout_reconciler(mock_entities, mock_backend)
+    dep = _deployment_stuck_deleting(elapsed_seconds=DELETING_TIMEOUT_SECONDS + 120)
+    dep.status_history.append(StatusEvent(status="FAILED", message="stuck", timestamp=NOW.isoformat()))
+    # A user delete reopens a timed-out delete by setting status without a history event.
+    dep.status = "DELETING"
+    dep.error_details = {"reason": "deleting_timeout"}
+
+    await _reconcile_stuck_deleting(reconciler, mock_backend, dep)
+
+    assert dep.status_history[-1].status == "DELETING"
+    assert dep.status_history[-1].timestamp == NOW.isoformat()
+    assert dep.error_details is None
+    mock_entities.delete.assert_awaited_once()
 
 
 @pytest.mark.asyncio

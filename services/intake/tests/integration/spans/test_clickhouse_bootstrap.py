@@ -3,9 +3,6 @@
 
 """ClickHouse schema bootstrap tests."""
 
-from typing import cast
-
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable, qualified_table
 from nhx.intake.service import IntakeService
@@ -21,7 +18,9 @@ def test_clickhouse_server_matches_supported_lts(
     result = run_async(clickhouse_client.query("SELECT version()"))
 
     assert len(result.result_rows) == 1
-    assert str(result.result_rows[0][0]).startswith(f"{clickhouse_version}.")
+    reported = str(result.result_rows[0][0])
+    # `.clickhouse-version` may name a release line (`26.3`) or an exact build (`26.3.62.3`).
+    assert reported == clickhouse_version or reported.startswith(f"{clickhouse_version}.")
 
 
 def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanClient, run_async):
@@ -57,9 +56,10 @@ def test_clickhouse_bootstrap_is_idempotent(clickhouse_client: ClickHouseSpanCli
         assert ttl in str(create.result_rows[0][0])
 
 
-def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(client: TestClient):
-    app = cast(FastAPI, client.app)
-    service = cast(IntakeService, app.state.intake_service)
+def test_intake_service_readiness_bootstraps_and_probes_service_owned_clickhouse(
+    client: TestClient, intake_service: IntakeService
+):
+    service = intake_service
 
     assert service.clickhouse_client is not None
     assert client.portal is not None

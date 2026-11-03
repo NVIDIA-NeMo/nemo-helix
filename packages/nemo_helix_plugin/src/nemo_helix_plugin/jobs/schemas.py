@@ -48,9 +48,14 @@ class HelixJobStatus(str, Enum):
 
     This enum represents the various states a job can be in during its lifecycle,
     from creation to a terminal state.
+
+    ``CREATED`` means the controller has not yet considered the job. ``QUEUED`` means
+    the controller has seen the job but not admitted it (waiting for capacity).
+    ``PENDING`` means the backend resource exists and is waiting to start.
     """
 
     CREATED = "created"
+    QUEUED = "queued"
     PENDING = "pending"
     ACTIVE = "active"
     CANCELLED = "cancelled"
@@ -69,6 +74,7 @@ class HelixJobStatus(str, Enum):
     def non_terminals() -> list["HelixJobStatus"]:
         return [
             HelixJobStatus.CREATED,
+            HelixJobStatus.QUEUED,
             HelixJobStatus.PENDING,
             HelixJobStatus.ACTIVE,
             HelixJobStatus.CANCELLING,
@@ -89,6 +95,16 @@ class HelixJobStatus(str, Enum):
         # Define valid transitions
         valid_transitions = {
             HelixJobStatus.CREATED: {
+                HelixJobStatus.QUEUED,
+                HelixJobStatus.PENDING,
+                HelixJobStatus.ACTIVE,
+                HelixJobStatus.CANCELLING,
+                HelixJobStatus.CANCELLED,
+                HelixJobStatus.PAUSING,
+                HelixJobStatus.PAUSED,
+                HelixJobStatus.ERROR,
+            },
+            HelixJobStatus.QUEUED: {
                 HelixJobStatus.PENDING,
                 HelixJobStatus.ACTIVE,
                 HelixJobStatus.CANCELLING,

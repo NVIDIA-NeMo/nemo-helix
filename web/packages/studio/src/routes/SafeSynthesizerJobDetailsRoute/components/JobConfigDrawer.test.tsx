@@ -89,7 +89,7 @@ describe('JobConfigDrawer', () => {
       const user = userEvent.setup();
       await user.click(closeButton);
 
-      await waitFor(() => expect(mockOnOpenChange).toHaveBeenCalledWith(false));
+      await waitFor(() => expect(mockOnOpenChange).toHaveBeenCalledWith(false, expect.anything()));
     });
 
     describe('Heading Content', () => {

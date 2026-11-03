@@ -123,7 +123,11 @@ export function useLiveTest() {
       const request: LiveScoreRequest = {
         dataset: [row],
         metrics: buildMetricBundles(values, bindings, workspace) as unknown as MetricInline[],
-        target: toWorkspaceModelRef(workspace, values.model),
+        // Orval drops the ModelRef string alias from the anyOf union; cast keeps types happy.
+        target: toWorkspaceModelRef(
+          workspace,
+          values.model
+        ) as unknown as LiveScoreRequest['target'],
         prompt_template: composeGenerationPrompt(bindings),
         ...(fieldMapping ? { field_mapping: fieldMapping } : {}),
       };

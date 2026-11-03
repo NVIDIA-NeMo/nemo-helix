@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 
 _OPENSHELL_INSTALL_HINT = (
     "The 'openshell' package is required for the OpenShell job backend. "
-    'Install it with: uv pip install "openshell>=0.1.2" "grpcio>=1.78.0" "protobuf>=6.31.1"'
+    'Install it with: uv pip install "openshell>=0.1.6" "grpcio>=1.78.0" "protobuf>=6.31.1"'
 )
 
 # OpenShell rejects a longer sandbox name with INVALID_ARGUMENT (63-char DNS label).

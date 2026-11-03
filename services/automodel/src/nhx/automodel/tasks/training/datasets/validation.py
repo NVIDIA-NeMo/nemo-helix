@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Iterable
 from typing import Any, Callable, Optional
 
 from jsonschema import exceptions
@@ -219,32 +220,56 @@ class DatasetValidator:
         if os.path.getsize(file_path) == 0:
             raise DatasetFormatError(f"{file_path} is empty")
 
+        with open(file_path, "r", encoding="utf-8") as jsonl_file:
+            self.validate_lines(jsonl_file, file_path, dataset_type)
+
+    def validate_lines(self, lines: Iterable[str], source: str, dataset_type: Optional[str] = None) -> int:
+        """Validate JSONL lines against the schema for *dataset_type*.
+
+        Training passes a whole file; a dry run passes the first rows of each file.
+
+        Args:
+            lines: JSONL lines, numbered from 1 in error messages.
+            source: Where the lines came from, for error messages.
+            dataset_type: Dataset type to validate against. If None, uses training type from config
+
+        Returns:
+            The number of rows validated: 0 when the dataset type has no schema.
+
+        Raises:
+            DatasetFormatError: If a line is not JSON or does not match the schema
+        """
+        if dataset_type is None:
+            dataset_type = self.training_type.value
+        schema_factory = SCHEMAS.get(dataset_type)
+        if not schema_factory:
+            return 0
+
         validator = _compile_validator(schema_factory(self.prompt_template))
         validated_rows = 0
+        # Log identifiers (source + line number) only, never the raw line: it can hold customer data.
+        for line_number, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
 
-        # Validate each line in the JSONL file
-        with open(file_path, "r", encoding="utf-8") as jsonl_file:
-            for line in jsonl_file:
-                line = line.strip()
-                if not line:
-                    continue
+            try:
+                obj: dict[str, Any] = json.loads(line)
+            except Exception as e:
+                logger.debug(f"{source} line {line_number} is not valid json. Error: {e}")
+                raise DatasetFormatError(f"{source} line {line_number} is not valid json: {e}")
 
-                try:
-                    obj: dict[str, Any] = json.loads(line)
-                except Exception as e:
-                    logger.debug(f"{file_path} has entry which is not valid json. Error: {e}\n{line}")
-                    raise DatasetFormatError(f"{file_path} has entry which is not valid json: {e}")
+            try:
+                self._validate_json_object(obj, validator)
+            except Exception as e:
+                logger.debug(f"{source} line {line_number} does not conform to the expected schema: {e}")
+                raise DatasetFormatError(f"{source} line {line_number} does not conform to the expected schema: {e}")
+            validated_rows += 1
+            if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
+                logger.info("Validated %s rows in %s", validated_rows, source)
 
-                try:
-                    self._validate_json_object(obj, validator)
-                except Exception as e:
-                    logger.debug(f"{file_path} does not conform to the expected schema: {e}")
-                    raise DatasetFormatError(f"{file_path} does not conform to the expected schema: {e}")
-                validated_rows += 1
-                if validated_rows % _VALIDATE_PROGRESS_INTERVAL == 0:
-                    logger.info("Validated %s rows in %s", validated_rows, file_path)
-
-        logger.info("Validated %s rows in %s", validated_rows, file_path)
+        logger.info("Validated %s rows in %s", validated_rows, source)
+        return validated_rows
 
 
 # Backward compatibility: provide standalone functions that create a validator instance

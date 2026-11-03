@@ -12,13 +12,16 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
+from nemo_helix_plugin.client.constants import ACCESS_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext, HelixJobTaskUpdate
 from nhx.common.auth import AuthContext
+from nhx.common.auth.models import NHX_PRINCIPAL_ENVVAR
 from nhx.common.config import get_platform_config
 from nhx.common.jobs.constants import (
     CONFIG_TASK_STORAGE_PATH_ENVVAR,
@@ -50,7 +53,10 @@ from nhx.core.jobs.controllers.backends.subprocess_runtime import (
     SubprocessOtelLogger,
     create_otel_logger,
     inject_secret_env_vars,
+    inject_subprocess_task_auth,
+    refresh_subprocess_task_auth,
     start_log_capture,
+    task_access_token_refresh_interval,
 )
 from pydantic import Field
 
@@ -61,6 +67,7 @@ SUBPROCESS_PID_STATUS_KEY = "pid"
 SUBPROCESS_PGID_STATUS_KEY = "pgid"
 SUBPROCESS_PERSISTENT_STORAGE_STATUS_KEY = "subprocess_persistent_storage_path"
 _MISSING_METADATA_PENDING_GRACE_SECONDS = 5
+_TASK_ACCESS_TOKEN_FILE_NAME = ".nhx-access-token"
 SUBPROCESS_INHERITED_ENV_ALLOWLIST = frozenset(
     {
         "PATH",
@@ -74,6 +81,11 @@ _ERR_COMMAND_REQUIRED = "subprocess requires command to be set"
 
 
 class SubprocessJobExecutionProfileConfig(JobExecutionProfileConfig):
+    max_active_jobs: int = Field(
+        default=8,
+        ge=1,
+        description="Maximum number of jobs admitted to run concurrently on this executor.",
+    )
     working_directory: str = Field(
         default="/tmp/nhx-subprocess-jobs",
         description="Root directory for subprocess job state, config, storage, and logs.",
@@ -120,6 +132,10 @@ class SubprocessProcessMetadata:
     closed_logs: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
     log_threads: list[threading.Thread] = field(default_factory=list)
+    # Set when the child holds a rotatable delegated token: its env (to re-derive the principal) and file.
+    task_auth_env: dict[str, str] | None = None
+    task_auth_token_file: Path | None = None
+    task_auth_refreshed_at: float = field(default_factory=time.monotonic)
 
 
 class SubprocessProcessRegistry:
@@ -159,10 +175,21 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         self._root_dir = Path(self._execution_profile_config.working_directory)
         self._root_dir.mkdir(parents=True, exist_ok=True)
         self._process_registry = SubprocessProcessRegistry()
+        self._remove_orphaned_task_tokens()
+
+    def _remove_orphaned_task_tokens(self) -> None:
+        # The registry is in memory, so after a restart nothing refreshes or removes the token files of
+        # the previous run's processes. Layout: <workspace>/<job>/<attempt>/<step>/<task>/config/<file>.
+        for token_file in self._root_dir.glob(f"*/*/*/*/*/config/{_TASK_ACCESS_TOKEN_FILE_NAME}"):
+            try:
+                token_file.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Failed to remove orphaned subprocess task access token file", exc_info=True)
 
     def shutdown(self) -> None:
         for metadata in self._process_registry.values():
             self._terminate_process(metadata, force=True)
+            self._remove_task_auth_token_file(metadata)
             self._finish_logs(metadata)
 
     def schedule(self, executor_config: SubprocessExecutionProvider, step: HelixJobStepWithContext) -> JobUpdate:
@@ -249,6 +276,8 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             log_path=log_path,
             persistent_dir=persistent_dir,
             otel_logger=otel_logger,
+            task_auth_env={name: value for name, value in env.items() if name == NHX_PRINCIPAL_ENVVAR},
+            task_auth_token_file=Path(env[ACCESS_TOKEN_FILE_ENVVAR]) if ACCESS_TOKEN_FILE_ENVVAR in env else None,
         )
         self._process_registry.set(key, metadata)
 
@@ -319,6 +348,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         if step.status == HelixJobStatus.PAUSING and pause_deadline_exceeded(step) and metadata.process.poll() is None:
             message = "Pause deadline exceeded"
             self._terminate_process(metadata, force=True)
+            self._remove_task_auth_token_file(metadata)
             self._finish_logs(metadata)
             self._update_task(
                 step,
@@ -334,19 +364,27 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
                 error_details={"message": message},
             )
 
+        self._refresh_task_auth(metadata)
+
         # The TTL bounds running time. A pausing step is bounded by its pause deadline, and a
         # cancelling step was just terminated above, so neither is timed out here. A step stays
         # pending until the first sync after schedule(), but its process is already running, so
         # the active TTL applies rather than the before-active one. A process that has exited is
         # not timed out: its exit code decides.
-        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING) or metadata.process.poll() is not None:
+        exited = metadata.process.poll() is not None
+        if exited:
+            self._remove_task_auth_token_file(metadata)
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING) or exited:
             return self._create_step_update(step, metadata)
         ttl_seconds = step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
         if self.check_step_ttl(step, ttl_seconds):
             if not self._terminate_process(metadata, force=True):
+                if metadata.process.poll() is not None:
+                    self._remove_task_auth_token_file(metadata)
                 return self._create_step_update(step, metadata)
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
             self._finish_logs(metadata)
+            self._remove_task_auth_token_file(metadata)
             self._update_task(
                 step,
                 metadata,
@@ -362,6 +400,36 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             )
 
         return self._create_step_update(step, metadata)
+
+    @staticmethod
+    def _remove_task_auth_token_file(metadata: SubprocessProcessMetadata) -> None:
+        if metadata.task_auth_token_file is None:
+            return
+        try:
+            metadata.task_auth_token_file.unlink(missing_ok=True)
+            metadata.task_auth_token_file = None
+        except OSError:
+            logger.warning("Failed to remove subprocess task access token file", exc_info=True)
+
+    def _refresh_task_auth(self, metadata: SubprocessProcessMetadata) -> None:
+        if metadata.task_auth_token_file is None or metadata.task_auth_env is None:
+            return
+        if metadata.process.poll() is not None:
+            # Nothing reads the token any more and it would otherwise sit on disk until job cleanup.
+            self._remove_task_auth_token_file(metadata)
+            return
+        if time.monotonic() - metadata.task_auth_refreshed_at < task_access_token_refresh_interval():
+            return
+        try:
+            refreshed = refresh_subprocess_task_auth(metadata.task_auth_env, metadata.task_auth_token_file)
+        except Exception:
+            # Keep the stale token: the old one stays valid until it expires and the next tick retries.
+            logger.warning("Failed to refresh subprocess task access token", exc_info=True)
+            return
+        if refreshed:
+            metadata.task_auth_refreshed_at = time.monotonic()
+        else:
+            logger.warning("Subprocess task access token was not refreshed: no token could be minted")
 
     def reclaim_persistent_storage(self, workspace: str, job: str) -> bool:
         try:
@@ -528,7 +596,9 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             principal = auth_context.to_principal()
             env.update(principal.get_env_var())
 
+        # The token file goes last: nothing after it can fail and leave it behind on a step that never registers.
         inject_secret_env_vars(env)
+        inject_subprocess_task_auth(env, config_dir / _TASK_ACCESS_TOKEN_FILE_NAME)
         return env, task_id, work_dir, log_path, persistent_dir
 
     @staticmethod
@@ -671,35 +741,37 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
         return details
 
     def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> bool:
-        """Signal the process group; return False if the process had already exited."""
+        """Signal the process group. Return False when no signal was sent because it had already exited."""
         if metadata.process.poll() is not None:
             return False
-        self._terminate_process_group(metadata.process, force=force)
-        if force:
-            try:
-                metadata.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
-            return True
+        signalled = self._terminate_process_group(metadata.process, force=force)
+        timeout = 5 if force else self._execution_profile_config.graceful_shutdown_timeout_seconds
         try:
-            metadata.process.wait(timeout=self._execution_profile_config.graceful_shutdown_timeout_seconds)
+            metadata.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            self._terminate_process(metadata, force=True)
-        return True
+            if not force:
+                return self._terminate_process(metadata, force=True)
+            logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
+        return signalled
 
     @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> None:
+    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> bool:
+        """Signal the process group. Return False when no signal was sent."""
         sig = signal.SIGKILL if force else signal.SIGTERM
         try:
             os.killpg(os.getpgid(process.pid), sig)
         except ProcessLookupError:
-            return
+            return False
         except Exception:
             logger.exception("Failed to signal subprocess group", extra={"pid": process.pid})
             try:
                 process.send_signal(sig)
+            except ProcessLookupError:
+                return False
             except Exception:
                 logger.exception("Failed to signal subprocess", extra={"pid": process.pid})
+                return False
+        return True
 
     def _finish_logs(self, metadata: SubprocessProcessMetadata) -> None:
         for thread in metadata.log_threads:

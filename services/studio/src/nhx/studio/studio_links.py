@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import Request
 from nhx.studio.config import StudioConfig
 from nhx.studio.env_mappings import ENV_MAPPINGS
 
@@ -472,33 +471,12 @@ _STUDIO_LINK_TOOL: dict[str, Any] = {
 }
 
 
-def _studio_config_from_request(request: Request) -> StudioConfig:
-    registry = getattr(request.app.state, "service_configs", {})
-    if isinstance(registry, dict):
-        config = registry.get(StudioConfig)
-        if isinstance(config, StudioConfig):
-            return config
-
-    for attr in ("studio_service", "service"):
-        service = getattr(request.app.state, attr, None)
-        config = getattr(service, "service_config", None)
-        if isinstance(config, StudioConfig):
-            return config
-        get_config = getattr(service, "_get_config", None)
-        if callable(get_config):
-            config = get_config()
-            if isinstance(config, StudioConfig):
-                return config
-
-    return StudioConfig()
-
-
 def _feature_flag_enabled(value: str | None) -> bool:
     return (value or "").strip().lower() != "false"
 
 
-def _studio_feature_flags_from_request(request: Request) -> dict[str, bool]:
-    replacements = _studio_config_from_request(request).env_replacements
+def feature_flags_from_config(config: StudioConfig) -> dict[str, bool]:
+    replacements = config.env_replacements
     return {
         flag: _feature_flag_enabled(replacements.get(mapping.marker, mapping.default))
         for flag, mapping in _STUDIO_FEATURE_FLAG_MAPPINGS.items()
@@ -523,10 +501,6 @@ def enabled_destinations(feature_flags: Mapping[str, bool]) -> dict[str, StudioL
         for destination, config in STUDIO_LINK_DESTINATIONS.items()
         if _destination_enabled(destination, feature_flags)
     }
-
-
-def enabled_destinations_from_request(request: Request) -> dict[str, StudioLinkDestination]:
-    return enabled_destinations(_studio_feature_flags_from_request(request))
 
 
 def destination_description(destinations: Mapping[str, StudioLinkDestination]) -> str:

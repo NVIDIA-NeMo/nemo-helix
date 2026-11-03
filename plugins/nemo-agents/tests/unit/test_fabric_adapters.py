@@ -29,7 +29,7 @@ def _write(path: Path, content: str) -> None:
 
 def test_installed_ids_come_from_manifests_not_directory_names(installed_adapter_manifests: Path) -> None:
     assert installed_adapter_ids() == {
-        "nvidia.fabric.insights-analyst",
+        "nvidia.helix.compass.analyst",
         "nvidia.fabric.nooa",
         "nvidia.fabric.nooa.bench-agent",
     }
@@ -95,7 +95,7 @@ def test_unknown_kind_lists_what_is_accepted() -> None:
     message = str(excinfo.value)
     assert "Unsupported harness kind 'nvidia.fabric.claud'" in message
     assert "claude" in message
-    assert "nvidia.fabric.insights-analyst" in message
+    assert "nvidia.helix.compass.analyst" in message
 
 
 @pytest.mark.usefixtures("installed_adapter_manifests")
@@ -130,7 +130,7 @@ def test_adapter_python_environment_is_scanned_too(
 
     assert installed_adapter_ids() == {
         "acme.isolated",
-        "nvidia.fabric.insights-analyst",
+        "nvidia.helix.compass.analyst",
         "nvidia.fabric.nooa",
         "nvidia.fabric.nooa.bench-agent",
     }
@@ -145,7 +145,7 @@ def test_unusable_adapter_python_is_skipped(
     monkeypatch.setenv(adapters.ADAPTER_PYTHON_ENV, str(tmp_path / "missing-python"))
 
     with caplog.at_level(logging.WARNING):
-        assert "nvidia.fabric.insights-analyst" in installed_adapter_ids()
+        assert "nvidia.helix.compass.analyst" in installed_adapter_ids()
 
     assert "Can't find Fabric adapters for ADAPTER_PYTHON" in caplog.text
 
