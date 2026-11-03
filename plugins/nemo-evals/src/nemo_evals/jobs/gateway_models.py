@@ -10,7 +10,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from harbor.models.task.config import NetworkMode, TaskConfig
+from harbor.models.task.config import NetworkMode, NetworkPolicy, TaskConfig
 from harbor.models.trial.config import AgentConfig as TrialAgentConfig
 from harbor.trial.network_policy import resolve_agent_phase_policy
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
@@ -198,17 +198,18 @@ async def require_closed_book_route(
 
 def no_network_task_ids(tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> list[str]:
     """The ids of the tasks among (task id, task.toml config) pairs whose agent runs, in any step, with no network."""
-    return [task_id for task_id, config in tasks if NetworkMode.NO_NETWORK in _agent_network_modes(config)]
+    return [
+        task_id
+        for task_id, config in tasks
+        if any(policy.network_mode == NetworkMode.NO_NETWORK for policy in _agent_network_policies(config))
+    ]
 
 
-def _agent_network_modes(config: Mapping[str, Any]) -> set[NetworkMode]:
-    """The network modes the agent runs under across a task's steps."""
+def _agent_network_policies(config: Mapping[str, Any]) -> list[NetworkPolicy]:
+    """The network policies the agent runs under across a task's steps."""
     task = TaskConfig.model_validate(config)
     baseline = task.environment.resolve_baseline()
-    return {
-        resolve_agent_phase_policy(task, TrialAgentConfig(), baseline, step).network_mode
-        for step in task.steps or [None]
-    }
+    return [resolve_agent_phase_policy(task, TrialAgentConfig(), baseline, step) for step in task.steps or [None]]
 
 
 def check_tasks_reach_the_gateway(
@@ -216,21 +217,35 @@ def check_tasks_reach_the_gateway(
 ) -> None:
     """Refuse no-network and allowlist tasks whose sandboxes couldn't reach the gateway model the agent calls.
 
-    ``tasks`` are (task id, task.toml config) pairs. Beyond its own hosts, such a sandbox reaches only the
-    profile's ``agent_channel`` hosts.
+    ``tasks`` are (task id, task.toml config) pairs. Such a sandbox reaches the profile's ``agent_channel``
+    hosts and, in allowlist mode, the task's own ``allowed_hosts``.
 
     Raises:
         ValueError: Some no-network or allowlist task's sandbox can't reach the gateway.
     """
     if not isinstance(target, HarborRunnerTarget) or target.gateway_model is None:
         return
-    restricted = [task_id for task_id, config in tasks if _agent_network_modes(config) - {NetworkMode.PUBLIC}]
-    if not restricted:
+    restricted = {
+        task_id: [policy for policy in _agent_network_policies(config) if policy.network_mode != NetworkMode.PUBLIC]
+        for task_id, config in tasks
+    }
+    if not any(restricted.values()):
         return
     host = urlsplit(agent_gateway_origin(sandboxed=True)).hostname or ""
-    if agent_channel_name(host, agent_channel) is None:
+    if agent_channel_name(host, agent_channel) is not None:
+        return
+    # Without a channel entry the agent calls the gateway by ``host`` itself, so an allowlist must allow that name.
+    unreachable = [
+        task_id
+        for task_id, policies in restricted.items()
+        if any(
+            policy.network_mode == NetworkMode.NO_NETWORK or agent_channel_name(host, policy.allowed_hosts) != host
+            for policy in policies
+        )
+    ]
+    if unreachable:
         raise ValueError(
-            f"gateway_unreachable: no-network or allowlist tasks {restricted} can't reach the Inference Gateway at "
+            f"gateway_unreachable: no-network or allowlist tasks {unreachable} can't reach the Inference Gateway at "
             f"{host}: add {host}, its fully qualified name, or an IP range containing it to the sandbox profile's "
             "agent_channel"
         )
