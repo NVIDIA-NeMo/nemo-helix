@@ -12,7 +12,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException
-from nemo_evals.agent_layers.models import AgentLayer
+from nemo_evals.agent_layers.models import AgentLayer, image_digest
 from nemo_evals.agent_layers.run_agents import agent_layer_request
 from nemo_evals.agent_layers.service import AgentLayerService, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
@@ -328,7 +328,12 @@ class TasksetRunService:
         )
 
     async def _start_agent_layers(
-        self, spec: AgentEvalSpec, harbor: HarborTaskJobsConfig, *, timeout: int
+        self,
+        spec: AgentEvalSpec,
+        harbor: HarborTaskJobsConfig,
+        prepared: list[PreparedHarborEnvironment],
+        *,
+        timeout: int,
     ) -> PlannedAgentLayers | None:
         """Start each task's agent layer for the run's agent, as the caller; None when no task can get one.
 
@@ -339,16 +344,19 @@ class TasksetRunService:
         agent = agent_layer_request(spec.target) if harbor.agent_layers else None
         if agent is None:
             return None
-        # Keyed by name and digest: provenance models don't hash, and two members may name one revision.
-        revisions = dict.fromkeys(
-            (task.spec.provenance.entity_name, task.spec.provenance.revision_digest)
-            for task in spec.tasks
+        # Keyed by name and digest: provenance models don't hash, and two members may name one revision. Each maps to
+        # the environment image the run prepared for it (in task order): a prebuilt image's tag may have moved since.
+        revisions = {
+            (task.spec.provenance.entity_name, task.spec.provenance.revision_digest): image_digest(
+                environment.agent.image_ref
+            )
+            for task, environment in zip(spec.tasks, prepared, strict=True)
             if isinstance(task.spec, ResolvedHarborTaskDefinition)
-        )
+        }
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
         now = self._clock()
 
-        async def start(revision: tuple[str, str]) -> AgentLayer | None:
+        async def start(revision: tuple[str, str], environment_digest: str) -> AgentLayer | None:
             entity_name, digest = revision
             task_workspace, _, name = entity_name.partition("/")
             jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=task_workspace)
@@ -356,7 +364,13 @@ class TasksetRunService:
             async with limit:
                 try:
                     return await service.request_layer(
-                        task_workspace, name, digest, agent, ttl=timedelta(seconds=timeout), now=now
+                        task_workspace,
+                        name,
+                        digest,
+                        agent,
+                        environment_digest=environment_digest,
+                        ttl=timedelta(seconds=timeout),
+                        now=now,
                     )
                 except (ImagePlanError, UnsupportedTaskKindError, ImageBuildForbiddenError) as exc:
                     logger.info("Task %s gets no agent layer; its trials install the agent: %s", entity_name, exc)
@@ -369,7 +383,7 @@ class TasksetRunService:
                     )
                     return None
 
-        layers = await _all(start(revision) for revision in revisions)
+        layers = await _all(start(revision, environment) for revision, environment in revisions.items())
         if all(layer is None for layer in layers):
             return None
         wait = timedelta(seconds=harbor.agent_layer_wait_seconds)
@@ -434,7 +448,7 @@ class TasksetRunService:
             intake = await self._resolve_publication(req, workspace, spec, taskset_ref=pinned.root)
             prepared, task_notices = await self._prepare_images(spec.tasks, policy, caller=caller)
             # The run's members wait in image_preparing for their layers, while the ones not ready yet are built.
-            agent_layers = await self._start_agent_layers(spec, harbor, timeout=timeout)
+            agent_layers = await self._start_agent_layers(spec, harbor, prepared, timeout=timeout)
             plan = TasksetRunPlan(
                 run_id=run_id,
                 workspace=workspace,

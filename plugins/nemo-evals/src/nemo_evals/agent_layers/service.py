@@ -86,10 +86,14 @@ class AgentLayerService:
         revision: str,
         request: AgentLayerRequest,
         *,
+        environment_digest: str,
         ttl: timedelta,
         now: datetime,
     ) -> AgentLayer | None:
         """Start a layer of a revision for an agent, or return the one already running, or ready and unexpired.
+
+        ``environment_digest`` is the digest of the task's environment image as the run prepared it. Only a layer on
+        that image is returned; one on another digest (a prebuilt image whose tag has moved since) gets a new attempt.
 
         A new attempt expires ``ttl`` after ``now`` and reuses only a Builder build made within ``ttl`` before it.
         Returns ``None`` when the task doesn't exist.
@@ -116,10 +120,11 @@ class AgentLayerService:
 
         layers = await self._layers(head, task_revision.content_hash, key)
         newest = layers[0] if layers else None
-        if newest is not None and newest.status == "ready":
+        same = newest is not None and newest.environment_digest == environment_digest
+        if newest is not None and same and newest.status == "ready":
             if not expired(newest, now):
                 return AgentLayer.from_entity(newest)
-        elif newest is not None and newest.status != "failed":
+        elif newest is not None and same and newest.status != "failed":
             job = await self.jobs.get(newest.job)
             if job is None or job.status not in _ENDED_JOB_STATUSES:
                 await self._start(newest)
@@ -140,6 +145,7 @@ class AgentLayerService:
             agent=request,
             attempt=attempt,
             job=layer_job_name(task, task_revision.content_hash, key, attempt),
+            environment_digest=environment_digest,
             expires_at=now + ttl,
             built_after=now - ttl,
         )

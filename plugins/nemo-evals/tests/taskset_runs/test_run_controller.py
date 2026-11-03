@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import nemo_evals.taskset_runs.controller as controller_module
 import pytest
-from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest
+from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, image_digest
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.image_builds.models import BuildImage, BuildStatus
@@ -1978,8 +1978,21 @@ def agent_layer(
         job="agent-layer-build-1",
         image=image,
         error="install failed" if status == "failed" else None,
+        environment_digest=image_digest(plan.task_environments[index].agent.image_ref),
         expires_at=expires_at,
     )
+
+
+async def test_a_layer_on_another_environment_image_than_the_runs_isnt_used(harness, harbor_plan, jobs):
+    plan = layered(harbor_plan)
+    moved = agent_layer(plan, 0).model_copy(update={"environment_digest": "sha256:" + "f" * 64})
+    harness.layers = {revision(plan, 0): moved, revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    members = await harness.members(run)
+    environments = [member_environment(harness.plans[run.name], member) for member in members]
+    assert [environment.agent_preinstalled for environment in environments] == [False, True]
+    assert environments[0].agent == plan.task_environments[0].agent
 
 
 async def test_tasks_wait_for_their_agent_layers_then_run_on_them(harness, harbor_plan, jobs):

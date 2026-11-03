@@ -34,12 +34,17 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 _CODEX = AgentLayerRequest(name="codex", kwargs={"version": "0.162.1"})
 _TTL = timedelta(hours=1)
+_ENVIRONMENT_DIGEST = "sha256:" + "e" * 64
 
 
 async def _request(service: AgentLayerService, name: str, digest: str, agent: AgentLayerRequest = _CODEX, **at: Any):
-    """``service.request_layer`` for a run with a one-hour timeout, now unless ``now`` says otherwise."""
+    """``service.request_layer`` for a run with a one-hour timeout that prepared ``_ENVIRONMENT_DIGEST``, now unless
+    ``now`` says otherwise."""
     now = at.get("now", datetime.now(timezone.utc))
-    return await service.request_layer("default", name, digest, agent, ttl=_TTL, now=now)
+    environment_digest = at.get("environment_digest", _ENVIRONMENT_DIGEST)
+    return await service.request_layer(
+        "default", name, digest, agent, environment_digest=environment_digest, ttl=_TTL, now=now
+    )
 
 
 class _Jobs:
@@ -221,6 +226,44 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
         "context/nhx-agent-installer/venv/bin/python": "../../python/cpython-3.12.15-linux-x86_64-gnu/bin/python3",
     }
     assert not any("instruction.md" in path or "task.toml" in path for path in context)
+
+
+async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """The task names a tag; the layer starts from the image the run's images copied, wherever the tag points now."""
+    config = {"agent": {"user": "agent"}, "environment": {"docker_image": "python:3.12"}}
+    _serve_archive(monkeypatch, {"task.toml": b'[agent]\nuser = "agent"\n'})
+    digest = await store_task("sort-task", config=config)
+    layer = await _request(AgentLayerService(entity_store, _Jobs(), _allow), "sort-task", digest)
+    assert layer is not None
+    spec = AgentLayerBuildSpec(
+        workspace="default", task="sort-task", revision_digest=digest, agent_key=layer.agent_key, attempt=1
+    )
+    builder, files = _Builder(), _Files()
+
+    await _run(entity_store, spec, builder, files, tmp_path)
+
+    ((name, _, _),) = builder.submits
+    dockerfile = _context(files.uploads[(name, "context.tar.gz")])["context/Dockerfile.nhx-agent-layer"].decode()
+    assert dockerfile.splitlines()[0] == f"FROM docker.io/library/python@{_ENVIRONMENT_DIGEST}"
+
+
+async def test_a_layer_on_another_environment_digest_isnt_reused(entity_store, store_task) -> None:
+    """A prebuilt image's tag moved and a run prepared the new image: the layer on the old one isn't its layer."""
+    jobs = _Jobs()
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, jobs, _allow)
+    await _request(service, "sort-task", digest)
+    await _make_ready(entity_store, digest)
+    moved = "sha256:" + "f" * 64
+
+    layer = await _request(service, "sort-task", digest, environment_digest=moved)
+    newest = await newest_layer(entity_store, "default", "sort-task", digest, agent_layer_key(_CODEX))
+
+    assert layer is not None and layer.id == "2" and layer.status == "pending"
+    assert newest is not None and newest.environment_digest == moved
+    assert len(jobs.created) == 2
 
 
 async def test_tasks_whose_environments_hold_the_same_files_share_one_build(

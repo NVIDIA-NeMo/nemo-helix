@@ -75,6 +75,15 @@ class AgentLayerEntity(EntityBase):
     status: BuildStatus = "pending"
     job: str = Field(description="Name of the agent-layer Job that runs this attempt.")
     image: BuildImage | None = Field(default=None, description="The layer's image, once the build has planned it.")
+    environment_digest: str | None = Field(
+        default=None,
+        description=(
+            "Digest of the task's environment image as the run that requested this attempt prepared it. A layer of a "
+            "prebuilt image starts from that image at this digest, whatever its tag names now, and a run uses the "
+            "layer only when it prepared the same digest. None: a layer made before this was recorded, which no run "
+            "uses."
+        ),
+    )
     error: str | None = None
     expires_at: datetime | None = Field(
         default=None,
@@ -92,9 +101,12 @@ class AgentLayerEntity(EntityBase):
     )
 
     def agent_image(self, base: PreparedImage) -> PreparedImage | None:
-        """The task's agent image with this layer's agent installed, replacing ``base``; None unless ready."""
+        """The task's agent image with this layer's agent installed, replacing ``base``; None unless ready and built on
+        the environment image ``base`` is."""
         image = self.image
         if self.status != "ready" or image is None or image.status != "ready" or image.image_ref is None:
+            return None
+        if self.environment_digest is None or self.environment_digest != image_digest(base.image_ref):
             return None
         return PreparedImage(
             image_ref=image.image_ref,
@@ -136,6 +148,11 @@ class AgentLayer(BaseModel):
             created_at=entity.created_at,
             updated_at=entity.updated_at,
         )
+
+
+def image_digest(image_ref: str) -> str:
+    """The digest of a pinned ``<registry>/<repository>@<digest>`` reference."""
+    return image_ref.rpartition("@")[2]
 
 
 def layer_entity_name(revision_digest: str, agent_key: str, attempt: int) -> str:

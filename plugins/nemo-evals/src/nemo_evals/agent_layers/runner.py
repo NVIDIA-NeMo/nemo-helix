@@ -20,6 +20,7 @@ import tarfile
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 
 from nemo_builder_plugin.identity import normalize_reference
@@ -138,7 +139,7 @@ async def _submit(
             # The listing alone: a compose task, which ``read_archive`` would extract and parse, gets no layer.
             archive = await asyncio.to_thread(TaskArchive.read, path)
             main = await asyncio.to_thread(_plan_main, definition, archive)
-            base_image = str(normalize_reference(main.image)) if main.image is not None else None
+            base_image = _base_image(main.image, layer.environment_digest) if main.image is not None else None
             environment = main.context_digest if base_image is None else base_image
             name = layer_builder_name(
                 environment=environment or "", agent_key=spec.agent_key, user=user, platform=main.platform
@@ -176,6 +177,15 @@ async def _submit(
     )
     apply_builder_image(image, built)
     return image
+
+
+def _base_image(image: str, digest: str | None) -> str:
+    """The prebuilt ``image`` a layer starts from: at ``digest``, the one the run's images copied, when known.
+
+    Builder's copy of a prebuilt image keeps its manifest, so the copy's digest names the same image upstream.
+    """
+    reference = normalize_reference(image)
+    return str(replace(reference, tag=None, digest=digest) if digest is not None else reference)
 
 
 def layer_builder_name(*, environment: str, agent_key: str, user: str | int | None, platform: str | None) -> str:
