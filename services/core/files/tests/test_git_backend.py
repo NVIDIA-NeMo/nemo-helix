@@ -1016,7 +1016,8 @@ class TestColdRepositories:
 
         (repo / "README.md").write_text("again\n")
         _git(repo, "commit", "--quiet", "-am", "readme")
-        impl = _impl(_config(remote["url"], revision=_git(repo, "rev-parse", "HEAD")), cache, ssh_binary=ssh)
+        config = _config(remote["url"], revision=_git(repo, "rev-parse", "HEAD"), read_chunk_size=64 * 1024)
+        impl = _impl(config, cache, ssh_binary=ssh)
         assert await _read(impl, "README.md") == b"again\n"
         assert len(await _read(impl, "big.bin")) == 2 * 1024 * 1024
         assert received.stat().st_size - before < 64 * 1024
