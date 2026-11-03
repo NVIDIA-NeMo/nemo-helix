@@ -170,6 +170,12 @@ overrides = [
     { name = "xgrammar", specifier = ">=0.1.32" },
 ]
 
+[[manifest.dependency-metadata]]
+name = "nemo-tavily-plugin"
+version = "0.1.0"
+requires-dist = ["httpx>=0.27.0,<1", "pydantic>=2.0.0"]
+requires-python = ">=3.12, <3.15"
+
 [[package]]
 name = "absl-py"
 version = "2.5.0"
@@ -7533,6 +7539,24 @@ requires-dist = [
 ]
 
 [[package]]
+name = "nemo-tavily-plugin"
+version = "0.1.0"
+source = { url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+wheels = [
+    { url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl", hash = "sha256:ffbfa4e99d8d621fcd21a4b3088fe406bc71a5769f871f49bab7a9ac1a2c78bb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.27.0,<1" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+]
+
+[[package]]
 name = "nemo-unsloth-plugin"
 version = "0.0.0"
 source = { editable = "plugins/nemo-unsloth" }
@@ -7673,6 +7697,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
+    { name = "nemo-tavily-plugin" },
     { name = "nemo-unsloth-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
@@ -7721,6 +7746,7 @@ core-services = [
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
+    { name = "nemo-tavily-plugin" },
     { name = "nemo-unsloth-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
@@ -7830,6 +7856,7 @@ enabled-plugins = [
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
+    { name = "nemo-tavily-plugin" },
     { name = "nemo-unsloth-plugin" },
     { name = "nhx-jobs", extra = ["openshell"] },
 ]
@@ -7852,6 +7879,7 @@ functional-services = [
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
     { name = "nemo-switchyard-plugin" },
+    { name = "nemo-tavily-plugin" },
     { name = "nemo-unsloth-plugin" },
     { name = "nhx-auth" },
     { name = "nhx-common" },
@@ -7890,6 +7918,9 @@ nhx-task-runtime = [
 scaled-evals = [
     { name = "nemo-scaled-evals-plugin" },
     { name = "opensandbox-server" },
+]
+tavily = [
+    { name = "nemo-tavily-plugin" },
 ]
 typecheck = [
     { name = "transformers" },
@@ -7955,6 +7986,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
+    { name = "nemo-tavily-plugin", url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
@@ -8001,6 +8033,7 @@ core-services = [
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
+    { name = "nemo-tavily-plugin", url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
@@ -8113,6 +8146,7 @@ enabled-plugins = [
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
+    { name = "nemo-tavily-plugin", url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
     { name = "nhx-jobs", extras = ["openshell"], editable = "services/core/jobs" },
 ]
@@ -8136,6 +8170,7 @@ functional-services = [
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
     { name = "nemo-switchyard-plugin", editable = "plugins/nemo-switchyard" },
+    { name = "nemo-tavily-plugin", url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" },
     { name = "nemo-unsloth-plugin", editable = "plugins/nemo-unsloth" },
     { name = "nhx-auth", editable = "services/core/auth" },
     { name = "nhx-common", editable = "packages/nhx_common" },
@@ -8172,6 +8207,7 @@ scaled-evals = [
     { name = "nemo-scaled-evals-plugin", editable = "plugins/_temporary-scaled-evals" },
     { name = "opensandbox-server", specifier = "==0.2.1" },
 ]
+tavily = [{ name = "nemo-tavily-plugin", url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" }]
 typecheck = [{ name = "transformers", specifier = ">=5.5.0,<5.9.0" }]
 
 [[package]]

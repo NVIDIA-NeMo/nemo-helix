@@ -81,6 +81,9 @@ scaled-evals = [
   # server image in k8s/helm/examples/opensandbox.
   "opensandbox-server==0.2.1",
 ]
+# Third-party Tavily plugin, installed from a release wheel. Keep it out of published extras: PyPI rejects
+# direct-URL dependencies.
+tavily = ["nemo-tavily-plugin"]
 dev = [
   "pre-commit>=3.8.0",
   "pydantic-settings>=2.6.1",
@@ -197,6 +200,7 @@ enabled-plugins = [
   "nemo-data-designer-plugin[retrieval-sdg]",
   "nemo-evals-plugin",
   { include-group = "compass" },
+  { include-group = "tavily" },
   "nemo-guardrails-plugin",
   "nemo-garak-plugin",
   "nemo-safe-synthesizer-plugin",
@@ -314,6 +318,14 @@ environments = [
   "sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
 
+# Workspace members read as 0.0.0, so the Tavily wheel's `nemo-helix>=0.9` floors can't resolve. Declare its
+# other requirements here and keep them in sync with its pyproject on each bump.
+dependency-metadata = [
+  { name = "nemo-tavily-plugin", version = "0.1.0", requires-dist = [
+    "httpx>=0.27.0,<1",
+    "pydantic>=2.0.0",
+  ], requires-python = ">=3.12,<3.15" },
+]
 constraint-dependencies = [
   "GitPython>=3.1.60",
   "Mako>=1.3.12",
@@ -461,6 +473,8 @@ nemo-compass-plugin = { workspace = true }
 
 nemo-evals-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
+# Bump the URL per release; uv.lock records the wheel hash.
+nemo-tavily-plugin = { url = "https://github.com/tavily-ai/nemo-helix-tavily/releases/download/v0.1.0/nemo_tavily_plugin-0.1.0-py3-none-any.whl" }
 nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
