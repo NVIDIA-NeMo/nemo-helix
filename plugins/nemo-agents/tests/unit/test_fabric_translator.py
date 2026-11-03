@@ -104,7 +104,7 @@ class TestTranslateAgentConfig:
             assert observability["insecure_http_hosts"] == hosts
 
     @pytest.mark.parametrize("hosts", [[], ["collector.example.com"]])
-    def test_hermes_rejects_explicit_http_allowlist(self, hosts: list[str]) -> None:
+    def test_hermes_rejects_explicit_http_allowlist_only_with_telemetry(self, hosts: list[str]) -> None:
         payload = _example_yaml_config()
         payload["telemetry"].update(enabled=True, insecure_http_hosts=hosts)
         config = AgentConfig.model_validate(payload)
@@ -112,6 +112,8 @@ class TestTranslateAgentConfig:
             translate_agent_config(config)
         # The restriction follows the selected harness, including overrides.
         assert translate_agent_config(config, harness_name="codex").relay is not None
+        config.telemetry.enabled = False
+        assert translate_agent_config(config).relay is None
 
     @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
     @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])

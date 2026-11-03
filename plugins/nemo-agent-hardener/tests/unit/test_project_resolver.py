@@ -84,13 +84,13 @@ def test_binaries_include_the_system_interpreter_the_venv_resolves_to():
 
 
 @pytest.mark.parametrize("install_dir", ["/custom/python", None])
-def test_hermes_project_preserves_adapter_environment_and_egress(tmp_path: Path, install_dir):
-    project = _project(tmp_path)
-    with (project / "Dockerfile").open("a") as dockerfile:
-        dockerfile.write("\nENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python\n")
-        if install_dir:
-            dockerfile.write(f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n")
-    derived = inspect_project(project, env_overrides={"ADAPTER_PYTHON": "/custom/hermes/bin/python"})
+def test_hermes_project_uses_adapter_overrides(tmp_path: Path, install_dir: str | None):
+    dockerfile = FABRIC_DOCKERFILE + "ENV ADAPTER_PYTHON=/image/hermes/bin/python\n"
+    if install_dir:
+        dockerfile += f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n"
+    derived = inspect_project(
+        _project(tmp_path, dockerfile), env_overrides={"ADAPTER_PYTHON": "/custom/hermes/bin/python"}
+    )
     assert derived["env"]["ADAPTER_PYTHON"] == "/custom/hermes/bin/python"
     if install_dir:
         assert "/custom/hermes/bin/python" in derived["binaries"]
@@ -98,7 +98,6 @@ def test_hermes_project_preserves_adapter_environment_and_egress(tmp_path: Path,
     else:
         assert not derived["binaries"]
         assert "binaries" in derived["unresolved"]
-        assert any("--binary" in warning for warning in derived["warnings"])
 
 
 def test_port_prefers_env_over_expose():

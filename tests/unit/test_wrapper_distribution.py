@@ -37,13 +37,10 @@ def test_harness_extras_include_agents_plugin_dependencies() -> None:
         project = tomllib.load(pyproject)["project"]
 
     extras = project["optional-dependencies"]
-    expected = {
-        "nemo-agents-plugin-claude": "nemo-fabric-adapters-claude[harness]>=0.6.0,<0.7.0",
-        "nemo-agents-plugin-codex": "nemo-fabric-adapters-codex[harness]>=0.6.0,<0.7.0",
-        "nemo-agents-plugin-deepagents": "nemo-fabric-adapters-deepagents[harness]>=0.6.0,<0.7.0",
-    }
-    for extra, dependency in expected.items():
-        assert extras[extra] == ["nemo-helix[nemo-agents-plugin]", dependency]
+    with open(ROOT / "plugins/nemo-agents/pyproject.toml", "rb") as pyproject:
+        harness_extras = tomllib.load(pyproject)["project"]["optional-dependencies"]
+    for harness in ("claude", "codex", "deepagents"):
+        assert extras[f"nemo-agents-plugin-{harness}"] == ["nemo-helix[nemo-agents-plugin]", *harness_extras[harness]]
     assert not {"claude", "codex", "deepagents"} & extras.keys()
 
 

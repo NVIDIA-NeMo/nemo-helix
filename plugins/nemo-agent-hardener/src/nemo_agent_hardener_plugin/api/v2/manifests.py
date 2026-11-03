@@ -54,7 +54,7 @@ from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
-from nemo_agent_hardener_plugin.project_resolver import build_project_manifest_dict, inspect_project
+from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, build_project_manifest_dict, inspect_project
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entity_client import (
@@ -464,6 +464,10 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
             f"explicitly. {' '.join(derived.get('warnings', []))}".strip(),
         )
 
+    runtime_env = derived.get("env", {})
+    if body.env:
+        runtime_env = {**{key: value for key, value in runtime_env.items() if key in HERMES_RUNTIME_ENV}, **body.env}
+
     manifest_dict = build_project_manifest_dict(
         agent_name=body.name,
         project_dir=".",
@@ -476,7 +480,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         backends=backends,
         harness=body.harness,
         relay_integration_confirmed=body.relay_integration_confirmed,
-        env=derived.get("env", {}),
+        env=runtime_env,
     )
     manifest = AgentHardenerManifest.from_project_upload(
         name=body.name,

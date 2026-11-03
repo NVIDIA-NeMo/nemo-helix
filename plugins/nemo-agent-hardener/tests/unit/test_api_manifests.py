@@ -533,17 +533,28 @@ def test_project_requires_explicit_binary_when_adapter_location_is_unknown(
     client, mock_entity_client, monkeypatch, tmp_path, binaries
 ) -> None:
     (tmp_path / "Dockerfile").write_text(
-        'FROM python:3.12-slim\nENV ADAPTER_PYTHON=/custom/venv/bin/python\nENTRYPOINT ["/usr/bin/python", "app.py"]\n'
+        "FROM python:3.12-slim\n"
+        "ENV ADAPTER_PYTHON=/custom/venv/bin/python\n"
+        "ENV DATABASE_URL=private-image-setting\n"
+        'ENTRYPOINT ["/usr/bin/python", "app.py"]\n'
     )
     monkeypatch.setattr(manifests_module, "download_and_extract_project", lambda *_a, **_k: tmp_path)
     mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
     response = client.post(
         "/apis/agent-hardener/v2/workspaces/default/manifests",
-        json={"name": "p1", "source_type": "project", "project_fileset": "default/proj", "binaries": binaries},
+        json={
+            "name": "p1",
+            "source_type": "project",
+            "project_fileset": "default/proj",
+            "binaries": binaries,
+            "env": {"MODE": "test"},
+        },
     )
     assert response.status_code == (201 if binaries else 400), response.text
     if binaries:
-        assert yaml.safe_load(response.json()["manifest_yaml"])["agent"]["binaries"] == binaries
+        agent = yaml.safe_load(response.json()["manifest_yaml"])["agent"]
+        assert agent["binaries"] == binaries
+        assert agent["env"] == {"ADAPTER_PYTHON": "/custom/venv/bin/python", "MODE": "test"}
     else:
         assert "UV_PYTHON_INSTALL_DIR" in response.text
 
