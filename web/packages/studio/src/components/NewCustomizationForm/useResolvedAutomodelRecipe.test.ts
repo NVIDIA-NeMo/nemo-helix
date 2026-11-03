@@ -45,6 +45,15 @@ describe('useResolvedAutomodelRecipe', () => {
     expect(result.current).toBeNull();
   });
 
+  it('treats an omitted recipe as auto', () => {
+    returnsModel({ head_type: 'embedding' });
+    const { result } = renderHook(() =>
+      useResolvedAutomodelRecipe('default/embedder', undefined, true)
+    );
+    expect(result.current).toBe('bi_encoder');
+    expect(queryOptions()?.enabled).toBe(true);
+  });
+
   it('stays auto for a loaded causal LM', () => {
     returnsModel({ head_type: 'causal_lm' });
     const { result } = renderHook(() => useResolvedAutomodelRecipe('default/llama', 'auto', true));
