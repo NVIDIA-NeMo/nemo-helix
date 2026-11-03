@@ -37,6 +37,7 @@ class _FakeFiles:
     """Records calls; `existing` names the filesets the platform already has."""
 
     workspace = "default"
+    retry = None
 
     def __init__(self, existing: set[str] | None = None) -> None:
         self.existing = existing or set()

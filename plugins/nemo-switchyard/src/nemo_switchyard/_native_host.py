@@ -113,7 +113,13 @@ class IgwJudgeTransport:
         headers: dict[str, str],
     ) -> dict[str, Any]:
         del headers
-        target = self._middleware.get_inference_url_and_model(model_entity_id)
+        try:
+            target = self._middleware.get_inference_url_and_model(model_entity_id)
+        except ValueError as exc:
+            raise InferenceMiddlewareError(
+                f"Switchyard judge provider has an invalid configuration: {exc}",
+                status_code=422,
+            ) from exc
         if target.missing_secret_name:
             raise InferenceMiddlewareError(
                 f"Switchyard judge provider secret {target.missing_secret_name!r} is not cached; "

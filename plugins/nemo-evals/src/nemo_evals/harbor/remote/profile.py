@@ -88,7 +88,7 @@ class ResolvedHarborSandboxPolicy(BaseModel):
         default=(), description="execution.sandbox.egress_allow, kept apart for provenance."
     )
     agent_channel: tuple[str, ...] = Field(
-        default=(), description="Hosts a no-network task's sandbox may still reach (operator config)."
+        default=(), description="Hosts a no-network or allowlist task's sandbox may also reach (operator config)."
     )
     agent_setup_egress: tuple[str, ...] = Field(
         default=(), description="Hosts the sandbox may also reach during the agent's setup() only (operator config)."

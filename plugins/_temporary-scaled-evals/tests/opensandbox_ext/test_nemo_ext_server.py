@@ -257,7 +257,7 @@ def test_health(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.get("/v1/nemo-ext/health").json() == {
         "status": "ok",
         "extension": "nemo-compose-services",
-        "features": ["compose-services", "agent-bundle", "compose-main", "egress-port"],
+        "features": ["compose-services", "agent-bundle", "compose-main", "compose-security", "egress-port"],
     }
     monkeypatch.setattr(ext, "_provider", None)
     assert api.get("/v1/nemo-ext/health").status_code == 503

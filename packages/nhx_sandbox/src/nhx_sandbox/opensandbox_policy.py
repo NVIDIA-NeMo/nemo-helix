@@ -86,15 +86,18 @@ async def verify_applied_egress(
     failure rather than as a sandbox with quietly unrestricted network access.
 
     ``default_action`` is always fatal when it disagrees: it is unambiguous, it decides what happens
-    to everything no rule matches, and create is the only moment it can be set. Missing *rules* are
-    only fatal under ``strict``, because the sidecar returns a merged, re-serialized policy and a
-    textual difference there is more likely to mean reformatting than a real gap.
+    to everything no rule matches, and create is the only moment it can be set. Under ``strict`` the
+    rules are compared both ways: a requested rule the sandbox doesn't report fails, and so does an
+    allow rule it reports that nobody requested, since that lets the sandbox reach something it
+    shouldn't. An extra deny rule only narrows what the sandbox can reach, so it never fails; the
+    sidecar may fold in operator rules of its own. ``default_action`` mode warns about both instead.
 
     Args:
         sandbox: A live OpenSandbox SDK ``Sandbox``.
         expected: The policy the sandbox was created with.
         mode: ``off`` skips the check; ``default_action`` fails only on a default-action mismatch;
-            ``strict`` also fails on any requested rule the sandbox does not report.
+            ``strict`` also fails on any requested rule the sandbox does not report, and on any allow
+            rule it reports that was not requested.
         label: Names the sandbox in errors and logs, e.g. ``"episode abc123"``.
         require_readback: Fail, rather than warn and skip, when the SDK object cannot report its
             applied policy.
@@ -123,23 +126,18 @@ async def verify_applied_egress(
         (getattr(rule, "action", None), canonical_egress_target(str(getattr(rule, "target", ""))))
         for rule in (getattr(applied, "egress", None) or ())
     }
-    missing = sorted(
-        (rule.action, rule.target)
-        for rule in expected.rules
-        if (rule.action, canonical_egress_target(rule.target)) not in applied_targets
-    )
-    if not missing:
-        return
+    expected_targets = {(rule.action, canonical_egress_target(rule.target)) for rule in expected.rules}
+    missing = sorted(expected_targets - applied_targets)
+    extra = sorted((action, target) for action, target in applied_targets - expected_targets if action == "allow")
 
+    problems = []
+    if missing:
+        problems.append(f"did not apply {len(missing)} requested egress rule(s); first few: {missing[:5]}")
+    if extra:
+        problems.append(f"allows {len(extra)} egress target(s) that were not requested; first few: {extra[:5]}")
+    if not problems:
+        return
+    message = f"{label} " + "; and ".join(problems)
     if mode == "strict":
-        raise EgressVerificationError(
-            f"{label} did not apply {len(missing)} requested egress rule(s); first few: {missing[:5]}"
-        )
-    LOGGER.warning(
-        "%s did not report %d requested egress rule(s) (first few: %s). The default action matched, "
-        "so this may be the sidecar re-serializing a merged policy rather than a real gap. Use strict "
-        "verification once a deployment is known to round-trip rules cleanly.",
-        label,
-        len(missing),
-        missing[:5],
-    )
+        raise EgressVerificationError(message)
+    LOGGER.warning("%s. Strict verification would fail it.", message)

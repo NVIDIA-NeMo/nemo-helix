@@ -39,13 +39,14 @@ class _Sandbox:
 
 
 def _matching() -> _Policy:
-    # The sidecar re-serializes: Go spells the IPv4-mapped prefix differently and adds its own rules.
+    # The sidecar re-serializes: Go spells the IPv4-mapped prefix differently, and an operator rule of
+    # its own may appear. A deny it adds only narrows what the sandbox can reach.
     return _Policy(
         default_action="deny",
         egress=[
             _Rule("allow", "API.example.com."),
             _Rule("deny", "::ffff:0.0.0.0/96"),
-            _Rule("allow", "10.96.0.10"),
+            _Rule("deny", "169.254.0.0/16"),
         ],
     )
 
@@ -74,7 +75,32 @@ async def test_missing_rule_fails_only_under_strict(caplog: pytest.LogCaptureFix
 
     with caplog.at_level(logging.WARNING):
         await verify_applied_egress(sandbox, EXPECTED, mode="default_action", label="sandbox s1")
-    assert "did not report 1 requested egress rule" in caplog.text
+    assert "did not apply 1 requested egress rule(s)" in caplog.text
+    assert "Strict verification would fail it" in caplog.text
+
+
+async def test_an_allow_rule_nobody_requested_fails_only_under_strict(caplog: pytest.LogCaptureFixture) -> None:
+    """It lets the sandbox reach something it shouldn't, which a check of the requested rules alone misses."""
+    sandbox = _Sandbox(_Policy(default_action="deny", egress=[*(_matching().egress or []), _Rule("allow", "*.com")]))
+
+    with pytest.raises(EgressVerificationError, match=r"allows 1 egress target\(s\) that were not requested.*\*\.com"):
+        await verify_applied_egress(sandbox, EXPECTED, mode="strict", label="sandbox s1")
+
+    with caplog.at_level(logging.WARNING):
+        await verify_applied_egress(sandbox, EXPECTED, mode="default_action", label="sandbox s1")
+    assert "allows 1 egress target(s) that were not requested" in caplog.text
+
+
+async def test_strict_reports_missing_and_extra_rules_together() -> None:
+    sandbox = _Sandbox(
+        _Policy(default_action="deny", egress=[_Rule("deny", "::ffff:0:0/96"), _Rule("allow", "evil.example")])
+    )
+
+    with pytest.raises(EgressVerificationError) as raised:
+        await verify_applied_egress(sandbox, EXPECTED, mode="strict", label="sandbox s1")
+
+    assert "did not apply 1 requested egress rule(s)" in str(raised.value)
+    assert "allows 1 egress target(s) that were not requested" in str(raised.value)
 
 
 async def test_off_skips_the_readback() -> None:
