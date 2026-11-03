@@ -27,6 +27,8 @@ export interface StartOption<Id extends string = string> {
    * never reveal a detail panel or the Continue footer.
    */
   enabled: boolean;
+  /** Shown as a tooltip on the card while it is disabled, saying why. */
+  disabledReason?: string;
 }
 
 /** One template tile below the divider. */

@@ -7,6 +7,7 @@ import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/Descr
 import { PersonaTestSetPanel } from '@studio/components/CreateFilesetStart/PersonaTestSetPanel';
 import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
 import type { CreateFilesetStartProps } from '@studio/components/CreateFilesetStart/types';
+import { usePersonaAgents } from '@studio/components/CreateFilesetStart/usePersonaAgents';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
@@ -22,6 +23,23 @@ export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onC
     null
   );
   const templateGroups = useMemo(buildTemplateGroups, []);
+  const { agents, isSuccess } = usePersonaAgents(workspace);
+  // Personas write messages for a chosen agent, so the tile is a dead end without one.
+  // Only a confirmed-empty list disables it; a failed load stays reachable for the panel's Retry.
+  const noAgents = isSuccess && !agents.length;
+  const options = useMemo(
+    () =>
+      START_OPTIONS.map((option) =>
+        option.id === 'persona' && noAgents
+          ? {
+              ...option,
+              enabled: false,
+              disabledReason: 'Personas write test messages for an agent. Create an agent first.',
+            }
+          : option
+      ),
+    [noAgents]
+  );
 
   // Identity-stable so it can be a dependency of the AI panel's generate callback.
   const handleValidConfig = useCallback(
@@ -62,7 +80,7 @@ export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onC
     <StartPage
       heading="Create a fileset"
       headingDescription="Generate synthetic data visually — no JSON to write. Start from a template, or describe what you need and let AI lay out the columns."
-      options={START_OPTIONS}
+      options={options}
       // Templates are the likeliest way in, so their cards are always the panel here.
       value="template"
       onChange={(id) => {

@@ -108,6 +108,25 @@ describe('PersonaTestSetPanel', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled());
   });
 
+  it('disables the Personas tile, with a tooltip, when the workspace has no agents', async () => {
+    mockApis(true);
+    server.use(
+      http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), () =>
+        HttpResponse.json({
+          data: [],
+          pagination: { total: 0, total_pages: 0, page: 1, page_size: 1 },
+        })
+      )
+    );
+    const user = userEvent.setup();
+    render(<CreateFilesetStart workspace={workspace} onContinue={vi.fn()} />);
+
+    // Wrapping it for the tooltip remounts the tile, so query it fresh.
+    await waitFor(() => expect(screen.getByRole('radio', { name: /Personas/ })).toBeDisabled());
+    await user.hover(screen.getByText('Personas'));
+    expect((await screen.findAllByText(/Create an agent first/)).length).toBeGreaterThan(0);
+  });
+
   it('shows agent-list failures and recovers on retry', async () => {
     mockApis(true);
     let fail = true;

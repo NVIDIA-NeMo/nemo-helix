@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import { Badge, RadioGroupRoot, Stack } from '@nvidia/foundations-react-core';
+import { Badge, Block, RadioGroupRoot, Stack, Tooltip } from '@nvidia/foundations-react-core';
 import {
   TILE_DESCRIPTION_KIND,
   TILE_LABEL_KIND,
@@ -30,36 +30,50 @@ export const StartOptionCards: FC<StartOptionCardsProps> = ({
     className="w-full"
   >
     <Stack gap="density-md">
-      {options.map((option) => (
-        <RadioCard
-          key={option.id}
-          value={option.id}
-          label={option.title}
-          description={option.description}
-          icon={<option.icon size="16" aria-hidden />}
-          slotEnd={
-            option.tag ? (
-              <Badge
-                id={`${option.id}-tag`}
-                kind={option.tag.kind}
-                color={option.tag.color}
-                size="medium"
-              >
-                {option.tag.label}
-              </Badge>
-            ) : undefined
-          }
-          attributes={
-            option.tag ? { RadioGroupInput: { 'aria-describedby': `${option.id}-tag` } } : undefined
-          }
-          compact
-          labelKind={TILE_LABEL_KIND}
-          descriptionKind={TILE_DESCRIPTION_KIND}
-          showIndicator={false}
-          className={TILE_RADIUS}
-          disabled={disabled || !option.enabled}
-        />
-      ))}
+      {options.map((option) => {
+        const card = (
+          <RadioCard
+            key={option.id}
+            value={option.id}
+            label={option.title}
+            description={option.description}
+            icon={<option.icon size="16" aria-hidden />}
+            slotEnd={
+              option.tag ? (
+                <Badge
+                  id={`${option.id}-tag`}
+                  kind={option.tag.kind}
+                  color={option.tag.color}
+                  size="medium"
+                >
+                  {option.tag.label}
+                </Badge>
+              ) : undefined
+            }
+            attributes={
+              option.tag
+                ? { RadioGroupInput: { 'aria-describedby': `${option.id}-tag` } }
+                : undefined
+            }
+            compact
+            labelKind={TILE_LABEL_KIND}
+            descriptionKind={TILE_DESCRIPTION_KIND}
+            showIndicator={false}
+            className={TILE_RADIUS}
+            disabled={disabled || !option.enabled}
+          />
+        );
+        if (option.enabled || !option.disabledReason) return card;
+        // A disabled input fires no hover or focus events, so the tooltip needs a focusable wrapper.
+        return (
+          <Tooltip key={option.id} slotContent={option.disabledReason}>
+            {/* The trigger defaults to fit-content; keep the tile full width like its siblings. */}
+            <Block tabIndex={0} className="w-full">
+              {card}
+            </Block>
+          </Tooltip>
+        );
+      })}
     </Stack>
   </RadioGroupRoot>
 );

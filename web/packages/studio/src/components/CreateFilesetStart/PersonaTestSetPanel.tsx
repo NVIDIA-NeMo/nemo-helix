@@ -5,7 +5,6 @@ import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSel
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
 import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { fetchAgentsForSelect } from '@studio/components/agents/AgentBlockingInput/agentQueries';
 import { NEMOTRON_PERSONAS_LOCALES } from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
 import {
   buildPersonaTestSetRequest,
@@ -13,7 +12,7 @@ import {
 } from '@studio/components/agents/PersonaTestSet/personaTestSetRequest';
 import type { NemotronPersonasLocale } from '@studio/components/agents/PersonaTestSet/types';
 import { useNemotronPersonasSetup } from '@studio/components/agents/PersonaTestSet/useNemotronPersonasSetup';
-import { useQuery } from '@tanstack/react-query';
+import { usePersonaAgents } from '@studio/components/CreateFilesetStart/usePersonaAgents';
 import { useEffect, useMemo, type FC } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 
@@ -49,12 +48,7 @@ export const PersonaTestSetPanel: FC<PersonaTestSetPanelProps> = ({ workspace, o
   });
   const [agentName, locale, rows] = useWatch({ control, name: ['agent', 'locale', 'rows'] });
   const personas = useNemotronPersonasSetup(workspace, locale);
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['persona-test-set', 'agents', workspace],
-    queryFn: ({ signal }) => fetchAgentsForSelect(workspace, signal),
-    enabled: !!workspace,
-  });
-  const agents = useMemo(() => (data ?? []).filter((agent) => !!agent.name), [data]);
+  const { agents, isLoading, isError, refetch } = usePersonaAgents(workspace);
   const agentItems = useMemo(
     () => agents.map((agent) => ({ value: agent.name as string, children: agent.name as string })),
     [agents]
