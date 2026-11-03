@@ -85,4 +85,18 @@ describe('CancelJobModal', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
     expect(onConfirm).toHaveBeenCalledTimes(2);
   });
+
+  it.each([undefined, null])(
+    'shows the fallback message when onConfirm rejects with %s',
+    async (reason) => {
+      const onConfirm = vi.fn().mockRejectedValueOnce(reason);
+      const { onClose, user } = setup(onConfirm);
+
+      await user.click(submit());
+
+      expect(await screen.findByText('Failed to cancel job')).toBeInTheDocument();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(submit()).toBeEnabled();
+    }
+  );
 });
