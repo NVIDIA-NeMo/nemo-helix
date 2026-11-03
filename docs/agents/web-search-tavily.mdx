@@ -11,8 +11,9 @@ tools. It is a third-party plugin maintained by Tavily. The platform proxies age
 server with the workspace's Tavily API key, so agents never see the key.
 
 <Note>
-Once a workspace has a key and an agent has Tavily enabled, search queries and page URLs go to `mcp.tavily.com`
-under Tavily's terms. See [Third-Party Services](/documentation/telemetry-and-privacy).
+Once a workspace has a Tavily key, search queries and page URLs from agents with Tavily enabled and from
+`nemo tavily search` and `nemo tavily extract` go to `mcp.tavily.com` under Tavily's terms. See
+[Third-Party Services](/documentation/reference/telemetry-and-privacy#third-party-services).
 </Note>
 
 ## Where it is included
@@ -20,7 +21,7 @@ under Tavily's terms. See [Third-Party Services](/documentation/telemetry-and-pr
 | Environment | Plugin installed | Proxy on by default |
 |---|---|---|
 | Helm chart and NeMo Helix images | Yes | Yes |
-| Source checkout (`make bootstrap`) | Yes | No. Start the platform with `NEMO_TAVILY_ENABLED=true`. |
+| Source checkout (`make bootstrap`) | Yes | No. Run the `tavily` service with `NEMO_TAVILY_ENABLED=true`. |
 | `pip install nemo-helix` | No | No |
 
 The plugin is published as a wheel on its
