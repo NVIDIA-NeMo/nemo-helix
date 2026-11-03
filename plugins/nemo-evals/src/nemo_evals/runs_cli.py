@@ -756,7 +756,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
             if stored_ref is not None and "without images" in str(exc):
-                echo(f"Check with: nemo evals tasksets build-images {stored_ref}{flag} --status", err=True)
+                # The ref names its workspace, and build-images takes no --workspace.
+                echo(f"Check with: nemo evals tasksets build-images {stored_ref} --status", err=True)
             raise typer.Exit(code=1) from exc
         if status.get("phase", "accepted") == "accepted":
             echo(
