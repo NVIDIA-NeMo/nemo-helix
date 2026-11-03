@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -22,6 +23,7 @@ from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefin
 from nemo_evals.cli import EvaluatorPluginCLI
 from nemo_evals.config import EvaluatorConfig
 from nemo_evals.filesets import FilesetRef
+from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.jobs import agent_evaluate
 from nemo_evals.jobs.agent_compiler import _environment
 from nemo_evals.jobs.agent_evaluate import (
@@ -49,6 +51,7 @@ from nemo_evals.jobs.agent_spec import (
     ResolvedTask,
     Target,
 )
+from nemo_evals.jobs.gateway_models import TrialRoute
 from nemo_evals.jobs.gym_sandbox import (
     GYM_SANDBOX_PLAN_ENVVAR,
     SandboxPlan,
@@ -107,6 +110,7 @@ from nhx_evals_sdk.agent_eval.trials import (
     AgentEvalTrial,
     AgentEvalTrialStatus,
     AgentOutput,
+    RunnerInfo,
     TrialError,
     TrialMeasurements,
 )
@@ -114,7 +118,16 @@ from nhx_evals_sdk.enums import AgentFormat
 from nhx_evals_sdk.execution.metric_execution import run_sync
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.llm_judge import LLMJudgeMetric
-from nhx_evals_sdk.values import Agent, GenericAgent, Model, RunConfigOnline, RunConfigOnlineModel, SecretRef
+from nhx_evals_sdk.values import (
+    Agent,
+    AgentBase,
+    GenericAgent,
+    Model,
+    ModelRef,
+    RunConfigOnline,
+    RunConfigOnlineModel,
+    SecretRef,
+)
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.protocol import MetricOutput
 from nhx_evals_sdk.values.scores import JSONScoreParser, RangeScore
@@ -359,6 +372,82 @@ def test_agent_eval_job_runs_gateway_judges_as_the_job_and_records_the_resolved_
     assert recorded.model.url == resolved
 
 
+_PUBLIC_GATEWAY_URL = "https://nhx.example.test/apis/inference-gateway/v2/workspaces/default/model/m/-/v1"
+_PUBLIC_AGENT_URL = "https://nhx.example.test/apis/agents/v2/workspaces/default/agents/triage/-/v1/chat/completions"
+_PLATFORM_ENDPOINT_TARGETS = [
+    ModelTarget(model=Model(url=_PUBLIC_GATEWAY_URL, name="m"), params=RunConfigOnlineModel()),
+    AgentTarget(
+        agent=GenericAgent(url=_PUBLIC_AGENT_URL, name="triage", body={}, response_path="$.choices[0].message.content"),
+        params=RunConfigOnline(),
+    ),
+]
+
+
+class _ProvenanceEvaluator(_FakeEvaluator):
+    """Records the endpoint it called as the run's ``metadata.target``, as ``AgentEvaluator`` does."""
+
+    def run_sync(self, *, target: AgentEvalTarget | None = None, **kwargs: Any) -> AgentEvalResult:
+        result = super().run_sync(target=target, **kwargs)
+        assert isinstance(target, Model | AgentBase)
+        kind = "model" if isinstance(target, Model) else "agent"
+        result.metadata.target = RunnerInfo(name=target.name, kind=kind, config={"url": target.url})
+        return result
+
+
+def _submitted_url(target: Target) -> str:
+    assert isinstance(target, ModelTarget | AgentTarget)
+    return target.model.url if isinstance(target, ModelTarget) else target.agent.url
+
+
+def _run_metadata(ctx: JobContext) -> dict[str, Any]:
+    return json.loads((ctx.storage.persistent / AGENT_BUNDLE_DIR / "metadata.json").read_text())
+
+
+@pytest.mark.parametrize("failed", [False, True], ids=["completed", "failed"])
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+@pytest.mark.usefixtures("job_identity")
+def test_a_key_less_platform_endpoint_is_called_through_the_job_proxy_and_recorded_as_submitted(
+    target: Target, failed: bool, tmp_path: Path, mocker: MockerFixture
+) -> None:
+    """With a job identity, the run calls the proxy; ``metadata.json`` still names the submitted URL."""
+    fake = _ProvenanceEvaluator(failed=failed)
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    called = urlsplit(getattr(fake.received_target, "url", ""))
+    assert (called.hostname, called.path) == ("127.0.0.1", urlsplit(_submitted_url(target)).path)
+    recorded = _run_metadata(ctx)["target"]
+    assert recorded["config"]["url"] == _submitted_url(target)
+    assert "127.0.0.1" not in json.dumps(recorded)
+
+
+@pytest.mark.parametrize("target", _PLATFORM_ENDPOINT_TARGETS, ids=["model", "agent"])
+def test_without_a_job_identity_a_platform_endpoint_is_called_as_submitted(
+    target: Target, tmp_path: Path, mocker: MockerFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An auth-disabled platform has no identity to forward, so there is no proxy and nothing to restore."""
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    monkeypatch.delenv("NHX_PRINCIPAL", raising=False)
+    fake = _ProvenanceEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    ctx = _job_context(tmp_path)
+
+    AgentEvalJob().run(
+        AgentEvalSpec(tasks=[_task_spec()], target=target).model_dump(),
+        ctx=ctx,
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert getattr(fake.received_target, "url", None) == _submitted_url(target)
+    assert _run_metadata(ctx)["target"]["config"]["url"] == _submitted_url(target)
+
+
 def test_agent_eval_job_reconstructs_tasks_and_persists_bundle(tmp_path: Path, mocker: MockerFixture) -> None:
     fake = _FakeEvaluator()
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
@@ -567,6 +656,35 @@ def test_agent_eval_job_passes_async_client_to_publication(tmp_path: Path, mocke
     assert intake.default_headers == _SDK_IDENTITY_HEADERS
 
 
+@pytest.mark.parametrize(
+    ("issuer", "marked"),
+    [
+        pytest.param(SimpleNamespace(records_calls=True), True, id="the route records the trials' calls"),
+        pytest.param(SimpleNamespace(records_calls=False), False, id="the route doesn't record them"),
+        pytest.param(None, False, id="no trial tokens"),
+    ],
+)
+def test_agent_eval_job_marks_published_usage_as_superseded_when_the_gateway_recorded_it(
+    tmp_path: Path, mocker: MockerFixture, issuer: SimpleNamespace | None, marked: bool
+) -> None:
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
+    mocker.patch("nemo_evals.jobs.agent_evaluate.persist_agent_eval_result")
+    mocker.patch("nemo_evals.jobs.agent_evaluate._trial_credential_issuer", return_value=issuer)
+    publish = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.publish_agent_eval_result",
+        return_value=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="eval-a"),
+    )
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=_runner_target("openai/gpt-5.4"),
+        publication=PublicationSpec(intake=IntakePublicationSpec(evaluation_id="eval-a", agent_name="agent-a")),
+    )
+
+    AgentEvalJob().run(spec.model_dump(), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity())
+
+    assert publish.call_args.kwargs["usage_superseded_by_gateway"] is marked
+
+
 def test_agent_eval_job_records_the_publish_outcome_in_status_details(tmp_path: Path, mocker: MockerFixture) -> None:
     """The job's output isn't persisted, so `runs status` reads the publish outcome from status details."""
     mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=_FakeEvaluator())
@@ -677,6 +795,37 @@ def test_resolve_target_builds_fabric_runtime_from_runner_target(tmp_path: Path)
     # A runner shapes its own request, so it contributes no prompt template or inference params.
     assert prompt_template is None
     assert params is None
+
+
+def test_resolve_target_routes_platform_fabric_model_through_job_auth_proxy(tmp_path: Path) -> None:
+    platform_url = "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    config = {
+        "metadata": {"name": "a"},
+        "harness": {"adapter_id": "nvidia.fabric.codex"},
+        "models": {
+            "default": {
+                "provider": "openai",
+                "model": "test",
+                "base_url": platform_url,
+                "api_key_env": "NEMO_AGENTS_IGW_API_KEY",
+            }
+        },
+        "environment": {"env": {"NEMO_AGENTS_IGW_API_KEY": "not-used"}},
+    }
+    fabric_target = FabricRunnerTarget(source=FabricConfigSource(config=config))
+
+    target, _, _ = AgentEvalJob._resolve_target(
+        fabric_target,
+        _job_context(tmp_path),
+        fabric_gateway_origin="http://127.0.0.1:9019",
+    )
+
+    assert isinstance(target, FabricAgentRuntime)
+    assert target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+    assert target._config["environment"]["env"]["NEMO_AGENTS_IGW_API_KEY"] == "not-used"
+    assert config["models"]["default"]["base_url"] == platform_url
 
 
 def test_resolve_target_builds_harbor_runtime_from_runner_target(
@@ -2310,6 +2459,76 @@ def test_sync_job_executes_each_target_type(target: Target, tmp_path: Path, mock
         assert getattr(fake.received_target, "name", None) == target.agent.name
 
 
+def test_only_fabric_targets_expose_a_fabric_config() -> None:
+    fabric_config = {"harness": {"adapter_id": "nvidia.fabric.codex"}}
+    fabric = FabricRunnerTarget(source=FabricConfigSource(config=fabric_config))
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    others = [
+        ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+        AgentTarget(agent=_agent()),
+        HarborRunnerTarget(),
+    ]
+
+    assert fabric.fabric_config == fabric_config
+    assert [target.fabric_config for target in others] == [None, None, None]
+
+
+def test_non_fabric_job_starts_no_auth_proxy(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch("nemo_evals.jobs.agent_evaluate.platform_auth_proxy")
+    model = Model(url="http://model.test/v1/chat/completions", name="m")
+    spec = AgentEvalSpec(
+        tasks=[_task_spec()],
+        target=ModelTarget(model=model, prompt_template="{{item.prompt}}", params=RunConfigOnlineModel()),
+    )
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"), ctx=_job_context(tmp_path), client=_sync_sdk_with_identity()
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_not_called()
+
+
+def test_sync_fabric_job_uses_auth_proxy_for_platform_model(tmp_path: Path, mocker: MockerFixture) -> None:
+    fake = _FakeEvaluator()
+    mocker.patch.object(AgentEvalJob, "_build_evaluator", return_value=fake)
+    proxy = mocker.patch(
+        "nemo_evals.jobs.agent_evaluate.platform_auth_proxy",
+        return_value=nullcontext("http://127.0.0.1:9019"),
+    )
+    target = FabricRunnerTarget(
+        source=FabricConfigSource(
+            config={
+                "metadata": {"name": "a"},
+                "harness": {"adapter_id": "nvidia.fabric.codex"},
+                "models": {
+                    "default": {
+                        "provider": "openai",
+                        "model": "test",
+                        "base_url": "http://platform/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                    }
+                },
+            }
+        )
+    )
+    spec = AgentEvalSpec(tasks=[_task_spec()], target=target)
+
+    result = AgentEvalJob().run(
+        spec.model_dump(mode="json"),
+        ctx=_job_context(tmp_path),
+        client=_sync_sdk_with_identity(),
+    )
+
+    assert result["status"] == "completed"
+    proxy.assert_called_once_with()
+    assert isinstance(fake.received_target, FabricAgentRuntime)
+    assert fake.received_target._config["models"]["default"]["base_url"] == (
+        "http://127.0.0.1:9019/apis/inference-gateway/v2/workspaces/dev/openai/-/v1"
+    )
+
+
 def test_sync_job_scores_precomputed_trials_offline(tmp_path: Path, mocker: MockerFixture) -> None:
     # Offline eval: precomputed trials are scored directly, with no target / no generation.
     fake = _FakeEvaluator()
@@ -2724,3 +2943,239 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
     assert isinstance(runner, HarborAgentTaskRunner)
     assert runner._config is not None
     assert runner._config.agent_kwargs["fabric_config"] == raised
+
+
+def test_a_registered_fabric_agent_on_the_gateway_gets_trial_tokens_in_its_models_key_variable() -> None:
+    config = {
+        "models": {
+            "default": {
+                "base_url": "http://h/apis/inference-gateway/v2/workspaces/dev/openai/-/v1",
+                "model": "dev/recorded-model",
+            }
+        }
+    }
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent="dev/codex-agent"), agent_kwargs={"fabric_config": config}
+    )
+
+    assert agent_evaluate._trial_gateway(target) == (ModelRef("dev/recorded-model"), ["NEMO_AGENTS_IGW_API_KEY"])
+
+
+_IGW_WS = "http://h/apis/inference-gateway/v2/workspaces/ws"
+
+
+def _registered_target(*, closed_book: bool = False, harness_model: dict | None = None) -> HarborRunnerTarget:
+    return HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        closed_book=closed_book,
+        agent_kwargs={
+            "fabric_config": {
+                "models": {"default": {"base_url": f"{_IGW_WS}/openai/-/v1", "model": "cb"}},
+                "harnesses": {"codex": {"model": harness_model or {"base_url": f"{_IGW_WS}/model/cb-harness/-/v1"}}},
+            }
+        },
+    )
+
+
+def _issuer(target: HarborRunnerTarget) -> Any:
+    return agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+
+@pytest.mark.parametrize("closed_book", [True, False], ids=["labelled closed-book", "unlabelled"])
+def test_a_trials_policy_is_closed_exactly_when_the_run_is_labelled_closed_book(
+    monkeypatch: pytest.MonkeyPatch, closed_book: bool
+) -> None:
+    """Closed-book is the run's choice: the same closed-book capable models serve open runs too."""
+    monkeypatch.setattr(
+        agent_evaluate, "check_trial_route", lambda _client, model: TrialRoute(closed_book=True, records_calls=True)
+    )
+
+    issuer = _issuer(_registered_target(closed_book=closed_book))
+
+    assert issuer._policy == ModelPolicy(
+        model_access=ModelAccess.CLOSED if closed_book else ModelAccess.OPEN, models=("ws/cb", "ws/cb-harness")
+    )
+
+
+def test_a_closed_book_run_that_can_reach_a_model_that_cant_keep_it_closed_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    capable = {"ws/cb": True, "ws/cb-harness": False}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(closed_book=capable[model.root], records_calls=True),
+    )
+
+    with pytest.raises(ValueError, match="ws/cb-harness can't keep trials closed-book"):
+        _issuer(_registered_target(closed_book=True))
+
+
+def test_a_trial_may_also_call_the_models_its_routers_call_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A router behind a listed VirtualModel calls its targets as the trial, so the trial's list must include them."""
+    callbacks = {"ws/cb": ("ws/strong", "ws/judge")}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(
+            closed_book=True, records_calls=True, routes_to=callbacks.get(model.root, ())
+        ),
+    )
+
+    issuer = _issuer(_registered_target(closed_book=True))
+
+    assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/strong", "ws/judge")
+
+
+def test_a_trial_may_call_what_its_routers_routers_call_back_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The submit check follows routers through any depth; the trial's list must reach as far, or its calls are refused."""
+    callbacks = {"ws/cb": ("ws/router",), "ws/router": ("ws/strong", "ws/cb")}
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(
+            closed_book=True, records_calls=True, routes_to=callbacks.get(model.root, ())
+        ),
+    )
+
+    issuer = _issuer(_registered_target(closed_book=True))
+
+    assert issuer._policy.models == ("ws/cb", "ws/cb-harness", "ws/router", "ws/strong")
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        HarborRunnerTarget(
+            source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="openai/gpt-5.4")),
+            closed_book=True,
+        ),
+        _registered_target(closed_book=True),
+    ],
+    ids=["no gateway model", "no platform client"],
+)
+def test_a_closed_book_run_whose_trials_cant_get_closed_tokens_is_refused(target: HarborRunnerTarget) -> None:
+    """Without a trial token naming the run closed, the closed-book middleware has nothing to hold the trial to."""
+    async_client = None if isinstance(target.source, RegisteredAgentSource) else MagicMock()
+
+    with pytest.raises(ValueError, match="can't be held closed-book"):
+        agent_evaluate._trial_credential_issuer(
+            cast(Any, SimpleNamespace(target=target, publication=None)),
+            cast(Any, SimpleNamespace(workspace="evals")),
+            MagicMock(),
+            async_client,
+            "run-1",
+        )
+
+
+def test_a_closed_book_run_of_an_agent_that_calls_no_model_needs_no_trial_tokens() -> None:
+    assert _issuer(HarborRunnerTarget(closed_book=True)) is None
+
+
+async def test_to_spec_refuses_a_closed_book_run_with_no_closed_book_model_route() -> None:
+    """A direct submission is checked the way a taskset run is, before a job exists."""
+    input_spec = AgentEvalInputSpec(
+        tasks=[AgentEvalTaskInput(id="t", intent="Answer.", inputs=TaskInputs(), metrics=[_inline_metric()])],
+        target=HarborRunnerTarget(
+            source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="openai/gpt-5.4")),
+            closed_book=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="closed_book_required"):
+        await AgentEvalJob.to_spec(
+            input_spec, workspace="dev", entity_client=None, async_sdk=_async_sdk(), is_local=True
+        )
+
+
+@pytest.mark.parametrize(
+    ("harness_model", "recording", "records_calls"),
+    [
+        pytest.param(
+            {"base_url": f"{_IGW_WS}/model/judge/-/v1"},
+            {"ws/main", "ws/judge"},
+            True,
+            id="every model records",
+        ),
+        pytest.param(
+            {"base_url": f"{_IGW_WS}/model/judge/-/v1"},
+            {"ws/main"},
+            False,
+            id="a gateway model that doesn't record",
+        ),
+        pytest.param(
+            {"base_url": "https://api.example.com/v1", "model": "direct"},
+            {"ws/main"},
+            False,
+            id="a model called directly, not through the gateway",
+        ),
+    ],
+)
+def test_a_registered_agents_traces_are_superseded_only_when_the_gateway_records_every_model_it_calls(
+    monkeypatch: pytest.MonkeyPatch, harness_model: dict[str, str], recording: set[str], records_calls: bool
+) -> None:
+    """A superseded trace stops counting usage the gateway reports, so a call the gateway never saw would be lost."""
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda _client, model: TrialRoute(closed_book=False, records_calls=model.root in recording),
+    )
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        agent_kwargs={
+            "fabric_config": {
+                "models": {"default": {"base_url": f"{_IGW_WS}/model/main/-/v1"}},
+                "harnesses": {"codex": {"model": harness_model}},
+            }
+        },
+    )
+
+    issuer = agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+    assert issuer is not None
+    assert issuer.records_calls is records_calls
+
+
+def test_trials_of_an_agent_whose_models_cannot_all_be_named_get_an_open_policy_without_a_list(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(
+        agent_evaluate,
+        "check_trial_route",
+        lambda *_: TrialRoute(closed_book=True, records_calls=True),
+    )
+    target = HarborRunnerTarget(
+        source=RegisteredAgentSource(agent=AgentRef("ws/coder")),
+        agent_kwargs={
+            "fabric_config": {
+                "models": {
+                    "default": {"base_url": f"{_IGW_WS}/model/cb/-/v1"},
+                    "templated": {"base_url": "${GATEWAY}/model/x/-/v1"},
+                }
+            }
+        },
+    )
+
+    issuer = agent_evaluate._trial_credential_issuer(
+        cast(Any, SimpleNamespace(target=target, publication=None)),
+        cast(Any, SimpleNamespace(workspace="evals")),
+        MagicMock(),
+        MagicMock(),
+        "run-1",
+    )
+
+    assert issuer is not None
+    assert issuer._policy == ModelPolicy(model_access=ModelAccess.OPEN)
+    assert "aren't limited to the models it configures" in caplog.text

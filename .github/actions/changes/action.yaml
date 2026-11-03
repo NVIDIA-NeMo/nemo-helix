@@ -71,7 +71,7 @@ outputs:
     description: "'true' if the nemo-guardrails plugin or guardrails service changed"
     value: ${{ steps.filter.outputs.guardrails-benchmark }}
   deployments-openshell:
-    description: "'true' if the nemo-deployments plugin changed (OpenShell backend coverage)"
+    description: "'true' if OpenShell deployment or credential authorization dependencies changed"
     value: ${{ steps.filter.outputs.deployments-openshell }}
   jobs-openshell:
     description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
@@ -202,6 +202,7 @@ runs:
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_platform_runner/**'
             - 'packages/nhx_sandbox/**'
+            - 'services/core/entities/**'
             - 'services/core/auth/src/nhx/core/auth/app/embedded_pdp/**'
             - 'services/core/auth/src/nhx/core/auth/app/policies/**'
             - 'services/core/auth/src/nhx/core/auth/app/scope_families.py'
@@ -212,6 +213,8 @@ runs:
             - 'packages/nhx_testing/src/nhx/testing/**'
             - 'services/core/files/src/nhx/core/files/service.py'
             - 'services/core/secrets/src/nhx/core/secrets/service.py'
+            # test_service_storage_auth_integration.py imports EntitiesService.
+            - 'services/core/entities/src/nhx/core/entities/service.py'
           e2e:
             - 'e2e/**'
           docs:
@@ -267,6 +270,14 @@ runs:
           deployments-openshell:
             - 'plugins/nemo-deployments/**'
             - 'packages/nemo_helix_plugin/**'
+            - 'packages/nhx_common/src/nhx/common/auth/**'
+            - 'packages/nhx_common/src/nhx/common/config/**'
+            - 'packages/nhx_common/src/nhx/common/secrets/**'
+            - 'packages/nhx_testing/**'
+            - 'services/core/auth/**'
+            - 'services/core/entities/**'
+            - 'services/core/secrets/**'
+            - 'services/core/jobs/src/nhx/core/jobs/controllers/backends/openshell/**'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -19,7 +19,8 @@ from nemo_agents_plugin.jobs.package_agent import (
     PackageAgentJob,
     PackageAgentSpec,
 )
-from nemo_helix_plugin.client.errors import NemoResponseValidationError
+from nemo_helix_plugin.agents.types import ReferenceConfig
+from nemo_helix_plugin.client.errors import NemoResponseValidationError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.jobs.exceptions import (
     HelixJobCompilationError,
@@ -30,6 +31,7 @@ from nemo_helix_plugin.jobs.execution_profiles import (
     DockerJobExecutionProfileConfig,
     SubprocessJobExecutionProfile,
 )
+from nemo_helix_plugin.refs import FilesetRef
 from packaging.requirements import Requirement
 from pydantic import ValidationError
 
@@ -82,18 +84,81 @@ def _patch_profiles(profiles: list[Any] | Exception):
 
 
 class TestToSpec:
-    async def test_resolves_agent_config_inline(self) -> None:
-        spec = await PackageAgentJob.to_spec(
-            PackageAgentInput(agent="my-agent"),
-            workspace="default",
-            entity_client=_StubEntityClient(_agent()),
-            async_sdk=None,
-            is_local=False,
-        )
+    @pytest.mark.parametrize(
+        ("reference", "source_fileset"),
+        [
+            (None, None),
+            (ReferenceConfig(container_image="alpine"), None),
+            (ReferenceConfig(fileset=FilesetRef("agent-source")), "agent-source"),
+            (ReferenceConfig(fileset=FilesetRef("sources/agent-source")), "sources/agent-source"),
+        ],
+    )
+    async def test_resolves_agent_config_inline(
+        self, reference: ReferenceConfig | None, source_fileset: str | None
+    ) -> None:
+        agent = _agent()
+        agent.reference = reference
+        files_client = AsyncMock()
+        async_sdk = MagicMock()
+        with patch(
+            "nemo_agents_plugin.jobs.package_agent.AsyncFilesClient.from_client", return_value=files_client
+        ) as factory:
+            spec = await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=async_sdk,
+                is_local=False,
+            )
+
+        if source_fileset is not None:
+            factory.assert_called_once_with(async_sdk)
+            files_client.get_fileset.assert_awaited_once_with(
+                workspace="sources" if "/" in source_fileset else "default", name="agent-source"
+            )
+        else:
+            factory.assert_not_called()
 
         assert isinstance(spec, PackageAgentSpec)
         assert spec.workspace == "default"
         assert spec.agent_config == FABRIC_CONFIG
+        assert spec.source_fileset == source_fileset
+
+    @pytest.mark.parametrize(
+        ("error", "message"),
+        [
+            (NotFoundError(httpx.Response(404)), "Fileset 'sources/agent-source' not found"),
+            (PermissionDeniedError(httpx.Response(403)), "Access denied to fileset 'sources/agent-source'"),
+        ],
+    )
+    async def test_unreadable_source_fails_at_submit(self, error: Exception, message: str) -> None:
+        agent = _agent()
+        agent.reference = ReferenceConfig(fileset=FilesetRef("sources/agent-source"))
+        files_client = AsyncMock()
+        files_client.get_fileset.side_effect = error
+        with (
+            patch("nemo_agents_plugin.jobs.package_agent.AsyncFilesClient.from_client", return_value=files_client),
+            pytest.raises(HelixJobCompilationError, match=message),
+        ):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=MagicMock(),
+                is_local=False,
+            )
+
+    async def test_source_without_client_fails_at_submit(self) -> None:
+        agent = _agent()
+        agent.reference = ReferenceConfig(fileset=FilesetRef("sources/agent-source"))
+        with pytest.raises(HelixJobCompilationError, match="platform client to validate the source fileset"):
+            await PackageAgentJob.to_spec(
+                PackageAgentInput(agent="my-agent"),
+                workspace="default",
+                entity_client=_StubEntityClient(agent),
+                async_sdk=None,
+                is_local=False,
+            )
 
     async def test_missing_agent_fails_at_submit(self) -> None:
         with pytest.raises(HelixJobCompilationError, match="not found in workspace"):
@@ -223,14 +288,23 @@ class TestCompile:
 
 
 class TestRun:
-    def test_builds_from_staged_ethos_fileset(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("source_fileset", [None, FilesetRef("sources/agent-source")])
+    def test_builds_from_staged_fileset(self, source_fileset: FilesetRef | None) -> None:
         captured: dict[str, Any] = {}
 
         async def _stage(
-            *, workspace: str, agent_name: str, agent_config: dict, base_dir: Path, files_client: Any
+            *,
+            workspace: str,
+            agent_name: str,
+            agent_config: dict,
+            base_dir: Path,
+            files_client: Any,
+            source_fileset: FilesetRef | None,
         ) -> None:
             captured["workspace"] = workspace
             captured["agent_name"] = agent_name
+            captured["source_fileset"] = source_fileset
+            (base_dir / "agent.yaml").write_text("name: source-config\n")
             (base_dir / "skills").mkdir()
             (base_dir / "skills" / "SKILL.md").write_text("# staged\n")
 
@@ -247,14 +321,35 @@ class TestRun:
         ):
             result = PackageAgentJob().run(
                 PackageAgentSpec(
-                    agent="my-agent", workspace="default", agent_config=FABRIC_CONFIG, tag="my-agent-abc123:26.08.21"
+                    agent="my-agent",
+                    workspace="default",
+                    agent_config=FABRIC_CONFIG,
+                    tag="my-agent-abc123:26.08.21",
+                    source_fileset=source_fileset,
                 ).model_dump(mode="json"),
             )
 
         assert result == {"image": "my-agent-abc123:26.08.21", "agent": "my-agent", "published": ""}
         assert captured["workspace"] == "default"
+        assert captured["source_fileset"] == source_fileset
         assert captured["rendered"] == FABRIC_CONFIG
         assert captured["staged_skill"], "agent.yaml must be written after staging clears the tree"
+
+    def test_explicit_fileset_without_client_does_not_build(self) -> None:
+        from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
+
+        with patch("nemo_agents_plugin.container.builder.build_fabric_agent_image") as build:
+            with pytest.raises(FabricArtifactStagingError, match="Files client is required"):
+                PackageAgentJob().run(
+                    PackageAgentSpec(
+                        agent="my-agent",
+                        workspace="default",
+                        agent_config=FABRIC_CONFIG,
+                        source_fileset=FilesetRef("sources/agent-source"),
+                    ).model_dump(mode="json"),
+                )
+
+        build.assert_not_called()
 
     def test_build_context_is_removed(self, tmp_path: Path) -> None:
         seen: dict[str, Path] = {}

@@ -171,7 +171,7 @@ KNOWN_PROVIDERS: tuple[KnownProvider, ...] = (
         label="Anthropic",
         description="Claude Opus 4, Sonnet 4, Haiku",
         host_url="https://api.anthropic.com",
-        auth_header_format="X-Api-Key: {{ auth_secret }}",
+        auth_header_format="X-Api-Key: <auth_secret>",
         default_extra_headers={"anthropic-version": "2023-06-01"},
         env_var="ANTHROPIC_API_KEY",
     ),
@@ -2245,7 +2245,9 @@ def _validate_api_key(
     headers: dict[str, str] = {}
     if auth_header_format:
         header_name, _, template = auth_header_format.partition(":")
-        headers[header_name.strip()] = template.strip().replace("{{ auth_secret }}", api_key)
+        headers[header_name.strip()] = (
+            template.strip().replace("<auth_secret>", api_key).replace("{{ auth_secret }}", api_key)
+        )
     else:
         headers["Authorization"] = f"Bearer {api_key}"
 

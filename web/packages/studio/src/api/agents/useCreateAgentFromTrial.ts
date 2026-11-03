@@ -13,6 +13,7 @@ import type {
 } from '@studio/api/agents/types';
 import { copyFilesetFiles } from '@studio/api/files/uploadFilesetEntries';
 import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
+import { isRepositoryBackend } from '@studio/util/storageBackend';
 import { useMutation } from '@tanstack/react-query';
 
 const retrieveFileset = async (
@@ -48,7 +49,7 @@ export const createAgentFromTrial = async ({
     });
   if (!sourceFileset) return createAgent();
 
-  const sharesStorage = sourceFileset.storage.type === 'github';
+  const sharesStorage = isRepositoryBackend(sourceFileset.storage.type);
   await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Agent spec for ${name}, copied from ${source.workspace}/${source.name}`,

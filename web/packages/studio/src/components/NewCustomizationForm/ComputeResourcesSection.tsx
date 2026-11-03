@@ -198,7 +198,7 @@ const RlParallelism = ({ disabled }: { disabled: boolean }) => {
         formFieldProps={{
           slotLabel: 'Expert Parallel Size',
           slotInfo:
-            'Expert parallel size for MoE models. GRPO only — a value above 1 selects the DTensor v2 backend. NeMo RL key: expert_parallel_size.',
+            'Expert parallel size for MoE models. GRPO only. NeMo RL key: expert_parallel_size.',
         }}
         {...specSliderProps(DPO_SPEC_DEFAULTS, 'parallelism_expert_parallel_size')}
         min={1}

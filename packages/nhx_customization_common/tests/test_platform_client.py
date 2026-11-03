@@ -122,6 +122,32 @@ async def test_gym_layout_checks_training_file_below_directory_path() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("ref", "listed"),
+    [
+        ("default/data", "train.jsonl"),
+        ("default/job-fileset#results/artifacts", "results/artifacts/my_train_rows.jsonl"),
+        ("default/job-fileset#results/artifacts/", "results/artifacts/training.jsonl"),
+    ],
+)
+async def test_gym_layout_accepts_any_training_file_name(ref: str, listed: str) -> None:
+    _, files, platform = _clients(SimpleNamespace())
+    files.list_files = AsyncMock(
+        return_value=SimpleNamespace(data=lambda: SimpleNamespace(data=[SimpleNamespace(path=listed)]))
+    )
+
+    await check_gym_dataset_layout(platform, ref, "default")
+
+
+async def test_gym_layout_rejects_a_fileset_without_a_training_file() -> None:
+    _, files, platform = _clients(SimpleNamespace())
+    listed = [SimpleNamespace(path="validation.jsonl"), SimpleNamespace(path="other/train.jsonl")]
+    files.list_files = AsyncMock(return_value=SimpleNamespace(data=lambda: SimpleNamespace(data=listed)))
+
+    with pytest.raises(ValueError, match="must contain a training JSONL file"):
+        await check_gym_dataset_layout(platform, "default/data", "default")
+
+
 async def test_environment_access_rejects_directory_path() -> None:
     _, _, platform = _clients(SimpleNamespace())
 

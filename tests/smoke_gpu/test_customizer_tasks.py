@@ -32,6 +32,7 @@ DALI_FILE_REMOVALS = {
 }
 MINIMUM_PYTHON_PACKAGE_VERSIONS = {
     "mamba-ssm": "2.3.0",
+    "notebook": "7.6.3",
     "transformers": "5.12.1",
     "wandb": "0.28.2",
 }

@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,8 +17,13 @@ from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
-from docker.errors import DockerException, NotFound
-from nhx.intake.config import ClickHouseConfig, should_provision_local_clickhouse
+from docker.errors import APIError, DockerException, NotFound
+from nhx.intake.config import (
+    DEFAULT_CLICKHOUSE_DIGEST,
+    DEFAULT_CLICKHOUSE_IMAGE,
+    ClickHouseConfig,
+    should_provision_local_clickhouse,
+)
 from nhx.intake.local_clickhouse import (
     CLICKHOUSE_DATA_PATH,
     CLICKHOUSE_HTTP_PORT_KEY,
@@ -38,6 +45,7 @@ from nhx.intake.local_clickhouse import (
     stop_local_clickhouse,
 )
 from nhx.intake.spans.clickhouse_client import ClickHouseSettings
+from nhx.testing.e2e.docker import DEFAULT_E2E_CLICKHOUSE_IMAGE
 
 
 @dataclass
@@ -107,15 +115,21 @@ class FakeContainers:
     def __init__(self, containers: dict[str, FakeContainer] | None = None) -> None:
         self._containers = containers or {}
         self.run_calls: list[dict[str, object]] = []
+        self.run_errors: list[Exception] = []
+        self.on_run: Callable[[], None] | None = None
 
     def get(self, name: str) -> FakeContainer:
         container = self._containers.get(name)
-        if container is None:
+        if container is None or container.removed:
             raise NotFound("missing")
         return container
 
     def run(self, **kwargs: object) -> FakeContainer:
         self.run_calls.append(kwargs)
+        if self.on_run is not None:
+            self.on_run()
+        if self.run_errors:
+            raise self.run_errors.pop(0)
         name = str(kwargs["name"])
         image = str(kwargs["image"])
         labels_value = kwargs["labels"]
@@ -221,7 +235,7 @@ def test_local_clickhouse_readiness_checks_managed_data_directory(
     name = _managed_container_name(data_dir)
     container = FakeContainer(
         name=name,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels=_expected_labels(data_dir, data_instance_id),
         data_dir=data_dir,
     )
@@ -287,7 +301,7 @@ def test_reconcile_reuses_matching_container(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
@@ -313,7 +327,7 @@ def test_reconcile_restarts_stopped_matching_container(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
@@ -337,7 +351,7 @@ def test_reconcile_rejects_container_identity_collision(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     container = FakeContainer(name=name, image=image, labels={}, data_dir=data_dir)
     client = FakeDockerClient({name: container})
     _patch_reconciliation(monkeypatch, client, tmp_path)
@@ -354,7 +368,7 @@ def test_reconcile_adopts_legacy_container(
     settings: ClickHouseSettings,
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     legacy = FakeContainer(name=LEGACY_CONTAINER_NAME, image=image, data_dir=data_dir, host_port=8123)
     client = FakeDockerClient({LEGACY_CONTAINER_NAME: legacy})
     _patch_reconciliation(monkeypatch, client, tmp_path)
@@ -373,7 +387,7 @@ def test_reconcile_does_not_adopt_legacy_container_without_expected_data_mount(
     tmp_path: Path,
     settings: ClickHouseSettings,
 ) -> None:
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     legacy = FakeContainer(name=LEGACY_CONTAINER_NAME, image=image, host_port=8123)
     client = FakeDockerClient({LEGACY_CONTAINER_NAME: legacy})
     _patch_reconciliation(monkeypatch, client, tmp_path)
@@ -530,7 +544,7 @@ def test_changed_credentials_report_actionable_remediation(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
@@ -556,7 +570,7 @@ def test_missing_container_credentials_report_unmanaged_container(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
@@ -582,7 +596,7 @@ def test_recreated_data_directory_replaces_stale_container(
 ) -> None:
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     name = _managed_container_name(data_dir)
-    image = f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}"
+    image = DEFAULT_CLICKHOUSE_IMAGE
     original_data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
@@ -629,7 +643,7 @@ def test_remove_local_clickhouse_validates_and_removes_owned_container(
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels=_expected_labels(data_dir, data_instance_id),
         data_dir=data_dir,
     )
@@ -651,7 +665,7 @@ def test_stop_local_clickhouse_preserves_container_and_data(
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels=_expected_labels(data_dir, data_instance_id),
         data_dir=data_dir,
     )
@@ -674,7 +688,7 @@ def test_remove_local_clickhouse_restores_host_ownership_before_removal(
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=name,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels=_expected_labels(data_dir, data_instance_id),
         data_dir=data_dir,
     )
@@ -762,7 +776,7 @@ def test_remove_local_clickhouse_refuses_unowned_container(
     name = _managed_container_name(data_dir)
     container = FakeContainer(
         name=name,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels={},
         data_dir=data_dir,
     )
@@ -783,7 +797,7 @@ def test_remove_local_clickhouse_removes_owned_legacy_container(
     data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
     container = FakeContainer(
         name=LEGACY_CONTAINER_NAME,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         labels=_expected_labels(data_dir, data_instance_id),
         data_dir=data_dir,
     )
@@ -802,7 +816,7 @@ def test_remove_local_clickhouse_ignores_legacy_container_for_another_data_direc
     data_dir = (tmp_path / "intake-clickhouse").resolve()
     legacy = FakeContainer(
         name=LEGACY_CONTAINER_NAME,
-        image=f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}",
+        image=DEFAULT_CLICKHOUSE_IMAGE,
         data_dir=tmp_path / "unrelated-clickhouse",
     )
     client = FakeDockerClient({LEGACY_CONTAINER_NAME: legacy})
@@ -816,3 +830,206 @@ def test_clickhouse_image_version_matches_service_pin() -> None:
     version_file = Path(__file__).parents[1] / ".clickhouse-version"
 
     assert version_file.read_text(encoding="utf-8").strip() == CLICKHOUSE_VERSION
+
+
+def test_default_image_pins_patched_release_by_digest() -> None:
+    # CVE-2026-116366 is fixed in 26.3.62.3; older 26.3 builds allow unauthenticated RCE.
+    version = tuple(int(part) for part in CLICKHOUSE_VERSION.split("."))
+
+    assert version[:2] == (26, 3)
+    assert version >= (26, 3, 62, 3)
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", DEFAULT_CLICKHOUSE_DIGEST)
+    assert DEFAULT_CLICKHOUSE_IMAGE == f"clickhouse/clickhouse-server:{CLICKHOUSE_VERSION}@{DEFAULT_CLICKHOUSE_DIGEST}"
+
+
+def test_e2e_default_image_matches_intake_pin() -> None:
+    assert DEFAULT_E2E_CLICKHOUSE_IMAGE == DEFAULT_CLICKHOUSE_IMAGE
+
+
+def _managed_container(data_dir: Path, *, image: str, password: str = "") -> FakeContainer:
+    data_instance_id = _ensure_data_directory_identity(data_dir, manage_permissions=True)
+    return FakeContainer(
+        name=_managed_container_name(data_dir),
+        image=image,
+        labels=_expected_labels(data_dir, data_instance_id),
+        data_dir=data_dir,
+        password=password,
+    )
+
+
+@pytest.mark.parametrize(
+    "previous_image",
+    [
+        "clickhouse/clickhouse-server:26.3",
+        "clickhouse/clickhouse-server:26.3.59.10",
+        "docker.io/clickhouse/clickhouse-server:26.3",
+    ],
+)
+def test_reconcile_replaces_managed_container_on_previous_default_image(
+    previous_image: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    old = _managed_container(data_dir, image=previous_image)
+    sentinel = data_dir / "store" / "part.bin"
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_bytes(b"spans")
+    client = FakeDockerClient({old.name: old})
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    assert _reconcile_local_clickhouse(settings) == "http://127.0.0.1:55123"
+
+    assert old.stopped is True
+    assert old.removed is True
+    assert len(client.containers.run_calls) == 1
+    run = client.containers.run_calls[0]
+    assert run["image"] == DEFAULT_CLICKHOUSE_IMAGE
+    assert run["name"] == old.name
+    assert run["volumes"] == {str(data_dir): {"bind": CLICKHOUSE_DATA_PATH, "mode": "rw"}}
+    assert run["labels"] == old.labels
+    assert sentinel.read_bytes() == b"spans"
+
+    _reconcile_local_clickhouse(settings)
+
+    assert len(client.containers.run_calls) == 1
+    assert client.containers.get(old.name).removed is False
+
+
+def test_reconcile_reuses_container_recorded_by_pinned_digest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    container = _managed_container(data_dir, image=f"clickhouse/clickhouse-server@{DEFAULT_CLICKHOUSE_DIGEST}")
+    client = FakeDockerClient({container.name: container})
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    _reconcile_local_clickhouse(settings)
+
+    assert client.containers.run_calls == []
+    assert container.removed is False
+
+
+@pytest.mark.parametrize(
+    ("existing_image", "desired_image"),
+    [
+        ("registry.example.com/mirror/clickhouse-server:26.3", DEFAULT_CLICKHOUSE_IMAGE),
+        ("clickhouse/clickhouse-server:26.3", "clickhouse/clickhouse-server:26.3.62.3"),
+        ("clickhouse/clickhouse-server:26.8.36.3", DEFAULT_CLICKHOUSE_IMAGE),
+        ("clickhouse/clickhouse-server:latest", DEFAULT_CLICKHOUSE_IMAGE),
+        ("clickhouse/clickhouse-server:26.3-alpine", DEFAULT_CLICKHOUSE_IMAGE),
+    ],
+    ids=["custom-repository", "operator-image-override", "newer-release-line", "floating-latest", "variant-tag"],
+)
+def test_reconcile_fails_closed_for_image_mismatch_it_does_not_own(
+    existing_image: str,
+    desired_image: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    container = _managed_container(data_dir, image=existing_image)
+    client = FakeDockerClient({container.name: container})
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    with pytest.raises(LocalClickHouseProvisioningError, match=f"uses {re.escape(existing_image)}") as error:
+        _reconcile_local_clickhouse(settings, image=desired_image)
+
+    assert "python -m nhx.intake.local_clickhouse --remove" in str(error.value)
+    assert container.removed is False
+    assert client.containers.run_calls == []
+
+
+def test_reconcile_fails_closed_for_unlabeled_legacy_container_on_previous_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    legacy = FakeContainer(
+        name=LEGACY_CONTAINER_NAME,
+        image="clickhouse/clickhouse-server:26.3",
+        data_dir=data_dir,
+        host_port=8123,
+    )
+    client = FakeDockerClient({LEGACY_CONTAINER_NAME: legacy})
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    with pytest.raises(LocalClickHouseProvisioningError, match="uses clickhouse/clickhouse-server:26.3"):
+        _reconcile_local_clickhouse(settings)
+
+    assert legacy.removed is False
+    assert client.containers.run_calls == []
+
+
+def test_reconcile_reports_changed_credentials_before_replacing_previous_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    container = _managed_container(data_dir, image="clickhouse/clickhouse-server:26.3", password="old-password")
+    client = FakeDockerClient({container.name: container})
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    with pytest.raises(LocalClickHouseProvisioningError, match="credentials changed"):
+        _reconcile_local_clickhouse(settings)
+
+    assert container.removed is False
+    assert client.containers.run_calls == []
+
+
+def test_failed_create_after_image_replacement_recovers_on_next_reconcile(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    old = _managed_container(data_dir, image="clickhouse/clickhouse-server:26.3")
+    sentinel = data_dir / "store" / "part.bin"
+    sentinel.parent.mkdir(parents=True)
+    sentinel.write_bytes(b"spans")
+    client = FakeDockerClient({old.name: old})
+    client.containers.run_errors.append(APIError("image pull failed", response=MagicMock(status_code=500)))
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    with pytest.raises(LocalClickHouseProvisioningError, match="Failed to reconcile local ClickHouse"):
+        _reconcile_local_clickhouse(settings)
+
+    assert old.removed is True
+    with pytest.raises(NotFound):
+        client.containers.get(old.name)
+
+    assert _reconcile_local_clickhouse(settings) == "http://127.0.0.1:55123"
+    assert len(client.containers.run_calls) == 2
+    assert client.containers.run_calls[1]["image"] == DEFAULT_CLICKHOUSE_IMAGE
+    assert client.containers.get(old.name).removed is False
+    assert sentinel.read_bytes() == b"spans"
+
+
+def test_create_conflict_after_image_replacement_reuses_concurrent_container(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    settings: ClickHouseSettings,
+) -> None:
+    data_dir = (tmp_path / "intake-clickhouse").resolve()
+    old = _managed_container(data_dir, image="clickhouse/clickhouse-server:26.3")
+    client = FakeDockerClient({old.name: old})
+    concurrent = _managed_container(data_dir, image=DEFAULT_CLICKHOUSE_IMAGE)
+    concurrent.ports[CLICKHOUSE_HTTP_PORT_KEY][0]["HostPort"] = "55999"
+
+    def create_concurrently() -> None:
+        client.containers._containers[old.name] = concurrent
+
+    client.containers.on_run = create_concurrently
+    client.containers.run_errors.append(APIError("conflict", response=MagicMock(status_code=409)))
+    _patch_reconciliation(monkeypatch, client, tmp_path)
+
+    assert _reconcile_local_clickhouse(settings) == "http://127.0.0.1:55999"
+    assert old.removed is True
+    assert concurrent.removed is False
+    assert len(client.containers.run_calls) == 1

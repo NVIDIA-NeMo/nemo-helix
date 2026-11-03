@@ -161,11 +161,11 @@ nemo inference providers create anthropic \
   --workspace my-workspace \
   --host-url "https://api.anthropic.com" \
   --api-key-secret-name "anthropic-api-key" \
-  --auth-header-format "X-Api-Key: {{ auth_secret }}" \
+  --auth-header-format "X-Api-Key: <auth_secret>" \
   --default-extra-headers '{"anthropic-version": "2023-06-01"}'
 ```
 
-`{{ auth_secret }}` is Jinja2 — substituted at request time. Without it the
+`<auth_secret>` is a plain placeholder (not a template) — substituted at request time. Without it the
 gateway defaults to `Authorization: Bearer` which Anthropic rejects.
 
 ---
@@ -475,5 +475,5 @@ done
 
 nemo inference providers delete nvidia-inference --workspace my-workspace
 nemo secrets delete nvidia-inference-key --workspace my-workspace
-nemo workspaces delete my-workspace
+nemo workspaces delete my-workspace --yes
 ```

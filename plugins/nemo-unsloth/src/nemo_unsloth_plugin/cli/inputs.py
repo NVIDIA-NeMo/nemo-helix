@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_unsloth_plugin.jobs.jobs import UnslothJob
 from nemo_unsloth_plugin.schema import UnslothJobInput
 
 _JOB_JSON_HELP = "Path to Unsloth job JSON (UnslothJobInput schema)."
@@ -55,9 +56,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
 create the resources and print their references without creating a job.
 
-One --upload-dataset fills both dataset.path and dataset.validation_path with
-the new fileset, so upload a directory holding a training and a validation
-file.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Unsloth tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -73,7 +74,6 @@ Run 'nemo customization unsloth explain' to print the job JSON schema."""
 _SPEC_REFS = SpecRefs(
     model=("model", "name"),
     dataset=("dataset", "path"),
-    dataset_validation=("dataset", "validation_path"),
 )
 
 
@@ -97,4 +97,5 @@ def apply_unsloth_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=UnslothJob,
     )

@@ -255,6 +255,8 @@ inference_gateway:
   refresh_model_cache_interval_sec: 3
   # Time-to-live (in seconds) for cached secrets before they expire and need refreshing. If set to 0, we will refresh this each time the model providers are refreshed. | default: 0
   secrets_ttl_sec: 0
+  # Base64-encoded 32-byte key the gateway seals a caller's credential with when it calls a model provider that calls models back as its caller. Every gateway process must share it. When unset, each process uses a key of its own, which works only while a router's calls back reach the process that called it.
+  caller_context_key:
 ```
 
 ### `jobs`
@@ -927,6 +929,8 @@ builder:
   control_profile: build-control
   # The one the push step runs on, the only step that holds the registry credential and signing key. | default: 'build-push'
   push_profile: build-push
+  # Most build jobs running at once, across every workspace. Set, every submit returns its images `queued`, and the `builder-queue` controller starts each job, oldest first, while fewer than this many run. Size it to the build namespace's ResourceQuota: each running build holds a sandbox plus a step pod. Null skips the queue and creates every job as it is submitted; jobs the ResourceQuota then rejects fail without a retry.
+  max_concurrent_builds:
   # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''

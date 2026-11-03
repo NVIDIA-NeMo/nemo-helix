@@ -137,6 +137,7 @@ async def test_create_running_one_shot_container_still_returns_status(
 @pytest.mark.asyncio
 async def test_create_exited_one_shot_returns_failed_when_removal_fails(
     docker_backend: DockerDeploymentBackend,
+    mock_entities: AsyncMock,
     mock_docker_client: MagicMock,
 ) -> None:
     existing = MagicMock()
@@ -144,6 +145,7 @@ async def test_create_exited_one_shot_returns_failed_when_removal_fails(
     existing.status = "exited"
     existing.remove.side_effect = APIError("remove failed")
     mock_docker_client.containers.get.return_value = existing
+    mock_entities.get.return_value = sample_config(restart_policy="Never")
 
     update = await docker_backend.create_deployment(
         workspace="default",
@@ -155,4 +157,5 @@ async def test_create_exited_one_shot_returns_failed_when_removal_fails(
 
     assert update.status == "FAILED"
     assert "remove exited container" in update.status_message
+    existing.remove.assert_called_once_with(force=True)
     mock_docker_client.containers.create.assert_not_called()

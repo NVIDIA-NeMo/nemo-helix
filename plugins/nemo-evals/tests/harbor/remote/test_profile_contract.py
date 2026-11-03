@@ -174,6 +174,19 @@ def test_operator_config_may_omit_dispatcher_image(harbor_config):
     assert HarborTaskJobsConfig.model_validate(data).dispatcher_image is None
 
 
+def test_operator_config_may_omit_dispatcher_profiles(harbor_config):
+    data = harbor_config.model_dump()
+    del data["dispatcher_profiles"]
+    assert HarborTaskJobsConfig.model_validate(data).dispatcher_profiles == ("default",)
+
+
+def test_operator_config_rejects_empty_dispatcher_profiles(harbor_config):
+    data = harbor_config.model_dump()
+    data["dispatcher_profiles"] = []
+    with pytest.raises(ValidationError, match="dispatcher_profiles"):
+        HarborTaskJobsConfig.model_validate(data)
+
+
 def test_operator_config_requires_the_default_profile(harbor_config):
     data = harbor_config.model_dump()
     data["default_sandbox_profile"] = "harbor-gpu"

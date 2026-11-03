@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, call, patch
 
 import httpx
 import pytest
+from filesets import UPLOAD_RETRY_POLICY
 from pydantic import ValidationError
 
 
@@ -224,7 +225,7 @@ class TestUploadFileset:
 
         runner.upload_fileset(FileSetRef(workspace="default", name="qwen-test"), src.resolve())
 
-        files.with_options.assert_called_once_with(timeout=UPLOAD_TIMEOUT)
+        files.with_options.assert_called_once_with(timeout=UPLOAD_TIMEOUT, retry=UPLOAD_RETRY_POLICY)
         mock_fs_cls.assert_called_once_with(client=files)
 
     @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")
@@ -468,75 +469,21 @@ class TestCreateFilesetRetry:
         assert files.create_fileset.call_count == 2
 
 
-class TestUploadRetry:
-    """The task layer owns upload retries.
-
-    The typed client cannot retry a streaming upload — the body is a one-shot
-    iterator, and replaying it under the original Content-Length makes h11 abort
-    the request. So the client raises through, and this layer, which rebuilds the
-    request from the source file on every attempt, is where the retry belongs.
-    """
+class TestUploadFailure:
+    """Uploads retry inside put_file; the task only reports the final failure."""
 
     @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")
-    def test_retries_transport_error_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
-        from nemo_helix_plugin.client.errors import NemoTransportError
-        from nhx.customization_common.schemas.file_io import FileSetRef
-
-        src = _make_dir(tmp_path)
-        fs = MagicMock()
-        fs.put.side_effect = [NemoTransportError(httpx.ReadTimeout("timed out")), None]
-        mock_fs_cls.return_value = fs
-        runner = _make_runner(_make_files_client())
-
-        runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
-
-        assert fs.put.call_count == 2
-
-    @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")
-    def test_retries_server_error_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
-        from nemo_helix_plugin.client.errors import InternalServerError
-        from nhx.customization_common.schemas.file_io import FileSetRef
-
-        src = _make_dir(tmp_path)
-        response = httpx.Response(503, request=httpx.Request("PUT", "http://test/upload"), json={"detail": "down"})
-        fs = MagicMock()
-        fs.put.side_effect = [InternalServerError(response), None]
-        mock_fs_cls.return_value = fs
-        runner = _make_runner(_make_files_client())
-
-        runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
-
-        assert fs.put.call_count == 2
-
-    @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")
-    def test_retries_rate_limit_wrapped_by_the_client(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
-        """429 is in the client's retryable statuses, but it cannot act on it here."""
-        from nemo_helix_plugin.client.errors import RateLimitError
-        from nhx.customization_common.schemas.file_io import FileSetRef
-
-        src = _make_dir(tmp_path)
-        response = httpx.Response(429, request=httpx.Request("PUT", "http://test/upload"), json={"detail": "slow down"})
-        fs = MagicMock()
-        fs.put.side_effect = [RateLimitError(response), None]
-        mock_fs_cls.return_value = fs
-        runner = _make_runner(_make_files_client())
-
-        runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
-
-        assert fs.put.call_count == 2
-
-    @patch("nhx.customization_common.tasks.file_io.run.FilesetFileSystem")
-    def test_gives_up_as_a_file_upload_error(self, mock_fs_cls, tmp_path: Path, no_retry_backoff) -> None:
-        from nemo_helix_plugin.client.errors import NemoTransportError
+    def test_exhausted_upload_is_a_file_upload_error(self, mock_fs_cls, tmp_path: Path) -> None:
+        from filesets import UploadRetriesExhaustedError
         from nhx.customization_common.schemas.file_io import FileSetRef, FileUploadError
 
         src = _make_dir(tmp_path)
         fs = MagicMock()
-        fs.put.side_effect = NemoTransportError(httpx.ReadTimeout("timed out"))
+        fs.put.side_effect = UploadRetriesExhaustedError(str(src), "default/models", 3)
         mock_fs_cls.return_value = fs
         runner = _make_runner(_make_files_client())
 
-        with pytest.raises(FileUploadError):
+        with pytest.raises(FileUploadError, match="failed after 3 attempts"):
             runner.upload_fileset(FileSetRef(workspace="default", name="models"), src.resolve())
 
-        assert fs.put.call_count == 3
+        assert fs.put.call_count == 1

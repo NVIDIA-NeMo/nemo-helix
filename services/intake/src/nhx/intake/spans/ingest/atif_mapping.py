@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from nemo_helix_plugin.intake.span_attributes import USAGE_SUPERSEDED_ATTRIBUTE
 from nhx.intake.config import DEFAULT_ATIF_MAX_SUBAGENT_DEPTH, MAX_ATIF_MAX_SUBAGENT_DEPTH
 from nhx.intake.spans.domain import (
     NEMO_STEP_ID_ATTRIBUTE,
@@ -35,6 +36,7 @@ from nhx.intake.spans.ingest.atif_domain import (
 )
 from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from nhx.intake.spans.span_attribute_bags import SpanAttributeBags
+from nhx.intake.spans.span_attribute_catalog import SPECS_BY_FIELD, SpanAttributeField, to_semantic_value
 from nhx.intake.spans.span_semantic_attributes import SpanSemanticAttributes
 from nhx.intake.spans.storage import json_dumps, json_dumps_preserve, stable_id
 from pydantic import BaseModel
@@ -305,6 +307,7 @@ def _trajectory_to_span(
         cost_total_usd=cost_total_usd,
         error_type=error_type,
         error_message=error_message,
+        usage_superseded_by_gateway=_usage_superseded((trajectory.extra or {}).get(USAGE_SUPERSEDED_ATTRIBUTE)),
         raw_attributes=raw_attributes,
     )
     trajectory_started_at = _trajectory_started_at(trajectory, ingested_at)
@@ -638,6 +641,7 @@ def _span_attributes(
     cached_tokens: int | None = None,
     total_tokens: int | None = None,
     cost_total_usd: Decimal | None = None,
+    usage_superseded_by_gateway: bool | None = None,
     raw_attributes: dict[str, Any] | None = None,
 ) -> SpanAttributeBags:
     """Build normalized semantic and raw attribute bags for an ATIF span."""
@@ -655,6 +659,7 @@ def _span_attributes(
         cached_tokens=cached_tokens,
         total_tokens=total_tokens,
         cost_total_usd=cost_total_usd,
+        usage_superseded_by_gateway=usage_superseded_by_gateway,
     )
     attribute_bags = semantic_attributes.to_bags()
     if raw_attributes is not None:
@@ -1101,6 +1106,14 @@ def _step_extra_dict(step: AtifStep, key: str) -> dict[str, Any]:
 def _dict_or_none(value: Any) -> dict[str, Any] | None:
     """Narrow a value to a dictionary or None."""
     return value if isinstance(value, dict) else None
+
+
+def _usage_superseded(value: Any) -> bool | None:
+    try:
+        marked = to_semantic_value(value, SPECS_BY_FIELD[SpanAttributeField.USAGE_SUPERSEDED_BY_GATEWAY])
+    except ValueError:
+        return None
+    return marked is True or None
 
 
 def _non_empty_string(value: Any) -> str | None:

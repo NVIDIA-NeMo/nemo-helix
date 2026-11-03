@@ -23,6 +23,7 @@ from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
     ImmediateResponse,
+    InferenceAccessRequest,
     InferenceMiddlewareContext,
     InferenceMiddlewareError,
     InferenceResponse,
@@ -33,14 +34,17 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
+from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal, refuse_router_keys
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
     raise_no_providers_for_model_entity,
     raise_unresolved_provider_secret,
 )
+from nhx.core.inference_gateway.api.metrics import UpstreamRequestLabels, record_upstream_request
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
     build_inference_response,
+    execute_access_checks,
     execute_post_response_middleware,
     execute_request_middleware,
     execute_response_middleware,
@@ -79,7 +83,11 @@ PROXY_OPENAPI_EXTRA: dict = {
                 "schema": {
                     "type": "object",
                     "additionalProperties": True,
-                }
+                },
+                "example": {
+                    "model": "YOUR_MODEL_NAME",
+                    "messages": [{"role": "user", "content": "Hello!"}],
+                },
             }
         },
         "required": False,
@@ -197,9 +205,10 @@ async def build_next_request(
         trailing_uri: The path suffix to append (e.g., "v1/chat/completions")
         auth_token: Raw secret value to inject into the auth header. When set,
             *auth_header_format* controls which header name and value format are used.
-        auth_header_format: Jinja2 template string controlling the auth header, e.g.
-            ``"X-Api-Key: {{ auth_secret }}"``. Defaults to
-            ``"Authorization: Bearer {{ auth_secret }}"`` when ``None``.
+        auth_header_format: Literal header format containing exactly one ``<auth_secret>``
+            placeholder (or the legacy ``{{ auth_secret }}``; never evaluated as a template), e.g.
+            ``"X-Api-Key: <auth_secret>"``. Defaults to
+            ``"Authorization: Bearer <auth_secret>"`` when ``None``.
         body: If the caller doesn't want to proxy the request's body,
               they can pass this argument instead. If not passed, we'll
               proxy the body when appropriate.
@@ -243,7 +252,13 @@ async def build_next_request(
         headers["content-length"] = str(len(body_bytes))
 
     if auth_token:
-        header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        try:
+            header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Invalid provider authentication configuration: {exc}",
+            ) from exc
         headers[header_name] = header_value
 
     return NextRequestInfo(
@@ -389,15 +404,28 @@ def _upstream_status_token(status_code: int) -> str:
 class UpstreamProviderContext:
     """Identifying context for the upstream model provider a request was routed to.
 
-    Used only to build a human-readable message when an upstream credential/route
-    rejection (401/403/404) is wrapped as 424. Every field is optional so callers
-    that lack full context (e.g. the mock path) still get a sensible message.
+    Used to build a human-readable message when an upstream credential/route
+    rejection (401/403/404) is wrapped as 424, and to label the upstream-requests
+    metric (see :func:`_upstream_request_labels`). Every field is optional so
+    callers that lack full context (e.g. the mock path) still get a sensible
+    message and a well-formed metric series.
     """
 
     model_provider_name: str | None = None
     provider_host_url: str | None = None
     model_name: str | None = None
     purpose: str | None = None
+    workspace: str | None = None
+
+
+def _upstream_request_labels(context: UpstreamProviderContext | None) -> UpstreamRequestLabels:
+    """Project an :class:`UpstreamProviderContext` onto the metric's routing labels."""
+    context = context or UpstreamProviderContext()
+    return UpstreamRequestLabels(
+        workspace=context.workspace,
+        model=context.model_name,
+        model_provider=context.model_provider_name,
+    )
 
 
 def _redact_url_userinfo(url: str) -> str | None:
@@ -517,6 +545,13 @@ async def proxy_request(
             original status for other backend errors, 500 for internal errors
     """
     response: aiohttp.ClientResponse | None = None
+    metric_labels = _upstream_request_labels(upstream_context)
+    # The true upstream status once a response is received; stays None if the
+    # request never completed (a connection/network error before any response).
+    # Used by the exception handlers so a failure AFTER the upstream responded
+    # (e.g. building the StreamingResponse) still records the real upstream
+    # status rather than the sentinel.
+    upstream_status_seen: int | None = None
     try:
         response = await http_client.request(
             next_request_info.method,
@@ -526,6 +561,7 @@ async def proxy_request(
             data=next_request_info.body,
             timeout=None,
         )
+        upstream_status_seen = response.status
 
         if response.status >= 400:
             error_body = await _read_error_body(response)
@@ -539,9 +575,14 @@ async def proxy_request(
             )
             if response.status in _DEPENDENCY_FAILURE_STATUSES:
                 detail = _dependency_failure_detail(response.status, error_body, upstream_context)
+                # Record last, immediately before the raise, so a failure while
+                # building the detail can't leave this path both uncounted here
+                # and re-counted by the generic handler below.
+                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
                 detail = error_body if error_body else str(response.status)
+                record_upstream_request(metric_labels, response.status, response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
 
         response_headers = _filter_response_headers(response.headers)
@@ -565,18 +606,26 @@ async def proxy_request(
                 # in this try/finally.
                 _close_response(response)
 
-        return StreamingResponse(
+        streaming_response = StreamingResponse(
             event_stream_generator(),
             status_code=response.status,
             headers=response_headers,
         )
+        # Record only after the response object is successfully constructed, so a
+        # construction failure (e.g. a non-Latin-1 upstream header that Starlette
+        # rejects) is counted once by the generic handler as (status, 500) rather
+        # than twice.
+        record_upstream_request(metric_labels, response.status, response.status)
+        return streaming_response
     except HTTPException:
         raise
     except aiohttp.ClientError as e:
         # Network error (connection failed, timeout, DNS, etc.)
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         raise HTTPException(status_code=502, detail=f"Backend networking error: {e}")
     except Exception as e:
+        record_upstream_request(metric_labels, upstream_status_seen, 500)
         _close_response(response)
         raise HTTPException(status_code=500, detail=f"Internal server error: {e}")
 
@@ -664,8 +713,22 @@ async def fetch_proxy_response(
 
     Raises:
         HTTPException: Same conditions as :func:`proxy_request`.
+
+    Metrics:
+        Records the upstream-requests counter for every PROXY-STAGE failure
+        (an upstream 4xx/5xx, a 424-wrapped rejection, a network 502, an
+        internal 500, or a 2xx-with-unusable-body 502) — these never reach the
+        caller's response middleware, so the proxy-stage status IS the client
+        status. The SUCCESS path is deliberately NOT recorded here: the caller
+        (:func:`virtual_model_proxy`) runs response middleware AFTER this returns,
+        which can turn a 2xx into a client-facing 4xx/5xx, so the success count
+        is finalized there against the true post-middleware client status.
     """
     response: aiohttp.ClientResponse | None = None
+    metric_labels = _upstream_request_labels(upstream_context)
+    # The true upstream status once a response is received; stays None if the
+    # request never completed (a connection/network error before any response).
+    upstream_status_seen: int | None = None
     try:
         response = await http_client.request(
             next_request_info.method,
@@ -676,6 +739,7 @@ async def fetch_proxy_response(
             timeout=None,
             auto_decompress=True,
         )
+        upstream_status_seen = response.status
 
         if response.status >= 400:
             error_body = await _read_error_body(response)
@@ -694,9 +758,11 @@ async def fetch_proxy_response(
             if served_model_name is not None and restored_model_id is not None:
                 error_body = _rewrite_model_field_in_error_body(error_body, served_model_name, restored_model_id)
             if response.status in _DEPENDENCY_FAILURE_STATUSES:
+                record_upstream_request(metric_labels, response.status, _DEPENDENCY_FAILURE_STATUS)
                 detail = _dependency_failure_detail(response.status, error_body, upstream_context)
                 raise HTTPException(status_code=_DEPENDENCY_FAILURE_STATUS, detail=detail, headers=error_headers)
             else:
+                record_upstream_request(metric_labels, response.status, response.status)
                 detail = error_body if error_body else str(response.status)
                 raise HTTPException(status_code=response.status, detail=detail, headers=error_headers)
 
@@ -720,6 +786,11 @@ async def fetch_proxy_response(
                     next_request_info.url,
                     exc_info=exc,
                 )
+                # Upstream returned a (2xx) status but an unparseable body, so the
+                # client gets a 502 despite a healthy upstream status. Count it the
+                # same way as the ClientPayloadError branch below so every
+                # client-facing response is recorded exactly once.
+                record_upstream_request(metric_labels, upstream_status_seen, 502)
                 raise HTTPException(
                     status_code=502,
                     detail=(
@@ -728,6 +799,7 @@ async def fetch_proxy_response(
                     ),
                 ) from exc
             if not isinstance(result, dict):
+                record_upstream_request(metric_labels, upstream_status_seen, 502)
                 raise HTTPException(
                     status_code=502,
                     detail=(
@@ -741,6 +813,9 @@ async def fetch_proxy_response(
     except HTTPException:
         raise
     except aiohttp.ClientPayloadError as exc:
+        # Upstream status was received (2xx, since >=400 raises above) but the body
+        # could not be decoded, so the client gets a 502 despite a healthy status.
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         logger.warning(
             "Inference Gateway could not decode upstream response from %s",
@@ -752,9 +827,11 @@ async def fetch_proxy_response(
             detail="Inference Gateway could not decode the upstream response body.",
         ) from exc
     except aiohttp.ClientError as exc:
+        record_upstream_request(metric_labels, upstream_status_seen, 502)
         _close_response(response)
         raise HTTPException(status_code=502, detail=f"Backend networking error: {exc}")
     except Exception as exc:
+        record_upstream_request(metric_labels, upstream_status_seen, 500)
         _close_response(response)
         raise HTTPException(status_code=500, detail=f"Internal server error: {exc}")
 
@@ -1019,6 +1096,19 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
+    refuse_router_keys(request.headers, model_cache.router_keys())
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    await execute_access_checks(
+        registry.plugins,
+        InferenceAccessRequest(
+            request_id=request_id,
+            workspace=workspace,
+            path=trailing_uri,
+            headers=dict(request.headers),
+            virtual_model_id=f"{workspace}/{vm_name}",
+            requested_model=json_body["model"] if isinstance(json_body.get("model"), str) else None,
+        ),
+    )
     if (workspace, vm_name) in registry.broken_vms:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1078,7 +1168,6 @@ async def virtual_model_proxy(
     # snapshot is contractually the request as the client sent it (nemo-guardrails reads
     # ``ctx.original_request.body`` precisely so later middleware can't hide content by
     # mutating the body), so it must not alias any mutable state the chain can touch.
-    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     original_request = build_inference_request(
         body=copy.deepcopy(json_body),
         headers=dict(request.headers),
@@ -1107,6 +1196,12 @@ async def virtual_model_proxy(
 
     backend_format = ctx.backend_format or BackendFormat.OPENAI_CHAT
     ctx.backend_format = backend_format
+
+    # Routing context for the upstream-requests metric + the 424 enrichment. Left
+    # as None on the ImmediateResponse path (no upstream was contacted, so the
+    # routing labels are legitimately unknown) and populated in the real-backend
+    # branch below once the provider is resolved.
+    upstream_context: UpstreamProviderContext | None = None
 
     # ImmediateResponse → skip proxy.
     if isinstance(modified_request, ImmediateResponse):
@@ -1150,15 +1245,17 @@ async def virtual_model_proxy(
         ctx.backend_format = backend_format
         resolved_served_model_name, resolved_model_provider_info = resolved_model_entity.model_providers[0]
 
-        # Context used only to enrich the 424 message when the upstream provider
-        # rejects the request (401/403/404). The model name we surface is the
-        # entity ref the caller asked for, never the upstream served_model_name.
+        # Context used to enrich the 424 message when the upstream provider
+        # rejects the request (401/403/404), and to label the upstream-requests
+        # metric. The model name we surface is the entity ref the caller asked
+        # for, never the upstream served_model_name.
         restored_model_id = f"{modified_model_ref.workspace}/{modified_model_ref.name}"
         upstream_context = UpstreamProviderContext(
             model_provider_name=resolved_model_provider_info.model_provider.name,
             provider_host_url=resolved_model_provider_info.model_provider.host_url,
             model_name=restored_model_id,
             purpose=f"proxying {proxy_path!r}",
+            workspace=workspace,
         )
 
         if (
@@ -1170,6 +1267,7 @@ async def virtual_model_proxy(
                 resolved_model_provider_info.model_provider.name,
             )
 
+        ctx.provider_calls_back_as_caller = resolved_model_provider_info.model_provider.calls_back_as_caller
         if is_mock_provider(resolved_model_provider_info.model_provider.name):
             # Pass json_body explicitly so that middleware body mutations are visible to
             # the mock handler (consistent with the real-backend path).  body["model"] is
@@ -1259,6 +1357,9 @@ async def virtual_model_proxy(
                 required_extra_headers=resolved_model_provider_info.model_provider.required_extra_headers,
                 request_headers=modified_request.headers,
             )
+            next_request_info.headers.update(
+                context_headers(resolved_model_provider_info.model_provider, modified_request.headers, gateway_seal())
+            )
             proxy_response_result, response_headers, response_status = await fetch_proxy_response(
                 http_client,
                 next_request_info,
@@ -1291,7 +1392,14 @@ async def virtual_model_proxy(
             response_body_annotations=dict(ctx.response_body_annotations),
         )
 
-    # Response middleware chain.
+    # Response middleware chain. The upstream-requests counter's SUCCESS path is
+    # finalized here (not in fetch_proxy_response / the mock branch) because
+    # response middleware runs AFTER the proxy stage and can turn a 2xx upstream
+    # result into a client-facing 4xx/5xx (e.g. a guardrails rejection). Recording
+    # here lets gateway_status reflect the TRUE status the client receives.
+    # (Proxy-stage FAILURES — upstream 4xx/5xx, 424 wraps, 502/500 — never reach
+    # this point; they are recorded at their own site in fetch_proxy_response.)
+    metric_labels = _upstream_request_labels(upstream_context)
     response_middleware_calls = registry.response_middleware_calls.get((workspace, vm_name), [])
     if response_middleware_calls:
         inference_response = build_inference_response(
@@ -1308,17 +1416,29 @@ async def virtual_model_proxy(
                 inference_response,
             )
         except InferenceMiddlewareError as exc:
+            # Response middleware rejected a 2xx upstream result; the client gets
+            # exc.status_code, so that is the gateway_status for this request.
+            record_upstream_request(metric_labels, response_status, exc.status_code)
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-    # Build final streaming response.
+    # Build final streaming response. Record the success only AFTER it is built:
+    # if serialization/header construction fails the client gets a 500, so count
+    # it as (response_status, 500) rather than a (response_status, response_status)
+    # success. Recording after the build also guarantees the request is counted
+    # exactly once (mirrors proxy_request's ordering).
     is_streaming = _is_streaming_response_result(inference_response)
     response_with_annotations = _build_inference_response_with_annotations(inference_response)
-    final_response = await stream_response_result(
-        response_with_annotations,
-        response_status,
-        response_with_annotations.headers,
-        named_events=_uses_named_sse_events(trailing_uri),
-    )
+    try:
+        final_response = await stream_response_result(
+            response_with_annotations,
+            response_status,
+            response_with_annotations.headers,
+            named_events=_uses_named_sse_events(trailing_uri),
+        )
+    except Exception:
+        record_upstream_request(metric_labels, response_status, 500)
+        raise
+    record_upstream_request(metric_labels, response_status, response_status)
 
     # Post-response middleware (fire-and-forget, non-streaming only).
     post_response_middleware_calls = registry.post_response_middleware_calls.get((workspace, vm_name), [])

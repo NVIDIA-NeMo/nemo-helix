@@ -45,7 +45,10 @@ CLICKHOUSE_HEALTH_ENDPOINT = "/ping"
 CLICKHOUSE_STARTUP_TIMEOUT_SECONDS = 60
 NHX_CLICKHOUSE_NETWORK_ALIAS = "nhx-intake-clickhouse"
 NHX_CLICKHOUSE_CONTAINER_NAME_PREFIX = "nhx-clickhouse-test"
-DEFAULT_E2E_CLICKHOUSE_IMAGE = "clickhouse/clickhouse-server:26.3"
+# Must equal nhx.intake.config.DEFAULT_CLICKHOUSE_IMAGE; Intake's tests enforce it.
+DEFAULT_E2E_CLICKHOUSE_IMAGE = (
+    "clickhouse/clickhouse-server:26.3.62.3@sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a"
+)
 
 # Docker client timeout in seconds. This needs to be higher than the default 60s
 # to handle Docker-in-Docker (DinD) environments in CI where the Docker daemon

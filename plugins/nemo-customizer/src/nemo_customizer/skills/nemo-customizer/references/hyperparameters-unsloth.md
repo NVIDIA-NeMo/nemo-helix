@@ -21,7 +21,7 @@ Unsloth is **Jobs-service-only, single-GPU inside the training container**. Ther
 |---------|---------|
 | `name` | Optional job name (auto-generated if omitted) |
 | `model` | **Object** — base model entity ref + how to load it (4-bit, dtype, max_seq_length) |
-| `dataset` | Single fileset ref (`path`) + optional `validation_path`; row shape selector (`text_field`, `apply_chat_template`, `packing`) |
+| `dataset` | One fileset ref (`path`) holding the training and any validation files; row shape selector (`text_field`, `apply_chat_template`, `packing`) |
 | `training` | Method (`sft`), adapter shape (`lora`/`full`), LoRA hyperparams, gradient checkpointing |
 | `schedule` | `epochs` (default 1) and optional `max_steps`, which overrides `epochs` when set; `warmup_steps` xor `warmup_ratio`; logging / save / eval cadence; LR scheduler |
 | `batch` | `per_device_train_batch_size` × `gradient_accumulation_steps` = effective batch |
@@ -47,7 +47,6 @@ Full template (every section, defaults inline):
   },
   "dataset": {
     "path": "default/<dataset-fileset>",
-    "validation_path": null,
     "text_field": "text",
     "apply_chat_template": true,
     "packing": false
@@ -139,8 +138,7 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `path` | — | Training fileset ref (`"name"` or `"workspace/name"`). |
-| `validation_path` | `null` | Optional validation fileset ref. |
+| `path` | — | Dataset fileset ref (`"name"` or `"workspace/name"`) holding the training file and, optionally, the validation file, told apart by name (`train.jsonl`, `validation.jsonl`). |
 | `text_field` | `"text"` | Column SFTTrainer reads. In `apply_chat_template: true` mode, the rendered template string is written into this column. |
 | `apply_chat_template` | `false` | Set `true` for rows with a `messages` array (preferred when the tokenizer has a chat template). |
 | `packing` | `false` | trl.SFTTrainer packing for throughput on short rows. |
@@ -186,7 +184,8 @@ See `references/dataset-formats.md` § Unsloth for row-shape rules.
 | `lr_scheduler_kwargs` | `null` | Extra scheduler kwargs, e.g. `{"num_cycles": 3}` for `cosine_with_restarts`. `null` uses defaults. |
 | `logging_steps` | `1` | Loss-log cadence. |
 | `save_steps` | `null` | If set, save checkpoint every N steps. |
-| `eval_steps` | `null` | If set with `validation_path`, eval every N steps. When `null` and `validation_path` is set, the training driver defaults to **one validation pass per effective epoch** at `max(1, effective_steps - 1)` (same effective-step cap as automodel's default `val_check_interval`). |
+| `eval_steps` | `null` | If set, eval every N steps. When `null`, the training driver defaults to **one validation pass per effective epoch** at `max(1, effective_steps - 1)` (same effective-step cap as automodel's default `val_check_interval`). |
+| `validation_split` | `0.1` | Share of the training rows held out for validation when the dataset has no validation file, seeded by `seed`. |
 | `seed` | `3407` | Trainer seed (`TrainingArguments.seed`). |
 
 **Hard mutex enforced by the schema:** `warmup_steps` xor `warmup_ratio`. Validation errors surface at submit time. `epochs` and `max_steps` are not mutually exclusive.

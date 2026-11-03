@@ -283,3 +283,9 @@ def installed_adapter_manifests(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(adapters, "ADAPTER_MANIFEST_ROOT", root)
     monkeypatch.delenv(adapters.ADAPTER_PYTHON_ENV, raising=False)
     return root
+
+
+@pytest.fixture
+def interactive_stdin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Treat stdin as a terminal so confirmation prompts read ``CliRunner`` input."""
+    monkeypatch.setattr("nemo_helix_plugin.cli_confirm.is_stdin_available", lambda: False)

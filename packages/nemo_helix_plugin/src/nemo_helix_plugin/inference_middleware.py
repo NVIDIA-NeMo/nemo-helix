@@ -360,6 +360,9 @@ class InferenceMiddlewareContext:
             convention.
         backend_format: Resolved backend API format used to parse typed responses.
             Defaults to ``None`` until IGW has resolved the request target.
+        provider_calls_back_as_caller: Whether the model provider IGW sent the request to is a router that calls
+            models back through the gateway as its caller. Set with ``proxied_request``, from the provider the
+            whole request middleware chain selected; ``False`` before then.
         response_body_annotations: Top-level fields to merge into the final
             response body after all middleware have run. Request middleware can
             use this when it needs to annotate the eventual backend response
@@ -379,6 +382,7 @@ class InferenceMiddlewareContext:
     original_request: InferenceRequest
     proxied_request: InferenceRequest | None = None
     backend_format: BackendFormat | None = None
+    provider_calls_back_as_caller: bool = False
     response_body_annotations: dict[str, Any] = field(default_factory=dict)
     request_nemo_client: AsyncNemoClient | None = None
     _state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
@@ -394,6 +398,36 @@ class InferenceMiddlewareContext:
                 Use your own plugin name to avoid colliding with other plugins' state.
         """
         return PluginStateNamespace(plugin_name=plugin_name, _store=self._state)
+
+
+@dataclass(frozen=True)
+class InferenceAccessRequest:
+    """A call IGW is about to serve, as :meth:`NemoInferenceMiddleware.check_access` sees it.
+
+    Exactly one of ``virtual_model_id`` and ``provider_name`` is set: a call on the ``model`` or ``openai`` routes
+    goes through a VirtualModel, and a call on the ``provider`` route goes straight to a ModelProvider, skipping
+    every VirtualModel's middleware.
+
+    Attributes:
+        request_id: The call's ``X-Request-ID``, or the id IGW generated for it.
+        workspace: The workspace in the request path.
+        path: The URI after the route's ``/-/``, e.g. ``v1/responses``.
+        headers: The caller's headers, credentials included.
+        virtual_model_id: ``"workspace/name"`` of the VirtualModel serving the call; read it with
+            :meth:`NemoInferenceMiddleware.get_virtual_model`.
+        requested_model: On a VirtualModel route, the model the call asked for: the body's ``model``, or the
+            URL's model name when it names a LoRA adapter. IGW then replaces it with the VirtualModel's
+            ``default_model_entity``, keeping a LoRA adapter suffix.
+        provider_name: The ModelProvider a ``provider`` route call names.
+    """
+
+    request_id: str
+    workspace: str
+    path: str
+    headers: Mapping[str, str]
+    virtual_model_id: str | None = None
+    requested_model: str | None = None
+    provider_name: str | None = None
 
 
 @dataclass
@@ -433,6 +467,10 @@ class ModelProviderInferenceTarget:
 
     missing_secret_name: str | None = None
     """Required provider secret missing from the cache, if any."""
+
+    calls_back_as_caller: bool = False
+    """Whether the provider is a router that calls models back through the gateway on its caller's behalf. Its stored
+    key is left out of ``outbound_headers``: only the gateway, which sends the caller context, can call it."""
 
 
 @dataclass
@@ -969,6 +1007,7 @@ class NemoInferenceMiddleware(ABC):
         Raises:
             RuntimeError: If called before IGW has injected the cache.
             KeyError: If ``model_entity_id`` is not in the cache.
+            ValueError: If the provider's stored ``auth_header_format`` is invalid.
         """
         return self._get_cache("get_inference_url_and_model").get_inference_url_and_model(
             model_entity_id, append_v1_suffix
@@ -1215,3 +1254,18 @@ class NemoInferenceMiddleware(ABC):
         Default: pass-through (return ``response`` unchanged).
         """
         return response
+
+    async def check_access(self, request: InferenceAccessRequest) -> None:
+        """Refuse a call before IGW serves it.
+
+        IGW calls this on every installed plugin, for every call on the ``model``, ``openai`` and ``provider``
+        routes, whether or not any VirtualModel lists the plugin, before any request middleware runs. Implement it
+        for rules that must hold on every route a caller can reach, such as limits carried by the caller's
+        credential; request middleware runs only on the VirtualModels that list it. It runs on every call, so
+        return at once for calls the plugin has no rule for.
+
+        Raises:
+            InferenceMiddlewareError: Refuse the call with its ``status_code`` and ``detail``.
+
+        Default: allow every call.
+        """

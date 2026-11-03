@@ -207,6 +207,41 @@ class TestRoleBindingPropagation:
             # Cleanup: delete the workspace
             test_client.delete(f"{WORKSPACES_PATH}/{workspace_id}", headers=service_headers)
 
+    def test_access_is_restored_when_revoked_role_binding_is_granted_again(self, test_client: TestClient):
+        """Granting a revoked role again reactivates the binding and the user regains access."""
+        workspace_id = f"test-ws-{uuid.uuid4().hex[:8]}"
+        viewer_email = f"viewer-{uuid.uuid4().hex[:8]}@example.com"
+        service_headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        user_headers = {"X-NHX-Principal-Id": viewer_email, "X-NHX-Principal-Email": viewer_email}
+        binding = {"principal": viewer_email, "role": "Viewer", "workspace": workspace_id}
+
+        response = test_client.post(
+            WORKSPACES_PATH,
+            json={"name": workspace_id, "description": "Test workspace for role binding re-grant"},
+            headers=service_headers,
+        )
+        assert response.status_code in (200, 201), f"Failed to create workspace: {response.text}"
+
+        try:
+            response = test_client.post(IAM_ROLE_BINDINGS_PATH, json=binding, headers=service_headers)
+            assert response.status_code == 200, f"Failed to create role binding: {response.text}"
+            binding_name = response.json()["name"]
+            assert test_client.get(f"{WORKSPACES_PATH}/{workspace_id}", headers=user_headers).status_code == 200
+
+            response = test_client.delete(f"{IAM_ROLE_BINDINGS_PATH}/{binding_name}", headers=service_headers)
+            assert response.status_code == 200, f"Failed to revoke role binding: {response.text}"
+            assert test_client.get(f"{WORKSPACES_PATH}/{workspace_id}", headers=user_headers).status_code == 403
+
+            response = test_client.post(IAM_ROLE_BINDINGS_PATH, json=binding, headers=service_headers)
+            assert response.status_code == 200, f"Re-granting a revoked role binding failed: {response.text}"
+            assert response.json()["name"] == binding_name
+            response = test_client.get(f"{WORKSPACES_PATH}/{workspace_id}", headers=user_headers)
+            assert response.status_code == 200, (
+                f"Viewer should regain access after the re-grant. Got {response.status_code}: {response.text}"
+            )
+        finally:
+            test_client.delete(f"{WORKSPACES_PATH}/{workspace_id}", headers=service_headers)
+
     def test_viewer_can_read_but_not_write_workspace(self, test_client: TestClient):
         """Test that a Viewer can read a workspace but not update it."""
         workspace_id = f"test-ws-{uuid.uuid4().hex[:8]}"

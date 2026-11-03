@@ -30,6 +30,8 @@ from nemo_helix_plugin.agents.types import (
     CreateExecuteJobRequest,
     CreateSessionRequest,
     DeploymentLogsResponse,
+    DeploymentModeAvailability,
+    DeploymentModeList,
     InvokeAgentRequest,
     JsonObject,
     LogLine,
@@ -100,6 +102,38 @@ def test_deployment_crud_and_logs() -> None:
     assert logs_prepared.response_type is DeploymentLogsResponse
     assert get_origin(stream_prepared.response_type) is Stream
     assert get_args(stream_prepared.response_type) == (LogLine,)
+
+
+def test_list_deployment_modes() -> None:
+    prepared = endpoints.list_deployment_modes(workspace="default")
+
+    assert prepared.method == "GET"
+    assert prepared.path_template == f"{_PREFIX}/deployment-modes"
+    assert prepared.path_params == {"workspace": "default"}
+    assert prepared.response_type is DeploymentModeList
+
+
+def _modes(*rows: tuple[str, bool, bool]) -> DeploymentModeList:
+    return DeploymentModeList(
+        data=[
+            DeploymentModeAvailability.model_validate({"mode": mode, "enabled": enabled, "requires_image": image})
+            for mode, enabled, image in rows
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("modes", "expected"),
+    [
+        (_modes(("subprocess", True, False), ("docker", True, False)), "subprocess"),
+        (_modes(("subprocess", False, False), ("docker", False, True), ("k8s", True, False)), "k8s"),
+        (_modes(("subprocess", False, False), ("k8s", True, True)), None),
+    ],
+)
+def test_default_deployment_mode_skips_disabled_and_image_only_modes(
+    modes: DeploymentModeList, expected: str | None
+) -> None:
+    assert modes.default_mode() == expected
 
 
 def test_sessions() -> None:

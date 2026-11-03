@@ -406,7 +406,9 @@ class Settings(BaseSettings):
     # or CIDRs every trial may reach in addition to the model endpoint.
     harbor_opensandbox_allowed_hosts: str = ""
     # How strictly each sandbox's applied egress policy is checked; "off" is deliberately not allowed.
-    harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "default_action"
+    # "strict" compares the allowed hosts both ways; "default_action" is for a deployment whose
+    # egress sidecar adds allow rules of its own.
+    harbor_opensandbox_egress_verification: Literal["default_action", "strict"] = "strict"
     # Cap each sandbox's ephemeral storage at its task's storage_mb. Kubernetes evicts a pod that
     # exceeds it. Turn off only where the sandbox runtime doesn't enforce the limit.
     harbor_opensandbox_enforce_disk_limit: bool = True

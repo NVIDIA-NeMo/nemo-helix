@@ -708,10 +708,6 @@ export const getAgentOptimizationDetailRoute = (workspace: string, optimizeJobNa
   });
 };
 
-export const getAgentDeploymentsListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.agentDeploymentsList, { workspace });
-};
-
 export const getAgentDeploymentDetailRoute = (workspace: string, agentDeploymentName: string) => {
   return generatePath(ROUTES.workspace.agentDeploymentDetail, {
     workspace,

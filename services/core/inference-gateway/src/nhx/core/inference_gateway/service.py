@@ -8,12 +8,9 @@ import logging
 from typing import ClassVar, List, Optional, Set
 
 import aiohttp
-from fastapi import Request
-from fastapi.exceptions import RequestValidationError
+from fastapi import FastAPI
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service import RouterConfig, Service
-from starlette import status
-from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +62,11 @@ class InferenceGatewayService(Service):
             ),
         ]
 
-    def configure_app(self) -> None:
-        """Configure exception handlers for the app."""
-        super().configure_app()
+    def configure_app(self, app: FastAPI) -> None:
+        """Install the caller-context middleware on the platform app, outside its authorization middleware."""
+        from nhx.core.inference_gateway.api.caller_context_middleware import CallerContextMiddleware
 
-        @self.app.exception_handler(RequestValidationError)
-        async def validation_error_exception_handler(request: Request, ex: RequestValidationError):
-            return JSONResponse(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                content={"detail": str(ex)},
-            )
+        app.add_middleware(CallerContextMiddleware)
 
     async def on_startup(self) -> None:
         """Initialize resources on startup."""
