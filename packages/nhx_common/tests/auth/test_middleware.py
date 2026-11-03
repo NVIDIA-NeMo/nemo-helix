@@ -1876,6 +1876,15 @@ class TestForbiddenDetail:
     def test_entities_routes_name_action_and_workspace(self, method, path, expected):
         assert _forbidden_detail(method, path) == f"Not allowed to {expected} entities in workspace 'ws-b'"
 
+    def test_all_workspaces_selector_uses_documented_wording(self):
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/-/entities/model")
+        assert detail == "Not allowed to list entities in the requested workspace."
+
+    def test_workspace_with_decoded_special_characters(self):
+        # request.url.path is percent-decoded, so team%40acme arrives as team@acme.
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/team@acme+qa/entities/model")
+        assert detail == "Not allowed to list entities in workspace 'team@acme+qa'"
+
     @pytest.mark.parametrize(
         ("method", "path"),
         [

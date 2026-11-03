@@ -27,6 +27,7 @@ from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
 from .headers import TRUSTED_IDENTITY_HEADERS
 from .models import Principal
+from .permissions import ALL_WORKSPACES
 from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
 from .token_resolver import ExtraBearerTokenResolver, ResolvedBearerToken, resolve_bearer_token
 from .workload_tokens import resolve_workload_access_token, resolve_workload_subject_token
@@ -39,8 +40,10 @@ class PrincipalExtractionError(RuntimeError):
 
 
 _ENTITY_ROUTE = re.compile(
-    r"/apis/entities/v2/workspaces/(?P<workspace>[A-Za-z0-9._-]+)/entities/[^/]+(?P<item>/[^/]+)?/?"
+    r"/apis/entities/v2/workspaces/(?P<workspace>[A-Za-z0-9@.+_-]+)/entities/[^/]+(?P<item>/[^/]+)?/?"
 )
+# Keyed by (HTTP method, whether the path names a single entity). Collection paths
+# (/entities/<type>) create or list; item paths (/entities/<type>/<name>) read, update or delete.
 _ENTITY_ACTIONS = {
     ("POST", False): "create",
     ("GET", False): "list",
@@ -61,6 +64,8 @@ def _forbidden_detail(method: str, path: str) -> str:
     action = _ENTITY_ACTIONS.get((method.upper(), bool(match and match["item"]))) if match else None
     if match is None or action is None:
         return "Forbidden"
+    if match["workspace"] == ALL_WORKSPACES:
+        return f"Not allowed to {action} entities in the requested workspace."
     return f"Not allowed to {action} entities in workspace '{match['workspace']}'"
 
 
