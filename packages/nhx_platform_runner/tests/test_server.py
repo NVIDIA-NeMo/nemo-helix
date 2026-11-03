@@ -17,12 +17,14 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas, generate_openapi_extra_params
+from nhx.common.auth.openapi import BEARER_SCHEME_NAME
 from nhx.common.config import AuthConfig, Configuration
 from nhx.common.config.base import OIDCConfig
 from nhx.common.controller import ControllerManager
 from nhx.common.platform_endpoint import _SyncHelixEndpointRoutingTransport
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
+from nhx.core.auth.service import AuthService
 from nhx.platform_runner import config as runner_config
 from nhx.platform_runner import server
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS
@@ -284,6 +286,8 @@ def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):
     try:
         app = server.create_app(services=[QueryParamSchemaService()])
         spec = app.openapi()
+        assert spec["info"]["title"] == "NeMo Helix API"
+        assert spec["info"]["description"] == "API for NeMo Helix services"
         schemas = spec["components"]["schemas"]
         filter_param = next(
             param
@@ -297,6 +301,30 @@ def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):
         assert "$defs" not in schemas["_ListFilter"]
     finally:
         clear_query_param_schemas()
+
+
+@pytest.mark.parametrize("standalone", [False, True], ids=["platform", "service"])
+def test_raw_app_openapi_registers_complete_scoped_bearer_metadata(monkeypatch, standalone):
+    _patch_platform_app_config(monkeypatch, seed_on_startup=False)
+    service = AuthService()
+    app = service.create_app() if standalone else server.create_app(services=[service])
+    assert app.openapi_schema is None
+    spec = app.openapi()
+    assert app.openapi() is spec
+    assert "security" not in spec
+    schemes = spec["components"]["securitySchemes"]
+    assert BEARER_SCHEME_NAME in schemes
+    secured = 0
+    for item in spec["paths"].values():
+        for operation in item.values():
+            if isinstance(operation, dict):
+                for requirement in operation.get("security", []):
+                    assert set(requirement) <= set(schemes)
+                    secured += BEARER_SCHEME_NAME in requirement
+    assert secured == 8
+    prefix = "" if standalone else "/apis/auth"
+    for path, method in [("/token", "post"), ("/v2/login", "get"), ("/v2/logout", "post")]:
+        assert "security" not in spec["paths"][prefix + path][method]
 
 
 def test_create_app_uses_separate_http_clients_for_auth_callouts(monkeypatch):

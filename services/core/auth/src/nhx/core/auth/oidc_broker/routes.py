@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from nhx.common.api.common import ErrorResponse
 from nhx.common.auth.token_resolver import resolve_bearer_token
 from nhx.common.config import get_auth_config, get_platform_config
 from nhx.common.config.base import OIDCConfidentialClientConfig, OIDCPublicClientConfig
@@ -120,7 +121,6 @@ LoginStore = Annotated[OidcLoginStore, Depends(get_login_store)]
 CredentialStore = Annotated[AccountCredentialStore, Depends(get_credential_store)]
 IdentityStore = Annotated[AccountIdentityStore, Depends(get_identity_store)]
 BrokerClientName = Literal["public", "confidential"]
-BearerTokenSource = Literal["access_token", "id_token"]
 
 
 @dataclass(frozen=True)
@@ -131,7 +131,6 @@ class BrokerClient:
     token_endpoint: str
     redirect_uri: str
     default_scopes: str
-    bearer_token_source: BearerTokenSource
     client_secret_env_var: str | None = None
 
 
@@ -164,7 +163,6 @@ def _broker_client(name: BrokerClientName) -> BrokerClient:
             token_endpoint=_required_endpoint(public.token_endpoint),
             redirect_uri=f"{advertised_base_url}/apis/auth/v2/login/callback",
             default_scopes=public.default_scopes,
-            bearer_token_source=public.bearer_token_source,
         )
 
     confidential = _require_confidential()
@@ -175,7 +173,6 @@ def _broker_client(name: BrokerClientName) -> BrokerClient:
         token_endpoint=_required_endpoint(confidential.token_endpoint),
         redirect_uri=confidential.login_redirect_uri,
         default_scopes=confidential.default_scopes,
-        bearer_token_source=confidential.bearer_token_source,
         client_secret_env_var=confidential.client_secret_env_var,
     )
 
@@ -222,15 +219,13 @@ def _decrypted_tokens(record: AccountCredentialRecord) -> dict[str, object]:
 async def _resolve_identity(
     tokens: dict[str, object],
     identity_store: AccountIdentityStore,
-    *,
-    bearer_token_source: BearerTokenSource,
 ) -> tuple[AccountIdentityRecord, dict[str, Any]]:
-    bearer_token = tokens.get(bearer_token_source)
+    bearer_token = tokens.get("access_token")
     if not isinstance(bearer_token, str):
         raise HTTPException(status_code=502, detail="Identity provider token response was incomplete")
     resolved = await resolve_bearer_token(get_auth_config(), bearer_token, skip_access_key_check=True)
     if resolved is None or resolved.token_kind != "oidc_access_token":
-        raise HTTPException(status_code=401, detail=f"Identity provider returned an invalid {bearer_token_source}")
+        raise HTTPException(status_code=401, detail="Identity provider returned an invalid access_token")
 
     claims = resolved.claims
     raw_claims = dict(claims.raw_claims)
@@ -264,7 +259,7 @@ async def _finish_token_authorization(
 ) -> RedirectResponse:
     client = _broker_client(_broker_client_name(payload["oidc_client"]))
     tokens = await _exchange_code(client, code, payload["verifier"])
-    identity, metadata = await _resolve_identity(tokens, identity_store, bearer_token_source=client.bearer_token_source)
+    identity, metadata = await _resolve_identity(tokens, identity_store)
     one_time = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="token_authorization_code",
@@ -393,7 +388,14 @@ _REDIRECT_RESPONSES: dict[int | str, dict[str, Any]] = {
     "/v2/login",
     status_code=302,
     response_class=RedirectResponse,
-    responses=_REDIRECT_RESPONSES,
+    responses={
+        **_REDIRECT_RESPONSES,
+        503: {
+            "model": ErrorResponse,
+            "description": "OIDC server-side login is not configured or is unavailable",
+            "content": {"application/json": {}},
+        },
+    },
 )
 async def start_web_session_login(
     store: LoginStore,
@@ -455,9 +457,7 @@ async def token_authorization_callback(
         raise HTTPException(status_code=400, detail="Login callback did not include an authorization code")
     selected_client = _broker_client(_broker_client_name(record.payload["oidc_client"]))
     tokens = await _exchange_code(selected_client, code, record.payload["verifier"])
-    identity, metadata = await _resolve_identity(
-        tokens, identity_store, bearer_token_source=selected_client.bearer_token_source
-    )
+    identity, metadata = await _resolve_identity(tokens, identity_store)
     session_id = secrets.token_urlsafe(32)
     await credential_store.create(
         credential_type="web_session",
@@ -517,7 +517,11 @@ async def logout(request: Request, credential_store: CredentialStore) -> Respons
     return response
 
 
-@router.get("/v2/session", response_model=WebSessionResponse)
+@router.get(
+    "/v2/session",
+    response_model=WebSessionResponse,
+    responses={401: {"model": ErrorResponse, "description": "Missing or invalid web session"}},
+)
 async def web_session(request: Request, credential_store: CredentialStore) -> WebSessionResponse:
     principal = await resolve_web_session(request, credential_store)
     if principal is None or principal.account_id is None:
@@ -630,7 +634,7 @@ async def broker_token(
                 public_metadata=record.public_metadata,
                 encrypted_payload=_encrypted_tokens(tokens),
             )
-        return _token_response(tokens, refresh_handle=refresh_handle, bearer_token_source=client.bearer_token_source)
+        return _token_response(tokens, refresh_handle=refresh_handle)
 
     record = await credential_store.get_active("broker_refresh", body.refresh_token)
     if record is None:
@@ -647,6 +651,7 @@ async def broker_token(
     if not isinstance(refreshed.get("refresh_token"), str):
         refreshed["refresh_token"] = provider_refresh
     refresh_handle = secrets.token_urlsafe(32)
+    response = _token_response(refreshed, refresh_handle=refresh_handle)
     rotated = await credential_store.rotate_active(
         record,
         new_handle=refresh_handle,
@@ -656,20 +661,19 @@ async def broker_token(
     )
     if rotated is None:
         raise HTTPException(status_code=400, detail="Refresh token was not found")
-    return _token_response(refreshed, refresh_handle=refresh_handle, bearer_token_source=client.bearer_token_source)
+    return response
 
 
 def _token_response(
     payload: dict[str, object],
     *,
     refresh_handle: str | None,
-    bearer_token_source: BearerTokenSource,
 ) -> dict[str, str | int]:
-    bearer_token = payload.get(bearer_token_source)
-    if not isinstance(bearer_token, str):
+    bearer_token = payload.get("access_token")
+    if not isinstance(bearer_token, str) or not bearer_token:
         raise HTTPException(
             status_code=502,
-            detail=f"Identity provider token response did not include {bearer_token_source}",
+            detail="Identity provider token response did not include access_token",
         )
     expires_in = payload.get("expires_in")
     response: dict[str, str | int] = {

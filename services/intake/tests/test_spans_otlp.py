@@ -100,7 +100,8 @@ def test_span_to_domain_skips_empty_scope_data():
     assert "otel.scope" not in domain_span.attributes_string
 
 
-def test_span_to_domain_does_not_duplicate_model_aliases():
+def test_span_to_domain_keeps_a_response_model_that_differs_from_the_request_model():
+    """A routing provider can serve a call with another model than the one requested; both are kept."""
     span = _make_span()
     request_model = span.attributes.add()
     request_model.key = "gen_ai.request.model"
@@ -118,7 +119,27 @@ def test_span_to_domain_does_not_duplicate_model_aliases():
     )
 
     assert domain_span.attributes_string["gen_ai.request.model"] == "request-model"
+    assert domain_span.attributes_string["gen_ai.response.model"] == "response-model"
+
+
+def test_span_to_domain_does_not_duplicate_model_aliases():
+    span = _make_span()
+    for key in ("gen_ai.request.model", "gen_ai.response.model", "llm.model_name"):
+        attribute = span.attributes.add()
+        attribute.key = key
+        attribute.value.string_value = "same-model"
+
+    domain_span = _span_to_domain(
+        workspace="default",
+        span=span,
+        resource_attributes={},
+        scope_data={},
+        ingested_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert domain_span.attributes_string["gen_ai.request.model"] == "same-model"
     assert "gen_ai.response.model" not in domain_span.attributes_string
+    assert "llm.model_name" not in domain_span.attributes_string
 
 
 def test_span_to_domain_promotes_pydantic_ai_model_messages():

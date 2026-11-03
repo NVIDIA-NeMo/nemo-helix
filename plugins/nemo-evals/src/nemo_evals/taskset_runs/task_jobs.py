@@ -63,7 +63,9 @@ async def task_job_request(
         name=task_job_name(run.name, index),
         description=f"Task {index} ({spec.spec.tasks[0].id}) of taskset run {run.name}",
         spec=spec.model_dump(mode="json"),
-        platform_spec=await HarborTaskDispatchJob.compile(spec=spec, profile=plan.dispatcher_profile),
+        platform_spec=await HarborTaskDispatchJob.compile(
+            spec=spec, profile=plan.dispatcher_profile, gateway_url_override=plan.gateway_url_override
+        ),
         source=TASK_JOB_SOURCE,
     )
 

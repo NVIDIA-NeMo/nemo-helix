@@ -79,7 +79,14 @@ def create_providers(
         str | None,
         typer.Option(
             "--auth-header-format",
-            help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
+            help="Literal header format controlling how the API key secret is sent to the upstream. Must contain exactly one `<auth_secret>` placeholder, which is replaced with the resolved secret value at request time. It is plain text, not a template: no `{` or `}` characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example: `'X-Api-Key: <auth_secret>'`. If not set, defaults to `'Authorization: Bearer <auth_secret>'`.",
+        ),
+    ] = None,
+    calls_back_as_caller: Annotated[
+        bool | None,
+        typer.Option(
+            "--calls-back-as-caller/--no-calls-back-as-caller",
+            help="For a router that calls models back through the gateway on its caller's behalf: the gateway sends it the stored key and a sealed caller context, and acts as the caller on each call back that returns the context.",
         ),
     ] = None,
     default_extra_body: Annotated[
@@ -172,6 +179,8 @@ def create_providers(
         input_payload["api_key_secret_name"] = api_key_secret_name
     if auth_header_format is not None:
         input_payload["auth_header_format"] = auth_header_format
+    if calls_back_as_caller is not None:
+        input_payload["calls_back_as_caller"] = calls_back_as_caller
     if default_extra_body is not None:
         input_payload["default_extra_body"] = read_payload("default_extra_body", default_extra_body)
     if default_extra_headers is not None:
@@ -387,7 +396,14 @@ def update_providers(
         str | None,
         typer.Option(
             "--auth-header-format",
-            help="Jinja2 template string controlling how the API key secret is sent to the upstream. Must contain exactly one variable named `auth_secret`, which is substituted with the resolved secret value at request time. Example: `'X-Api-Key: {{ auth_secret }}'`. If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`.",
+            help="Literal header format controlling how the API key secret is sent to the upstream. Must contain exactly one `<auth_secret>` placeholder, which is replaced with the resolved secret value at request time. It is plain text, not a template: no `{` or `}` characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example: `'X-Api-Key: <auth_secret>'`. If not set, defaults to `'Authorization: Bearer <auth_secret>'`.",
+        ),
+    ] = None,
+    calls_back_as_caller: Annotated[
+        bool | None,
+        typer.Option(
+            "--calls-back-as-caller/--no-calls-back-as-caller",
+            help="For a router that calls models back through the gateway on its caller's behalf: the gateway sends it the stored key and a sealed caller context, and acts as the caller on each call back that returns the context.",
         ),
     ] = None,
     default_extra_body: Annotated[
@@ -472,6 +488,8 @@ def update_providers(
         input_payload["api_key_secret_name"] = api_key_secret_name
     if auth_header_format is not None:
         input_payload["auth_header_format"] = auth_header_format
+    if calls_back_as_caller is not None:
+        input_payload["calls_back_as_caller"] = calls_back_as_caller
     if default_extra_body is not None:
         input_payload["default_extra_body"] = read_payload("default_extra_body", default_extra_body)
     if default_extra_headers is not None:

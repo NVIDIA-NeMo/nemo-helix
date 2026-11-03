@@ -358,6 +358,13 @@ credential for every workload.
 A successful submit returns `201` with the job's name and the `pending` rows. Poll the rows, not the
 job: images in a set finish independently.
 
+With `max_concurrent_builds` set (see [Configuration](#configuration)), the rows come back `queued` and
+the job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
+the build, once fewer than `max_concurrent_builds` builds run across the deployment, oldest submit first,
+and moves the rows to `pending`. If Jobs then
+refuses the job, the rows are failed with the reason in `status_detail` rather than the submit
+returning `403` or `409`.
+
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
@@ -382,7 +389,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
+| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -639,6 +646,9 @@ builder:
   import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
   # The platform for a spec that names none. Set it to the nodes' architecture; this is the default.
   default_platform: linux/amd64
+  # Most builds running at once, across workspaces; later submits queue. Null, the default, never queues.
+  # The chart sets it from builder.maxConcurrentBuilds (3).
+  max_concurrent_builds: 3
 ```
 
 `registry` has no default; while it is unset, submits fail with a `409` rather than as builds that

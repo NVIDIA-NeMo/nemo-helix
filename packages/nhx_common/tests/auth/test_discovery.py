@@ -21,7 +21,7 @@ def test_auth_discovery_response_accepts_endpoint_shape() -> None:
                 PublicOidcAdvertisedClient(
                     client_id="nhx",
                     default=True,
-                    bearer_token_source="id_token",
+                    bearer_token_source="access_token",
                 )
             ],
         ),
@@ -29,7 +29,7 @@ def test_auth_discovery_response_accepts_endpoint_shape() -> None:
 
     assert response.auth_enabled is True
     assert response.oidc is not None
-    assert response.oidc.clients[0].bearer_token_source == "id_token"
+    assert response.oidc.clients[0].bearer_token_source == "access_token"
 
 
 def test_auth_discovery_response_rejects_malformed_scalar_types() -> None:
@@ -54,6 +54,7 @@ def test_oidc_discovery_response_rejects_unknown_bearer_token_source() -> None:
         )
 
 
-def test_parse_bearer_token_source_rejects_unknown_values() -> None:
+@pytest.mark.parametrize("source", ["id_token", "refresh_token", None, ""])
+def test_parse_bearer_token_source_rejects_unknown_values(source: object) -> None:
     with pytest.raises(ValueError, match="bearer_token_source"):
-        parse_bearer_token_source("refresh_token")
+        parse_bearer_token_source(source)

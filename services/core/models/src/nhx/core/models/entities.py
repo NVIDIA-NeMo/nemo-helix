@@ -209,11 +209,20 @@ class ModelProvider(EntityBase):
     auth_header_format: str | None = Field(
         default=None,
         description=(
-            "Jinja2 template controlling how the API key is sent upstream. "
-            "Must contain exactly one variable named `auth_secret`. "
-            "Defaults to `'Authorization: Bearer {{ auth_secret }}'` when not set."
+            "Literal header format controlling how the API key is sent upstream. "
+            "Must contain exactly one `<auth_secret>` placeholder (legacy `{{ auth_secret }}` is also accepted). "
+            "Defaults to `'Authorization: Bearer <auth_secret>'` when not set."
         ),
         max_length=1024,
+    )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
     )
 
     # Auth context from the request that created this provider.

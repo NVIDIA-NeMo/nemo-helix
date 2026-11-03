@@ -3,7 +3,7 @@
 
 [project]
 name = "nhx-platform"
-description = "Nemo Helix - entry point for all domain services"
+description = "NeMo Helix - entry point for all domain services"
 requires-python = ">=3.11,<3.15"
 
 # Service dependencies are NOT listed here - they're defined in the root

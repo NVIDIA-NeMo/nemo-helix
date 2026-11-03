@@ -6,9 +6,10 @@ import logging
 from typing import Annotated
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware_models import VirtualModel
+from nhx.common.api.common import ErrorResponse
 from nhx.common.entities.utils import parse_adapters_suffix
 from nhx.common.service.dependencies import get_nemo_client
 from nhx.core.inference_gateway.api.authz import (
@@ -136,6 +137,7 @@ async def openai_get_models(
     summary="OpenAI Get Model",
     response_description="Get model request to OpenAI-compatible endpoint",
     operation_id="openai_proxy_get_model",
+    responses={404: {"model": ErrorResponse, "description": "Virtual model not found"}},
     status_code=status.HTTP_200_OK,
 )
 async def openai_get_model(
@@ -194,6 +196,7 @@ async def openai_get_model(
     response_description="Proxy DELETE request to OpenAI-compatible endpoint",
     operation_id="openai_proxy_delete",
     status_code=status.HTTP_200_OK,
+    openapi_extra=PROXY_OPENAPI_EXTRA,
 )
 @router.patch(
     "/v2/workspaces/{workspace}/openai/-/{trailing_uri:path}",
@@ -206,7 +209,7 @@ async def openai_get_model(
 async def openai_proxy(
     request: Request,
     workspace: str,
-    trailing_uri: str,
+    trailing_uri: Annotated[str, Path(examples=["v1/chat/completions"])],
     http_client: Annotated[ClientSession, Depends(global_http_client)],
     nemo_client: Annotated[AsyncNemoClient, Depends(get_nemo_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],

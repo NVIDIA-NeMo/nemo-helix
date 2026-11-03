@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import duckdb
 import pytest
 from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
 from nhx.common.jobs.schemas import InvalidPageCursorError, LogPageCursorV1, PaginationDirection, decode_log_page_cursor
@@ -544,6 +545,47 @@ async def test_query_logs_allows_apostrophe_in_log_message_filter(log_storage, l
 
     assert result.total == 1
     assert result.data[0].message == "I'm testing apostrophes"
+
+
+@pytest.fixture
+def apostrophe_storage(tmp_path):
+    """A local storage root whose directory name contains an apostrophe."""
+    root = tmp_path / "worker's-logs"
+    root.mkdir()
+    return LocalStorageImpl(config=LocalStorageConfig(path=str(root)))
+
+
+async def test_insert_and_query_logs_under_path_with_apostrophe(log_storage, apostrophe_storage, sample_log_entries):
+    """The storage path is data, not SQL: reads and writes under ``worker's-logs`` must work in every mode."""
+    assert await log_storage.insert_logs(apostrophe_storage, sample_log_entries) == len(sample_log_entries)
+
+    offset_page = await log_storage.query_logs(apostrophe_storage, filters={"job": "job-123"}, page_size=10)
+    assert offset_page.total == len(sample_log_entries)
+    assert len(offset_page.data) == 10
+
+    tail_page = await log_storage.query_logs(apostrophe_storage, filters={"job": "job-123"}, tail=5)
+    assert [log.message for log in tail_page.data] == [f"Log message {i}" for i in range(20, 25)]
+    assert tail_page.prev_page is not None
+
+    cursor_page = await log_storage.query_logs(
+        apostrophe_storage, filters={"job": "job-123"}, page_size=5, page_cursor=tail_page.prev_page
+    )
+    assert [log.message for log in cursor_page.data] == [f"Log message {i}" for i in range(15, 20)]
+
+
+def test_prepare_query_escapes_apostrophes_in_s3_prefix():
+    """An S3 prefix with an apostrophe must stay inside the read_parquet string literal."""
+    base_path = "s3://bucket/it's/'; DROP TABLE logs; --/logs"
+    base_table, where_clause, params = DuckDBLogRepository._prepare_query(base_path, {"job": "job-123"})
+
+    statements = duckdb.connect(":memory:").extract_statements(f"SELECT * FROM {base_table} WHERE {where_clause}")
+    assert len(statements) == 1
+    assert "it''s" in base_table
+    assert params == []
+
+
+def test_sql_string_literal_doubles_apostrophes():
+    assert DuckDBLogRepository._sql_string_literal("a'b''c") == "'a''b''''c'"
 
 
 def test_log_repository_rejects_multi_statement_query(local_storage, monkeypatch):

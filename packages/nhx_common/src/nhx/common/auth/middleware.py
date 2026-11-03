@@ -4,6 +4,8 @@
 """Authorization middleware for NeMo Helix services."""
 
 import logging
+import re
+from collections.abc import Mapping
 from typing import Any, Callable, NamedTuple, Optional
 
 import httpx
@@ -25,6 +27,7 @@ from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
 from .headers import TRUSTED_IDENTITY_HEADERS
 from .models import Principal
+from .permissions import ALL_WORKSPACES
 from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
 from .token_resolver import ExtraBearerTokenResolver, ResolvedBearerToken, resolve_bearer_token
 from .workload_tokens import resolve_workload_access_token, resolve_workload_subject_token
@@ -34,6 +37,36 @@ logger = logging.getLogger(__name__)
 
 class PrincipalExtractionError(RuntimeError):
     """Raised when principal extraction returns an impossible success state."""
+
+
+_ENTITY_ROUTE = re.compile(
+    r"/apis/entities/v2/workspaces/(?P<workspace>[A-Za-z0-9@.+_-]+)/entities/[^/]+(?P<item>/[^/]+)?/?"
+)
+# Keyed by (HTTP method, whether the path names a single entity). Collection paths
+# (/entities/<type>) create or list; item paths (/entities/<type>/<name>) read, update or delete.
+_ENTITY_ACTIONS = {
+    ("POST", False): "create",
+    ("GET", False): "list",
+    ("GET", True): "read",
+    ("PUT", True): "update",
+    ("DELETE", True): "delete",
+}
+
+
+def _forbidden_detail(method: str, path: str) -> str:
+    """Return the 403 detail for a PDP denial.
+
+    Generic entities routes name the denied action and workspace so end users see the same detail
+    as the entities handler gives delegated callers. Both come from the request the caller sent,
+    so nothing about the denied workspace is disclosed. Every other route keeps the bare detail.
+    """
+    match = _ENTITY_ROUTE.fullmatch(path)
+    action = _ENTITY_ACTIONS.get((method.upper(), bool(match and match["item"]))) if match else None
+    if match is None or action is None:
+        return "Forbidden"
+    if match["workspace"] == ALL_WORKSPACES:
+        return f"Not allowed to {action} entities in the requested workspace."
+    return f"Not allowed to {action} entities in workspace '{match['workspace']}'"
 
 
 def _require_principal(principal: Principal | None) -> Principal:
@@ -224,6 +257,23 @@ PUBLIC_GET_PATHS = {
     "/openapi.json",  # OpenAPI schema consumed by the documentation UI and client generators
     "/apis/plugins",  # Studio plugin manifest — fetched by the SPA before login completes
 }
+
+
+#: Model clients on these routes may send their key as ``x-api-key`` (Anthropic's convention) instead of a bearer
+#: token. The gateway never forwards either header upstream.
+API_KEY_HEADER_PATH_PREFIXES = ("/apis/inference-gateway/",)
+
+
+def request_bearer_token(path: str, headers: Mapping[str, str]) -> str | None:
+    """The bearer token a request carries: ``Authorization: Bearer``, else ``x-api-key`` on a model route.
+
+    Raises:
+        MalformedBearerTokenError: The ``Authorization`` header uses Bearer but is malformed.
+    """
+    token = parse_bearer_authorization_header(headers.get("authorization"))
+    if token is None and path.startswith(API_KEY_HEADER_PATH_PREFIXES):
+        token = headers.get("x-api-key", "").strip() or None
+    return token
 
 
 def is_auth_middleware_excluded_path(path: str) -> bool:
@@ -461,10 +511,8 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             self.service_name or "unknown",
             result.reason,
         )
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": "Unauthorized" if status_code == 401 else "Forbidden"},
-        )
+        detail = "Unauthorized" if status_code == 401 else _forbidden_detail(request.method, request.url.path)
+        return JSONResponse(status_code=status_code, content={"detail": detail})
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Main entry point - routes requests through the appropriate authorization flow.
@@ -530,9 +578,9 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
         if not self.config.enabled:
             return await self._handle_auth_disabled_request(request, call_next)
 
-        # Try to extract principal from Authorization: Bearer header (native OIDC or unsigned JWT)
+        # Try to extract principal from the bearer token (native OIDC or unsigned JWT)
         try:
-            bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
+            bearer_token = request_bearer_token(path, headers_dict)
         except MalformedBearerTokenError:
             return JSONResponse(status_code=401, content={"detail": "Invalid bearer token"})
         if bearer_token is not None:

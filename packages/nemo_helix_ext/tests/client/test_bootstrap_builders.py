@@ -391,7 +391,7 @@ def test_oauth_builder_uses_discovered_user_login_client_and_bearer_source(tmp_p
                 client_id="user-login-client",
                 client_authentication="public",
                 default=True,
-                bearer_token_source="id_token",
+                bearer_token_source="access_token",
                 token_endpoint="https://idp/token",
             ),
         ),
@@ -403,7 +403,7 @@ def test_oauth_builder_uses_discovered_user_login_client_and_bearer_source(tmp_p
     assert client._auth is not None
     assert isinstance(client._auth, OIDCTokenProvider)
     assert client._auth.client_id == "user-login-client"
-    assert client._auth.bearer_token_source == "id_token"
+    assert client._auth.bearer_token_source == "access_token"
 
 
 @patch("nemo_helix_ext.auth.bootstrap.discover_nhx_config", return_value=_OIDC)

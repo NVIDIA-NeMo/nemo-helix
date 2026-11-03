@@ -64,9 +64,12 @@ def test_lint_accepts_the_generated_spec(spec):
 
 
 @pytest.mark.parametrize("method", ["get", "post"])
-def test_authenticate_samples_send_the_bearer_token(spec, method):
-    for lang, source in _samples(spec, "/apis/auth/authenticate", method).items():
-        assert "Bearer YOUR_ACCESS_TOKEN" in source, lang
+def test_authenticate_samples_use_native_bearer_credentials(spec, method):
+    path = "/apis/auth/authenticate"
+    operation = {**spec["paths"][path][method], "x-codeSamples": []}
+    request = sample_request(spec, path, method, operation)
+    assert request is not None and request.requires_bearer_token
+    assert "Authorization" not in request.headers
 
 
 def test_token_exchange_samples_send_every_required_form_field(spec):

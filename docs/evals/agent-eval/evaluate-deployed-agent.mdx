@@ -74,12 +74,19 @@ class _AgentHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         return  # keep the demo output quiet
+
+httpd = ThreadingHTTPServer(("127.0.0.1", 8000), _AgentHandler)
+threading.Thread(target=httpd.serve_forever, daemon=True).start()
 ```
 
 ## 3. Run the evaluation
 
 With an agent target and no inference function supplied, `run()` generates answers by making real HTTP
 calls to the agent's `url`.
+
+If you skipped the local stand-in in section 2, run `asyncio.run(run_evaluation())` directly instead
+of the `try`/`finally` block below. Do not call `httpd.shutdown()` or `httpd.server_close()` when
+using your own endpoint: there is no local server to clean up.
 
 ```python
 import asyncio
@@ -97,12 +104,19 @@ async def run_evaluation() -> None:
     for aggregate in result.summary.scores.scores:
         print(f"{aggregate.name}: {aggregate.mean}")
 
-asyncio.run(run_evaluation())
+try:
+    asyncio.run(run_evaluation())
+finally:
+    httpd.shutdown()
+    httpd.server_close()
 ```
+
+The `finally` block stops the local stand-in and releases port 8000, including if evaluation fails.
 
 ## Point at your real agent
 
-To evaluate your own deployed agent, change three things and drop the local server:
+To evaluate your own deployed agent, skip section 2 and omit the local-server cleanup in section 3
+as described above. Change these three settings:
 
 1. **`url`** → your agent's endpoint.
 2. **`body`** → the request your agent expects (reference the task's inputs, e.g. `{{ instruction }}`).
@@ -244,6 +258,7 @@ async def main() -> None:
         )
     finally:
         httpd.shutdown()
+        httpd.server_close()
 
     for aggregate in result.summary.scores.scores:
         print(f"{aggregate.name}: {aggregate.mean}")

@@ -25,6 +25,7 @@ from nemo_agents_plugin.entities import (
 from nemo_deployments_plugin.entities import ConfigFile
 from nemo_helix_plugin.client.errors import NotFoundError as PluginClientNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 
 logger = logging.getLogger(__name__)
 _CONTRACT_FILENAMES = {ETHOS_FILENAME, AGENT_SPEC_FILENAME}
@@ -48,7 +49,7 @@ async def _download_fileset(
     try:
         listing = (await files_client.list_files(workspace=workspace, name=fileset_name)).data()
     except PluginClientNotFoundError as exc:
-        raise FabricEthosFilesetNotFound(f"Ethos fileset {workspace}/{fileset_name} was not found") from exc
+        raise FabricEthosFilesetNotFound(f"Source fileset {workspace}/{fileset_name} was not found") from exc
 
     for file_info in listing.data:
         relative_path = _fileset_relative_path(file_info.path)
@@ -64,7 +65,7 @@ async def _download_fileset(
 def _fileset_relative_path(path: str) -> PurePosixPath:
     relative_path = PurePosixPath(path.lstrip("/"))
     if not relative_path.parts or relative_path.is_absolute() or ".." in relative_path.parts:
-        raise FabricArtifactStagingError(f"Invalid path in Ethos fileset: {path!r}")
+        raise FabricArtifactStagingError(f"Invalid path in source fileset: {path!r}")
     return relative_path
 
 
@@ -81,12 +82,12 @@ def _copy_downloaded_tree(download_root: Path, base_dir: Path, preserved: set[st
         rel_posix = PurePosixPath(rel.as_posix())
         if rel_posix.parts[0] in preserved:
             raise FabricArtifactStagingError(
-                f"Ethos fileset path {rel_posix.as_posix()!r} targets preserved runtime directory "
+                f"Source fileset path {rel_posix.as_posix()!r} targets preserved runtime directory "
                 f"{rel_posix.parts[0]!r}"
             )
         if source.is_symlink():
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         if not source.is_file():
             continue
@@ -94,7 +95,7 @@ def _copy_downloaded_tree(download_root: Path, base_dir: Path, preserved: set[st
         destination = base_dir / rel
         if not destination.resolve(strict=False).is_relative_to(resolved_base):
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel_posix.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         copies.append((source, destination))
 
@@ -110,13 +111,14 @@ async def stage_fabric_ethos_dir(
     agent_config: dict[str, Any],
     base_dir: Path,
     files_client: AsyncFilesClient | None = None,
+    source_fileset: FilesetRef | None = None,
 ) -> None:
-    """Download the Ethos fileset into *base_dir* for subprocess deployments.
+    """Download agent source into *base_dir* for packaging or subprocess deployments.
 
     Mirrors :func:`stage_fabric_ethos_config_files` for a runtime that reads the
-    agent root off local disk rather than through a ConfigMap. An unavailable
-    fileset is not fatal — config-only agents deploy from ``agent.yaml`` alone —
-    but a config referencing skills still needs them staged.
+    agent root off local disk rather than through a ConfigMap. An explicit
+    ``source_fileset`` must be readable. Otherwise, use the optional Ethos fileset;
+    config-only agents can proceed without it, but configured skills must exist.
 
     ``ETHOS.md`` and the legacy ``AGENT-SPEC.md`` file are dropped after
     download, matching the container path, so both runtimes see the same tree.
@@ -132,13 +134,20 @@ async def stage_fabric_ethos_dir(
     the fileset would survive locally, and stale skills could satisfy validation
     for a deployment that staged nothing.
     """
+    if source_fileset is not None:
+        ref = parse_entity_ref(source_fileset, default_workspace=workspace)
+        workspace, fileset_name = ref.workspace, ref.name
+        if files_client is None:
+            raise FabricArtifactStagingError(f"A Files client is required to stage source fileset {source_fileset}.")
+    else:
+        fileset_name = ethos_fileset_name(agent_name)
+
     preserved = _runtime_dir_names(agent_config)
     await asyncio.to_thread(_clear_staged_tree, base_dir, preserved)
 
-    if agent_name and files_client is not None:
-        fileset_name = ethos_fileset_name(agent_name)
+    if (agent_name or source_fileset is not None) and files_client is not None:
         try:
-            with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
+            with tempfile.TemporaryDirectory(prefix=f".fabric-source-{agent_name}-") as tmp:
                 tmp_path = Path(tmp)
                 await _download_fileset(
                     files_client,
@@ -148,6 +157,8 @@ async def stage_fabric_ethos_dir(
                 )
                 await asyncio.to_thread(_copy_downloaded_tree, tmp_path, base_dir, preserved)
         except FabricEthosFilesetNotFound as exc:
+            if source_fileset is not None:
+                raise FabricArtifactStagingError(f"Source fileset {workspace}/{fileset_name} was not found.") from exc
             logger.info(
                 "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
                 workspace,
@@ -202,7 +213,7 @@ def _clear_staged_tree(base_dir: Path, preserved: set[str]) -> None:
                 child.unlink(missing_ok=True)
         except OSError as exc:
             raise FabricArtifactStagingError(
-                f"Failed to remove stale Ethos artifact {child.name!r} from {base_dir}: {exc}"
+                f"Failed to remove stale source artifact {child.name!r} from {base_dir}: {exc}"
             ) from exc
 
 
@@ -226,7 +237,7 @@ def _collect_staged_dir(base_dir: Path, preserved: set[str]) -> set[PurePosixPat
             continue
         if path.is_symlink() or not path.resolve().is_relative_to(resolved_base):
             raise FabricArtifactStagingError(
-                f"Staged Ethos path {rel.as_posix()!r} escapes the agent base directory {base_dir}"
+                f"Staged source path {rel.as_posix()!r} escapes the agent base directory {base_dir}"
             )
         if not path.is_file():
             continue
@@ -248,23 +259,26 @@ async def stage_fabric_ethos_config_files(
     rewritten_agent_config: dict[str, Any],
     agent_yaml_path: str,
     files_client: AsyncFilesClient | None = None,
+    source_fileset: FilesetRef | None = None,
 ) -> list[ConfigFile]:
-    """Download the Ethos fileset and return container ``config_files`` entries.
+    """Stage agent source as container ``config_files`` entries.
 
-    When the fileset is unavailable, returns a single inline ``agent.yaml`` entry.
-    When available, maps every fileset file under the same
+    An explicit ``source_fileset`` must be readable. Otherwise, use the optional
+    Ethos fileset, falling back to inline ``agent.yaml`` when it is absent.
+    Maps every fileset file under the same
     ``base_dir`` as *agent_yaml_path*, substituting the rewritten YAML for
     ``agent.yaml``.
     """
     config_yaml = yaml.safe_dump(rewritten_agent_config, sort_keys=False)
-    if not agent_name:
+    if not agent_name and source_fileset is None:
         return [ConfigFile(path=agent_yaml_path, content=config_yaml)]
     if files_client is None:
-        raise FabricArtifactStagingError("Fabric Ethos staging requires an AsyncFilesClient.")
+        raise FabricArtifactStagingError("Agent source staging requires an AsyncFilesClient.")
 
-    fileset_name = ethos_fileset_name(agent_name)
+    ref = parse_entity_ref(source_fileset or ethos_fileset_name(agent_name), default_workspace=workspace)
+    workspace, fileset_name = ref.workspace, ref.name
     try:
-        with tempfile.TemporaryDirectory(prefix=f".fabric-ethos-{agent_name}-") as tmp:
+        with tempfile.TemporaryDirectory(prefix=f".fabric-source-{agent_name}-") as tmp:
             tmp_path = Path(tmp)
             await _download_fileset(files_client, workspace=workspace, fileset_name=fileset_name, local_path=tmp_path)
             config_files = _collect_staged_config_files(
@@ -279,6 +293,8 @@ async def stage_fabric_ethos_config_files(
             _validate_staged_size(config_files, fileset_name)
             return config_files
     except FabricEthosFilesetNotFound as exc:
+        if source_fileset is not None:
+            raise FabricArtifactStagingError(f"Source fileset {workspace}/{fileset_name} was not found.") from exc
         logger.info(
             "Ethos fileset %s/%s unavailable (%s); using inline agent.yaml only",
             workspace,
@@ -306,7 +322,7 @@ def _collect_staged_config_files(
             continue
         rel = path.relative_to(root)
         if ".." in rel.parts:
-            raise FabricArtifactStagingError(f"Path escape in Ethos fileset: {rel.as_posix()!r}")
+            raise FabricArtifactStagingError(f"Path escape in source fileset: {rel.as_posix()!r}")
         if rel.name in _CONTRACT_FILENAMES:
             continue
         container_path = str(base_dir / PurePosixPath(rel.as_posix()))
@@ -317,7 +333,7 @@ def _collect_staged_config_files(
                 content = path.read_text(encoding="utf-8")
             except UnicodeDecodeError as exc:
                 raise FabricArtifactStagingError(
-                    f"Ethos fileset contains non-UTF-8 file {rel.as_posix()!r}; staged artifacts must be text"
+                    f"Source fileset contains non-UTF-8 file {rel.as_posix()!r}; staged artifacts must be text"
                 ) from exc
         config_files.append(ConfigFile(path=container_path, content=content))
 
@@ -330,7 +346,7 @@ def _validate_staged_size(config_files: list[ConfigFile], fileset_name: str) -> 
     total = sum(len(config_file.content.encode("utf-8")) for config_file in config_files)
     if total > MAX_ETHOS_STAGED_BYTES:
         raise FabricArtifactStagingError(
-            f"Ethos fileset {fileset_name!r} stages {total} bytes across {len(config_files)} files, "
+            f"Source fileset {fileset_name!r} stages {total} bytes across {len(config_files)} files, "
             f"exceeding the {MAX_ETHOS_STAGED_BYTES} byte limit for container config delivery"
         )
 
@@ -368,5 +384,5 @@ def validate_referenced_skill_paths(
             matched = bool(staged_paths)
         if not matched:
             raise FabricArtifactStagingError(
-                f"Referenced skills.paths entry {skill_path!r} was not found in staged Ethos fileset"
+                f"Referenced skills.paths entry {skill_path!r} was not found in staged source fileset"
             )

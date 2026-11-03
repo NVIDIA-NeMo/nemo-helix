@@ -36,6 +36,7 @@ from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentC
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
@@ -1869,7 +1870,8 @@ def test_agent_deployment_defaults_are_subprocess() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> None:
+@pytest.mark.parametrize("source_fileset", [None, FilesetRef("sources/agent-source")])
+async def test_create_deployment_fabric_docker_stages_fileset_artifacts(source_fileset: FilesetRef | None) -> None:
     backend = _backend(default_image="fabric:latest", default_executor="local-docker")
     entities = AsyncMock()
     backend._entities = entities
@@ -1907,6 +1909,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
             port=0,
             deployment_mode="docker",
             agent="fabric-agent",
+            source_fileset=source_fileset,
         )
 
     assert info.status == "starting"
@@ -1914,6 +1917,7 @@ async def test_create_deployment_fabric_docker_stages_fileset_artifacts() -> Non
     stage_args = mock_stage.await_args
     assert stage_args is not None
     assert stage_args.kwargs["files_client"] is files_client
+    assert stage_args.kwargs["source_fileset"] == source_fileset
     created_config = entities.create.await_args_list[0].args[0]
     assert len(created_config.config_files) == 2
     assert not any(e.name == "STAGED_CONFIG_FILES_B64_JSON" for e in created_config.containers[0].env)

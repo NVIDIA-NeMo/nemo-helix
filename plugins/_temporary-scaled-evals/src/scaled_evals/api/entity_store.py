@@ -10,13 +10,16 @@ from collections.abc import Mapping, Sequence
 from threading import Lock
 from typing import Any
 
+from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.client_provider import get_nemo_client
 from nemo_helix_plugin.entities.base import EntityT, SyncEntityClient
 from nemo_helix_plugin.entities.client import EntitiesClient
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
+from nemo_helix_plugin.iam.client import IAMClient
+from nemo_helix_plugin.iam.types import AuthzRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
-from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
+from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, CreateWorkspaceRequest
 
 from scaled_evals.api.repositories.base_repository import normalize_order
 from scaled_evals.api.schemas.common import decode_cursor
@@ -41,24 +44,45 @@ def entity_client() -> SyncEntityClient:
 
 @functools.cache
 def private_workspace() -> str:
-    """Return the workspace only this service can read, creating it on first use.
+    """Return this service's private storage workspace, creating it on first use.
 
     The plugin authorizes reads of what it keeps there itself, so no user may
     reach those entities directly through the Entities API.
 
     Raises:
-        RuntimeError: if someone else created a workspace with that name first.
+        RuntimeError: if someone else created the workspace or its storage role has not propagated.
 
     """
     name = settings.entity_store_private_workspace
-    client = WorkspacesClient.from_client(get_nemo_client(as_service=SERVICE_NAME, internal=True))
+    client = get_nemo_client(as_service=SERVICE_NAME, internal=True)
+    workspaces_client = WorkspacesClient.from_client(client)
     try:
-        client.create_workspace(body=CreateWorkspaceRequest(name=name))
+        workspaces_client.create_workspace(body=CreateWorkspaceRequest(name=name))
     except ConflictError:
         # Its creator is its Admin; a user who claimed the name first could read every entity.
-        owner = client.get_workspace(name=name).data().created_by
+        owner = workspaces_client.get_workspace(name=name).data().created_by
         if owner != f"service:{SERVICE_NAME}":
             raise RuntimeError(f"workspace {name!r} belongs to {owner!r}, not the {SERVICE_NAME} service") from None
+    workspaces_client.create_workspace_member(
+        workspace=name,
+        body=CreateWorkspaceMemberRequest(
+            principal=f"service:{SERVICE_NAME}",
+            roles=["Admin", "ServiceEntityStore"],
+        ),
+    ).data()
+    if platform_auth_enabled():
+        decision = (
+            IAMClient.from_client(client)
+            .evaluate_authorization(
+                entrypoint="has_role",
+                body=AuthzRequest(
+                    input={"principal_id": f"service:{SERVICE_NAME}", "workspace": name, "role": "ServiceEntityStore"}
+                ),
+            )
+            .data()
+        )
+        if decision.result.get("has_role") is not True:
+            raise RuntimeError(f"ServiceEntityStore role has not propagated to workspace {name!r}")
     return name
 
 

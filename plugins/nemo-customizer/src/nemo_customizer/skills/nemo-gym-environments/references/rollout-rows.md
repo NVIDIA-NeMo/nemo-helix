@@ -5,11 +5,11 @@
 
 GRPO has **no labelled completions**. A row is a prompt plus enough routing information for the environment to run a rollout against it and score the result. The reward comes from the environment, not the file.
 
-The dataset FileSet holds `training.jsonl` (required) and optionally `validation.jsonl`, referenced by the single `dataset` string. The environment is a **separate** FileSet.
+The dataset FileSet holds a training file (required) and optionally a validation file, named like `train*.jsonl` and `val*.jsonl` or `dev*.jsonl` (such as `training.jsonl` and `validation.jsonl`), or placed directly in `train/` (or `training/`) and `val/` (or `validation/`, `dev/`), referenced by the single `dataset` string. The environment is a **separate** FileSet.
 
 ## Row schema
 
-**Where rows are actually checked.** Submit verifies only that the dataset FileSet has `training.jsonl` at its root (`check_gym_dataset_layout`). Row *shape* is checked later by `DatasetValidator` inside the training container, against `GRPO_SCHEMA` — which is built from the **agent-agnostic** `GymDatasetRow`, so it requires exactly `responses_create_params` and `agent_ref` and passes everything else through. A wrong `vf_env_id` is therefore not a validation error; it surfaces as the environment failing to load, one job start later. Validate rows locally.
+**Where rows are actually checked.** Submit verifies only that the dataset FileSet has a training file at its root (`check_gym_dataset_layout`). A sandboxed run reads one training file and at most one validation file in place. Row *shape* is checked later by `DatasetValidator` inside the training container, against `GRPO_SCHEMA` — which is built from the **agent-agnostic** `GymDatasetRow`, so it requires exactly `responses_create_params` and `agent_ref` and passes everything else through. A wrong `vf_env_id` is therefore not a validation error; it surfaces as the environment failing to load, one job start later. Validate rows locally.
 
 ```json
 {
@@ -81,6 +81,8 @@ with open("training.jsonl", "w", encoding="utf-8") as f:
 ```
 
 Multi-turn context goes in `input` as additional messages, in order — the same `role`/`content` dicts, ending with the turn the model must respond to.
+
+An image prompt uses that same `content` field. Put a Responses API part list there: an `input_image` part with a string `image_url`, followed by an `input_text` part. A string `content` stays one text part.
 
 ## Find out which fields YOUR environment scores — do this first
 

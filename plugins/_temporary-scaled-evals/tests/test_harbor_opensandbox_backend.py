@@ -398,7 +398,7 @@ def test_connection_env_requires_domain_and_key() -> None:
 
 def _submit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, spec: LaunchSpec | None = None, task_env: str = ""):
     harbor_dir = tmp_path / "harbor"
-    site = harbor_dir / ".venv" / "lib" / "python3.12" / "site-packages" / "opensandbox-0.1.16.dist-info"
+    site = harbor_dir / ".venv" / "lib" / "python3.12" / "site-packages" / "opensandbox-1.2.0.dist-info"
     site.mkdir(parents=True)
     template = tmp_path / "template.yaml"
     template.write_text("agents: [{name: oracle}]\n")
@@ -455,7 +455,7 @@ def test_submit_stages_binds_renders_and_spawns(tmp_path: Path, monkeypatch: pyt
         cleanup.EVALUATION_METADATA_KEY: "ev_os1",
         cleanup.BENCHMARK_RUN_METADATA_KEY: "br_1",
     }
-    assert handle.raw["provenance"]["opensandbox_sdk_version"] == "0.1.16"
+    assert handle.raw["provenance"]["opensandbox_sdk_version"] == "1.2.0"
     assert handle.raw["provenance"]["harbor_version"] == "0.20.0"
     assert handle.raw["provenance"]["task_image_digest"] == DIGEST
     assert handle.raw["provenance"]["verifier_image_ref"] is None

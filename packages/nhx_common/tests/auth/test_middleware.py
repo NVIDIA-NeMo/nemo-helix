@@ -23,6 +23,7 @@ from nhx.common.auth.jwt import UnsignedJWTRejectedError
 from nhx.common.auth.middleware import (
     PUBLIC_GET_PATHS,
     AuthorizationMiddleware,
+    _forbidden_detail,
     is_auth_middleware_excluded_path,
 )
 from nhx.common.auth.models import Principal
@@ -1310,6 +1311,78 @@ class TestBearerTokenAuth:
         mock_authorize.assert_called_once()
 
 
+class TestApiKeyHeaderOnModelRoutes:
+    """Anthropic-style clients send their key as ``x-api-key``; on model routes it authenticates like a bearer token."""
+
+    GATEWAY_PATH = "/apis/inference-gateway/v2/workspaces/default/anthropic/-/v1/messages"
+
+    @pytest.fixture
+    def config(self) -> AuthConfig:
+        return AuthConfig(
+            enabled=True,
+            allow_unsigned_jwt=True,
+            policy_decision_point_base_url="http://localhost:8181",
+            oidc=OIDCConfig(enabled=False),
+        )
+
+    def _client(self, config: AuthConfig) -> TestClient:
+        app = create_test_app(config)
+
+        @app.post(self.GATEWAY_PATH)
+        async def messages():
+            return {"status": "ok"}
+
+        @app.post("/apis/models/v2/workspaces/default/models")
+        async def models():
+            return {"status": "ok"}
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def _claims(self) -> TokenClaims:
+        return TokenClaims(subject="admin@example.com", email="admin@example.com", groups=[], scopes=[], raw_claims={})
+
+    @pytest.mark.parametrize(
+        ("path", "headers", "validated"),
+        [
+            pytest.param(GATEWAY_PATH, {"x-api-key": "trial-jwt"}, "trial-jwt", id="x-api-key on a model route"),
+            pytest.param(
+                GATEWAY_PATH,
+                {"Authorization": "Bearer bearer-jwt", "x-api-key": "other"},
+                "bearer-jwt",
+                id="a bearer token wins over x-api-key",
+            ),
+            pytest.param(
+                "/apis/models/v2/workspaces/default/models",
+                {"x-api-key": "trial-jwt"},
+                None,
+                id="x-api-key ignored off model routes",
+            ),
+        ],
+    )
+    def test_the_token_authenticated_is_the_bearer_else_x_api_key_on_model_routes(
+        self, config: AuthConfig, path: str, headers: dict[str, str], validated: str | None
+    ) -> None:
+        client = self._client(config)
+        with (
+            patch("nhx.common.auth.jwt.JWTValidator.validate_token", return_value=self._claims()) as validate,
+            patch("nhx.common.auth.client.AuthClient.authorize_request", return_value=MagicMock(allowed=True)),
+        ):
+            response = client.post(path, headers=headers)
+
+        if validated is None:
+            validate.assert_not_called()
+        else:
+            assert validate.call_args.args[0] == validated
+            assert response.status_code == 200
+
+    def test_an_invalid_key_in_x_api_key_is_refused(self, config: AuthConfig) -> None:
+        client = self._client(config)
+        with patch("nhx.common.auth.jwt.JWTValidator.validate_token", return_value=None):
+            response = client.post(self.GATEWAY_PATH, headers={"x-api-key": "not-a-token"})
+
+        assert response.status_code == 401
+
+
 class TestPrincipalHeadersAuth:
     """Tests for X-NHX-Principal-* header authentication."""
 
@@ -1785,3 +1858,66 @@ class TestServicePrincipalDelegationMiddleware:
             )
 
         assert response.status_code == 403
+
+
+class TestForbiddenDetail:
+    """The 403 for a PDP denial names the action and workspace on generic entities routes."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "expected"),
+        [
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model", "create"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model", "list"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "read"),
+            ("PUT", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "update"),
+            ("DELETE", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "delete"),
+        ],
+    )
+    def test_entities_routes_name_action_and_workspace(self, method, path, expected):
+        assert _forbidden_detail(method, path) == f"Not allowed to {expected} entities in workspace 'ws-b'"
+
+    def test_all_workspaces_selector_uses_documented_wording(self):
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/-/entities/model")
+        assert detail == "Not allowed to list entities in the requested workspace."
+
+    def test_workspace_with_decoded_special_characters(self):
+        # request.url.path is percent-decoded, so team%40acme arrives as team@acme.
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/team@acme+qa/entities/model")
+        assert detail == "Not allowed to list entities in workspace 'team@acme+qa'"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/apis/models/v2/workspaces/ws-b/models"),
+            ("PATCH", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("GET", "/apis/entities/v2/workspaces/ws%20b/entities/model"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model/extra"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b\n/entities/model"),
+        ],
+    )
+    def test_other_routes_keep_bare_forbidden(self, method, path):
+        assert _forbidden_detail(method, path) == "Forbidden"
+
+    def test_middleware_denial_names_action_and_workspace(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get(
+                "/apis/entities/v2/workspaces/ws-b/entities/model",
+                headers={"x-nhx-principal-id": "user@example.com"},
+            )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not allowed to list entities in workspace 'ws-b'"}
+
+    def test_middleware_denial_on_other_route_stays_bare(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get("/test", headers={"x-nhx-principal-id": "user@example.com"})
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Forbidden"}

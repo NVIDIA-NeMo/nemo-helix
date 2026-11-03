@@ -262,28 +262,13 @@ class DockerDeploymentBackend(DeploymentBackend):
         auth_context: AuthContext | None = None,
     ) -> BackendStatusUpdate:
         c_name = container_name(workspace, name)
-        recreate_exited_one_shot = False
+        exited_one_shot = None
         try:
             existing = await asyncio.to_thread(self._client.containers.get, c_name)
             if self._container_matches_deployment(existing, workspace, name, config_name):
                 restart_policy = (existing.labels or {}).get(RESTART_POLICY_LABEL, "Always")
                 if restart_policy in _ONE_SHOT_RESTART_POLICIES and existing.status in _EXITED_CONTAINER_STATES:
-                    logger.info(
-                        "Removing exited one-shot container before recreate",
-                        extra={
-                            "container": c_name,
-                            "restart_policy": restart_policy,
-                            "status": existing.status,
-                        },
-                    )
-                    try:
-                        await asyncio.to_thread(existing.remove, force=True)
-                    except self._docker_errors.APIError as exc:
-                        return BackendStatusUpdate(
-                            status="FAILED",
-                            status_message=f"Failed to remove exited container before recreate: {exc}",
-                        )
-                    recreate_exited_one_shot = True
+                    exited_one_shot = existing
                 else:
                     return await self.read_status(workspace=workspace, name=name)
             else:
@@ -314,7 +299,37 @@ class DockerDeploymentBackend(DeploymentBackend):
                 status_message=f"Failed to load deployment config: {exc}",
             )
 
-        if recreate_exited_one_shot:
+        container_spec = plan.primary
+        docker_cfg = parse_docker_backend_config(backend_config)
+        if config.backend_config.docker is not None:
+            docker_cfg = config.backend_config.docker
+        # Validate untrusted primary-network input before any init/primary/sidecar
+        # container is created. Do not apply this to the internally generated
+        # container:<primary> namespace join used by sidecars below.
+        try:
+            network = self._executor_config.resolve_network(docker_cfg.network)
+        except ValueError as exc:
+            return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+        docker_cfg = docker_cfg.model_copy(update={"network": network})
+
+        # Preserve the previous attempt and its identity until network policy
+        # accepts the replacement, including its container logs for diagnosis.
+        if exited_one_shot is not None:
+            logger.info(
+                "Removing exited one-shot container before recreate",
+                extra={
+                    "container": c_name,
+                    "restart_policy": restart_policy,
+                    "status": exited_one_shot.status,
+                },
+            )
+            try:
+                await asyncio.to_thread(exited_one_shot.remove, force=True)
+            except self._docker_errors.APIError as exc:
+                return BackendStatusUpdate(
+                    status="FAILED",
+                    status_message=f"Failed to remove exited container before recreate: {exc}",
+                )
             try:
                 await self._revoke_workload_delegations_for_deployment(workspace=workspace, name=name)
                 await self._cleanup_workload_identity_volumes(workspace=workspace, name=name)
@@ -324,13 +339,6 @@ class DockerDeploymentBackend(DeploymentBackend):
                     status="FAILED",
                     status_message=f"Failed to clean up workload identity before recreate: {exc}",
                 )
-
-        container_spec = plan.primary
-        docker_cfg = parse_docker_backend_config(backend_config)
-        if config.backend_config.docker is not None:
-            docker_cfg = config.backend_config.docker
-        if docker_cfg.network is None and self._executor_config.network is not None:
-            docker_cfg = docker_cfg.model_copy(update={"network": self._executor_config.network})
 
         dep_key = deployment_key(workspace, name)
         gpu_pool = self._gpu_pool

@@ -561,24 +561,12 @@ describe('getGrpoRunConfig', () => {
     expect(config.promptDataset).toBe('default/deepscaler-train');
   });
 
-  it('reports DTensor, since Megatron is built inert for GRPO', () => {
+  it('reports Automodel, since that is the only GRPO policy worker', () => {
     expect(getGrpoRunConfig(spec({ finetuning_type: 'all_weights' })).trainingBackend).toBe(
-      'DTensor · Full weights'
+      'Automodel · Full weights'
     );
-  });
-
-  it.each([
-    ['LoRA', { finetuning_type: 'lora' as const }],
-    ['expert parallelism', { parallelism: { expert_parallel_size: 2 } }],
-    ['automodel kwargs', { automodel_kwargs: { force_hf: true } }],
-  ])('selects the v2 backend for %s, which only v2 implements', (_label, training) => {
-    expect(getGrpoRunConfig(spec(training)).trainingBackend).toContain('DTensor v2');
-  });
-
-  it('does not read an empty automodel_kwargs as selecting v2', () => {
-    // The schema says unset means "auto-detect", and `{}` is a plausible API round-trip of that.
-    expect(getGrpoRunConfig(spec({ automodel_kwargs: {} })).trainingBackend).toBe(
-      'DTensor · Full weights'
+    expect(getGrpoRunConfig(spec({ finetuning_type: 'lora' })).trainingBackend).toBe(
+      'Automodel · LoRA'
     );
   });
 
@@ -794,6 +782,13 @@ describe('getCurrentStage', () => {
     expect(
       getCurrentStage([step('training', 'completed', 'completed'), step('model-upload', 'pending')])
     ).toEqual({ label: 'Uploading Model', detail: 'starting' });
+  });
+
+  it('says a queued step is starting', () => {
+    expect(getCurrentStage([step('training', 'queued')])).toEqual({
+      label: 'Training',
+      detail: 'starting',
+    });
   });
 
   it('reads the phase from whichever task reports one on a multi-node step', () => {

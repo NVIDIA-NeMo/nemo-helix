@@ -247,7 +247,7 @@ describe('CustomizationOverview — GRPO', () => {
     expect(screen.getByText('Prompt Dataset')).toBeInTheDocument();
 
     expect(screen.getByText('Training Backend')).toBeInTheDocument();
-    expect(screen.getByText('DTensor · Full weights')).toBeInTheDocument();
+    expect(screen.getByText('Automodel · Full weights')).toBeInTheDocument();
 
     expect(screen.getByText('Parallelism')).toBeInTheDocument();
     expect(screen.getByText('TP 4 · PP 1 · CP 1')).toBeInTheDocument();

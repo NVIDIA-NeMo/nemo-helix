@@ -10,6 +10,7 @@ from hashlib import sha256
 
 from filesets import parse_fileset_ref
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 
@@ -18,6 +19,15 @@ logger = logging.getLogger(__name__)
 
 class PlanStorageError(RuntimeError):
     """A plan write failed; its chained cause preserves the original Files error."""
+
+
+class PlanStoragePermissionDeniedError(PlanStorageError):
+    """A plan write was denied; retain the typed Files error for sanitized diagnostics."""
+
+    def __init__(self, message: str, permission_error: PermissionDeniedError) -> None:
+        """Preserve the permission denial while keeping the plan-write cleanup contract."""
+        self.permission_error = permission_error
+        super().__init__(message)
 
 
 class PlanDigestMismatchError(RuntimeError):
@@ -73,6 +83,7 @@ async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> St
         per attempt keeps concurrent losers from deleting a winner's plan.
 
     Raises:
+        PlanStoragePermissionDeniedError: Files refused fileset creation or upload.
         PlanStorageError: Fileset creation or upload failed, with the original
             error retained as its cause even when rollback also fails.
     """
@@ -85,10 +96,15 @@ async def store_plan(files_client: AsyncFilesClient, plan: TasksetRunPlan) -> St
             body=CreateFilesetRequest(name=name, description=f"Frozen plan for {plan.workspace}/{plan.run_id}."),
             exist_ok=False,
         )
+    except PermissionDeniedError as exc:
+        raise PlanStoragePermissionDeniedError(f"failed to create plan fileset {plan.workspace}/{name}", exc) from exc
     except Exception as exc:
         raise PlanStorageError(f"failed to create plan fileset {plan.workspace}/{name}") from exc
     try:
         await files_client.upload_file(workspace=plan.workspace, name=name, path="plan.json", content=body)
+    except PermissionDeniedError as exc:
+        await delete_fileset_ref(files_client, ref)
+        raise PlanStoragePermissionDeniedError(f"failed to upload plan to {ref}", exc) from exc
     except Exception as exc:
         await delete_fileset_ref(files_client, ref)
         raise PlanStorageError(f"failed to upload plan to {ref}") from exc

@@ -6,7 +6,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
-from nhx.common.api.common import Page
+from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
@@ -81,6 +82,8 @@ async def list_deployments(
         return result
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployments by workspace")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list deployments")
@@ -130,6 +133,8 @@ async def create_deployment(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error creating deployment")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment")
@@ -138,6 +143,7 @@ async def create_deployment(
 @deployment_routes.get(
     "/v2/workspaces/{workspace}/deployments/{name}",
     summary="Get Latest ModelDeployment",
+    responses={404: {"model": ErrorResponse, "description": "Deployment not found"}},
     response_description="Return the latest version of a model deployment",
     status_code=status.HTTP_200_OK,
 )
@@ -162,6 +168,8 @@ async def get_latest_deployment(
         return deployment
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error getting deployment")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment")
@@ -179,11 +187,10 @@ async def get_deployment_models(
     service: ModelDeploymentService = Depends(get_model_deployment_service),
 ) -> dict:
     """
-    Get Latest ModelDeployment's Model Entities from Entity Store.
-    This provides the API contract that NIMs expect from Entity Store today, for pulling LoRAs,
-    but enables us to enforce AuthZ boundaries.
+    Return the workspace, name, and model list for the latest deployment.
 
-    TODO: Implement model entity retrieval based on deployment config.
+    The model list is currently empty; this endpoint does not yet discover models
+    or LoRA adapters from the deployment configuration.
     """
     deployment_name = name
     logger.debug(f"Getting deployment models: {workspace}/{deployment_name}")
@@ -200,6 +207,8 @@ async def get_deployment_models(
         # For now, return empty list
         return {"workspace": workspace, "name": deployment_name, "models": []}
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment models")
@@ -226,6 +235,8 @@ async def list_deployment_versions(
     try:
         versions = await service.list_deployment_versions(workspace, deployment_name)
         return versions
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployment versions")
         raise HTTPException(
@@ -269,6 +280,8 @@ async def get_deployment_version(
             )
         return result
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment version")
@@ -317,6 +330,8 @@ async def update_deployment(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error updating deployment")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update deployment")
@@ -381,6 +396,8 @@ async def update_deployment_status(
         logger.warning(f"Deployment status conflict: {e}")
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception("Unexpected error updating deployment status")
@@ -452,6 +469,8 @@ async def delete_all_deployment_versions(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error deleting deployment")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete deployment")
@@ -531,6 +550,8 @@ async def delete_deployment_version(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error deleting deployment version")
         raise HTTPException(

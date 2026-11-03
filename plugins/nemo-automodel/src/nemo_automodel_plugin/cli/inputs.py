@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_automodel_plugin.jobs.jobs import AutomodelJob
 from nemo_automodel_plugin.schema import AutomodelJobInput
 
 _JOB_JSON_HELP = "Path to Automodel job JSON (AutomodelJobInput schema)."
@@ -55,9 +56,9 @@ it here, or drop the flag to use what the file names.
 Run 'nemo customization --upload-model ... --upload-dataset ...' instead to
 create the resources and print their references without creating a job.
 
-One --upload-dataset fills both dataset.training and dataset.validation with
-the new fileset. Automodel finds the train and validation files inside it by
-name, so upload a directory holding both.
+Upload a directory holding a training file and, optionally, a validation file
+(train.jsonl, validation.jsonl). Automodel tells them apart by name; without a
+validation file it holds out schedule.validation_split of the training rows.
 
 Creating a resource that already exists fails unless you pass --exist-ok,
 which applies to whichever sources you gave.
@@ -73,7 +74,6 @@ Run 'nemo customization automodel explain' to print the job JSON schema."""
 _SPEC_REFS = SpecRefs(
     model=("model",),
     dataset=("dataset", "training"),
-    dataset_validation=("dataset", "validation"),
 )
 
 
@@ -102,4 +102,5 @@ def apply_automodel_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=AutomodelJob,
     )

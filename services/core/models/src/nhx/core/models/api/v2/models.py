@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.client.errors import NemoClientError
+from nemo_helix_plugin.client.errors import NemoClientError, PermissionDeniedError
 from nemo_helix_plugin.entities.types import EntityWriteValidationErrorResponse
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.api_factory import (
@@ -22,7 +22,7 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.spec import HelixJobSpec as HelixJobSpecModel
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -158,6 +158,8 @@ async def create_model(
             )
         logger.warning(f"Model creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model entity")
@@ -226,6 +228,8 @@ async def list_models(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Failed to list model entities")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list model entities")
@@ -235,6 +239,7 @@ async def list_models(
     "/v2/workspaces/{workspace}/models/{name}",
     summary="Get Model by Workspace and Name",
     response_description="Return model details",
+    responses={404: {"model": ErrorResponse, "description": "Model not found"}},
     status_code=status.HTTP_200_OK,
     response_model=ModelEntity,
 )
@@ -267,6 +272,8 @@ async def get_model(
             )
 
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model entity - {e}")
@@ -429,6 +436,8 @@ async def update_model(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to update model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model entity")
@@ -477,6 +486,8 @@ async def delete_model(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Failed to delete model entity")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
@@ -539,6 +550,8 @@ async def create_model_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create model adapter - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model adapter")
@@ -591,6 +604,8 @@ async def delete_model_adapter(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to delete model entity - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model entity")
@@ -654,6 +669,8 @@ async def update_model_adapter(
         logger.warning(f"Adapter update validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception as e:
         logger.exception(f"Failed to update model adapter entity - {e}")

@@ -76,6 +76,7 @@ from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -467,11 +468,16 @@ def _backend_mismatch(executor: str | None, backend: str, mode: DeploymentMode) 
     )
 
 
-def require_deployment_mode_available(config: DeploymentsRunnerConfig, mode: DeploymentMode) -> None:
+def require_deployment_mode_available(agents_config: AgentsConfig, mode: DeploymentMode) -> None:
     """Refuse a mode that could not run, before a deployment is persisted for it."""
     if mode == "subprocess":
+        if not agents_config.resolved_subprocess_enabled():
+            raise ValueError(
+                "deployment_mode 'subprocess' is disabled on this platform. Use a container mode "
+                f"({', '.join(sorted(CONTAINER_DEPLOYMENT_MODES))}), or set 'agents.subprocess_enabled: true'."
+            )
         return
-    executor = _resolve_executor_name(executor_for_mode(config, mode))
+    executor = _resolve_executor_name(executor_for_mode(agents_config.deployments, mode))
     entry = _executor_entry(executor)
     if entry is None:
         if executor:
@@ -761,6 +767,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
         port: int,
         *,
         agent: str = "",
+        source_fileset: FilesetRef | None = None,
         image: str | None = None,
         deployment_mode: DeploymentMode = "docker",
         created_by: str | None = None,
@@ -858,7 +865,7 @@ class DeploymentsRunnerBackend(RunnerBackend):
 
         staged_config_files: list[ConfigFile] | None = None
         staged_spec: SpecRevision | None = None
-        if is_fabric and agent:
+        if is_fabric and (agent or source_fileset):
             agent_yaml_path = _fabric_config_mount_path(self._config.config_mount_path)
             try:
                 client = get_async_nemo_client(as_service="agents", internal=True)
@@ -867,12 +874,14 @@ class DeploymentsRunnerBackend(RunnerBackend):
                     files_client,
                     workspace=workspace,
                     agent_name=agent,
+                    source_fileset=source_fileset,
                     stage=lambda: stage_fabric_ethos_config_files(
                         workspace=workspace,
                         agent_name=agent,
                         rewritten_agent_config=config,
                         agent_yaml_path=agent_yaml_path,
                         files_client=files_client,
+                        source_fileset=source_fileset,
                     ),
                 )
             except FabricArtifactStagingError as exc:

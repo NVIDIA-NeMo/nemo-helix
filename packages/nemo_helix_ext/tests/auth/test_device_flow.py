@@ -86,7 +86,7 @@ class TestTokenResponse:
         assert response.access_token == "access_token_123"
         assert response.refresh_token is None
 
-    def test_token_for_nhx_selects_configured_id_token(self):
+    def test_token_for_nhx_uses_access_token_when_id_token_is_present(self):
         response = TokenResponse(
             access_token="opaque-access-token",
             id_token="signed-id-token",
@@ -94,38 +94,30 @@ class TestTokenResponse:
             token_type="Bearer",
             expires_in=3600,
             scope="openid",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
         )
 
-        assert response.token_for_nhx == "signed-id-token"
+        assert response.token_for_nhx == "opaque-access-token"
 
-    def test_token_for_nhx_requires_configured_id_token(self):
+    def test_token_for_nhx_does_not_fall_back_to_id_token(self):
         response = TokenResponse(
-            access_token="opaque-access-token",
-            id_token=None,
-            refresh_token=None,
-            token_type="Bearer",
-            expires_in=3600,
-            scope="openid",
-            bearer_token_source="id_token",
-        )
-
-        with pytest.raises(DeviceFlowError, match="did not return one"):
-            _ = response.token_for_nhx
-
-    def test_token_for_nhx_rejects_unknown_source(self):
-        response = TokenResponse(
-            access_token="opaque-access-token",
+            access_token="",
             id_token="signed-id-token",
             refresh_token=None,
             token_type="Bearer",
             expires_in=3600,
             scope="openid",
-            bearer_token_source="refresh_token",  # type: ignore[arg-type]
+            bearer_token_source="access_token",
         )
 
-        with pytest.raises(ValueError, match="bearer_token_source"):
+        with pytest.raises(DeviceFlowError, match="did not return an access token"):
             _ = response.token_for_nhx
+
+    def test_token_for_nhx_rejects_unknown_source(self):
+        from nemo_helix_ext.auth.helpers import parse_bearer_token_source
+
+        with pytest.raises(ValueError, match="bearer_token_source"):
+            parse_bearer_token_source("refresh_token")
 
 
 class TestDeviceFlow:

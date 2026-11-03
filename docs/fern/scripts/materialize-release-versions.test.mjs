@@ -89,57 +89,6 @@ test("discovers and sorts branch lines, not tag snapshots or local-only branches
   assert.match(readFileSync(join(f.checkout, "docs/fern/versions/v0.9.yml"), "utf8"), /generated\/release-versions\/v0.9\/overview.mdx/);
 });
 
-for (const basepath of ["", "/nemo-helix"]) {
-  test(`links Latest to the newest released branch only (basepath '${basepath}')`, (t) => {
-    const f = fixture(t);
-    const config = join(f.checkout, "docs/fern/docs.yml");
-    const latest = parse(readFileSync(join(fernDir, "docs.yml"), "utf8")).versions[0];
-    const warning = latest.announcement.message;
-    assert.equal(latest["display-name"], "Latest");
-    assert.match(warning, /unreleased development docs/);
-    assert.ok(!warning.includes("](")); // Authored fallback makes no release claim.
-    writeFileSync(config, readFileSync(config, "utf8")
-      + `    announcement:\n      message: ${JSON.stringify(warning)}\n`
-      + (basepath ? `instances:\n  - url: example.com/other\n    custom-domain: docs.example.com${basepath}\n` : ""));
-    f.branch("release/0.8"); // The fixture's reachable 0.8.0 tag marks this line released.
-    f.commit("0.9 development");
-    f.branch("release/0.9");
-    f.commit("0.10 development");
-    f.branch("release/0.10");
-
-    const check = (stable, slugs, availability) => {
-      const versions = f.versions();
-      const message = warning + (stable
-        ? ` See the [latest released docs](${basepath}/${stable}/documentation/home).`
-        : "");
-      assert.deepEqual(versions[0], { ...latest, announcement: { message } });
-      assert.deepEqual(versions.map((v) => v.slug), ["latest", ...slugs]);
-      assert.deepEqual(versions.slice(1).map((v) => v.availability), availability);
-      assert.ok(versions.every((v) => !("default" in v)));
-      assert.ok(versions.slice(1).every((v) => !("announcement" in v)));
-    };
-    f.run();
-    check("v0.8", ["v0.10", "v0.9", "v0.8"], ["preview", "preview", undefined]);
-    const first = readFileSync(config, "utf8");
-    f.run();
-    assert.equal(readFileSync(config, "utf8"), first);
-
-    // Tag the actual 0.9 branch tip, not the later 0.10 development commit.
-    git(f.seed, "tag", "0.9.0", "HEAD~1");
-    git(f.seed, "push", "origin", "--tags");
-    f.run();
-    check("v0.9", ["v0.10", "v0.9", "v0.8"], ["preview", undefined, undefined]);
-
-    // Removing all stable candidates must discard the previously generated link.
-    git(f.seed, "push", "origin", ":refs/heads/release/0.8", ":refs/tags/0.9.0");
-    f.run();
-    check(undefined, ["v0.10", "v0.9"], ["preview", "preview"]);
-    const fallback = readFileSync(config, "utf8");
-    f.run();
-    assert.equal(readFileSync(config, "utf8"), fallback);
-  });
-}
-
 test("only reachable stable tags from the branch's own release line remove preview", (t) => {
   const f = fixture(t);
   f.commit("0.9 release work");

@@ -76,6 +76,9 @@ platformConfig:
   # workloads. default_namespace is omitted so the executor uses its own pod
   # namespace (the Helm release namespace), landing the agent beside the platform.
   agents:
+    # test_nemo_agents.py deploys without a mode, so it gets subprocess, which the
+    # kubernetes runtime refuses unless this is set.
+    subprocess_enabled: true
     deployments:
       k8s_executor: kind-k8s
       container_port: 8000

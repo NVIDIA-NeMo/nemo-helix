@@ -51,7 +51,7 @@ def run_task(module_name: str, env_vars: list[str], config: str | None) -> int:
 def main() -> None:
     """Main entrypoint function."""
     parser = argparse.ArgumentParser(
-        description="Nemo Helix",
+        description="NeMo Helix",
         formatter_class=RawTextRichHelpFormatter,
         epilog="""
 Examples:
