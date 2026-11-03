@@ -159,6 +159,40 @@ def test_compile_deployment_includes_init_and_sidecar() -> None:
     assert len(compiled.service_containers) == 2
 
 
+def test_compile_mounts_memory_backed_shm_on_main_containers_only() -> None:
+    config = sample_always_config().model_copy(
+        update={
+            "shm_size": "32Gi",
+            "init_containers": [Container(name="bootstrap", image="busybox")],
+        }
+    )
+    compiled = compile_workload(
+        config=config,
+        workspace="default",
+        deployment_name="server",
+        labels={},
+        k8s_config=None,
+        pod_restart_policy="Always",
+    )
+    pod_spec = _serialized(compiled.pod_spec_kwargs)
+    assert {"name": "dshm", "emptyDir": {"medium": "Memory", "sizeLimit": "32Gi"}} in pod_spec["volumes"]
+    for container in pod_spec["containers"]:
+        assert {"name": "dshm", "mountPath": "/dev/shm"} in container["volumeMounts"]
+    assert "volumeMounts" not in pod_spec["init_containers"][0]
+
+
+def test_compile_without_shm_size_keeps_runtime_default() -> None:
+    compiled = compile_workload(
+        config=sample_always_config(),
+        workspace="default",
+        deployment_name="server",
+        labels={},
+        k8s_config=None,
+        pod_restart_policy="Always",
+    )
+    assert "dshm" not in str(_serialized(compiled.pod_spec_kwargs))
+
+
 def test_compile_applies_k8s_deployment_config() -> None:
     config = sample_always_config()
     k8s_config = K8sDeploymentConfig.model_validate(

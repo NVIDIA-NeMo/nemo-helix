@@ -881,3 +881,14 @@ def test_compile_model_deployment_adds_workload_identity_when_auth_context_prese
     assert compiled.puller_config.workload_identity.token_audience == "model-audience"
     assert compiled.server_config.workload_identity.workload_id == "my-dep/v3"
     assert compiled.server_config.workload_identity.token_audience == "model-audience"
+
+
+@pytest.mark.parametrize("engine", ["vllm", "nim"])
+@pytest.mark.parametrize(("gpu", "expected"), [(4, "32Gi"), (1, "8Gi"), (0, None)])
+def test_gpu_server_gets_shared_memory_per_gpu(engine: str, gpu: int, expected: str | None) -> None:
+    # Multi-GPU servers fail at startup on the 64Mi runtime default for /dev/shm.
+    resolved = _resolved(engine)
+    resolved.view.gpu = gpu
+    compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
+    assert compiled.server_config.shm_size == expected
+    assert compiled.puller_config is not None and compiled.puller_config.shm_size is None

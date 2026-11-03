@@ -137,6 +137,14 @@ DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL = "nemo.nvidia.com/workload-identity-t
 DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL = "nemo.nvidia.com/workload-identity-volume"
 
 
+def _docker_shm_size(quantity: str) -> str:
+    """Convert a Kubernetes quantity ('32Gi', '512Mi') to docker's shm_size form ('32g', '512m')."""
+    for suffix, docker_suffix in (("Gi", "g"), ("Mi", "m"), ("Ki", "k")):
+        if quantity.endswith(suffix):
+            return f"{quantity[: -len(suffix)]}{docker_suffix}"
+    return quantity
+
+
 def _is_ngc_image(image: str) -> bool:
     """Return whether an image belongs to the configured NGC registry."""
     return image == NGC_IMAGE_REGISTRY or image.startswith(f"{NGC_IMAGE_REGISTRY}/")
@@ -1093,6 +1101,8 @@ class DockerDeploymentBackend(DeploymentBackend):
         device_requests = device_requests_for_gpus(gpu_ids)
         if device_requests:
             run_kwargs["device_requests"] = device_requests
+        if config.shm_size:
+            run_kwargs["shm_size"] = _docker_shm_size(config.shm_size)
 
         return run_kwargs
 

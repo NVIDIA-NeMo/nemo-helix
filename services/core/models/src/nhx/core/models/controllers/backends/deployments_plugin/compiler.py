@@ -82,6 +82,7 @@ _SCRATCH_VOLUME_SIZE = "1Gi"
 # SGLang's health check waits a second before it answers, so the 1s probe default
 # never sees the SGLang model-free NIM become ready.
 _READINESS_PROBE_TIMEOUT_SECONDS = 5
+_SHM_GIB_PER_GPU = 8
 
 
 @dataclass(frozen=True)
@@ -450,6 +451,9 @@ def compile_model_deployment(
         restartPolicy="Always",
         backendConfig=backend_config or DeploymentBackendConfig(),
         workloadIdentity=workload_identity,
+        # Multi-GPU servers exchange data through /dev/shm, which defaults to 64Mi;
+        # same sizing as GPU jobs.
+        shmSize=f"{_SHM_GIB_PER_GPU * resolved.view.gpu}Gi" if resolved.view.gpu > 0 else None,
     )
     if engine == ENGINE_NIM:
         apply_nim_override_config(
