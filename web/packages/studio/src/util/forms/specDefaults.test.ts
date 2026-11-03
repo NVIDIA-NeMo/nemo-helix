@@ -202,6 +202,16 @@ describe('unset learning rate', () => {
       learningRateSliderProps({ backend: 'rl', method: 'grpo', finetuningType: 'lora' })
     ).toMatchObject({ defaultValue: undefined, unsetValue: 1e-5 });
   });
+
+  it('shows Unset while an auto recipe has not resolved', () => {
+    expect(
+      learningRateSliderProps({ backend: 'automodel', finetuningType: 'lora', recipe: null })
+    ).toEqual({
+      defaultValue: undefined,
+      unsetPlaceholder: UNSET_PLACEHOLDER,
+      unsetValue: undefined,
+    });
+  });
 });
 
 describe('resolveAutomodelRecipe', () => {

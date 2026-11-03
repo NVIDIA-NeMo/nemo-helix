@@ -187,8 +187,6 @@ const main = async () => {
     execSync(concurrentlyCommand, { stdio: 'inherit' });
     console.log('\n🧰 Generating LLM capability registry...');
     execSync('pnpm run gen:capabilities', { stdio: 'inherit' });
-    console.log('\n🧩 Generating schema extension modules...');
-    execSync('pnpm run gen:schema-extensions', { stdio: 'inherit' });
     writeHash(currentHash);
     console.log('\n🎉 All type generation completed successfully!');
   } catch {

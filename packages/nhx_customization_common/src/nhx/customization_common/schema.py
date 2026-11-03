@@ -81,7 +81,5 @@ def match_learning_rate_default(rules: Sequence[LearningRateDefault], values: Ma
 
 def learning_rate_defaults_schema_extra(rules: Sequence[LearningRateDefault]) -> dict[str, JsonValue]:
     """``json_schema_extra`` that publishes ``rules`` under :data:`LEARNING_RATE_DEFAULTS_KEY`."""
-    published: list[JsonValue] = [
-        {"when": {path: value for path, value in rule["when"].items()}, "value": rule["value"]} for rule in rules
-    ]
+    published: list[JsonValue] = [{"when": dict(rule["when"]), "value": rule["value"]} for rule in rules]
     return {LEARNING_RATE_DEFAULTS_KEY: published}

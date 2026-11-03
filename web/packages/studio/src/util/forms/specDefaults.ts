@@ -247,7 +247,8 @@ export const resolveAutomodelRecipe = (
 };
 
 export type LearningRateSelection =
-  | { backend: 'automodel'; finetuningType?: string; recipe?: string }
+  /** `recipe: null`: `auto` has not resolved yet. */
+  | { backend: 'automodel'; finetuningType?: string; recipe?: string | null }
   | { backend: 'unsloth'; finetuningType?: string }
   | { backend: 'rl'; method: 'dpo' | 'grpo'; finetuningType?: string };
 
@@ -255,6 +256,9 @@ export type LearningRateSelection =
 export const learningRateDefault = (selection: LearningRateSelection): number | undefined => {
   switch (selection.backend) {
     case 'automodel':
+      if (selection.recipe === null) {
+        return undefined;
+      }
       return (
         matchLearningRateDefault(LEARNING_RATE_DEFAULTS.AutomodelJobInput, {
           'training.recipe': selection.recipe,

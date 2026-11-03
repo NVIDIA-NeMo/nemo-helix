@@ -31,12 +31,34 @@ describe('useResolvedAutomodelRecipe', () => {
     expect(queryOptions()?.enabled).toBe(true);
   });
 
-  it('stays auto until the model loads', () => {
+  it('is unresolved until the model loads, or when it fails to load', () => {
     returnsModel(undefined);
     const { result } = renderHook(() =>
       useResolvedAutomodelRecipe('default/embedder', 'auto', true)
     );
+    expect(result.current).toBeNull();
+  });
+
+  it('is unresolved on auto before a model is chosen', () => {
+    returnsModel(undefined);
+    const { result } = renderHook(() => useResolvedAutomodelRecipe('', 'auto', true));
+    expect(result.current).toBeNull();
+  });
+
+  it('stays auto for a loaded causal LM', () => {
+    returnsModel({ head_type: 'causal_lm' });
+    const { result } = renderHook(() => useResolvedAutomodelRecipe('default/llama', 'auto', true));
     expect(result.current).toBe('auto');
+  });
+
+  it('passes an explicit recipe or another backend through untouched', () => {
+    returnsModel(undefined);
+    expect(
+      renderHook(() => useResolvedAutomodelRecipe('default/embedder', 'sft', true)).result.current
+    ).toBe('sft');
+    expect(
+      renderHook(() => useResolvedAutomodelRecipe('default/embedder', 'auto', false)).result.current
+    ).toBe('auto');
   });
 
   it('does not fetch for an explicit recipe, another backend, or no model', () => {

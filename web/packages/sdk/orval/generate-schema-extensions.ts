@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Emits the `x-*` schema extensions Orval drops to `generated/schema-extensions/`.
-// Run by `gen:all`, not by a single `gen:<service>`; use `pnpm gen:schema-extensions`.
+// Run by `gen:<service>` for every service that lists `schemaExtensions`.
 import fs from 'fs';
 import path from 'path';
 import { parse as parseYaml } from 'yaml';

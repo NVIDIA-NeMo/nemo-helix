@@ -137,6 +137,16 @@ const main = async () => {
     // Post-process Zod files if generating with zod client
     if (client === 'zod') {
       postProcessZodFiles(`./generated/${config.path}/zod/default.ts`);
+    } else if (config.schemaExtensions?.length) {
+      // Covers every opted-in service, since each module merges them all.
+      console.log('Generating schema extension modules.');
+      execFileSync(
+        isWindows ? 'cmd.exe' : 'pnpm',
+        isWindows
+          ? ['/c', 'pnpm', 'run', 'gen:schema-extensions']
+          : ['run', 'gen:schema-extensions'],
+        { stdio: 'inherit' }
+      );
     }
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

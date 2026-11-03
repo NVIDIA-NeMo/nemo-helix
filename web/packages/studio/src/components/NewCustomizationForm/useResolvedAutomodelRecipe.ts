@@ -5,15 +5,22 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useModelsGetModel } from '@nemo/sdk/generated/platform/models';
 import { resolveAutomodelRecipe } from '@studio/util/forms/specDefaults';
 
-/** Fetches the base model only while the recipe is `auto`; returns `auto` until it loads. */
+/**
+ * Fetches the base model only while the recipe is `auto`. Returns `null` until it loads,
+ * as `auto` may still resolve to a retrieval recipe.
+ */
 export const useResolvedAutomodelRecipe = (
   modelRef: string | undefined,
   recipe: string | undefined,
   enabled: boolean
-): string | undefined => {
+): string | null | undefined => {
   const parts = modelRef ? getPartsFromReference(modelRef) : null;
+  const needsModel = enabled && recipe === 'auto';
   const { data: model } = useModelsGetModel(parts?.workspace ?? '', parts?.name ?? '', undefined, {
-    query: { enabled: enabled && recipe === 'auto' && Boolean(parts?.name), retry: false },
+    query: { enabled: needsModel && Boolean(parts?.name), retry: false },
   });
+  if (needsModel && !model) {
+    return null;
+  }
   return resolveAutomodelRecipe(recipe, model?.spec);
 };
