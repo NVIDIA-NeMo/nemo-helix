@@ -2868,8 +2868,9 @@ async def test_reconcile_creates_virtual_models_even_when_update_status_fails(re
     mock_client.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
+@pytest.mark.parametrize("prompt_root", ["e2e-ws/qwen-lora-base", "qwen-lora-base"])
 @pytest.mark.asyncio
-async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler):
+async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler, prompt_root):
     """Deployment-backed provider builds served_models with base, LoRA (&adapters/), and prompt-tuned
     formats, and creates passthrough VirtualModels for the base and prompt-tuned entries only.
 
@@ -2896,7 +2897,7 @@ async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler
     discovered = [
         {"id": "e2e-ws/qwen-lora-base", "root": "e2e-ws/qwen-lora-base", "parent": None},
         {"id": "qwen-lora-base-lora-e2e-dataset-5c30", "root": "/scratch/loras/...", "parent": "e2e-ws/qwen-lora-base"},
-        {"id": "qwen-lora-prompt-tuned", "root": "e2e-ws/qwen-lora-base", "parent": None},
+        {"id": "qwen-lora-prompt-tuned", "root": prompt_root, "parent": None},
     ]
     reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
@@ -2984,18 +2985,19 @@ async def test_relative_deployment_model_id_creates_passthrough_virtual_model(re
 
 
 @pytest.mark.parametrize(
-    ("entity_id", "entity_workspace", "model_namespace", "expected"),
+    ("entity_id", "entity_workspace", "model_namespace", "model_name", "expected"),
     [
-        ("base", "model-ws", "ignored", "model-ws/base"),
-        ("base", None, "model-ws", "model-ws/base"),
-        ("other/base", "ignored", "ignored", "other/base"),
-        ("base", None, None, "base"),
+        ("base", "model-ws", "ignored", "ignored/source", "model-ws/base"),
+        ("base", None, "model-ws", "source-ws/source", "model-ws/base"),
+        ("other/base", "ignored", "ignored", "ignored/source", "other/base"),
+        ("base", None, None, "source", "base"),
+        ("base", None, None, "source-ws/source@revision", "source-ws/base"),
     ],
 )
-def test_resolve_relative_base_backend_model_id(entity_id, entity_workspace, model_namespace, expected):
+def test_resolve_relative_base_backend_model_id(entity_id, entity_workspace, model_namespace, model_name, expected):
     config = MagicMock()
     config.model_entity_id = entity_id
-    config.model_spec = MagicMock(model_namespace=model_namespace)
+    config.model_spec = MagicMock(model_namespace=model_namespace, model_name=model_name, model_revision=None)
     entity = MagicMock(workspace=entity_workspace) if entity_workspace else None
     assert _resolve_base_backend_model_id(config, entity) == expected
 
