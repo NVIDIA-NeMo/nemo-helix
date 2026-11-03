@@ -55,7 +55,7 @@ from nemo_fabric import (
     inspect_adapter,
 )
 from nemo_fabric.integrations.harbor.fabric_agent import HARBOR_ARTIFACT_ROOT, FabricAgent, ensure_success
-from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, tcp_forwarder
+from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, relay_cli_install, tcp_forwarder
 from nhx_evals_sdk.agent_eval.runtimes.fabric.image import fabric_version
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import TRACES_SUBDIR, fold_exports, otlp_endpoint_fields
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -185,46 +185,6 @@ RELAY_CLI_RELEASES_URL = "https://github.com/NVIDIA/NeMo-Relay/releases/download
 RELAY_CLI_DIR = "/tmp/nemo-relay/bin"
 #: Waits between attempts to download the CLI or its checksum; a setup sandbox's egress can fail transiently.
 RELAY_CLI_DOWNLOAD_RETRY_DELAYS_SEC = (2.0, 5.0, 10.0)
-_RELAY_CLI_INSTALL = """
-import glob, hashlib, importlib.metadata, os, platform, shutil, subprocess, sys, time, urllib.error, urllib.request
-if shutil.which("nemo-relay"):
-    sys.exit(0)
-delays = [float(delay) for delay in sys.argv[3].split(",") if delay]
-def fetch(url, timeout):
-    for attempt, delay in enumerate([*delays, None], start=1):
-        try:
-            return urllib.request.urlopen(url, timeout=timeout).read()
-        except urllib.error.HTTPError as error:
-            if error.code < 500 or delay is None:
-                sys.exit(f"could not download {url}: {error} (attempts: {attempt})")
-        except OSError as error:
-            if delay is None:
-                sys.exit(f"could not download {url}: {error} (attempts: {attempt})")
-        time.sleep(delay)
-try:
-    version = importlib.metadata.version("nemo-relay")
-except importlib.metadata.PackageNotFoundError:
-    sys.exit("Relay telemetry needs the nemo-relay Python package: install nemo-fabric[relay]")
-arch = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine().lower())
-if arch is None:
-    sys.exit(f"no nemo-relay CLI release for {platform.machine()}")
-libc = "musl" if glob.glob("/lib/ld-musl-*") else "gnu"
-asset = f"nemo-relay-cli-{arch}-unknown-linux-{libc}-{version}"
-url = f"{sys.argv[1]}/{version}/{asset}"
-binary = fetch(url, 120)
-expected = fetch(url + ".sha256", 60).decode().split()[0]
-if hashlib.sha256(binary).hexdigest() != expected:
-    sys.exit(f"{asset} does not match its published sha256")
-os.makedirs(sys.argv[2], exist_ok=True)
-target = os.path.join(sys.argv[2], "nemo-relay")
-with open(target, "wb") as handle:
-    handle.write(binary)
-os.chmod(target, 0o755)
-check = subprocess.run([target, "--version"], capture_output=True, text=True)
-if check.returncode != 0:
-    os.remove(target)
-    sys.exit(f"{asset} does not run in this image: {(check.stderr or check.stdout).strip()[:500]}")
-"""
 
 #: An exact ``nemo-fabric`` pin inside ``fabric_package``, with or without extras.
 _FABRIC_DISTRIBUTION_PIN = re.compile(
@@ -421,8 +381,9 @@ class NemoFabricAgent(FabricAgent):  # ty: ignore[unsupported-base]
             script = Path(self.logs_dir) / Path(target).name
             script.write_text(Path(module.__file__).read_text(encoding="utf-8"), encoding="utf-8")
             await environment.upload_file(script, target)
+        install = Path(relay_cli_install.__file__).read_text(encoding="utf-8")
         result = await environment.exec(
-            f"{shlex.quote(self._runner_python)} -c {shlex.quote(_RELAY_CLI_INSTALL)} "
+            f"{shlex.quote(self._runner_python)} -c {shlex.quote(install)} "
             f"{shlex.quote(RELAY_CLI_RELEASES_URL)} {shlex.quote(RELAY_CLI_DIR)} "
             f"{','.join(str(delay) for delay in RELAY_CLI_DOWNLOAD_RETRY_DELAYS_SEC)}",
             env=self._install_env,

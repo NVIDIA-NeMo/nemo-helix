@@ -27,8 +27,7 @@ pytest.importorskip("harbor", reason="NemoFabricAgent subclasses Harbor's BaseAg
 
 from harbor.environments.base import BaseEnvironment
 from nemo_fabric.integrations.harbor.fabric_agent import FabricAgent
-from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, tcp_forwarder
-from nhx_evals_sdk.agent_eval.runtimes.harbor import fabric_agent
+from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, relay_cli_install, tcp_forwarder
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import (
     RELAY_CLI_DIR,
     RELAY_CLI_RELEASES_URL,
@@ -240,7 +239,7 @@ def _release(tmp_path: Path, *, checksum: str | None = None, binary: bytes = REL
 
 def _install(base_url: str, target: Path, path: str = "/nonexistent") -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-c", fabric_agent._RELAY_CLI_INSTALL, base_url, str(target), "0,0"],
+        [sys.executable, "-c", Path(relay_cli_install.__file__).read_text(), base_url, str(target), "0,0"],
         capture_output=True,
         text=True,
         env={**os.environ, "PATH": path},
@@ -264,12 +263,10 @@ def _install_in_process(
     """Run the install script here with ``urlopen`` replaced; the exit code, or 0 when it runs to the end."""
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
-    monkeypatch.setattr(sys, "argv", ["-c", base_url, str(target), "0,0"])
     try:
-        exec(fabric_agent._RELAY_CLI_INSTALL, {"__name__": "__main__"})
+        return relay_cli_install.main(["-c", base_url, str(target), "0,0"])
     except SystemExit as exit_:
         return exit_.code
-    return 0
 
 
 def test_a_download_that_fails_transiently_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
