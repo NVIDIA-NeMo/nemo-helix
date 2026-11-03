@@ -332,6 +332,13 @@ Number Check performs numerical comparisons and operations on extracted values. 
 
 **Metric Output:** 1 if the condition is true, 0 otherwise. If either value cannot be parsed as a number, the row score is `NaN`.
 
+**Large Numbers:**
+
+- Integers are compared exactly up to Python's [integer string conversion limit](https://docs.python.org/3/library/stdtypes.html#int-max-str-digits), 4,300 digits by default. Leading zeros don't count toward the limit for this metric.
+- Integers with more digits, and decimals beyond the floating-point range (about 1.8e308), are compared as positive or negative infinity. Two different values that become the same infinity compare as equal.
+- Each operand outside the floating-point range adds a diagnostic to the row that names the operand (`left` or `right`).
+- Disabling the limit, for example with `PYTHONINTMAXSTRDIGITS=0` in the process that runs the evaluation, removes the integer cutoff.
+
 ### Supported Operations
 
 - Equality: `"equals"`, `"=="`
