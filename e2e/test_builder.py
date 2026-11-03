@@ -39,7 +39,7 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 from nemo_helix_plugin.secrets.types import HelixSecretCreateRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
-from nhx.testing import as_user
+from nhx.testing import as_user, grant_workspace_role
 from pydantic import SecretStr
 
 pytestmark = [
@@ -264,19 +264,26 @@ def test_complete_refuses_callers_not_acting_for_the_submitter(client: NemoClien
     submitter = row.created_by
     assert submitter, f"{name} records no submitter"
     bogus = "sha256:" + "0" * 64
+    # An Editor, who may complete images of their own: so only the builder's own check can refuse them.
+    editor = f"editor-{uuid.uuid4().hex[:8]}@example.com"
+    grant_workspace_role(client, workspace=build.workspace, principal=editor, roles=["Editor"])
+    service = as_user(client, "service:builder")
 
-    callers: dict[str, tuple[NemoClient, str]] = {
+    # Each caller, and the reason it is refused, or None where the platform refuses before the builder's check.
+    callers: dict[str, tuple[NemoClient, str | None]] = {
         "the submitter's own identity": (
             as_user(client, submitter),
             "only a job step acting for the image's submitter may complete it",
         ),
-        "a service acting for no one": (
-            as_user(client, "service:builder"),
-            "only a job step acting for the image's submitter may complete it",
-        ),
-        "a service acting for someone else": (
-            as_user(client, "service:builder").with_headers({ON_BEHALF_OF_HEADER: "someone-else@example.com"}),
+        "a service acting for no one": (service, "only a job step acting for the image's submitter may complete it"),
+        "a service acting for another Editor": (
+            service.with_headers({ON_BEHALF_OF_HEADER: editor}),
             "was submitted by someone else",
+        ),
+        # Entities refuses to read the row as someone who isn't a member.
+        "a service acting for a non-member": (
+            service.with_headers({ON_BEHALF_OF_HEADER: f"stranger-{uuid.uuid4().hex[:8]}@example.com"}),
+            None,
         ),
     }
     for who, (caller, reason) in callers.items():
@@ -284,8 +291,9 @@ def test_complete_refuses_callers_not_acting_for_the_submitter(client: NemoClien
             BuilderClient.from_client(caller).complete_container_image(
                 workspace=build.workspace, name=name, body=CompleteRequest(digest=bogus)
             )
-        # The builder's own refusal, not the policy's: the policy admits all three.
-        assert reason in str(refused.value.detail), f"{who}: {refused.value.detail}"
+        if reason is not None:
+            # The builder's own refusal, not the policy's: the policy admits these callers.
+            assert reason in str(refused.value.detail), f"{who}: {refused.value.detail}"
 
     after = builder.get_container_image(workspace=build.workspace, name=name).data()
     assert after.digest != bogus, f"{name} was completed at the refused digest"
