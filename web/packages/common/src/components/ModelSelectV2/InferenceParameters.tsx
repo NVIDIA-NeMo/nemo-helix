@@ -6,7 +6,7 @@ import type { HyperparameterFieldMetadata } from '@nemo/common/src/components/Tr
 import { INFERENCE_HYPERPARAMETER_FIELD_METADATA } from '@nemo/common/src/constants/inferenceParameters';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import { Stack } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export const INFERENCE_PARAMETER_FIELDS = [
   'temperature',

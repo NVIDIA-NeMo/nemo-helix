@@ -4,7 +4,7 @@
 import * as customQueries from '@nemo/common/src/tests/customQueries';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { routes as appRoutes } from '@studio/routes';
-import { TestProviders, TestProvidersOptions } from '@studio/tests/util/TestProviders';
+import { TestProviders, type TestProvidersOptions } from '@studio/tests/util/TestProviders';
 import { queries, render, within } from '@testing-library/react';
 import { Suspense } from 'react';
 import { createMemoryRouter, MemoryRouter, type RouteObject } from 'react-router';

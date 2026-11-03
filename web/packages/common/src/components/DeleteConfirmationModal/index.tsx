@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ConfirmationModal } from '@nemo/common/src/components/ConfirmationModal';
-import { FormModalProps } from '@nemo/common/src/components/FormModal';
+import type { FormModalProps } from '@nemo/common/src/components/FormModal';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   onDelete: () => boolean | Promise<boolean>;

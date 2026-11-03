@@ -15,10 +15,10 @@ import { useBulkDuplicate } from '@studio/components/filesets/hooks/useBulkDupli
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import { TransformFileModal } from '@studio/components/FilesTable/TransformFileModal';
-import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { resolveDatasetFilePath } from '@studio/util/files';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 type ModalType = 'createSplit' | 'rename' | 'delete' | 'info' | 'transform' | 'addToFolder';
 

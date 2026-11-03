@@ -6,7 +6,7 @@ import {
   Button,
   Divider,
   DropdownContent,
-  DropdownDividerItemEntry,
+  type DropdownDividerItemEntry,
   DropdownItem,
   DropdownRoot,
   DropdownTrigger,

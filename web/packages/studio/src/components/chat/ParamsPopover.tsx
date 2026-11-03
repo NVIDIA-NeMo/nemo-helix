@@ -13,7 +13,7 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface ParamsPopoverProps {
   value: InferenceParams;

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Toast } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode } from 'react';
+import type { Toast } from '@nvidia/foundations-react-core';
+import type { ComponentProps, ReactNode } from 'react';
 
 export interface MessageFnOptions {
   durationMs?: number | false; // How long should the toast appear for? Pass false to prevent auto-dismiss.

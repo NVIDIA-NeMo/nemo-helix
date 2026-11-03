@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChatCompletionChunk } from 'openai/resources/index.mjs';
+import type { ChatCompletionChunk } from 'openai/resources/index.mjs';
 
 export const chatCompletionRequest1 = {
   model: 'meta/llama-3_1-8b-instruct',

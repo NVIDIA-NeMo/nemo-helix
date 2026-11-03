@@ -6,7 +6,7 @@ import {
   AddToFolderModal,
   FOLDER_DELETION_WARNING,
 } from '@studio/components/filesets/AddToFolderModal';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
 import { mockUseParams, mockUseNavigate } from '@studio/tests/util/mockUseParams';
 import { render } from '@studio/tests/util/render';

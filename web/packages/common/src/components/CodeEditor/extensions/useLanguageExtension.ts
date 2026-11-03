@@ -5,8 +5,8 @@ import { javascript } from '@codemirror/lang-javascript';
 import { json } from '@codemirror/lang-json';
 import { python } from '@codemirror/lang-python';
 import { yaml } from '@codemirror/lang-yaml';
-import { Compartment, Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Compartment, type Extension } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { useEffect, useMemo } from 'react';
 

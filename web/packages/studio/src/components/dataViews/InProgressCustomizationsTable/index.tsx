@@ -11,7 +11,7 @@ import {
 } from '@studio/hooks/useInProgressCustomizations';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import { formatFinetuningType } from '@studio/util/customizations';
-import { type ComponentProps, type FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 import { useNavigate } from 'react-router';
 
 const makeColumns: ComponentProps<typeof DataView.Root<InProgressCustomization>>['makeColumns'] = ({

@@ -1,16 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  type GitStorageConfig,
-  type GithubStorageConfig,
-  type HuggingfaceStorageConfig,
-  type LocalStorageConfig,
-  type NGCStorageConfig,
-  type S3StorageConfig,
+import type {
+  GitStorageConfig,
+  GithubStorageConfig,
+  HuggingfaceStorageConfig,
+  LocalStorageConfig,
+  NGCStorageConfig,
+  S3StorageConfig,
 } from '@nemo/sdk/generated/platform/schema';
-import { type StorageConfig } from '@studio/components/DatasetsTable/types';
-import { type StorageBackend } from '@studio/util/storageBackend';
+import type { StorageConfig } from '@studio/components/DatasetsTable/types';
+import type { StorageBackend } from '@studio/util/storageBackend';
 
 export function getStorageBackend(storage: StorageConfig | undefined): StorageBackend | null {
   return storage?.type ?? null;

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { ActionMenu } from '@studio/routes/FilesetListRoute/ActionMenu';

@@ -4,11 +4,11 @@
 import type { EvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import {
   type AnnotationInput,
-  HTTPValidationError,
-  ModelEntitySortField,
-  HelixJobLogPage,
-  HelixJobResponsesPage,
-  Project,
+  type HTTPValidationError,
+  type ModelEntitySortField,
+  type HelixJobLogPage,
+  type HelixJobResponsesPage,
+  type Project,
   TraceMetricBucketParam,
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';

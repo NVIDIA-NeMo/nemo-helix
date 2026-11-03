@@ -15,7 +15,7 @@ import {
   agentSpecFilesetName,
   parseAgentConfig,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
-import { UseMutationOptions, useMutation } from '@tanstack/react-query';
+import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 export interface CreateAgentFromUploadParams {
   workspace: string;

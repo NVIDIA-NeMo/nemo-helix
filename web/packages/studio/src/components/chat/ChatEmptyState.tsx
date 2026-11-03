@@ -5,7 +5,7 @@ import { PlugReceptacle, DriveNetwork } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { generatePath, useNavigate } from 'react-router';
 
 interface ChatEmptyStateProps {
