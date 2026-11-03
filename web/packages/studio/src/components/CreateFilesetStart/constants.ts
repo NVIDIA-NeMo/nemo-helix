@@ -42,7 +42,7 @@ const ALL_START_OPTIONS: StartOption[] = [
   },
   {
     id: 'persona',
-    title: 'Persona test set',
+    title: 'Personas',
     description:
       'Generate test messages for an agent, each written by a different synthetic Nemotron persona.',
     icon: ProfileGroup,
