@@ -343,10 +343,12 @@ def test_compile_vllm_args_underscore_spelling_counts_as_user_flag(raw: list[str
 # ---------------------------------------------------------------------------
 
 
-def _super_vl(*, base_model=None, tool_call_config=None, architecture="NemotronH_Omni_Reasoning_V3") -> SimpleNamespace:
+def _super_vl(
+    *, base_model=None, finetuning_type=None, tool_call_config=None, architecture="NemotronH_Omni_Reasoning_V3"
+) -> SimpleNamespace:
     """The spec the model spec task records: language-model dims plus the top-level architecture."""
     spec = _spec(num_kv_heads=2, architectures=[architecture], tool_call_config=tool_call_config)
-    return _model_entity(spec=spec, trust_remote_code=True, base_model=base_model)
+    return _model_entity(spec=spec, trust_remote_code=True, base_model=base_model, finetuning_type=finetuning_type)
 
 
 _SUPER_VL_DEFAULTS = [
@@ -388,9 +390,15 @@ def test_super_vl_with_lora_raises_adapter_limits_and_skips_mtp():
     assert "--speculative-config" not in args
 
 
-def test_super_vl_fine_tuned_checkpoint_skips_mtp():
-    # Fine-tuning drops the MTP layer, so a derived checkpoint has nothing to draft with.
-    args = vllm_compiler.compile_vllm_args(_view(gpu=4), _super_vl(base_model="default/super-vl-base"))
+@pytest.mark.parametrize(
+    "lineage",
+    [{"base_model": "default/super-vl-base"}, {"finetuning_type": "all_weights"}],
+    ids=["base_model", "finetuning_type_only"],
+)
+def test_super_vl_fine_tuned_checkpoint_skips_mtp(lineage: dict[str, str]):
+    # Fine-tuning drops the MTP layer, so a derived checkpoint has nothing to draft with. Either
+    # field marks one: the model API accepts finetuning_type without base_model.
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4), _super_vl(**lineage))
     assert args[-len(_SUPER_VL_DEFAULTS) :] == _SUPER_VL_DEFAULTS
     assert "--speculative-config" not in args
 

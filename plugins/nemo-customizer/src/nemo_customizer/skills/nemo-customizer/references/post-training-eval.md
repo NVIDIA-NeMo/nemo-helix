@@ -132,7 +132,7 @@ When comparing several adapters, for example different epoch counts, score each 
 | Model-free NIM, SGLang (`sglang-model-free-nim`) | **16** if the server starts with no adapters; otherwise the highest rank among adapters present at start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
 
-vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above rank 16 create a deployment config template with the flag and reference it by name. Before training at rank > 16, confirm the user will deploy with a raised limit.
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above the default max rank (16, or 64 for Nemotron 3.5 Super VL) create a deployment config template with the flag and reference it by name. Before training above that rank, confirm the user will deploy with a raised limit.
 
 **Weights volume.** On Kubernetes the deployment downloads the model into a volume of `executor_config.disk_size`, default `50Gi`. When the model's files are larger, set `disk_size` above their size, in the job's inline `deployment_config` or in the deployment config; otherwise the download runs out of space and the deployment never becomes ready.
 
