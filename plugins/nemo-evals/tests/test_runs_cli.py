@@ -257,6 +257,17 @@ def test_ctrl_c_during_the_build_wait_says_how_to_submit_later(submitting, monke
     assert "the image builds keep going. Submit with: nemo evals runs submit --taskset " + STORED in result.output
 
 
+def test_ctrl_c_outside_the_build_wait_doesnt_mention_builds(submitting, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", interrupted)
+    result = submitting.invoke("--taskset", STORED)
+    assert result.exit_code == 130
+    assert "Interrupted. Submit with: nemo evals runs submit --taskset " + STORED in result.output
+    assert "image builds" not in result.output
+
+
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     spec = tmp_path / "run.json"
     spec.write_text(

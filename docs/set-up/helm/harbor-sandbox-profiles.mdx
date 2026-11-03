@@ -10,6 +10,7 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
 
 - Users pick a profile with `--sandbox-profile <name>` or `execution.sandbox.profile`. Without one, a run gets `default_sandbox_profile`.
 - Submit copies the profile into the run's plan. Editing a profile never changes a run that's already accepted.
+- A resubmit with the same idempotency key is checked against the current profiles before it returns the existing run. Keep a profile while its runs may be resubmitted.
 - Profiles live in the Helm values at `platformConfig.evals.runs.harbor`.
 - Users can't list profile names. An unknown name returns a 422 that lists them, so tell your users which names exist.
 
@@ -17,7 +18,7 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
 
 - OpenSandbox is installed and the platform points at it. See [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
 - `sandboxClusterCapable: true` and `builder.enabled: true`. The chart then enables taskset runs with one profile, `harbor-standard`.
-- Set `FULLNAME`, the prefix of every chart resource: `fullnameOverride` if you set it. Otherwise, with `<name>` = `nameOverride` if set, else `nemo-helix`: the release name if it contains `<name>`, else `<release>-<name>`.
+- Set `FULLNAME`, the prefix of every chart resource: `fullnameOverride` if you set it. Otherwise, with `<name>` = `nameOverride` if set, else `nemo-helix`: the release name if it contains `<name>`, else `<release>-<name>`. The result is cut to 63 characters, without a trailing `-`.
 
   ```bash
   NHX_NAMESPACE=nemo-helix
@@ -72,7 +73,9 @@ How the profile combines with the network mode in the task's `task.toml`:
   - Every `allowed_hosts` entry must also be an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`.
   - Entries match exactly, after lowercasing and IP normalization: a profile's `*.wikipedia.org` doesn't admit a task's `en.wikipedia.org`, and `10.0.0.0/8` doesn't admit `10.1.2.3`.
 - `no-network` → the sandbox reaches `agent_channel` only.
-- `allowlist` or `no-network`, with a model-calling agent: if `agent_channel` doesn't include the API host, the task Job fails with `gateway_unreachable` before any sandbox starts.
+- With a model-calling agent, the task Job fails with `gateway_unreachable` before any sandbox starts when:
+  - `no-network`: the profile's `agent_channel` doesn't include the API host.
+  - `allowlist`: neither `agent_channel` nor the task's `allowed_hosts` includes it.
 - Any mode → `agent_setup_egress` is added while the agent installs itself.
 
 ### Resources

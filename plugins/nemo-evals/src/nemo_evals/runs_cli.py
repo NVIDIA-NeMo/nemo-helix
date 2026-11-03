@@ -700,6 +700,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         stored_ref = qualify_ref(taskset, workspace) if taskset is not None else None
         flag = _workspace_flag(workspace, client.resolve_workspace())
         taskset_ref: str | None = None
+        waiting_for_builds = False
         try:
             if list_tasks:
                 _print_tasks(
@@ -735,7 +736,9 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 )
                 refs, taskset_ref, source = created.refs, created.ref, created.dataset
                 if not no_build_images:
+                    waiting_for_builds = True
                     builds = wait_for_builds(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
+                    waiting_for_builds = False
                     if (failed := failed_builds(builds)) is not None:
                         raise RuntimeError(f"image builds failed: {failed}")
             request = run_request(
@@ -752,8 +755,9 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
             )
         except KeyboardInterrupt:
+            stopped = "Stopped waiting; the image builds keep going." if waiting_for_builds else "Interrupted."
             hint = f" Submit with: nemo evals runs submit --taskset {taskset_ref}{flag}" if taskset_ref else ""
-            echo(f"Stopped waiting; the image builds keep going.{hint}")
+            echo(f"{stopped}{hint}")
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)

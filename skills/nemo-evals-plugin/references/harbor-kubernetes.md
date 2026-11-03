@@ -71,7 +71,7 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 
    ```bash
    nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
-     --default-model-entity default/nvidia-nemotron-3-5-super-vl-120b-a12b \
+     --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
      --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
    ```
 
@@ -83,10 +83,12 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
      | nemo secrets create evals-inference-key --workspace "$WS" --from-file -
    ```
 
-4. Copy `assets/specs/harbor_taskset_run_openhands.json`, set `source.model.ref` to the closed-book model, and
-   submit. The task source flag supplies `spec.tasks`:
+4. Copy `assets/specs/harbor_taskset_run_openhands.json` and set `source.model.ref` to the closed-book model in
+   your workspace, `<WS>/nemotron-super-closed-book` (the file says `default/…`; JSON doesn't expand `$WS`).
+   Create the Experiment, then submit. The task source flag supplies `spec.tasks`:
 
    ```bash
+   nemo experiments create harbor-runs --workspace "$WS" --exist-ok
    nemo evals runs submit --workspace "$WS" --harbor-hub datacurve/deep-swe \
      --tasks anko-default-function-arguments,geo-shapeindex-serialization \
      --spec-file harbor_taskset_run_openhands.json --experiment harbor-runs
