@@ -8,6 +8,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 /** Sentinel ``evalConfig`` value that switches the form into create mode. */
 export const CREATE_NEW = '__create_new__';
 
+/** Sentinel ``deployment`` value for an agent reached at a user-given URL instead of the gateway. */
+export const CUSTOM_ENDPOINT = '__custom_endpoint__';
+
 export const MODE_DEFAULT = 'default';
 /** Re-run an existing Experiment, which owns the fileset holding its eval config. */
 export const MODE_EXPERIMENT = 'experiment';
@@ -140,9 +143,11 @@ export interface SubmitSelections {
   /** Rows sent to the agent at once. Omitted means {@link DEFAULT_PARALLELISM}. */
   parallelism?: number;
   deployment?: string;
+  /** Called instead of the gateway when set, with an optional API key secret sent as a bearer token. */
+  endpoint?: { url: string; apiKeySecret?: string };
 }
 
-type TargetSelections = Pick<SubmitSelections, 'workspace' | 'agent' | 'deployment'>;
+type TargetSelections = Pick<SubmitSelections, 'workspace' | 'agent' | 'deployment' | 'endpoint'>;
 
 /** ``spec.publication`` for a run that asked to publish, or nothing at all. ``agent_name`` is
  *  left off deliberately: the backend derives it from the agent target. */
@@ -168,7 +173,12 @@ const gatewayRoute = ({ agent, deployment }: TargetSelections) =>
 /** Chat completions is the one endpoint both config formats serve, so this needs no branch. */
 const agentEndpoint = (selections: TargetSelections, promptVar: string) => ({
   format: 'generic' as const,
-  url: `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(selections.workspace)}/${gatewayRoute(selections)}/-/v1/chat/completions`,
+  url:
+    selections.endpoint?.url ??
+    `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${encodeURIComponent(selections.workspace)}/${gatewayRoute(selections)}/-/v1/chat/completions`,
+  ...(selections.endpoint?.apiKeySecret
+    ? { api_key_secret: selections.endpoint.apiKeySecret }
+    : {}),
   name: bareName(selections.agent),
   body: {
     model: bareName(selections.agent),

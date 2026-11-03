@@ -87,6 +87,7 @@ import {
   bareName,
   buildAgentEvalRequestBody,
   buildDatasetEvalRequestBody,
+  CUSTOM_ENDPOINT,
   DEFAULT_PARALLELISM,
   type DatasetEvalSpec,
   type EvalConfigFormat,
@@ -104,6 +105,8 @@ import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityN
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
 import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
+import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
@@ -179,6 +182,8 @@ const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
   deployment: z.string(),
+  customEndpointUrl: z.string(),
+  customEndpointSecret: z.string(),
   judgeModel: z.string(),
   mode: z.enum([MODE_DEFAULT, MODE_EXPERIMENT]),
   /** Name of the experiment created on the "new experiment" path. The fileset holding this run's
@@ -226,6 +231,16 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: nameError, path: ['newName'] });
       }
     }
+    if (
+      data.deployment === CUSTOM_ENDPOINT &&
+      !/^https?:\/\/\S+$/i.test(data.customEndpointUrl.trim())
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Enter an http(s) URL',
+        path: ['customEndpointUrl'],
+      });
+    }
     if (data.mode === MODE_EXPERIMENT && !data.evaluationName) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -250,6 +265,8 @@ const makeDefaultValues = (
 ): SubmitEvaluationFormData => ({
   agent: agent ?? '',
   deployment: deployment ?? '',
+  customEndpointUrl: '',
+  customEndpointSecret: '',
   judgeModel: '',
   // Provisional: the preselect effect corrects this once the evaluation list resolves.
   mode: MODE_EXPERIMENT,
@@ -514,23 +531,28 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   if (step === 'evaluation' && !shownDefault && firstRunning) setShownDefault(firstRunning);
   const selectedDeployment = deployment || shownDefault || '';
 
+  const isCustomEndpoint = deployment === CUSTOM_ENDPOINT;
   const deploymentIssue = (() => {
-    if (!selectedAgent || isDeploymentsLoading) return undefined;
+    if (!selectedAgent || isCustomEndpoint || isDeploymentsLoading) return undefined;
     if (isDeploymentsUnavailable) {
       return `Couldn't load the deployments of ${bareName(selectedAgent)}. Retrying...`;
     }
     if (runningDeployments.length === 0) {
-      return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
+      return `${bareName(selectedAgent)} has no running deployment. Deploy it, or pick Custom endpoint.`;
     }
     if (selectedDeployment && !runningDeployments.some((d) => d.name === selectedDeployment)) {
       return `Deployment ${selectedDeployment} is no longer running. Pick another.`;
     }
     return undefined;
   })();
-  const deploymentItems = runningDeployments.map((d) => ({
-    value: d.name ?? '',
-    children: `${d.name} · ${deploymentModeLabel(d.deployment_mode)}`,
-  }));
+  const deploymentItems = [
+    ...runningDeployments.map((d) => ({
+      value: d.name ?? '',
+      children: `${d.name} · ${deploymentModeLabel(d.deployment_mode)}`,
+    })),
+    { value: CUSTOM_ENDPOINT, children: 'Custom endpoint' },
+  ];
+  const [createSecretOpen, setCreateSecretOpen] = useState(false);
 
   // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
   // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
@@ -844,7 +866,14 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         const selections = {
           workspace,
           agent: formData.agent,
-          deployment: selectedDeployment,
+          ...(isCustomEndpoint
+            ? {
+                endpoint: {
+                  url: formData.customEndpointUrl.trim(),
+                  apiKeySecret: formData.customEndpointSecret || undefined,
+                },
+              }
+            : { deployment: selectedDeployment }),
           filesetName,
           experimentName: nameStem,
           evaluationId,
@@ -1014,272 +1043,307 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   );
 
   return (
-    <EvalWizard
-      heading="Run Agent Evaluation"
-      headingDescription="Score your agent against a dataset."
-      steps={steps.map(stepHeading)}
-      activeStep={stepIndex(steps, step)}
-      onSubmit={(event) => {
-        event.preventDefault();
-        handleContinue();
-      }}
-      slotBanner={
-        errorMessage ? (
-          <Banner kind="inline" status="error">
-            {errorMessage}
-          </Banner>
-        ) : null
-      }
-      slotFooterStart={
-        stepIndex(steps, step) > 0 ? (
-          <Button kind="secondary" onClick={goBack} disabled={isPending}>
-            Back
-          </Button>
-        ) : null
-      }
-      cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
-      continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
-      continueLoading={isPending}
-      canContinue={!blocker}
-      blockedHint={blocker?.kind === 'hint' ? blocker.hint : undefined}
-      onContinue={handleContinue}
-    >
-      <FormProvider {...methods}>
-        <Stack gap="density-xl">
-          {step === 'start' && (
-            <>
-              <Text kind="body/regular/md">
-                Run evaluation via NeMo Helix Evals built-in runner. Evaluator also supports Harbor
-                and Gym as runners.{' '}
-                <Anchor
-                  kind="inline"
-                  textKind="body/regular/md"
-                  href={LINK_EVAL_DOCS}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Learn more
-                </Anchor>
-                .
-              </Text>
+    <>
+      <EvalWizard
+        heading="Run Agent Evaluation"
+        headingDescription="Score your agent against a dataset."
+        steps={steps.map(stepHeading)}
+        activeStep={stepIndex(steps, step)}
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleContinue();
+        }}
+        slotBanner={
+          errorMessage ? (
+            <Banner kind="inline" status="error">
+              {errorMessage}
+            </Banner>
+          ) : null
+        }
+        slotFooterStart={
+          stepIndex(steps, step) > 0 ? (
+            <Button kind="secondary" onClick={goBack} disabled={isPending}>
+              Back
+            </Button>
+          ) : null
+        }
+        cancelTo={getAgentEvaluationsTabRoute(workspace, agentProp)}
+        continueLabel={onLastStep ? 'Run Evaluation' : 'Next'}
+        continueLoading={isPending}
+        canContinue={!blocker}
+        blockedHint={blocker?.kind === 'hint' ? blocker.hint : undefined}
+        onContinue={handleContinue}
+      >
+        <FormProvider {...methods}>
+          <Stack gap="density-xl">
+            {step === 'start' && (
+              <>
+                <Text kind="body/regular/md">
+                  Run evaluation via NeMo Helix Evals built-in runner. Evaluator also supports
+                  Harbor and Gym as runners.{' '}
+                  <Anchor
+                    kind="inline"
+                    textKind="body/regular/md"
+                    href={LINK_EVAL_DOCS}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Learn more
+                  </Anchor>
+                  .
+                </Text>
 
-              <FormField slotLabel="How do you want to start?">
-                <RadioGroup
-                  kind="tile"
-                  orientation="vertical"
-                  name="mode"
-                  value={mode}
-                  onValueChange={(value) => {
-                    setValue('mode', value as EvaluationMode, { shouldValidate: false });
-                    clearErrors(['evaluationName', 'newName']);
-                  }}
-                  items={startItems(rerunUnavailable)}
-                />
-              </FormField>
-            </>
-          )}
-
-          {step === 'experiment' && (
-            <>
-              <Text kind="label/bold/xl">Experiment</Text>
-              <Text className="text-secondary" kind="body/regular/md">
-                Learn more in the{' '}
-                <Anchor
-                  kind="inline"
-                  textKind="body/regular/md"
-                  href={LINK_DOCS_STUDIO_EXPERIMENTS}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  experiments documentation
-                </Anchor>
-                .
-              </Text>
-              <ControlledTextInput
-                useControllerProps={{ control, name: 'newName' }}
-                placeholder="e.g. model-update-tests"
-                formFieldProps={{
-                  slotLabel: 'Name',
-                  ...experimentNameSlots,
-                }}
-              />
-              {/* The same settings the Experiments page offers, so starting from here is not a
-                  lesser way to create an experiment. */}
-              <ExperimentSettingsFields
-                control={control}
-                names={{
-                  description: 'description',
-                  defaultSort: 'defaultSort',
-                  isFavorite: 'isFavorite',
-                  showEvaluationsOverTime: 'showEvaluationsOverTime',
-                }}
-                disabled={isPending}
-                collapseAdvanced
-              />
-            </>
-          )}
-
-          {step === 'configuration' && (
-            <>
-              <Text kind="label/bold/xl">Dataset File</Text>
-              <SegmentedControl
-                aria-label="Dataset source"
-                size="tiny"
-                className="w-full"
-                value={datasetSource}
-                onValueChange={(value) => {
-                  clearDatasetPick();
-                  setValue('datasetFileset', '');
-                  setValue('datasetFile', '');
-                  setValue('datasetBatchGlob', '');
-                  setDatasetSource(value as FileSource);
-                }}
-                items={FILE_SOURCE_ITEMS}
-              />
-
-              {datasetSource === FILE_SOURCE_FILESET ? (
-                <FilesetDatasetPicker<SubmitEvaluationFormData>
-                  workspace={workspace}
-                  control={control}
-                  filesetName="datasetFileset"
-                  fileName="datasetFile"
-                  batchGlobName="datasetBatchGlob"
-                  disabled={isPending}
-                  loading={isLoadingFilesetFile}
-                  error={datasetError}
-                />
-              ) : (
-                <Upload
-                  attributes={{ UploadInputElement: { 'aria-label': 'Dataset file' } }}
-                  accept={DATASET_FILE_ACCEPT}
-                  multiple
-                  onValueChange={handleDatasetPicked}
-                  status={datasetError ? 'error' : undefined}
-                  renderInput={(slotInput) => (
-                    <FormField
-                      name="dataset"
-                      slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
-                      slotError={datasetError}
-                      status={datasetError ? 'error' : undefined}
-                    >
-                      {datasetPick ? null : slotInput}
-                    </FormField>
-                  )}
-                />
-              )}
-
-              <Text kind="label/bold/xl">Eval Configuration File</Text>
-              <SegmentedControl
-                aria-label="Evaluator config source"
-                size="tiny"
-                className="w-full"
-                value={configSource}
-                onValueChange={handleConfigSourceChanged}
-                items={FILE_SOURCE_ITEMS}
-              />
-
-              {isConfigFromFileset ? (
-                <FilesetConfigPicker<SubmitEvaluationFormData>
-                  workspace={workspace}
-                  control={control}
-                  filesetName="configFileset"
-                  fileName="configFile"
-                  onPick={() => setValue('judgeModel', '')}
-                  disabled={isPending}
-                  loading={isLoadingFilesetConfig}
-                  error={configError}
-                />
-              ) : (
-                <Upload
-                  attributes={{ UploadInputElement: { 'aria-label': 'Eval configuration file' } }}
-                  accept={EVAL_CONFIG_FILE_ACCEPT}
-                  onValueChange={handleConfigPicked}
-                  onFileRemove={clearConfigPick}
-                  status={configError ? 'error' : undefined}
-                  renderInput={(slotInput) => (
-                    <FormField
-                      name="evalConfig"
-                      slotHelp="Select a JSON or YAML config."
-                      slotError={configError}
-                      status={configError ? 'error' : undefined}
-                    >
-                      {configPick ? null : slotInput}
-                    </FormField>
-                  )}
-                />
-              )}
-
-              {isLlmJudge && (
-                <JudgeModelSelect<SubmitEvaluationFormData>
-                  formFieldName="judgeModel"
-                  slotLabel={
-                    judgeRequired ? 'Override All LLM Models' : 'Override All LLM Models (Optional)'
-                  }
-                  slotError={invalidModelsError}
-                />
-              )}
-
-              {parallelismField}
-            </>
-          )}
-
-          {step === 'evaluation' && (
-            <>
-              {mode === MODE_EXPERIMENT && <Text kind="label/bold/xl">Configuration</Text>}
-              {/* Which run to base this one on, and what to call the result, are one decision:
-                  the name is derived from the pick, so the two belong on the same screen. */}
-              {mode === MODE_EXPERIMENT &&
-                (hasNoEvaluations ? (
-                  <Text className="text-secondary" kind="body/regular/md">
-                    {NO_EVALUATIONS_MESSAGE}
-                  </Text>
-                ) : (
-                  <EvaluationSourceSelect<SubmitEvaluationFormData>
-                    name="evaluationName"
-                    options={sources.options}
-                    groupLabels={sources.groupLabels}
-                    byName={sources.byName}
-                    isLoading={sources.isLoading}
-                    selectedName={evaluationName}
-                    slotError={evaluationFieldError}
-                    disabled={isPending}
+                <FormField slotLabel="How do you want to start?">
+                  <RadioGroup
+                    kind="tile"
+                    orientation="vertical"
+                    name="mode"
+                    value={mode}
+                    onValueChange={(value) => {
+                      setValue('mode', value as EvaluationMode, { shouldValidate: false });
+                      clearErrors(['evaluationName', 'newName']);
+                    }}
+                    items={startItems(rerunUnavailable)}
                   />
-                ))}
+                </FormField>
+              </>
+            )}
 
-              <ControlledSelect
-                useControllerProps={{ control, name: 'deployment' }}
-                items={deploymentItems}
-                value={selectedDeployment}
-                loading={isDeploymentsLoading}
-                disabled={isPending || isDeploymentsLoading}
-                placeholder={
-                  isDeploymentsLoading ? 'Loading deployments...' : 'Select a deployment'
-                }
-                formFieldProps={{
-                  slotLabel: 'Deployment',
-                  slotHelp:
-                    'The running deployment this evaluation calls. It is recorded on the job, so results can be traced back to it.',
-                  slotError: deploymentIssue,
-                  status: deploymentIssue ? 'error' : undefined,
-                }}
-                hideError
-              />
+            {step === 'experiment' && (
+              <>
+                <Text kind="label/bold/xl">Experiment</Text>
+                <Text className="text-secondary" kind="body/regular/md">
+                  Learn more in the{' '}
+                  <Anchor
+                    kind="inline"
+                    textKind="body/regular/md"
+                    href={LINK_DOCS_STUDIO_EXPERIMENTS}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    experiments documentation
+                  </Anchor>
+                  .
+                </Text>
+                <ControlledTextInput
+                  useControllerProps={{ control, name: 'newName' }}
+                  placeholder="e.g. model-update-tests"
+                  formFieldProps={{
+                    slotLabel: 'Name',
+                    ...experimentNameSlots,
+                  }}
+                />
+                {/* The same settings the Experiments page offers, so starting from here is not a
+                  lesser way to create an experiment. */}
+                <ExperimentSettingsFields
+                  control={control}
+                  names={{
+                    description: 'description',
+                    defaultSort: 'defaultSort',
+                    isFavorite: 'isFavorite',
+                    showEvaluationsOverTime: 'showEvaluationsOverTime',
+                  }}
+                  disabled={isPending}
+                  collapseAdvanced
+                />
+              </>
+            )}
 
-              <ControlledTextInput
-                useControllerProps={{ control, name: 'evaluationRecordName' }}
-                placeholder={
-                  isCreateMode ? 'e.g. initial-baseline' : 'e.g. nemotron-super-3-temp-1'
-                }
-                formFieldProps={{
-                  slotLabel: isCreateMode ? 'Evaluation Name' : 'New Evaluation Name',
-                  ...recordNameSlots,
-                }}
-              />
-              {mode === MODE_EXPERIMENT && parallelismField}
-            </>
-          )}
-        </Stack>
-      </FormProvider>
-    </EvalWizard>
+            {step === 'configuration' && (
+              <>
+                <Text kind="label/bold/xl">Dataset File</Text>
+                <SegmentedControl
+                  aria-label="Dataset source"
+                  size="tiny"
+                  className="w-full"
+                  value={datasetSource}
+                  onValueChange={(value) => {
+                    clearDatasetPick();
+                    setValue('datasetFileset', '');
+                    setValue('datasetFile', '');
+                    setValue('datasetBatchGlob', '');
+                    setDatasetSource(value as FileSource);
+                  }}
+                  items={FILE_SOURCE_ITEMS}
+                />
+
+                {datasetSource === FILE_SOURCE_FILESET ? (
+                  <FilesetDatasetPicker<SubmitEvaluationFormData>
+                    workspace={workspace}
+                    control={control}
+                    filesetName="datasetFileset"
+                    fileName="datasetFile"
+                    batchGlobName="datasetBatchGlob"
+                    disabled={isPending}
+                    loading={isLoadingFilesetFile}
+                    error={datasetError}
+                  />
+                ) : (
+                  <Upload
+                    attributes={{ UploadInputElement: { 'aria-label': 'Dataset file' } }}
+                    accept={DATASET_FILE_ACCEPT}
+                    multiple
+                    onValueChange={handleDatasetPicked}
+                    status={datasetError ? 'error' : undefined}
+                    renderInput={(slotInput) => (
+                      <FormField
+                        name="dataset"
+                        slotHelp="JSONL, a JSON array of objects, CSV, or Parquet. Select several Parquet files to combine them."
+                        slotError={datasetError}
+                        status={datasetError ? 'error' : undefined}
+                      >
+                        {datasetPick ? null : slotInput}
+                      </FormField>
+                    )}
+                  />
+                )}
+
+                <Text kind="label/bold/xl">Eval Configuration File</Text>
+                <SegmentedControl
+                  aria-label="Evaluator config source"
+                  size="tiny"
+                  className="w-full"
+                  value={configSource}
+                  onValueChange={handleConfigSourceChanged}
+                  items={FILE_SOURCE_ITEMS}
+                />
+
+                {isConfigFromFileset ? (
+                  <FilesetConfigPicker<SubmitEvaluationFormData>
+                    workspace={workspace}
+                    control={control}
+                    filesetName="configFileset"
+                    fileName="configFile"
+                    onPick={() => setValue('judgeModel', '')}
+                    disabled={isPending}
+                    loading={isLoadingFilesetConfig}
+                    error={configError}
+                  />
+                ) : (
+                  <Upload
+                    attributes={{ UploadInputElement: { 'aria-label': 'Eval configuration file' } }}
+                    accept={EVAL_CONFIG_FILE_ACCEPT}
+                    onValueChange={handleConfigPicked}
+                    onFileRemove={clearConfigPick}
+                    status={configError ? 'error' : undefined}
+                    renderInput={(slotInput) => (
+                      <FormField
+                        name="evalConfig"
+                        slotHelp="Select a JSON or YAML config."
+                        slotError={configError}
+                        status={configError ? 'error' : undefined}
+                      >
+                        {configPick ? null : slotInput}
+                      </FormField>
+                    )}
+                  />
+                )}
+
+                {isLlmJudge && (
+                  <JudgeModelSelect<SubmitEvaluationFormData>
+                    formFieldName="judgeModel"
+                    slotLabel={
+                      judgeRequired
+                        ? 'Override All LLM Models'
+                        : 'Override All LLM Models (Optional)'
+                    }
+                    slotError={invalidModelsError}
+                  />
+                )}
+
+                {parallelismField}
+              </>
+            )}
+
+            {step === 'evaluation' && (
+              <>
+                {mode === MODE_EXPERIMENT && <Text kind="label/bold/xl">Configuration</Text>}
+                {/* Which run to base this one on, and what to call the result, are one decision:
+                  the name is derived from the pick, so the two belong on the same screen. */}
+                {mode === MODE_EXPERIMENT &&
+                  (hasNoEvaluations ? (
+                    <Text className="text-secondary" kind="body/regular/md">
+                      {NO_EVALUATIONS_MESSAGE}
+                    </Text>
+                  ) : (
+                    <EvaluationSourceSelect<SubmitEvaluationFormData>
+                      name="evaluationName"
+                      options={sources.options}
+                      groupLabels={sources.groupLabels}
+                      byName={sources.byName}
+                      isLoading={sources.isLoading}
+                      selectedName={evaluationName}
+                      slotError={evaluationFieldError}
+                      disabled={isPending}
+                    />
+                  ))}
+
+                <ControlledSelect
+                  useControllerProps={{ control, name: 'deployment' }}
+                  items={deploymentItems}
+                  value={selectedDeployment}
+                  loading={isDeploymentsLoading}
+                  disabled={isPending || isDeploymentsLoading}
+                  placeholder={
+                    isDeploymentsLoading ? 'Loading deployments...' : 'Select a deployment'
+                  }
+                  formFieldProps={{
+                    slotLabel: 'Deployment',
+                    slotHelp:
+                      'The running deployment this evaluation calls, or a custom endpoint. It is recorded on the job, so results can be traced back to it.',
+                    slotError: deploymentIssue,
+                    status: deploymentIssue ? 'error' : undefined,
+                  }}
+                  hideError
+                />
+                {isCustomEndpoint && (
+                  <>
+                    <ControlledTextInput
+                      useControllerProps={{ control, name: 'customEndpointUrl' }}
+                      placeholder="https://agent.example.com/v1/chat/completions"
+                      disabled={isPending}
+                      formFieldProps={{
+                        slotLabel: 'Endpoint URL',
+                        slotHelp:
+                          'Full URL of an OpenAI-compatible chat completions endpoint. The evaluation job calls it from the cluster, so it must be reachable from there.',
+                      }}
+                    />
+                    <SecretSearchableSelect<SubmitEvaluationFormData>
+                      workspace={workspace}
+                      useControllerProps={{ control, name: 'customEndpointSecret' }}
+                      onRequestNewSecret={() => setCreateSecretOpen(true)}
+                      formFieldProps={{
+                        slotLabel: 'API Key',
+                        slotInfo:
+                          'Sent as a bearer token. Leave empty for an endpoint without auth.',
+                      }}
+                    />
+                  </>
+                )}
+
+                <ControlledTextInput
+                  useControllerProps={{ control, name: 'evaluationRecordName' }}
+                  placeholder={
+                    isCreateMode ? 'e.g. initial-baseline' : 'e.g. nemotron-super-3-temp-1'
+                  }
+                  formFieldProps={{
+                    slotLabel: isCreateMode ? 'Evaluation Name' : 'New Evaluation Name',
+                    ...recordNameSlots,
+                  }}
+                />
+                {mode === MODE_EXPERIMENT && parallelismField}
+              </>
+            )}
+          </Stack>
+        </FormProvider>
+      </EvalWizard>
+      {/* Outside the wizard's <form>: a submit inside the modal would bubble through the portal. */}
+      <CreateSecretModal
+        workspace={workspace}
+        open={createSecretOpen}
+        onClose={() => setCreateSecretOpen(false)}
+        onSecretCreated={(name) => setValue('customEndpointSecret', name)}
+      />
+    </>
   );
 };

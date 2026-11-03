@@ -346,8 +346,46 @@ describe('AgentEvaluationWizard deployment', () => {
     await rerunBaseline(user);
 
     expect(
-      await screen.findByText(`${AGENT} has no running deployment. Deploy it to run an evaluation.`)
+      await screen.findByText(
+        `${AGENT} has no running deployment. Deploy it, or pick Custom endpoint.`
+      )
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+  });
+
+  it('calls a custom endpoint with its API key secret, with no deployment running', async () => {
+    server.use(
+      agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-down`, { status: 'failed' })])
+    );
+    const user = userEvent.setup();
+    renderWizard();
+
+    await rerunBaseline(user);
+    await user.click(screen.getByRole('combobox', { name: 'Deployment' }));
+    await user.click(await screen.findByRole('option', { name: 'Custom endpoint' }));
+    await user.type(
+      screen.getByLabelText('Endpoint URL'),
+      'https://agent.example.com/v1/chat/completions'
+    );
+    await submit(user);
+
+    expect(submittedUrl()).toBe('https://agent.example.com/v1/chat/completions');
+  });
+
+  it('refuses a custom endpoint that is not an http(s) URL', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await rerunBaseline(user);
+    await user.click(screen.getByRole('combobox', { name: 'Deployment' }));
+    await user.click(await screen.findByRole('option', { name: 'Custom endpoint' }));
+    await user.type(screen.getByLabelText('Endpoint URL'), 'agent.example.com');
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeEnabled()
+    );
+    await user.click(screen.getByRole('button', { name: 'Run Evaluation' }));
+
+    expect(await screen.findByText('Enter an http(s) URL')).toBeInTheDocument();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 });
