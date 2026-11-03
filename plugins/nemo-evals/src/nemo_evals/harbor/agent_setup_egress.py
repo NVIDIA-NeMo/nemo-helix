@@ -13,10 +13,15 @@ Any other Harbor environment that can switch to an allowlist after start gets th
 the task's policy through Harbor's ``set_network_policy()`` for the duration of ``setup()``, and on close
 the processes setup left holding an outside connection are killed. Elsewhere, setup runs under the task's
 own policy.
+
+An installed agent whose setup command fails (a download that hit a transient network error) gets up to
+:data:`SETUP_ATTEMPTS` attempts in the same window, :data:`SETUP_RETRY_DELAY_SEC` apart. Installed agents' setup is idempotent;
+any other agent's setup runs once. A timeout or cancellation is never retried.
 """
 
 from __future__ import annotations
 
+import asyncio
 import shlex
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
@@ -26,6 +31,7 @@ from typing import Any, ClassVar
 from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.acp_registry import is_acp_registry_shorthand, registry_spec_from_agent_name
+from harbor.agents.installed.base import BaseInstalledAgent, NonZeroAgentExitCodeError
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig
@@ -34,6 +40,10 @@ from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST
 SETUP_EGRESS_AGENT = "nemo_evals.harbor.agent_setup_egress:AgentSetupEgress"
 INNER_AGENT_KWARG = "agent_setup_egress_inner"
 SETUP_HOSTS_KWARG = "agent_setup_egress_hosts"
+
+SETUP_ATTEMPTS = 3
+# Failures cluster in time (two sandboxes of one run failed 5 s apart), so each retry waits out a short blip.
+SETUP_RETRY_DELAY_SEC = 20.0
 
 
 @cache
@@ -187,17 +197,38 @@ def _with_setup_egress(agent_class: type[BaseAgent], hosts: tuple[str, ...]) -> 
     class SetupEgressAgent(agent_class):  # ty: ignore[unsupported-base]  # a class known only at run time
         async def setup(self, environment: BaseEnvironment) -> None:
             window = getattr(environment, "agent_setup_egress", None)
-            if window is None:
-                async with _network_policy_window(environment, hosts):
-                    await super().setup(environment)
-                return
-            async with window():
-                await super().setup(environment)
+            opened = _network_policy_window(environment, hosts) if window is None else window()
+            async with opened:
+                await _setup_with_retry(self, super().setup, environment)
 
     SetupEgressAgent.__name__ = agent_class.__name__
     SetupEgressAgent.__qualname__ = agent_class.__qualname__
     SetupEgressAgent.__module__ = agent_class.__module__
     return SetupEgressAgent
+
+
+async def _setup_with_retry(
+    agent: BaseAgent, setup: Callable[[BaseEnvironment], Awaitable[None]], environment: BaseEnvironment
+) -> None:
+    """Runs ``setup``; an installed agent whose setup command failed is retried, up to ``SETUP_ATTEMPTS`` in all.
+
+    All attempts share Harbor's setup timeout, which wraps the whole ``setup()``.
+    """
+    for attempt in range(1, SETUP_ATTEMPTS + 1):
+        try:
+            await setup(environment)
+            return
+        except NonZeroAgentExitCodeError as exc:
+            if not isinstance(agent, BaseInstalledAgent) or attempt == SETUP_ATTEMPTS:
+                raise
+            agent.logger.warning(
+                "Agent setup failed (attempt %d of %d), retrying in %.0f s: %s",
+                attempt,
+                SETUP_ATTEMPTS,
+                SETUP_RETRY_DELAY_SEC,
+                str(exc).partition("\n")[0] or type(exc).__name__,
+            )
+            await asyncio.sleep(SETUP_RETRY_DELAY_SEC)
 
 
 def setup_timeout_multiplier(inner: str, multiplier: float) -> float:
