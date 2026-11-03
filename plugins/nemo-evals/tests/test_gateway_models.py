@@ -714,17 +714,33 @@ async def test_a_registered_agent_whose_gateway_models_are_closed_book_serves_no
 async def test_a_closed_book_registered_agent_that_calls_a_model_elsewhere_is_refused_at_submit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Labelled closed-book, the run is held to the gateway everywhere; its trials would be refused credentials."""
+    """Labelled closed-book, the run is held to the gateway everywhere, not just where trials get their credential."""
+    _virtual_models(monkeypatch, VirtualModel(name="cb", workspace="ws", request_middleware=[_CLOSED_BOOK]))
+    target = _registered(
+        {
+            "models": {"default": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"}},
+            "harnesses": {"codex": {"model": {"base_url": "https://integrate.api.nvidia.com/v1", "model": "x"}}},
+        }
+    ).model_copy(update={"closed_book": True})
+
+    with pytest.raises(ValueError, match=r"closed_book_required: closed_book runs need every model"):
+        await require_closed_book_route(target, [], async_sdk=AsyncMock(), authorize=None)
+
+
+async def test_a_no_network_run_whose_agents_default_model_is_off_the_gateway_is_refused_at_submit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Its trials are issued credentials through the default model's gateway route; without one the run fails later."""
     _virtual_models(monkeypatch, VirtualModel(name="cb", workspace="ws", request_middleware=[_CLOSED_BOOK]))
     target = _registered(
         {
             "models": {"default": {"base_url": "https://integrate.api.nvidia.com/v1", "model": "x"}},
             "harnesses": {"codex": {"model": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"}}},
         }
-    ).model_copy(update={"closed_book": True})
+    )
 
-    with pytest.raises(ValueError, match=r"closed_book_required: closed_book runs need every model"):
-        await require_closed_book_route(target, [], async_sdk=AsyncMock(), authorize=None)
+    with pytest.raises(ValueError, match=r"no-network tasks \['offline'\] need the agent's default model"):
+        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
 
 
 async def test_a_registered_agent_with_a_harness_model_that_is_not_closed_book_is_refused(

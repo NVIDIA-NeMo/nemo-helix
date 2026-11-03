@@ -311,8 +311,9 @@ async def require_closed_book_route(
     the closed-book middleware.
 
     Raises:
-        ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable, or the
-            target is labelled closed-book and its agent calls a model elsewhere.
+        ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable, or its
+            registered agent's default model doesn't call the gateway, or the target is labelled closed-book and its
+            agent calls a model elsewhere.
     """
     if not closed_book_run(target, tasks):
         return
@@ -321,6 +322,16 @@ async def require_closed_book_route(
         models = _gateway_models(target)
     except ValueError as exc:
         raise ValueError(f"closed_book_required: {why} need a closed-book model route: {exc}") from exc
+    if (
+        isinstance(target, HarborRunnerTarget)
+        and isinstance(target.source, RegisteredAgentSource)
+        and (config := registered_agent_config(target)) is not None
+        and fabric_gateway_route(config) is None
+    ):
+        raise ValueError(
+            f"closed_book_required: {why} need the agent's default model to call the Inference Gateway, which issues "
+            "each trial its credential"
+        )
     if closed_book_run(target, ()) and not calls_only_gateway_models(target):
         raise ValueError(
             f"closed_book_required: {why} need every model the agent calls to go through the Inference Gateway, and "
