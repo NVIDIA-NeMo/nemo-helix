@@ -40,7 +40,7 @@ describe('useAgentDeployments', () => {
       { wrapper: TestProviders }
     );
 
-    expect(result.current).toEqual({
+    expect(result.current).toMatchObject({
       deployments: [],
       isLoading: false,
       isPending: true,

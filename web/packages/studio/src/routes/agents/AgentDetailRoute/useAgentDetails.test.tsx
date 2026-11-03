@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { JOB_POLLING_INTERVAL_LONG, JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
-import { useAgentsListDeployments } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
+import { useAgentDeployments } from '@studio/api/agents/useAgentDeployments';
 import { useAgentDetails } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook } from '@testing-library/react';
@@ -18,12 +18,14 @@ vi.mock('@nemo/sdk/generated/agents/agents', async (importOriginal) => ({
 }));
 vi.mock('@nemo/sdk/generated/agents/agent-deployments', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/agents/agent-deployments')>()),
-  useAgentsListDeployments: vi.fn(() => ({})),
   useAgentsDeleteDeployment: vi.fn(() => ({})),
 }));
 vi.mock('@nemo/sdk/generated/platform/evaluations', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/evaluations')>()),
   useListEvaluations: vi.fn(() => ({})),
+}));
+vi.mock('@studio/api/agents/useAgentDeployments', () => ({
+  useAgentDeployments: vi.fn(() => ({ deployments: [] })),
 }));
 vi.mock('@studio/api/evaluation/evaluator-jobs', () => ({ fetchEvaluatorJobs: vi.fn(() => []) }));
 
@@ -39,14 +41,13 @@ const render = (opts: { evalsEnabled?: boolean }) =>
     wrapper,
   });
 
-const lastQueryOptions = (hook: typeof useListEvaluations | typeof useAgentsListDeployments) =>
+const lastQueryOptions = (hook: typeof useListEvaluations) =>
   (vi.mocked(hook).mock.lastCall?.at(-1) as { query: Record<string, unknown> }).query;
 
 const deploymentInterval = (status: string) => {
-  const refetchInterval = lastQueryOptions(useAgentsListDeployments).refetchInterval as (query: {
-    state: { data: unknown };
-  }) => number | false;
-  return refetchInterval({ state: { data: { data: [{ agent: AGENT, status }] } } });
+  const refetchInterval = vi.mocked(useAgentDeployments).mock.lastCall?.[0]
+    .refetchInterval as (query: { state: { data: unknown } }) => number | false;
+  return refetchInterval({ state: { data: [{ agent: AGENT, status }] } });
 };
 
 describe('useAgentDetails', () => {
