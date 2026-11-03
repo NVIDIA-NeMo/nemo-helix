@@ -3,7 +3,7 @@
 
 import { toScientificNotation } from '@nemo/common/src/utils/formatters';
 import { clamp } from '@nemo/common/src/utils/math';
-import { InfoCircle, Retry } from '@nemo/icons/icons';
+import { InfoCircle, Reset } from '@nemo/icons/icons';
 import {
   Block,
   Button,
@@ -198,7 +198,7 @@ export const SliderWithTextInput = ({
           className="shrink-0"
           type="button"
         >
-          <Retry />
+          <Reset />
         </Button>
       )}
       {slotEnd}

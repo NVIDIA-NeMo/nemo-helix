@@ -12,7 +12,7 @@ import {
   type LogLoadProgress,
   type LogStatus,
 } from '@nemo/common/src/utils/logs';
-import { ArrowUp, CopyGeneric, Download, Paragraph, Record as RecordIcon } from '@nemo/icons/icons';
+import { ArrowUp, CopyGeneric, Download, Return, Record as RecordIcon } from '@nemo/icons/icons';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
@@ -182,7 +182,7 @@ export const LogViewer: FC<LogViewerProps> = ({
                 aria-pressed={wrapLines}
                 onClick={() => setWrapLines((prev) => !prev)}
               >
-                <Paragraph />
+                <Return />
               </Button>
               {downloadFilename && (
                 <Button
