@@ -639,7 +639,7 @@ class TestAutoSetup:
         assert result == "anthropic-proxy-example-com"
         body = _create_body(client)
         assert body.host_url == "https://anthropic-proxy.example.com"
-        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert body.auth_header_format == "X-Api-Key: <auth_secret>"
 
     def test_existing_provider_updated_not_recreated(self):
         client = _make_mock_client(provider_exists=True, secret_exists=True)
@@ -674,7 +674,7 @@ class TestAutoSetup:
         body = _create_body(client)
         assert body.name == "anthropic"
         assert body.api_key_secret_name == "anthropic-api-key"
-        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert body.auth_header_format == "X-Api-Key: <auth_secret>"
         assert "required_extra_headers" not in body.model_fields_set
         assert api_key not in str(client.models.create_provider.call_args)
 
@@ -2164,7 +2164,7 @@ class TestProviderIdempotency:
         assert result == "anthropic"
         body = _upsert_body(client)
         assert body.api_key_secret_name == "anthropic-api-key"
-        assert body.auth_header_format == "X-Api-Key: {{ auth_secret }}"
+        assert body.auth_header_format == "X-Api-Key: <auth_secret>"
         assert body.model_dump(exclude_unset=True)["required_extra_headers"] is None
         assert api_key not in str(client.models.upsert_provider.call_args)
 
