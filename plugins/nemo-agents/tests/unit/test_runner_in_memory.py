@@ -42,6 +42,7 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_agents_plugin.runner.in_memory import InMemoryRunnerBackend, _resolve_nat_bin
 from nemo_helix_plugin.config import Configuration, nhx_user_data_dir
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.refs import FilesetRef
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
 requires_hermes_adapter = pytest.mark.skipif(
@@ -594,7 +595,10 @@ def test_resolve_nat_bin_falls_back_to_container_path(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Path) -> None:
+@pytest.mark.parametrize("source_fileset", [None, FilesetRef("sources/agent-source")])
+async def test_create_deployment_stages_ethos_fileset_into_base_dir(
+    tmp_path: Path, source_fileset: FilesetRef | None
+) -> None:
     backend = _backend(tmp_path)
     config = {
         "config_format": "nemo-agents-spec-v1",
@@ -612,9 +616,12 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
         agent_config: dict[str, Any],
         base_dir: Path,
         files_client: Any | None,
+        source_fileset: FilesetRef | None,
     ) -> None:
         del files_client
-        staged.append({"workspace": workspace, "agent_name": agent_name, "base_dir": base_dir})
+        staged.append(
+            {"workspace": workspace, "agent_name": agent_name, "base_dir": base_dir, "source_fileset": source_fileset}
+        )
         assert not (base_dir / "agent.yaml").exists()
         (base_dir / "mcps").mkdir()
         (base_dir / "mcps" / "calculator.py").write_text("print(1)\n")
@@ -642,10 +649,14 @@ async def test_create_deployment_stages_ethos_fileset_into_base_dir(tmp_path: Pa
         ),
         patch.object(InMemoryRunnerBackend, "_spawn_fabric", _spawn_fabric),
     ):
-        info = await backend.create_deployment("ws", "fabric-dep", config, port=49212, agent="fabric-agent")
+        info = await backend.create_deployment(
+            "ws", "fabric-dep", config, port=49212, agent="fabric-agent", source_fileset=source_fileset
+        )
 
     base_dir = Path(info.extra["base_dir"])
-    assert staged == [{"workspace": "ws", "agent_name": "fabric-agent", "base_dir": base_dir}]
+    assert staged == [
+        {"workspace": "ws", "agent_name": "fabric-agent", "base_dir": base_dir, "source_fileset": source_fileset}
+    ]
     assert info.staged_spec is not None
     assert (info.staged_spec.revision, info.staged_spec.tracked_revision) == (STAGED_SHA, "main")
     assert (base_dir / "mcps" / "calculator.py").exists()
@@ -1011,7 +1022,7 @@ async def test_fabric_reservation_lifetime(tmp_path: Path, failure: str | None) 
             addresses.append(sock.getsockname())
             yield sock
 
-    async def stage(*args: Any) -> None:
+    async def stage(*args: Any, source_fileset: FilesetRef | None = None) -> None:
         assert sockets[0].fileno() >= 0
         with socket.socket() as competitor:
             with pytest.raises(OSError):

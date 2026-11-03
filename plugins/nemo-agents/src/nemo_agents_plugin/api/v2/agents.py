@@ -27,9 +27,9 @@ from nemo_agents_plugin.schema import (
     RegisterAgentRequest,
 )
 from nemo_helix_plugin.agents.types import ReferenceConfig
+from nemo_helix_plugin.agents.validation import resolve_agent_fileset
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -38,7 +38,6 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
-from nemo_helix_plugin.refs import FilesetRef, parse_entity_ref
 from nemo_helix_plugin.schema import PaginationData
 
 # Deployment statuses that block agent deletion.
@@ -231,14 +230,12 @@ async def _resolve_agent_reference(
     """Check fileset access as the caller and qualify the stored reference."""
     if reference is None or reference.fileset is None:
         return reference
-    ref = parse_entity_ref(reference.fileset, default_workspace=workspace)
-    qualified = FilesetRef(f"{ref.workspace}/{ref.name}")
     try:
-        await files_client.get_fileset(workspace=ref.workspace, name=ref.name)
-    except NotFoundError as exc:
-        raise HTTPException(status_code=400, detail=f"Fileset '{qualified}' not found.") from exc
-    except PermissionDeniedError as exc:
-        raise HTTPException(status_code=403, detail=f"Access denied to fileset '{qualified}'.") from exc
+        qualified = await resolve_agent_fileset(reference.fileset, workspace=workspace, files_client=files_client)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return reference.model_copy(update={"fileset": qualified})
 
 

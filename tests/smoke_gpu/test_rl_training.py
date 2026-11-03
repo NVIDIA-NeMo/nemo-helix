@@ -55,9 +55,9 @@ BASE_VENV_MINIMUM_PYTHON_PACKAGE_VERSIONS = {
 # Listing all seven is what makes a broken prefetch filter fail here instead of silently shipping an
 # image whose workers rebuild their venv on the node at job start.
 WORKER_VENV_IMPORTS = {
-    # GRPO policy training, DTensor V2 (--extra automodel). nemo_automodel and transformer_engine
+    # DPO and GRPO policy training, AutomodelPolicyWorker (--extra automodel). nemo_automodel and transformer_engine
     # are checked through distribution metadata instead — see WORKER_VENV_DRIVER_LINKED below.
-    "nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2": [
+    "nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker": [
         "torch",
     ],
     # GRPO policy training, Megatron (--extra mcore). Also hosts Megatron-native generation in
@@ -122,7 +122,7 @@ WORKER_VENV_IMPORTS = {
 # sharing actually happened rather than one tier silently missing it.
 WORKER_VENV_DRIVER_LINKED = {
     "nemo_rl.models.generation.vllm.vllm_worker.VllmGenerationWorker": ["deep_ep"],
-    "nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2": [
+    "nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker": [
         "nemo-automodel",
         "transformer-engine",
     ],
@@ -311,7 +311,7 @@ def test_worker_venvs_symlink_into_shared_cache():
     Guards the link-mode/cache layout: a silent fallback to copy mode would multiply image size
     across the prefetched venvs this image ships.
     """
-    venv = RAY_VENVS / "nemo_rl.models.policy.workers.dtensor_policy_worker_v2.DTensorPolicyWorkerV2"
+    venv = RAY_VENVS / "nemo_rl.models.policy.workers.automodel_policy_worker.AutomodelPolicyWorker"
     if not (venv / "bin" / "python").exists():
         pytest.skip("policy worker venv not present; covered by test_worker_venv_prefetched")
     torch_init = next(venv.glob("lib/python*/site-packages/torch/__init__.py"), None)

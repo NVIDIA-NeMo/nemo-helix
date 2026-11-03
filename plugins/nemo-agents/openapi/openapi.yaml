@@ -3006,6 +3006,11 @@ components:
             as ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed
             container env vars (never plaintext) for docker/k8s modes; ignored for
             subprocess.
+        source_fileset:
+          title: Source Fileset
+          description: Agent source fileset snapshotted at creation. When absent,
+            stages <agent>-ethos.
+          type: string
         spec_revision:
           type: string
           title: Spec Revision
@@ -3742,8 +3747,9 @@ components:
         image:
           type: string
           title: Image
-          description: Container image for docker/k8s/openshell modes. Ignored for
-            subprocess.
+          description: Container image for docker/k8s/openshell modes. When omitted,
+            uses the agent's reference.container_image, then deployments.default_image.
+            Ignored for subprocess.
           default: ''
         use_image_entrypoint:
           type: boolean
@@ -5731,13 +5737,17 @@ components:
         workspace:
           type: string
           title: Workspace
-          description: Workspace owning the agent and its spec fileset.
+          description: Workspace owning the agent.
           default: ''
         agent_config:
           additionalProperties: true
           type: object
           title: Agent Config
           description: Resolved agent config.
+        source_fileset:
+          title: Source Fileset
+          description: Source fileset referenced by the agent.
+          type: string
       additionalProperties: false
       type: object
       required:

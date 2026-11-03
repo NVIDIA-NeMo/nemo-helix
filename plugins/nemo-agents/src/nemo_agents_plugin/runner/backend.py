@@ -21,6 +21,7 @@ from nemo_agents_plugin.entities import ComputeResources, DeploymentMode, Deploy
 from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
+from nemo_helix_plugin.refs import FilesetRef
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class RunnerBackend(ABC):
         port: int,
         *,
         agent: str = "",
+        source_fileset: FilesetRef | None = None,
         image: str | None = None,
         deployment_mode: DeploymentMode = "subprocess",
         created_by: str | None = None,

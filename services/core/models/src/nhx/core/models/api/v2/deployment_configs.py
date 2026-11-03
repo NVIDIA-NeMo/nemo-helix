@@ -6,6 +6,7 @@ from typing import Annotated, List
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.openapi.models import Example
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
@@ -100,6 +101,8 @@ async def list_deployment_configs(
         return result
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployment configs by workspace")
         raise HTTPException(
@@ -154,6 +157,8 @@ async def create_deployment_config(
         )
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error creating deployment config")
         raise HTTPException(
@@ -192,6 +197,8 @@ async def get_latest_deployment_config(
         raise
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error getting deployment config")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment config")
@@ -217,6 +224,8 @@ async def list_deployment_config_versions(
     try:
         versions = await service.list_deployment_config_versions(workspace, deployment_config_name)
         return versions
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployment config versions")
         raise HTTPException(
@@ -260,6 +269,8 @@ async def get_deployment_config_version(
             )
         return result
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment config version")
@@ -310,6 +321,8 @@ async def update_deployment_config(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=str(e),
         )
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error updating deployment config")
         raise HTTPException(
@@ -363,6 +376,8 @@ async def delete_all_deployment_config_versions(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config")
         raise HTTPException(
@@ -427,6 +442,8 @@ async def delete_deployment_config_version(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config version")
         raise HTTPException(

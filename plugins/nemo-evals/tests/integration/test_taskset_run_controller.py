@@ -148,7 +148,7 @@ _SHARED: dict[str, GroupOnlyWorkspace] = {}
 
 
 async def _shared_group_only_workspace(base_url: str) -> GroupOnlyWorkspace:
-    """One group-only workspace per platform for the tests that only read it: each setup waits ~30 s for roles."""
+    """One group-only workspace per platform for the tests that only read it, so they skip the role waits."""
     if base_url not in _SHARED:
         _SHARED[base_url] = await _group_only_workspace(base_url)
     return _SHARED[base_url]

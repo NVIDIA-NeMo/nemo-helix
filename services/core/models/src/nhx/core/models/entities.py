@@ -209,9 +209,9 @@ class ModelProvider(EntityBase):
     auth_header_format: str | None = Field(
         default=None,
         description=(
-            "Jinja2 template controlling how the API key is sent upstream. "
-            "Must contain exactly one variable named `auth_secret`. "
-            "Defaults to `'Authorization: Bearer {{ auth_secret }}'` when not set."
+            "Literal header format controlling how the API key is sent upstream. "
+            "Must contain exactly one `<auth_secret>` placeholder (legacy `{{ auth_secret }}` is also accepted). "
+            "Defaults to `'Authorization: Bearer <auth_secret>'` when not set."
         ),
         max_length=1024,
     )

@@ -23,17 +23,18 @@ OUT_DIR=${2:?usage: build-gym-wheel.sh <gym-source-dir> <out-dir>}
 # gitdir pointer file, not a directory). Left alone the wheel builds and installs happily while
 # quietly missing every YAML, including the sandbox provider configs. Declare the data explicitly
 # rather than depend on VCS state this build cannot have.
-# Anchored on the leading "resources/*.py" entry only: upstream appends further entries to this
-# list (e.g. token_id_capture golden vectors), and those are carried through by the capture group.
-PKG_DATA_RE='^nemo_gym = \["resources/\*\.py"\(.*\)\]$'
+# The 0.8 package split dropped the old leading "resources/*.py" entry. What remains is a
+# single-line list (today, the token-id-capture golden vectors). Keep whatever it names and
+# append the globs. A multi-line rewrite fails this check on purpose.
+PKG_DATA_RE='^nemo_gym = \[.*\]$'
 if ! grep -q "${PKG_DATA_RE}" "${GYM_SRC}/pyproject.toml"; then
     echo "build-gym-wheel: Gym's [tool.setuptools.package-data] entry moved;" \
          "re-check this substitution against ${GYM_SRC}/pyproject.toml" >&2
     exit 1
 fi
-# Fully single-quoted, and the brackets/dots/stars escaped: unescaped, `["resources/*.py"]` is a
-# BRE character class, which matches nothing here and would edit the file silently not at all.
-sed -i 's|^nemo_gym = \["resources/\*\.py"\(.*\)\]$|nemo_gym = ["resources/*.py"\1, "**/*.yaml", "**/*.yml", "**/*.md"]\n"*" = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]|' \
+# Fully single-quoted, and the brackets/dots/stars escaped: unescaped, `[.*]` is a BRE that
+# matches nothing useful and would edit the file silently not at all.
+sed -i 's|^nemo_gym = \[\(.*\)\]$|nemo_gym = [\1, "**/*.yaml", "**/*.yml", "**/*.md", "**/*.json", "**/*.txt"]\n"*" = ["**/*.yaml", "**/*.yml", "**/*.json", "**/*.md", "**/*.txt"]|' \
     "${GYM_SRC}/pyproject.toml"
 if ! grep -qF '"**/*.yaml"' "${GYM_SRC}/pyproject.toml"; then
     echo "build-gym-wheel: package-data substitution did not apply to ${GYM_SRC}/pyproject.toml" >&2
