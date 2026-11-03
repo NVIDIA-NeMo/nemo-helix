@@ -67,6 +67,7 @@ jobs:
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
       customization-auth: ${{ steps.changes.outputs.customization-auth }}
+      builder-e2e: ${{ steps.changes.outputs.builder-e2e }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -212,7 +213,8 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
-        needs.changes.outputs.customization-auth == 'true'
+        needs.changes.outputs.customization-auth == 'true' ||
+        needs.changes.outputs.builder-e2e == 'true'
       )
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -757,6 +759,119 @@ jobs:
           kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
           artifact-name: kind-customizer-auth-e2e-kubernetes-artifacts
           junit-report: report-kubernetes-customizer-auth-e2e.xml
+          services-log-dir: ${{ runner.temp }}/e2e-services-logs
+
+  kind-builder-e2e:
+    name: Kind builder e2e (auth ${{ matrix.auth }})
+    needs: [changes, build-cpu-smoke-images]
+    if: >
+      !cancelled() &&
+      needs.build-cpu-smoke-images.result == 'success' &&
+      needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.builder-e2e == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Workload token exchange is off in both: the builder doesn't work with it on yet.
+        auth: ["off", "on"]
+    env:
+      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-builder-auth-${{ matrix.auth }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Make a password for the development registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          password="$(openssl rand -hex 16)"
+          echo "::add-mask::${password}"
+          printf '%s' "${password}" > "${RUNNER_TEMP}/builder-registry-password"
+
+      - name: Setup Kind cluster with NeMo Helix and the builder
+        uses: ./.github/actions/setup-kind-cluster
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+          kind-image-pull-token: ${{ github.token }}
+          kind-image-pull-user: ${{ github.actor }}
+          helm-extra-args: >-
+            -f e2e/k8s/values/builder.yaml
+            --set-file builder.devRegistry.password=${{ runner.temp }}/builder-registry-password
+            ${{ matrix.auth == 'on' && '-f e2e/k8s/values/auth-overlay.yaml' || '' }}
+
+      - name: Pre-pull the build step and sandbox images into Kind
+        shell: bash
+        env:
+          KIND_IMAGE_PULL_TOKEN: ${{ github.token }}
+          KIND_IMAGE_PULL_USER: ${{ github.actor }}
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: |
+          e2e/k8s/scripts/prepull_kind_images.sh \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-builder-tasks:${NHX_E2E_IMAGE_TAG}" \
+            "${NHX_E2E_IMAGE_REGISTRY}/nhx-kaniko:${NHX_E2E_IMAGE_TAG}"
+
+      - name: Run builder e2e tests
+        shell: bash
+        env:
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
+          AUTH: ${{ matrix.auth }}
+          NHX_E2E_KUBE_CONTEXT: kind-${{ env.KIND_CLUSTER_NAME }}
+          NHX_E2E_KUBE_NAMESPACE: nemo-helix
+          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
+          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          test -n "${NHX_E2E_CLUSTER_URL}"
+          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
+          NHX_E2E_BUILDER_REGISTRY_PASSWORD="$(cat "${RUNNER_TEMP}/builder-registry-password")"
+          export NHX_E2E_BUILDER_REGISTRY_PASSWORD
+
+          markers="builder_e2e and not builder_auth_e2e"
+          features=(--feature builder)
+          if [ "${AUTH}" = "on" ]; then
+            markers="builder_e2e"
+            features+=(--feature auth)
+          fi
+          uv run --frozen pytest \
+            e2e/test_builder.py \
+            -v \
+            -m "${markers}" \
+            "${features[@]}" \
+            --run-e2e \
+            --no-cov \
+            --junitxml=report-kubernetes-builder-e2e.xml
+
+          # A skipped test here means a marker or feature selected the wrong tests, so it fails the job.
+          python3 - <<'EOF'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("report-kubernetes-builder-e2e.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root)
+          tests = sum(int(suite.get("tests", 0)) for suite in suites)
+          skipped = sum(int(suite.get("skipped", 0)) for suite in suites)
+          if tests == 0 or skipped:
+              raise SystemExit(f"builder e2e ran {tests} tests and skipped {skipped}: expected none skipped")
+          print(f"builder e2e: {tests} tests, none skipped")
+          EOF
+
+      - name: Finalize Kind builder e2e
+        if: always()
+        uses: ./.github/actions/finalize-kind-e2e
+        with:
+          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact-name: kind-builder-e2e-auth-${{ matrix.auth }}-kubernetes-artifacts
+          junit-report: report-kubernetes-builder-e2e.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
 
   kind-network-policy-smoke:
@@ -2703,6 +2818,7 @@ jobs:
       - kind-cpu-smoke
       - kind-gym-e2e
       - kind-customizer-auth-e2e
+      - kind-builder-e2e
       - kind-network-policy-smoke
       - helm-lint
       - helm-chart-verifier

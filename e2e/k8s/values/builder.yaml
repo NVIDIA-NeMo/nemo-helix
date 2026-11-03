@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# The builder, for the Kind builder e2e (e2e/test_builder.py). Layer it on kind.yaml, and on auth-overlay.yaml for the
+# auth-on run. Set the development registry's password with `--set-file builder.devRegistry.password=<file>`.
+
+builder:
+  enabled: true
+  workVolume:
+    # kind's default storage class provisions ReadWriteOnce only, once a pod uses the claim. A kind cluster is one
+    # node, so every build pod lands where the volume is.
+    accessModes:
+      - ReadWriteOnce
+    size: 5Gi
+  # The in-cluster registry the chart sets `builder.registry` to: plain HTTP, the username `builder`.
+  devRegistry:
+    enabled: true
+
+platformConfig:
+  builder:
+    # Images land at <prefix>/<workspace>/..., as on a shared registry.
+    repository_prefix: e2e-builds
+    # Sized for a CI runner. The test's Dockerfiles only copy busybox and write a file.
+    sandbox:
+      cpu: 500m
+      memory: 1Gi
+      ephemeral_storage: 4Gi
