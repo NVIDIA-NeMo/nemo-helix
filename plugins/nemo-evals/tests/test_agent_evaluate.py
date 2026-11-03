@@ -9,6 +9,7 @@ import asyncio
 import json
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
+from importlib.metadata import version
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1095,7 +1096,7 @@ def test_harbor_agent_kwargs_round_trip_the_wire_unchanged() -> None:
     """Nested kwargs survive JSON serialization, so what the submitter wrote is what the agent's ``__init__`` gets."""
     agent_kwargs: dict[str, JsonValue] = {
         "fabric_adapter_id": "nvidia.fabric.codex",
-        "fabric_package": "nemo-fabric[codex]==0.6.0",
+        "fabric_package": f"nemo-fabric[codex]=={version('nemo-fabric')}",
         "fabric_harness_settings": {"max_turns": 3, "tools": ["shell", None], "strict": True},
     }
     spec = AgentEvalSpec(
@@ -2937,7 +2938,7 @@ def test_resolve_target_raises_a_relay_version_persisted_under_an_older_fabric(t
 
     harbor_target = HarborRunnerTarget(
         source=RegisteredAgentSource(agent=AgentRef(root="dev/a")),
-        agent_kwargs={"fabric_config": persisted, "fabric_package": "nemo-fabric[codex]==0.6.0"},
+        agent_kwargs={"fabric_config": persisted, "fabric_package": f"nemo-fabric[codex]=={version('nemo-fabric')}"},
     )
     runner, _, _ = AgentEvalJob._resolve_target(harbor_target, ctx)
     assert isinstance(runner, HarborAgentTaskRunner)

@@ -27,6 +27,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.runtimes.provenance import credential_shaped_settings, redact_credentials
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
+_PACKAGE = f"nemo-fabric[deepagents]=={importlib.metadata.version('nemo-fabric')}"
 
 
 def _registered_agent_config() -> dict[str, Any]:
@@ -262,7 +263,7 @@ def test_harbor_preflight_accepts_the_agent_kwargs_a_target_carries() -> None:
         {
             "fabric_config": _registered_agent_config(),
             "fabric_default_max_turns": 20,
-            "fabric_package": "nemo-fabric[deepagents]==0.6.0",
+            "fabric_package": _PACKAGE,
             "fabric_workspace": "/app",
         }
     )
@@ -359,11 +360,11 @@ def test_install_and_run_keywords_still_pass_through(tmp_path: Path) -> None:
     bundle.mkdir()
     agent = _agent(
         tmp_path,
-        fabric_package="nemo-fabric[deepagents]==0.6.0",
+        fabric_package=_PACKAGE,
         fabric_config_bundle=bundle,
         fabric_config_target="/tmp/agent",
     )
-    assert agent.fabric_package == "nemo-fabric[deepagents]==0.6.0"
+    assert agent.fabric_package == _PACKAGE
     assert agent.fabric_config_bundle == bundle
     # Relative paths in the config (skills) resolve against the uploaded bundle.
     assert str(agent._build_spec("hi").config_base_dir) == "/tmp/agent"
