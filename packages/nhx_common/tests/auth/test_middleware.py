@@ -23,6 +23,7 @@ from nhx.common.auth.jwt import UnsignedJWTRejectedError
 from nhx.common.auth.middleware import (
     PUBLIC_GET_PATHS,
     AuthorizationMiddleware,
+    _forbidden_detail,
     is_auth_middleware_excluded_path,
 )
 from nhx.common.auth.models import Principal
@@ -1857,3 +1858,66 @@ class TestServicePrincipalDelegationMiddleware:
             )
 
         assert response.status_code == 403
+
+
+class TestForbiddenDetail:
+    """The 403 for a PDP denial names the action and workspace on generic entities routes."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "expected"),
+        [
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model", "create"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model", "list"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "read"),
+            ("PUT", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "update"),
+            ("DELETE", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "delete"),
+        ],
+    )
+    def test_entities_routes_name_action_and_workspace(self, method, path, expected):
+        assert _forbidden_detail(method, path) == f"Not allowed to {expected} entities in workspace 'ws-b'"
+
+    def test_all_workspaces_selector_uses_documented_wording(self):
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/-/entities/model")
+        assert detail == "Not allowed to list entities in the requested workspace."
+
+    def test_workspace_with_decoded_special_characters(self):
+        # request.url.path is percent-decoded, so team%40acme arrives as team@acme.
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/team@acme+qa/entities/model")
+        assert detail == "Not allowed to list entities in workspace 'team@acme+qa'"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/apis/models/v2/workspaces/ws-b/models"),
+            ("PATCH", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("GET", "/apis/entities/v2/workspaces/ws%20b/entities/model"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model/extra"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b\n/entities/model"),
+        ],
+    )
+    def test_other_routes_keep_bare_forbidden(self, method, path):
+        assert _forbidden_detail(method, path) == "Forbidden"
+
+    def test_middleware_denial_names_action_and_workspace(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get(
+                "/apis/entities/v2/workspaces/ws-b/entities/model",
+                headers={"x-nhx-principal-id": "user@example.com"},
+            )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not allowed to list entities in workspace 'ws-b'"}
+
+    def test_middleware_denial_on_other_route_stays_bare(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get("/test", headers={"x-nhx-principal-id": "user@example.com"})
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Forbidden"}
