@@ -64,7 +64,7 @@ const openPanel = async () => {
   const user = userEvent.setup();
   const onContinue = vi.fn();
   render(<CreateFilesetStart workspace={workspace} onContinue={onContinue} />);
-  await user.click(screen.getByRole('radio', { name: /Persona test set/ }));
+  await user.click(screen.getByRole('radio', { name: /Personas/ }));
   return { user, onContinue };
 };
 
@@ -106,5 +106,26 @@ describe('PersonaTestSetPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Register dataset' }));
 
     await waitFor(() => expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled());
+  });
+
+  it('shows agent-list failures and recovers on retry', async () => {
+    mockApis(true);
+    let fail = true;
+    server.use(
+      http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), () =>
+        fail
+          ? HttpResponse.json({ detail: 'boom' }, { status: 500 })
+          : HttpResponse.json({
+              data: [{ name: agentName, workspace }],
+              pagination: { total: 1, total_pages: 1, page: 1, page_size: 1 },
+            })
+      )
+    );
+    const { user } = await openPanel();
+
+    await screen.findByText('Could not load agents.');
+    fail = false;
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await pickAgent(user);
   });
 });

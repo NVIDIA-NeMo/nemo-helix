@@ -78,7 +78,8 @@ describe('buildPersonaTestSetRequest', () => {
         ...options,
         agent: {
           name: 'a',
-          instructions: 'x{%- endraw -%}y{% end{% endraw %}raw %}{{ person.age }}',
+          instructions:
+            'x{%- endraw -%}{%+ endraw %}{% endraw +%}y{% end{% endraw %}raw %}{{ person.age }}',
         },
       }),
       QUESTION_COLUMN

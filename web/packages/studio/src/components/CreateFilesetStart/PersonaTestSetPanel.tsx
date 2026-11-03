@@ -4,7 +4,7 @@
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
-import { Flex, Stack } from '@nvidia/foundations-react-core';
+import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { fetchAgentsForSelect } from '@studio/components/agents/AgentBlockingInput/agentQueries';
 import { NEMOTRON_PERSONAS_LOCALES } from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
 import {
@@ -49,7 +49,7 @@ export const PersonaTestSetPanel: FC<PersonaTestSetPanelProps> = ({ workspace, o
   });
   const [agentName, locale, rows] = useWatch({ control, name: ['agent', 'locale', 'rows'] });
   const personas = useNemotronPersonasSetup(workspace, locale);
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['persona-test-set', 'agents', workspace],
     queryFn: ({ signal }) => fetchAgentsForSelect(workspace, signal),
     enabled: !!workspace,
@@ -108,6 +108,16 @@ export const PersonaTestSetPanel: FC<PersonaTestSetPanelProps> = ({ workspace, o
             }}
           />
         </Flex>
+        {isError && !agents.length ? (
+          <Banner kind="inline" status="error" className="shrink-0">
+            <Flex gap="density-md" align="center" justify="between">
+              <Text kind="body/regular/sm">Could not load agents.</Text>
+              <Button type="button" kind="secondary" size="small" onClick={() => void refetch()}>
+                Retry
+              </Button>
+            </Flex>
+          </Banner>
+        ) : null}
         {personas.banner}
       </Stack>
       {personas.secretModal}

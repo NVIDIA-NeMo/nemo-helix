@@ -40,7 +40,7 @@ export const PHRASING_STYLES = [
 const MAX_JOB_NAME_LENGTH = 63;
 
 /** Agent text is data, not template: Data Designer would otherwise render any `{{ }}` in it. */
-const END_RAW = /\{%-?\s*endraw\s*-?%\}/g;
+const END_RAW = /\{%[-+]?\s*endraw\s*[-+]?%\}/g;
 
 /** Repeats until stable, so removing one terminator can't splice another together. */
 const stripEndRaw = (text: string): string => {
