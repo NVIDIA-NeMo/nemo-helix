@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
+from nemo_agents_plugin.agent_config_formats import validate_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import (
     FabricTranslationError,
@@ -81,27 +82,25 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
-    @pytest.mark.parametrize("hosts", [[], ["collector.observability.svc.cluster.local", "10.0.0.8"]])
-    def test_http_allowlist_survives_config_roundtrip_and_translation(self, hosts: list[str]) -> None:
-        payload = _example_yaml_config()
-        payload["telemetry"].update(enabled=True, insecure_http_hosts=hosts)
-        config = AgentConfig.model_validate(payload)
-        config = AgentConfig.model_validate(config.model_dump(exclude_unset=True))
-
-        translated = translate_agent_config(config)
-
-        assert translated.relay is not None
-        assert translated.relay.observability is not None
-        assert translated.relay.observability.model_dump()["insecure_http_hosts"] == hosts
-        assert payload["telemetry"]["insecure_http_hosts"] == hosts
-
-    def test_http_allowlist_is_not_implicitly_enabled(self) -> None:
+    @pytest.mark.parametrize("hosts", [None, [], ["collector.observability.svc.cluster.local", "10.0.0.8"]])
+    def test_http_allowlist_survives_registration_and_intake(self, hosts: list[str] | None) -> None:
         payload = _example_yaml_config()
         payload["telemetry"]["enabled"] = True
+        if hosts is not None:
+            payload["telemetry"]["insecure_http_hosts"] = hosts
+        payload = validate_agent_config(payload["config_format"], payload)
+        assert configure_intake_atif_export(payload, workspace="team-a", base_url="http://127.0.0.1:54321")
+        payload = AgentConfig.model_validate(payload).model_dump()
+
         translated = translate_agent_config(AgentConfig.model_validate(payload))
+
         assert translated.relay is not None
         assert translated.relay.observability is not None
-        assert "insecure_http_hosts" not in translated.relay.observability.model_dump()
+        observability = translated.relay.observability.model_dump()
+        if hosts is None:
+            assert "insecure_http_hosts" not in observability
+        else:
+            assert observability["insecure_http_hosts"] == hosts
 
     @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
     @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])

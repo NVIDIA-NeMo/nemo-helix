@@ -362,9 +362,8 @@ def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
     observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
-    # Preserve an explicit empty list too: Relay uses replacement semantics for
-    # this policy, so [] must not turn into an inherited host allowance.
-    if telemetry.insecure_http_hosts or "insecure_http_hosts" in telemetry.model_fields_set:
+    # None preserves omission across serialization; [] clears inherited allowances.
+    if telemetry.insecure_http_hosts is not None:
         observability["insecure_http_hosts"] = list(telemetry.insecure_http_hosts)
 
     if telemetry.atif is not None:

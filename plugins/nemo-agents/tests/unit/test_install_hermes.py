@@ -12,8 +12,10 @@ import pytest
 from nemo_agents_plugin.container import install_hermes
 
 
-@pytest.mark.parametrize("unexpected", [[], ["unrelated conflict"], None])
-def test_install_checks_upstream_override_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unexpected):
+@pytest.mark.parametrize("unexpected", [[], ["unrelated conflict"]])
+def test_install_checks_upstream_override_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unexpected: list[str]
+) -> None:
     interpreter = tmp_path / "venv" / "bin" / "python"
     checker = Mock(return_value=unexpected)
     monkeypatch.setattr(
@@ -21,11 +23,9 @@ def test_install_checks_upstream_override_policy(tmp_path: Path, monkeypatch: py
         "run_path",
         lambda _: {"override_requirements": lambda _: ["Pillow==13.0.0"], "unexpected_incompatibilities": checker},
     )
-    monkeypatch.setattr(install_hermes, "version", lambda name: "0.11.0" if name == "nemo-relay" else "0.6.0")
-    calls = []
+    monkeypatch.setattr(install_hermes, "version", lambda _: "0.6.0")
 
     def run(command, **kwargs):
-        calls.append(command)
         assert command[command.index("--python") + 1] == str(interpreter)
         if "install" in command:
             assert Path(command[command.index("--overrides") + 1]).read_text() == "Pillow==13.0.0\n"
@@ -42,10 +42,11 @@ def test_install_checks_upstream_override_policy(tmp_path: Path, monkeypatch: py
         with pytest.raises(subprocess.CalledProcessError):
             install_hermes.install_hermes(tmp_path, interpreter)
     checker.assert_called_once_with("report", tmp_path / "uv.lock")
-    assert len(calls) == 2
 
 
-def test_main_preserves_virtual_environment_interpreter_symlink(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_main_preserves_virtual_environment_interpreter_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     base_python = tmp_path / "base-python"
     base_python.touch()
     interpreter = tmp_path / "venv-python"

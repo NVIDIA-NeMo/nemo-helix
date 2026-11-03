@@ -111,8 +111,8 @@ class TelemetryConfig(BaseModel):
     output_dir: str | None = None
     project: str | None = None
     agent_name: str | None = None
-    insecure_http_hosts: list[str] = Field(
-        default_factory=list,
+    insecure_http_hosts: list[str] | None = Field(
+        default=None,
         description=(
             "Explicitly allow plain HTTP observability exports to these bare hostnames or IP addresses. "
             "Entries must not contain a scheme, port, path, or wildcard. Relay validates host syntax "
