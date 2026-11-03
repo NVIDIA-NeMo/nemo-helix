@@ -96,6 +96,39 @@ class FileSetSource(BaseModel):
         return None if value is None else _relative_path(value, field="context_path")
 
 
+#: Where a mount may not go: the sandbox's own tools and work volume, and the kernel's filesystems.
+RESERVED_MOUNT_PATHS = ("/busybox", "/dev", "/kaniko", "/nhx-work", "/proc", "/sys")
+
+
+class BuildMount(BaseModel):
+    """Files a build's ``RUN`` instructions can read, at a path of their own, that never become part of the image."""
+
+    model_config = _STRICT
+
+    source: FileSetSource = Field(description="The files: a fileset, or a directory or archive in one.")
+    target: str = Field(
+        description=(
+            "The absolute path where every `RUN` of the build reads them, read-only. The image holds nothing at that "
+            "path from them: kaniko leaves a mount out of every snapshot. Its base image's own files there are hidden "
+            "from the build, but kept in the image. Not `/`, and not in or above "
+            + ", ".join(f"`{path}`" for path in RESERVED_MOUNT_PATHS)
+            + "."
+        )
+    )
+
+    @field_validator("target")
+    @classmethod
+    def _target_is_a_free_absolute_path(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        plain = path.as_posix() == value and not value.startswith("//")
+        if not path.is_absolute() or not plain or ".." in path.parts or len(path.parts) < 2:
+            raise ValueError(f"target must be an absolute path below `/`, written plainly, got {value!r}")
+        for reserved in map(PurePosixPath, RESERVED_MOUNT_PATHS):
+            if path.is_relative_to(reserved) or reserved.is_relative_to(path):
+                raise ValueError(f"target {value!r} overlaps {reserved}, which the build sandbox needs")
+        return value
+
+
 class ImageSource(BaseModel):
     """A published image to copy unchanged, rather than build."""
 
@@ -177,6 +210,13 @@ class BuildSpec(BaseModel):
         description="Where to publish. Omit to publish under the workspace, with the system tag only (see `name`).",
     )
     dockerfile: str = Field(default="Dockerfile", description="Path to the Dockerfile, relative to the context.")
+    mounts: list[BuildMount] = Field(
+        default_factory=list,
+        description=(
+            "Files the build reads that its context mustn't hold, such as a tool a `RUN` installs from: the "
+            "Dockerfile's `COPY . .` and `.dockerignore` never see them. Each at its own target; none inside another."
+        ),
+    )
     platform: str | None = Field(
         default=None,
         pattern=PLATFORM_PATTERN,
@@ -193,6 +233,17 @@ class BuildSpec(BaseModel):
         _relative_path(self.dockerfile, field="dockerfile")
         if isinstance(self.source, ImageSource) and "dockerfile" in self.model_fields_set:
             raise ValueError("a spec that copies an image has no dockerfile")
+        return self
+
+    @model_validator(mode="after")
+    def _mounts_are_apart(self) -> Self:
+        if self.mounts and isinstance(self.source, ImageSource):
+            raise ValueError("a spec that copies an image runs nothing, so it has no mounts")
+        targets = [PurePosixPath(mount.target) for mount in self.mounts]
+        for index, target in enumerate(targets):
+            for other in targets[index + 1 :]:
+                if target.is_relative_to(other) or other.is_relative_to(target):
+                    raise ValueError(f"mounts at {target} and {other} overlap")
         return self
 
 

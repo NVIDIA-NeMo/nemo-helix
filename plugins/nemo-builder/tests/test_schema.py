@@ -11,6 +11,7 @@ import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import (
     MAX_BUILD_SPECS,
+    BuildMount,
     BuildOutput,
     BuildSet,
     BuildSpec,
@@ -42,6 +43,32 @@ class TestDockerfileStaysWithinContext:
     def test_does_not_escape_and_names_a_file(self, bad: str) -> None:
         with pytest.raises(ValidationError, match="dockerfile"):
             _spec("x", dockerfile=bad)
+
+
+class TestMounts:
+    @pytest.mark.parametrize("good", ["/opt/tool", "/opt/a/b", "/tools"])
+    def test_a_mount_goes_at_an_absolute_path(self, good: str) -> None:
+        assert BuildMount(source=FileSetSource(fileset="tools"), target=good).target == good
+
+    @pytest.mark.parametrize(
+        "bad", ["/", "opt/tool", "/opt/../etc", "/opt/tool/", "//opt", "/kaniko", "/kaniko/x", "/nhx-work/out", "/proc"]
+    )
+    def test_a_mount_stays_out_of_the_sandboxs_own_paths(self, bad: str) -> None:
+        with pytest.raises(ValidationError, match="target"):
+            BuildMount(source=FileSetSource(fileset="tools"), target=bad)
+
+    def test_mounts_may_not_nest(self) -> None:
+        mounts = [
+            BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool"),
+            BuildMount(source=FileSetSource(fileset="tools-b"), target="/opt/tool/agent"),
+        ]
+        with pytest.raises(ValidationError, match="overlap"):
+            BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=mounts)
+
+    def test_a_copy_has_no_mounts(self) -> None:
+        mount = BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool")
+        with pytest.raises(ValidationError, match="no mounts"):
+            BuildSpec(source=ImageSource(image="ubuntu:24.04"), mounts=[mount])
 
 
 class TestSourcePaths:

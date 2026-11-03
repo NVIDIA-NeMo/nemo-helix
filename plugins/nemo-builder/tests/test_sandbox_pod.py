@@ -25,7 +25,14 @@ from nemo_builder_plugin.run.supervise import (
     _results_from_log,
     sandbox_pod_name,
 )
-from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, SandboxSpec, WorkLayout
+from nemo_builder_plugin.steps import (
+    ContextSource,
+    SandboxGroup,
+    SandboxImage,
+    SandboxMount,
+    SandboxSpec,
+    WorkLayout,
+)
 
 
 def _sandbox(**overrides: object) -> SandboxSpec:
@@ -145,6 +152,24 @@ class TestMounts:
         mounts = {m.mount_path: m for m in _pod().spec.containers[0].volume_mounts}
         assert mounts["/nhx-work/context/ws/fs-a"].sub_path == "jobs/default/abc/context/ws/fs-a"
         assert mounts["/nhx-work/out/demo-1-0"].sub_path == "jobs/default/abc/out/demo-1-0"
+
+    def test_a_groups_mounts_are_read_only_at_their_targets(self) -> None:
+        group = _group(1).model_copy(
+            update={
+                "mounts": [SandboxMount(source=ContextSource(fileset="ws/tools", context_path="bin"), target="/opt/t")]
+            }
+        )
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g0",
+            namespace="nhx-builds",
+            group=group,
+            sandbox=_sandbox(),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        mounts = {m.mount_path: m for m in pod.spec.containers[0].volume_mounts}
+        assert mounts["/opt/t"].read_only is True
+        assert mounts["/opt/t"].sub_path == "jobs/default/abc/context/ws/tools/bin"
 
     def test_only_this_groups_outputs_are_mounted(self) -> None:
         mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
