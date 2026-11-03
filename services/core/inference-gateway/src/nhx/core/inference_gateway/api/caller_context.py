@@ -133,7 +133,10 @@ def refuse_router_keys(headers: Mapping[str, str], router_keys: Mapping[str, str
     Raises:
         HTTPException: 403 for a call made with a router's key.
     """
-    credential = _credential({name.lower(): value for name, value in headers.items()})
+    first: dict[str, str] = {}
+    for name, value in headers.items():
+        first.setdefault(name.lower(), value)
+    credential = _credential(first)
     if credential is None:
         return
     router = next((router for router, key in router_keys.items() if _same_secret(credential, key)), None)

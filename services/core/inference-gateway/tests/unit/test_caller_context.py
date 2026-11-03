@@ -21,6 +21,7 @@ from nhx.core.inference_gateway.api.caller_context import (
     CallerContextSeal,
     InvalidCallerContextError,
     caller_headers,
+    refuse_router_keys,
 )
 from nhx.core.inference_gateway.api.caller_context_middleware import GATEWAY_PATH_PREFIX, CallerContextMiddleware
 from nhx.core.inference_gateway.api.dependencies import global_virtual_model_cache
@@ -28,6 +29,7 @@ from nhx.core.inference_gateway.api.model_cache import ModelCache
 from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
 from pydantic import ValidationError
+from starlette.datastructures import Headers
 from starlette.responses import PlainTextResponse
 
 KEY = bytes(range(32))
@@ -248,6 +250,23 @@ async def test_the_middleware_drops_a_context_sent_without_its_routers_key() -> 
 
 async def test_the_middleware_refuses_a_routers_key_without_a_context() -> None:
     assert await _seen_through_middleware([(b"authorization", f"Bearer {ROUTER_KEY}".encode())]) == 403
+
+
+@pytest.mark.parametrize("name", [b"authorization", b"x-api-key"])
+async def test_the_middleware_refuses_a_second_credential_header(name: bytes) -> None:
+    """Platform auth reads the first credential; a router's key sent first, with another after it, must not slip by."""
+    first = f"Bearer {ROUTER_KEY}".encode() if name == b"authorization" else ROUTER_KEY.encode()
+
+    assert await _seen_through_middleware([(name, first), (name, b"someone-else")]) == 400
+
+
+def test_the_handler_refusal_reads_the_credential_platform_auth_reads() -> None:
+    headers = Headers(raw=[(b"authorization", f"Bearer {ROUTER_KEY}".encode()), (b"authorization", b"Bearer other")])
+
+    with pytest.raises(HTTPException) as exc_info:
+        refuse_router_keys(headers, {"default/tot": ROUTER_KEY})
+
+    assert exc_info.value.status_code == 403
 
 
 async def test_the_middleware_leaves_other_platform_routes_alone() -> None:

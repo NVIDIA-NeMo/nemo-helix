@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 GATEWAY_PATH_PREFIX = "/apis/inference-gateway/"
+_CREDENTIAL_HEADERS = ("authorization", "x-api-key")
 
 
 def _router_keys() -> Mapping[str, str | None]:
@@ -49,7 +50,14 @@ class CallerContextMiddleware:
             await self._app(scope, receive, send)
             return
         raw: list[tuple[bytes, bytes]] = scope["headers"]
-        headers = {name.decode("latin-1"): value.decode("latin-1") for name, value in raw}
+        names = [name.decode("latin-1").lower() for name, _ in raw]
+        if any(names.count(credential) > 1 for credential in _CREDENTIAL_HEADERS):
+            await JSONResponse(
+                {"detail": "An inference request may carry at most one Authorization and one x-api-key header."},
+                status_code=400,
+            )(scope, receive, send)
+            return
+        headers = {name.decode("latin-1").lower(): value.decode("latin-1") for name, value in raw}
         router_keys = self._router_keys()
         if CALLER_CONTEXT_HEADER not in headers and not router_keys:
             await self._app(scope, receive, send)
@@ -60,12 +68,15 @@ class CallerContextMiddleware:
             await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(scope, receive, send)
             return
         if CALLER_CONTEXT_HEADER in headers:
-            credentials = ("authorization", "x-api-key")
             kept = [
                 (name, value)
                 for name, value in raw
-                if name.decode("latin-1").lower() not in {CALLER_CONTEXT_HEADER, *credentials}
+                if name.decode("latin-1").lower() not in {CALLER_CONTEXT_HEADER, *_CREDENTIAL_HEADERS}
             ]
-            kept += [(name.encode("latin-1"), acting[name].encode("latin-1")) for name in credentials if name in acting]
+            kept += [
+                (name.encode("latin-1"), acting[name].encode("latin-1"))
+                for name in _CREDENTIAL_HEADERS
+                if name in acting
+            ]
             scope = {**scope, "headers": kept}
         await self._app(scope, receive, send)
