@@ -193,7 +193,7 @@ response = InferenceGatewayClient.from_client(client).provider_post(
 </Tabs>
 #### Anthropic
 
-Anthropic's `/v1/messages` API expects the API key in an `X-Api-Key:` header (not `Authorization: Bearer`) and requires an `anthropic-version` header on every request. Use `--auth-header-format` (Jinja2 template, must contain exactly one `{{ auth_secret }}` variable) to override the default `Authorization: Bearer {{ auth_secret }}` and pass the API-version pin via `--default-extra-headers`. Without these, Anthropic rejects every request with 401.
+Anthropic's `/v1/messages` API expects the API key in an `X-Api-Key:` header (not `Authorization: Bearer`) and requires an `anthropic-version` header on every request. Use `--auth-header-format` (a literal header format that must contain exactly one `<auth_secret>` placeholder) to override the default `Authorization: Bearer <auth_secret>` and pass the API-version pin via `--default-extra-headers`. Without these, Anthropic rejects every request with 401.
 
 <Tabs>
 
@@ -207,7 +207,7 @@ echo "$ANTHROPIC_API_KEY" | nemo secrets create "anthropic-api-key" --from-file 
 nemo inference providers create "anthropic" \
     --host-url "https://api.anthropic.com" \
     --api-key-secret-name "anthropic-api-key" \
-    --auth-header-format "X-Api-Key: {{ auth_secret }}" \
+    --auth-header-format "X-Api-Key: <auth_secret>" \
     --default-extra-headers '{"anthropic-version": "2023-06-01"}'
 
 nemo wait inference provider anthropic
@@ -228,7 +228,7 @@ provider = client.models.create_provider(
         name="anthropic",
         host_url="https://api.anthropic.com",
         api_key_secret_name="anthropic-api-key",
-        auth_header_format="X-Api-Key: {{ auth_secret }}",
+        auth_header_format="X-Api-Key: <auth_secret>",
         default_extra_headers={"anthropic-version": "2023-06-01"},
     ),
 ).data()
@@ -239,7 +239,7 @@ client.models.wait_for_provider_status(provider_name="anthropic")
 </Tab>
 
 </Tabs>
-`{{ auth_secret }}` is substituted with the resolved secret value at request time.
+`<auth_secret>` is substituted with the resolved secret value at request time. The legacy `{{ auth_secret }}` spelling is still accepted.
 
 ---
 

@@ -7,6 +7,11 @@ instances:
   multi-source: true
 title: NVIDIA NeMo Helix
 global-theme: nvidia
+settings:
+  http-snippets:
+  - python
+  - javascript
+  - curl
 logo:
   right-text: NeMo Helix
 css:

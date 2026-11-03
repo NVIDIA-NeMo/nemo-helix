@@ -20,6 +20,7 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.api.utils import register_query_param_schemas
 from nhx.common.auth import Principal
+from nhx.common.auth.openapi import register_bearer_security_scheme
 from nhx.common.config import Configuration, HelixConfig, ServiceConfig, get_platform_config
 from nhx.common.controller import Controller
 from nhx.common.entities.client import EntityClient
@@ -73,6 +74,7 @@ class _ServiceFastAPI(FastAPI):
             tags=self._nhx_service_openapi_tags,
         )
         openapi_schema = register_query_param_schemas(openapi_schema)
+        openapi_schema = register_bearer_security_scheme(openapi_schema)
         self.openapi_schema = openapi_schema
         return self.openapi_schema
 

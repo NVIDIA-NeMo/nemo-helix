@@ -13,6 +13,7 @@ from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_s
 from nemo_evals.api.v2.taskset_runs import router
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, ResultState, TasksetRunMemberEntity, TasksetRunPhase
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -488,3 +489,20 @@ def test_real_authorization_denies_cancel_without_the_permission(
             assert response.status_code == 403, response.text
     get.assert_not_awaited()
     update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("suffix", ["", "/run-selected", "/run-selected/tasks"])
+async def test_read_routes_preserve_storage_permission_denials(read_client, service, monkeypatch, suffix):
+    denied = PermissionDeniedError(
+        httpx.Response(
+            403,
+            json={"detail": "private storage denial"},
+            request=httpx.Request("GET", "http://entities.test/entities"),
+        )
+    )
+    monkeypatch.setattr(service, "list_runs", AsyncMock(side_effect=denied))
+    monkeypatch.setattr(service, "get", AsyncMock(side_effect=denied))
+    monkeypatch.setattr(service, "list_tasks", AsyncMock(side_effect=denied))
+    response = await read_client.get(PATH + suffix)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Forbidden"}

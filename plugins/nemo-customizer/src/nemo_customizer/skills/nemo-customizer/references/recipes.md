@@ -8,7 +8,7 @@ Before you write job JSON for a named model, start from a benchmarked recipe in 
 | Backend | Library | Ref (matches the training image) | Applicable recipes |
 |---|---|---|---|
 | `automodel` | [Automodel](https://github.com/NVIDIA-NeMo/Automodel/tree/r0.6.0/examples) | `r0.6.0` | `examples/llm_finetune/<family>/`, `examples/llm_kd/` |
-| `rl` | [NeMo-RL](https://github.com/NVIDIA-NeMo/RL/tree/r0.8.0/examples/configs) | `r0.8.0` | `examples/configs/recipes/llm/*-fsdp2*`, `*-automodel*`, and the base configs they extend. Customizer trains on the DTensor/Automodel policy, so `*-megatron*` recipes do not apply. |
+| `rl` | [NeMo-RL](https://github.com/NVIDIA-NeMo/RL/tree/r0.8.0/examples/configs) | `r0.8.0` | `examples/configs/recipes/llm/*-fsdp2*`, `*-automodel*`, and the base configs they extend. Customizer trains on `AutomodelPolicyWorker`, so `*-megatron*` recipes do not apply. |
 
 ## Workflow
 
@@ -42,7 +42,7 @@ All of [`examples/llm_finetune/nemotron/`](https://github.com/NVIDIA-NeMo/Automo
 
 **Nemotron gotchas**
 
-- **Hopper or Blackwell only.** Nemotron customization is supported on NVIDIA Hopper or Blackwell era GPUs (H100, H200, B100, B200). Check `nemo jobs list-execution-profiles -f json` for a Hopper or Blackwell profile before you submit, and set `training.execution_profile` if the default GPU profile is neither. If the platform has no such GPUs, tell the user rather than submitting.
+- **Hopper or Blackwell only.** Nemotron customization is supported on NVIDIA Hopper or Blackwell era GPUs (H100, H200, B100, B200). Check the GPUs of the profile you will train on before you submit (`troubleshooting.md` § **GPUs and training image**): Hopper has compute capability 9.0, Blackwell 10.0 and up. Set `training.execution_profile` if the default GPU profile is neither. If the platform has no such GPUs, tell the user rather than submitting.
 - Train the **BF16** checkpoint. Automodel `r0.6.0` dequantizes FP8 and GPT-OSS MXFP4 base checkpoints, but not ModelOpt NVFP4 (`…-NVFP4`). Use NVFP4 for inference only.
 - Set `lora.exclude_modules: ["*.out_proj"]`. Mamba `out_proj` runs through a fused kernel that LoRA cannot wrap.
 - MoE layout: `parallelism.expert_parallel_size` equal to the GPU count, `tensor_parallel_size: 1` (`hyperparameters-automodel.md` § `parallelism`).
@@ -99,12 +99,11 @@ All fields go under `training` unless noted.
 | `policy.max_total_sequence_length` | `max_seq_length` |
 | `policy.optimizer.kwargs.lr` / `weight_decay` / `eps` | `learning_rate` / `weight_decay` / `adam_eps` |
 | `policy.scheduler` min LR / warmup | `min_learning_rate` / `warmup_steps` |
-| `policy.dtensor_cfg.{tensor,context,expert}_parallel_size` | `parallelism.*` (`expert_parallel_size` is GRPO-only and needs `policy_backend: "automodel"`) |
-| `policy.dtensor_cfg._v2: true` | `policy_backend: "automodel"` (GRPO) |
-| `policy.dtensor_cfg.activation_checkpointing` | `activation_checkpointing` |
-| `policy.dtensor_cfg.lora_cfg.{dim,alpha,dropout,exclude_modules}` | `finetuning_type: "lora"` + `lora.{rank,alpha,dropout,exclude_modules}` (GRPO-only) |
+| `policy.automodel_cfg.{tensor,context,expert}_parallel_size` | `parallelism.*` (`expert_parallel_size` is GRPO-only) |
+| `policy.automodel_cfg.activation_checkpointing` | `activation_checkpointing` |
+| `policy.automodel_cfg.lora_cfg.{dim,alpha,dropout,exclude_modules}` | `finetuning_type: "lora"` + `lora.{rank,alpha,dropout,exclude_modules}` (GRPO-only) |
 | `policy.generation.temperature` / `max_new_tokens` / `top_k` | `temperature` / `max_new_tokens` / `top_k` |
-| `policy.generation.vllm_cfg.tensor_parallel_size` / `gpu_memory_utilization` | `vllm_tensor_parallel_size` / `vllm_gpu_memory_utilization` |
+| `policy.generation.vllm_cfg.tensor_parallel_size` / `expert_parallel_size` / `gpu_memory_utilization` | `vllm_tensor_parallel_size` / `vllm_expert_parallel_size` / `vllm_gpu_memory_utilization` |
 | `cluster.num_nodes` / `gpus_per_node` | `parallelism.num_nodes` / `num_gpus_per_node` |
 | `checkpointing.keep_top_k`, `grpo.val_period` | `keep_top_k`, `val_check_interval` |
 | `policy.megatron_cfg.*`, `logger.*`, `data.*`, `env.*` | not mapped — Megatron is disabled; data and environment come from FileSets |

@@ -82,7 +82,11 @@ PROXY_OPENAPI_EXTRA: dict = {
                 "schema": {
                     "type": "object",
                     "additionalProperties": True,
-                }
+                },
+                "example": {
+                    "model": "YOUR_MODEL_NAME",
+                    "messages": [{"role": "user", "content": "Hello!"}],
+                },
             }
         },
         "required": False,
@@ -200,9 +204,10 @@ async def build_next_request(
         trailing_uri: The path suffix to append (e.g., "v1/chat/completions")
         auth_token: Raw secret value to inject into the auth header. When set,
             *auth_header_format* controls which header name and value format are used.
-        auth_header_format: Jinja2 template string controlling the auth header, e.g.
-            ``"X-Api-Key: {{ auth_secret }}"``. Defaults to
-            ``"Authorization: Bearer {{ auth_secret }}"`` when ``None``.
+        auth_header_format: Literal header format containing exactly one ``<auth_secret>``
+            placeholder (or the legacy ``{{ auth_secret }}``; never evaluated as a template), e.g.
+            ``"X-Api-Key: <auth_secret>"``. Defaults to
+            ``"Authorization: Bearer <auth_secret>"`` when ``None``.
         body: If the caller doesn't want to proxy the request's body,
               they can pass this argument instead. If not passed, we'll
               proxy the body when appropriate.
@@ -246,7 +251,13 @@ async def build_next_request(
         headers["content-length"] = str(len(body_bytes))
 
     if auth_token:
-        header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        try:
+            header_name, header_value = render_auth_header(auth_token, auth_header_format)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=http_status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"Invalid provider authentication configuration: {exc}",
+            ) from exc
         headers[header_name] = header_value
 
     return NextRequestInfo(

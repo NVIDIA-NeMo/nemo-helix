@@ -559,6 +559,7 @@ class AgentDeploymentController(NemoController):
                 config=dep.config,
                 port=0,
                 agent=dep.agent,
+                source_fileset=dep.source_fileset,
                 image=dep.image or None,
                 deployment_mode=dep.deployment_mode,
                 created_by=dep.created_by,

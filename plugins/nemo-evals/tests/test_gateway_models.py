@@ -344,7 +344,9 @@ def test_a_no_network_task_off_the_agent_channel_is_refused(
     """
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
 
-    with pytest.raises(ValueError, match=r"no-network tasks \['offline'\] can't reach the Inference Gateway"):
+    with pytest.raises(
+        ValueError, match=r"no-network or allowlist tasks \['offline'\] can't reach the Inference Gateway"
+    ):
         check_tasks_reach_the_gateway(_codex(), [("online", {}), ("offline", _NO_NETWORK)], agent_channel)
 
 
@@ -362,8 +364,38 @@ def test_a_task_that_takes_only_the_agent_offline_is_checked(
     """Harbor runs the agent under its own or a step's network mode, ahead of the environment's."""
     monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
 
-    with pytest.raises(ValueError, match=r"gateway_unreachable: no-network tasks \['offline'\]"):
+    with pytest.raises(ValueError, match=r"gateway_unreachable: no-network or allowlist tasks \['offline'\]"):
         check_tasks_reach_the_gateway(_codex(), [("offline", config)], ())
+
+
+def test_an_allowlist_task_off_the_agent_channel_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its sandbox reaches only its own hosts and the agent channel, not the profile's egress_allow."""
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", "http://nemo-api.ns.svc:8080")
+    allowlist = {"environment": {"network_mode": "allowlist", "allowed_hosts": ["pypi.org"]}}
+
+    check_tasks_reach_the_gateway(_codex(), [("allowlist", allowlist)], ("nemo-api.ns.svc",))
+    with pytest.raises(ValueError, match=r"no-network or allowlist tasks \['allowlist'\] can't reach"):
+        check_tasks_reach_the_gateway(_codex(), [("online", {}), ("allowlist", allowlist)], ())
+
+
+@pytest.mark.parametrize(
+    ("allowed_hosts", "reaches"),
+    [(["nemo-api.ns.svc"], True), (["10.0.0.0/8"], True), (["nemo-api.ns.svc.cluster.local"], False)],
+    ids=["host", "cidr", "other-name"],
+)
+def test_an_allowlist_task_that_allows_the_gateway_needs_no_agent_channel(
+    monkeypatch: pytest.MonkeyPatch, allowed_hosts: list[str], reaches: bool
+) -> None:
+    """Without a channel entry the agent calls the gateway by its own host, so only that name or its IP counts."""
+    host = "10.1.2.3" if allowed_hosts == ["10.0.0.0/8"] else "nemo-api.ns.svc"
+    monkeypatch.setenv("NHX_INTERNAL_BASE_URL", f"http://{host}:8080")
+    allowlist = {"environment": {"network_mode": "allowlist", "allowed_hosts": allowed_hosts}}
+
+    if reaches:
+        check_tasks_reach_the_gateway(_codex(), [("allowlist", allowlist)], ())
+    else:
+        with pytest.raises(ValueError, match="gateway_unreachable"):
+            check_tasks_reach_the_gateway(_codex(), [("allowlist", allowlist)], ())
 
 
 def test_tasks_with_network_access_or_targets_without_a_gateway_model_are_not_checked() -> None:

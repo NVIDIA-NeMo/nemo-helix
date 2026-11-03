@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The agent channel for no-network tasks, and the agent setup egress window."""
+"""The agent channel for no-network and allowlist tasks, and the agent setup egress window."""
 
 import asyncio
 import ipaddress
@@ -21,10 +21,12 @@ from nhx_sandbox.opensandbox_policy import EgressVerificationError
 IGW = "nemo-helix-api.ns.svc.cluster.local"
 
 
-def _environment(mode: NetworkMode, channel: tuple[str, ...], trusted: tuple[str, ...] = ()) -> Any:
+def _environment(
+    mode: NetworkMode, channel: tuple[str, ...], trusted: tuple[str, ...] = (), allowed: tuple[str, ...] = ()
+) -> Any:
     """The environment's egress state only; ``egress_policy`` reads nothing else."""
     environment = object.__new__(AgentChannelOpenSandboxEnvironment)
-    environment._network_policy = NetworkPolicy(network_mode=mode)
+    environment._network_policy = NetworkPolicy(network_mode=mode, allowed_hosts=list(allowed))
     environment._agent_channel_hosts = channel
     environment._trusted_allowed_hosts = trusted
     environment._agent_setup_hosts = ()
@@ -45,6 +47,20 @@ def test_no_network_with_channel_allows_only_the_channel():
     policy = _environment(NetworkMode.NO_NETWORK, (IGW,), trusted=(IGW, "pypi.org")).egress_policy()
     assert policy.default_action == "deny"
     assert IGW in _allowed(policy) and "pypi.org" not in _allowed(policy)
+
+
+def test_allowlist_tasks_get_their_own_hosts_and_the_channel_only():
+    environment = _environment(
+        NetworkMode.ALLOWLIST, (IGW,), trusted=(IGW, "pypi.org", "github.com"), allowed=("pypi.org",)
+    )
+    allowed = _allowed(environment.egress_policy())
+    assert allowed & {IGW, "pypi.org", "github.com"} == {IGW, "pypi.org"}
+
+
+def test_allowlist_without_channel_keeps_the_task_hosts():
+    environment = _environment(NetworkMode.ALLOWLIST, (), trusted=(IGW, "pypi.org"), allowed=("pypi.org",))
+    allowed = _allowed(environment.egress_policy())
+    assert allowed & {IGW, "pypi.org"} == {"pypi.org"}
 
 
 def test_public_tasks_keep_the_profile_allowlist():
@@ -157,14 +173,24 @@ async def test_a_process_that_survives_the_kill_fails_the_trial(monkeypatch):
     assert _allowed_now(environment) == {IGW}  # the hosts were removed before the kill was attempted
 
 
-async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatch):
+@pytest.mark.parametrize(
+    ("verification", "error"),
+    [
+        # Strict verification of the closed policy already rejects the setup hosts the sidecar kept.
+        ("strict", "allows 2 egress target"),
+        # The dedicated check still catches them when only the default action is verified.
+        ("default_action", "still allows"),
+    ],
+)
+async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatch, verification, error):
     environment = _setup_environment(monkeypatch)
+    environment._egress_verification = verification
 
     async def ignore_delete(targets: list[str]) -> None:
         return None
 
     monkeypatch.setattr(environment._sandbox, "delete_egress_rules", ignore_delete)
-    with pytest.raises(EgressVerificationError, match="still allows"):
+    with pytest.raises(EgressVerificationError, match=error):
         async with environment.agent_setup_egress():
             pass
 
