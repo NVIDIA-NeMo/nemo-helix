@@ -91,7 +91,7 @@ metrics:
 `;
 
 // A stored config carries the dataset reference that upload bakes in.
-const STORED_EVAL_CONFIG = `dataset: default/baseline-data#dataset.jsonl
+const STORED_EVAL_CONFIG = `dataset: default/source-data#dataset.jsonl
 ${EVAL_CONFIG}`;
 
 const SOURCE: EvaluationResponse = {
@@ -224,5 +224,9 @@ describe('AgentEvaluationWizard parallel requests', () => {
 
     await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
     expect(submittedParallelism()).toBe(2);
+    expect(createRunEvaluation).toHaveBeenCalledWith(
+      DEFAULT_WORKSPACE,
+      expect.objectContaining({ datasetName: 'source-data' })
+    );
   });
 });

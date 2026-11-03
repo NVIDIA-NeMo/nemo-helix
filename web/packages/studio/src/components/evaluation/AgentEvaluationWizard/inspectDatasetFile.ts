@@ -8,29 +8,19 @@ import {
   parseDataFile,
 } from '@studio/components/FileRowEditor/parse';
 
-/** Stem the dataset is stored under in the run's fileset; the extension follows its content. */
-const DATASET_BASENAME = 'dataset';
-
-/** Either the name a valid dataset is stored under, or why it was rejected. */
+/** Why a dataset was rejected; empty when it is valid. */
 export interface DatasetInspection {
-  storedName?: string;
   error?: string;
 }
 
 const isRecord = (value: unknown): boolean =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const storedAs = (
-  records: readonly unknown[],
-  format: 'json' | 'jsonl' | 'csv' | 'parquet'
-): DatasetInspection =>
-  records.length === 0
-    ? { error: 'File contains no data' }
-    : { storedName: `${DATASET_BASENAME}.${format}` };
+const nonEmpty = (records: readonly unknown[]): DatasetInspection =>
+  records.length === 0 ? { error: 'File contains no data' } : {};
 
 /** The evaluator's loader takes ``.json`` and ``.jsonl`` interchangeably, sniffing a leading
- *  ``[`` to tell an array from line-delimited records — so the name follows the detected
- *  content, not the uploaded extension, and the dataset ref written into the config matches.
+ *  ``[`` to tell an array from line-delimited records, so either extension is read either way.
  *
  *  Every record must be an object: the evaluator turns each one into a row keyed by its own
  *  fields, and a file of scalars only fails once the job is running. */
@@ -39,15 +29,12 @@ const inspectJsonText = (rawText: string): DatasetInspection => {
   if (!text) return { error: 'File is empty' };
 
   let records: unknown[];
-  let format: 'json' | 'jsonl';
   try {
     const parsed: unknown = JSON.parse(text);
     records = Array.isArray(parsed) ? parsed : [parsed];
-    format = 'json';
   } catch {
     try {
       records = text.split('\n').flatMap((line) => (line.trim() ? [JSON.parse(line)] : []));
-      format = 'jsonl';
     } catch {
       return { error: 'File is not valid JSON or JSONL' };
     }
@@ -56,7 +43,7 @@ const inspectJsonText = (rawText: string): DatasetInspection => {
   if (records.length > 0 && !records.every(isRecord)) {
     return { error: 'Every dataset record must be a JSON object.' };
   }
-  return storedAs(records, format);
+  return nonEmpty(records);
 };
 
 const isBlankLine = (cells: readonly string[]): boolean => cells.length === 1 && cells[0] === '';
@@ -77,21 +64,20 @@ const inspectCsvText = (text: string): DatasetInspection => {
       error: `Row ${raggedIndex + 1} has ${body[raggedIndex].length} values but the header has ${header.length}.`,
     };
   }
-  return storedAs(parseDataFile(text, 'csv'), 'csv');
+  return nonEmpty(parseDataFile(text, 'csv'));
 };
 
 /** CSV and Parquet rows always decode as objects, so only emptiness needs checking. Reading the
  *  first row is enough to prove the file decodes with a codec the browser supports. */
 const inspectParquet = async (file: File): Promise<DatasetInspection> => {
   try {
-    return storedAs(await readParquetRows(file, 1), 'parquet');
+    return nonEmpty(await readParquetRows(file, 1));
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Could not read the dataset file.' };
   }
 };
 
-/** Validate a dataset and settle the name it is stored under. The file is stored as-is, so the
- *  evaluator reads it with the loader for its real format rather than a lossy conversion. */
+/** Validate a dataset the way the evaluator's loader for its format will read it. */
 export const inspectDatasetFile = async (file: File): Promise<DatasetInspection> => {
   switch (formatFromFileName(file.name)) {
     case 'parquet':

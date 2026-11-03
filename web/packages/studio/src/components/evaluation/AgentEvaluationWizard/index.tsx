@@ -44,6 +44,8 @@ import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
   buildAgentEvaluationSpec,
   configFitIssues,
+  NO_FIT_ISSUES,
+  promptFitIssues,
   defaultAgentPrompt,
   defaultJudgePrompt,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
@@ -51,6 +53,12 @@ import {
   DATASET_FILE_TYPES,
   EVAL_CONFIG_FILE_ACCEPT,
 } from '@studio/components/evaluation/AgentEvaluationWizard/consts';
+import {
+  DATASET_SNAPSHOT_KEY,
+  datasetDrift,
+  datasetSnapshotOf,
+  takeDatasetSnapshot,
+} from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import { EvaluationSourceSelect } from '@studio/components/evaluation/AgentEvaluationWizard/EvaluationSourceSelect';
 import { FilesetConfigPicker } from '@studio/components/evaluation/AgentEvaluationWizard/FilesetConfigPicker';
 import { inspectDatasetFile } from '@studio/components/evaluation/AgentEvaluationWizard/inspectDatasetFile';
@@ -225,8 +233,7 @@ const submitEvaluationBaseSchema = z.object({
 
 type SubmitEvaluationFormData = z.infer<typeof submitEvaluationBaseSchema>;
 
-const isUnusablePrompt = (prompt: string | null) =>
-  prompt !== null && (!prompt.trim() || hasMalformedBraces(prompt));
+const isUnusablePrompt = (prompt: string | null) => prompt !== null && hasMalformedBraces(prompt);
 
 const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
   submitEvaluationBaseSchema.superRefine((data, ctx) => {
@@ -553,8 +560,23 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     enabled: mode === MODE_EXPERIMENT && !!selectedEvaluation,
   });
 
+  const sourceSnapshot = selectedEvaluation ? datasetSnapshotOf(selectedEvaluation) : null;
+  const { data: sourceDatasetDrift, isFetching: isCheckingSourceDataset } = useQuery({
+    queryKey: ['evaluation-dataset-drift', workspace, evaluationName],
+    queryFn: sourceSnapshot
+      ? ({ signal }) => datasetDrift(workspace, sourceSnapshot, signal)
+      : skipToken,
+    enabled: mode === MODE_EXPERIMENT,
+    retry: false,
+  });
+  const sourceDatasetMissing =
+    sourceDatasetDrift === 'missing' && sourceSnapshot
+      ? `The dataset this evaluation read, ${sourceSnapshot.ref}, no longer exists. Pick another evaluation.`
+      : undefined;
+
   const evaluationFileset = selectedEvaluation ? evaluationFilesetName(selectedEvaluation) : null;
-  const evaluationFieldError = errors.evaluationName?.message ?? evaluationConfigIssue ?? undefined;
+  const evaluationFieldError =
+    errors.evaluationName?.message ?? evaluationConfigIssue ?? sourceDatasetMissing ?? undefined;
 
   const configKind = useWatch({ control, name: 'configKind' });
   const isFormConfig = configKind === CONFIG_KIND_FORM;
@@ -641,15 +663,18 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   // Checked against the row the preview read, so nothing is reported before the columns are known.
   const configIssues =
-    !isFormConfig && pickedSpec && preview.row ? configFitIssues(pickedSpec, columns) : [];
+    !isFormConfig && pickedSpec && preview.row
+      ? configFitIssues(pickedSpec, columns)
+      : NO_FIT_ISSUES;
   const generatedAgentPrompt = defaultAgentPrompt(columns);
   const generatedJudgePrompt = defaultJudgePrompt(columns);
-  const promptFitIssues = (prompt: string) =>
-    isFormConfig && preview.row
-      ? configFitIssues({ dataset: '', metrics: [], prompt_template: prompt }, columns)
-      : [];
-  const promptIssues = promptFitIssues(promptTemplate ?? generatedAgentPrompt);
-  const judgePromptIssues = promptFitIssues(judgePrompt ?? generatedJudgePrompt);
+  const checksPrompts = isFormConfig && !!preview.row;
+  const promptIssues = checksPrompts
+    ? promptFitIssues(promptTemplate ?? generatedAgentPrompt, columns)
+    : NO_FIT_ISSUES;
+  const judgePromptIssues = checksPrompts
+    ? promptFitIssues(judgePrompt ?? generatedJudgePrompt, columns, true)
+    : NO_FIT_ISSUES;
 
   const rawExperimentName = useWatch({ control, name: 'newName' });
   const rawRecordName = useWatch({ control, name: 'evaluationRecordName' });
@@ -748,14 +773,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       .filter((urn): urn is NonNullable<typeof urn> => urn !== undefined) ?? []
   );
 
-  // A ref string is checked against the workspace below, and a concrete `{url, name}` Model (what
-  // the model wizard writes) runs as-is. Anything else cannot run, so it requires the override.
+  // Nothing to validate, but it still cannot run — so it requires the override just the same.
   const hasModellessJudge =
-    isLlmJudge &&
-    judgeMetrics.some((metric) => {
-      const model = metric.payload.metric.model;
-      return typeof model !== 'string' && !isConcreteModel(model);
-    });
+    isLlmJudge && judgeMetrics.some((metric) => typeof metric.payload.metric.model !== 'string');
 
   // Full `workspace/name` ModelRefs: an unqualified bare name is unreachable to the evaluator's
   // resolver. Empty while loading, or every model would read as unusable.
@@ -804,7 +824,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // The override belongs to a picked config; a built one picks its own judge.
   const handleConfigKindChanged = (value: string) => {
     setValue('judgeModel', '');
-    clearErrors();
+    clearErrors(['judgeModel', 'configFileset', 'configFile', 'promptTemplate', 'body']);
     clearConfigPick();
     setValue('configFileset', '');
     setValue('configFile', '');
@@ -864,13 +884,21 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
           parentEvaluationId = selectedEvaluation.id;
         }
 
+        const specDataset =
+          isDatasetEvalSpec(spec) && typeof spec.dataset === 'string' ? spec.dataset : null;
+        const datasetSnapshot = specDataset
+          ? await takeDatasetSnapshot(workspace, specDataset).catch(() => null)
+          : null;
         const evaluationId = await createRunEvaluation(workspace, {
           experimentIds,
           name: formData.evaluationRecordName,
           nameStem,
           filesetName,
-          datasetName: isNew ? datasetLocation?.name : undefined,
+          datasetName: specDataset ? parseFilesetLocation(specDataset, workspace)?.name : undefined,
           parentEvaluationId,
+          metadata: datasetSnapshot
+            ? { [DATASET_SNAPSHOT_KEY]: JSON.stringify(datasetSnapshot) }
+            : undefined,
         }).catch((err: unknown) => {
           if (isConflictError(err)) {
             throw new Error(
@@ -936,13 +964,13 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       if (datasetError) {
         return blockedWith(datasetError);
       }
-      if (configIssues.length > 0) {
+      if (configIssues.errors.length > 0) {
         return SHOWN_ON_FIELD;
       }
       if (isLlmJudge && isJudgeModelsLoading) {
         return blockedWith('Loading judge models...');
       }
-      if (promptIssues.length > 0 || judgePromptIssues.length > 0) {
+      if (promptIssues.errors.length > 0 || judgePromptIssues.errors.length > 0) {
         return SHOWN_ON_FIELD;
       }
     }
@@ -964,7 +992,10 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         if (isValidatingEvaluation) {
           return blockedWith('Checking the saved eval config...');
         }
-        if (evaluationConfigIssue) {
+        if (isCheckingSourceDataset) {
+          return blockedWith('Checking the dataset...');
+        }
+        if (evaluationConfigIssue || sourceDatasetMissing) {
           return SHOWN_ON_FIELD;
         }
       }
@@ -1017,9 +1048,9 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (
       mode === MODE_DEFAULT &&
       ((!isFormConfig && !pickedSpec) ||
-        configIssues.length > 0 ||
-        promptIssues.length > 0 ||
-        judgePromptIssues.length > 0)
+        configIssues.errors.length > 0 ||
+        promptIssues.errors.length > 0 ||
+        judgePromptIssues.errors.length > 0)
     ) {
       setStep('configuration');
       return;
@@ -1242,8 +1273,13 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                       />
                     )}
 
-                    {configIssues.map((issue) => (
+                    {configIssues.errors.map((issue) => (
                       <Banner key={issue} kind="inline" status="error">
+                        {issue}
+                      </Banner>
+                    ))}
+                    {configIssues.warnings.map((issue) => (
+                      <Banner key={issue} kind="inline" status="warning">
                         {issue}
                       </Banner>
                     ))}
@@ -1366,6 +1402,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                     disabled={isPending}
                   />
                 ))}
+              {mode === MODE_EXPERIMENT && sourceDatasetDrift === 'changed' ? (
+                <Banner kind="inline" status="warning">
+                  The dataset has changed since {evaluationName} ran, so its scores may not compare
+                  with this run&apos;s.
+                </Banner>
+              ) : null}
 
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}
