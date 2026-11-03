@@ -38,7 +38,7 @@ from nemo_evals.harbor.remote.sandbox_policy import SandboxPolicyError, resolve_
 from nemo_evals.image_builds.service import ImageBuildService, JobsServiceBuildJobs, builder_authorizer
 from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import AgentEvalSpec, ResolvedTask, registered_agent_source, target_agent_identity
-from nemo_evals.jobs.gateway_models import require_closed_book_route
+from nemo_evals.jobs.gateway_models import platform_gateway_url_override, require_closed_book_route
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment
 from nemo_evals.revisions import RevisionNotFoundError, get_revision
 from nemo_evals.source_authorization import remember_allowed
@@ -378,6 +378,7 @@ class TasksetRunService:
                 dispatcher_profile=dispatcher_profile,
                 task_environments=prepared,
                 intake=intake,
+                gateway_url_override=platform_gateway_url_override(),
             )
             # Before accept, so every stored run has its Evaluation. An accept that fails after this leaves the
             # Evaluation behind; a retry with the same idempotency_key derives the same run id and adopts it.
