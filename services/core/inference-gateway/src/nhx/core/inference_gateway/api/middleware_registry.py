@@ -142,6 +142,7 @@ class InferenceMiddlewareCacheAccessorImpl:
 
         Raises:
             KeyError: If ``model_entity_id`` is not in the ModelCache.
+            ValueError: If the provider's stored ``auth_header_format`` is invalid.
         """
         try:
             ref = parse_model_entity_ref(model_entity_id)

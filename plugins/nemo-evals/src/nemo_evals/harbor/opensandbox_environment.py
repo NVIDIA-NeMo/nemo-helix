@@ -3,9 +3,9 @@
 
 """The OpenSandbox environment task Jobs run trials in: nhx-sandbox's environment plus an agent channel.
 
-A no-network task (``allow_internet = false``) normally gets a deny-all sandbox. An agent that runs
-inside the sandbox (codex, hermes, ...) then can't reach its model. ``agent_channel_hosts`` keeps
-those hosts (the inference gateway) reachable for such tasks; the internet stays closed.
+A no-network task (``allow_internet = false``) normally gets a deny-all sandbox, and an allowlist task only
+the hosts it declares. An agent that runs inside the sandbox (codex, hermes, ...) then can't reach its model.
+``agent_channel_hosts`` keeps those hosts (the inference gateway) reachable for such tasks; nothing else opens.
 
 It also sizes each sandbox as submit checked it: ``agent_resource_overrides`` in the agent sandbox only,
 then task.toml, then ``sandbox_resource_defaults``.
@@ -42,7 +42,7 @@ def network_rules(rules: list[EgressRule]) -> list[Any]:
 
 
 class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
-    """``NemoOpenSandboxEnvironment`` whose no-network sandboxes may still reach ``agent_channel_hosts``."""
+    """``NemoOpenSandboxEnvironment`` whose no-network and allowlist sandboxes may also reach ``agent_channel_hosts``."""
 
     _setup_egress_state: Literal["closed", "open", "closing"] = "closed"
 
@@ -79,11 +79,15 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
 
     @override
     def egress_policy(self) -> EgressPolicy:
-        """No-network tasks get the agent channel only (empty channel: deny all); other modes are unchanged."""
-        if self._network_policy.network_mode != NetworkMode.NO_NETWORK or not self._agent_channel_hosts:
+        """No-network and allowlist tasks also get the agent channel (empty channel: unchanged); public is unchanged."""
+        mode = self._network_policy.network_mode
+        if mode == NetworkMode.PUBLIC or not self._agent_channel_hosts:
             return super().egress_policy()
+        task_hosts = tuple(self._network_policy.allowed_hosts) if mode == NetworkMode.ALLOWLIST else ()
         return build_egress_policy(
-            EgressAllowlist(targets=self._agent_channel_hosts, resolver_addresses=self._resolver_addresses)
+            EgressAllowlist(
+                targets=(*task_hosts, *self._agent_channel_hosts), resolver_addresses=self._resolver_addresses
+            )
         )
 
     @asynccontextmanager

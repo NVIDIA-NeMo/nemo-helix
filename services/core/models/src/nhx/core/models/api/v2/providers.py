@@ -7,6 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -76,6 +77,8 @@ async def list_providers(
         return result
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to list model providers for workspace {workspace}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -144,6 +147,8 @@ async def create_provider(
             )
         logger.warning(f"Model provider creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to create model provider")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -214,6 +219,8 @@ async def upsert_provider(
     except ValueError as e:
         logger.warning(f"Model provider upsert validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to upsert model provider")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -260,6 +267,8 @@ async def update_provider_status(
         )
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to update model provider status fields")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -295,6 +304,8 @@ async def get_provider(
 
         return provider
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model provider {workspace}/{name}")
@@ -335,6 +346,8 @@ async def delete_provider(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to delete model provider {workspace}/{name}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

@@ -100,6 +100,20 @@ def test_rejects_duplicate_mount_paths_within_a_container() -> None:
         parse_compose_services(_spec(service, volumes=["a"]))
 
 
+@pytest.mark.parametrize(
+    ("path", "cleaned"),
+    [("/tmp/", "/tmp"), ("//installed-agent", "/installed-agent"), ("/a/../b/./c", "/b/c"), ("/", "/")],
+)
+def test_mount_paths_are_cleaned(path: str, cleaned: str) -> None:
+    services = parse_compose_services(_spec(main={"tmpfs": [{"mount_path": path}]}))
+    assert services.main.tmpfs[0].mount_path == cleaned
+
+
+def test_rejects_two_spellings_of_one_mount_path() -> None:
+    with pytest.raises(ValidationError, match="main: mount_path '/tmp' is used by more than one"):
+        parse_compose_services(_spec(main={"tmpfs": [{"mount_path": "/tmp"}, {"mount_path": "/tmp/"}]}))
+
+
 def test_allows_the_same_mount_path_in_different_containers() -> None:
     parse_compose_services(
         _spec(
@@ -192,3 +206,94 @@ def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() 
 def test_main_s_working_dir_must_be_absolute() -> None:
     with pytest.raises(ValidationError):
         parse_compose_services(_spec(main={"working_dir": "app"}))
+
+
+def test_security_and_tmpfs_round_trip_and_need_the_security_feature() -> None:
+    security = {
+        "run_as_user": 1000,
+        "run_as_group": 1000,
+        "read_only_root_filesystem": True,
+        "drop_capabilities": ["ALL"],
+        "no_new_privileges": True,
+    }
+    spec = parse_compose_services(
+        _spec(
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "security": {"drop_capabilities": ["NET_RAW"]},
+                "tmpfs": [{"mount_path": "/run"}],
+            },
+            main={"security": security, "tmpfs": [{"mount_path": "/tmp", "size_limit": "32Mi"}]},
+        )
+    )
+
+    assert ComposeServices.model_validate_json(spec.to_json()) == spec
+    assert spec.uses_security_settings()
+    assert not parse_compose_services(_spec()).uses_security_settings()
+
+
+@pytest.mark.parametrize(
+    ("main", "message"),
+    [
+        ({"security": {"run_as_group": 1000}}, "run_as_group needs run_as_user"),
+        ({"security": {"run_as_user": -1}}, "greater than or equal to 0"),
+        ({"security": {"drop_capabilities": ["net_raw"]}}, "String should match pattern"),
+        ({"tmpfs": [{"mount_path": f"/t{index}"} for index in range(11)]}, "at most 10 tmpfs mounts"),
+        ({"tmpfs": [{"mount_path": "tmp"}]}, "String should match pattern"),
+        (
+            {"tmpfs": [{"mount_path": "/data"}], "volume_mounts": [{"name": "shared", "mount_path": "/data"}]},
+            "'/data' is used by more than one mount",
+        ),
+    ],
+)
+def test_invalid_security_and_tmpfs_are_rejected(main: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+READ_ONLY = {"read_only_root_filesystem": True}
+
+
+@pytest.mark.parametrize(
+    "main",
+    [
+        {"security": READ_ONLY, "tmpfs": [{"mount_path": "/tmp"}]},
+        {"security": READ_ONLY, "volume_mounts": [{"name": "shared", "mount_path": "/tmp"}]},
+        # A writable mount over a parent of the temp folder covers it too.
+        {"security": READ_ONLY, "env": {"TMPDIR": "/scratch/tmp"}, "tmpfs": [{"mount_path": "/scratch"}]},
+    ],
+)
+def test_a_read_only_main_with_a_writable_temp_folder_is_accepted(main: dict[str, Any]) -> None:
+    parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+@pytest.mark.parametrize(
+    ("main", "temp_dir"),
+    [
+        ({"security": READ_ONLY}, "/tmp"),
+        ({"security": READ_ONLY, "tmpfs": [{"mount_path": "/scratch"}]}, "/tmp"),
+        # execd uses TMPDIR when it's set, so /tmp alone doesn't help.
+        ({"security": READ_ONLY, "env": {"TMPDIR": "/scratch"}, "tmpfs": [{"mount_path": "/tmp"}]}, "/scratch"),
+        (
+            {
+                "security": READ_ONLY,
+                "volume_mounts": [{"name": "shared", "mount_path": "/tmp", "read_only": True}],
+            },
+            "/tmp",
+        ),
+        # The read-only mount is the closer one, so the writable tmpfs above it doesn't count.
+        (
+            {
+                "security": READ_ONLY,
+                "env": {"TMPDIR": "/scratch/tmp"},
+                "tmpfs": [{"mount_path": "/scratch"}],
+                "volume_mounts": [{"name": "shared", "mount_path": "/scratch/tmp", "read_only": True}],
+            },
+            "/scratch/tmp",
+        ),
+    ],
+)
+def test_a_read_only_main_needs_a_writable_temp_folder(main: dict[str, Any], temp_dir: str) -> None:
+    with pytest.raises(ValidationError, match=f"needs a writable tmpfs or volume at {temp_dir},"):
+        parse_compose_services(_spec(volumes=["shared"], main=main))

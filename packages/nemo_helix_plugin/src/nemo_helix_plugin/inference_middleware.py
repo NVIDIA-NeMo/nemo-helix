@@ -999,6 +999,7 @@ class NemoInferenceMiddleware(ABC):
         Raises:
             RuntimeError: If called before IGW has injected the cache.
             KeyError: If ``model_entity_id`` is not in the cache.
+            ValueError: If the provider's stored ``auth_header_format`` is invalid.
         """
         return self._get_cache("get_inference_url_and_model").get_inference_url_and_model(
             model_entity_id, append_v1_suffix
