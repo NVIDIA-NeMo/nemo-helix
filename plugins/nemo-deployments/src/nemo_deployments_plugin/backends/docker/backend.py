@@ -82,6 +82,7 @@ from nemo_deployments_plugin.entities import (
     Deployment,
     DeploymentConfig,
 )
+from nemo_deployments_plugin.quantity import quantity_bytes
 from nemo_deployments_plugin.secrets import (
     SecretResolutionError,
     resolve_deployment_config_secrets,
@@ -135,14 +136,6 @@ NGC_IMAGE_REGISTRY = os.getenv("NGC_IMAGE_REGISTRY", "nvcr.io")
 NGC_IMAGE_REGISTRY_USER_NAME = os.getenv("NGC_IMAGE_REGISTRY_USER_NAME", "$oauthtoken")
 DOCKER_WORKLOAD_IDENTITY_TOKEN_FILE_LABEL = "nemo.nvidia.com/workload-identity-token-file"
 DOCKER_WORKLOAD_IDENTITY_VOLUME_LABEL = "nemo.nvidia.com/workload-identity-volume"
-
-
-def _docker_shm_size(quantity: str) -> str:
-    """Convert a Kubernetes quantity ('32Gi', '512Mi') to docker's shm_size form ('32g', '512m')."""
-    for suffix, docker_suffix in (("Gi", "g"), ("Mi", "m"), ("Ki", "k")):
-        if quantity.endswith(suffix):
-            return f"{quantity[: -len(suffix)]}{docker_suffix}"
-    return quantity
 
 
 def _is_ngc_image(image: str) -> bool:
@@ -1102,7 +1095,8 @@ class DockerDeploymentBackend(DeploymentBackend):
         if device_requests:
             run_kwargs["device_requests"] = device_requests
         if config.shm_size:
-            run_kwargs["shm_size"] = _docker_shm_size(config.shm_size)
+            # Bytes: docker reads "8G" as GiB and rejects "Ti", unlike Kubernetes.
+            run_kwargs["shm_size"] = quantity_bytes(config.shm_size)
 
         return run_kwargs
 

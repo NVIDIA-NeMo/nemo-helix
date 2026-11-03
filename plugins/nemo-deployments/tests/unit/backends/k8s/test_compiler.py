@@ -161,29 +161,44 @@ def test_compile_deployment_includes_init_and_sidecar() -> None:
 
 @pytest.mark.parametrize("shm_size", ["32Gi", None])
 def test_compile_mounts_memory_backed_shm_on_main_containers_only(shm_size: str | None) -> None:
-    config = sample_always_config().model_copy(
+    base = sample_always_config()
+    own_shm = Container(
+        name="own-shm", image="busybox", volumeMounts=[VolumeMount(name="user-shm", mountPath="/dev/shm")]
+    )
+    config = base.model_copy(
         update={
             "shm_size": shm_size,
+            "containers": [*base.containers, own_shm],
             "init_containers": [Container(name="bootstrap", image="busybox")],
         }
     )
-    compiled = compile_workload(
-        config=config,
-        workspace="default",
-        deployment_name="server",
-        labels={},
-        k8s_config=None,
-        pod_restart_policy="Always",
-    )
-    pod_spec = _serialized(compiled.pod_spec_kwargs)
+
+    def compile_config(cfg):
+        return compile_workload(
+            config=cfg,
+            workspace="default",
+            deployment_name="server",
+            labels={},
+            k8s_config=None,
+            pod_restart_policy="Always",
+        )
+
+    pod_spec = _serialized(compile_config(config).pod_spec_kwargs)
     if shm_size is None:
         # Unset keeps the runtime's 64Mi default.
         assert "dshm" not in str(pod_spec)
         return
     assert {"name": "dshm", "emptyDir": {"medium": "Memory", "sizeLimit": "32Gi"}} in pod_spec["volumes"]
-    for container in pod_spec["containers"]:
-        assert {"name": "dshm", "mountPath": "/dev/shm"} in container["volumeMounts"]
+    main, own = pod_spec["containers"]
+    assert {"name": "dshm", "mountPath": "/dev/shm"} in main["volumeMounts"]
+    # A container that already mounts /dev/shm keeps its own mount and gets no second one.
+    assert [m["mountPath"] for m in own["volumeMounts"]] == ["/dev/shm"]
+    assert own["volumeMounts"][0]["name"] == "user-shm"
     assert "volumeMounts" not in pod_spec["init_containers"][0]
+    # The generated volume's name is reserved.
+    clash = config.model_copy(update={"volume_mounts": [VolumeMount(name="dshm", mountPath="/data")]})
+    with pytest.raises(ValueError, match="reserved for shm_size"):
+        compile_config(clash)
 
 
 def test_compile_applies_k8s_deployment_config() -> None:

@@ -112,17 +112,19 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
     assert created_config.workload_identity.token_expiration_seconds == 900
 
 
-def test_create_deployment_config_rejects_zero_backoff_limit(
+@pytest.mark.parametrize(
+    "invalid",
+    [{"backoff_limit": 0}, {"shmSize": "32GB"}, {"shm_size": "lots"}],
+    ids=["zero-backoff-limit", "shm-size-unit", "shm-size-text"],
+)
+def test_create_deployment_config_rejects_invalid_fields(
     client: TestClient,
     mock_entity_client: AsyncMock,
+    invalid: dict,
 ) -> None:
     resp = client.post(
         "/apis/deployments/v2/workspaces/default/deployment-configs",
-        json={
-            "name": "cfg1",
-            "containers": [{"name": "main", "image": "nginx"}],
-            "backoff_limit": 0,
-        },
+        json={"name": "cfg1", "containers": [{"name": "main", "image": "nginx"}], **invalid},
     )
 
     assert resp.status_code == 422

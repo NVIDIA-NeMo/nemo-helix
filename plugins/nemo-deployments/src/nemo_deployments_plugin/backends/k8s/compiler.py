@@ -625,9 +625,14 @@ def compile_workload(
         for container in config.containers
     ]
     if config.shm_size:
+        if any(mount.name == SHM_VOLUME_NAME for mount in pvc_mounts):
+            raise ValueError(f"Volume name {SHM_VOLUME_NAME!r} is reserved for shm_size; rename the volume mount.")
         volumes = [*volumes, _build_shm_volume(config.shm_size)]
         k8s = k8s_client_module()
         for main_container in main_containers:
+            # A container that already mounts something at /dev/shm keeps its own mount.
+            if any(mount.mount_path == "/dev/shm" for mount in main_container.volume_mounts or []):
+                continue
             main_container.volume_mounts = [
                 *(main_container.volume_mounts or []),
                 k8s.client.V1VolumeMount(name=SHM_VOLUME_NAME, mount_path="/dev/shm"),

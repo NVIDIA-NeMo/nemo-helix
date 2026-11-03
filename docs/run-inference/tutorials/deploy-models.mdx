@@ -831,14 +831,21 @@ The platform adds these `vllm serve` flags:
 | Flag | Value | When | Why |
 | ---- | ----- | ---- | --- |
 | `--max-model-len` | `114688` | Always | vLLM cannot fit a KV cache for the model's native 1M-token context and exits at startup. |
-| `--reasoning-parser` | `nemotron_v3` | Always | Returns the model's thinking in `reasoning_content`, separate from the answer in `content`. |
+| `--reasoning-parser` | `nemotron_v3` | Always | Returns the model's thinking in the response's `reasoning` field, separate from the answer in `content`. |
 | `--tool-call-parser`, `--enable-auto-tool-choice` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
 | `--mamba-ssm-cache-dtype` | `float32` | Always | Precision of the state the Mamba layers carry between tokens. |
 | `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | Always | At most one image and one video per request. |
 | `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model without LoRA | Faster generation; see below. |
 | `--max-lora-rank`, `--max-loras` | `64`, `4` | LoRA enabled | Recipe adapters are rank 64, and vLLM otherwise loads rank 16 and one adapter per batch. |
 
-The speculative config turns on multi-token prediction (MTP). The checkpoint includes a small layer that guesses the next few tokens; vLLM drafts three tokens with it and keeps those the full model confirms, so output is unchanged and arrives faster. The platform turns it on only for the base model: fine-tuning recipes drop that layer, and deployments with LoRA run without it.
+The speculative config turns on multi-token prediction (MTP). The released checkpoint includes an extra layer trained to predict the next few tokens. At each step vLLM uses that layer to guess the next 3 tokens, then runs the full model once to check all of them, and keeps every guess that matches what the full model would have generated. Responses are the same as without MTP; they arrive faster because one step can produce several tokens.
+
+The platform turns MTP on only for the released base model with LoRA disabled:
+
+- A fine-tuned checkpoint may not have the MTP layer. Automodel's Nemotron 3.5 Super VL recipes set `num_nextn_predict_layers: 0`, which builds the model without that layer, so a checkpoint saved from that training contains no MTP weights.
+- With LoRA, the MTP layer comes from the base model and does not include the adapter's changes. NVIDIA's finance cookbook serves its adapters without MTP.
+
+If your fine-tuned checkpoint kept the MTP layer, turn MTP on by adding `--speculative-config` to `additional_args`.
 
 A flag you set in `executor_config.additional_args` replaces the platform's value, whether you spell it with `-` or `_`, or set one key of it (for example `--speculative-config.num_speculative_tokens 5`). For example, to accept up to 8 page images per request:
 

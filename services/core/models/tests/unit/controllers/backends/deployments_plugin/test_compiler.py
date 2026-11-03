@@ -641,7 +641,7 @@ def test_nim_override_config_wins_over_k8s_nim_operator_config() -> None:
             ),
             override_config={
                 "nodeSelector": {"zone": "override-zone"},
-                "resources": {"requests": {"cpu": "16"}},
+                "resources": {"requests": {"cpu": "16"}, "limits": {"nvidia.com/gpu": "2"}},
             },
         ),
         weights_type=ModelWeightsType.BAKED_CONTAINER,
@@ -655,6 +655,8 @@ def test_nim_override_config_wins_over_k8s_nim_operator_config() -> None:
     compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
     server = compiled.server_config.containers[0]
     assert server.resources.requests["cpu"] == "16"
+    # Shared memory follows the GPUs the override requests, not the deployment's gpu count (0).
+    assert compiled.server_config.shm_size == "16Gi"
     k8s = compiled.server_config.backend_config.k8s
     assert k8s is not None
     assert k8s.affinity is not None

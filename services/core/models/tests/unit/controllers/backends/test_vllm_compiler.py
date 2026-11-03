@@ -386,7 +386,8 @@ _MTP = ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}'
             + ["--max-lora-rank", "64", "--max-loras", "4"],
             id="lora",
         ),
-        # Fine-tuning drops the MTP layer; the model API accepts finetuning_type without base_model.
+        # A fine-tuned checkpoint may lack the MTP layer; the model API accepts finetuning_type
+        # without base_model.
         pytest.param(
             {},
             _super_vl(base_model="default/super-vl-base"),

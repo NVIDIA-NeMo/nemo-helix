@@ -30,8 +30,9 @@ from nemo_deployments_plugin.entities import (
     VolumeStatus,
     WorkloadIdentitySpec,
 )
+from nemo_deployments_plugin.quantity import quantity_bytes
 from nemo_helix_plugin.schema import NemoFilter, NemoListResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def _default_request_access_modes() -> list[AccessMode]:
@@ -121,6 +122,13 @@ class CreateDeploymentConfigRequest(BaseModel):
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("shm_size")
+    @classmethod
+    def validate_shm_size(cls, value: str | None) -> str | None:
+        if value is not None:
+            quantity_bytes(value)
+        return value
 
     @model_validator(mode="after")
     def validate_docker_network(self) -> CreateDeploymentConfigRequest:

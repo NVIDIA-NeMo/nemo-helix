@@ -2400,7 +2400,10 @@ async def test_create_volume_bound(
     assert update.status == "BOUND"
 
 
-@pytest.mark.parametrize(("shm_size", "expected"), [("32Gi", "32g"), ("512Mi", "512m"), (None, None)])
+@pytest.mark.parametrize(
+    ("shm_size", "expected"),
+    [("32Gi", 32 * 2**30), ("8G", 8 * 10**9), ("1Ti", 2**40), ("512Mi", 512 * 2**20), (None, None)],
+)
 def test_build_run_kwargs_sizes_dev_shm(
     docker_backend: DockerDeploymentBackend, shm_size: str | None, expected: str | None
 ) -> None:

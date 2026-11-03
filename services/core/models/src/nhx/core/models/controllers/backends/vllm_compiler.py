@@ -101,8 +101,9 @@ def _nemotron_super_vl_args(
         # Recipe adapters are rank 64; vLLM defaults to rank 16 and one adapter per batch.
         defaults += [("--max-lora-rank", "64"), ("--max-loras", "4")]
     elif not (getattr(model_entity, "base_model", None) or getattr(model_entity, "finetuning_type", None)):
-        # Speculative decoding drafts with the checkpoint's MTP layer. Fine-tuning drops that
-        # layer, and adapters are served without it, so only the released base model gets it.
+        # Speculative decoding drafts with the checkpoint's MTP layer. A fine-tuned checkpoint may
+        # lack it (Automodel's Super VL recipes train with num_nextn_predict_layers: 0), and adapters
+        # are served without it, so only the released base model gets it.
         defaults.append(("--speculative-config", json.dumps({"method": "mtp", "num_speculative_tokens": 3})))
     args: list[str] = []
     for flag, value in defaults:

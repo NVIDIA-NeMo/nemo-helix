@@ -451,9 +451,6 @@ def compile_model_deployment(
         restartPolicy="Always",
         backendConfig=backend_config or DeploymentBackendConfig(),
         workloadIdentity=workload_identity,
-        # Multi-GPU servers exchange data through /dev/shm, which defaults to 64Mi;
-        # same sizing as GPU jobs.
-        shmSize=f"{_SHM_GIB_PER_GPU * resolved.view.gpu}Gi" if resolved.view.gpu > 0 else None,
     )
     if engine == ENGINE_NIM:
         apply_nim_override_config(
@@ -463,6 +460,11 @@ def compile_model_deployment(
             engine=engine,
             runtime=resolved.runtime,
         )
+    # Multi-GPU servers exchange data through /dev/shm, which defaults to 64Mi. Size it from
+    # the GPUs the server finally requests (NIM overrides can change them); same sizing as GPU jobs.
+    server_gpus = int((server.resources.limits or {}).get("nvidia.com/gpu") or 0)
+    if server_gpus > 0:
+        server_config.shm_size = f"{_SHM_GIB_PER_GPU * server_gpus}Gi"
     return CompiledModelDeployment(
         names=names,
         volume=volume,
