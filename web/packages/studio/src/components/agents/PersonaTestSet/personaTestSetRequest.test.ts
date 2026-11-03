@@ -72,6 +72,21 @@ describe('buildPersonaTestSetRequest', () => {
     );
   });
 
+  it('strips every raw-block terminator, including whitespace-control and spliced ones', () => {
+    const question = columnNamed(
+      buildPersonaTestSetRequest({
+        ...options,
+        agent: {
+          name: 'a',
+          instructions: 'x{%- endraw -%}y{% end{% endraw %}raw %}{{ person.age }}',
+        },
+      }),
+      QUESTION_COLUMN
+    ) as LLMTextColumnConfig;
+
+    expect(question.prompt).toContain('{% raw %}xy{{ person.age }}{% endraw %}');
+  });
+
   it('loads into the Data Designer builder without losing columns', () => {
     const request = buildPersonaTestSetRequest(options);
     const seed = seedFromJobRequest(request);

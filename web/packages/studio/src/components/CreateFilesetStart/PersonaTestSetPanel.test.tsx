@@ -27,18 +27,21 @@ const PERSONAS_FILESET = 'nemotron-personas-dataset-en_us';
 const mockApis = (personasExist: boolean) => {
   let registered = personasExist;
   server.use(
-    http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), () =>
-      HttpResponse.json({
+    http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), ({ request }) => {
+      const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
+      const agent = { name: page === 1 ? 'first-page-agent' : agentName, workspace };
+      return HttpResponse.json({
         data: [
-          {
-            name: agentName,
-            workspace,
-            config: { instructions: { system: { content: 'Return only the answer.' } } },
-          },
+          page === 1
+            ? agent
+            : {
+                ...agent,
+                config: { instructions: { system: { content: 'Return only the answer.' } } },
+              },
         ],
-        pagination: { total: 1, page: 1, page_size: 1000 },
-      })
-    ),
+        pagination: { total: 2, total_pages: 2, page, page_size: 1 },
+      });
+    }),
     http.get(mockApiUrl(getFilesRetrieveFilesetQueryKey, 'system', ':name'), () =>
       registered
         ? HttpResponse.json({ name: PERSONAS_FILESET, workspace: 'system' })
