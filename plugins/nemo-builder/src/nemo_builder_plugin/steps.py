@@ -133,7 +133,9 @@ class SandboxMount(BaseModel):
 class SandboxImage(BaseModel):
     image: str = Field(description="The `ContainerImage` row name.")
     platform: str
-    dockerfile: str = Field(description="Dockerfile path, relative to the group's context.")
+    dockerfile: str = Field(
+        description="Dockerfile path, relative to the group's context, or absolute inside one of its mounts."
+    )
 
 
 class SandboxGroup(BaseModel):

@@ -209,7 +209,13 @@ class BuildSpec(BaseModel):
         default=None,
         description="Where to publish. Omit to publish under the workspace, with the system tag only (see `name`).",
     )
-    dockerfile: str = Field(default="Dockerfile", description="Path to the Dockerfile, relative to the context.")
+    dockerfile: str = Field(
+        default="Dockerfile",
+        description=(
+            "Path to the Dockerfile, relative to the context; or an absolute path inside one of the spec's `mounts`, "
+            "so the Dockerfile isn't in the context the build's `COPY` instructions read."
+        ),
+    )
     mounts: list[BuildMount] = Field(
         default_factory=list,
         description=(
@@ -230,7 +236,20 @@ class BuildSpec(BaseModel):
 
     @model_validator(mode="after")
     def _dockerfile_stays_within_the_context(self) -> Self:
-        _relative_path(self.dockerfile, field="dockerfile")
+        path = PurePosixPath(self.dockerfile)
+        if not path.is_absolute():
+            _relative_path(self.dockerfile, field="dockerfile")
+        elif (
+            path.as_posix() != self.dockerfile
+            or ".." in path.parts
+            or not any(
+                path.is_relative_to(mount.target) and path != PurePosixPath(mount.target) for mount in self.mounts
+            )
+        ):
+            raise ValueError(
+                f"dockerfile must be relative to the context, or a file inside one of the spec's mounts, "
+                f"got {self.dockerfile!r}"
+            )
         if isinstance(self.source, ImageSource) and "dockerfile" in self.model_fields_set:
             raise ValueError("a spec that copies an image has no dockerfile")
         return self

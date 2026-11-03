@@ -65,6 +65,17 @@ class TestMounts:
         with pytest.raises(ValidationError, match="overlap"):
             BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=mounts)
 
+    def test_a_dockerfile_may_be_a_file_in_a_mount(self) -> None:
+        mounts = [BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool")]
+        spec = BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=mounts, dockerfile="/opt/tool/Dockerfile")
+        assert spec.dockerfile == "/opt/tool/Dockerfile"
+
+    @pytest.mark.parametrize("bad", ["/opt/tool", "/opt/other/Dockerfile", "/opt/tool/../x", "/opt/toolbox/Dockerfile"])
+    def test_an_absolute_dockerfile_must_be_inside_a_mount(self, bad: str) -> None:
+        mounts = [BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool")]
+        with pytest.raises(ValidationError, match="dockerfile"):
+            BuildSpec(source=FileSetSource(fileset="fs-a"), mounts=mounts, dockerfile=bad)
+
     def test_a_copy_has_no_mounts(self) -> None:
         mount = BuildMount(source=FileSetSource(fileset="tools-a"), target="/opt/tool")
         with pytest.raises(ValidationError, match="no mounts"):

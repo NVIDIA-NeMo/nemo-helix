@@ -200,6 +200,14 @@ class TestMounts:
         assert "--oci-layout-path=/nhx-work/out/demo-1-0" in script
         assert {"/nhx-work/context/ws/fs-a", "/nhx-work/out/demo-1-0", "/nhx-work/out/demo-1-1"} == mounts
 
+    def test_a_dockerfile_in_a_mount_is_passed_by_its_absolute_path(self) -> None:
+        group = SandboxGroup(
+            source=ContextSource(fileset="ws/fs-a"),
+            mounts=[SandboxMount(source=ContextSource(fileset="ws/tools"), target="/opt/t")],
+            images=[SandboxImage(image="demo-1-0", platform="linux/amd64", dockerfile="/opt/t/Dockerfile")],
+        )
+        assert "--dockerfile=/opt/t/Dockerfile" in _build_script(group, _sandbox())
+
 
 class TestPodNames:
     def test_the_same_job_name_in_two_workspaces_is_two_pods(self) -> None:
