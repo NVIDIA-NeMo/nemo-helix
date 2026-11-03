@@ -41,6 +41,50 @@ def test_a_relative_image_url_stays_under_the_dataset(tmp_path: Path) -> None:
     }
 
 
+def test_thinking_tool_calls_and_tools_survive_the_rewrite(tmp_path: Path) -> None:
+    dataset = tmp_path / "data"
+    dataset.mkdir()
+    source = dataset / "training.jsonl"
+    tool_call = {"type": "function", "function": {"name": "lookup", "arguments": {"q": "a"}}}
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "lookup", "description": "look", "parameters": {"type": "object", "properties": {}}},
+        }
+    ]
+    source.write_text(
+        json.dumps(
+            {
+                "messages": [
+                    {"role": "user", "content": "where"},
+                    {"role": "assistant", "thinking": "check the map"},
+                    {"role": "assistant", "tool_calls": [tool_call]},
+                    {"role": "user", "content": [{"type": "audio", "audio": "clip.wav"}, "listen"]},
+                ],
+                "tools": tools,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest = tmp_path / "out.jsonl"
+    rewrite_fileset_rows(source, dest, dataset_root=dataset, image_dir=tmp_path / "images", column_keys=None)
+    row = json.loads(dest.read_text(encoding="utf-8"))
+
+    assert row["conversation"][1] == {"role": "assistant", "thinking": "check the map"}
+    assert row["conversation"][2] == {"role": "assistant", "tool_calls": [tool_call]}
+    assert row["conversation"][3]["content"] == [
+        {"type": "audio", "audio": "clip.wav"},
+        {"type": "text", "text": "listen"},
+    ]
+    assert row["tools"] == tools
+
+    loaded = vlm.make_conversation_dataset(str(dest))
+    assert loaded[0]["tools"] == tools
+    assert loaded[0]["conversation"][1]["thinking"] == "check the map"
+    assert loaded[0]["conversation"][2]["tool_calls"] == [tool_call]
+
+
 def test_an_absolute_image_url_is_rejected(tmp_path: Path) -> None:
     with pytest.raises(DatasetFormatError, match="relative to the dataset"):
         _rewrite(tmp_path, "/etc/shadow")

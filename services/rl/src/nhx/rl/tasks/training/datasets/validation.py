@@ -178,6 +178,7 @@ class DatasetValidator:
         finetuning_type: Optional[FinetuningType] = None,
         *,
         prompt_template: str | None = None,
+        reject_multimodal: bool = False,
     ):
         """Initialize validator with training configuration.
 
@@ -185,10 +186,13 @@ class DatasetValidator:
             training_type: The type of training (DPO, etc.)
             finetuning_type: Optional finetuning type (LoRA, all_weights, etc.)
             prompt_template: Optional prompt template for datasets
+            reject_multimodal: Reject a DPO row that contains an image part.
+                Set for a vision checkpoint. A chat-only preference file still passes.
         """
         self.training_type = training_type
         self.finetuning_type = finetuning_type
         self.prompt_template = prompt_template
+        self.reject_multimodal = reject_multimodal
         # Widest image-part count across files this validator has read. Callers that
         # need it (the vLLM per-prompt image limit) reuse this instead of scanning again.
         self.max_images_per_prompt = 0
@@ -317,6 +321,11 @@ class DatasetValidator:
             # Reject files that mix multiple DPO schemas: detect_dpo_schema_name()
             # later selects one concrete loader from the first row, so a mixed
             # file would silently be handed to the wrong NeMo-RL dataset class.
+            if is_dpo and self.reject_multimodal and _count_image_parts(obj) > 0:
+                raise DatasetFormatError(
+                    f"{source} line {line_number} contains an image. DPO on a vision "
+                    "checkpoint accepts a chat-only preference dataset."
+                )
             if is_dpo:
                 row_schema = get_preference_dataset_discriminator(obj)
                 if expected_dpo_schema is None:

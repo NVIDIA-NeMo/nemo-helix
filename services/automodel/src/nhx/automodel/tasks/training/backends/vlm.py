@@ -68,7 +68,10 @@ def rewrite_fileset_rows(
                     image_dir=image_dir,
                     column_keys=column_keys,
                 )
-                dest_handle.write(json.dumps({"conversation": conversation}, ensure_ascii=False) + "\n")
+                record: dict[str, Any] = {"conversation": conversation}
+                if isinstance(row.get("tools"), list):
+                    record["tools"] = row["tools"]
+                dest_handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         temp_path.replace(dest)
     finally:
         if temp_path is not None:
@@ -88,8 +91,11 @@ def make_conversation_dataset(path_or_dataset: str, **kwargs: Any) -> list[dict[
         for line in handle:
             if not line.strip():
                 continue
-            conversation = json.loads(line)["conversation"]
+            parsed = json.loads(line)
+            conversation = parsed["conversation"]
             example: dict[str, Any] = {"conversation": conversation}
+            if "tools" in parsed:
+                example["tools"] = parsed["tools"]
             if not _conversation_has_media(conversation):
                 example["conversation"] = _inject_fake_image(conversation)
                 example["_injected_fake"] = True
@@ -107,12 +113,15 @@ def _row_to_conversation(
     if isinstance(messages, list):
         conversation = []
         for message in messages:
-            conversation.append(
-                {
-                    "role": message["role"],
-                    "content": _content_parts(message.get("content"), dataset_root=dataset_root, image_dir=image_dir),
-                }
-            )
+            converted = {"role": message["role"]}
+            content = message.get("content")
+            if content is not None:
+                converted["content"] = _content_parts(content, dataset_root=dataset_root, image_dir=image_dir)
+            if message.get("thinking") is not None:
+                converted["thinking"] = message["thinking"]
+            if message.get("tool_calls"):
+                converted["tool_calls"] = message["tool_calls"]
+            conversation.append(converted)
         return conversation
 
     if column_keys is None:
@@ -129,16 +138,22 @@ def _content_parts(content: Any, dataset_root: Path, image_dir: Path) -> list[di
         return [{"type": "text", "text": content}]
     parts = [content] if isinstance(content, dict) else content
     if not isinstance(parts, list):
-        return [{"type": "text", "text": "" if content is None else str(content)}]
+        return [{"type": "text", "text": str(content)}]
     converted: list[dict[str, Any]] = []
     for part in parts:
+        if isinstance(part, str):
+            converted.append({"type": "text", "text": part})
+            continue
         if not isinstance(part, dict):
+            converted.append({"type": "text", "text": str(part)})
             continue
         if part.get("type") == "text":
             converted.append({"type": "text", "text": str(part.get("text", ""))})
         elif part.get("type") == "image_url":
             url = str((part.get("image_url") or {}).get("url", ""))
             converted.append({"type": "image", "image": _resolve_image(url, dataset_root, image_dir)})
+        else:
+            converted.append(dict(part))
     return converted
 
 
@@ -227,8 +242,10 @@ def _inject_placeholder(conversation: list[dict[str, Any]]) -> list[dict[str, An
         content = message.get("content")
         if isinstance(content, list):
             content.insert(0, placeholder)
+        elif content:
+            message["content"] = [placeholder, {"type": "text", "text": content}]
         else:
-            message["content"] = [placeholder, {"type": "text", "text": content or ""}]
+            message["content"] = [placeholder]
         return conversation
     conversation.insert(0, {"role": "user", "content": [placeholder]})
     return conversation

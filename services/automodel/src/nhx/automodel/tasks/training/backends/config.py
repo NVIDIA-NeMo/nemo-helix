@@ -495,8 +495,17 @@ def _configure_vlm_datasets(
         image_dir=image_dir,
         column_keys=column_keys,
     )
+    chat_template = resolve_chat_template(
+        model_path=customizer_config.model.path,
+        model_name=customizer_config.model.name,
+        user_template=customizer_config.model.chat_template,
+    )
     cfg["dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(train_out)}
     cfg["validation_dataset"] = {"_target_": CONVERSATION_DATASET_TARGET, "path_or_dataset": str(val_out)}
+    if chat_template:
+        cfg["dataset"]["chat_template"] = chat_template
+        cfg["validation_dataset"]["chat_template"] = chat_template
+    cfg["_resolved_chat_template"] = chat_template
 
 
 def _resolve_seed(customizer_config: TrainingStepConfig) -> int:

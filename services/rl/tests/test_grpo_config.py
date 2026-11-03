@@ -1895,7 +1895,10 @@ def test_caller_vllm_kwargs_and_lora_targets_are_kept(
 
     cfg = compile_grpo_config(step, job_ctx)
 
-    assert cfg["policy"]["generation"]["vllm_kwargs"] == {"moe_backend": "triton"}
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["moe_backend"] == "triton"
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["skip_mm_profiling"] is True
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["mm_processor_cache_gb"] == 0
     assert cfg["policy"]["automodel_cfg"]["automodel_kwargs"]["freeze_config"] == {"freeze_vision_tower": False}
     assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["target_modules"] == ["*.q_proj"]
     assert cfg["policy"]["hf_config_overrides"]["num_nextn_predict_layers"] == 0

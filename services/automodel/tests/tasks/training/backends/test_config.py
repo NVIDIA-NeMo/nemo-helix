@@ -1094,11 +1094,16 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
             ]
         },
     ]
-    compiled = _compile_vision(_vision_training_config(tmp_path, rows), tmp_path)
+    config = _vision_training_config(tmp_path, rows)
+    config.model.chat_template = "vision-template"
+    compiled = _compile_vision(config, tmp_path)
 
     assert compiled["_recipe"] == "vlm_sft"
     assert compiled["model"]["_target_"] == "nemo_automodel.NeMoAutoModelForImageTextToText.from_pretrained"
     assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
+    assert compiled["dataset"]["chat_template"] == "vision-template"
+    assert compiled["validation_dataset"]["chat_template"] == "vision-template"
+    assert compiled["_resolved_chat_template"] == "vision-template"
     assert compiled["freeze_config"]["freeze_vision_tower"] is True
     assert compiled["distributed"]["ep_size"] == 1
     assert "num_nextn_predict_layers" not in compiled["model"]

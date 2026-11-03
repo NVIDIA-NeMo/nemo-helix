@@ -681,13 +681,19 @@ def compile_grpo_config(
     }
     # Sibling of vllm_cfg, not nested in it: NeMo-RL forwards this dict straight to
     # the vLLM engine constructor, so it reaches options vllm_cfg does not name.
-    if grpo_hp.vllm_kwargs:
-        cfg["policy"]["generation"]["vllm_kwargs"] = dict(grpo_hp.vllm_kwargs)
-    elif traits.has_vision_tower:
-        cfg["policy"]["generation"]["vllm_kwargs"] = {
+    # A vision checkpoint starts from the image defaults. Caller keys override
+    # individual entries and cannot drop the image limit by replacing the dict.
+    vllm_kwargs: dict[str, Any] = {}
+    if traits.has_vision_tower:
+        vllm_kwargs = {
             "skip_mm_profiling": True,
             "limit_mm_per_prompt": {"image": max(max_images, 1)},
+            "mm_processor_cache_gb": 0,
         }
+    if grpo_hp.vllm_kwargs:
+        vllm_kwargs.update(grpo_hp.vllm_kwargs)
+    if vllm_kwargs:
+        cfg["policy"]["generation"]["vllm_kwargs"] = vllm_kwargs
 
     if lora_cfg["enabled"]:
         cfg["policy"]["generation"]["lora_refit_mode"] = "merged"

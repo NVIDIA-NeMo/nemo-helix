@@ -358,6 +358,29 @@ def test_driver_sets_log_dir_on_the_logger_model(driver: str) -> None:
     assert "config.logger.log_dir" in source
 
 
+def _keyword_passed(source: str, callee: str, keyword: str) -> bool:
+    """Whether a call to *callee* passes *keyword* as a keyword argument."""
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", None)
+        if name != callee:
+            continue
+        if any(arg.arg == keyword for arg in node.keywords):
+            return True
+    return False
+
+
+def test_grpo_driver_passes_the_vision_processor_into_training() -> None:
+    """A vision policy is a text model unless setup and grpo_train receive the processor."""
+    source = (DRIVERS / "grpo_driver.py").read_text()
+
+    assert 'config.policy.get("is_vlm")' in source
+    assert "get_processor=True" in source
+    assert _keyword_passed(source, "setup", "processor")
+    assert _keyword_passed(source, "grpo_train", "processor")
+
+
 @pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
 def test_driver_marks_a_pause_for_the_resume(driver: str) -> None:
     """The exit code alone tells only this run's runner; the resume reads the marker."""
