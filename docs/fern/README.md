@@ -99,9 +99,30 @@ PUT/PATCH/DELETE success still depends on the upstream provider supporting the s
 
 API reference code samples are limited to Python, JavaScript, and cURL. The
 `settings.http-snippets` allowlist in `docs.yml` controls Fern's HTTP fallbacks;
-`script/openapi_helper/code_samples.py` supplies Python/JavaScript overrides and
-separate default-cURL SDK overrides. Authored route samples must follow the same
-language policy; the fallback allowlist does not remove custom samples.
+`script/openapi_helper/code_samples.py` supplies SDK overrides for **all three default
+tabs**. `x-codeSamples` alone does not override the Python/JavaScript HTTP fallbacks,
+even when it is present in the rendered page's serialized data. Route-authored samples
+are also mirrored into SDK overrides, including HEAD operations. Authored route samples
+must follow the same language policy.
+
+After changing API samples, verify the **visible tabs** on a Fern preview, not just the
+OpenAPI extensions. Install Chromium once with
+`uv run --with playwright playwright install chromium`, then run, for example:
+
+```bash
+uv run --with playwright python docs/_scripts/check_rendered_api_samples.py \
+  --url 'https://PREVIEW/documentation/reference/api-reference/files/upload-file-apis-files-v-2-workspaces-workspace-filesets-name-path-put' \
+  --path '/apis/files/v2/workspaces/{workspace}/filesets/{name}/-/{path}' --method put
+```
+
+Use the actual page URL from the preview sidebar. Repeat for file download, ATIF,
+direct spans, OTLP traces, evaluation PATCH, and bodyless DELETE (jobs, virtual models,
+evaluations). The check selects Python and JavaScript and compares visible code against
+the matching spec; it never executes API requests. Use `--spec` for a release version's
+spec. Run the check again after publishing. Release versions use their release branch's
+spec, so a fix on main alone does not update `/v0.9/`; backport and regenerate there too.
+Browser-fixture tests in `docs/_scripts/test_check_rendered_api_samples.py` additionally
+verify language switching and reject hidden-correct/visible-broken samples.
 
 Fern groups endpoints by their OpenAPI tag in the sidebar (Customizer, Evaluator, Guardrails, …), which replaces the old per-service filter chips. Link to it from other pages with the nav URL `/documentation/reference/api-reference`.
 

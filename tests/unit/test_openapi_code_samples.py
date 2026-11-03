@@ -47,6 +47,37 @@ def test_curl_arguments_round_trip_through_shell_tokenization():
     ]
 
 
+def test_every_custom_sample_overrides_every_fern_example(spec):
+    for path, item in spec["paths"].items():
+        for method, operation in item.items():
+            if not isinstance(operation, dict) or not operation.get("x-codeSamples"):
+                continue
+            expected = {s["lang"].lower(): s["source"] for s in operation["x-codeSamples"]}
+            assert operation.get("x-fern-examples"), (method, path)
+            for example in operation["x-fern-examples"]:
+                actual = {s["sdk"]: s["code"] for s in example["code-samples"]}
+                assert expected.items() <= actual.items(), (method, path)
+
+
+def test_authored_samples_override_fallbacks_without_losing_examples():
+    import copy
+
+    operation = {
+        "x-codeSamples": [{"lang": "Python", "source": "print('authored')"}],
+        "x-fern-examples": [
+            {"request": {"name": "first"}, "code-samples": [{"sdk": "python", "code": "stale"}]},
+            {"request": {"name": "second"}, "code-samples": [{"sdk": "curl", "code": "keep"}]},
+        ],
+    }
+    spec = {"paths": {"/example": {"head": operation}}}
+    add_code_samples(spec)
+    for example in operation["x-fern-examples"]:
+        assert {"sdk": "python", "code": "print('authored')"} in example["code-samples"]
+    assert operation["x-fern-examples"][0]["request"] == {"name": "first"}
+    assert {"sdk": "curl", "code": "keep"} in operation["x-fern-examples"][1]["code-samples"]
+    assert add_code_samples(copy.deepcopy(spec)) == spec
+
+
 def test_language_policy_covers_authored_samples_and_default_curl(spec):
     docs = yaml.safe_load((Path(__file__).resolve().parents[2] / "docs/fern/docs.yml").read_text())
     assert set(docs["settings"]["http-snippets"]) == {"python", "javascript", "curl"}
