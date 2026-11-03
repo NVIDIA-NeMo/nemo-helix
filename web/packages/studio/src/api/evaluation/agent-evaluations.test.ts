@@ -12,6 +12,7 @@ import {
   fetchAgentEvalJobs,
   fetchAgentEvalResultsForJobs,
   joinBundleByTask,
+  joinBundleByTrial,
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
 
@@ -249,6 +250,50 @@ describe('joinBundleByTask', () => {
 
     expect(joinBundleByTask(bundle)[0].scores).toEqual([
       { name: 'llm-judge.accuracy', value: null },
+    ]);
+  });
+});
+
+describe('joinBundleByTrial', () => {
+  it('keeps every trial with its own scores, and a row for a task with no trials', () => {
+    const score = (trial: string, value: number) => ({
+      id: `s-${trial}`,
+      task_id: 'A',
+      trial_id: trial,
+      metric_type: 'llm-judge',
+      status: 'completed',
+      outputs: [{ name: 'accuracy', value }],
+    });
+    const rows = joinBundleByTrial({
+      tasks: [{ id: 'A' }, { id: 'B' }],
+      trials: [
+        { id: 't1', task_id: 'A', status: 'completed', output: { output_text: 'benign' } },
+        { id: 't2', task_id: 'A', status: 'completed', output: { output_text: 'phishing' } },
+      ],
+      scores: [score('t1', 0), score('t2', 1)],
+    });
+
+    expect(
+      rows.map(({ taskId, trialId, responseText, scores }) => ({
+        taskId,
+        trialId,
+        responseText,
+        scores,
+      }))
+    ).toEqual([
+      {
+        taskId: 'A',
+        trialId: 't1',
+        responseText: 'benign',
+        scores: [{ name: 'llm-judge.accuracy', value: 0 }],
+      },
+      {
+        taskId: 'A',
+        trialId: 't2',
+        responseText: 'phishing',
+        scores: [{ name: 'llm-judge.accuracy', value: 1 }],
+      },
+      { taskId: 'B', trialId: undefined, responseText: null, scores: [] },
     ]);
   });
 });

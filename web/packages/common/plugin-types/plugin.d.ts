@@ -6047,6 +6047,8 @@ export declare const InputErrorText: FC<PropsWithChildren<ComponentProps<typeof 
 //#region src/components/ActionsMenu/index.d.ts
 interface ActionMenuItem {
   label: string;
+  /** Secondary line under the label, for when the label alone doesn't say what the action does. */
+  description?: string;
   onSelect: () => void;
   icon?: ReactElement<{
     size?: number;
