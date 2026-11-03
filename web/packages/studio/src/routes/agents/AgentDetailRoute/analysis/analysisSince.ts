@@ -3,7 +3,14 @@
 
 import { parseISOWithUTCFallback } from '@nemo/common/src/components/RelativeTime/util';
 
-export type SincePreset = 'all' | 'periodic-cursor' | 'day' | 'week' | 'custom';
+export type SincePreset =
+  | 'all'
+  | 'periodic-cursor'
+  | 'day'
+  | 'week'
+  | 'two-weeks'
+  | 'month'
+  | 'custom';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +40,10 @@ export const sinceFor = (
       return msAgo(now, DAY_MS);
     case 'week':
       return msAgo(now, 7 * DAY_MS);
+    case 'two-weeks':
+      return msAgo(now, 14 * DAY_MS);
+    case 'month':
+      return msAgo(now, 30 * DAY_MS);
     case 'custom': {
       const date = custom ? new Date(custom) : undefined;
       return date && !Number.isNaN(date.getTime()) && date <= now ? date.toISOString() : undefined;

@@ -205,6 +205,12 @@ export const ENTITY_EMPTY_STATES: Record<EmptyStateEntityKey, EmptyStateDescript
     cliCommand: 'nemo compass analysis-runs create --agent <agent-name> --workspace <workspace>',
     skillPrompt: 'Help me run my first analysis of my agent with the nemo-compass skill',
   },
+  insightJobs: {
+    heading: 'No insights jobs yet',
+    subheading:
+      "Choose Get Insights to analyze this agent's traces. Each run appears here as a job.",
+    cliCommand: 'nemo compass analysis-runs create --agent <agent-name> --workspace <workspace>',
+  },
   insightExperiments: {
     heading: 'No experiments yet',
     subheading: 'This insight has no linked experiments yet.',

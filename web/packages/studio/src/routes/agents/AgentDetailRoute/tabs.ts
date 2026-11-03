@@ -42,6 +42,12 @@ export const ACTION_SEARCH_PARAM = 'action';
  */
 export const VIEW_SEARCH_PARAM = 'view';
 
+/** The Insights tab's views: the agent's insights (default), or the analysis jobs behind them. */
+export enum InsightsView {
+  Insights = 'insights',
+  Jobs = 'jobs',
+}
+
 /** Table, then how to set the study up, then — for a guided path — that strategy's form. */
 export enum OptimizationView {
   Table = 'table',

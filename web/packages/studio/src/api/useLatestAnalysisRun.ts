@@ -81,10 +81,14 @@ const completionMessage = (added = 0) =>
     ? `Analysis complete: ${added} new ${added === 1 ? 'finding' : 'findings'}.`
     : 'Analysis complete.';
 
-/** The agent's most recent analysis run, polled while in flight; toasts when a watched run ends. */
+/**
+ * The agent's most recent analysis run, polled while in flight; toasts when a watched run ends
+ * unless `notify` is false.
+ */
 export const useLatestAnalysisRun = (
   workspace: string,
-  agent: string | undefined
+  agent: string | undefined,
+  { notify = true }: { notify?: boolean } = {}
 ): { latestRun?: LatestAnalysisRun; isActive: boolean; blocksNewRun: boolean } => {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -114,7 +118,7 @@ export const useLatestAnalysisRun = (
   const requestedAt = current?.run.created_at;
 
   useEffect(() => {
-    if (!agent || !name || !status || !requestedAt) return;
+    if (!notify || !agent || !name || !status || !requestedAt) return;
 
     if (isActive) {
       watchedName.current = name;
@@ -133,7 +137,7 @@ export const useLatestAnalysisRun = (
     } else if (status === HelixJobStatus.error) {
       toast.error(`Analysis run "${name}" failed. Open the run's job to read its logs.`);
     }
-  }, [agent, isActive, name, queryClient, requestedAt, status, toast, workspace]);
+  }, [agent, isActive, name, notify, queryClient, requestedAt, status, toast, workspace]);
 
   const latestRun: LatestAnalysisRun | undefined =
     current && name
