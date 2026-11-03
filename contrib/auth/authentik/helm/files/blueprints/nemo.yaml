@@ -48,6 +48,19 @@ entries:
     identifiers:
       name: authentik Self-signed Certificate
 
+  # NeMo only trusts the email claim as an identity when the token carries email_verified: true.
+  # These demo users and their emails are managed by this blueprint, so they are verified.
+  - model: authentik_providers_oauth2.scopemapping
+    id: nemo-email-scope
+    identifiers:
+      name: "NeMo email"
+    attrs:
+      name: "NeMo email"
+      scope_name: email
+      description: "Email and email_verified for the demo users, whose emails this blueprint manages"
+      expression: |
+        return {"email": request.user.email, "email_verified": True}
+
   - model: authentik_providers_oauth2.scopemapping
     id: nemo-groups-scope
     identifiers:
@@ -83,7 +96,7 @@ entries:
         !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
-        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !KeyOf nemo-email-scope
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf nemo-groups-scope
 
@@ -112,7 +125,7 @@ entries:
         !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
-        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !KeyOf nemo-email-scope
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf nemo-groups-scope
 
@@ -144,7 +157,7 @@ entries:
         !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
-        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !KeyOf nemo-email-scope
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, offline_access]]
         - !KeyOf nemo-groups-scope
 
@@ -170,7 +183,7 @@ entries:
         !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       property_mappings:
         - !Find [authentik_providers_oauth2.scopemapping, [scope_name, openid]]
-        - !Find [authentik_providers_oauth2.scopemapping, [scope_name, email]]
+        - !KeyOf nemo-email-scope
         - !KeyOf nemo-groups-scope
 
   - model: authentik_core.application

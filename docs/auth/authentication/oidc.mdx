@@ -162,6 +162,7 @@ nemo workspaces list
 | `audience` | string | Expected `aud` claim. Required when `enabled` is true. If several applications share this audience at your IdP, restrict which clients can get tokens for it. |
 | `additional_audiences` | list of strings | Other accepted `aud` values, for IdPs that set `aud` to each client's ID. Default: empty. |
 | `email_claim` | string | JWT claim for email (default: `email`). |
+| `require_verified_email` | bool | Trust the email only when the token has `email_verified: true` (default: `true`). |
 | `subject_claim` | string | JWT claim for subject (default: `sub`). |
 | `groups_claim` | string | JWT claim for groups (default: `groups`). |
 | `jwks_uri` | string | Override JWKS URI. |
@@ -245,6 +246,10 @@ NeMo Helix maps JWT claims to [trusted identity headers](/documentation/access-c
 | Subject (Principal ID) | `subject_claim` | `sub` | `X-NHX-Principal-Id` |
 | Email | `email_claim` | `email` | `X-NHX-Principal-Email` |
 | Groups | `groups_claim` | `groups` | `X-NHX-Principal-Groups` |
+
+<Warning>
+Role bindings can name an email address, so NeMo Helix only treats the email claim as an identity when the token also carries `email_verified: true`. An unverified email is dropped from the principal, and a token whose `subject_claim` is the email claim is rejected when the email is unverified. If your IdP does not emit `email_verified` but guarantees that emails are directory-managed and immutable, set `require_verified_email: false`. Never set it for an IdP where users can edit their own email or where an address can be reassigned to another user, such as Azure AD `upn`. For Azure AD, bind roles to an immutable identifier such as `oid`, or to groups.
+</Warning>
 
 <Note>
 

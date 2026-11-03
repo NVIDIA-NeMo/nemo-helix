@@ -137,6 +137,7 @@ class MiniOIDCIssuer:
             claims["aud"] = spec.audience
         if spec.email is not None:
             claims["email"] = spec.email
+            claims["email_verified"] = True
         if spec.groups:
             claims["groups"] = spec.groups
         if spec.scopes:
