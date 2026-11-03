@@ -63,7 +63,7 @@ export const EvaluationDetailRoute: FC = () => {
             </Stack>
           </Card>
         ) : null}
-        <div className="flex flex-col gap-4 border-t border-base pt-4">
+        <Stack className="min-h-[480px] flex-1 gap-4 border-t border-base pt-4">
           <div className="flex items-center gap-3">
             <Text kind="title/sm">Test cases</Text>
             {evaluation?.run_count !== undefined && (
@@ -76,7 +76,7 @@ export const EvaluationDetailRoute: FC = () => {
             evaluationName={evaluationName}
             experimentName={experimentName}
           />
-        </div>
+        </Stack>
       </Stack>
     </AccessibleTitle>
   );
