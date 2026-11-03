@@ -279,12 +279,17 @@ class TestPushOne:
         ]
 
     def test_the_image_is_completed_with_how_it_starts(self, tmp_path: Path, events: list[str]) -> None:
-        config = {"config": {"Entrypoint": ["/bin/bash", "-l", "-c"], "Cmd": ["/app/run.sh"], "WorkingDir": "/app"}}
-        digest = _layout(tmp_path / "out", json.dumps(config).encode())
+        settings = {
+            "Entrypoint": ["/bin/bash", "-l", "-c"],
+            "Cmd": ["/app/run.sh"],
+            "WorkingDir": "/app",
+            "User": "1000",
+        }
+        digest = _layout(tmp_path / "out", json.dumps({"config": settings}).encode())
         builder = FakeBuilder(digest, events)
         _push_one(_row(), _image(), tmp_path / "out", builder=builder, sign=None, plain_http=False)
         assert builder.runtime_configs["demo-1-0"] == ImageRuntimeConfig(
-            entrypoint=["/bin/bash", "-l", "-c"], cmd=["/app/run.sh"], working_dir="/app"
+            entrypoint=["/bin/bash", "-l", "-c"], cmd=["/app/run.sh"], working_dir="/app", user="1000"
         )
 
     def test_an_image_the_deployment_does_not_sign_is_pushed_and_completed(
@@ -429,12 +434,12 @@ class TestPushingACopy:
 
 
 class TestReadingHowTheImageStarts:
-    def test_the_config_s_entrypoint_cmd_and_working_dir_are_read(self, tmp_path: Path) -> None:
-        # What a build writes for an image that inherits all three from its base image.
-        config = {"architecture": "amd64", "config": {"Entrypoint": ["/bin/bash", "-l", "-c"], "WorkingDir": "/app"}}
-        digest = _layout(tmp_path, json.dumps(config).encode())
+    def test_the_config_s_entrypoint_cmd_working_dir_and_user_are_read(self, tmp_path: Path) -> None:
+        # What a build writes for an image that inherits them from its base image.
+        settings = {"Entrypoint": ["/bin/bash", "-l", "-c"], "WorkingDir": "/app", "User": "node"}
+        digest = _layout(tmp_path, json.dumps({"architecture": "amd64", "config": settings}).encode())
         assert read_runtime_config(tmp_path, digest) == ImageRuntimeConfig(
-            entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app"
+            entrypoint=["/bin/bash", "-l", "-c"], working_dir="/app", user="node"
         )
 
     @pytest.mark.parametrize(
@@ -442,8 +447,9 @@ class TestReadingHowTheImageStarts:
         [b"{}", b'{"config": null}', b'{"config": {"Entrypoint": [], "Cmd": null, "WorkingDir": ""}}'],
         ids=["no-config", "null-config", "empty-values"],
     )
-    def test_an_image_that_sets_nothing_records_nothing(self, tmp_path: Path, config: bytes) -> None:
-        assert read_runtime_config(tmp_path, _layout(tmp_path, config)) == ImageRuntimeConfig()
+    def test_an_image_that_sets_nothing_records_nothing_and_runs_as_root(self, tmp_path: Path, config: bytes) -> None:
+        # An empty `user` records that the image runs as root; None would mean it wasn't read.
+        assert read_runtime_config(tmp_path, _layout(tmp_path, config)) == ImageRuntimeConfig(user="")
 
     def test_a_config_that_does_not_match_its_digest_records_none(self, tmp_path: Path) -> None:
         digest = _layout(tmp_path, b'{"config": {"Entrypoint": ["/start"]}}')
