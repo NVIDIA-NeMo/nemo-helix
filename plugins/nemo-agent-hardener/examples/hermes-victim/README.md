@@ -5,20 +5,20 @@ SPDX-License-Identifier: Apache-2.0
 
 # The war-game victim, Hermes harness
 
-The second guardable harness (deepagents is the other), registered on NeMo Helix like the
-`relay-victim` — but Hermes reaches Relay through an opt-in *plugin*, not the adapter's telemetry
-wiring, and that changes two things.
+The Hermes victim registers on NeMo Helix like `relay-victim`, with a Relay config
+override for the guardrails uploaded by Agent Hardener.
 
 ```
 agent.yaml       the platform submission — note there is NO telemetry: block, on purpose
 ledger_mcp.py    the tools, as an MCP server that ships inside the image
-Dockerfile       your image, with the two Hermes-only lines that replace the telemetry: block
+Dockerfile       your image, with an isolated Hermes environment and Relay config override
 ```
 
 **Why no `telemetry:` block.** If it declared `provider: relay`, the Fabric Hermes adapter would
 repoint `HERMES_NEMO_RELAY_PLUGINS_TOML` at its own generated config and the guardrails Agent Hardener
 uploads to `/etc/nemo-relay/plugins.toml` would never be read. Instead the Dockerfile sets that env
-var itself and runs `hermes plugins enable observability/nemo_relay` — see the comments there.
+var for Hermes' built-in Relay integration. The pinned Hermes release no longer needs
+`hermes plugins enable observability/nemo_relay`.
 
 ## Running it
 

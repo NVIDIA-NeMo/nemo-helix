@@ -3,9 +3,7 @@
 #
 # The image for a Hermes-harness Fabric agent, owned by its author rather than rendered.
 #
-# It is a normal Fabric image plus the war-game requirements, plus TWO Hermes-only lines that do
-# what a `telemetry:` block does for the DeepAgents victim — because Hermes reaches Relay through
-# an opt-in plugin, not through the adapter's telemetry wiring.
+# Hermes reads the guardrails uploaded by Agent Hardener through its Relay config override.
 FROM python:3.12-slim
 COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
@@ -19,9 +17,9 @@ RUN apt-get update \
 
 WORKDIR /workspace
 
-# The main runtime uses Relay 0.11; Fabric 0.6's Hermes adapter needs Relay 0.10
-# and Python 3.14 in a separate environment, just as in generated agent images.
-RUN uv venv --python 3.12 /workspace/.venv \
+# Helix uses the base image's Python and Relay 0.11. Hermes requires Python 3.14
+# and Relay 0.10 in a separate environment.
+RUN uv venv --python /usr/local/bin/python /workspace/.venv \
  && uv pip install --python /workspace/.venv/bin/python \
       "nemo-helix[nemo-agents-plugin]" \
       "mcp[cli]"
@@ -43,19 +41,8 @@ COPY ledger_mcp.py /app/ledger_mcp.py
 RUN mkdir -p /etc/nemo-relay /home/sandbox/.agent-hardener/relay \
  && chown -R sandbox:sandbox /etc/nemo-relay /home/sandbox/.agent-hardener /workspace /app
 
-# --- The two Hermes-only lines. [hermes] ---
-#
-# Hermes reads Relay's plugin config ONLY from this env var — not from /etc/nemo-relay, which Relay
-# discovers on its own for every other integration. Point it at the file Agent Hardener uploads into.
+# Point Hermes' built-in Relay integration at the config Agent Hardener uploads.
 ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml
-# Relay is an opt-in Hermes plugin. Without enabling it, its middleware never registers and the env
-# var above is read by nobody — the victim runs, emits nothing, and the run's preflight fails it.
-#
-# Enable it as `sandbox`, not root: Hermes keeps plugin state per-user (~/.hermes), so enabling as
-# root leaves it "not enabled" for the user the victim actually runs as.
-USER sandbox
-RUN /opt/hermes-venv/bin/hermes plugins enable observability/nemo_relay
-USER root
 
 ENV AGENT_CONFIG_PATH=/workspace/agent.yaml
 ENV PORT=8000

@@ -31,10 +31,8 @@ telemetry:
         service_name: my-agent
 ```
 
-Use bare hostnames or IP addresses—no scheme, port, path, userinfo, wildcard,
-or leading dot. Matching is exact and case-insensitive, ignoring a trailing
-dot; subdomains and DNS aliases need separate entries. Any port or path is
-allowed for a matching host.
+Each `insecure_http_hosts` entry is only a hostname or IP address; `endpoint`
+is the full collector URL. Host matching is exact, so list subdomains separately.
 
 Helix forwards the list to `relay.observability.insecure_http_hosts`; `[]`
 clears inherited allowances. Relay rejects other non-loopback HTTP trace
