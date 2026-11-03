@@ -2,8 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CsvRow, DownloadPayload } from '@nemo/common/src/utils/download';
+import type { AgentEvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
-import type { AgentEvalTaskDetail } from '@studio/api/evaluation/agent-evaluations';
+import {
+  type AgentEvalResult,
+  type AgentEvalTaskDetail,
+  agentNameForJob,
+} from '@studio/api/evaluation/agent-evaluations';
 import type { EvalAggregateScoreRow } from '@studio/components/evaluation/EvalAggregateScoresTable';
 import type { DatasetEvalRow } from '@studio/components/evaluation/Jobs/datasetEval/DatasetEvalRowResultsPanel';
 import {
@@ -36,17 +41,19 @@ export const datasetEvalExport = (
   ),
 });
 
+/** JSON keeps the full job and result records; JSONL and CSV hold one row per trial. */
 export const agentEvalExport = (
-  job: { name: string; status?: string; agent: string | null },
+  job: AgentEvaluateJob,
+  result: AgentEvalResult | null | undefined,
   scores: EvalAggregateScoreRow[],
-  tasks: AgentEvalTaskDetail[],
-  summary?: unknown
+  trials: AgentEvalTaskDetail[]
 ): DownloadPayload => ({
-  json: { ...job, scores, summary, tasks },
-  jsonl: rowsOrScores(tasks, scores),
+  json: { job, agent: agentNameForJob(job), result: result ?? null, trials },
+  jsonl: rowsOrScores(trials, scores),
   csv: rowsOrScores(
-    tasks.map((task) => ({
+    trials.map((task) => ({
       task_id: task.taskId,
+      trial_id: task.trialId,
       intent: task.intent,
       instruction: task.instruction,
       reference: task.reference,
