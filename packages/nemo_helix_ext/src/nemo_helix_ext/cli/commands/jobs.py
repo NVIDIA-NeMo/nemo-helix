@@ -1704,11 +1704,10 @@ def retry_job_group(
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
 ) -> None:
-    """Retry the failed members of a job group.
+    """Retry the non-succeeded members of a job group.
 
-    Reruns each errored member as a fresh attempt in the background; succeeded members
-    are left untouched and cancelled members are out of scope. A group that is
-    cancelling cannot be retried.
+    Reruns each failed or cancelled member as a fresh attempt in the background;
+    succeeded members are left untouched. A group that is cancelling cannot be retried.
     """
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)

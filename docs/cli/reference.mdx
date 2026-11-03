@@ -5114,7 +5114,7 @@ nemo jobs groups [OPTIONS] COMMAND [ARGS]...
 * `update`: Update a job group's mutable metadata.
 * `delete`: Delete a job group and all of its member jobs.
 * `cancel`: Request cancellation of a job group.
-* `retry`: Retry the failed members of a job group.
+* `retry`: Retry the non-succeeded members of a job group.
 
 ##### nemo jobs groups create
 
@@ -5316,11 +5316,10 @@ nemo jobs groups cancel [OPTIONS] NAME
 
 ##### nemo jobs groups retry
 
-Retry the failed members of a job group.
+Retry the non-succeeded members of a job group.
 
-Reruns each errored member as a fresh attempt in the background; succeeded members
-are left untouched and cancelled members are out of scope. A group that is
-cancelling cannot be retried.
+Reruns each failed or cancelled member as a fresh attempt in the background;
+succeeded members are left untouched. A group that is cancelling cannot be retried.
 
 **Usage:**
 

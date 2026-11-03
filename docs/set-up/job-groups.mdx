@@ -288,11 +288,13 @@ all members are terminal the group settles to `cancelled`. The background
 teardown is best-effort: if it is lost, members finish naturally and the group
 settles to its real terminal status — re-request cancellation to drive it again.
 
-**Retry** reruns each `error` member as a fresh attempt (not a
-delete-and-recreate), in the background; succeeded members are left untouched and
-cancelled members are out of scope. As retried members re-enter `created` the
+**Retry** reruns every non-succeeded member as a fresh attempt (not a
+delete-and-recreate), in the background. Both failed (`error`) members and
+`cancelled` members are rerun — in a `fail_fast` group the member that failed and
+the siblings cancelled alongside it are all unfinished work, so all restart. Only
+succeeded members are left untouched. As retried members re-enter `created` the
 group re-opens to a non-terminal status. Retrying a group that is `cancelling` is
-rejected, and retrying a group with no failed members is a harmless no-op.
+rejected, and retrying a group with no non-succeeded members is a harmless no-op.
 
 ## Not Yet Available
 
