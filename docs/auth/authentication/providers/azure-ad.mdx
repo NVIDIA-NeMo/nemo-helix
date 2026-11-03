@@ -55,6 +55,7 @@ NeMo Helix uses Azure AD as an OIDC identity provider. The Azure token must be a
 - `public_client.client_id`: the Azure application client ID used by CLI and Studio login.
 - `audience`: the expected token `aud` claim, if you want audience validation. For Azure AD v2.0 access tokens, this is often the application client ID GUID; verify the token's actual `aud` claim.
 - `email_claim`: often `upn` for Azure AD access tokens.
+- `require_verified_email`: Azure AD access tokens do not carry `email_verified`. Set this to `false` only if role bindings reference `upn` values, which are directory-managed.
 - `subject_claim`: often `oid` for Azure AD access tokens.
 - `groups_claim`: `groups` when Azure emits group IDs in the token.
 
@@ -72,6 +73,7 @@ auth:
     additional_issuers:
       - "https://sts.windows.net/<tenant-id>/"
     email_claim: "upn"
+    require_verified_email: false
     subject_claim: "oid"
     groups_claim: "groups"
     public_client:

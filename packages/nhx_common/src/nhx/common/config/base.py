@@ -301,6 +301,16 @@ class OIDCConfig(BaseSettings):
         "Set explicitly for your IdP.",
     )
 
+    require_verified_email: bool = Field(
+        default=True,
+        description="Only trust the email claim as an identity (principal email and authorization alias "
+        "for role bindings) when the token also carries `email_verified: true`. An unverified email is "
+        "attacker-influenceable at many IdPs, so a missing or false `email_verified` drops the email "
+        "from the principal. Tokens that name the email as the subject (`subject_claim` equal to "
+        "`email_claim`) are rejected when it is not verified. Set to false only when the IdP "
+        "guarantees emails are verified and immutable but does not emit `email_verified`.",
+    )
+
     groups_claim: str = Field(
         default="groups",
         description="JWT claim containing user groups. "

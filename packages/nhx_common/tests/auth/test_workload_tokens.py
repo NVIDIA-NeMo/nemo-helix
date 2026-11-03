@@ -105,6 +105,7 @@ async def test_workload_subject_token_resolves_with_configured_subject_issuer(tm
             "iss": "https://sso.example.test/application/o/nemo-workload/",
             "sub": "svc-nemo",
             "email": "svc-nemo@example.test",
+            "email_verified": True,
             "groups": "nemo-workloads",
             "scope": "openid email groups",
             "aud": "nemo-helix-workload",

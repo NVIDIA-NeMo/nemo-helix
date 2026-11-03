@@ -119,6 +119,8 @@ auth:
     audience:
     # JWT claim containing the principal email (maps to X-NHX-Principal-Email). Set explicitly for your IdP. | default: 'email'
     email_claim: email
+    # Only trust the email claim as an identity (principal email and authorization alias for role bindings) when the token also carries `email_verified: true`. An unverified email is attacker-influenceable at many IdPs, so a missing or false `email_verified` drops the email from the principal. Tokens that name the email as the subject (`subject_claim` equal to `email_claim`) are rejected when it is not verified. Set to false only when the IdP guarantees emails are verified and immutable but does not emit `email_verified`. | default: True
+    require_verified_email: true
     # JWT claim containing user groups. Supports 'groups' (standard) and 'cognito:groups' (AWS Cognito). | default: 'groups'
     groups_claim: groups
     # JWT claim to use as principal ID (maps to X-NHX-Principal-Id). Set explicitly for your IdP. | default: 'sub'
