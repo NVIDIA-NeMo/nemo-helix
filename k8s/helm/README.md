@@ -244,7 +244,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | api.podSecurityContext | object | [See values.yaml](values.yaml#L1024) | Pod-level security context settings for the API service. |
 | api.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
 | api.podSecurityContext.runAsGroup | int | `1000` | GID of the `nvs` user. |
-| api.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. |
+| api.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID. |
 | api.readinessProbe | object | [See values.yaml](values.yaml#L1089) | Readiness probe configuration for the api service. |
 | api.readinessProbe.failureThreshold | int | `3` | The failure threshold for the readiness probe. |
 | api.readinessProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the readiness probe. |
@@ -362,7 +362,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.controller.podSecurityContext | object | [See values.yaml](values.yaml#L1281) | Pod-level security context settings for the controller service. |
 | core.controller.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
 | core.controller.podSecurityContext.runAsGroup | int | `1000` | GID of the `nvs` user. |
-| core.controller.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. |
+| core.controller.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID. |
 | core.controller.readinessProbe | object | [See values.yaml](values.yaml#L1337) | Readiness probe configuration for the controller service. |
 | core.controller.readinessProbe.failureThreshold | int | `3` | The failure threshold for the readiness probe. |
 | core.controller.readinessProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the readiness probe. |
