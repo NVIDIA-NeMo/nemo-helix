@@ -18,9 +18,9 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import { useJobsCancelJob, useJobsDeleteJob } from '@nemo/sdk/generated/platform/jobs';
@@ -63,7 +63,7 @@ export const GenerateJobsDataView: FC = () => {
 
   const [deleteJobs, setDeleteJobs] = useState<GenerateJob[]>([]);
   const [cancelTarget, setCancelTarget] = useState<GenerateJob | undefined>(undefined);
-  const toast = useToast();
+  const announceCancellation = useAnnounceCancellation();
 
   const deleteJobMutation = useJobsDeleteJob({
     mutation: {
@@ -97,8 +97,8 @@ export const GenerateJobsDataView: FC = () => {
   // Cancel job mutation
   const cancelJobMutation = useJobsCancelJob({
     mutation: {
-      onSuccess: () => {
-        toast.success('Job cancelled successfully.');
+      onSuccess: (job, variables) => {
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
         queryClient.resetQueries({
           queryKey: getSafeSynthesizerListJobsQueryKey(workspace),
         });

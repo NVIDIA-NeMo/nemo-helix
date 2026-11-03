@@ -3,7 +3,7 @@
 
 import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import { Close } from '@nemo/icons/icons';
 import {
   getJobsGetJobQueryKey,
@@ -34,13 +34,13 @@ export const CancelJobButton: FC<CancelJobButtonProps> = ({
   onCancelled,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const toast = useToast();
+  const announceCancellation = useAnnounceCancellation();
   const queryClient = useQueryClient();
 
   const { mutateAsync, isPending } = useJobsCancelJob({
     mutation: {
-      onSuccess: () => {
-        toast.success('Job cancelled successfully.');
+      onSuccess: (job) => {
+        announceCancellation(workspace, { name: jobName, status: job.status });
         queryClient.invalidateQueries({
           queryKey: getJobsGetJobQueryKey(workspace, jobName),
         });

@@ -5,7 +5,7 @@ import { type ActionMenuItem, ActionsMenu } from '@nemo/common/src/components/Ac
 import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import {
   getDataDesignerListCreateJobsQueryKey,
   useDataDesignerCancelCreateJob,
@@ -51,15 +51,15 @@ export const DataDesignerJobActionsMenu: FC<DataDesignerJobActionsMenuProps> = (
   const queryClient = useQueryClient();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const toast = useToast();
+  const announceCancellation = useAnnounceCancellation();
 
   const cancelJobMutation = useDataDesignerCancelCreateJob({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (job, variables) => {
         queryClient.resetQueries({
           queryKey: getDataDesignerListCreateJobsQueryKey(workspace),
         });
-        toast.success('Job cancelled successfully.');
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
       },
     },
   });

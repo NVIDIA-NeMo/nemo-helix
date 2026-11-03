@@ -7,7 +7,7 @@ import {
   QuickActionsMenuRoot,
 } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
-import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerCancelRunJob,
@@ -36,15 +36,15 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
   const queryClient = useQueryClient();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
-  const toast = useToast();
+  const announceCancellation = useAnnounceCancellation();
 
   const cancelJobMutation = useAnonymizerCancelRunJob({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (job, variables) => {
         queryClient.resetQueries({
           queryKey: getAnonymizerListRunJobsQueryKey(workspace),
         });
-        toast.success('Job cancelled successfully.');
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
       },
     },
   });
