@@ -10,7 +10,7 @@ builds it:
 - start a throwaway container from the environment image;
 - run the agent's own ``setup()`` in it, as the task's agent user, the way a trial would, but with nothing of a
   trial (no healthcheck, task files, skills or credentials);
-- ``docker commit`` the result, restoring the image's ``CMD``.
+- ``docker commit`` the result, restoring the image's ``ENTRYPOINT`` and ``CMD``.
 
 Trials of the same key across runs on the machine wait for that build (an exclusive ``flock`` per key) and reuse
 it. A layer that can't be built leaves the trial on its environment image, where setup installs as before.
@@ -23,9 +23,12 @@ Set :data:`~nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer.AGENT_LAYERS_EN
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import os
 import shlex
+import stat
 import sys
 import tempfile
 import time
@@ -60,7 +63,7 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
     """Harbor's Docker environment, starting each trial from its environment image's agent layer.
 
     A built image is tagged per trial (compose's ``<project>-main``) and compose labels it per project, so its ID
-    differs between trials of the same ``environment/``. Its layer is keyed by Harbor's content hash of
+    differs between trials of the same ``environment/``. Its layer is keyed by :func:`environment_digest` of
     ``environment/`` instead; a prebuilt task image by its image ID, which every trial shares.
     """
 
@@ -76,7 +79,8 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
         await super()._validate_image_os(image_name)
         built = not self._use_prebuilt
         if built:
-            layer = await self._agent_layer(self._built_image, base_key=f"environment:{self.environment_id}")
+            digest = await asyncio.to_thread(environment_digest, self.environment_dir)
+            layer = await self._agent_layer(self._built_image, base_key=f"environment:{digest}")
         else:
             layer = await self._agent_layer(image_name, base_key=None)
         if layer is not None:
@@ -132,6 +136,30 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
         except Exception:
             logger.exception("Could not build the agent layer of %s; the trial installs its agent in setup", image_name)
             return None
+
+
+def environment_digest(environment_dir: Path) -> str:
+    """A digest of everything a build of ``environment_dir`` can see: each path, mode, and file's contents or link's target.
+
+    Not Harbor's content hash, which leaves modes and symlinks out: a script made executable, or a link pointed
+    elsewhere, builds a different image and must get a different layer.
+    """
+    digest = hashlib.sha256()
+    for directory, names, files in os.walk(environment_dir):  # links to directories are listed, not followed
+        names.sort()
+        for name in sorted([*names, *files]):
+            path = Path(directory, name)
+            info = path.lstat()
+            relative = path.relative_to(environment_dir).as_posix()
+            if stat.S_ISLNK(info.st_mode):
+                entry = f"link {relative} {os.readlink(path)}"
+            elif stat.S_ISDIR(info.st_mode):
+                entry = f"dir {relative} {stat.S_IMODE(info.st_mode):o}"
+            else:
+                contents = hashlib.sha256(path.read_bytes()).hexdigest()
+                entry = f"file {relative} {stat.S_IMODE(info.st_mode):o} {contents}"
+            digest.update(entry.encode() + b"\0")
+    return digest.hexdigest()
 
 
 def default_lock_dir() -> Path:
@@ -220,7 +248,9 @@ async def build_agent_layer(
     container = f"nemo-agent-layer-build-{tag.rpartition(':')[2]}-{uuid.uuid4().hex[:8]}"
     config = json.loads(await _docker("image", "inspect", "--format", "{{json .Config}}", image))
     logger.info("Building agent layer %s (%s) on %s", tag, install.agent, image)
-    await _docker("run", "--detach", "--rm", "--name", container, image, "sh", "-c", "sleep infinity")
+    # The image's ENTRYPOINT is overridden too: a task's entrypoint may initialize state each trial must make for
+    # itself, which a layer would otherwise share.
+    await _docker("run", "--detach", "--rm", "--name", container, "--entrypoint", "sh", image, "-c", "sleep infinity")
     try:
         with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
             harbor_agent = AgentFactory.create_agent_from_config(agent, logs_dir=Path(logs))
@@ -232,7 +262,10 @@ async def build_agent_layer(
         # A compose-built image carries its trial's project label, and `down --rmi local` deletes every image that
         # names its project: blank those, or that trial's teardown would delete the shared layer.
         compose = {name: "" for name in config.get("Labels") or {} if name.startswith(_COMPOSE_LABEL_PREFIX)}
-        changes = [f"CMD {json.dumps(config.get('Cmd') or [])}"]
+        changes = [
+            f"ENTRYPOINT {json.dumps(config.get('Entrypoint') or [])}",
+            f"CMD {json.dumps(config.get('Cmd') or [])}",
+        ]
         changes += [f"LABEL {json.dumps(name)}={json.dumps(value)}" for name, value in {**compose, **labels}.items()]
         await _docker("commit", *[arg for change in changes for arg in ("--change", change)], container, tag)
     finally:

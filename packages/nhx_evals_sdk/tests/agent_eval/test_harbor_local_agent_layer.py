@@ -37,6 +37,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.local_agent_layer import (
     ContainerExecEnvironment,
     build_agent_layer,
     ensure_agent_layer,
+    environment_digest,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import _with_agent_layers
 
@@ -200,7 +201,9 @@ async def test_a_missing_task_image_is_pulled_first(tmp_path, monkeypatch) -> No
     assert pulled == [("pull", "task-image")]
 
 
-async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_cmd_restored(tmp_path, monkeypatch) -> None:
+async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_start_restored(
+    tmp_path, monkeypatch
+) -> None:
     calls: list[tuple[str, ...]] = []
     set_up: list[Any] = []
 
@@ -208,7 +211,7 @@ async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_cmd_r
         calls.append(args)
         if args[:2] == ("image", "inspect"):
             labels = {"com.docker.compose.project": "hello-world__abc__env", "org.opencontainers.image.title": "t"}
-            return json.dumps({"Cmd": ["bash"], "Entrypoint": None, "Labels": labels})
+            return json.dumps({"Cmd": ["bash"], "Entrypoint": ["/init.sh"], "Labels": labels})
         return ""
 
     class _Agent:
@@ -221,12 +224,13 @@ async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_cmd_r
     await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user="agent")
 
     run = next(call for call in calls if call[0] == "run")
-    assert run[-4:] == ("task-image", "sh", "-c", "sleep infinity")
+    # The task's entrypoint doesn't run: state it initializes belongs to each trial, not the shared layer.
+    assert run[-5:] == ("--entrypoint", "sh", "task-image", "-c", "sleep infinity")
     (environment,) = set_up
     assert isinstance(environment, ContainerExecEnvironment) and environment.default_user == "agent"
     commit = next(call for call in calls if call[0] == "commit")
     changes = [commit[i + 1] for i, arg in enumerate(commit) if arg == "--change"]
-    assert 'CMD ["bash"]' in changes
+    assert 'ENTRYPOINT ["/init.sh"]' in changes and 'CMD ["bash"]' in changes
     # The trial's compose project label is blanked, or that trial's `down --rmi local` would delete the layer.
     assert 'LABEL "com.docker.compose.project"=""' in changes
     assert not any("org.opencontainers" in change for change in changes)
@@ -307,7 +311,6 @@ def _environment(tmp_path: Path, agent: dict[str, Any], *, compose: bool = False
     environment._use_prebuilt = False
     environment._before_layer = None
     environment.session_id = "Hello-World__abc"
-    environment.__dict__["environment_id"] = "env-content-hash"  # Harbor's cached_property, over environment/
     return environment
 
 
@@ -340,7 +343,8 @@ async def test_the_trial_starts_from_its_agent_layer(tmp_path, monkeypatch) -> N
     asked = await _validated(environment, monkeypatch, "nemo-agent-layer:abc")
 
     # The image compose built, keyed by environment/'s contents: compose labels each trial's build differently.
-    assert asked == [("hello-world__abc-main", "harbor:codex", "agent", "environment:env-content-hash")]
+    digest = environment_digest(environment.environment_dir)
+    assert asked == [("hello-world__abc-main", "harbor:codex", "agent", f"environment:{digest}")]
     assert environment._use_prebuilt and environment._env_vars.prebuilt_image_name == "nemo-agent-layer:abc"
 
 
@@ -463,3 +467,18 @@ async def test_teardown_removes_the_trials_own_image_not_the_shared_layer(
     await environment.stop(delete=True)
 
     assert stopped == [(prebuilt, image)]
+
+
+def test_the_environment_digest_sees_modes_and_symlinks(tmp_path: Path) -> None:
+    """Harbor's content hash doesn't: a script made executable, or a link moved, builds a different image."""
+    (tmp_path / "run.sh").write_text("echo hi\n")
+    (tmp_path / "data").symlink_to("run.sh")
+    before = environment_digest(tmp_path)
+
+    (tmp_path / "run.sh").chmod(0o755)
+    executable = environment_digest(tmp_path)
+    (tmp_path / "data").unlink()
+    (tmp_path / "data").symlink_to("elsewhere")
+
+    assert len({before, executable, environment_digest(tmp_path)}) == 3
+    assert environment_digest(tmp_path) == environment_digest(tmp_path)
