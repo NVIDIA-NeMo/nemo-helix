@@ -6,7 +6,8 @@
 Builder's builds hold no registry credential, so a layer can't start ``FROM`` the environment image the platform
 built: it builds the environment again, from the task's own Dockerfile (a prebuilt image is public, so it starts
 ``FROM`` that), and appends one step to the final stage. That step runs the agent's own setup as root, with the
-agent installer (a standalone Python with Harbor) and the agent to install read from Builder mounts. They are outside
+agent installer (a standalone Python with Harbor) and the agent to install read from Builder mounts, where the
+generated Dockerfile itself is too. They are outside
 the build context, so the task's ``COPY . .`` doesn't copy them and its ``.dockerignore`` doesn't hide them, and the
 image holds none of them. The setup switches to the task's agent user for what it installs as the agent. The final
 stage's ``USER`` is restored.
@@ -25,7 +26,8 @@ INSTALLER_MOUNT = "/opt/nhx-agent-installer"
 AGENT_DIR = "nhx-agent-layer"
 AGENT_MOUNT = "/opt/nhx-agent-layer"
 AGENT_FILE = "agent.json"
-#: The generated Dockerfile's name in the context, beside the task's own.
+#: The generated Dockerfile's name, beside the agent to install: never in the context, where the task's
+#: ``COPY . .`` would copy it.
 LAYER_DOCKERFILE = "Dockerfile.nhx-agent-layer"
 INSTALL_MODULE = "nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install"
 

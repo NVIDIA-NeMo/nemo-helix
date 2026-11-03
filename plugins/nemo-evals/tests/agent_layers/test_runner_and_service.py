@@ -215,13 +215,12 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
     assert layer.status == "ready" and layer.image is not None
     assert layer.image.image_ref is not None and layer.image.image_ref.endswith("@sha256:" + "d" * 64)
     ((name, source, dockerfile),) = builder.submits
-    assert name.startswith("harbor-agent-") and dockerfile == "Dockerfile.nhx-agent-layer"
+    assert name.startswith("harbor-agent-") and dockerfile == "/opt/nhx-agent-layer/Dockerfile.nhx-agent-layer"
     assert isinstance(source, FileSetSource) and source.fileset == f"default/{name}"
     context = _context(files.uploads[(name, "context.tar.gz")])
-    # The environment's own files and the generated Dockerfile; nothing else of the task, and nothing of the install,
-    # which a task's `COPY . .` would copy into its image.
-    assert set(context) == {"context/setup.sh", "context/Dockerfile", "context/Dockerfile.nhx-agent-layer"}
-    assert context["context/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
+    # The environment's own files; nothing else of the task, and nothing of the layer, which a task's `COPY . .` would
+    # copy into its image.
+    assert set(context) == {"context/setup.sh", "context/Dockerfile"}
     # The agent and the installer are the build's mounts, from an archive of their own.
     (mounts,) = builder.mounts
     assert [(m.source.archive, m.source.context_path, m.target) for m in mounts] == [
@@ -229,6 +228,7 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
         ("mounts.tar.gz", "mounts/nhx-agent-layer", AGENT_MOUNT),
     ]
     mounted = _context(files.uploads[(name, "mounts.tar.gz")])
+    assert mounted["mounts/nhx-agent-layer/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
     agent = json.loads(mounted["mounts/nhx-agent-layer/agent.json"])
     assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "env": {}, "user": "agent"}
     assert "mounts/nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3" in mounted
@@ -257,7 +257,8 @@ async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
     await _run(entity_store, spec, builder, files, tmp_path)
 
     ((name, _, _),) = builder.submits
-    dockerfile = _context(files.uploads[(name, "context.tar.gz")])["context/Dockerfile.nhx-agent-layer"].decode()
+    mounted = _context(files.uploads[(name, "mounts.tar.gz")])
+    dockerfile = mounted["mounts/nhx-agent-layer/Dockerfile.nhx-agent-layer"].decode()
     assert dockerfile.splitlines()[0] == f"FROM docker.io/library/python@{_ENVIRONMENT_DIGEST}"
 
 

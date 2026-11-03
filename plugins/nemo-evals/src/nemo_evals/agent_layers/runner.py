@@ -3,9 +3,9 @@
 
 """The agent-layer Job's work: make the layer's build context, have Builder build it, and record the result.
 
-The context is the task's environment context (or nothing, for a prebuilt image) and the generated Dockerfile. The
-agent to install, and the agent installer the Job's first step put on job storage, are the build's mounts, apart
-from the context. Each goes up as a tar archive in a fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
+The context is the task's environment context, or nothing for a prebuilt image. The generated Dockerfile, the agent
+to install, and the agent installer the Job's first step put on job storage are the build's mounts, apart from the
+context. Each goes up as a tar archive in a fileset of its own. Builder's name for the build is keyed by what the layer holds (the environment's files or image,
 the agent install, the installer and the platform), so tasks with the same environment share one build.
 """
 
@@ -56,6 +56,8 @@ CONTEXT_ROOT = "context"
 #: The installer and the agent to install, which the build mounts rather than holding them in its context.
 MOUNTS_ARCHIVE = "mounts.tar.gz"
 MOUNTS_ROOT = "mounts"
+#: The generated Dockerfile, where the build reads it: in the agent's mount.
+MOUNTED_DOCKERFILE = f"{AGENT_MOUNT}/{LAYER_DOCKERFILE}"
 _BUILDER_NAME_PREFIX = "harbor-agent-"
 
 
@@ -152,12 +154,13 @@ async def _submit(
             if built is None:
                 environment_dockerfile = await asyncio.to_thread(_stage_environment, main, archive, context)
         if built is None:
-            (context / LAYER_DOCKERFILE).write_text(
+            mounted = Path(scratch) / MOUNTS_ROOT
+            (mounted / AGENT_DIR).mkdir(parents=True)
+            # In the agent's mount, not the context: a task's `COPY . .` would copy it into the image.
+            (mounted / AGENT_DIR / LAYER_DOCKERFILE).write_text(
                 layer_dockerfile(environment_dockerfile=environment_dockerfile, base_image=base_image),
                 encoding="utf-8",
             )
-            mounted = Path(scratch) / MOUNTS_ROOT
-            (mounted / AGENT_DIR).mkdir(parents=True)
             agent = {**layer.agent.model_dump(mode="json"), "user": user}
             (mounted / AGENT_DIR / AGENT_FILE).write_text(json.dumps(agent), encoding="utf-8")
             await asyncio.to_thread(_unpack, installer, mounted / INSTALLER_DIR)
@@ -166,7 +169,7 @@ async def _submit(
                 builder,
                 name=name,
                 source=source,
-                dockerfile=LAYER_DOCKERFILE,
+                dockerfile=MOUNTED_DOCKERFILE,
                 mounts=mounts,
                 platform=main.platform,
                 built_after=layer.built_after,
@@ -175,7 +178,7 @@ async def _submit(
         type=MAIN_SERVICE,
         source="dockerfile",
         context_path=CONTEXT_ROOT,
-        dockerfile=LAYER_DOCKERFILE,
+        dockerfile=MOUNTED_DOCKERFILE,
         context_digest=main.context_digest,
         platform=main.platform,
         builder_image=built.name,
@@ -197,8 +200,9 @@ def _base_image(image: str, digest: str | None) -> str:
 def layer_builder_name(*, environment: str, agent_key: str, user: str | int | None, platform: str | None) -> str:
     """Builder build-set name for a layer: keyed by the environment it builds on, the agent install, the task's agent
     user (installs write into that user's home) and the platform."""
-    # v2: the installer and agent are mounted, not in the context, where a task's `COPY . .` copied them.
-    document = {"v": 2, "environment": environment, "agent": agent_key, "user": user, "platform": platform}
+    # v3: the installer, agent and generated Dockerfile are mounted, not in the context, where a task's `COPY . .`
+    # copied them.
+    document = {"v": 3, "environment": environment, "agent": agent_key, "user": user, "platform": platform}
     key = json.dumps(document, sort_keys=True)
     return f"{_BUILDER_NAME_PREFIX}{hashlib.sha256(key.encode()).hexdigest()[:12]}"
 
