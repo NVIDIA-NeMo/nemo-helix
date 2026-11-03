@@ -4,6 +4,7 @@
 """Unit tests for customizer E2E asset helpers (no platform required)."""
 
 import ast
+import importlib.util
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,7 +14,7 @@ import httpx
 import pytest
 
 from e2e.customizer import mine_embedding_data, stage_assets
-from e2e.customizer.assets_manifest import load, local_only_formats
+from e2e.customizer.assets_manifest import load, local_only_formats, repo_root
 from e2e.customizer.generate_grpo_assets import (
     ADAPTER_ENV_FORMAT,
     ADAPTER_SMOKE_FORMAT,
@@ -242,6 +243,31 @@ def test_grpo_envs_are_built_locally_not_synced_from_s3() -> None:
 def test_generator_writes_every_built_grpo_format() -> None:
     written = {ENV_FORMAT, NATIVE_ENV_FORMAT, NATIVE_REF_ENV_FORMAT, ADAPTER_ENV_FORMAT, ADAPTER_SMOKE_FORMAT}
     assert written == GRPO_BUILT_FORMATS
+
+
+def test_dapo_rows_ask_for_the_boxed_answer_math_with_judge_grades() -> None:
+    """math_with_judge scores a response without a \\boxed{} answer 0, so no row may ask for "Answer:"."""
+    spec = importlib.util.spec_from_file_location(
+        "prepare_math_with_judge", repo_root() / "scripts/grpo-examples/prepare_math_with_judge.py"
+    )
+    assert spec is not None and spec.loader is not None
+    prepare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(prepare)
+    dapo_prompt = (
+        "Solve the following math problem step by step. The last line of your response should be of the form "
+        "Answer: $Answer (without quotes) where $Answer is the answer to the problem.\n\n"
+        "What is $1 + 1$?\n\n"
+        'Remember to put your answer on its own line after "Answer:".'
+    )
+
+    row = prepare._boxed_row(prepare._dapo_problem(dapo_prompt), "2")
+
+    system, user = row["responses_create_params"]["input"]
+    assert "\\boxed{}" in system["content"]
+    assert user == {"role": "user", "content": "What is $1 + 1$?"}
+    assert row["question"] == "What is $1 + 1$?" and row["expected_answer"] == "2"
+    with pytest.raises(ValueError, match="expected wrapper"):
+        prepare._dapo_problem("What is $1 + 1$?")
 
 
 def test_missing_built_env_names_its_generator(tmp_path: Path) -> None:

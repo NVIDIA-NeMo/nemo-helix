@@ -3,7 +3,7 @@
 
 # E2E Test Harness
 
-The E2E test harness runs tests against one of two **platforms**: **docker** (quickstart: Docker + config file) or **kubernetes** (already-deployed cluster). You select the platform at run time with `--docker` or `--kubernetes`. A config file is only used for docker (default: `e2e/quickstart/default.yaml`; auth: `e2e/quickstart/auth.yaml` when `--feature auth`). Tests declare which platform(s) they support via the `platform` marker and optional features (e.g. auth) via the `feature` marker.
+The E2E test harness runs tests against one of two **platforms**: **docker** (quickstart: Docker + config file) or **kubernetes** (already-deployed cluster). You select the platform at run time with `--docker` or `--kubernetes`. For docker, a config file configures the quickstart platform (default: `e2e/quickstart/default.yaml`; auth: `e2e/quickstart/auth.yaml` when `--feature auth`). For kubernetes, `--config` only tells the harness whether the cluster runs with auth, so the client sends the admin principal headers. Tests declare which platform(s) they support via the `platform` marker and optional features (e.g. auth) via the `feature` marker.
 
 ## Test Organization
 
@@ -19,7 +19,7 @@ E2E tests are organized by functional service workflows that represent complete 
 
 1. **Docker** (`--docker`): Runs the NHX API in a Docker container (quickstart) using a config file. Config defaults to `e2e/quickstart/default.yaml` (or `auth.yaml` when `--feature auth`); override with `--config path/to/config.yaml`.
 
-2. **Kubernetes** (`--kubernetes`): Connects to an already-deployed cluster. Requires `--cluster-url` or `NHX_E2E_CLUSTER_URL`. No local backend is started; OpenShift is treated as kubernetes.
+2. **Kubernetes** (`--kubernetes`): Connects to an already-deployed cluster. Requires `--cluster-url` or `NHX_E2E_CLUSTER_URL`. No local backend is started; OpenShift is treated as kubernetes. When the cluster runs with auth and accepts principal headers (for example installed with `e2e/k8s/values/auth-overlay.yaml`), pass `--config e2e/quickstart/auth.yaml`: tests that do not set their own `e2e_config` then send the admin principal headers. Without it they send none and get `401`.
 
 ## Building Images
 
@@ -113,20 +113,27 @@ feature markers plus a suite marker:
   asset), and the job auto-deploys its output: the test passes an unbound vLLM deployment config
   as the job's `deployment_config`, waits for the deployment, sends one chat completion (or one
   embeddings request), and deletes it. A LoRA adapter is served from its base model's deployment.
+  Automodel SFT outputs are then also served on the model-free NIM (NIM 2.x) without training
+  again: the LoRA adapter from its base model, which also carries a custom chat template
+  (checked through `usage.prompt_tokens`), and the full-weight output with tool calling.
 - **`uplift`**: longer runs on larger datasets that check the tuned model beats the base. SFT
-  and DPO train for one epoch, serve the base and tuned models on vLLM (the models service's
-  default vLLM image), and score both. The embedding test runs the validated NVDocs recipe
-  (3 epochs on 4 GPUs) on the full mined dataset. GRPO validates on the same holdout prompts
-  before and after training and requires both `val_accuracy` and `train_reward` to increase.
+  trains for one epoch, serves the base and tuned models on vLLM (the models service's default
+  vLLM image), and scores both. DPO trains for one epoch and is scored on the held-out
+  preference pairs the job validates before and after training: the tuned policy must give
+  chosen responses a higher mean implicit reward than rejected ones and rank more than half of
+  the pairs that have a preference correctly (ties never count, since NeMo-RL trains a tie as
+  chosen == rejected). The embedding test runs the validated NVDocs recipe (3 epochs on 4 GPUs)
+  on the full mined dataset. GRPO validates on the same holdout prompts before and after
+  training and requires both `val_accuracy` and `train_reward` to increase.
 
 | Test | Backend / mode | Base model | Features |
 |---|---|---|---|
-| `test_smoke.py` | Automodel and Unsloth SFT (LoRA, all-weights), NeMo RL DPO (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, backend, `smoke` |
+| `test_smoke.py` | Automodel and Unsloth SFT (LoRA, all-weights), NeMo RL DPO (Kubernetes only); Automodel outputs also served on the model-free NIM | `Qwen/Qwen3-0.6B` | `gpu`, backend, `smoke` |
 | `test_smoke.py` | NeMo RL GRPO, `wheels-v1` `math_with_judge` environment (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `grpo`, `smoke` |
 | `test_smoke.py` | Automodel `bi_encoder`, all-weights, served for embeddings | `nvidia/Nemotron-3-Embed-1B-BF16` | `gpu`, `automodel`, `smoke` |
 | `test_automodel.py` | Automodel SFT, LoRA and all-weights | `Qwen/Qwen3-0.6B` | `gpu`, `automodel`, `uplift` |
 | `test_unsloth.py` | Unsloth SFT, LoRA and all-weights | `Qwen/Qwen3-0.6B` | `gpu`, `unsloth`, `uplift` |
-| `test_rl_dpo.py` | NeMo RL DPO (Kubernetes only) | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `uplift` |
+| `test_rl_dpo.py` | NeMo RL DPO (Kubernetes only); held-out preference accuracy and reward margin | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `uplift` |
 | `test_rl_grpo.py` | NeMo RL GRPO, `wheels-v1` `math_with_judge` environment (Kubernetes only); `val_accuracy` and `train_reward` must increase | `Qwen/Qwen3-0.6B` | `gpu`, `rl`, `grpo`, `uplift` |
 | `test_automodel_embedding.py` | Automodel `bi_encoder`, all-weights on 4 GPUs, scored with `retrieve-eval`; requires nDCG@10 uplift >= 0.05 | `nvidia/Nemotron-3-Embed-1B-BF16` | `gpu`, `automodel`, `embedding`, `uplift` |
 | `test_automodel_nemotron.py` | Automodel LoRA on 4 GPUs (expert parallel 4), served on 4 GPUs | `nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16` | `gpu`, `automodel`, `h100`, `uplift` |
@@ -134,11 +141,13 @@ feature markers plus a suite marker:
 A test runs only when all of its features are selected:
 
 ```bash
-# Against a Kubernetes cluster (review cluster in CI, or local minikube)
+# Against a Kubernetes cluster (review cluster in CI, or local minikube). Add
+# --config e2e/quickstart/auth.yaml when the cluster runs with auth (as CI smoke does).
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature unsloth --feature rl --feature smoke -v
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature unsloth --feature rl --feature uplift -v
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature rl --feature grpo --feature smoke -v
-uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature embedding --feature uplift -v
+# The embedding module alone: its features also select the automodel SFT uplift tests.
+uv run pytest e2e/customizer/tests/test_automodel_embedding.py --kubernetes --feature gpu --feature automodel --feature embedding --feature uplift -v
 uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automodel --feature h100 --feature uplift -v
 ```
 
@@ -147,14 +156,18 @@ uv run pytest e2e/customizer/tests/ --kubernetes --feature gpu --feature automod
 | Trigger | Suite | Failure handling |
 |---|---|---|
 | Nightly (`0 9 * * *`), Platform-Deploy PRs, `workflow_dispatch` with `run-e2e` (default) | `smoke` | Fails the run |
-| Weekly (`0 11 * * 6`), `workflow_dispatch` with `run-e2e` and `customizer-suite: uplift` | `uplift` | Reported in the E2E summary; does not fail the run |
+| Weekly (`0 11 * * 6`), `workflow_dispatch` with `run-e2e` and `customizer-suite: uplift` | `uplift`, with `E2E_REQUIRE_UPLIFT=1` | Reported in the E2E summary; does not fail the run |
+| Weekly (`0 11 * * 6`) in its own Docker job (`Run Docker Customizer embedding uplift E2E tests`), `workflow_dispatch` with `run-e2e` and `customizer-embedding` | `test_automodel_embedding.py` (three epochs over the full mined set, ~10 h on 4 GPUs) | Reported in the E2E summary; does not fail the run |
 
 On Kubernetes, smoke runs install the platform with auth enabled
-(`e2e/k8s/values/auth-overlay.yaml`), so job pods authenticate as their service principals.
+(`e2e/k8s/values/auth-overlay.yaml`), so job pods authenticate as their service principals, and
+pass `--config e2e/quickstart/auth.yaml` so the test client sends the admin principal headers.
 Uplift runs without auth because its eval calls the inference gateway without principal headers.
 
-Docker runs skip `rl` and `grpo`. CI does not select `embedding` uplift (three epochs over the
-full mined set take hours) or `h100` (needs 4x 80GB H100s).
+Docker runs skip `rl` and `grpo`. CI does not select `h100` (needs 4x 80GB H100s).
+
+Smoke pre-pulls the model-free NIM image (`E2E_MODEL_FREE_NIM_IMAGE`:`E2E_MODEL_FREE_NIM_TAG`)
+with the NGC key, which needs NIM entitlement.
 
 GRPO needs OpenSandbox, which the platform chart does not install. The `customizer-grpo`
 `workflow_dispatch` input installs it on the Kubernetes GPU runner
@@ -213,7 +226,8 @@ does not require GPUs or OpenSandbox.
 
 | Variable | Description | Default |
 |---|---|---|
-| `E2E_REQUIRE_UPLIFT` | Set to `1` to require tuned > base instead of tuned >= base - 0.02 (the embedding test always requires nDCG@10 uplift >= 0.05) | unset |
+| `E2E_REQUIRE_UPLIFT` | SFT uplift tests: set to `1` to require tuned > base instead of tuned >= base - 0.02. The DPO, GRPO, and embedding tests always require their own uplift (embedding: nDCG@10 >= +0.05). CI sets `1` | unset |
+| `E2E_MODEL_FREE_NIM_IMAGE` / `E2E_MODEL_FREE_NIM_TAG` | Model-free NIM that the Automodel smoke test serves its outputs on | `nvcr.io/nim/nvidia/vllm-model-free-nim` / `latest` |
 | `E2E_GPU_TEST_TIMEOUT` | Per-test timeout in seconds (the embedding test sets its own 12-hour timeout) | `5400` |
 | `E2E_ASSETS_CACHE_DIR` | Local cache for assets synced from S3 | `e2e/customizer/.asset-cache` |
 | `E2E_ASSETS_SYNC_TIMEOUT` | Timeout in seconds for each `aws s3 sync` | `1800` |
@@ -558,9 +572,9 @@ e2e/
 └── test_workspaces.py              # Workspace tests with auth (use --feature auth)
 ```
 
-## Configuration (Quickstart Only)
+## Configuration
 
-Config is only used when running with `--docker`. The default config is `e2e/quickstart/default.yaml`; when `--feature auth` is set, `e2e/quickstart/auth.yaml` is used. Override with `--config path/to/config.yaml`.
+Config configures the platform only when running with `--docker`. The default config is `e2e/quickstart/default.yaml`; when `--feature auth` is set, `e2e/quickstart/auth.yaml` is used. Override with `--config path/to/config.yaml`. With `--kubernetes` the cluster is already configured, and only the config's `auth.enabled` is read: it decides whether the test client sends the admin principal headers.
 
 Config files are merged with platform defaults at runtime. For example, the default quickstart config enables auth and sets `platform.base_url` for the Docker network.
 

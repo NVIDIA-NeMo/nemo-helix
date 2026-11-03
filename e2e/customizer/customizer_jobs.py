@@ -29,6 +29,7 @@ from nemo_helix_plugin.models.types import (
     ListDeploymentConfigsQueryParams,
     ListDeploymentsQueryParams,
     ModelDeploymentConfigModelSpec,
+    ToolCallConfig,
 )
 from nhx.customization_common.sdk.client import CustomizationClient
 from nhx.customization_common.sdk.types import CustomizationJobCreateRequest
@@ -38,6 +39,9 @@ from pydantic import BaseModel
 from e2e.customizer.customization_helpers import _format_status, unique_name
 
 logger = logging.getLogger(__name__)
+
+MODEL_FREE_NIM_IMAGE = os.environ.get("E2E_MODEL_FREE_NIM_IMAGE", "nvcr.io/nim/nvidia/vllm-model-free-nim")
+MODEL_FREE_NIM_TAG = os.environ.get("E2E_MODEL_FREE_NIM_TAG", "latest")
 
 _DOCKER_LOG_TAIL_LINES = 300
 _SENSITIVE_ASSIGNMENT_RE = re.compile(
@@ -116,7 +120,8 @@ def _append_substrate_deployment_details(
             f"/deployments/{quote(substrate_name, safe='')}"
         )
         try:
-            response = httpx.get(path, timeout=5.0)
+            # The client's transport carries its auth headers; a bare httpx call gets a 401 on auth clusters.
+            response = client.http_client.get(path, timeout=5.0)
             if response.status_code == 404:
                 continue
             response.raise_for_status()
@@ -309,7 +314,84 @@ def deploy_vllm_model(
             executor_config=ContainerExecutorConfig.model_validate(executor_config),
         ),
     )
-    models.create_deployment(
+    return _deploy_and_wait(
+        client,
+        workspace,
+        deployment_name,
+        deployment_config_name,
+        ready_timeout=ready_timeout,
+        gateway_timeout=gateway_timeout,
+    )
+
+
+def deploy_model_free_nim(
+    client: NemoClient,
+    workspace: str,
+    model_entity: str,
+    *,
+    lora_enabled: bool = False,
+    chat_template: str | None = None,
+    tool_call_config: ToolCallConfig | None = None,
+    gpu: int = 1,
+    ready_timeout: int = 3600,
+    gateway_timeout: int = 120,
+) -> tuple[str, str]:
+    """Deploy ``model_entity`` on the model-free NIM (NIM 2.x) and wait until inference is routable.
+
+    NIM 2.x reads the weights path, the ``vllm serve`` flags (LoRA, tool calling), and the chat
+    template from what the models service compiles from this config, not from NIM 1.x variables.
+    """
+    deployment_config_name = unique_name("e2e-nim-config")
+    deployment_name = unique_name("e2e-nim")
+    logger.info(
+        "Deploying %s/%s on %s:%s (lora_enabled=%s, gpu=%s)",
+        workspace,
+        model_entity,
+        MODEL_FREE_NIM_IMAGE,
+        MODEL_FREE_NIM_TAG,
+        lora_enabled,
+        gpu,
+    )
+    ModelsClient.from_client(client).create_deployment_config(
+        workspace=workspace,
+        body=CreateModelDeploymentConfigRequest(
+            name=deployment_config_name,
+            description=f"E2E model-free NIM deployment for {model_entity}",
+            model_entity_id=f"{workspace}/{model_entity}",
+            engine=Engine.NIM,
+            model_spec=ModelDeploymentConfigModelSpec(
+                model_name=model_entity,
+                model_namespace=workspace,
+                lora_enabled=lora_enabled,
+                chat_template=chat_template,
+                tool_call_config=tool_call_config,
+            ),
+            executor_config=ContainerExecutorConfig(
+                gpu=gpu, image_name=MODEL_FREE_NIM_IMAGE, image_tag=MODEL_FREE_NIM_TAG
+            ),
+        ),
+    )
+    return _deploy_and_wait(
+        client,
+        workspace,
+        deployment_name,
+        deployment_config_name,
+        ready_timeout=ready_timeout,
+        gateway_timeout=gateway_timeout,
+    )
+
+
+def _deploy_and_wait(
+    client: NemoClient,
+    workspace: str,
+    deployment_name: str,
+    deployment_config_name: str,
+    *,
+    ready_timeout: int,
+    gateway_timeout: int,
+) -> tuple[str, str]:
+    """Create a deployment of an existing config and wait until the gateway routes to it."""
+    ModelsClient.from_client(client).create_deployment(
         workspace=workspace,
         body=CreateModelDeploymentRequest(name=deployment_name, config=deployment_config_name),
     )
@@ -491,27 +573,28 @@ def _find_model_deployment(
         time.sleep(poll_interval)
 
 
-def assert_chat_completion(client: NemoClient, workspace: str, deployment_name: str, model_field: str) -> None:
-    """Send one chat completion through the inference gateway and assert it returns text."""
-    response = cast(
+def provider_chat(client: NemoClient, workspace: str, deployment_name: str, **body: Any) -> dict[str, Any]:
+    """Send one chat completion on a deployment's gateway provider route and return the response."""
+    request = {
+        "messages": [{"role": "user", "content": "What is 2 + 2?"}],
+        "max_tokens": 32,
+        "temperature": 0,
+        "chat_template_kwargs": {"enable_thinking": False},
+        **body,
+    }
+    return cast(
         dict[str, Any],
         InferenceGatewayClient.from_client(client)
         .provider_post(
-            trailing_uri="v1/chat/completions",
-            name=deployment_name,
-            workspace=workspace,
-            body=JsonBody(
-                {
-                    "model": model_field,
-                    "messages": [{"role": "user", "content": "What is 2 + 2?"}],
-                    "max_tokens": 32,
-                    "temperature": 0,
-                    "chat_template_kwargs": {"enable_thinking": False},
-                }
-            ),
+            trailing_uri="v1/chat/completions", name=deployment_name, workspace=workspace, body=JsonBody(request)
         )
         .data(),
     )
+
+
+def assert_chat_completion(client: NemoClient, workspace: str, deployment_name: str, model_field: str) -> None:
+    """Send one chat completion through the inference gateway and assert it returns text."""
+    response = provider_chat(client, workspace, deployment_name, model=model_field)
     content = response["choices"][0]["message"]["content"]
     assert isinstance(content, str) and content.strip(), f"{model_field} returned no text: {response}"
     logger.info("%s answered: %r", model_field, content)
@@ -535,21 +618,27 @@ def assert_embeddings(client: NemoClient, workspace: str, deployment_name: str, 
     logger.info("%s returned a %d-dimensional embedding", model_field, len(embedding))
 
 
-def training_metric_values(client: NemoClient, workspace: str, job_name: str, metric: str) -> list[float]:
-    """Return a recorded training metric's values in step order.
+def training_metrics(client: NemoClient, workspace: str, job_name: str) -> dict[str, list[float]]:
+    """Return every training metric series a job recorded, each in step order.
 
     Training tasks store each metric's history under ``status_details.metrics`` as
     ``{"step", "epoch", "value"}`` points.
     """
     status = JobsClient.from_client(client).get_job_status(name=job_name, workspace=workspace).data()
-    recorded: set[str] = set()
+    series: dict[str, list[float]] = {}
     for step in status.steps:
         for task in step.tasks:
-            metrics = task.status_details.get("metrics") or {}
-            recorded.update(metrics)
-            if points := metrics.get(metric):
-                return [float(point["value"]) for point in sorted(points, key=lambda point: point["step"])]
-    pytest.fail(f"Job {job_name} recorded no {metric!r} series; recorded metrics: {sorted(recorded)}")
+            for name, points in (task.status_details.get("metrics") or {}).items():
+                if not series.get(name):
+                    series[name] = [float(point["value"]) for point in sorted(points, key=lambda point: point["step"])]
+    return series
+
+
+def require_metric(metrics: dict[str, list[float]], metric: str, job_name: str) -> list[float]:
+    """Return one series from :func:`training_metrics`, failing the test if the job recorded none."""
+    if values := metrics.get(metric):
+        return values
+    pytest.fail(f"Job {job_name} recorded no {metric!r} series; recorded metrics: {sorted(metrics)}")
 
 
 def _wait_for_gateway_ready(
