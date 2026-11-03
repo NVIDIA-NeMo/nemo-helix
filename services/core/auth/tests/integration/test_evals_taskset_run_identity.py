@@ -16,6 +16,8 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nhx.common.config import AuthConfig
+from nhx.common.entities.client import EntityClient as ServiceEntityClient
+from nhx.core.auth.app.embedded_pdp import load_policy_data
 from nhx.core.entities.app.repository import get_async_session_maker
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccountIdentity
 from nhx.core.entities.service import EntitiesService
@@ -89,7 +91,10 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
         tmp_dir=tmp_path,
         workspaces=[],
         projects=[],
-        auth_bundle_cache_seconds=0,
+        # Any non-zero cache stops the PDP rebuilding policy on every request, which took this
+        # test past its timeout on CI. Grants are pushed explicitly below, and the refresh loop
+        # stays idle so it cannot land an older snapshot after a push.
+        auth_bundle_cache_seconds=3600,
         auth_policy_data_refresh_interval=3600,
         access_log=True,
         service_configs={
@@ -107,6 +112,7 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
         assert portal is not None
         assert ctx.test_client.get("/apis/entities/v2/workspaces", headers=user).status_code == 200
         account_id = portal.call(_resolved_account_id, issuer, subject)
+        policy_entities = ServiceEntityClient(AsyncEntitiesClient.from_client(ctx.async_client))
         factory = dependencies.get_async_nemo_client
 
         def provide(*, as_service: str, internal: bool, on_behalf_of: str | RuntimePrincipal) -> AsyncNemoClient:
@@ -135,6 +141,7 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
                     headers=admin,
                 )
                 assert granted.status_code == 200, granted.text
+                portal.call(load_policy_data, policy_entities)
             portal.call(_seed_run, ctx.async_client.with_headers({"X-NHX-Principal-Id": "service:evals"}), workspace)
             base = f"/apis/evals/v2/workspaces/{workspace}"
             ctx.access_log.clear()
@@ -166,6 +173,8 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
             headers=user,
         )
         assert created.status_code == 201, created.text
+        # Creating the workspace binds its creator; push that binding too.
+        portal.call(load_policy_data, policy_entities)
         response = ctx.test_client.get(
             "/apis/evals/v2/workspaces/identity-user-created/agent-evaluate/runs", headers=user
         )

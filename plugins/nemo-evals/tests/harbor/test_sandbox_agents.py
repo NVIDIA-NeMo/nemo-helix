@@ -270,3 +270,122 @@ async def test_commands_run_normally_while_the_window_is_open_and_after_it_close
         await environment.exec("apt-get install -y curl")
     await environment.exec("run the agent")
     assert ran == ["apt-get install -y curl", "run the agent"]
+
+
+class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
+    """A sandbox that records its uploads and root shell commands. The shell answers with ``result``."""
+
+    uploads: list[tuple[str, str]]
+    scripts: list[tuple[str, dict[str, str]]]
+    script_env: list[dict[str, str]]
+    result: ExecResult
+
+    @override
+    async def upload_file(self, source_path: Any, target_path: str) -> None:
+        self.uploads.append((str(source_path), target_path))
+
+    @override
+    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+        self.scripts.append((script, env))
+        self.script_env.append({**self._persistent_env, **env})
+        return self.result
+
+
+def _gateway_ca_environment(result: ExecResult) -> _GatewayCAEnvironment:
+    environment = object.__new__(_GatewayCAEnvironment)
+    environment._persistent_env = {"PATH": "/agent/bin:/usr/bin"}
+    environment.session_id = "s"
+    environment.logger = logging.getLogger("test")
+    environment.uploads = []
+    environment.scripts = []
+    environment.script_env = []
+    environment.result = result
+    return environment
+
+
+async def test_every_later_command_trusts_the_gateway_ca_alongside_the_roots_it_trusted():
+    """Each variable names its own bundle: the roots it named before, else the image's, plus the gateway CA.
+
+    The files live under /tmp, which a non-root image's commands can write; they can't write /etc.
+    """
+    environment = _gateway_ca_environment(ExecResult(stdout="/etc/ssl/certs/ca-certificates.crt", return_code=0))
+
+    await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert environment.uploads == [("/etc/nhx/ca.crt", "/tmp/nemo-helix-tls/gateway-ca.pem")]
+    assert environment.scripts == [
+        (
+            opensandbox_environment.TRUST_GATEWAY_CA_SCRIPT,
+            {
+                "GATEWAY_CA": "/tmp/nemo-helix-tls/gateway-ca.pem",
+                "CA_BUNDLE": "/tmp/nemo-helix-tls/ca-bundle.pem",
+                "REQUESTS_CA_BUNDLE_OUT": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+                "CURL_CA_BUNDLE_OUT": "/tmp/nemo-helix-tls/curl-ca-bundle.pem",
+                "NODE_EXTRA_CA_CERTS_OUT": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
+            },
+        )
+    ]
+    assert environment._persistent_env == {
+        "PATH": "/agent/bin:/usr/bin",
+        "SSL_CERT_FILE": "/tmp/nemo-helix-tls/ca-bundle.pem",
+        "REQUESTS_CA_BUNDLE": "/tmp/nemo-helix-tls/requests-ca-bundle.pem",
+        "CURL_CA_BUNDLE": "/tmp/nemo-helix-tls/curl-ca-bundle.pem",
+        "NODE_EXTRA_CA_CERTS": "/tmp/nemo-helix-tls/node-extra-ca-certs.pem",
+    }
+
+
+async def test_the_ca_script_sees_the_trust_settings_the_task_set():
+    """The script reads SSL_CERT_FILE, REQUESTS_CA_BUNDLE, CURL_CA_BUNDLE and NODE_EXTRA_CA_CERTS to keep what they name.
+
+    Pointing them at the new bundles before it runs would make each bundle start from itself.
+    """
+    environment = _gateway_ca_environment(ExecResult(stdout="/task/roots.pem", return_code=0))
+    task = {
+        "SSL_CERT_FILE": "/task/roots.pem",
+        "REQUESTS_CA_BUNDLE": "/task/requests.pem",
+        "CURL_CA_BUNDLE": "/task/curl.pem",
+        "NODE_EXTRA_CA_CERTS": "/task/node.pem",
+    }
+    environment._persistent_env.update(task)
+
+    await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert task.items() <= environment.script_env[0].items()
+
+
+async def test_an_image_without_a_ca_bundle_is_warned_about(caplog):
+    """Its commands can reach the gateway but no other HTTPS host, so the operator has to fix the image."""
+    environment = _gateway_ca_environment(ExecResult(stdout="", return_code=0))
+
+    with caplog.at_level(logging.WARNING):
+        await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert "has no CA bundle" in caplog.text
+    assert environment._persistent_env["SSL_CERT_FILE"] == opensandbox_environment.CA_BUNDLE
+
+
+async def test_a_ca_that_cannot_be_installed_fails_the_trial():
+    """Running on without it would fail every gateway call with a TLS error instead of naming the cause."""
+    environment = _gateway_ca_environment(ExecResult(stdout="", stderr="cat: permission denied", return_code=1))
+
+    with pytest.raises(RuntimeError, match="permission denied"):
+        await environment._trust_gateway_ca("/etc/nhx/ca.crt")
+
+    assert "SSL_CERT_FILE" not in environment._persistent_env
+
+
+@pytest.mark.parametrize(("ca_file", "installs"), [("/etc/nhx/ca.crt", 1), (None, 0)], ids=["ca", "no-ca"])
+async def test_the_gateway_ca_is_installed_after_the_sandbox_starts(monkeypatch, ca_file, installs):
+    environment = _gateway_ca_environment(ExecResult(stdout="/etc/ssl/cert.pem", return_code=0))
+    environment._gateway_ca_file = ca_file
+    started: list[bool] = []
+
+    async def parent_start(self: Any, force_build: bool) -> None:
+        started.append(force_build)
+
+    monkeypatch.setattr(NemoOpenSandboxEnvironment, "start", parent_start)
+
+    await environment.start(force_build=False)
+
+    assert started == [False]
+    assert len(environment.scripts) == installs

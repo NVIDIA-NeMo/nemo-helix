@@ -556,6 +556,15 @@ class ModelProvider(ModelEntityBaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
 
 class ModelProviderSort(StrEnum):
@@ -636,6 +645,15 @@ class CreateModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
 
 class UpsertModelProviderRequest(BaseModel):
@@ -700,6 +718,15 @@ class UpsertModelProviderRequest(BaseModel):
         default=None,
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
+    )
+    calls_back_as_caller: bool | None = Field(
+        default=None,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused. Left unset, an update keeps the provider's current setting."
+        ),
     )
 
 
