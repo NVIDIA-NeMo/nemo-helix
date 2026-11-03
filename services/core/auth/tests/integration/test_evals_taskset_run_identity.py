@@ -24,6 +24,10 @@ from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 from nhx.testing import ClientContext, create_test_client
 from sqlalchemy import select
 
+# The test boots the full platform with the evals service; with coverage on a loaded CI runner that runs past
+# the 120s session default.
+pytestmark = pytest.mark.timeout(300)
+
 
 class TestEvalsService(NemoServiceAdapter):
     __test__ = False
