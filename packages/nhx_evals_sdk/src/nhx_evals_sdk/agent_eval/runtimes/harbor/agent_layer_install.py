@@ -7,9 +7,10 @@ The layer's build mounts a self-contained interpreter with Harbor and this modul
 
     python -m nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install /path/to/agent.json
 
-``agent.json`` holds ``{"name", "import_path", "kwargs", "env", "user"}``: ``env`` only what the install runs with. The agent's own ``setup()`` runs as a trial's
-would: commands go to :class:`LocalExecEnvironment`, which runs them here, in the image's filesystem, as the task's
-agent user unless a command asks for another. Nothing is left behind but what the install wrote.
+``agent.json`` holds ``{"name", "import_path", "kwargs", "env", "user"}``; ``env`` is only what the install runs
+with. The agent's own ``setup()`` runs as a trial's would: commands go to :class:`LocalExecEnvironment`, which runs
+them here, in the image's filesystem and with its ``ENV``, as the task's agent user unless a command asks for another.
+Nothing is left behind but what the install wrote.
 """
 
 from __future__ import annotations
@@ -49,7 +50,8 @@ class LocalExecEnvironment:
         user: str | int | None = None,
     ) -> ExecResult:
         account = _account(user if user is not None else self.default_user)
-        process_env = {"PATH": os.environ.get("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")}
+        # The image's own ENV (its proxy or package index, say), as a trial's commands get it from `docker exec`.
+        process_env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", **os.environ}
         if account is not None:
             process_env |= {"HOME": account.pw_dir, "USER": account.pw_name, "LOGNAME": account.pw_name}
         else:

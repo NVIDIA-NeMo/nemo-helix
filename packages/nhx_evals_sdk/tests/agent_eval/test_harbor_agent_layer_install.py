@@ -30,6 +30,15 @@ async def test_commands_run_here_with_the_given_environment(tmp_path: Path) -> N
     assert (tmp_path / "out.txt").read_text() == "hi\n"
 
 
+async def test_commands_get_the_images_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In a build, this process's environment is the image's ``ENV``."""
+    monkeypatch.setenv("PIP_INDEX_URL", "https://pypi.example/simple")
+
+    result = await LocalExecEnvironment(default_user=None).exec('echo "$PIP_INDEX_URL"')
+
+    assert (result.stdout or "").strip() == "https://pypi.example/simple"
+
+
 async def test_a_failing_command_reports_its_code_and_output() -> None:
     result = await LocalExecEnvironment(default_user=None).exec("echo oops >&2; exit 3")
 
