@@ -262,10 +262,10 @@ def test_ctrl_c_during_the_submit_says_to_retry_with_the_same_key(submitting, mo
         raise KeyboardInterrupt
 
     monkeypatch.setattr("nemo_evals.runs_cli.submit_run", interrupted)
-    result = submitting.invoke("--taskset", STORED, "--idempotency-key", "k-1")
+    result = submitting.invoke("--taskset", STORED, "--idempotency-key", "k-$USER")
     assert result.exit_code == 130
     assert "the run may still be accepted" in result.output
-    assert "rerun the same command with --idempotency-key k-1" in result.output
+    assert "rerun the same command with --idempotency-key 'k-$USER'" in result.output  # quoted: the shell keeps it
     assert "image builds" not in result.output and "--taskset" not in result.output
 
 

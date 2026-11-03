@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -513,7 +514,7 @@ def submit_run(
             raise RuntimeError(
                 f"the submit got no answer ({reason}); the run may still be "
                 f"accepted. To check or finish it without starting a second run, rerun the same command with "
-                f"--idempotency-key {body.get('idempotency_key')}"
+                f"--idempotency-key {shlex.quote(str(body.get('idempotency_key')))}"
             ) from exc
         if response.status_code == 503 and attempt < RETRY_ATTEMPTS:
             echo(f"{response.json().get('detail')}; retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
@@ -523,9 +524,7 @@ def submit_run(
             message = f"submit failed ({response.status_code}): {_detail(response)}"
             if response.status_code >= 500 and body.get("idempotency_key"):
                 # The run may already be accepted: only the same key finishes it instead of starting another.
-                message += (
-                    f"; to finish this run, rerun the same command with --idempotency-key {body['idempotency_key']}"
-                )
+                message += f"; to finish this run, rerun the same command with --idempotency-key {shlex.quote(body['idempotency_key'])}"
             raise RuntimeError(message)
         return response.json()
     raise AssertionError("unreachable")
@@ -760,7 +759,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             if submitting_key is not None:  # the run may already be accepted: only the same key avoids a second one
                 echo(
                     "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
-                    f"a second run, rerun the same command with --idempotency-key {submitting_key}"
+                    f"a second run, rerun the same command with --idempotency-key {shlex.quote(submitting_key)}"
                 )
                 raise typer.Exit(code=130) from None
             stopped = "Stopped waiting; the image builds keep going." if waiting_for_builds else "Interrupted."
