@@ -9,6 +9,8 @@ import {
 } from '@nemo/common/src/components/form/VariableTextArea';
 import { Banner, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import {
+  AGENT_PROMPT_NAMES,
+  type FitIssues,
   itemRef,
   templateFields,
 } from '@studio/components/evaluation/AgentEvaluationWizard/agentEvalConfig';
@@ -30,7 +32,7 @@ interface PromptTemplateSectionProps {
   generated: string;
   columns: string[];
   /** Fit-check findings for the prompt. */
-  issues: string[];
+  issues: FitIssues;
   /** Offer the agent's response, which only the judge can read. */
   withResponse?: boolean;
 }
@@ -71,7 +73,9 @@ export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({
   );
 
   const isKnown = (token: string) =>
-    templateFields(`{{${token}}}`).every((field) => columns.includes(field));
+    templateFields(`{{${token}}}`, withResponse ? undefined : AGENT_PROMPT_NAMES).every((field) =>
+      columns.includes(field)
+    );
 
   return (
     <Stack gap="density-xs">
@@ -96,8 +100,13 @@ export const PromptTemplateSection: FC<PromptTemplateSectionProps> = ({
         </Banner>
       ) : null}
 
-      {issues.map((issue) => (
+      {issues.errors.map((issue) => (
         <Banner key={issue} kind="inline" status="error">
+          {issue}
+        </Banner>
+      ))}
+      {issues.warnings.map((issue) => (
+        <Banner key={issue} kind="inline" status="warning">
           {issue}
         </Banner>
       ))}

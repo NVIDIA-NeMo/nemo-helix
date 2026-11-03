@@ -15,6 +15,7 @@ import {
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
+import { DATASET_SNAPSHOT_KEY } from '@studio/components/evaluation/AgentEvaluationWizard/datasetSnapshot';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
@@ -292,7 +293,15 @@ describe('AgentEvaluationWizard dataset', () => {
     expect(uploadedPaths()).toEqual(['eval-config.yaml']);
     expect(createRunEvaluation).toHaveBeenCalledWith(
       DEFAULT_WORKSPACE,
-      expect.objectContaining({ datasetName: 'generated' })
+      expect.objectContaining({
+        datasetName: 'generated',
+        metadata: {
+          [DATASET_SNAPSHOT_KEY]: JSON.stringify({
+            ref: DATASET_REF,
+            files: [{ path: 'output/part-0.parquet', size: 10 }],
+          }),
+        },
+      })
     );
   });
 
@@ -380,7 +389,7 @@ describe('AgentEvaluationWizard dataset', () => {
   });
 });
 
-const ROW_PROMPT = 'prompt:\n{{ item.prompt }}\n\nexpected:\n{{ item.expected }}';
+const ROW_PROMPT = 'prompt:\n{{ item["prompt"] }}\n\nexpected:\n{{ item["expected"] }}';
 
 describe('AgentEvaluationWizard guided eval config', () => {
   it('sends every field as a text prompt and scores the response with one LLM judge', async () => {
@@ -554,5 +563,21 @@ describe('AgentEvaluationWizard existing eval config', () => {
     expect(screen.getByLabelText('Eval configuration file')).toBeInTheDocument();
     expect(await screen.findByText('Select an eval configuration')).toBeVisible();
     expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
+  });
+
+  it('keeps errors outside the eval config when switching its source', async () => {
+    const user = userEvent.setup();
+    renderWizard();
+
+    await openConfigurationStep(user);
+    await pickDataset(user);
+    const parallelism = await screen.findByRole('spinbutton', { name: 'Parallel Requests' });
+    await user.clear(parallelism);
+    await user.type(parallelism, '99');
+    await clickNextWhenReady(user);
+    expect(await screen.findByText('At most 16')).toBeVisible();
+
+    await chooseConfigKind(user, 'Upload');
+    expect(screen.getByText('At most 16')).toBeVisible();
   });
 });
