@@ -119,6 +119,49 @@ def test_driver_reads_steps_per_epoch_defensively(driver: str) -> None:
     )
 
 
+# MasterConfig sections that are pydantic models at the pinned NeMo-RL, so they are read by
+# attribute. policy, data, and checkpointing are still TypedDicts, read by subscript.
+MODEL_SECTIONS = {"logger", "cluster"}
+
+
+def _subscripted_model_sections(source: str) -> set[str]:
+    """The model sections read as `config.<section>[...]`, which raises TypeError on a model."""
+    return {
+        node.value.attr
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "config"
+        and node.value.attr in MODEL_SECTIONS
+    }
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        ("config.logger['log_dir'] = d\n", {"logger"}),
+        ("x = config.cluster['num_nodes']\n", {"cluster"}),
+        ("config.logger.log_dir = d\n", set()),
+        # Still a TypedDict, so a subscript is right.
+        ("x = config.policy['tokenizer']\n", set()),
+    ],
+)
+def test_model_section_subscript_detector_discriminates(source: str, expected: set[str]) -> None:
+    assert _subscripted_model_sections(source) == expected
+
+
+@pytest.mark.parametrize("driver", ["grpo_driver.py", "dpo_driver.py"])
+def test_driver_reads_model_sections_by_attribute(driver: str) -> None:
+    """A subscript on a pydantic section raises TypeError when the driver starts, before training."""
+    source = (DRIVERS / driver).read_text()
+
+    assert not _subscripted_model_sections(source), (
+        f"{driver} subscripts {sorted(_subscripted_model_sections(source))}; "
+        "they are pydantic models in NeMo-RL's MasterConfig, so read them by attribute"
+    )
+
+
 def _for_schedule_keywords(source: str) -> set[str]:
     """Keyword names passed to any `NemoRLLogger.for_schedule(...)` call."""
     return {
