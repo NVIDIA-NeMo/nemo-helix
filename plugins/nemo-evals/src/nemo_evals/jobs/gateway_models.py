@@ -8,7 +8,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit, urlunsplit
@@ -17,6 +16,13 @@ from harbor.models.task.config import NetworkMode, NetworkPolicy, TaskConfig
 from harbor.models.trial.config import AgentConfig as TrialAgentConfig
 from harbor.trial.network_policy import resolve_agent_phase_policy
 from nemo_agents_plugin.config import AgentsConfig
+from nemo_agents_plugin.fabric.gateway_models import (
+    gateway_model,
+    gateway_models,
+    is_gateway_url,
+    model_base_url,
+    model_configs,
+)
 from nemo_agents_plugin.runner.deployments_backend import resolve_agent_gateway_url, rewrite_fabric_config_base_urls
 from nemo_agents_plugin.utils import get_base_url, get_internal_base_url
 from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
@@ -190,31 +196,10 @@ def add_gateway_url_override(environment: list[EnvironmentVariable], override: s
     return [*environment, EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
 
 
-#: The gateway routes a Fabric model can name: a model's own route, or the OpenAI route with the model in the body.
-_FABRIC_GATEWAY_ROUTE = re.compile(
-    r"/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/(?:model/(?P<name>[^/]+)/-|openai/-)(?:/|$)"
-)
-#: Where a registered agent reads its gateway key when its model names no ``api_key_env``.
-FABRIC_GATEWAY_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
-
-
-def _fabric_base_url(model: Mapping[str, Any]) -> str:
-    """The URL a Fabric model config calls, read as the runtime reads it."""
-    settings = model.get("settings")
-    url = model.get("base_url") or (settings.get("base_url") if isinstance(settings, Mapping) else None)
-    return url if isinstance(url, str) else ""
-
-
-def _fabric_gateway_model(model: object) -> ModelRef | None:
-    """The gateway model one Fabric model config calls, or ``None`` if it doesn't call the Inference Gateway."""
-    if not isinstance(model, Mapping):
-        return None
-    match = _FABRIC_GATEWAY_ROUTE.search(_fabric_base_url(model))
-    name = (match["name"] or model.get("model")) if match is not None else None
-    if not isinstance(name, str) or not name:
-        return None
-    assert match is not None
-    return ModelRef(name if "/" in name else f"{match['workspace']}/{name}")
+def _virtual_model(model: dict[str, Any]) -> ModelRef | None:
+    """The VirtualModel one Fabric model config calls through the gateway, or ``None`` if its route names none."""
+    found = gateway_model(model)
+    return ModelRef(found.virtual_model) if found is not None and found.virtual_model is not None else None
 
 
 def fabric_gateway_route(config: Mapping[str, Any]) -> tuple[ModelRef, str] | None:
@@ -223,35 +208,18 @@ def fabric_gateway_route(config: Mapping[str, Any]) -> tuple[ModelRef, str] | No
     ``None`` when the default model doesn't call the Inference Gateway.
     """
     model = (config.get("models") or {}).get("default")
-    ref = _fabric_gateway_model(model)
-    if ref is None:
+    found = gateway_model(model) if isinstance(model, dict) else None
+    if found is None or found.virtual_model is None:
         return None
-    assert isinstance(model, Mapping)
-    return ref, str(model.get("api_key_env") or FABRIC_GATEWAY_KEY_ENV)
+    return ModelRef(found.virtual_model), found.api_key_env
 
 
 def fabric_gateway_key_envs(config: Mapping[str, Any]) -> list[str]:
     """The variables a Fabric config's gateway models read their key from, the default model's first, each once."""
-    shared = config.get("models") or {}
-    models = [shared.get("default"), *(model for name, model in shared.items() if name != "default")]
-    models += [
-        harness.get("model") for harness in (config.get("harnesses") or {}).values() if isinstance(harness, Mapping)
-    ]
-    envs = [
-        str(model.get("api_key_env") or FABRIC_GATEWAY_KEY_ENV)
-        for model in models
-        if isinstance(model, Mapping) and _fabric_gateway_model(model) is not None
-    ]
-    return list(dict.fromkeys(envs))
-
-
-def _fabric_models(config: Mapping[str, Any]) -> list[Mapping[str, Any]]:
-    """A Fabric config's shared and harness model configs."""
-    models = list((config.get("models") or {}).values())
-    models += [
-        harness.get("model") for harness in (config.get("harnesses") or {}).values() if isinstance(harness, Mapping)
-    ]
-    return [model for model in models if isinstance(model, Mapping)]
+    default = (config.get("models") or {}).get("default")
+    found = [model for model in gateway_models(config) if model.virtual_model is not None]
+    found.sort(key=lambda model: model.config is not default)
+    return list(dict.fromkeys(model.api_key_env for model in found))
 
 
 def fabric_gateway_models(config: Mapping[str, Any]) -> list[ModelRef]:
@@ -261,12 +229,12 @@ def fabric_gateway_models(config: Mapping[str, Any]) -> list[ModelRef]:
         ValueError: A model's URL is a template, or calls the gateway on a route that names no virtual model.
     """
     refs: list[ModelRef] = []
-    for model in _fabric_models(config):
-        url = _fabric_base_url(model)
+    for model in model_configs(config):
+        url = model_base_url(model) or ""
         if "$" in url:
             raise ValueError(f"a model's base_url {url!r} is a template, so where it calls can't be checked")
-        ref = _fabric_gateway_model(model)
-        if ref is None and urlsplit(url).path.startswith("/apis/inference-gateway/"):
+        ref = _virtual_model(model)
+        if ref is None and is_gateway_url(url):
             raise ValueError(f"a model calls the gateway at {urlsplit(url).path!r}, which names no virtual model")
         if ref is not None and ref not in refs:
             refs.append(ref)
@@ -275,7 +243,7 @@ def fabric_gateway_models(config: Mapping[str, Any]) -> list[ModelRef]:
 
 def fabric_calls_only_gateway(config: Mapping[str, Any]) -> bool:
     """Whether every shared and harness model of a Fabric config calls the Inference Gateway."""
-    return all(_fabric_gateway_model(model) is not None for model in _fabric_models(config))
+    return all(_virtual_model(model) is not None for model in model_configs(config))
 
 
 def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dict[str, Any], origin: str) -> None:

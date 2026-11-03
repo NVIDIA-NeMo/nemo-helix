@@ -14,6 +14,7 @@ import httpx
 import pytest
 from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
 from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
+from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_API_KEY_ENV
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
 from nemo_evals.api.fields import AgentRef
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer
@@ -31,7 +32,6 @@ from nemo_evals.jobs.agent_spec import (
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
-    FABRIC_GATEWAY_KEY_ENV,
     GATEWAY_CA_FILE_KWARG,
     GATEWAY_URL_OVERRIDE_ENVVAR,
     TrialRoute,
@@ -990,4 +990,4 @@ def test_a_registered_agents_gateway_models_each_name_the_variable_they_read_the
         },
     }
 
-    assert fabric_gateway_key_envs(config) == [FABRIC_GATEWAY_KEY_ENV, "OTHER_KEY", "HARNESS_KEY"]
+    assert fabric_gateway_key_envs(config) == [PLATFORM_IGW_API_KEY_ENV, "OTHER_KEY", "HARNESS_KEY"]
