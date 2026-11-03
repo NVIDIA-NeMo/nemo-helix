@@ -136,8 +136,8 @@ def test_merge_ignores_non_fabric_config() -> None:
 
 def _provider_spec(**overrides: Any) -> EnvironmentSpecInline:
     data = {
-        "secrets": {"SERVICE_SECRET": "team/service-token", "OTHER": "team/other-token"},
-        "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}},
+        "secrets": {"OTHER": "team/other-token"},
+        "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "team/service-token"}}},
     }
     data.update(overrides)
     data["settings"] = {"openshell": {"providers": data.pop("providers")}}
@@ -166,67 +166,70 @@ def test_provider_secrets_are_separate_from_agent_config_and_env_injection() -> 
 @pytest.mark.parametrize(
     "fulfillment",
     [
-        {"profile": "", "credentials": {"API_TOKEN": "SERVICE_SECRET"}},
-        {"profile": "service read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}},
+        {"profile": "", "credentials": {"API_TOKEN": "team/service-token"}},
+        {"profile": "service read", "credentials": {"API_TOKEN": "team/service-token"}},
         {"profile": "service-read", "credentials": {}},
-        {"profile": "service-read", "credentials": {"bad-name": "SERVICE_SECRET"}},
-        {"profile": "service-read", "credentials": {"API_TOKEN": "team/service-token"}},
-        {"profile": "service-read", "credentials": {"API_TOKEN": "MISSING"}},
-        {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}, "typo": True},
+        {"profile": "service-read", "credentials": {"bad-name": "team/service-token"}},
+        {"profile": "service-read", "credentials": {"API_TOKEN": ""}},
+        {"profile": "service-read", "credentials": {"API_TOKEN": " "}},
+        {"profile": "service-read", "credentials": {"API_TOKEN": "team/"}},
+        {"profile": "service-read", "credentials": {"API_TOKEN": "team/extra/service-token"}},
+        {"profile": "service-read", "credentials": {"API_TOKEN": "team/service-token"}, "typo": True},
     ],
 )
-def test_provider_fulfillment_rejects_invalid_or_unknown_bindings(fulfillment: dict[str, Any]) -> None:
+def test_provider_fulfillment_rejects_invalid_bindings(fulfillment: dict[str, Any]) -> None:
     with pytest.raises(ValueError):
         merge_environment_spec_into_agent_config(_agent_config(), _provider_spec(providers={"service": fulfillment}))
 
 
-def test_provider_fulfillment_rejects_duplicate_slots_and_empty_secret_refs() -> None:
-    provider = ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "SERVICE_SECRET"})
+def test_provider_fulfillment_rejects_duplicate_slots() -> None:
+    provider = ProviderFulfillment(profile="service-read", credentials={"API_TOKEN": "team/service-token"})
     with pytest.raises(ValueError, match="duplicate credential slots"):
         merge_environment_spec_into_agent_config(
             _agent_config(), _provider_spec(providers={"one": provider, "two": provider})
         )
-    with pytest.raises(ValueError, match="empty secret entry"):
-        merge_environment_spec_into_agent_config(_agent_config(), _provider_spec(secrets={"SERVICE_SECRET": " "}))
 
 
-@pytest.mark.parametrize("alias", ["SERVICE_SECRET", "API_TOKEN"])
 @pytest.mark.parametrize("location", ["environment", "mcp"])
-def test_provider_alias_and_slot_cannot_be_plaintext_env(alias: str, location: str) -> None:
+def test_provider_slot_cannot_be_plaintext_env(location: str) -> None:
     config = _agent_config()
     if location == "environment":
-        config["environment"]["env"] = {alias: "plaintext"}
+        config["environment"]["env"] = {"API_TOKEN": "plaintext"}
     else:
-        config["mcp"] = {"servers": {"tool": {"env": {alias: "plaintext"}}}}
+        config["mcp"] = {"servers": {"tool": {"env": {"API_TOKEN": "plaintext"}}}}
     with pytest.raises(EnvironmentResolutionError, match="plaintext"):
         merge_environment_spec_into_agent_config(config, _provider_spec())
 
 
+@pytest.mark.parametrize("provider_ref", ["team/service-token", "service-token"])
 @pytest.mark.parametrize("ref", ["team/service-token", "service-token"])
-def test_provider_credential_cannot_be_exposed_under_another_env_alias(ref: str) -> None:
-    spec = _provider_spec(secrets={"SERVICE_SECRET": "team/service-token", "ALIAS": ref})
+def test_provider_credential_cannot_be_exposed_under_another_env_alias(provider_ref: str, ref: str) -> None:
+    spec = _provider_spec(
+        secrets={"ALIAS": ref},
+        providers={"service": {"profile": "service-read", "credentials": {"API_TOKEN": provider_ref}}},
+    )
     with pytest.raises(EnvironmentResolutionError, match="conflicts with a provider credential"):
         merge_environment_spec_into_agent_config(_agent_config(), spec, workspace="team")
 
 
 def test_provider_slot_cannot_collide_with_a_different_env_secret() -> None:
-    spec = _provider_spec(secrets={"SERVICE_SECRET": "team/service-token", "API_TOKEN": "team/other-token"})
+    spec = _provider_spec(secrets={"API_TOKEN": "team/other-token"})
     with pytest.raises(EnvironmentResolutionError, match="conflicts with a provider credential"):
         merge_environment_spec_into_agent_config(_agent_config(), spec, workspace="team")
 
 
-@pytest.mark.parametrize("alias", ["SERVICE_SECRET", "ALIAS"])
-def test_provider_secret_cannot_also_fulfill_mcp(alias: str) -> None:
+@pytest.mark.parametrize("ref", ["team/service-token", "service-token"])
+def test_provider_secret_cannot_also_fulfill_mcp(ref: str) -> None:
     config = _agent_config(mcp={"servers": {"tool": {}}})
     spec = _provider_spec(
-        mcp={"tool": {"url": "https://service.example/mcp", "secrets": {alias: "team/service-token"}}},
+        mcp={"tool": {"url": "https://service.example/mcp", "secrets": {"ALIAS": ref}}},
     )
     with pytest.raises(EnvironmentResolutionError, match="provider credential"):
         merge_environment_spec_into_agent_config(config, spec, workspace="team")
 
 
 def test_provider_secret_names_in_other_workspaces_are_distinct() -> None:
-    spec = _provider_spec(secrets={"SERVICE_SECRET": "team/service-token", "OTHER": "other/service-token"})
+    spec = _provider_spec(secrets={"OTHER": "other/service-token"})
     result = merge_environment_spec_into_agent_config(_agent_config(), spec, workspace="team")
     assert result.secrets == {"OTHER": "other/service-token"}
 
@@ -535,13 +538,18 @@ def test_openshell_rejects_any_unbound_secret(with_provider: bool) -> None:
         result.require_runtime_support("openshell")
 
 
-def test_openshell_settings_are_consumed_outside_agent_config() -> None:
-    spec = _provider_spec(secrets={"SERVICE_SECRET": "team/service-token"})
+@pytest.mark.parametrize("ref", ["team/service-token", "service-token"])
+def test_openshell_settings_are_consumed_outside_agent_config(ref: str) -> None:
+    spec = _provider_spec(
+        secrets={},
+        providers={"service": {"profile": "service-read", "credentials": {"API_TOKEN": ref}}},
+    )
     spec.settings["unrelated"] = "kept"
     result = merge_environment_spec_into_agent_config(_agent_config(), spec)
     result.require_runtime_support("openshell")
     assert result.config["environment"]["settings"] == {"unrelated": "kept"}
     assert result.secrets == {}
+    assert result.providers["service"].credentials == {"API_TOKEN": ref}
     assert "openshell" in spec.settings
 
 

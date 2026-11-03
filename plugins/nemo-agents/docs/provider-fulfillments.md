@@ -15,22 +15,20 @@ Agent behavior stays in `agent.yaml`. Add the service URL and credential binding
 name: service-access
 env:
   SERVICE_URL: https://service.example
-secrets:
-  SERVICE_SECRET: team/service-token
 settings:
   openshell:
     providers:
       service:
         profile: service-read
         credentials:
-          API_TOKEN: SERVICE_SECRET
+          API_TOKEN: team/service-token
 ```
 
-`service` names the binding. `service-read` selects an approved injection profile. `API_TOKEN` is the profile's credential slot, and `SERVICE_SECRET` names an entry in this environment's `secrets` map. The agent uses the `API_TOKEN` placeholder supplied by OpenShell; the spec contains no credential values.
+`service` names the binding. `service-read` selects an approved injection profile. `API_TOKEN` is the profile's credential slot, and `team/service-token` references a Helix secret directly. A bare name uses the workload's workspace. The agent uses the `API_TOKEN` placeholder supplied by OpenShell; the spec contains no credential values.
 
-OpenShell requires external injection bindings for all secrets. Unbound top-level or MCP process-env secrets reject launch, including when no providers are declared. Non-secret `env` entries pass through normally. Other backends retain their existing env-secret behavior and reject OpenShell provider bindings.
+OpenShell requires external injection bindings for all secrets. Put their references directly in provider `credentials`; top-level and MCP `secrets` are process-env injection and reject launch. Non-secret `env` entries pass through normally. Other backends retain their existing env-secret behavior and reject OpenShell provider bindings.
 
-Compilation rejects missing aliases, duplicate slots, plaintext env conflicts, and exposure of a bound secret through another env alias or MCP fulfillment. It strips `settings.openshell` from the agent config and keeps the references separately for provisioning. `EnvironmentSpec.provider` (singular) selects the Fabric environment and is unrelated to credential bindings.
+Compilation rejects malformed references, duplicate slots, plaintext env conflicts, and exposure of a provider-bound secret through top-level or MCP `secrets`, comparing references in the workload's workspace. It strips `settings.openshell` from the agent config and keeps the references separately for provisioning. `EnvironmentSpec.provider` (singular) selects the Fabric environment and is unrelated to credential bindings.
 
 ## Runtime behavior
 
@@ -80,4 +78,4 @@ In Helix renewal mode, confirmed permission denial or a missing secret records c
 
 Provider removal does not promise immediate process termination or cancellation of requests already accepted by the external service. Removing a provider leaves the underlying Helix secret intact. Source-service token revocation is separate. The Jobs and Deployments controllers retain responsibility for workload lifecycle.
 
-Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` may inject the referenced secrets into process environments; mixed-version consumers are unsupported. The credential driver accepts registration tickets only, so its gateway cannot also serve unrelated raw provider credentials.
+Upgrade all environment consumers before storing these specs. Older consumers that discard `settings.openshell` cannot provision these credentials; mixed-version consumers are unsupported. The credential driver accepts registration tickets only, so its gateway cannot also serve unrelated raw provider credentials.

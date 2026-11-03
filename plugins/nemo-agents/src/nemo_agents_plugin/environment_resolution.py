@@ -178,69 +178,47 @@ def merge_environment_spec_into_agent_config(
     _merge_process_env(merged, env_spec)
     _merge_model_provider_override(merged, env_spec)
     secrets = _collect_secrets(merged, env_spec)
-    providers = _partition_provider_secrets(merged, env_spec, secrets, workspace=workspace)
+    providers = _resolve_provider_bindings(merged, env_spec, secrets, workspace=workspace)
     return MergedEnvironment(config=merged, secrets=secrets, providers=providers)
 
 
 def _openshell_settings(env_spec: EnvironmentSpecInline) -> OpenShellEnvironmentSettings:
     try:
         settings = OpenShellEnvironmentSettings.model_validate(env_spec.settings.get("openshell", {}))
-        settings.validate_secrets(env_spec.secrets)
+        settings.validate_slots()
     except ValueError as exc:
         raise EnvironmentResolutionError(str(exc)) from exc
     return settings
 
 
-def _partition_provider_secrets(
+def _resolve_provider_bindings(
     config: dict[str, Any],
     env_spec: EnvironmentSpecInline,
     secrets: dict[str, str],
     *,
     workspace: str,
 ) -> dict[str, ResolvedProviderFulfillment]:
-    """Remove bound secrets from env injection and reject alternate exposure paths."""
+    """Collect provider references and reject exposure through process environments."""
     settings = _openshell_settings(env_spec)
     if not settings.providers:
         return {}
-    consumed = {alias for provider in settings.providers.values() for alias in provider.credentials.values()}
     providers = {
         name: ResolvedProviderFulfillment(
             profile=provider.profile,
-            credentials={slot: env_spec.secrets[alias] for slot, alias in provider.credentials.items()},
+            credentials=dict(provider.credentials),
         )
         for name, provider in settings.providers.items()
     }
     slots = {slot: ref for provider in providers.values() for slot, ref in provider.credentials.items()}
     _reject_plaintext_secret_collisions(config, slots)
-    protected_refs = {parse_qualified_name(env_spec.secrets[alias], default_workspace=workspace) for alias in consumed}
-
-    def _reject_exposure(env_name: str, ref: str) -> None:
+    protected_refs = {parse_qualified_name(ref, default_workspace=workspace) for ref in slots.values()}
+    for env_name, ref in secrets.items():
         if env_name in slots or parse_qualified_name(ref, default_workspace=workspace) in protected_refs:
             raise EnvironmentResolutionError(
                 f"Secret env var {env_name!r} conflicts with a provider credential. "
                 "Provider credentials must not also be injected into the agent or an MCP process."
             )
 
-    for env_name, ref in secrets.items():
-        if env_name not in consumed:
-            _reject_exposure(env_name, ref)
-
-    # _collect_secrets coalesces identical top-level and MCP entries. Check MCP
-    # bindings separately so a shared name cannot hide a second injection path.
-    mcp = config.get("mcp")
-    servers = mcp.get("servers") if isinstance(mcp, dict) else None
-    if isinstance(servers, dict):
-        for name, fulfillment in env_spec.mcp.items():
-            if isinstance(servers.get(name), dict):
-                for env_name, ref in fulfillment.secrets.items():
-                    if env_name in consumed:
-                        raise EnvironmentResolutionError(
-                            f"MCP secret env var {env_name!r} is reserved for a provider credential."
-                        )
-                    _reject_exposure(env_name, ref)
-
-    for alias in consumed:
-        del secrets[alias]
     return providers
 
 

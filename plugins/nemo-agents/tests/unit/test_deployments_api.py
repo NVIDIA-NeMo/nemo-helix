@@ -706,13 +706,12 @@ class TestCreateDeployment:
                 "name": "fabric-dep",
                 "environment": {
                     "environment_spec": {
-                        "secrets": {"SERVICE_SECRET": "default/service-token"},
                         "settings": {
                             "openshell": {
                                 "providers": {
                                     "service": {
                                         "profile": "service-read",
-                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                        "credentials": {"API_TOKEN": "default/service-token"},
                                     }
                                 }
                             }
@@ -1093,10 +1092,14 @@ class TestListDeploymentModes:
                 assert without_image.status_code == expected, (mode, without_image.text)
 
 
-@pytest.mark.parametrize("error_type,status_code", [(PluginClientNotFoundError, 404), (PermissionDeniedError, 403)])
-def test_provider_secret_admission_preserves_status_without_response_details(
+@pytest.mark.parametrize("secret_ref", ["default/service-token", "service-token", "team/service-token"])
+@pytest.mark.parametrize(
+    "error_type,status_code", [(None, 201), (PluginClientNotFoundError, 404), (PermissionDeniedError, 403)]
+)
+def test_inline_provider_secret_admission(
     monkeypatch: pytest.MonkeyPatch,
-    error_type: type[PluginClientNotFoundError] | type[PermissionDeniedError],
+    secret_ref: str,
+    error_type: type[PluginClientNotFoundError] | type[PermissionDeniedError] | None,
     status_code: int,
 ) -> None:
     _configure_deployments(
@@ -1104,9 +1107,12 @@ def test_provider_secret_admission_preserves_status_without_response_details(
     )
     entity_client = AsyncMock()
     entity_client.get.return_value = _make_agent()
-    error = error_type(httpx.Response(status_code, json={"detail": "sensitive upstream detail"}))
+    entity_client.create.side_effect = lambda deployment: deployment
     secrets_client = AsyncMock(spec=deployments_router_module.AsyncSecretsClient)
-    secrets_client.get_secret.side_effect = error
+    if error_type is not None:
+        secrets_client.get_secret.side_effect = error_type(
+            httpx.Response(status_code, json={"detail": "sensitive upstream detail"})
+        )
     with patch.object(deployments_router_module.AsyncSecretsClient, "from_client", return_value=secrets_client):
         response = _test_client(entity_client).post(
             "/apis/agents/v2/workspaces/default/deployments",
@@ -1116,13 +1122,12 @@ def test_provider_secret_admission_preserves_status_without_response_details(
                 "deployment_mode": "openshell",
                 "environment": {
                     "environment_spec": {
-                        "secrets": {"SERVICE_SECRET": "default/service-token"},
                         "settings": {
                             "openshell": {
                                 "providers": {
                                     "service": {
                                         "profile": "service-read",
-                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                        "credentials": {"API_TOKEN": secret_ref},
                                     }
                                 }
                             }
@@ -1131,8 +1136,16 @@ def test_provider_secret_admission_preserves_status_without_response_details(
                 },
             },
         )
-    secrets_client.get_secret.assert_awaited_once_with(workspace="default", name="service-token")
+    secret_workspace = "team" if secret_ref.startswith("team/") else "default"
+    secrets_client.get_secret.assert_awaited_once_with(workspace=secret_workspace, name="service-token")
     assert response.status_code == status_code
+    if error_type is None:
+        entity_client.create.assert_awaited_once()
+        assert entity_client.create.await_args is not None
+        deployment = entity_client.create.await_args.args[0]
+        assert deployment.providers["service"].credentials == {"API_TOKEN": secret_ref}
+        assert deployment.secrets == {}
+        return
     assert "provider secret" in response.json()["detail"]
     assert "sensitive upstream" not in response.text
     entity_client.create.assert_not_awaited()
