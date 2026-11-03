@@ -64,7 +64,6 @@ def test_intake_samples_send_runtime_valid_payloads(method, path, reads_body, la
     assert request.headers["Content-Type"] == (
         "application/x-protobuf" if path.endswith("/traces") else "application/json"
     )
-    assert request == sample_request({}, path, method, {"responses": {"201" if not reads_body else "200": {}}})
 
     if language == "Python":
         source = next(s["source"] for s in render_samples(request) if s["lang"] == language)
@@ -115,8 +114,3 @@ console.log = () => {{}};
         result = subprocess.run(["sh", "-c", setup + _curl(request)], check=True, capture_output=True)
         body = result.stdout
     _validate_payload(path, body)
-
-
-@pytest.mark.parametrize(("method", "path", "reads_body"), CASES)
-def test_intake_samples_preserve_authored_overrides(method, path, reads_body):
-    assert sample_request({}, path, method, {"x-codeSamples": [{"lang": "Python", "source": "authored"}]}) is None

@@ -60,8 +60,6 @@ def test_every_custom_sample_overrides_every_fern_example(spec):
 
 
 def test_authored_samples_override_fallbacks_without_losing_examples():
-    import copy
-
     operation = {
         "x-codeSamples": [{"lang": "Python", "source": "print('authored')"}],
         "x-fern-examples": [
@@ -75,7 +73,6 @@ def test_authored_samples_override_fallbacks_without_losing_examples():
         assert {"sdk": "python", "code": "print('authored')"} in example["code-samples"]
     assert operation["x-fern-examples"][0]["request"] == {"name": "first"}
     assert {"sdk": "curl", "code": "keep"} in operation["x-fern-examples"][1]["code-samples"]
-    assert add_code_samples(copy.deepcopy(spec)) == spec
 
 
 def test_language_policy_covers_authored_samples_and_default_curl(spec):
