@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
 import { KVPair } from '@nemo/common/src/components/KVPair';
@@ -81,9 +82,11 @@ export const AgentEvaluationDetailRoute: FC = () => {
 
   // Job + status — refetched while the job is non-terminal so the badge stays
   // live without forcing a page reload.
-  const { data: job } = useEvalsGetAgentEvaluateJobSuspense(workspace, jobName, {
+  const { data: job, error: jobError } = useEvalsGetAgentEvaluateJobSuspense(workspace, jobName, {
     query: { refetchInterval: (query) => (isTerminal(query.state.data?.status) ? false : 5_000) },
   });
+  // A poll that 404s (job deleted mid-run) keeps the cached job; surface it as not-found instead.
+  if (isNotFoundError(jobError)) throw jobError;
 
   // The "Evaluations" crumb links the agent's eval tab, but the agent name only arrives with
   // the loaded job — so set breadcrumbs from an effect keyed on it (the useBreadcrumbs `items`

@@ -54,6 +54,35 @@ describe('AgentEvaluationDetailRoute', () => {
     expect(await screen.findByText('Not Found')).toBeInTheDocument();
   });
 
+  it('shows not-found when a poll finds the running job deleted', async () => {
+    suppressConsoleError(
+      'The above error occurred in',
+      'React Router caught the following error',
+      'undefined'
+    );
+    let polls = 0;
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+        () =>
+          polls++ === 0
+            ? HttpResponse.json({ ...completedJob, status: 'running' })
+            : HttpResponse.json({ detail: 'Not found' }, { status: 404 })
+      )
+    );
+    renderRoute(<AgentEvaluationDetailRoute />, {
+      history: getAgentEvaluationDetailRoute(workspace, JOB_NAME),
+      routes: [
+        {
+          path: ROUTES.workspace.agentEvaluationDetail,
+          element: <AgentEvaluationDetailRoute />,
+          errorElement: <RouteErrorPanel />,
+        },
+      ],
+    });
+    expect(await screen.findByText('Not Found', undefined, { timeout: 9_000 })).toBeInTheDocument();
+  }, 15_000);
+
   describe('cost', () => {
     const publishedJob = {
       ...completedJob,
