@@ -16,6 +16,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nhx.common.config import AuthConfig
+from nhx.core.auth.app.embedded_pdp import load_policy_data
 from nhx.core.entities.app.repository import get_async_session_maker
 from nhx.core.entities.app.repository.sqlalchemy.models import DBAccountIdentity
 from nhx.core.entities.service import EntitiesService
@@ -89,7 +90,9 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
         tmp_dir=tmp_path,
         workspaces=[],
         projects=[],
-        auth_bundle_cache_seconds=0,
+        # Reload the policy only after a role-binding write (portal.call(load_policy_data, ...)); reloading it on
+        # every PDP check costs ~100 reloads and runs past the 120s timeout on CI.
+        auth_bundle_cache_seconds=3600,
         auth_policy_data_refresh_interval=3600,
         access_log=True,
         service_configs={
@@ -135,6 +138,7 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
                     headers=admin,
                 )
                 assert granted.status_code == 200, granted.text
+                assert portal.call(load_policy_data, ctx.entity_client)
             portal.call(_seed_run, ctx.async_client.with_headers({"X-NHX-Principal-Id": "service:evals"}), workspace)
             base = f"/apis/evals/v2/workspaces/{workspace}"
             ctx.access_log.clear()
@@ -166,6 +170,7 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
             headers=user,
         )
         assert created.status_code == 201, created.text
+        assert portal.call(load_policy_data, ctx.entity_client)
         response = ctx.test_client.get(
             "/apis/evals/v2/workspaces/identity-user-created/agent-evaluate/runs", headers=user
         )
