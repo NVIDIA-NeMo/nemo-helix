@@ -116,7 +116,9 @@ def test_mcp_servers_the_adapter_cannot_implement_fail_at_construction(tmp_path:
         _agent(tmp_path, fabric_config=config, mcp_servers=[server])
 
 
-async def test_state_harbor_assigns_after_construction_reaches_the_wrapped_agent(tmp_path: Path) -> None:
+async def test_state_harbor_assigns_after_construction_reaches_the_wrapped_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The tripwire for composition's one real risk.
 
     Harbor sets these on the object it constructed, after construction: `session_id`/`context_id`
@@ -136,7 +138,7 @@ async def test_state_harbor_assigns_after_construction_reaches_the_wrapped_agent
             skills=getattr(agent.fabric, "skills", None),
         )
 
-    agent.fabric.run = _capture
+    monkeypatch.setattr(agent.fabric, "run", _capture)
     agent.session_id = "hello-world__aaa__agent"
     agent.context_id = context_id
     agent.skills = ["/skills/researching"]
