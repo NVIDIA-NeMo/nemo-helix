@@ -389,9 +389,18 @@ def test_guardable_harnesses_pass_through() -> None:
 
 def test_the_manifest_carries_the_harness() -> None:
     """Agent Hardener needs it to stage Hermes' extra wiring — not to choose a victim kind."""
-    manifest = build_manifest_dict(agent_name="a", project_dir=".", port=8000, secrets=[], harness="hermes")
+    manifest = build_manifest_dict(
+        agent_name="a", project_dir=".", port=8000, secrets=[], harness="hermes", env={"EXAMPLE": "value"}
+    )
 
     assert manifest["agent"]["harness"] == "hermes"
+    assert manifest["agent"]["env"] == {
+        "ADAPTER_PYTHON": "/opt/hermes-venv/bin/python",
+        "HERMES_NEMO_RELAY_PLUGINS_TOML": "/etc/nemo-relay/plugins.toml",
+        "EXAMPLE": "value",
+    }
+    assert "/opt/hermes-venv/bin/**" in manifest["agent"]["binaries"]
+    assert "/opt/uv/python/**/bin/python*" in manifest["agent"]["binaries"]
 
 
 def test_declared_env_reaches_the_manifest() -> None:

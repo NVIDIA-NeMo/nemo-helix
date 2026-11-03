@@ -85,6 +85,7 @@ class TestTranslateAgentConfig:
     @pytest.mark.parametrize("hosts", [None, [], ["collector.observability.svc.cluster.local", "10.0.0.8"]])
     def test_http_allowlist_survives_registration_and_intake(self, hosts: list[str] | None) -> None:
         payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
         payload["telemetry"]["enabled"] = True
         if hosts is not None:
             payload["telemetry"]["insecure_http_hosts"] = hosts
@@ -101,6 +102,16 @@ class TestTranslateAgentConfig:
             assert "insecure_http_hosts" not in observability
         else:
             assert observability["insecure_http_hosts"] == hosts
+
+    @pytest.mark.parametrize("hosts", [[], ["collector.example.com"]])
+    def test_hermes_rejects_explicit_http_allowlist(self, hosts: list[str]) -> None:
+        payload = _example_yaml_config()
+        payload["telemetry"].update(enabled=True, insecure_http_hosts=hosts)
+        config = AgentConfig.model_validate(payload)
+        with pytest.raises(FabricTranslationError, match="Hermes harness uses Relay 0.10"):
+            translate_agent_config(config)
+        # The restriction follows the selected harness, including overrides.
+        assert translate_agent_config(config, harness_name="codex").relay is not None
 
     @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
     @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])

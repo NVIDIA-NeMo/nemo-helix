@@ -82,6 +82,16 @@ def test_binaries_include_the_system_interpreter_the_venv_resolves_to():
     assert "/usr/local/bin/python*" in binaries
 
 
+def test_hermes_project_preserves_adapter_environment_and_egress(tmp_path: Path):
+    project = _project(tmp_path)
+    with (project / "Dockerfile").open("a") as dockerfile:
+        dockerfile.write("\nENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python\nENV UV_PYTHON_INSTALL_DIR=/opt/uv/python\n")
+    derived = inspect_project(project)
+    assert derived["env"]["ADAPTER_PYTHON"] == "/opt/hermes-venv/bin/python"
+    assert "/opt/hermes-venv/bin/python" in derived["binaries"]
+    assert "/opt/uv/python/**/bin/python*" in derived["binaries"]
+
+
 def test_port_prefers_env_over_expose():
     assert derive_port("FROM x\nENV PORT=9000\nEXPOSE 8000\n", {"PORT": "9000"}) == 9000
     assert derive_port("FROM x\nEXPOSE 8080/tcp\n", {}) == 8080

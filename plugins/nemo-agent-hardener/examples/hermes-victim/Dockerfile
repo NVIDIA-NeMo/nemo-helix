@@ -16,13 +16,15 @@ RUN apt-get update \
  && useradd --system --gid sandbox --create-home --home-dir /home/sandbox --shell /bin/bash sandbox
 
 WORKDIR /workspace
+COPY dist/*.whl /tmp/helix/
 
 # Helix uses the base image's Python and Relay 0.11. Hermes requires Python 3.14
 # and Relay 0.10 in a separate environment.
 RUN uv venv --python /usr/local/bin/python /workspace/.venv \
+ && set -- /tmp/helix/*.whl && test "$#" -eq 1 \
  && uv pip install --python /workspace/.venv/bin/python \
-      "nemo-helix[nemo-agents-plugin]" \
-      "mcp[cli]"
+      "$1[nemo-agents-plugin]" "mcp[cli]" \
+ && rm -rf /tmp/helix
 RUN uv venv --python 3.14 /opt/hermes-venv \
  && git init --quiet /opt/hermes-agent \
  && git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git \

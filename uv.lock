@@ -4203,9 +4203,11 @@ dependencies = [
 [package.optional-dependencies]
 claude = [
     { name = "nemo-fabric-adapters-claude", extra = ["harness"] },
+    { name = "nemo-relay-cli-bin" },
 ]
 codex = [
     { name = "nemo-fabric-adapters-codex", extra = ["harness"] },
+    { name = "nemo-relay-cli-bin" },
 ]
 deepagents = [
     { name = "nemo-fabric-adapters-deepagents", extra = ["harness"] },
@@ -4255,6 +4257,8 @@ requires-dist = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nemo-relay", specifier = "==0.11.0" },
+    { name = "nemo-relay-cli-bin", marker = "extra == 'claude'", specifier = ">=0.11.0,<0.12" },
+    { name = "nemo-relay-cli-bin", marker = "extra == 'codex'", specifier = ">=0.11.0,<0.12" },
     { name = "nvidia-nat-atif", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-config-optimizer", specifier = ">=1.9.0a20260811,<1.10" },
     { name = "nvidia-nat-core", specifier = ">=1.9.0a20260811,<1.10" },
@@ -5416,6 +5420,7 @@ nemo-agents-plugin-claude = [
     { name = "nemo-fabric-adapters-remote-agent" },
     { name = "nemo-helix-plugin" },
     { name = "nemo-relay" },
+    { name = "nemo-relay-cli-bin" },
     { name = "nvidia-nat-atif" },
     { name = "nvidia-nat-config-optimizer" },
     { name = "nvidia-nat-core" },
@@ -5446,6 +5451,7 @@ nemo-agents-plugin-codex = [
     { name = "nemo-fabric-adapters-remote-agent" },
     { name = "nemo-helix-plugin" },
     { name = "nemo-relay" },
+    { name = "nemo-relay-cli-bin" },
     { name = "nvidia-nat-atif" },
     { name = "nvidia-nat-config-optimizer" },
     { name = "nvidia-nat-core" },
@@ -6519,6 +6525,8 @@ requires-dist = [
     { name = "nemo-relay", marker = "extra == 'plugins'", specifier = ">=0.11.0,<0.12" },
     { name = "nemo-relay", marker = "extra == 'services'", specifier = "==0.11.0" },
     { name = "nemo-relay", marker = "extra == 'services'", specifier = ">=0.11.0,<0.12" },
+    { name = "nemo-relay-cli-bin", marker = "extra == 'nemo-agents-plugin-claude'", specifier = ">=0.11.0,<0.12" },
+    { name = "nemo-relay-cli-bin", marker = "extra == 'nemo-agents-plugin-codex'", specifier = ">=0.11.0,<0.12" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'all'", specifier = "==0.1.15" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'nemo-safe-synthesizer-plugin'", specifier = "==0.1.15" },
     { name = "nemo-safe-synthesizer", marker = "extra == 'plugins'", specifier = "==0.1.15" },
@@ -7288,14 +7296,14 @@ wheels = [
 
 [[package]]
 name = "nemo-relay-cli-bin"
-version = "0.9.3"
+version = "0.11.0"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/3d/41c8d25cae9701b17186a0d26800ceabf38bddc7f160ee8f0bdc863f821c/nemo_relay_cli_bin-0.9.3-py3-none-macosx_11_0_arm64.whl", hash = "sha256:941c82547e0cce0cac61146ecf4e08e45fdc33c2e883857dfa5bf6cc60c4507c", size = 12902164, upload-time = "2026-09-28T18:22:18.219Z" },
-    { url = "https://files.pythonhosted.org/packages/d0/08/a4acd6e23da1526110b732875a3967f08b314d7d2ee2e18424d2d30549f7/nemo_relay_cli_bin-0.9.3-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:3911f264d1d8720cdd640870d61bfa817de833fb22af23ea4e93287d63b85ff5", size = 13147035, upload-time = "2026-09-28T18:22:20.54Z" },
-    { url = "https://files.pythonhosted.org/packages/19/b9/631ed24631f95b57b8233fb57288cfadffb02c0f73ab60d33416b376fb8e/nemo_relay_cli_bin-0.9.3-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:7e98b4713cb6d525ee097e1ffbab46990c08c0222ec76fbaf7977577bd26f137", size = 13198156, upload-time = "2026-09-28T18:22:22.582Z" },
-    { url = "https://files.pythonhosted.org/packages/33/a6/6d9d217ea74ad5c31f16adfc42e35c8eafcf2f7db94c6010380c5992d21c/nemo_relay_cli_bin-0.9.3-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:c3a7db67a3c2939cbb8a1ce187de49b31ed4e6e1aa5f08131d0ce9ca1af2b748", size = 13106000, upload-time = "2026-09-28T18:22:24.567Z" },
-    { url = "https://files.pythonhosted.org/packages/34/9f/26228860d0c4d44258725a23a4e62ced221a30450b6e35b252e6597ffdb3/nemo_relay_cli_bin-0.9.3-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:6b6a9296cbe4162796cdd258f106f6b5e18a13b98852c9ea01422d7a12dcc3d7", size = 13914788, upload-time = "2026-09-28T18:22:26.571Z" },
+    { url = "https://files.pythonhosted.org/packages/37/c0/b9f7080f8b86e9c749e97dcc24c19a00741911f9dda341775d3624409463/nemo_relay_cli_bin-0.11.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:4f99411b5281633f86d9fd41681efbb055e076ff2282b89c0a208c7082b1411f", size = 14649482, upload-time = "2026-10-28T01:19:53.508Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/7d/bac56c9cb3ba32aafa8771f11ef0ca2ddca3498a84d3443edf85719597d7/nemo_relay_cli_bin-0.11.0-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:ab7a02f1804c14cc5ba8f47b8f59959d4db2944a12378abcf72908fe870b6069", size = 14855242, upload-time = "2026-10-28T01:19:55.812Z" },
+    { url = "https://files.pythonhosted.org/packages/9e/11/22c9d48f80577a2f06f9e7848b8323286321a784dc497a50427a0bd39dc5/nemo_relay_cli_bin-0.11.0-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:a3fb596ae155ffae1f881df66c7425a20c9ea23807cc611f3c43f773e1b2f7b3", size = 14899370, upload-time = "2026-10-28T01:19:58.171Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/0d/3da199267f7384d18f4b5d6836b8930ddf289e99794789c54eafc20c989c/nemo_relay_cli_bin-0.11.0-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:3a7ad67c594dc931102244925d02a643c2107f590ff68b21bf268f13bc09b18d", size = 14863047, upload-time = "2026-10-28T01:20:00.526Z" },
+    { url = "https://files.pythonhosted.org/packages/68/1f/77b59ec0b00103d45d562b35a413f17ec32b2f4277d0390f98b886e62a71/nemo_relay_cli_bin-0.11.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:032531b965c7e1875dc5bc6b7993ebf9656ff0495111038f2e4def92a2418d93", size = 15608877, upload-time = "2026-10-28T01:20:02.706Z" },
 ]
 
 [[package]]

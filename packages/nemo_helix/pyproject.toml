@@ -303,12 +303,14 @@ nemo-agents-plugin = [
 nemo-agents-plugin-claude = [
   "nemo-helix[nemo-agents-plugin]",
   "nemo-fabric-adapters-claude[harness]>=0.6.0,<0.7.0",
+  "nemo-relay-cli-bin>=0.11.0,<0.12",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-agents-plugin-codex = [
   "nemo-helix[nemo-agents-plugin]",
   "nemo-fabric-adapters-codex[harness]>=0.6.0,<0.7.0",
+  "nemo-relay-cli-bin>=0.11.0,<0.12",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.

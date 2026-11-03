@@ -2150,13 +2150,14 @@ nemo-relay==0.11.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') 
     #   nemo-fabric
     #   nemo-helix
     #   nhx-evals-sdk
-nemo-relay-cli-bin==0.9.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:3911f264d1d8720cdd640870d61bfa817de833fb22af23ea4e93287d63b85ff5 \
-    --hash=sha256:6b6a9296cbe4162796cdd258f106f6b5e18a13b98852c9ea01422d7a12dcc3d7 \
-    --hash=sha256:7e98b4713cb6d525ee097e1ffbab46990c08c0222ec76fbaf7977577bd26f137 \
-    --hash=sha256:941c82547e0cce0cac61146ecf4e08e45fdc33c2e883857dfa5bf6cc60c4507c \
-    --hash=sha256:c3a7db67a3c2939cbb8a1ce187de49b31ed4e6e1aa5f08131d0ce9ca1af2b748
+nemo-relay-cli-bin==0.11.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:032531b965c7e1875dc5bc6b7993ebf9656ff0495111038f2e4def92a2418d93 \
+    --hash=sha256:3a7ad67c594dc931102244925d02a643c2107f590ff68b21bf268f13bc09b18d \
+    --hash=sha256:4f99411b5281633f86d9fd41681efbb055e076ff2282b89c0a208c7082b1411f \
+    --hash=sha256:a3fb596ae155ffae1f881df66c7425a20c9ea23807cc611f3c43f773e1b2f7b3 \
+    --hash=sha256:ab7a02f1804c14cc5ba8f47b8f59959d4db2944a12378abcf72908fe870b6069
     # via
+    #   nemo-agents-plugin
     #   nemo-fabric-adapters-claude
     #   nemo-fabric-adapters-codex
 nemo-safe-synthesizer==0.1.15 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \

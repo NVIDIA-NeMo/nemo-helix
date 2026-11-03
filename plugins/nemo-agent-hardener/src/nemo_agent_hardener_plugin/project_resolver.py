@@ -180,6 +180,12 @@ def derive_binaries(text: str, env: dict[str, str]) -> list[str]:
         match = re.search(r"python\s+-m\s+venv\s+(\S+)", text)
         venv = match.group(1) if match else ""
     globs = [f"{venv.rstrip('/')}/bin/**"] if venv else []
+    adapter_python = env.get("ADAPTER_PYTHON", "")
+    if adapter_python.startswith("/") and "$" not in adapter_python:
+        globs.append(adapter_python)
+        python_install_dir = env.get("UV_PYTHON_INSTALL_DIR", "")
+        if python_install_dir.startswith("/") and "$" not in python_install_dir:
+            globs.append(f"{python_install_dir.rstrip('/')}/**/bin/python*")
     return [*globs, "/usr/local/bin/python*", "/usr/bin/python*"]
 
 

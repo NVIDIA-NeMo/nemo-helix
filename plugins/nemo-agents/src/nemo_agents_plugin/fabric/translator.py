@@ -89,6 +89,11 @@ def translate_agent_config(
             resolution="preinstalled",
             settings=harness.settings,
         )
+        if harness_config.adapter_id == "nvidia.fabric.hermes" and config.telemetry.insecure_http_hosts is not None:
+            raise FabricTranslationError(
+                "telemetry.insecure_http_hosts requires Relay 0.11; the Hermes harness uses Relay 0.10. "
+                "Remove this setting and use an HTTPS or loopback collector for Hermes."
+            )
     model_payloads = _model_payloads(config, model)
     runtime_env = {
         **_platform_runtime_env(proxy_origin=proxy_origin),

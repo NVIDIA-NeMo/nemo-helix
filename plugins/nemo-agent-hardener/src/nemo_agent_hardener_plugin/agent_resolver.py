@@ -403,6 +403,14 @@ def build_manifest_dict(
         "secrets": secrets,
         "secrets_file": secrets_file,
     }
+    if harness == "hermes":
+        # OpenShell drops image ENV and matches egress against resolved executables.
+        env = {
+            "ADAPTER_PYTHON": "/opt/hermes-venv/bin/python",
+            "HERMES_NEMO_RELAY_PLUGINS_TOML": "/etc/nemo-relay/plugins.toml",
+            **(env or {}),
+        }
+        agent["binaries"].extend(["/opt/hermes-venv/bin/**", "/opt/uv/python/**/bin/python*"])
     if env:
         agent["env"] = env
     if relay_artifacts:

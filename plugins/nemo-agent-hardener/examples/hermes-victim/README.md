@@ -22,8 +22,14 @@ var for Hermes' built-in Relay integration. The pinned Hermes release no longer 
 
 ## Running it
 
+From the repository root, build the current Helix wheel into the image's build context.
+Keep only that wheel in the example's `dist/` directory.
+
 ```bash
 export NHX_BASE_URL=http://localhost:8080
+
+uv build --package nemo-helix --wheel \
+  --out-dir plugins/nemo-agent-hardener/examples/hermes-victim/dist
 
 nemo agents package --agent plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml \
                     --dockerfile plugins/nemo-agent-hardener/examples/hermes-victim/Dockerfile \
