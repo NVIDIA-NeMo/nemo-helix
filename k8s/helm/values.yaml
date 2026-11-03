@@ -482,8 +482,10 @@ clickhouse:
   image:
     # -- ClickHouse image repository. Intake is tested against the 26.3 LTS release line.
     repository: docker.io/clickhouse/clickhouse-server
-    # -- ClickHouse image tag.
-    tag: "26.3"
+    # -- ClickHouse image tag. Keep at or above 26.3.62.3, which fixes CVE-2026-116366.
+    tag: "26.3.62.3"
+    # -- ClickHouse image digest (`sha256:...`) pinned with the tag. Set to an empty string to pull by tag only, for example from a mirror that re-signs images.
+    digest: "sha256:de3e47c64078aa196dae2349e048fc98ba81947f651f5c20e06e46baea8ae40a"
     # -- ClickHouse image pull policy.
     pullPolicy: IfNotPresent
   auth:
@@ -767,6 +769,59 @@ baseHelixConfig: |
   # -- evals is the configuration specific to the Evals service
   evals:
     allow_insecure_cloudpickle_metrics: {{ .Values.evals.allowInsecureCloudpickleMetrics }}
+    {{- if and .Values.sandboxClusterCapable .Values.builder.enabled }}
+    # Harbor taskset runs: enables running harbor dataset evaluation in k8s.
+    runs:
+      harbor:
+        # Add profiles under platformConfig.evals.runs.harbor.sandbox_profiles.
+        sandbox_profiles:
+          # harbor-standard reaches only the API by default.
+          # Adjust the policy to allow access to other domains per use case or create a new profile.
+          harbor-standard:
+            agent_channel:
+              - '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
+            # Open only while a built-in agent installs itself, on top of the task's own policy.
+            # Covers the install scripts of harbor's built-in agents (harbor 0.24).
+            agent_setup_egress:
+              # Package registries (npm/yarn/pip/apt/apk) and Node via nvm.
+              - registry.npmjs.org
+              - repo.yarnpkg.com
+              - pypi.org
+              - files.pythonhosted.org
+              - "*.debian.org"
+              - archive.ubuntu.com
+              - security.ubuntu.com
+              - dl-cdn.alpinelinux.org
+              - nodejs.org
+              # GitHub: nvm, uv, goose and tmux releases, hermes, git clones, ACP registry.
+              - github.com
+              - api.github.com
+              - raw.githubusercontent.com
+              - objects.githubusercontent.com
+              - release-assets.githubusercontent.com
+              - gh.io
+              # uv installer and Bun (aider, kimi, vibe, code-puppy, trae-agent, cline, ...).
+              - astral.sh
+              - releases.astral.sh
+              - bun.sh
+              # Vendor-hosted agent installers.
+              - aider.chat
+              - downloads.claude.ai
+              - cursor.com
+              - downloads.cursor.com
+              - cli.devin.ai
+              - static.devin.ai
+              - junie.jetbrains.com
+              - acli.atlassian.com
+              - antigravity.google
+              - dev.meta.ai
+              - x.ai
+              - fx.sh
+              - ai.snowflake.com
+              - mimo.xiaomi.com
+            egress_allow:
+              - '{{ include "nhx-api.api-servicename" . }}.{{ .Release.Namespace }}.svc.cluster.local'
+    {{- end }}
 
   # -- guardrails is the configuration specific to the Guardrails service
   guardrails: {}

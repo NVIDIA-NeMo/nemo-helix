@@ -53,8 +53,41 @@ reservations are not observable until a publish is attempted, so a port claimed
 concurrently is retried against a different port rather than failing the deployment.
 Pick a range nothing else on the host publishes on.
 
-Entity-level `backend_config.docker` accepts only deployment-specific overrides such
-as `network`.
+Entity-level `backend_config.docker` accepts deployment-specific overrides such
+as `network`. Docker network selection is restricted per executor:
+
+- An omitted or `null` network inherits the operator's executor `network` (including
+  `NEMO_DEPLOYMENTS_DOCKER_NETWORK` or legacy `MODELS_DOCKER_NETWORK`). With no
+  executor network, Docker's default networking is unchanged.
+- An explicit client network must equal the executor's configured network or an
+  exact name in its `allowed_networks` list (empty by default). Network existence
+  on the daemon does not grant permission. Built-ins such as `bridge` and `none`
+  also require explicit approval; `none` is unsuitable for networked services.
+- Client namespace-sharing modes are rejected with HTTP 422 at config creation.
+  Internal sidecars still share their own primary container's network namespace.
+- Allowlist authorization occurs at launch, when the executor is known. A named
+  network can be stored in a config but a deployment selecting a different
+  executor may fail with a network-policy status before creating containers.
+
+For example, under a Docker executor's `config`:
+
+```yaml
+network: helix-workloads
+allowed_networks:
+  - approved-secondary-workloads
+```
+
+**Upgrade compatibility:** inventory existing explicit network overrides and add
+only approved names to each executor's allowlist before launching or recreating
+those deployments. Stored configs remain readable and deletable; disallowed
+values are not silently remapped or grandfathered at launch. Existing running
+containers are not forcibly stopped by this policy.
+
+Executor defaults are trusted operator configuration, not client permissions.
+Operators must choose segregated workload networks and keep internal platform
+services unreachable from them; a host-network executor default remains an
+unsafe operator opt-in. Allowlisting does not isolate containers on the same
+network or replace gateway authentication and network policy.
 
 ## Docker resource naming
 

@@ -31,6 +31,46 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:
@@ -44,12 +84,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AutomodelJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/AutomodelJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Automodel Jobs
@@ -896,6 +942,46 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:
@@ -909,12 +995,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RlJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/RlJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Rl Jobs
@@ -1579,6 +1671,46 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: dry_run
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Check the job without creating it. The job is validated, its
+            references resolved and its steps compiled, as create does. The dry run
+            then checks that each step's execution profile exists and runs the job
+            type's own checks, such as reading the first rows of each dataset file.
+            If every check passes, returns 200 with the unsaved job, named as requested
+            or dry-run-job, and the checks in status_details.checks. If a check fails,
+            returns 422 with detail.message naming the failed checks and detail.checks
+            listing all of them. Errors before the checks, such as an invalid spec
+            or a missing reference, are the same as create's.
+          default: false
+          title: Dry Run
+        description: Check the job without creating it. The job is validated, its
+          references resolved and its steps compiled, as create does. The dry run
+          then checks that each step's execution profile exists and runs the job type's
+          own checks, such as reading the first rows of each dataset file. If every
+          check passes, returns 200 with the unsaved job, named as requested or dry-run-job,
+          and the checks in status_details.checks. If a check fails, returns 422 with
+          detail.message naming the failed checks and detail.checks listing all of
+          them. Errors before the checks, such as an invalid spec or a missing reference,
+          are the same as create's.
+      - name: dry_run_full
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: With dry_run=true, run the job type's checks in full rather
+            than on a sample, such as checking every row of each dataset file instead
+            of the first rows. The response comes only after every row is read and
+            checked, so the larger the data, the longer it takes.
+          default: false
+          title: Dry Run Full
+        description: With dry_run=true, run the job type's checks in full rather than
+          on a sample, such as checking every row of each dataset file instead of
+          the first rows. The response comes only after every row is read and checked,
+          so the larger the data, the longer it takes.
       requestBody:
         required: true
         content:
@@ -1592,12 +1724,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnslothJobsJob'
-        '422':
-          description: Validation Error
+        '200':
+          description: 'Dry run passed: the job that would be created, unsaved.'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/UnslothJobsJob'
+        '422':
+          description: Validation error, or a dry run whose checks fail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDryRunValidationErrorResponse'
     get:
       tags:
       - Unsloth Jobs
@@ -3805,6 +3943,65 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JobDryRunCheck:
+      properties:
+        name:
+          type: string
+          title: Name
+          description: What was checked.
+        passed:
+          type: boolean
+          title: Passed
+        message:
+          type: string
+          title: Message
+          description: What the check found; on failure, what to fix.
+      type: object
+      required:
+      - name
+      - passed
+      - message
+      title: JobDryRunCheck
+      description: One check a dry run (create with ``?dry_run=true``) made.
+    JobDryRunFailure:
+      properties:
+        detail:
+          $ref: '#/components/schemas/JobDryRunFailureDetail'
+      type: object
+      required:
+      - detail
+      title: JobDryRunFailure
+      description: The 422 body of a dry run whose checks fail.
+    JobDryRunFailureDetail:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: The checks that failed.
+        checks:
+          items:
+            $ref: '#/components/schemas/JobDryRunCheck'
+          type: array
+          title: Checks
+          description: Every check the dry run made, passed and failed.
+      type: object
+      required:
+      - message
+      - checks
+      title: JobDryRunFailureDetail
+      description: What a dry run whose checks fail returns in ``detail``.
+    JobDryRunValidationErrorResponse:
+      anyOf:
+      - $ref: '#/components/schemas/HTTPValidationError'
+      - $ref: '#/components/schemas/JobDryRunFailure'
+      title: JobDryRunValidationErrorResponse
+      description: 'Request validation error, or a dry run whose checks fail.
+
+
+        Create routes that take ``?dry_run=true`` declare this for 422. Declaring
+        any 422 model
+
+        replaces FastAPI''s request-validation schema, so the union keeps both shapes.'
     MlflowIntegration:
       properties:
         experiment_name:
@@ -3911,16 +4108,16 @@ components:
     PolicyBackend:
       type: string
       enum:
-      - dtensor
       - automodel
       title: PolicyBackend
       description: 'Which NeMo-RL policy worker trains the model.
 
 
-        The value picks the worker class, which picks the Ray actor''s venv and kernels.
+        ``automodel`` selects ``AutomodelPolicyWorker`` and the ``automodel`` extra.
 
-        Asking for a capability the backend lacks is a validation error, not a silent
-        upgrade.'
+        ``MegatronPolicyWorker`` is prefetched, but this field does not select it.
+
+        A stored ``dtensor`` is read as ``automodel``; it is not a second worker.'
     ProgressReportingConfig:
       properties:
         min_report_interval_seconds:
@@ -4317,12 +4514,12 @@ components:
         policy_backend:
           allOf:
           - $ref: '#/components/schemas/PolicyBackend'
-          description: NeMo-RL policy worker that trains the model. `lora` requires
-            `automodel` (NeMo Automodel + Transformer Engine, Hopper or newer; the
-            only backend with expert parallelism and automodel_kwargs). `all_weights`
-            defaults to `dtensor` (stock HuggingFace on PyTorch FSDP2, also the pre-Hopper
-            option) and may be set to `automodel` for a consolidated HuggingFace export.
-            Omit it to get the default for the finetuning type.
+          description: 'NeMo-RL policy worker that trains the model. The only value
+            is `automodel` (`AutomodelPolicyWorker`, the automodel extra), which is
+            also the default for both LoRA and full weights. A stored or submitted
+            `dtensor` is read as `automodel`: full-weight jobs saved that value, and
+            it is not a separate worker.'
+          default: automodel
         v4_compatible:
           type: boolean
           title: V4 Compatible
@@ -4564,10 +4761,10 @@ components:
           default: 64
         automodel_kwargs:
           title: Automodel Kwargs
-          description: 'Passed to policy.dtensor_cfg.automodel_kwargs; requires policy_backend=''automodel''.
-            {''force_hf'': true} loads the stock HuggingFace modules; a {''backend'':
-            {...}} block picks the Transformer-Engine / DeepEP MoE implementation.
-            Unset means Automodel auto-detects.'
+          description: 'Passed to policy.automodel_cfg.automodel_kwargs. {''force_hf'':
+            true} loads the stock HuggingFace modules; a {''backend'': {...}} block
+            picks the Transformer-Engine / DeepEP MoE implementation. Unset means
+            Automodel auto-detects.'
           additionalProperties: true
           type: object
         router_aux_loss_coef:
@@ -4598,12 +4795,14 @@ components:
         vllm_kwargs:
           title: Vllm Kwargs
           description: 'Additional arguments for the vLLM rollout engine, for example
-            {''moe_backend'': ''triton''}. Forwarded to vLLM as supplied.'
+            {''moe_backend'': ''triton''}. Do not set hf_overrides (use hf_config_overrides)
+            or engine keys the worker already passes, such as tensor_parallel_size
+            and enable_prefix_caching.'
           additionalProperties: true
           type: object
         moe_parallelizer:
           title: Moe Parallelizer
-          description: Merged over policy.dtensor_cfg.moe_parallelizer, which controls
+          description: Merged over policy.automodel_cfg.moe_parallelizer, which controls
             how MoE experts are sharded and checkpointed. The platform already sets
             ignore_router_for_ac when expert parallelism and activation checkpointing
             are both on; this reaches the rest.
@@ -4615,6 +4814,14 @@ components:
             of the policy's. Defaults to min(parallelism.tensor_parallel_size, parallelism.num_gpus_per_node).
           type: integer
           exclusiveMinimum: 0.0
+        vllm_expert_parallel_size:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Vllm Expert Parallel Size
+          description: Expert parallel size for the vLLM rollout engine, independent
+            of the policy's. Defaults to 1. Super VL recipes set this to 4 alongside
+            tensor_parallel_size 4.
+          default: 1
         vllm_gpu_memory_utilization:
           type: number
           maximum: 1.0
@@ -4643,7 +4850,7 @@ components:
 
         ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
 
-        ``lora_merged`` is not supported for GRPO on the platform DTensor path.'
+        ``lora_merged`` is not supported for GRPO on the Automodel path.'
     RlJobInput:
       properties:
         name:
@@ -5063,7 +5270,8 @@ components:
       additionalProperties: false
       type: object
       title: RlLoRAParams
-      description: LoRA hyperparameters for GRPO (DTensor ``lora_cfg``). No merge-at-export.
+      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No
+        merge-at-export.
     RlOutputRequest:
       properties:
         name:
@@ -5134,8 +5342,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Expert Parallel Size
-          description: Expert parallel size for MoE models. GRPO only, and implemented
-            only by policy_backend='automodel'.
+          description: Expert parallel size for MoE models. GRPO only.
           default: 1
         sequence_parallel:
           type: boolean

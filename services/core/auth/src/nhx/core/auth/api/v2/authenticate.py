@@ -22,6 +22,7 @@ from nemo_helix_plugin.auth.types import (
 from nhx.common.auth.bearer import MalformedBearerTokenError
 from nhx.common.auth.jwt import JWTValidator
 from nhx.common.auth.middleware import request_bearer_token
+from nhx.common.auth.openapi import BEARER_AUTH_OPENAPI
 from nhx.common.auth.token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
 from nhx.common.auth.token_resolver import ResolvedBearerToken, resolve_bearer_token
 from nhx.common.config import AuthConfig, get_auth_config
@@ -510,6 +511,7 @@ async def _ext_authz_bearer_token(
     "/authenticate",
     response_model=AuthenticateResponse,
     operation_id="get_authenticate_bearer_token",
+    openapi_extra=BEARER_AUTH_OPENAPI,
     responses=_AUTHENTICATE_ERROR_RESPONSES,
 )
 async def authenticate_bearer_token_get(
@@ -528,6 +530,7 @@ async def authenticate_bearer_token_get(
     "/authenticate",
     response_model=AuthenticateResponse,
     operation_id="post_authenticate_bearer_token",
+    openapi_extra=BEARER_AUTH_OPENAPI,
     responses=_AUTHENTICATE_ERROR_RESPONSES,
 )
 async def authenticate_bearer_token_post(

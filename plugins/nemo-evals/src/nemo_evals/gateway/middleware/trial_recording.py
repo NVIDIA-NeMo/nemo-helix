@@ -1,0 +1,238 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""``nemo-evals-trial-recording``: records each model call an evaluation trial makes to Intake, in that trial.
+
+An evaluation job issues each trial a trial token whose claims name the trial (see :mod:`nemo_evals.gateway.tokens`).
+For every call through a VirtualModel that lists this middleware in ``response_middleware``, the middleware notes
+the caller's token, the token usage the provider reported, and when the caller had the whole response, and hands the
+call to a :class:`~nemo_evals.gateway.recorder.CallRecorder`. With platform auth on, it trusts only tokens the
+platform signed, whatever the gateway accepted; with auth off, only unsigned tokens from ``nemo-evals``. A call made
+with any other credential is not recorded.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterator, Callable, Mapping
+from datetime import UTC, datetime
+from typing import Any
+
+from nemo_evals.gateway.recorder import CallRecorder, FinishedCall, intake_sink
+from nemo_evals.gateway.spans import CallerSpan, trial_trace_id
+from nemo_evals.gateway.tokens import TrialClaims, claims_a_trial, platform_token_reader
+from nemo_evals.gateway.usage import CallApi, TokenUsage, model_from_payload, usage_from_payload
+from nemo_helix_plugin.auth import inference_gateway_credential
+from nemo_helix_plugin.client.oidc import decode_jwt_claims
+from nemo_helix_plugin.inference_middleware import (
+    InferenceMiddlewareContext,
+    InferenceRequest,
+    InferenceResponse,
+    NemoInferenceMiddleware,
+)
+from nemo_helix_plugin.models.refs import parse_workspace_name_ref
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+MIDDLEWARE_NAME = "nemo-evals-trial-recording"
+CONFIG_TYPE = "trial_recording"
+STARTED_AT_STATE_KEY = "started_at"
+ROUTING_SPAN_STATE_KEY = "routing_span"
+
+AGENT_HEADERS = ("x-claude-code-session-id", "session_id", "session-id", "x-codex-turn-metadata", "x-codex-window-id")
+AGENT_HEADER_ATTRIBUTE_PREFIX = "nemo.agent.header."
+MAX_HEADER_VALUE_LENGTH = 1024
+
+
+class TrialRecordingConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    routes_to: tuple[str, ...] = Field(
+        default=(),
+        description="For a VirtualModel whose provider is a router that calls models back through the gateway as "
+        "its caller: the `workspace/name` of each VirtualModel it can route to. An evaluation lets its trials call "
+        "these, and holds them to the run's closed-book requirement.",
+    )
+
+    @field_validator("routes_to")
+    @classmethod
+    def _workspace_name_refs(cls, routes_to: tuple[str, ...]) -> tuple[str, ...]:
+        for ref in routes_to:
+            parse_workspace_name_ref(ref, label="routes_to entry")
+        return routes_to
+
+
+class _ObservedCall:
+    """One call through the middleware: what it was, and the usage its response reported."""
+
+    def __init__(
+        self, ctx: InferenceMiddlewareContext, token: str, served_model_name: Callable[[str], str | None]
+    ) -> None:
+        request = ctx.original_request
+        self.ctx = ctx
+        self.token = token
+        self.served_model_name = served_model_name
+        self.api = CallApi.from_path(request.path)
+        self.usage = TokenUsage()
+        self.response_model: str | None = None
+        self.agent_headers = {
+            name: value[:MAX_HEADER_VALUE_LENGTH] for name in AGENT_HEADERS if (value := request.headers.get(name))
+        }
+        self.caller = CallerSpan.from_headers(request.headers.get("traceparent"), request.headers.get("tracestate"))
+
+    def observe(self, payload: object) -> None:
+        if not isinstance(payload, Mapping):
+            return
+        if (usage := usage_from_payload(self.api, payload)) is not None:
+            self.usage.merge(usage)
+        self.response_model = model_from_payload(payload) or self.response_model
+
+    def finished(
+        self, started_at: datetime, *, cancelled: bool, error: bool = False, routing_span: str | None = None
+    ) -> FinishedCall:
+        proxied = self.ctx.proxied_request
+        model = (proxied.body if proxied is not None else self.ctx.original_request.body).get("model")
+        attributes: dict[str, object] = {
+            "gen_ai.operation.name": "chat",
+            "nemo.virtual_model": f"{self.ctx.workspace}/{self.ctx.virtual_model_name}",
+            "nemo.inference.api": self.api.value,
+            **{f"{AGENT_HEADER_ATTRIBUTE_PREFIX}{name}": value for name, value in self.agent_headers.items()},
+            **self.usage.attributes(),
+        }
+        if isinstance(model, str):
+            attributes["gen_ai.request.model"] = model
+        if self.response_model is not None:
+            attributes["gen_ai.response.model"] = self._response_model(self.response_model, model)
+        return FinishedCall(
+            token=self.token,
+            name=self.api.value,
+            started_at=started_at,
+            ended_at=datetime.now(UTC),
+            cancelled=cancelled,
+            error=error,
+            attributes=attributes,
+            caller=self.caller,
+            span_id=routing_span,
+            routing=routing_span is not None,
+        )
+
+    def _response_model(self, response_model: str, forwarded: object) -> str:
+        """The model the provider says served the call, as the provider named it.
+
+        The gateway renames the served model in a response to its model entity before response middleware runs.
+        """
+        if isinstance(forwarded, str) and forwarded != response_model:
+            if self.served_model_name(response_model) == forwarded:
+                return forwarded
+        return response_model
+
+
+class TrialRecordingMiddleware(NemoInferenceMiddleware):
+    """Record each call made with a trial token to Intake, in the trial.
+
+    It records from ``response_middleware``. Listed in ``request_middleware`` too, a call's span starts when the
+    gateway received the call rather than when the response began, and a router's calls back nest beneath its call.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._recorder: CallRecorder | None = None
+
+    def supports_middleware_phase(self, phase: str) -> bool:
+        return phase in {"request", "response"}
+
+    async def validate_middleware_config(self, config_type: str, config: Any) -> TrialRecordingConfig:
+        if config_type != CONFIG_TYPE:
+            raise ValueError(f"{MIDDLEWARE_NAME} supports config_type {CONFIG_TYPE!r}, not {config_type!r}")
+        return TrialRecordingConfig.model_validate(config or {})
+
+    async def on_startup(self) -> None:
+        self._recorder = CallRecorder(platform_token_reader(), intake_sink(self._get_platform_client("on_startup")))
+        self._recorder.start()
+
+    async def on_shutdown(self) -> None:
+        if self._recorder is not None:
+            await self._recorder.stop()
+
+    async def process_request(
+        self,
+        ctx: InferenceMiddlewareContext,
+        request: InferenceRequest,
+        middleware_config: TrialRecordingConfig,
+    ) -> InferenceRequest:
+        ctx.state(MIDDLEWARE_NAME).set(STARTED_AT_STATE_KEY, datetime.now(UTC))
+        if (routing_span := self._routing_span(request)) is not None:
+            trace_id, span_id = routing_span
+            request.headers["traceparent"] = f"00-{trace_id}-{span_id}-01"
+            ctx.state(MIDDLEWARE_NAME).set(ROUTING_SPAN_STATE_KEY, span_id)
+        return request
+
+    def _routing_span(self, request: InferenceRequest) -> tuple[str, str] | None:
+        """The trace and a fresh span id for a trial's call to a provider that calls models back as the trial."""
+        credential = inference_gateway_credential(request.headers)
+        model = request.body.get("model")
+        if credential is None or not isinstance(model, str):
+            return None
+        trial = TrialClaims.from_token_claims(decode_jwt_claims(credential))
+        if trial is None:
+            return None
+        if not self._calls_back_as_caller(model):
+            return None
+        caller = CallerSpan.from_headers(request.headers.get("traceparent"), request.headers.get("tracestate"))
+        return (caller.trace_id if caller is not None else trial_trace_id(trial)), os.urandom(8).hex()
+
+    def _calls_back_as_caller(self, model: object) -> bool:
+        if not isinstance(model, str):
+            return False
+        try:
+            return self.get_inference_url_and_model(model).calls_back_as_caller
+        except KeyError:
+            return False
+
+    def _served_model_name(self, model_entity: str) -> str | None:
+        try:
+            return self.get_inference_url_and_model(model_entity).served_model_name
+        except KeyError:
+            return None
+
+    async def process_response(
+        self,
+        ctx: InferenceMiddlewareContext,
+        response: InferenceResponse,
+        middleware_config: TrialRecordingConfig,
+    ) -> InferenceResponse:
+        recorder = self._recorder
+        credential = inference_gateway_credential(ctx.original_request.headers)
+        if recorder is None or credential is None or not claims_a_trial(credential):
+            return response
+        call = _ObservedCall(ctx, credential, self._served_model_name)
+        started_at = ctx.state(MIDDLEWARE_NAME).get(STARTED_AT_STATE_KEY) or datetime.now(UTC)
+        routing_span: str | None = None
+        if ctx.provider_calls_back_as_caller:
+            routing_span = ctx.state(MIDDLEWARE_NAME).get(ROUTING_SPAN_STATE_KEY) or os.urandom(8).hex()
+        if isinstance(response.result, Mapping):
+            call.observe(response.result)
+            recorder.record(call.finished(started_at, cancelled=False, routing_span=routing_span))
+            return response
+        response.result = _follow(response.result, call, recorder, started_at, routing_span)
+        return response
+
+
+async def _follow(
+    chunks: AsyncIterator[dict[str, Any]],
+    call: _ObservedCall,
+    recorder: CallRecorder,
+    started_at: datetime,
+    routing_span: str | None,
+) -> AsyncIterator[dict[str, Any]]:
+    """Pass the stream through, recording the call when the caller has all of it, stops reading, or it fails."""
+    cancelled, error = True, False
+    try:
+        async for chunk in chunks:
+            call.observe(chunk)
+            yield chunk
+        cancelled = False
+    except Exception:
+        cancelled, error = False, True
+        raise
+    finally:
+        recorder.record(call.finished(started_at, cancelled=cancelled, error=error, routing_span=routing_span))

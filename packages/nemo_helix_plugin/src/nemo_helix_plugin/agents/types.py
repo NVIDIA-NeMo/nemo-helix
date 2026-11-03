@@ -368,6 +368,10 @@ class AgentDeployment(EntityMetadata):
         description="Resolved compute snapshot from the referenced environment.",
     )
     secrets: StringMap = Field(default_factory=dict, description="Resolved secret env references.")
+    source_fileset: FilesetRef | None = Field(
+        default=None,
+        description="Agent source fileset snapshotted at creation. When absent, stages <agent>-ethos.",
+    )
     status: DeploymentStatus = Field(default="pending", description="Deployment lifecycle status.")
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")
     endpoint: str = Field(default="", description="Subprocess loopback endpoint.")
@@ -506,7 +510,10 @@ class CreateDeploymentRequest(BaseModel):
     )
     image: str = Field(
         default="",
-        description="Container image for docker/k8s/openshell modes. Ignored for subprocess.",
+        description=(
+            "Container image for docker/k8s/openshell modes. When omitted, uses the agent's "
+            "reference.container_image, then deployments.default_image. Ignored for subprocess."
+        ),
     )
     use_image_entrypoint: bool = Field(
         default=False,

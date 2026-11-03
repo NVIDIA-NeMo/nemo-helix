@@ -28,12 +28,11 @@ const DELETING_MESSAGE = 'Waiting for backend to delete deployment';
 const DEPLOYMENT_URL = '*/apis/agents/v2/workspaces/:workspace/deployments/:name';
 
 const source = (revision: string): AgentSpecSource => ({
-  owner: 'acme',
-  repo: 'agents',
   repository: 'acme/agents',
   trackedRevision: 'main',
   revision,
   webUrl: `https://github.com/acme/agents/tree/${revision}`,
+  commitUrl: (commit) => `https://github.com/acme/agents/commit/${commit}`,
 });
 
 const deployment = (overrides: Partial<AgentDeployment> = {}): AgentDeployment =>

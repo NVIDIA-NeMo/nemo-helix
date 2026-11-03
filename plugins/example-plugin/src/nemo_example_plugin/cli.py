@@ -29,6 +29,7 @@ from nemo_example_plugin.types.payloads import (
 )
 from nemo_helix_plugin.cli import NemoCLI, create_typer_app
 from nemo_helix_plugin.cli_codegen import handle_code_generation
+from nemo_helix_plugin.cli_confirm import confirm_destructive
 from nemo_helix_plugin.cli_error_handling import handle_errors
 from nemo_helix_plugin.cli_options import (
     EntityOutputFormatOption,
@@ -36,6 +37,7 @@ from nemo_helix_plugin.cli_options import (
     NoTruncateOption,
     OutputColumnsOption,
     WorkspaceOption,
+    YesOption,
 )
 from nemo_helix_plugin.cli_output import Column, check_output_columns_with_format, format_output
 from nemo_helix_plugin.cli_state import cli_state, resolve_cli_workspace, resolve_output_format
@@ -203,12 +205,11 @@ class ExampleCLI(NemoCLI):
             ctx: typer.Context,
             name: NameArgument,
             workspace: WorkspaceOption = None,
-            yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+            yes: YesOption = False,
         ) -> None:
             """Delete a middleware config."""
             workspace = resolve_cli_workspace(ctx, workspace)
-            if not yes:
-                typer.confirm(f"Delete middleware config '{workspace}/{name}'?", abort=True)
+            confirm_destructive(f"Delete middleware config '{workspace}/{name}'?", yes=yes)
             cli_state(ctx).typed_client(ExampleClient).delete_middleware_config(workspace=workspace, name=name)
             typer.echo(f"Deleted '{workspace}/{name}'.")
 

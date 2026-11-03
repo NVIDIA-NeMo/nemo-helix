@@ -14,6 +14,7 @@ because the compiler call convention and profile resolution are backend-specific
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 from typing import ClassVar, Literal
 
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -22,6 +23,7 @@ from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nhx.customization_common.dry_run import DatasetRows
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -29,6 +31,7 @@ from nhx.customization_common.service.platform_client import (
 from nhx.unsloth.compile import platform_job_config_compiler
 from nhx.unsloth.config import config as unsloth_config
 from nhx.unsloth.schemas import UnslothJobOutput
+from nhx.unsloth.tasks.training.datasets.validation import select_data_files, validate_lines
 from pydantic import BaseModel
 
 
@@ -52,6 +55,23 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
     @classmethod
     def _job_input_schema(cls) -> type[UnslothJobInput]:
         return UnslothJobInput
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: UnslothJobOutput, workspace: str) -> list[DatasetRows]:
+        del workspace
+        validate = partial(
+            validate_lines,
+            apply_chat_template=spec.dataset.apply_chat_template,
+            text_field=spec.dataset.text_field,
+        )
+        return [
+            DatasetRows(
+                name="training dataset",
+                fileset=spec.dataset.path,
+                select_files=select_data_files,
+                validate_lines=validate,
+            )
+        ]
 
     @classmethod
     async def _transform(

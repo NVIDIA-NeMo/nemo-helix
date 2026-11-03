@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal, cast
 
 import typer
@@ -19,6 +20,7 @@ from nemo_helix_plugin.cli_input import (
 )
 from nemo_helix_plugin.cli_kwargs import build_kwargs, merge_filter_dict
 from nemo_helix_plugin.cli_options import (
+    OUTPUT_FORMAT_FLAGS,
     EntityOutputFormatOption,
     ListOutputFormatOption,
     NoTruncateOption,
@@ -54,6 +56,13 @@ from nemo_helix_plugin.intake.types import (
     TraceMetricsQueryParams,
 )
 from nhx.intake.cli_commands.common import list_query_params, without_keys
+from nhx.intake.cli_commands.transcript import (
+    DEFAULT_MAX_CHARS,
+    DEFAULT_TRANSCRIPT_KINDS,
+    Transcript,
+    build_transcript,
+    render_transcript,
+)
 
 app = create_typer_app(name="intake", help="Intake operations")
 annotations_app = create_typer_app(name="annotations", help="Manage annotations")
@@ -330,6 +339,119 @@ def retrieve_traces(
 
     result = state.typed_client(IntakeClient).get_trace(id=id, workspace=workspace, query_params=query_params)
     _format_entity(state, result, resolved_output_format)
+
+
+TranscriptOutputFormat = Literal["text", "json", "yaml"]
+
+
+def _parse_transcript_kinds(value: str | None) -> list[str] | None:
+    """Parse ``--kinds``: comma-separated span kinds, or ``all`` (returned as ``None``)."""
+    if value is None:
+        return list(DEFAULT_TRANSCRIPT_KINDS)
+    kinds = [kind.strip().upper() for kind in value.split(",") if kind.strip()]
+    if not kinds:
+        raise typer.BadParameter("Pass at least one span kind, or 'all'.", param_hint="--kinds")
+    return None if "ALL" in kinds else list(dict.fromkeys(kinds))
+
+
+def _print_transcript_schema(value: bool) -> None:
+    # Eager, so it runs before the required trace ID is checked and never calls the API.
+    if value:
+        typer.echo(json.dumps(Transcript.model_json_schema(), indent=2))
+        raise typer.Exit()
+
+
+@traces_app.command("show")
+@collect_warnings
+@handle_errors
+def show_traces(
+    ctx: typer.Context,
+    id: Annotated[str, typer.Argument(help="Trace ID.")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    max_chars: Annotated[
+        int,
+        typer.Option(
+            "--max-chars",
+            min=1,
+            help="Cut each block's input and output to this many characters. Ignored with --no-truncate.",
+        ),
+    ] = DEFAULT_MAX_CHARS,
+    kinds: Annotated[
+        str | None,
+        typer.Option(
+            "--kinds",
+            metavar="KINDS",
+            help=(
+                "Comma-separated span kinds to show as blocks, e.g. LLM,TOOL,RETRIEVER, or 'all'. "
+                "Defaults to LLM,TOOL. TOOL also selects spans of any other kind that carry a tool name."
+            ),
+        ),
+    ] = None,
+    no_truncate: Annotated[
+        bool | None,
+        typer.Option(
+            "--no-truncate",
+            help="Print each block's full input and output.",
+            rich_help_panel="Output Options",
+        ),
+    ] = None,
+    output_format: Annotated[
+        TranscriptOutputFormat | None,
+        typer.Option(
+            *OUTPUT_FORMAT_FLAGS,
+            show_choices=True,
+            help=(
+                "text prints the transcript; json and yaml print the same blocks as structured data. "
+                "Defaults to text, even when piped, unless the configured output format is json or yaml."
+            ),
+            rich_help_panel="Output Options",
+        ),
+    ] = None,
+    output_schema: Annotated[
+        bool,
+        typer.Option(
+            "--output-schema",
+            is_eager=True,
+            expose_value=False,
+            callback=_print_transcript_schema,
+            help="Print the JSON Schema of the json and yaml output, then exit. Needs no trace ID.",
+            rich_help_panel="Output Options",
+        ),
+    ] = False,
+) -> None:
+    """Show one trace as a transcript.
+
+    Prints one block per model turn and tool call in started_at order, with the span's model or tool
+    name, its input (a tool's arguments) and output (a tool's result) cut to --max-chars, and its token
+    counts and duration. When an LLM span's input is a chat message list, the text view shows only its
+    last message, the one new in that turn. Spans of other kinds are counted by kind; show them with
+    --kinds.
+    """
+    selected_kinds = _parse_transcript_kinds(kinds)
+    state = cli_state(ctx)
+    if output_format is None:
+        # A transcript is prose, so piping it keeps text; only an explicit json/yaml preference switches.
+        configured = state.get_output_format(apply_non_tty_default=False)
+        output_format = configured if configured in ("json", "yaml") else "text"
+
+    client = state.typed_client(IntakeClient)
+    trace = client.get_trace(id=id, workspace=workspace, query_params={"mode": "summary"}).data()
+    # Detailed mode so --max-chars, not the server's 300-character preview, bounds each payload.
+    spans = client.list_spans(
+        workspace=workspace,
+        query_params={"filter": {"trace_id": id}, "sort": "started_at", "mode": "detailed", "page_size": 1000},
+    ).items()
+    transcript = build_transcript(
+        trace,
+        spans,
+        kinds=selected_kinds,
+        max_chars=None if state.get_no_truncate(no_truncate) else max_chars,
+    )
+
+    if output_format == "text":
+        typer.echo(render_transcript(transcript))
+    else:
+        format_output(transcript.model_dump(mode="json"), output_format=output_format)
 
 
 # ---------------------------------------------------------------------------

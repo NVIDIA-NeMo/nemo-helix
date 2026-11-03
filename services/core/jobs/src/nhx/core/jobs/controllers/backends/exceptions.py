@@ -26,5 +26,9 @@ class SchedulingDeferred(Exception):
         self.message = message
 
 
+class AdmissionDeferred(SchedulingDeferred):
+    """Exception raised when admission control does not admit a step; the step is queued."""
+
+
 class JobStorageError(Exception):
     """Exception raised when there's an issue with job storage."""

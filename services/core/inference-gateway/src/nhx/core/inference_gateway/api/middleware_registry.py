@@ -142,6 +142,7 @@ class InferenceMiddlewareCacheAccessorImpl:
 
         Raises:
             KeyError: If ``model_entity_id`` is not in the ModelCache.
+            ValueError: If the provider's stored ``auth_header_format`` is invalid.
         """
         try:
             ref = parse_model_entity_ref(model_entity_id)
@@ -161,7 +162,7 @@ class InferenceMiddlewareCacheAccessorImpl:
         outbound_headers = CIMultiDict(provider.default_extra_headers or {})
         for key, value in (provider.required_extra_headers or {}).items():
             outbound_headers[key] = value
-        if provider_info.secret_value:
+        if provider_info.secret_value and not provider.calls_back_as_caller:
             header_name, header_value = render_auth_header(provider_info.secret_value, provider.auth_header_format)
             outbound_headers[header_name] = header_value
 
@@ -174,6 +175,7 @@ class InferenceMiddlewareCacheAccessorImpl:
             missing_secret_name=provider.api_key_secret_name
             if provider.api_key_secret_name and not provider_info.secret_value
             else None,
+            calls_back_as_caller=provider.calls_back_as_caller,
         )
 
     def get_backend_format(self, virtual_model_id: str, model_entity_id: str) -> BackendFormat | None:

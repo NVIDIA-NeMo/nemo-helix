@@ -25,6 +25,10 @@ data:
         spec:
           restartPolicy: Never
           terminationGracePeriodSeconds: 60
+          # Task code is untrusted and must not hold a cluster token. A mounted
+          # token also makes in-cluster clients (Helm, kubectl) default to this
+          # pod's namespace instead of the one a task expects.
+          automountServiceAccountToken: false
           # Sandbox pods are built from this template by the OpenSandbox server
           # not by the jobs controller, so neither the jobs controller's
           # image_pull_secrets nor the chart's top-level imagePullSecrets reaches them.
