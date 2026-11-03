@@ -841,7 +841,8 @@ jobs:
           features=(--feature builder)
           if [ "${AUTH}" = "on" ]; then
             markers="builder_e2e"
-            features+=(--feature auth)
+            # The auth config tells the e2e client that auth is on, so it sends the admin's principal headers.
+            features+=(--feature auth --config e2e/quickstart/auth.yaml)
           fi
           uv run --frozen pytest \
             e2e/test_builder.py \

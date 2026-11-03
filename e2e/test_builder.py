@@ -229,8 +229,9 @@ def build(client: NemoClient, auth_on: bool, builder_workspace: str, registry_pa
         .submit_build(workspace=workspace, body=BuildSet(name=BUILD_SET, revision=1, build_specs=specs))
         .data()
     )
-    images = {image.provenance.spec: image.name for image in submitted.images}
-    assert set(images) == set(CONTEXTS), f"submit returned rows for {sorted(images)}"
+    # Every spec here is named, so every row's provenance names its spec.
+    images = {spec: image.name for image in submitted.images if (spec := image.provenance.spec) is not None}
+    assert set(images) == set(CONTEXTS), f"submit returned rows {[image.name for image in submitted.images]}"
     return Build(workspace=workspace, job=submitted.job, images=images, public_key=public_key)
 
 
