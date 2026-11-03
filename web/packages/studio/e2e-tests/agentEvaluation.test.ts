@@ -34,7 +34,7 @@ const AGENT_DIR = path.join(
  *  than handed over as-is. */
 const DATASET_CSV = path.join(
   PROJECT_ROOT,
-  'public/sample-agents/email-phishing-analyzer/smaller_test.csv'
+  'public/sample-agents/email-security-triage/smaller_test.csv'
 );
 const EVAL_CONFIG = path.join(MOCKS_DIR, 'email-security-triage', 'eval-config.yaml');
 
