@@ -213,7 +213,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | api | object | [See values.yaml](values.yaml#L969) | API configuration settings for the api deployment |
 | api.affinity | object | `{}` | Affinity configuration for the API service. |
 | api.annotations | object | `{}` | Annotations to add to the API service deployment. |
-| api.autoscaling | object | [See values.yaml](values.yaml#L1100) | Specifies autoscaling configurations for the deployment. |
+| api.autoscaling | object | [See values.yaml](values.yaml#L1116) | Specifies autoscaling configurations for the deployment. |
 | api.autoscaling.annotations | object | `{}` | Annotations for the HorizontalPodAutoscaler. |
 | api.autoscaling.enabled | bool | `false` | Whether to enable horizontal pod autoscaler. |
 | api.autoscaling.maxReplicas | int | `10` | The maximum number of replicas for the deployment. |
@@ -229,31 +229,37 @@ For the complete default values, see [values.yaml](values.yaml).
 | api.image.pullPolicy | string | `"IfNotPresent"` | The image pull policy determining when to pull new images. |
 | api.image.repository | string | `"nvcr.io/nvidia/nemo-helix/nhx-api"` | The registry where the NeMo Helix image is located. |
 | api.image.tag | string | `""` | The image tag to use. |
-| api.livenessProbe | object | [See values.yaml](values.yaml#L1059) | Liveness probe configuration for the api service. |
+| api.livenessProbe | object | [See values.yaml](values.yaml#L1075) | Liveness probe configuration for the api service. |
 | api.livenessProbe.failureThreshold | int | `3` | The failure threshold for the liveness probe. |
 | api.livenessProbe.httpGet | object | `{"path":"/health/live","port":"http"}` | The HTTP GET request to use for the liveness probe. |
 | api.livenessProbe.periodSeconds | int | `10` | The frequency in seconds to perform the liveness probe. |
 | api.livenessProbe.timeoutSeconds | int | `5` | The timeout in seconds for the liveness probe. |
 | api.nodeSelector | object | `{}` | Node selector configuration for the API service. |
 | api.podAnnotations | object | `{}` | Annotations to add to the API service pod. |
-| api.podDisruptionBudget | object | [See values.yaml](values.yaml#L1087) | PodDisruptionBudget configuration for the API service. |
+| api.podDisruptionBudget | object | [See values.yaml](values.yaml#L1103) | PodDisruptionBudget configuration for the API service. |
 | api.podDisruptionBudget.annotations | object | `{}` | Annotations for the PodDisruptionBudget. |
 | api.podDisruptionBudget.enabled | bool | `false` | Whether to create a PodDisruptionBudget for the API pods. |
 | api.podDisruptionBudget.minAvailable | int | `1` | Minimum number of API pods that must remain available during voluntary disruptions. Only one of minAvailable or maxUnavailable may be set. |
 | api.podLabels | object | `{}` | Labels for the API service pod. |
 | api.podSecurityContext | object | [See values.yaml](values.yaml#L1024) | Pod-level security context settings for the API service. |
 | api.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
-| api.readinessProbe | object | [See values.yaml](values.yaml#L1073) | Readiness probe configuration for the api service. |
+| api.podSecurityContext.runAsGroup | int | `1000` | GID of the `nvs` user. |
+| api.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. |
+| api.readinessProbe | object | [See values.yaml](values.yaml#L1089) | Readiness probe configuration for the api service. |
 | api.readinessProbe.failureThreshold | int | `3` | The failure threshold for the readiness probe. |
 | api.readinessProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the readiness probe. |
 | api.readinessProbe.periodSeconds | int | `10` | The frequency in seconds to perform the readiness probe. |
 | api.readinessProbe.timeoutSeconds | int | `5` | The timeout in seconds for the readiness probe. |
 | api.replicaCount | int | `1` | Number of replicas for the API service. |
 | api.resources | object | `{}` | Kubernetes deployment resources configuration for the API service. Utilization-based autoscaling requires a matching resource request. |
-| api.securityContext | object | `{}` | Container-level security context settings for the API service. |
+| api.securityContext | object | [See values.yaml](values.yaml#L1033) | Container-level security context settings for the API service. |
+| api.securityContext.allowPrivilegeEscalation | bool | `false` | Block setuid binaries from gaining privileges. |
+| api.securityContext.capabilities | object | `{"drop":["ALL"]}` | Linux capabilities to drop. |
+| api.securityContext.runAsNonRoot | bool | `true` | Refuse to start if the image resolves to UID 0. |
+| api.securityContext.seccompProfile | object | `{"type":"RuntimeDefault"}` | Seccomp profile applied to the container. |
 | api.server | object | `{"keepAliveTimeoutSeconds":10}` | Platform API server settings. |
 | api.server.keepAliveTimeoutSeconds | int | `10` | Seconds Uvicorn keeps idle HTTP connections open. Must be greater than envoyProxy.timeouts.upstreamIdle when Envoy is enabled. |
-| api.service | object | [See values.yaml](values.yaml#L1031) | Service configuration for the API service. |
+| api.service | object | [See values.yaml](values.yaml#L1047) | Service configuration for the API service. |
 | api.service.annotations | object | `{}` | Annotations for the API service. |
 | api.service.port | int | `8080` | The port number to expose for the service. |
 | api.service.type | string | `"ClusterIP"` | The Kubernetes service type to create. |
@@ -269,7 +275,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | api.serviceMonitor.labels | object | `{}` | Additional labels to add to the ServiceMonitor |
 | api.serviceMonitor.scheme | string | `"http"` | Scheme to use for scraping metrics (http or https) |
 | api.services | list | `[]` | Explicit services passed to `nemo services run` with `--services`. When non-empty, overrides api.serviceGroup. Must be a list. |
-| api.startupProbe | object | [See values.yaml](values.yaml#L1043) | Startup probe configuration for the api service. |
+| api.startupProbe | object | [See values.yaml](values.yaml#L1059) | Startup probe configuration for the api service. |
 | api.startupProbe.failureThreshold | int | `24` | The failure threshold for the startup probe. |
 | api.startupProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the startup probe. |
 | api.startupProbe.initialDelaySeconds | int | `10` | Number of seconds to wait before the first startup probe. Allows time for DB connection retries (e.g. Postgres pod booting). |
@@ -335,7 +341,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | clickhouse.serviceAccount.name | string | `""` | The name of the service account to use. If not set and create is true, a name is generated from the release fullname. |
 | clickhouse.startupProbe | object | [See values.yaml](values.yaml#L523) | Startup probe configuration for the ClickHouse container. |
 | clickhouse.tolerations | list | `[]` | Tolerations for the ClickHouse pod. |
-| core | object | [See values.yaml](values.yaml#L1174) | Core deployment configuration settings |
+| core | object | [See values.yaml](values.yaml#L1190) | Core deployment configuration settings |
 | core.controller.affinity | object | `{}` | Affinity configuration for the controller service. |
 | core.controller.annotations | object | `{}` | Annotations to add to the controller service deployment. |
 | core.controller.componentLabel | string | `"nhx-core-controller"` | Component label shared by controller selectors and matching resources. Keep unchanged for existing Deployments. |
@@ -345,7 +351,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.controller.extraArgs | list | `[]` | Additional arguments to pass to the Core Controller service |
 | core.controller.extraVolumeMounts | list | `[]` | Additional volume mounts to add to the controller container. |
 | core.controller.extraVolumes | list | `[]` | Additional volumes to add to the controller pod. |
-| core.controller.livenessProbe | object | [See values.yaml](values.yaml#L1291) | Liveness probe configuration for the controller service. |
+| core.controller.livenessProbe | object | [See values.yaml](values.yaml#L1323) | Liveness probe configuration for the controller service. |
 | core.controller.livenessProbe.failureThreshold | int | `3` | The failure threshold for the liveness probe. |
 | core.controller.livenessProbe.httpGet | object | `{"path":"/health/live","port":"http"}` | The HTTP GET request to use for the liveness probe. |
 | core.controller.livenessProbe.periodSeconds | int | `10` | The frequency in seconds to perform the liveness probe. |
@@ -353,24 +359,30 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.controller.nodeSelector | object | `{}` | Node selector configuration for the controller service. |
 | core.controller.podAnnotations | object | `{}` | Annotations to add to the controller service pod. |
 | core.controller.podLabels | object | `{}` | Labels for the controller service pod. |
-| core.controller.podSecurityContext | object | [See values.yaml](values.yaml#L1265) | Pod-level security context settings for the controller service. |
+| core.controller.podSecurityContext | object | [See values.yaml](values.yaml#L1281) | Pod-level security context settings for the controller service. |
 | core.controller.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
-| core.controller.readinessProbe | object | [See values.yaml](values.yaml#L1305) | Readiness probe configuration for the controller service. |
+| core.controller.podSecurityContext.runAsGroup | int | `1000` | GID of the `nvs` user. |
+| core.controller.podSecurityContext.runAsUser | int | `1000` | UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. |
+| core.controller.readinessProbe | object | [See values.yaml](values.yaml#L1337) | Readiness probe configuration for the controller service. |
 | core.controller.readinessProbe.failureThreshold | int | `3` | The failure threshold for the readiness probe. |
 | core.controller.readinessProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the readiness probe. |
 | core.controller.readinessProbe.periodSeconds | int | `10` | The frequency in seconds to perform the readiness probe. |
 | core.controller.readinessProbe.timeoutSeconds | int | `5` | The timeout in seconds for the readiness probe. |
 | core.controller.resources | object | `{}` | Kubernetes deployment resources configuration for the controller service. |
-| core.controller.securityContext | object | `{}` | Container-level security context settings for the controller service. |
-| core.controller.service | object | [See values.yaml](values.yaml#L1252) | Service configuration for the controller service. This only configures a headless service for DNS resolution. |
+| core.controller.securityContext | object | [See values.yaml](values.yaml#L1290) | Container-level security context settings for the controller service. |
+| core.controller.securityContext.allowPrivilegeEscalation | bool | `false` | Block setuid binaries from gaining privileges. |
+| core.controller.securityContext.capabilities | object | `{"drop":["ALL"]}` | Linux capabilities to drop. |
+| core.controller.securityContext.runAsNonRoot | bool | `true` | Refuse to start if the image resolves to UID 0. |
+| core.controller.securityContext.seccompProfile | object | `{"type":"RuntimeDefault"}` | Seccomp profile applied to the container. |
+| core.controller.service | object | [See values.yaml](values.yaml#L1268) | Service configuration for the controller service. This only configures a headless service for DNS resolution. |
 | core.controller.service.annotations | object | `{}` | Annotations for the headless controller service. |
 | core.controller.service.port | int | `8080` | The port for the service. |
-| core.controller.serviceAccount | object | [See values.yaml](values.yaml#L1233) | Service account configuration for the controller service. |
+| core.controller.serviceAccount | object | [See values.yaml](values.yaml#L1249) | Service account configuration for the controller service. |
 | core.controller.serviceAccount.annotations | object | `{}` | Annotations to add to the service account. |
 | core.controller.serviceAccount.automount | bool | `true` | Automatically mount a ServiceAccount's API credentials. |
 | core.controller.serviceAccount.create | bool | `true` | Specifies whether a service account should be created. |
 | core.controller.serviceAccount.name | string | `""` | The name of the service account to use. If not set and create is true, a name is generated using the fullname template. |
-| core.controller.startupProbe | object | [See values.yaml](values.yaml#L1275) | Startup probe configuration for the core service. |
+| core.controller.startupProbe | object | [See values.yaml](values.yaml#L1307) | Startup probe configuration for the core service. |
 | core.controller.startupProbe.failureThreshold | int | `24` | The failure threshold for the startup probe. |
 | core.controller.startupProbe.httpGet | object | `{"path":"/health/ready","port":"http"}` | The HTTP GET request to use for the startup probe. |
 | core.controller.startupProbe.initialDelaySeconds | int | `10` | Number of seconds to wait before the first startup probe. Allows time for DB connection retries (e.g. Postgres pod booting). |
@@ -379,11 +391,11 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.controller.tolerations | list | `[]` | Tolerations configuration for the controller service. |
 | core.controller.topologySpreadConstraints | list | `[]` | Topology spread constraints for the controller service pods. See https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/ |
 | core.enabled | bool | `true` | Specifies whether to enable the core deployment. |
-| core.image | object | [See values.yaml](values.yaml#L1180) | Container image configuration for the core deployment. |
+| core.image | object | [See values.yaml](values.yaml#L1196) | Container image configuration for the core deployment. |
 | core.image.pullPolicy | string | `"IfNotPresent"` | The image pull policy determining when to pull new images. |
 | core.image.repository | string | `"nvcr.io/nvidia/nemo-helix/nhx-api"` | The registry where the NeMo Helix image is located. |
 | core.image.tag | string | `""` | The image tag to use. |
-| core.jobs | object | [See values.yaml](values.yaml#L1210) | Service account configuration for pods created by the jobs controller (Kubernetes/Volcano job pods). |
+| core.jobs | object | [See values.yaml](values.yaml#L1226) | Service account configuration for pods created by the jobs controller (Kubernetes/Volcano job pods). |
 | core.jobs.maxActiveJobs | int | `500` | Maximum number of jobs admitted to run concurrently on the Kubernetes and Volcano executors. |
 | core.jobs.maxActiveJobsPerUser | int | `50` | Default maximum number of jobs a single user may have admitted concurrently. |
 | core.jobs.maxActiveJobsPerWorkspace | int | `200` | Default maximum number of jobs a single workspace may have admitted concurrently. |
@@ -405,11 +417,11 @@ For the complete default values, see [values.yaml](values.yaml).
 | core.telemetry | object | `{}` | OpenTelemetry configuration overrides for the platform deployment. |
 | env | object | `{}` | Environment variables that will be applied to every deployment pod. Uses a simple key value map structure like MY_ENV_VAR: the-key and works with valueFrom as well. |
 | envFromSecret | string | `""` | Optional. Name of an existing Kubernetes Secret to load as env vars (envFrom) for the API pod. When set, the chart does not create or generate the default api-env Secret; use your own Secret (for example, from Vault or sealed-secrets). |
-| envoyProxy | object | [See values.yaml](values.yaml#L1347) | Envoy proxy configuration settings. Resources are created only when platform config has auth.enabled: true (see platformConfig.auth.enabled). |
+| envoyProxy | object | [See values.yaml](values.yaml#L1379) | Envoy proxy configuration settings. Resources are created only when platform config has auth.enabled: true (see platformConfig.auth.enabled). |
 | envoyProxy.adminPort | int | `9901` | Envoy Admin port |
 | envoyProxy.affinity | object | `{}` | Affinity configuration for the Envoy pods. |
 | envoyProxy.annotations | object | `{}` | Annotations to add to the Envoy service deployment. |
-| envoyProxy.autoscaling | object | [See values.yaml](values.yaml#L1477) | Specifies autoscaling configurations for the deployment. |
+| envoyProxy.autoscaling | object | [See values.yaml](values.yaml#L1509) | Specifies autoscaling configurations for the deployment. |
 | envoyProxy.autoscaling.annotations | object | `{}` | Annotations for the HorizontalPodAutoscaler. |
 | envoyProxy.autoscaling.enabled | bool | `false` | Whether to enable horizontal pod autoscaler. |
 | envoyProxy.autoscaling.maxReplicas | int | `10` | The maximum number of replicas for the deployment. |
@@ -422,25 +434,25 @@ For the complete default values, see [values.yaml](values.yaml).
 | envoyProxy.extraVolumeMounts | list | `[]` | Additional volume mounts to add to the Envoy container. |
 | envoyProxy.extraVolumes | list | `[]` | Additional volumes to add to the Envoy pod. |
 | envoyProxy.image.digest | string | `""` | Optional image digest. When set, the Envoy image renders as repository@digest. |
-| envoyProxy.livenessProbe | object | [See values.yaml](values.yaml#L1438) | Liveness probe for the Envoy container (admin interface /ready). |
+| envoyProxy.livenessProbe | object | [See values.yaml](values.yaml#L1470) | Liveness probe for the Envoy container (admin interface /ready). |
 | envoyProxy.nodeSelector | object | `{}` | Node selector configuration for the Envoy pods. |
 | envoyProxy.podAnnotations | object | `{}` | Annotations to add to the Envoy service pod. |
-| envoyProxy.podDisruptionBudget | object | [See values.yaml](values.yaml#L1464) | PodDisruptionBudget configuration for the Envoy service. |
+| envoyProxy.podDisruptionBudget | object | [See values.yaml](values.yaml#L1496) | PodDisruptionBudget configuration for the Envoy service. |
 | envoyProxy.podDisruptionBudget.annotations | object | `{}` | Annotations for the PodDisruptionBudget. |
 | envoyProxy.podDisruptionBudget.enabled | bool | `false` | Whether to create a PodDisruptionBudget for the Envoy pods. |
 | envoyProxy.podDisruptionBudget.minAvailable | int | `1` | Minimum number of Envoy pods that must remain available during voluntary disruptions. Only one of minAvailable or maxUnavailable may be set. |
 | envoyProxy.podLabels | object | `{}` | Labels for the Envoy service pod. |
-| envoyProxy.podSecurityContext | object | [See values.yaml](values.yaml#L1398) | Pod-level security context settings for the Envoy service. |
+| envoyProxy.podSecurityContext | object | [See values.yaml](values.yaml#L1430) | Pod-level security context settings for the Envoy service. |
 | envoyProxy.podSecurityContext.fsGroup | int | `1000` | The file system group ID to use for all containers. |
-| envoyProxy.readinessProbe | object | [See values.yaml](values.yaml#L1446) | Readiness probe for the Envoy container (admin interface /ready). |
+| envoyProxy.readinessProbe | object | [See values.yaml](values.yaml#L1478) | Readiness probe for the Envoy container (admin interface /ready). |
 | envoyProxy.resources | object | `{}` | Kubernetes deployment resources configuration for the Envoy service. Utilization-based autoscaling requires a matching resource request. |
 | envoyProxy.securityContext | object | `{}` | Container-level security context settings for the Envoy service. |
-| envoyProxy.service | object | [See values.yaml](values.yaml#L1405) | Service configuration for the Envoy service. |
+| envoyProxy.service | object | [See values.yaml](values.yaml#L1437) | Service configuration for the Envoy service. |
 | envoyProxy.service.annotations | object | `{}` | Annotations for the Envoy service. |
 | envoyProxy.service.exposeAdminPort | bool | `false` | Expose the Envoy admin port through the Kubernetes Service. Enable only for controlled in-cluster scraping or debugging. |
 | envoyProxy.service.port | int | `8080` | The port number to expose for the service. |
 | envoyProxy.service.type | string | `"ClusterIP"` | The Kubernetes service type to create. |
-| envoyProxy.serviceAccount | object | [See values.yaml](values.yaml#L1381) | Service account configuration for the Envoy service. |
+| envoyProxy.serviceAccount | object | [See values.yaml](values.yaml#L1413) | Service account configuration for the Envoy service. |
 | envoyProxy.serviceAccount.annotations | object | `{}` | Annotations to add to the service account. |
 | envoyProxy.serviceAccount.automount | bool | `true` | Automatically mount a ServiceAccount's API credentials. |
 | envoyProxy.serviceAccount.create | bool | `true` | Specifies whether a service account should be created. |
@@ -450,8 +462,8 @@ For the complete default values, see [values.yaml](values.yaml).
 | envoyProxy.serviceMonitor.interval | string | `"30s"` | Scrape interval for the ServiceMonitor |
 | envoyProxy.serviceMonitor.labels | object | `{}` | Additional labels to add to the ServiceMonitor |
 | envoyProxy.serviceMonitor.scheme | string | `"http"` | Scheme to use for scraping metrics (http or https) |
-| envoyProxy.startupProbe | object | [See values.yaml](values.yaml#L1454) | Startup probe for the Envoy container (admin interface /ready). |
-| envoyProxy.timeouts | object | [See values.yaml](values.yaml#L1420) | Timeouts for proxying to long-lived streams (e.g. inference gateway). Use "0s" to disable a timeout. |
+| envoyProxy.startupProbe | object | [See values.yaml](values.yaml#L1486) | Startup probe for the Envoy container (admin interface /ready). |
+| envoyProxy.timeouts | object | [See values.yaml](values.yaml#L1452) | Timeouts for proxying to long-lived streams (e.g. inference gateway). Use "0s" to disable a timeout. |
 | envoyProxy.timeouts.connect | string | `"30s"` | Cluster connect timeout (time to establish connection to backend). |
 | envoyProxy.timeouts.request | string | `"0s"` | Total request timeout. 0 = disabled (required for streaming; not compatible with streaming if set). |
 | envoyProxy.timeouts.requestHeaders | string | `"60s"` | Time to receive full request headers. 0 = disabled. |
@@ -577,7 +589,7 @@ For the complete default values, see [values.yaml](values.yaml).
 | openshiftRoute.targetPort | string | [See values.yaml](values.yaml#L927) | Target port on the service. Defaults to Envoy or API port depending on auth (tpl-evaluated). |
 | openshiftRoute.tls | object | `{}` | Optional TLS configuration (termination, certificate, key, etc.). See OpenShift Route spec. |
 | platformConfig | object | `{}` | Platform-wide configuration settings Set configuration here to apply custom, structured configuration across all services. Applied after the base platform config is evaluated for templates. Enables adding / overriding YAML-based elements in the evaluated platform config. It is usually recommended to use this config section instead of `baseHelixConfig` unless you need to use templating features. For example, you can set the NIM default StorageClass via models.controller.backends.deployments_plugin.default_storage_class. For full configuration reference, see https://docs.nvidia.com/nemo-helix |
-| platformSeedJob | object | [See values.yaml](values.yaml#L1142) | Platform seed Job (Helm hook: runs after install/upgrade) Runs the platform-seed task (guardrails configs, evaluator system entities, data designer filesets). Uses post-install,post-upgrade hooks so it runs on fresh installs and can be re-triggered on no-op upgrade. |
+| platformSeedJob | object | [See values.yaml](values.yaml#L1158) | Platform seed Job (Helm hook: runs after install/upgrade) Runs the platform-seed task (guardrails configs, evaluator system entities, data designer filesets). Uses post-install,post-upgrade hooks so it runs on fresh installs and can be re-triggered on no-op upgrade. |
 | platformSeedJob.activeDeadlineSeconds | int | `600` | Maximum time in seconds the Job can run. |
 | platformSeedJob.affinity | object | `{}` | Affinity for the platform seeding Job pod. |
 | platformSeedJob.backoffLimit | int | `6` | Number of retries before considering the Job failed. |
