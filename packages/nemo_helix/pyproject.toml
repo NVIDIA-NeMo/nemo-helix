@@ -159,7 +159,7 @@ garak-service = [
 guardrails-service = [
   "fastapi>=0.109.0",
   "fsspec>=2024.10.0",
-  "nemoguardrails[tracing]==0.23.0",
+  "nemoguardrails[tracing]==0.24.1",
   "openai>=1.61.0",
   "opentelemetry-distro>=0.64b0",
   "opentelemetry-exporter-otlp>=1.22.0",
@@ -429,7 +429,7 @@ nemo-garak-plugin = [
 # Generated from [tool.bundle-package]; do not edit by hand.
 nemo-guardrails-plugin = [
   "nemo-helix-plugin",
-  "nemoguardrails[tracing]==0.23.0",
+  "nemoguardrails[tracing]==0.24.1",
   "langchain>=1.3.14",
   "langchain-community>=0.3.31,<0.4",
   "langchain-core>=1.4.9",

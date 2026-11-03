@@ -982,7 +982,7 @@ fastar==0.11.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (
     # via
     #   fastapi
     #   fastapi-cloud-cli
-fastembed==0.8.0 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+fastembed==0.8.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:40bee672657574a1009e35ec50030a55f2b426842cb011845379817641bbbbd0 \
     --hash=sha256:75966edfa8b006ee78514c726bd7f6a50721dadc89305279052be9db72fd53e8
     # via nemoguardrails
@@ -1752,7 +1752,7 @@ litellm==1.95.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or 
     #   harbor
     #   nemo-compass
     #   nooa
-loguru==0.7.3 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+loguru==0.7.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:19480589e77d47b8d85b2c827ad95d49bf31b0dcde16593892eb51dd18706eb6 \
     --hash=sha256:31a33c10c8e1e10422bfd431aeb5d351c7cf7fa671e3c4df004162264b28220c
     # via fastembed
@@ -1896,7 +1896,7 @@ mlflow-skinny==3.15.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin
     # via
     #   nhx-rl
     #   nhx-unsloth
-mmh3==5.2.1 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+mmh3==5.2.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:0cc21533878e5586b80d74c281d7f8da7932bc8ace50b8d5f6dbf7e3935f63f1 \
     --hash=sha256:169e0d178cb59314456ab30772429a802b25d13227088085b0d49b9fe1533104 \
     --hash=sha256:17fbb47f0885ace8327ce1235d0416dc86a211dcd8cc1e703f41523be32cfec8 \
@@ -2138,8 +2138,8 @@ nemo-switchyard==0.3.0 ; (platform_machine == 'arm64' and sys_platform == 'darwi
     # via
     #   nemo-helix
     #   nemo-switchyard-plugin
-nemoguardrails==0.23.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:91106c9718748fd760e873dd872915c6ed15d15c80300d538c8a1f4024eff92a
+nemoguardrails==0.24.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:4fcfc9d9456cdcbcc939fbd4ba884e9fc89b7f200bd9d8ed77836298bf31680f
     # via
     #   nemo-guardrails-plugin
     #   nemo-helix
@@ -2231,6 +2231,7 @@ numpy==2.5.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (pl
     #   peft
     #   pytrec-eval-terrier
     #   ragas
+    #   nemoguardrails
     #   rouge-score
     #   sacrebleu
     #   scikit-learn
@@ -2719,7 +2720,6 @@ pandas==2.3.3 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     #   nemo-data-designer-plugin
     #   nemo-helix
     #   nemo-safe-synthesizer
-    #   nemoguardrails
     #   nhx-evals-sdk
     #   nhx-files
     #   nhx-jobs
@@ -2941,7 +2941,7 @@ py-key-value-aio==0.4.5 ; (platform_machine == 'arm64' and sys_platform == 'darw
     --hash=sha256:ab862adbcb8c72547d1c57821f22cbbb71ab86509039c96f36e914e0336c8dd7 \
     --hash=sha256:c6563a2c6abe5da5e20f4f9e875c2a9b425a2244a54fadbf46cf140a9eea45d7
     # via fastmcp-slim
-py-rust-stemmers==0.1.8 ; (python_full_version < '3.14' and platform_machine == 'arm64' and sys_platform == 'darwin') or (python_full_version < '3.14' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.14' and platform_machine == 'x86_64' and sys_platform == 'linux') \
+py-rust-stemmers==0.1.8 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:245e2c61c52e073341893a9682cd1396b61047154548aee30bb1af3d8ed4b4cc \
     --hash=sha256:2b607f0b270951fb66479baf4b68716cc63a981585cbd898b0b6b5c359efde7e \
     --hash=sha256:2e86ad68fe297a6652f0f0390625ea81858b6f27862fd4c5ee1214bf5af29b9d \
