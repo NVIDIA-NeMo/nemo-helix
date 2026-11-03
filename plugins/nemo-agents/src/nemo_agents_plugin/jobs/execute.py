@@ -18,6 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, cast
 
+from filesets import parse_fileset_ref
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import resolve_agent_config_for_deployment
 from nemo_agents_plugin.config import AgentsConfig
@@ -28,6 +29,7 @@ from nemo_agents_plugin.entities import (
     AgentEnvironmentInline,
     AgentInline,
     ComputeSpecInline,
+    ethos_fileset_name,
 )
 from nemo_agents_plugin.environment_resolution import (
     EnvironmentResolutionError,
@@ -69,6 +71,7 @@ from nemo_agents_plugin.telemetry.intake_export import (
 )
 from nemo_helix_plugin.agents.post_run_actions import PostRunActionContext
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.files.client import AsyncFilesClient, FilesClient
 from nemo_helix_plugin.job import NemoJob
@@ -99,7 +102,10 @@ from nemo_helix_plugin.jobs.constants import (
     TASK_CONFIG_ENVVAR,
 )
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, parse_entity_ref
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
@@ -360,6 +366,8 @@ class ExecuteAgentStepConfig(BaseModel):
     # the job is not kept in sync with the underlying environment entities.
     compute: ComputeSpecInline | None = None
     secrets: dict[str, str] = Field(default_factory=dict)
+    providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    stage_ethos_fileset: bool = True
     post_run_action: PostRunActionConfig = Field(default_factory=_make_noop_post_run_action_config)
 
     @model_validator(mode="before")
@@ -418,7 +426,6 @@ class ExecuteAgentJob(NemoJob):
         in the AgentWorkdir, which are validated here, but not materialized; the Job snapshots
         them as a named result before doing any work.
         """
-        del is_local
         request = cast(ExecuteAgentJobConfig, input_spec)
         typed_entity_client = cast(Any, entity_client)
         source = await _resolve_agent_source(request.agent, workspace=workspace, entity_client=typed_entity_client)
@@ -447,9 +454,27 @@ class ExecuteAgentJob(NemoJob):
             resolved_env = await resolve_environment(
                 request.environment, workspace=workspace, entity_client=typed_entity_client
             )
-            merged = merge_environment_spec_into_agent_config(resolved_agent_config, resolved_env.environment_spec)
+            merged = merge_environment_spec_into_agent_config(
+                resolved_agent_config, resolved_env.environment_spec, workspace=workspace
+            )
         except EnvironmentResolutionError as exc:
             raise ValueError(str(exc)) from exc
+
+        stage_ethos_fileset = True
+        if merged.providers:
+            merged.require_runtime_support("openshell")
+            if is_local:
+                raise ValueError("Gateway provider bindings require remote OpenShell execution.")
+            await authorize_provider_references(
+                merged.providers,
+                workspace=workspace,
+                secrets_client=AsyncSecretsClient.from_client(cast(AsyncNemoClient, async_sdk)),
+            )
+            files_client = AsyncFilesClient.from_client(cast(AsyncNemoClient, async_sdk))
+            try:
+                await files_client.get_fileset(workspace=source.workspace, name=ethos_fileset_name(source.name))
+            except NotFoundError:
+                stage_ethos_fileset = False
 
         # Validate the merged config: an EnvironmentSpec can override the harness
         # provider, so validation must run after the merge to reject e.g. a spec
@@ -483,6 +508,8 @@ class ExecuteAgentJob(NemoJob):
             workdir=workdir,
             compute=resolved_env.compute_spec,
             secrets=merged.secrets,
+            providers=merged.providers,
+            stage_ethos_fileset=stage_ethos_fileset,
             post_run_action=post_run_action,
         )
 
@@ -533,6 +560,18 @@ class ExecuteAgentJob(NemoJob):
         if resources is not None:
             executor["resources"] = resources
 
+        read_filesets: set[str] = set()
+        if step_config.providers:
+            if step_config.stage_ethos_fileset:
+                read_filesets.add(f"{step_config.agent.workspace}/{ethos_fileset_name(step_config.agent.name)}")
+            if step_config.workdir:
+                refs = [mount.ref for mount in step_config.workdir.artifact_mounts]
+                if step_config.workdir.base_workdir:
+                    refs.append(step_config.workdir.base_workdir)
+                read_filesets.update(
+                    "/".join(parse_fileset_ref(ref, workspace_fallback=step_config.agent.workspace)[:2]) for ref in refs
+                )
+
         return HelixJobSpec(
             steps=[
                 HelixJobStep(
@@ -540,6 +579,8 @@ class ExecuteAgentJob(NemoJob):
                     executor=executor,
                     config=step_config.model_dump(mode="json"),
                     environment=environment,
+                    gateway_providers=step_config.providers,
+                    gateway_read_filesets=sorted(read_filesets),
                 )
             ],
         )
@@ -617,7 +658,7 @@ class ExecuteAgentJob(NemoJob):
             # and the default workspace is one of those children.
             logger.info("Staging stored agent files for %s.", agent_ref)
             _stage_stored_agent_ethos(
-                sdk,
+                sdk if step_config.stage_ethos_fileset else None,
                 workspace=step_config.agent.workspace,
                 agent_name=step_config.agent.name,
                 agent_config=agent_config,

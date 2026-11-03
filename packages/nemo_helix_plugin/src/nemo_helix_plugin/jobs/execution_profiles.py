@@ -37,6 +37,7 @@ from nemo_helix_plugin.jobs.constants import (
 )
 from nemo_helix_plugin.jobs.providers import ComputeResources
 from nemo_helix_plugin.jobs.spec import BaseExecutionProfile, ProviderRef
+from nemo_helix_plugin.openshell.types import GatewayCredentialConfig
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Default image used to set filesystem permissions on job storage volumes.
@@ -570,6 +571,7 @@ class OpenShellJobExecutionProfileConfig(JobExecutionProfileConfig):
     """
 
     model_config = ConfigDict(extra="forbid")
+    gateway_credentials: GatewayCredentialConfig | None = None
 
     gateway_endpoint: str = Field(
         default="http://127.0.0.1:17670",
