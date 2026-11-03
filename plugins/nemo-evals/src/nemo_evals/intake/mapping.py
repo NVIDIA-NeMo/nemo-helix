@@ -32,7 +32,6 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -205,11 +204,13 @@ async def otlp_ingest_for_trial(
 
     The caller's agent and model identity (``agent_name``/``agent_version``/``model_name``) is
     stamped onto the published root span alone, the same identity the ATIF path writes onto its
-    agent block. ``agent_name=None`` keeps the producer's ``gen_ai.agent.name``, and a version left
-    at ``DEFAULT_AGENT_VERSION`` keeps the producer's ``gen_ai.agent.version``, so a trace that
-    already knows who ran it is not relabelled with defaults. Child spans keep whatever identity
-    they recorded. The messages are stamped on a copy: the evidence handle caches what it parsed,
-    and a later reader of that cache must see the trace as the producer wrote it.
+    agent block. ``agent_name=None`` and an empty name both keep the producer's
+    ``gen_ai.agent.name``: an empty string is not a name, and Intake treats one as no agent at
+    all. A version left at ``DEFAULT_AGENT_VERSION`` keeps the producer's ``gen_ai.agent.version``,
+    so a trace that already knows who ran it is not relabelled with defaults. Child spans keep
+    whatever identity they recorded. The messages are stamped on the export envelope's copy: the
+    evidence handle caches what it parsed, and a later reader of that cache must see the trace as
+    the producer wrote it.
     """
     evidence = trial.evidence
     if evidence is None:
@@ -223,9 +224,10 @@ async def otlp_ingest_for_trial(
     except (OSError, ValueError) as error:
         logger.warning("Ignoring unreadable OTLP trace for trial %s: %s", trial.id, error)
         return None
-    # The handle returns its cached messages, so stamping them in place would change what every
-    # later reader of the cached evidence sees. Publish a copy; the cached read stays untouched.
-    resource_spans = deepcopy(cached)
+    # The handle returns its cached messages. The export envelope copies that repeated field,
+    # so stamping the request's spans leaves the cached read untouched.
+    request = ExportTraceServiceRequest(resource_spans=cached)
+    resource_spans = list(request.resource_spans)
 
     span_id = root_span_id(resource_spans)
     if span_id is None:
@@ -255,8 +257,8 @@ async def otlp_ingest_for_trial(
     fill_missing_start_times(resource_spans, start_time_unix_nano=int(started_at.timestamp() * 1_000_000_000))
     if measurements.runtime_sec is not None:
         fill_missing_root_end_time(resource_spans, duration_unix_nano=int(measurements.runtime_sec * 1_000_000_000))
-    # The Export RPC envelope goes on only here, at the point these actually cross a wire.
-    return ExportTraceServiceRequest(resource_spans=resource_spans).SerializeToString(), span_id
+    # The envelope was built above, before the stamp, so this is the copy that crosses the wire.
+    return request.SerializeToString(), span_id
 
 
 class OtlpSpanTooLargeError(ValueError):
@@ -403,17 +405,18 @@ def _caller_identity(*, agent_name: str | None, agent_version: str, model_name: 
     """The caller-supplied identity that overrides the producer's, stamped on the root span alone.
 
     ``agent_name=None`` and ``model_name=None`` keep the producer's recorded values: the caller
-    passed nothing that should replace them. An explicit name always overrides — including
-    ``publish_to_intake``'s ``"agent"`` default, which is a name, not an omission. A version left
-    at ``DEFAULT_AGENT_VERSION`` keeps the producer's version, matching the ATIF path's treatment
-    of a trajectory's own ``agent.version``.
+    passed nothing that should replace them. An empty string is not a name either. Stamping it
+    would publish a blank, and Intake reads a blank agent name as no agent at all. An explicit
+    name always overrides — including ``publish_to_intake``'s ``"agent"`` default, which is a
+    name, not an omission. A version left at ``DEFAULT_AGENT_VERSION`` keeps the producer's
+    version, matching the ATIF path's treatment of a trajectory's own ``agent.version``.
     """
     identity: dict[str, str] = {}
-    if agent_name is not None:
+    if agent_name:
         identity[AGENT_NAME_ATTRIBUTE] = agent_name
     if agent_version != DEFAULT_AGENT_VERSION:
         identity[AGENT_VERSION_ATTRIBUTE] = agent_version
-    if model_name is not None:
+    if model_name:
         identity[MODEL_NAME_ATTRIBUTE] = model_name
     return identity
 

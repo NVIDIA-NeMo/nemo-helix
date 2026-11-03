@@ -729,6 +729,19 @@ async def test_an_omitted_identity_keeps_the_producer_values(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_an_empty_identity_keeps_the_producer_values(tmp_path: Path) -> None:
+    # An empty string is not a name. Intake reads a blank agent name as no agent, so stamping
+    # "" would publish a trace that is worse than the one the producer recorded.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+
+    spans = await _published_spans(trial, agent_name="", model_name="")()
+
+    attributes = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert attributes["gen_ai.agent.name"] == "relay"
+    assert attributes["gen_ai.request.model"] == "relay-model"
+
+
+@pytest.mark.asyncio
 async def test_an_explicit_identity_overrides_the_root_only(tmp_path: Path) -> None:
     # An explicit name, version, and model replace the producer's on the root span. Child spans
     # keep their own identity: stamping them would clobber a subagent's recorded name.

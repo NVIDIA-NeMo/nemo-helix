@@ -196,7 +196,8 @@ async def publish_to_intake(
     ``agent_name="agent"`` is an explicit name: it overrides the trace's producer
     identity, because existing callers relied on it labelling the trace. A caller
     who wants the producer's own identity kept must call ``otlp_ingest_for_trial``
-    directly with ``agent_name=None``.
+    directly with ``agent_name=None``. An empty string is not a name: it keeps the
+    producer value, because Intake treats a blank agent name as no agent at all.
     """
     if max_otlp_request_bytes <= 0:
         raise ValueError(f"max_otlp_request_bytes must be positive, got {max_otlp_request_bytes}")
