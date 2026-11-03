@@ -110,13 +110,19 @@ const mockLists = () => {
   );
 };
 
-const renderWizard = () =>
+const renderWizard = (deployment?: string) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
         path: '/workspaces/:workspace',
-        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
+        element: (
+          <AgentEvaluationWizard
+            workspace={DEFAULT_WORKSPACE}
+            agent={AGENT}
+            deployment={deployment}
+          />
+        ),
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent page</div> },
     ],
@@ -255,6 +261,19 @@ describe('AgentEvaluationWizard deployment', () => {
     expect(submittedUrl()).toContain(
       `/workspaces/${DEFAULT_WORKSPACE}/deployments/${AGENT}-subprocess/-/v1/chat/completions`
     );
+  });
+
+  it('preselects the deployment it was opened with', async () => {
+    const user = userEvent.setup();
+    renderWizard(`${AGENT}-k8s`);
+
+    await rerunBaseline(user);
+    expect(screen.getByRole('combobox', { name: 'Deployment' })).toHaveTextContent(
+      `${AGENT}-k8s · Kubernetes`
+    );
+    await submit(user);
+
+    expect(submittedUrl()).toContain(`/deployments/${AGENT}-k8s/-/`);
   });
 
   it('calls the deployment the user picks', async () => {

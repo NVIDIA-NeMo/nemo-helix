@@ -248,12 +248,28 @@ describe('AgentDetailRoute', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens the Run Agent Evaluation page from the header', async () => {
+  it('opens the Run Agent Evaluation page on the deployment the header shows', async () => {
     const user = userEvent.setup();
     renderWithWizardRoute();
 
     const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
     await waitFor(() => expect(headerButton).toBeEnabled());
+    await user.click(headerButton);
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(
+        getAgentRunEvaluationRoute(workspace, agentName, undefined, 'rag-agent-prod')
+      )
+    );
+  });
+
+  it('leaves the deployment to the wizard when the header shows one that is not running', async () => {
+    const user = userEvent.setup();
+    renderWithWizardRoute();
+
+    await user.click(await screen.findByRole('button', { name: 'Deployment' }));
+    await user.click(await screen.findByRole('menuitem', { name: /sql-agent-dev/ }));
+    const [headerButton] = screen.getAllByRole('button', { name: 'Run Evaluation' });
     await user.click(headerButton);
 
     await waitFor(() =>

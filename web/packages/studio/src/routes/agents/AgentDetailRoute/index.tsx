@@ -229,8 +229,13 @@ export const AgentDetailRoute: FC = () => {
       ? 'Deploy the agent to run an evaluation.'
       : undefined;
   const navigate = useNavigate();
+  // Carries the deployment the header is showing, so the run evaluates what the user is looking at.
+  const contextDeployment =
+    selectedDeployment?.status === 'running' ? selectedDeployment.name : undefined;
   const runEvaluation = () => {
-    if (agentName) navigate(getAgentRunEvaluationRoute(workspace, agentName));
+    if (agentName) {
+      navigate(getAgentRunEvaluationRoute(workspace, agentName, undefined, contextDeployment));
+    }
   };
 
   const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);

@@ -245,10 +245,11 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
 
 const makeDefaultValues = (
   agent?: string,
-  sourceEvaluation?: string
+  sourceEvaluation?: string,
+  deployment?: string
 ): SubmitEvaluationFormData => ({
   agent: agent ?? '',
-  deployment: '',
+  deployment: deployment ?? '',
   judgeModel: '',
   // Provisional: the preselect effect corrects this once the evaluation list resolves.
   mode: MODE_EXPERIMENT,
@@ -300,6 +301,9 @@ interface AgentEvaluationWizardProps {
   /** Name of an evaluation to start from. Opens the wizard on its last step with that run already
    *  chosen, which is how "New evaluation from this configuration" hands a row's config over. */
   sourceEvaluation?: string;
+  /** Deployment to preselect, e.g. the one the agent page was showing. Held like a user's pick, so
+   *  if it stops the wizard says so instead of falling back to another. */
+  deployment?: string;
 }
 
 interface SeededEntities {
@@ -424,6 +428,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   workspace,
   agent: agentProp,
   sourceEvaluation,
+  deployment: deploymentProp,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -451,7 +456,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
-    defaultValues: makeDefaultValues(agentProp, sourceEvaluation),
+    defaultValues: makeDefaultValues(agentProp, sourceEvaluation, deploymentProp),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });

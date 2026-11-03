@@ -674,10 +674,15 @@ export const getAgentOptimizationsTabRoute = (workspace: string, agentName: stri
 export const getAgentRunEvaluationRoute = (
   workspace: string,
   agentName: string,
-  sourceEvaluation?: string
+  sourceEvaluation?: string,
+  deployment?: string
 ) => {
   const path = generatePath(ROUTES.workspace.agentEvaluationNew, { workspace, agentName });
-  return sourceEvaluation ? `${path}?${new URLSearchParams({ source: sourceEvaluation })}` : path;
+  const query = new URLSearchParams({
+    ...(sourceEvaluation ? { source: sourceEvaluation } : {}),
+    ...(deployment ? { deployment } : {}),
+  }).toString();
+  return query ? `${path}?${query}` : path;
 };
 
 /** The Optimizations tab with the Optimize agent modal open on arrival. */
