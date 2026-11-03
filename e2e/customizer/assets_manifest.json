@@ -38,8 +38,7 @@
       "outputs": {
         "dpo": {
           "training": "training.jsonl",
-          "validation": "validation.jsonl",
-          "eval": "eval.jsonl"
+          "validation": "validation.jsonl"
         }
       },
       "tests": [
