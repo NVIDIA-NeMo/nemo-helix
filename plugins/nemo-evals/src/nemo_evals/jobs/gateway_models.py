@@ -311,7 +311,8 @@ async def require_closed_book_route(
     the closed-book middleware.
 
     Raises:
-        ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable.
+        ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable, or the
+            target is labelled closed-book and its agent calls a model elsewhere.
     """
     if not closed_book_run(target, tasks):
         return
@@ -320,6 +321,11 @@ async def require_closed_book_route(
         models = _gateway_models(target)
     except ValueError as exc:
         raise ValueError(f"closed_book_required: {why} need a closed-book model route: {exc}") from exc
+    if closed_book_run(target, ()) and not calls_only_gateway_models(target):
+        raise ValueError(
+            f"closed_book_required: {why} need every model the agent calls to go through the Inference Gateway, and "
+            "its config calls one elsewhere"
+        )
     if not models:
         raise ValueError(
             f"closed_book_required: {why} need the agent's model calls to go through a closed-book VirtualModel: "
@@ -341,6 +347,14 @@ async def require_closed_book_route(
 def _closed_book_reason(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> str:
     no_network = no_network_task_ids(tasks)
     return f"no-network tasks {no_network}" if no_network else "closed_book runs"
+
+
+def calls_only_gateway_models(target: object) -> bool:
+    """Whether every model a Harbor target's trials call goes through the Inference Gateway."""
+    if not isinstance(target, HarborRunnerTarget) or not isinstance(target.source, RegisteredAgentSource):
+        return True
+    config = registered_agent_config(target)
+    return config is None or fabric_calls_only_gateway(config)
 
 
 def _gateway_models(target: object) -> list[ModelRef]:

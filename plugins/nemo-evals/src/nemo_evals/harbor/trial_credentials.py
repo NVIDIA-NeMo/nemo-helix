@@ -62,9 +62,13 @@ class TrialCredentialIssuer:
         evaluation_name: str | None = None,
         policy: ModelPolicy = _OPEN,
         records_calls: bool = False,
+        http_client: Callable[[], httpx.AsyncClient] | None = None,
     ) -> None:
+        """``http_client`` makes the HTTP client each Harbor job uses on its own event loop; by default, one like
+        ``client``'s own."""
         self.records_calls = records_calls
         self._client = client
+        self._http_client = http_client or self._loop_local_client
         self._run_id = run_id
         self._intake_workspace = intake_workspace
         self._evaluation_name = evaluation_name
@@ -77,10 +81,7 @@ class TrialCredentialIssuer:
     @contextlib.asynccontextmanager
     async def _issued_to(self, job: Job, api_key_envs: list[str]) -> AsyncGenerator[None]:
         # The job runs on its own event loop, so the platform client gets a transport bound to it.
-        event_hooks = {event: list(hooks) for event, hooks in self._client._client.event_hooks.items()}
-        async with httpx.AsyncClient(
-            timeout=REQUEST_TIMEOUT_SEC, verify=client_verify_from_env(), event_hooks=event_hooks
-        ) as http_client:
+        async with self._http_client() as http_client:
             trials = _JobTrials(self._client.with_http_client(http_client), job, self._claims)
             try:
                 auth_enabled = (await asyncio.to_thread(discover_nhx_config, self._client.base_url)).auth_enabled
@@ -99,6 +100,10 @@ class TrialCredentialIssuer:
                     # The revocations need the transport, which closes when this block exits.
                     await cleanup
                     raise
+
+    def _loop_local_client(self) -> httpx.AsyncClient:
+        event_hooks = {event: list(hooks) for event, hooks in self._client._client.event_hooks.items()}
+        return httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SEC, verify=client_verify_from_env(), event_hooks=event_hooks)
 
     def _claims(self, config: TrialConfig) -> TrialClaims:
         return TrialClaims(

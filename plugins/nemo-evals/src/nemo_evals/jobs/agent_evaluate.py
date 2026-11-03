@@ -67,10 +67,10 @@ from nemo_evals.jobs.gateway_models import (
     TrialRoute,
     add_gateway_key_placeholder,
     agent_gateway_origin,
+    calls_only_gateway_models,
     check_gateway_model,
     check_trial_route,
     closed_book_run,
-    fabric_calls_only_gateway,
     fabric_gateway_key_envs,
     fabric_gateway_models,
     fabric_gateway_route,
@@ -804,7 +804,7 @@ def _trial_credential_issuer(
         _require_closed_book_capable(reachable, route_of)
     records_calls = (
         reachable is not None
-        and _calls_only_gateway_models(spec.target)
+        and calls_only_gateway_models(spec.target)
         and all(route_of(model).records_calls for model in reachable)
     )
     return TrialCredentialIssuer(
@@ -863,14 +863,6 @@ def _trial_models(target: Target | None, primary: ModelRef) -> list[ModelRef] | 
     except ValueError:
         return None
     return [primary, *(model for model in models if model != primary)]
-
-
-def _calls_only_gateway_models(target: Target | None) -> bool:
-    """Whether every model a Harbor target's trials call goes through the Inference Gateway."""
-    if not isinstance(target, HarborRunnerTarget) or not isinstance(target.source, RegisteredAgentSource):
-        return True
-    config = registered_agent_config(target)
-    return config is None or fabric_calls_only_gateway(config)
 
 
 def _trial_gateway(target: Target | None) -> tuple[ModelRef, list[str]] | None:
