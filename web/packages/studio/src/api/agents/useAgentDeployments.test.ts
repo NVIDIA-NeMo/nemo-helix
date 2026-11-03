@@ -40,7 +40,12 @@ describe('useAgentDeployments', () => {
       { wrapper: TestProviders }
     );
 
-    expect(result.current).toEqual({ deployments: [], isLoading: false, isUnavailable: false });
+    expect(result.current).toEqual({
+      deployments: [],
+      isLoading: false,
+      isPending: true,
+      isUnavailable: false,
+    });
   });
 
   it('reports the list as unavailable when it cannot be loaded', async () => {

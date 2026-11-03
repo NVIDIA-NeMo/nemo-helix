@@ -18,10 +18,16 @@ import {
   findEvalConfigFile,
 } from '@studio/components/evaluation/experimentEvalConfig';
 import { ROUTES } from '@studio/constants/routes';
-import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
+import {
+  AGENT_DEPLOYMENTS_URL,
+  agentDeployment,
+  agentDeploymentsHandler,
+} from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
-import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import { act, renderRoute, screen, waitFor } from '@studio/tests/util/render';
+import type { TestProvidersOptions } from '@studio/tests/util/TestProviders';
+import { focusManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
@@ -110,8 +116,9 @@ const mockLists = () => {
   );
 };
 
-const renderWizard = (deployment?: string) =>
+const renderWizard = (deployment?: string, testProviderOptions?: TestProvidersOptions) =>
   renderRoute(undefined, {
+    testProviderOptions,
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
@@ -261,6 +268,46 @@ describe('AgentEvaluationWizard deployment', () => {
     expect(submittedUrl()).toContain(
       `/workspaces/${DEFAULT_WORKSPACE}/deployments/${AGENT}-subprocess/-/v1/chat/completions`
     );
+  });
+
+  it('keeps the default deployment when it stops, instead of switching to another', async () => {
+    let defaultStopped = false;
+    server.use(
+      http.get(AGENT_DEPLOYMENTS_URL, () =>
+        HttpResponse.json({
+          data: [
+            agentDeployment(
+              AGENT,
+              `${AGENT}-subprocess`,
+              defaultStopped ? { status: 'failed' } : {}
+            ),
+            agentDeployment(AGENT, `${AGENT}-k8s`, { deployment_mode: 'k8s' }),
+          ],
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderWizard(undefined, {
+      queryClientConfig: {
+        defaultOptions: { queries: { retry: false, staleTime: 0, refetchOnWindowFocus: true } },
+      },
+    });
+
+    await rerunBaseline(user);
+    expect(screen.getByRole('combobox', { name: 'Deployment' })).toHaveTextContent(
+      `${AGENT}-subprocess · Subprocess`
+    );
+    defaultStopped = true;
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+
+    expect(
+      await screen.findByText(`Deployment ${AGENT}-subprocess is no longer running. Pick another.`)
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
+    expect(evalsCreateEvaluateJob).not.toHaveBeenCalled();
   });
 
   it('preselects the deployment it was opened with', async () => {

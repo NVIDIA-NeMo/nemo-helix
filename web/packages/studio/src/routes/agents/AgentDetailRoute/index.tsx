@@ -119,6 +119,8 @@ export const AgentDetailRoute: FC = () => {
     isDeploying,
     isDeploymentsLoading,
     refetchDeployments,
+    isDeploymentsPending,
+    isDeploymentsUnavailable,
   } = useAgentDetails({
     workspace,
     agentName,
@@ -224,10 +226,12 @@ export const AgentDetailRoute: FC = () => {
 
   const hasRunningDeployment = healthyDeployments.length > 0;
   const canRunEvaluation = !!agentName && canDeploy && hasRunningDeployment;
-  const runEvaluationDisabledReason =
-    canDeploy && !isDeploymentsLoading && !hasRunningDeployment
-      ? 'Deploy the agent to run an evaluation.'
-      : undefined;
+  const runEvaluationDisabledReason = (() => {
+    if (!canDeploy || isDeploymentsLoading || hasRunningDeployment) return undefined;
+    return isDeploymentsUnavailable
+      ? "Couldn't load this agent's deployments."
+      : 'Deploy the agent to run an evaluation.';
+  })();
   const navigate = useNavigate();
   // Carries the deployment the header is showing, so the run evaluates what the user is looking at.
   const contextDeployment =
@@ -243,7 +247,9 @@ export const AgentDetailRoute: FC = () => {
   // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
   // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
   useEffect(() => {
-    if (!actionFromUrl || isAgentPending || isDeploymentsLoading) return;
+    if (!actionFromUrl || isAgentPending) return;
+    // Only the evaluation link depends on deployments; an optimize link must not wait on them.
+    if (actionFromUrl === 'run-evaluation' && isDeploymentsPending) return;
     if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
       navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
       return;
@@ -266,7 +272,7 @@ export const AgentDetailRoute: FC = () => {
   }, [
     actionFromUrl,
     isAgentPending,
-    isDeploymentsLoading,
+    isDeploymentsPending,
     agent,
     setSearchParams,
     canRunEvaluation,

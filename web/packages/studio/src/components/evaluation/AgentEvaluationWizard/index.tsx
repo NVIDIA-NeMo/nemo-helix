@@ -502,8 +502,15 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
-  // Derived, not copied into the form: the form holds only an explicit pick.
-  const selectedDeployment = deployment || runningDeployments[0]?.name || '';
+  // The default is fixed the first time it is shown, so a poll cannot swap the deployment the user
+  // saw. Kept out of the form, which holds only an explicit pick.
+  const [shownDefault, setShownDefault] = useState<{ agent: string; name: string }>();
+  const firstRunning = runningDeployments[0]?.name;
+  if (selectedAgent && firstRunning && shownDefault?.agent !== selectedAgent) {
+    setShownDefault({ agent: selectedAgent, name: firstRunning });
+  }
+  const selectedDeployment =
+    deployment || (shownDefault?.agent === selectedAgent ? shownDefault.name : '');
 
   const deploymentIssue = (() => {
     if (!selectedAgent || isDeploymentsLoading) return undefined;
@@ -513,8 +520,8 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (runningDeployments.length === 0) {
       return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
     }
-    if (deployment && !runningDeployments.some((d) => d.name === deployment)) {
-      return `Deployment ${deployment} is no longer running. Pick another.`;
+    if (selectedDeployment && !runningDeployments.some((d) => d.name === selectedDeployment)) {
+      return `Deployment ${selectedDeployment} is no longer running. Pick another.`;
     }
     return undefined;
   })();

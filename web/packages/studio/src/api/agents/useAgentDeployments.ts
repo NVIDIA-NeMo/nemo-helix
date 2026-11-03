@@ -26,7 +26,7 @@ export const useAgentDeployments = ({
   agent,
   refetchInterval,
 }: UseAgentDeploymentsParams) => {
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isPending, isError, refetch } = useQuery({
     queryKey: [...getAgentsListDeploymentsQueryKey(workspace), { agent }],
     queryFn: agent
       ? ({ signal }) =>
@@ -41,6 +41,7 @@ export const useAgentDeployments = ({
   return {
     deployments: data ?? NO_DEPLOYMENTS,
     isLoading,
+    isPending,
     isUnavailable: isError && data === undefined,
     refetch,
   };
