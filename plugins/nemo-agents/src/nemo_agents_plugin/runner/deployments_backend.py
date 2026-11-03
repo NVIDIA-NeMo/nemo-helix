@@ -253,6 +253,8 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
     config = copy.deepcopy(agent_config)
     for model_config in model_configs(config):
+        if not isinstance(model_config, dict):
+            continue
         current = model_config.get("base_url")
         if is_gateway_url(current):
             model_config["base_url"] = f"{reachable_origin}{urlsplit(current).path}"

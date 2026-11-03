@@ -196,7 +196,7 @@ def add_gateway_url_override(environment: list[EnvironmentVariable], override: s
     return [*environment, EnvironmentVariable(name=GATEWAY_URL_OVERRIDE_ENVVAR, value=override)]
 
 
-def _virtual_model(model: dict[str, Any]) -> ModelRef | None:
+def _virtual_model(model: Mapping[str, Any]) -> ModelRef | None:
     """The VirtualModel one Fabric model config calls through the gateway, or ``None`` if its route names none."""
     found = gateway_model(model)
     return ModelRef(found.virtual_model) if found is not None and found.virtual_model is not None else None
@@ -208,7 +208,7 @@ def fabric_gateway_route(config: Mapping[str, Any]) -> tuple[ModelRef, str] | No
     ``None`` when the default model doesn't call the Inference Gateway.
     """
     model = (config.get("models") or {}).get("default")
-    found = gateway_model(model) if isinstance(model, dict) else None
+    found = gateway_model(model) if isinstance(model, Mapping) else None
     if found is None or found.virtual_model is None:
         return None
     return ModelRef(found.virtual_model), found.api_key_env

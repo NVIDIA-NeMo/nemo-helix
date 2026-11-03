@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import MappingProxyType
 from typing import Any
 
 import pytest
@@ -78,3 +79,12 @@ def test_a_gateway_url_is_found_where_the_runtime_reads_it(model: dict[str, Any]
 )
 def test_models_off_the_gateway_are_not_found(config: dict[str, Any]) -> None:
     assert gateway_models(config) == []
+
+
+def test_read_only_mappings_are_read_too() -> None:
+    model = MappingProxyType({"model": "vm", "base_url": f"{IGW}/openai/-/v1"})
+
+    [found] = gateway_models(MappingProxyType({"models": MappingProxyType({"default": model})}))
+
+    assert found.virtual_model == "ws/vm"
+    assert found.config is model

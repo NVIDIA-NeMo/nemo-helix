@@ -113,6 +113,8 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
 
     runtime_config = copy.deepcopy(config)
     for model in gateway_models(runtime_config):
+        if not isinstance(model.config, dict):
+            continue
         model.config["base_url"] = _onto_proxy(model.base_url, origin)
         settings = model.config.get("settings")
         if isinstance(settings, dict):

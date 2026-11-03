@@ -24,8 +24,8 @@ _VIRTUAL_MODEL_ROUTE = re.compile(
 class GatewayModel:
     """One shared or harness model of a translated Fabric config that calls the Inference Gateway."""
 
-    config: dict[str, Any]
-    """The model's own mapping inside the config, so a caller can rewrite it in place."""
+    config: Mapping[str, Any]
+    """The model's own mapping inside the config, so a caller can rewrite it in place when it is a ``dict``."""
     base_url: str
     """The URL it calls: ``base_url``, else the legacy ``settings.base_url``."""
     virtual_model: str | None
@@ -50,17 +50,17 @@ def model_base_url(model: Mapping[str, Any]) -> str | None:
     return legacy if isinstance(legacy, str) and legacy else None
 
 
-def model_configs(config: Mapping[str, Any]) -> list[dict[str, Any]]:
+def model_configs(config: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """A translated Fabric config's shared model configs, then its harness model configs."""
     models = config.get("models")
     found = list(models.values()) if isinstance(models, Mapping) else []
     harnesses = config.get("harnesses")
     if isinstance(harnesses, Mapping):
         found += [harness.get("model") for harness in harnesses.values() if isinstance(harness, Mapping)]
-    return [model for model in found if isinstance(model, dict)]
+    return [model for model in found if isinstance(model, Mapping)]
 
 
-def gateway_model(model: dict[str, Any]) -> GatewayModel | None:
+def gateway_model(model: Mapping[str, Any]) -> GatewayModel | None:
     """``model`` as a :class:`GatewayModel`, or ``None`` when it doesn't call the Inference Gateway."""
     base_url = model_base_url(model)
     if base_url is None or not is_gateway_url(base_url):
