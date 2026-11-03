@@ -130,7 +130,7 @@ async def _build(
     build.status = "running"
     build.images = images
     for image in images:
-        await _submit(builder, image, definition)
+        await _submit(builder, image, definition, rebuild=build.rebuild)
     build = await entities.update(build)
 
     started = clock()
@@ -235,12 +235,14 @@ async def _downloaded(files: AsyncFilesClient, source: HarborArchiveSource) -> A
         yield path
 
 
-async def _submit(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> None:
+async def _submit(
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool = False
+) -> None:
     try:
         if image.image is not None:
             builder_image = await _submit_copy(builder, image)
         else:
-            builder_image = await _submit_build(builder, image, definition)
+            builder_image = await _submit_build(builder, image, definition, rebuild=rebuild)
     except NemoClientError as exc:
         image.status = "failed"
         image.error = f"Builder refused the build: {exc}"
@@ -268,16 +270,23 @@ async def _submit_copy(builder: ImageBuilder, image: BuildImage) -> ContainerIma
     return submitted.images[0]
 
 
-async def _submit_build(builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition) -> ContainerImage:
-    """Use the build of a context with the same files when there is one, from any task; submit this task's otherwise."""
+async def _submit_build(
+    builder: ImageBuilder, image: BuildImage, definition: HarborTaskDefinition, *, rebuild: bool
+) -> ContainerImage:
+    """Use the build of a context with the same files when there is one, from any task; submit this task's otherwise.
+
+    A rebuild submits this task's request whatever is there: a ready build of a request naming no platform may be for
+    the default platform before it changed, and only Builder knows the default now.
+    """
     assert image.context_path is not None and image.dockerfile is not None and image.context_digest is not None
-    return await adopt_or_build(
-        builder,
-        name=builder_name(context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform),
-        source=archive_source(definition.source.fileset_ref, image.context_path),
-        dockerfile=image.dockerfile,
-        platform=image.platform,
-    )
+    name = builder_name(context_digest=image.context_digest, dockerfile=image.dockerfile, platform=image.platform)
+    source = archive_source(definition.source.fileset_ref, image.context_path)
+    if rebuild:
+        submitted = await ensure_build(
+            builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform
+        )
+        return submitted.images[0]
+    return await adopt_or_build(builder, name=name, source=source, dockerfile=image.dockerfile, platform=image.platform)
 
 
 async def _refresh(builder: ImageBuilder, images: list[BuildImage]) -> bool:

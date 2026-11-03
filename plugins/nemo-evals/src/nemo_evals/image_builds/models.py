@@ -98,6 +98,13 @@ class TaskImageBuildEntity(EntityBase):
     job: str = Field(description="Name of the task-builder Job that runs this attempt.")
     allowed_registries: list[str] = Field(default_factory=list)
     platform: str | None = Field(default=None, description="The platform the request asked for, if any.")
+    rebuild: bool = Field(
+        default=False,
+        description=(
+            "The request asked to rebuild: each image goes to Builder again instead of using a ready build of the "
+            "same contents, which may be for the default platform before it changed."
+        ),
+    )
     images: list[BuildImage] = Field(default_factory=list)
     error: str | None = None
 

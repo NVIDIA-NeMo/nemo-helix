@@ -523,6 +523,19 @@ async def test_a_task_whose_context_holds_the_same_files_uses_the_existing_build
     assert first.images[0].builder_image == second.images[0].builder_image
 
 
+async def test_a_rebuild_takes_a_ready_build_to_builder_again(entity_store, store_task, archive) -> None:
+    """A ready build may be for the default platform before it changed; only Builder knows the default now."""
+    spec = await _start(entity_store, store_task, config=_SEPARATE_VERIFIER)
+    builder = _Builder({"sort-task/environment": "ready", "sort-task/tests": "ready"})
+    await _run(entity_store, spec, builder)
+    service = ImageBuildService(entity_store, _Jobs(), _allow)
+    await service.request_build("default", "sort-task", spec.revision_digest, ImageBuildRequest(rebuild=True))
+
+    rebuilt = await _run(entity_store, spec.model_copy(update={"attempt": 2}), builder)
+
+    assert rebuilt.status == "ready" and len(builder.submits) == 4
+
+
 async def test_a_context_with_different_files_gets_its_own_build(entity_store, store_task, monkeypatch) -> None:
     builder = _Builder({"sort-task/environment": "ready"})
     _serve_archive(monkeypatch, _two_tasks_archive(b"Sort.\n"))
