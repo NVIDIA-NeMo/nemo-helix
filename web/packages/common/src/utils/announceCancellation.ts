@@ -44,6 +44,9 @@ export const announceCancellation = async ({
 
   toast.info(`Cancellation requested for ${jobName}.`);
 
+  // Only statuses the polls actually returned count: the request's own response is old news
+  // by the deadline, and a failed poll tells us nothing.
+  let lastSeen: string | undefined;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     // Not Promise.withResolvers: Studio's tsconfig `lib` is ES2023, which lacks it.
@@ -54,6 +57,7 @@ export const announceCancellation = async ({
     } catch {
       continue;
     }
+    lastSeen = current;
     if (current === 'cancelled') {
       toast.success(`Job ${jobName} cancelled.`);
       return;
@@ -68,5 +72,9 @@ export const announceCancellation = async ({
     }
   }
 
-  toast.info(`${jobName} is still cancelling. Check its status in the list.`);
+  toast.info(
+    lastSeen === 'cancelling'
+      ? `${jobName} is still cancelling. Check its status in the list.`
+      : `Cancellation was requested for ${jobName}, but its status could not be confirmed. Check the list.`
+  );
 };
