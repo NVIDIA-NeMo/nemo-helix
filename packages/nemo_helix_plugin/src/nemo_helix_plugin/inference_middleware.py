@@ -360,6 +360,9 @@ class InferenceMiddlewareContext:
             convention.
         backend_format: Resolved backend API format used to parse typed responses.
             Defaults to ``None`` until IGW has resolved the request target.
+        provider_calls_back_as_caller: Whether the model provider IGW sent the request to is a router that calls
+            models back through the gateway as its caller. Set with ``proxied_request``, from the provider the
+            whole request middleware chain selected; ``False`` before then.
         response_body_annotations: Top-level fields to merge into the final
             response body after all middleware have run. Request middleware can
             use this when it needs to annotate the eventual backend response
@@ -379,6 +382,7 @@ class InferenceMiddlewareContext:
     original_request: InferenceRequest
     proxied_request: InferenceRequest | None = None
     backend_format: BackendFormat | None = None
+    provider_calls_back_as_caller: bool = False
     response_body_annotations: dict[str, Any] = field(default_factory=dict)
     request_nemo_client: AsyncNemoClient | None = None
     _state: dict[str, Any] = field(default_factory=dict, init=False, repr=False)
@@ -463,6 +467,10 @@ class ModelProviderInferenceTarget:
 
     missing_secret_name: str | None = None
     """Required provider secret missing from the cache, if any."""
+
+    calls_back_as_caller: bool = False
+    """Whether the provider is a router that calls models back through the gateway on its caller's behalf. Its stored
+    key is left out of ``outbound_headers``: only the gateway, which sends the caller context, can call it."""
 
 
 @dataclass

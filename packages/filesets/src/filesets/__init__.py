@@ -14,9 +14,11 @@ here for backwards compatibility.
 
 from .filesystem.callbacks import RichFileProgressCallback as RichFileProgressCallback
 from .filesystem.callbacks import RichProgressCallback as RichProgressCallback
+from .filesystem.filesystem import UPLOAD_RETRY_POLICY as UPLOAD_RETRY_POLICY
 from .filesystem.filesystem import AsyncFilesetFileSystem as AsyncFilesetFileSystem
 from .filesystem.filesystem import FilesetFileSystem as FilesetFileSystem
 from .filesystem.filesystem import FilesetPathError as FilesetPathError
+from .filesystem.filesystem import UploadRetriesExhaustedError as UploadRetriesExhaustedError
 from .filesystem.filesystem import build_fileset_ref as build_fileset_ref
 from .filesystem.filesystem import parse_fileset_path as parse_fileset_path
 from .filesystem.filesystem import parse_fileset_ref as parse_fileset_ref

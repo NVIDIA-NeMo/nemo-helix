@@ -8,6 +8,7 @@ from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlparse
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.inference_middleware import (
@@ -1202,6 +1203,31 @@ def test_openai_proxy_response_middleware_receives_model_entity(app: FastAPI, cl
     # In the new API, the original request body is on ctx.original_request (args[0]).
     ctx_arg = plugin.process_response.await_args.args[0]
     assert ctx_arg.original_request.body["model"] == "e2e-test/meta_llama-3.2-1b-instruct"
+
+
+@pytest.mark.parametrize("router", [True, False])
+def test_response_middleware_learns_whether_the_selected_provider_calls_back_as_its_caller(
+    app: FastAPI, client: TestClient, mock_proxy_client, model_cache: ModelCache, router: bool
+):
+    entity = model_cache.get_from_model_entity("e2e-test", "meta_llama-3.2-1b-instruct")
+    assert entity is not None
+    entity.model_providers[0][1].model_provider.calls_back_as_caller = router
+    plugin = MagicMock(spec=NemoInferenceMiddleware)
+    plugin.process_response = AsyncMock(side_effect=lambda ctx, response, cfg: response)
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild([_make_vm("e2e-test", "my-router", "e2e-test/meta_llama-3.2-1b-instruct")])
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+    app.dependency_overrides[global_middleware_registry] = lambda: _make_registry_with_plugin(
+        "e2e-test", "my-router", plugin, phase="response"
+    )
+
+    response = client.post(
+        "/v2/workspaces/e2e-test/openai/-/v1/chat/completions",
+        json={"model": "my-router", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert response.status_code == 200
+    assert plugin.process_response.await_args.args[0].provider_calls_back_as_caller is router
 
 
 def test_openai_proxy_request_middleware_path_rewrite_reaches_backend(

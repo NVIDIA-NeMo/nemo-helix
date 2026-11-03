@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
+from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
 from nemo_evals.api.fields import AgentRef, TasksetRef
 from nemo_evals.api.service.taskset_run_service import TasksetRunResolutionError, pin_taskset_ref
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
@@ -132,6 +133,18 @@ async def test_accept_defaults_dispatcher_image_to_platform_nhx_tasks(
     )
     plan = await run_store.load_plan(await run_store.find("default", result.status.run_id))
     assert plan.dispatcher_image == f"{sandbox_platform.image_registry}/nhx-tasks:{sandbox_platform.image_tag}"
+
+
+async def test_accept_freezes_the_gateway_url_override(service, published, request_body, run_store, monkeypatch):
+    config = AgentsConfig(deployments=DeploymentsRunnerConfig(gateway_url_override="https://gw.ns.svc:8443"))
+    monkeypatch.setattr(AgentsConfig, "get", classmethod(lambda cls: config))
+
+    result = await service.submit(
+        TasksetRunInput.model_validate(request_body), workspace="default", caller="user:alice"
+    )
+
+    plan = await run_store.load_plan(await run_store.find("default", result.status.run_id))
+    assert plan.gateway_url_override == "https://gw.ns.svc:8443"
 
 
 async def test_authorized_replay_preserves_original_run_without_resolution(
