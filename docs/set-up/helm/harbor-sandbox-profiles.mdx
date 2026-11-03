@@ -211,9 +211,11 @@ An invalid `evals` config doesn't stop the rollout. The API starts without the e
 
    ```bash
    helm upgrade <release> <chart> -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml --wait --timeout 10m
-   kubectl rollout status deploy/"$FULLNAME-api" -n "$NHX_NAMESPACE" --timeout 5m
-   kubectl rollout status deploy/"$FULLNAME-core-controller" -n "$NHX_NAMESPACE" --timeout 5m
+   kubectl rollout status deploy/"${FULLNAME:0:59}-api" -n "$NHX_NAMESPACE" --timeout 5m
+   kubectl rollout status deploy/"${FULLNAME:0:52}-core-controller" -n "$NHX_NAMESPACE" --timeout 5m
    ```
+
+   - The chart truncates `FULLNAME` in these deployment names, as the commands do.
 
    - A config change restarts the API and core-controller pods. New runs get the new profile; accepted runs keep theirs.
    - Don't use `--reuse-values` for profiles: a key you set by mistake stays in the release after you delete it from the file, and setting it to `null` doesn't remove it.
