@@ -10,6 +10,7 @@ vi.hoisted(() => {
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import {
@@ -258,6 +259,21 @@ describe('AgentDetailRoute', () => {
     await waitFor(() =>
       expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
     );
+  });
+
+  it('disables Run Evaluation and says why when the agent has no running deployment', async () => {
+    server.use(
+      agentDeploymentsHandler([
+        agentDeployment(agentName, `${agentName}-down`, { status: 'failed' }),
+      ])
+    );
+    const user = userEvent.setup();
+    renderDetail();
+
+    const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
+    await waitFor(() => expect(headerButton).toBeDisabled());
+    await user.hover(headerButton);
+    expect(await screen.findByText('Deploy the agent to run an evaluation.')).toBeInTheDocument();
   });
 
   it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {

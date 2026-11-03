@@ -497,8 +497,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
-  // The form holds only a deployment the user picked. Until then the first running one stands in,
-  // so nothing is copied into form state when the list arrives.
+  // Derived, not copied into the form: the form holds only an explicit pick.
   const selectedDeployment = deployment || runningDeployments[0]?.name || '';
 
   const deploymentIssue = (() => {
@@ -509,7 +508,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     if (runningDeployments.length === 0) {
       return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
     }
-    // Never swapped for another deployment: a pick that stopped is reported, not replaced.
     if (deployment && !runningDeployments.some((d) => d.name === deployment)) {
       return `Deployment ${deployment} is no longer running. Pick another.`;
     }
@@ -870,13 +868,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       if (!selectedAgent) {
         return blockedWith('Pick an agent to evaluate.');
       }
-      // Caught here, not at submit, so nobody fills in a whole run for an agent nothing can answer.
-      if (isDeploymentsLoading) {
-        return blockedWith('Loading deployments...');
-      }
-      if (runningDeployments.length === 0 && deploymentIssue) {
-        return blockedWith(deploymentIssue);
-      }
       return undefined;
     }
     if (step === 'experiment') {
@@ -902,7 +893,6 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
       if (isDeploymentsLoading) {
         return blockedWith('Loading deployments...');
       }
-      // The picker shows the reason on the field itself.
       if (deploymentIssue) {
         return SHOWN_ON_FIELD;
       }

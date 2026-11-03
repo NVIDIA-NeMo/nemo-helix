@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Block, Button, Flex } from '@nvidia/foundations-react-core';
+import { Block, Button, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { INTAKE_ENABLED } from '@studio/constants/environment';
 import type { AgentDetailTab } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { type FC, type RefObject } from 'react';
@@ -19,6 +19,7 @@ interface Action {
   id: ActionId;
   label: string;
   disabled: boolean;
+  disabledReason?: string;
   onClick?: () => void;
   /** Anchors the walkthrough coachmark, which must follow the button between kinds. */
   ref?: RefObject<HTMLDivElement | null>;
@@ -30,6 +31,7 @@ export interface AgentDetailCTAsProps {
   canDeploy: boolean;
   isAgentPending: boolean;
   canRunEvaluation: boolean;
+  runEvaluationDisabledReason?: string;
   isDeploying: boolean;
   canOptimize: boolean;
   deployButtonRef: RefObject<HTMLDivElement | null>;
@@ -54,6 +56,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
   canDeploy,
   isAgentPending,
   canRunEvaluation,
+  runEvaluationDisabledReason,
   isDeploying,
   canOptimize,
   deployButtonRef,
@@ -67,6 +70,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
       id: 'evaluate',
       label: 'Run Evaluation',
       disabled: !canRunEvaluation,
+      disabledReason: runEvaluationDisabledReason,
       onClick: onRunEvaluation,
     },
     {
@@ -109,7 +113,7 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
       )}
       {ordered.map((action) => {
         const isPrimary = action.id === primaryId;
-        const button = (
+        const plainButton = (
           <Button
             key={isPrimary ? 'primary' : 'secondary'}
             kind={isPrimary ? undefined : 'secondary'}
@@ -120,6 +124,12 @@ export const AgentDetailCTAs: FC<AgentDetailCTAsProps> = ({
             {action.label}
           </Button>
         );
+        const button =
+          action.disabled && action.disabledReason ? (
+            <Tooltip slotContent={action.disabledReason}>{plainButton}</Tooltip>
+          ) : (
+            plainButton
+          );
         return action.ref ? (
           <Block key={action.id} ref={action.ref}>
             {button}

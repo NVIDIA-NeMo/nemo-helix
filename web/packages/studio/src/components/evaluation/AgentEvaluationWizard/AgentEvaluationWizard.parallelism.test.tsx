@@ -270,15 +270,18 @@ describe('AgentEvaluationWizard deployment', () => {
     expect(submittedUrl()).toContain(`/deployments/${AGENT}-k8s/-/`);
   });
 
-  it('holds the first step when the agent has no running deployment', async () => {
+  it('blocks Run Evaluation when the agent has no running deployment', async () => {
     server.use(
       agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-down`, { status: 'failed' })])
     );
+    const user = userEvent.setup();
     renderWizard();
+
+    await rerunBaseline(user);
 
     expect(
       await screen.findByText(`${AGENT} has no running deployment. Deploy it to run an evaluation.`)
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Run Evaluation' })).toBeDisabled();
   });
 });

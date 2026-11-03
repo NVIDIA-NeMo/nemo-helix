@@ -222,7 +222,12 @@ export const AgentDetailRoute: FC = () => {
     [agentName]
   );
 
-  const canRunEvaluation = !!agentName && canDeploy;
+  const hasRunningDeployment = healthyDeployments.length > 0;
+  const canRunEvaluation = !!agentName && canDeploy && hasRunningDeployment;
+  const runEvaluationDisabledReason =
+    canDeploy && !isDeploymentsLoading && !hasRunningDeployment
+      ? 'Deploy the agent to run an evaluation.'
+      : undefined;
   const navigate = useNavigate();
   const runEvaluation = () => {
     if (agentName) navigate(getAgentRunEvaluationRoute(workspace, agentName));
@@ -233,7 +238,7 @@ export const AgentDetailRoute: FC = () => {
   // param either way: a link that cannot open its modal still lands on its tab. `isPending`, not
   // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
   useEffect(() => {
-    if (!actionFromUrl || isAgentPending) return;
+    if (!actionFromUrl || isAgentPending || isDeploymentsLoading) return;
     if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
       navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
       return;
@@ -256,6 +261,7 @@ export const AgentDetailRoute: FC = () => {
   }, [
     actionFromUrl,
     isAgentPending,
+    isDeploymentsLoading,
     agent,
     setSearchParams,
     canRunEvaluation,
@@ -359,6 +365,7 @@ export const AgentDetailRoute: FC = () => {
                 canDeploy={canDeploy}
                 isAgentPending={isAgentPending}
                 canRunEvaluation={canRunEvaluation}
+                runEvaluationDisabledReason={runEvaluationDisabledReason}
                 isDeploying={isDeploying}
                 canOptimize={!isCreatingOptimization}
                 deployButtonRef={deployButtonRef}
