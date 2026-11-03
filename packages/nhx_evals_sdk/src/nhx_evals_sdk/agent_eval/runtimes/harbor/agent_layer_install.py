@@ -7,7 +7,7 @@ The layer's build mounts a self-contained interpreter with Harbor and this modul
 
     python -m nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install /path/to/agent.json
 
-``agent.json`` holds ``{"name", "import_path", "kwargs", "user"}``. The agent's own ``setup()`` runs as a trial's
+``agent.json`` holds ``{"name", "import_path", "kwargs", "env", "user"}``: ``env`` only what the install runs with. The agent's own ``setup()`` runs as a trial's
 would: commands go to :class:`LocalExecEnvironment`, which runs them here, in the image's filesystem, as the task's
 agent user unless a command asks for another. Nothing is left behind but what the install wrote.
 """
@@ -91,7 +91,9 @@ async def install(agent: Mapping[str, Any]) -> None:
     """Run ``agent``'s setup into this filesystem."""
     # The Fabric config bundle is the trial's, not the install's: setup uploads it in every trial.
     kwargs = {name: value for name, value in (agent.get("kwargs") or {}).items() if name != FABRIC_CONFIG_BUNDLE_KWARG}
-    config = AgentConfig(name=agent.get("name"), import_path=agent.get("import_path"), kwargs=kwargs)
+    config = AgentConfig(
+        name=agent.get("name"), import_path=agent.get("import_path"), kwargs=kwargs, env=agent.get("env") or {}
+    )
     with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
         harbor_agent = AgentFactory.create_agent_from_config(config, logs_dir=Path(logs))
         # Agents' setup() uses only exec, upload_file/upload_dir and default_user: no trial, task directory or

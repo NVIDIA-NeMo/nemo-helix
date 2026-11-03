@@ -13,6 +13,7 @@ from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.models import BuildImage, BuildStatus
 from nemo_helix_plugin.entities import EntityBase
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import INSTALL_ENV_NAMES
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 AGENT_LAYER_BUILD_JOB_SOURCE = "nemo-evals.agent-layer-build"
@@ -40,11 +41,20 @@ class AgentLayerRequest(BaseModel):
             "Fabric agent's package and Python/uv versions) picks the layer; the rest is used to build the agent."
         ),
     )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "The proxy, package-index and TLS settings of the run's `env_vars` that the agent's install runs with. "
+            "They pick the layer and reach its install; no other variable does."
+        ),
+    )
 
     @model_validator(mode="after")
     def _one_agent(self) -> AgentLayerRequest:
         if (self.name is None) == (self.import_path is None):
             raise ValueError("give exactly one of name and import_path")
+        if other := sorted(set(self.env) - INSTALL_ENV_NAMES):
+            raise ValueError(f"env holds only what an agent's install runs with, not {', '.join(other)}")
         return self
 
 

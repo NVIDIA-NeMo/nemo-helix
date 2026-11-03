@@ -212,7 +212,7 @@ async def test_the_layer_builds_the_environment_with_the_agent_installed(
     assert context["context/setup.sh"] == b"echo hi\n"
     assert context["context/Dockerfile.nhx-agent-layer"].decode().splitlines()[-1] == "USER agent"
     agent = json.loads(context["context/nhx-agent-layer/agent.json"])
-    assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "user": "agent"}
+    assert agent == {"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "env": {}, "user": "agent"}
     assert "context/nhx-agent-installer/python/cpython-3.12.15-linux-x86_64-gnu/bin/python3" in context
     # Builder refuses a link to an absolute path: the installer's links are relative, to the same files.
     links = _links(files.uploads[(name, "context.tar.gz")])

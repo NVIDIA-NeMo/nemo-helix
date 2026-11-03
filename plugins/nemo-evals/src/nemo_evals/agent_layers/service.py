@@ -49,7 +49,11 @@ def agent_layer_key(request: AgentLayerRequest) -> str:
         AgentNotLayerableError: The agent's setup can't be done ahead of time.
     """
     install = agent_install(
-        agent_name=request.name, agent_import_path=request.import_path, agent_dir=None, agent_kwargs=request.kwargs
+        agent_name=request.name,
+        agent_import_path=request.import_path,
+        agent_dir=None,
+        agent_kwargs=request.kwargs,
+        agent_env=request.env,
     )
     if install is None:
         raise AgentNotLayerableError(

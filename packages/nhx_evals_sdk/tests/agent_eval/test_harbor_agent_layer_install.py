@@ -74,13 +74,22 @@ def test_main_runs_the_named_agents_setup_as_its_user(tmp_path: Path, monkeypatc
     monkeypatch.setattr(agent_layer_install.AgentFactory, "create_agent_from_config", create)
     spec = tmp_path / "agent.json"
     spec.write_text(
-        json.dumps({"name": "codex", "import_path": None, "kwargs": {"version": "0.162.1"}, "user": "agent"})
+        json.dumps(
+            {
+                "name": "codex",
+                "import_path": None,
+                "kwargs": {"version": "0.162.1"},
+                "env": {"PIP_INDEX_URL": "https://pypi.example/simple"},
+                "user": "agent",
+            }
+        )
     )
 
     assert main([str(spec)]) == 0
 
     (config,) = built
     assert config.name == "codex" and config.kwargs == {"version": "0.162.1"}
+    assert config.env == {"PIP_INDEX_URL": "https://pypi.example/simple"}
     (environment,) = set_up
     assert isinstance(environment, LocalExecEnvironment) and environment.default_user == "agent"
 
