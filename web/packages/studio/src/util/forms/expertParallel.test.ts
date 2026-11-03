@@ -133,6 +133,21 @@ describe('suggestedExpertParallelSize', () => {
 });
 
 describe('expertParallelSizeOnModelChange', () => {
+  it('clears a carried-over size for a dense Nemotron-H model', () => {
+    expect(
+      expertParallelSizeOnModelChange(spec('NemotronHForCausalLM'), {
+        num_gpus_per_node: 4,
+        expert_parallel_size: 4,
+      })
+    ).toBeNull();
+  });
+
+  it('keeps the size while the model metadata is unresolved', () => {
+    expect(
+      expertParallelSizeOnModelChange(undefined, { num_gpus_per_node: 4, expert_parallel_size: 4 })
+    ).toBeUndefined();
+  });
+
   it('clears a carried-over size for a dense model', () => {
     expect(
       expertParallelSizeOnModelChange(spec('LlamaForCausalLM'), {

@@ -41,6 +41,17 @@ vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
         type="button"
         onClick={() =>
           onValueChange({
+            model: 'ws/nemotron-h-dense',
+            entity: { spec: { checkpoint_model_name: 'NemotronHForCausalLM' } } as ModelEntity,
+          })
+        }
+      >
+        Dense Nemotron-H
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          onValueChange({
             model: 'ws/mixtral',
             entity: {
               spec: {
@@ -112,7 +123,7 @@ describe('ModelSelectionSection expert parallel size', () => {
     expect(screen.getByTestId('ep')).toHaveTextContent('unset');
   });
 
-  it.each(['Dense', 'Mixtral'])(
+  it.each(['Dense', 'Dense Nemotron-H', 'Mixtral'])(
     'clears the Nemotron-H size when %s is selected next',
     async (button) => {
       render(<Harness gpus={4} />);

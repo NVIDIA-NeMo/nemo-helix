@@ -26,6 +26,10 @@ export const validExpertParallelSizes = (
 const isNemotronH = (spec: ModelEntity['spec']) =>
   spec?.checkpoint_model_name === 'NemotronHForCausalLM';
 
+// Nemotron-H also covers the dense v2 models, which have no experts.
+const isNemotronHMoe = (spec: ModelEntity['spec']) =>
+  isNemotronH(spec) && (spec?.moe_config?.num_experts ?? 0) > 1;
+
 export const expertParallelWarning = (
   spec: ModelEntity['spec'],
   p: AutomodelParallelismSpec
@@ -52,7 +56,7 @@ export const suggestedExpertParallelSize = (
 ): number | null | undefined => {
   const numExperts = spec?.moe_config?.num_experts;
   const ep = p.expert_parallel_size;
-  if (!isNemotronH(spec) || !numExperts || numExperts <= 1) return undefined;
+  if (!numExperts || !isNemotronHMoe(spec)) return undefined;
   const sizes = totalGpus(p) > 1 ? validExpertParallelSizes(numExperts, p) : [];
   if (sizes.length === 0) return ep === undefined ? undefined : null;
   return sizes.includes(ep ?? 0) ? undefined : sizes.at(-1);
@@ -63,7 +67,8 @@ export const expertParallelSizeOnModelChange = (
   spec: ModelEntity['spec'],
   p: AutomodelParallelismSpec
 ): number | null | undefined => {
+  if (!spec) return undefined;
   const size = suggestedExpertParallelSize(spec, p);
-  if (size !== undefined || isNemotronH(spec)) return size;
+  if (size !== undefined || isNemotronHMoe(spec)) return size;
   return p.expert_parallel_size === undefined ? undefined : null;
 };
