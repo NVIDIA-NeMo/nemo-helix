@@ -20,9 +20,11 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import uuid
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -33,7 +35,10 @@ from nemo_agents_plugin.jobs.gateway_proxy import (
     routes_fabric_inference_through_gateway,
 )
 from nemo_evals.config import get_config
+from nemo_evals.gateway.middleware.closed_book import MIDDLEWARE_NAME as CLOSED_BOOK_MIDDLEWARE
+from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.harbor.resolution import map_with_limited_concurrency
+from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer, gateway_job_scope
 from nemo_evals.jobs.agent_compiler import (
     _compile_agent_eval_cpu_job,
     _secret_refs,
@@ -53,17 +58,28 @@ from nemo_evals.jobs.agent_spec import (
     ModelTarget,
     RegisteredAgentSource,
     Target,
+    registered_agent_config,
     registered_agent_files,
     validate_task_collection,
 )
 from nemo_evals.jobs.environment_stage import ENVIRONMENT_STORAGE_DIR
 from nemo_evals.jobs.gateway_models import (
+    TrialRoute,
     add_gateway_key_placeholder,
     agent_gateway_origin,
+    calls_only_gateway_models,
     check_gateway_model,
+    check_trial_route,
+    closed_book_run,
+    fabric_gateway_key_envs,
+    fabric_gateway_models,
+    fabric_gateway_route,
+    gateway_model_id,
     point_agent_at_gateway_model,
     rebase_registered_agent_config,
+    require_closed_book_route,
     sandbox_agent_channel,
+    trust_the_gateway_ca,
 )
 from nemo_evals.jobs.gym_sandbox import (
     SandboxUnavailableError,
@@ -131,7 +147,7 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.runtime import FabricAgentRuntime
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalRunConfig, AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTarget
-from nhx_evals_sdk.values import AgentBase, Model, RunConfigOnline, RunConfigOnlineModel
+from nhx_evals_sdk.values import AgentBase, Model, ModelRef, RunConfigOnline, RunConfigOnlineModel
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -268,6 +284,7 @@ class _AgentEvalJobBase(NemoJob):
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
+            await require_closed_book_route(target, (), async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -494,13 +511,15 @@ class _AgentEvalJobBase(NemoJob):
         *,
         configure_harbor: Callable[[HarborRuntimeConfig], HarborRuntimeConfig] | None = None,
         fabric_gateway_origin: str | None = None,
+        trial_issuer: TrialCredentialIssuer | None = None,
     ) -> tuple[AgentEvalTarget | None, str | dict[str, Any] | None, RunConfigOnline | RunConfigOnlineModel | None]:
         """Resolve a target spec to ``(runtime target, prompt_template, params)`` for the SDK run config.
 
         Endpoint targets carry their own request config; a runner is instantiated to its runtime and
         shapes its own request, so it contributes neither a prompt template nor inference params.
         ``configure_harbor`` adjusts a Harbor runner's config last (a Kubernetes task Job selects its
-        sandbox environment there).
+        sandbox environment there). ``trial_issuer`` issues each trial of a Harbor agent that calls a gateway
+        model its own gateway key.
         """
         if isinstance(target, ModelTarget):
             return target.model, target.prompt_template, target.params or RunConfigOnlineModel()
@@ -560,9 +579,17 @@ class _AgentEvalJobBase(NemoJob):
                 harbor_config = point_agent_at_gateway_model(
                     harbor_config.model_copy(update={"agent_kwargs": agent_kwargs}), target, origin
                 )
+                harbor_config = trust_the_gateway_ca(harbor_config, origin)
+            gateway = _trial_gateway(target)
+            job_scope = (
+                gateway_job_scope(harbor_config, trial_issuer, gateway[1])
+                if trial_issuer is not None and gateway is not None
+                else None
+            )
             harbor_runtime = HarborAgentTaskRunner(
                 config=harbor_config,
                 secret_resolver=JobEnvSecretSource(workspace=ctx.workspace),
+                job_scope=job_scope,
             )
             return harbor_runtime, None, None
         return None, None, None
@@ -619,12 +646,15 @@ class _AgentEvalJobBase(NemoJob):
             if fabric_config is not None and routes_fabric_inference_through_gateway(fabric_config)
             else nullcontext(None)
         )
+        run_id = self._run_id() or f"agent-eval-{datetime.now(UTC):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
+        trial_issuer = _trial_credential_issuer(spec, ctx, platform_client, async_client, run_id)
         with proxy as fabric_gateway_origin:
             target, prompt_template, params = self._resolve_target(
                 spec.target,
                 ctx,
                 configure_harbor=lambda harbor_config: self._configure_harbor_runtime(harbor_config, ctx),
                 fabric_gateway_origin=fabric_gateway_origin,
+                trial_issuer=trial_issuer,
             )
             bundle_dir = ctx.storage.persistent / AGENT_BUNDLE_DIR
             if bundle_dir.exists():
@@ -636,7 +666,7 @@ class _AgentEvalJobBase(NemoJob):
                 labels=spec.labels,
                 fail_fast=spec.fail_fast,
                 work_dir=bundle_dir,
-                run_id=self._run_id(),
+                run_id=run_id,
             )
             evaluator = self._build_evaluator(platform_client, spec.target)
             include_trial_measurements = not isinstance(spec.target, ModelTarget | AgentTarget)
@@ -703,6 +733,7 @@ class _AgentEvalJobBase(NemoJob):
                 workspace=ctx.workspace,
                 intake=intake,
                 record_durations=self.record_publication_durations,
+                usage_superseded_by_gateway=trial_issuer is not None and trial_issuer.records_calls,
             )
             output["publication"] = publication_outcome.model_dump(exclude_none=True)
             # The job output isn't persisted; status details are, so `runs status` can say what was published.
@@ -734,6 +765,116 @@ class _AgentEvalJobBase(NemoJob):
     def _configure_harbor_runtime(self, config: HarborRuntimeConfig, ctx: JobContext) -> HarborRuntimeConfig:
         """Hook: adjust a Harbor runner's config before it runs. Returns it unchanged by default."""
         return config
+
+
+def _trial_credential_issuer(
+    spec: AgentEvalSpec,
+    ctx: JobContext,
+    platform_client: NemoClient | AsyncNemoClient,
+    async_client: AsyncNemoClient | None,
+    run_id: str,
+) -> TrialCredentialIssuer | None:
+    """The issuer of each trial's trial token, for a Harbor agent that calls a gateway model."""
+    gateway = _trial_gateway(spec.target)
+    closed = closed_book_run(spec.target, ())
+    if async_client is None or gateway is None:
+        if closed:
+            raise ValueError(
+                "closed_book: the agent's model calls don't all go through the Inference Gateway, so the run can't "
+                "be held closed-book"
+            )
+        return None
+    publication = spec.publication.intake if spec.publication is not None else None
+    route = check_trial_route(platform_client, gateway[0])
+    models = _trial_models(spec.target, gateway[0])
+    if models is None:
+        logger.warning(
+            "The agent's config names a gateway model evals can't read, so its trials' model calls aren't limited "
+            "to the models it configures"
+        )
+    routes = {gateway[0].root: route}
+
+    def route_of(model: ModelRef) -> TrialRoute:
+        if model.root not in routes:
+            routes[model.root] = check_trial_route(platform_client, model)
+        return routes[model.root]
+
+    reachable = _with_routed_models(models, route_of) if models is not None else None
+    if closed:
+        _require_closed_book_capable(reachable, route_of)
+    records_calls = (
+        reachable is not None
+        and calls_only_gateway_models(spec.target)
+        and all(route_of(model).records_calls for model in reachable)
+    )
+    return TrialCredentialIssuer(
+        async_client,
+        run_id=run_id,
+        intake_workspace=ctx.workspace,
+        evaluation_name=publication.evaluation_id if publication is not None else None,
+        policy=ModelPolicy(
+            model_access=ModelAccess.CLOSED if closed else ModelAccess.OPEN,
+            models=tuple(gateway_model_id(model) for model in reachable) if reachable is not None else None,
+        ),
+        records_calls=records_calls,
+    )
+
+
+def _with_routed_models(models: list[ModelRef], route_of: Callable[[ModelRef], TrialRoute]) -> list[ModelRef]:
+    """``models``, then every VirtualModel their routers call back through the gateway, through any depth, each once."""
+    reachable = list(models)
+    seen = {model.root for model in reachable}
+    pending = list(reachable)
+    while pending:
+        for routed in route_of(pending.pop(0)).routes_to:
+            if routed not in seen:
+                seen.add(routed)
+                reachable.append(ModelRef(routed))
+                pending.append(ModelRef(routed))
+    return reachable
+
+
+def _require_closed_book_capable(reachable: list[ModelRef] | None, route_of: Callable[[ModelRef], TrialRoute]) -> None:
+    """Refuse a closed-book run whose trials could reach a VirtualModel that can't keep them closed-book.
+
+    Raises:
+        ValueError: The agent's models can't all be named, or one it can reach isn't closed-book capable.
+    """
+    if reachable is None:
+        raise ValueError(
+            "closed_book: the agent's config names a gateway model evals can't read, so the run can't be held "
+            "closed-book"
+        )
+    open_models = [model.root for model in reachable if not route_of(model).closed_book]
+    if open_models:
+        raise ValueError(
+            f"closed_book: {', '.join(open_models)} can't keep trials closed-book; end each one's "
+            f"request_middleware with {CLOSED_BOOK_MIDDLEWARE}"
+        )
+
+
+def _trial_models(target: Target | None, primary: ModelRef) -> list[ModelRef] | None:
+    """Every gateway model a Harbor target's trials call, ``primary`` first; ``None`` when they can't all be named."""
+    if not isinstance(target, HarborRunnerTarget) or not isinstance(target.source, RegisteredAgentSource):
+        return [primary]
+    config = registered_agent_config(target)
+    try:
+        models = fabric_gateway_models(config) if config is not None else []
+    except ValueError:
+        return None
+    return [primary, *(model for model in models if model != primary)]
+
+
+def _trial_gateway(target: Target | None) -> tuple[ModelRef, list[str]] | None:
+    """The gateway model a Harbor target's trials call, and every variable their agent reads a gateway key from."""
+    if not isinstance(target, HarborRunnerTarget):
+        return None
+    if target.gateway_model is not None and target.gateway_agent_env is not None:
+        return target.gateway_model, [target.gateway_agent_env.api_key_env]
+    if isinstance(target.source, RegisteredAgentSource) and (config := registered_agent_config(target)) is not None:
+        route = fabric_gateway_route(config)
+        return (route[0], fabric_gateway_key_envs(config)) if route is not None else None
+    return None
 
 
 class AgentEvalJob(_AgentEvalJobBase):

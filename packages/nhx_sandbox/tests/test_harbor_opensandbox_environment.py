@@ -391,6 +391,29 @@ async def test_strict_verification_rejects_a_dropped_rule(
     assert server.live() == set()
 
 
+async def test_verification_is_strict_by_default_and_rejects_an_unrequested_allow_rule(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sandbox that reports an allow rule nobody requested can reach more than its task may, so it is killed."""
+    environment = _environment(tmp_path, server, NetworkMode.NO_NETWORK)
+    sdk = environment._driver.sdk
+    create = sdk["Sandbox"].create
+
+    async def add_rule(image: Any, **kwargs: Any) -> Sandbox:
+        """Create normally, but apply the policy with an extra allow rule."""
+        sandbox = await create(image, **kwargs)
+        egress = [*sandbox._policy["egress"], {"action": "allow", "target": "*.example.com"}]
+        sandbox._policy = {**sandbox._policy, "egress": egress}
+        return sandbox
+
+    monkeypatch.setattr(sdk["Sandbox"], "create", add_rule)
+
+    with pytest.raises(RuntimeError, match="allows 1 egress target"):
+        await environment._create_sandbox()
+
+    assert server.live() == set()
+
+
 def test_rejects_compose_tasks_and_missing_images(tmp_path: Path, server: Server) -> None:
     """Compose tasks and tasks without a prebuilt image are rejected at construction."""
     (tmp_path / "environment").mkdir()
@@ -422,7 +445,8 @@ async def test_start_prepares_logs_and_uploads_the_environment(tmp_path: Path, s
     sandbox = _sandbox(environment)
     assert {"/logs/agent", "/logs/verifier", "/logs/artifacts", "/app"} <= set(sandbox.files.tree)
     chmod = next(opts for command, opts in sandbox.commands.runs if command.startswith("chmod 777"))
-    assert chmod["uid"] == 0
+    # The image already runs as root, so root is not sent as a uid to switch to.
+    assert "uid" not in chmod
     assert chmod["working_directory"] == "/"
     assert sandbox.files.tree["/app/setup.sh"] == b"echo hi\n"
     assert sandbox.files.modes["/app/setup.sh"] == 755
@@ -528,25 +552,40 @@ async def test_a_root_default_user_is_mapped_too(tmp_path: Path, server: Server)
     assert _sandbox(environment).commands.uids_sent("mkdir -p /installed-agent") == [None]
 
 
-async def test_root_images_keep_uid_0(tmp_path: Path, server: Server) -> None:
-    """On a root image, root commands keep uid 0."""
+async def test_root_on_a_root_image_is_not_sent(tmp_path: Path, server: Server) -> None:
+    """On a root image, root commands already run as root, so no uid is sent.
+
+    execd switches identity whenever it gets a uid, and the switch fails on a sandbox that drops every capability.
+    """
     environment = await _started(tmp_path, server, image_uid=0)
 
     await environment.exec("apt-get install -y curl", user="root")
 
-    assert _sandbox(environment).commands.uids_sent("apt-get install -y curl") == [0]
+    assert _sandbox(environment).commands.uids_sent("apt-get install -y curl") == [None]
 
 
-async def test_non_root_requests_do_not_probe(tmp_path: Path, server: Server) -> None:
-    """Commands that don't ask for root never trigger the image probe."""
+async def test_the_sandbox_s_own_uid_is_not_sent(tmp_path: Path, server: Server) -> None:
+    """A request for the uid the sandbox already runs as needs no switch; any other uid is sent."""
+    environment = await _started(tmp_path, server, image_uid=1000)
+    commands = _sandbox(environment).commands
+
+    await environment.exec("id", user=1000)
+    await environment.exec("id", user="1000")
+    await environment.exec("id", user=1234)
+
+    assert commands.uids_sent("id") == [None, None, 1234]
+    assert commands.probes() == 1
+
+
+async def test_commands_that_name_no_uid_do_not_probe(tmp_path: Path, server: Server) -> None:
+    """Commands that run as the default user, or as a user name execd can't use, never trigger the probe."""
     environment = await _started(tmp_path, server, image_uid=10001)
     commands = _sandbox(environment).commands
 
     await environment.exec("whoami")
-    await environment.exec("whoami", user=1234)
     await environment.exec("whoami", user="agent")
 
-    assert commands.uids_sent("whoami") == [None, 1234, None]
+    assert commands.uids_sent("whoami") == [None, None]
     assert commands.probes() == 0
 
 

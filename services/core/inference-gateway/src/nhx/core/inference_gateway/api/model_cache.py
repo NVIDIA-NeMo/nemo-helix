@@ -114,6 +114,14 @@ class ModelCache:
         model_info = self.workspace_name_provider_map.get((workspace, provider_name))
         return model_info
 
+    def router_keys(self) -> dict[str, str | None]:
+        """The stored key of each provider that calls models back as its caller, by ``workspace/name``."""
+        return {
+            f"{info.model_provider.workspace}/{info.model_provider.name}": info.secret_value
+            for info in self.workspace_name_provider_map.values()
+            if info.model_provider.calls_back_as_caller
+        }
+
     def get_from_model_entity(self, workspace: str, model_entity_name: str) -> ModelEntityInfo | None:
         return self.model_entity_info_map.get((workspace, model_entity_name))
 

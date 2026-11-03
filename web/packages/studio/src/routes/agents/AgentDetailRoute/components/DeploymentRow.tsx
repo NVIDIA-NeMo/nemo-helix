@@ -9,7 +9,7 @@ import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import { useAgentsGetDeployment } from '@nemo/sdk/generated/agents/agent-deployments';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Badge, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { type AgentSpecSource, githubCommitUrl } from '@studio/api/agents/useAgentSpecFileset';
+import { type AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
 import {
   deploymentModeLabel,
   deploymentUrl,
@@ -27,13 +27,10 @@ interface DeploymentRowProps {
   onViewLogs: (deployment: AgentDeployment) => void;
 }
 
-/** A commit, linked to GitHub when the source it came from is still known. */
+/** A commit, linked when the source it came from is still known and has a web view. */
 const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source, revision }) =>
-  source ? (
-    <ExternalLink
-      href={githubCommitUrl(source.owner, source.repo, revision)}
-      textKind="body/regular/xs"
-    >
+  source?.commitUrl ? (
+    <ExternalLink href={source.commitUrl(revision)} textKind="body/regular/xs">
       {shortRevision(revision)}
     </ExternalLink>
   ) : (

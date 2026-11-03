@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from nemo_evals.intake.publish import PublishError, _token_final_metrics, publish_to_intake
 from nemo_evals.intake.row_adapter import row_result_to_agent_eval_result
+from nemo_helix_plugin.intake.span_attributes import USAGE_SUPERSEDED_ATTRIBUTE
 from nhx.testing.intake import InMemoryIntakeService
 from nhx_evals_sdk.agent_eval.results import AgentEvalResult, AgentEvalSummary, RunMetadata
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
@@ -892,3 +893,44 @@ async def test_a_non_positive_otlp_budget_is_rejected_before_any_request(budget:
 
     assert intake.evaluation_lookups == []
     assert intake.otlp_requests == []
+
+
+@pytest.mark.parametrize("superseded", [True, False], ids=["gateway-recorded", "not gateway-recorded"])
+async def test_a_gateway_recorded_trials_trajectory_says_its_usage_is_superseded(superseded: bool) -> None:
+    """The gateway recorded the same calls in the session; Intake counts those instead of the trajectory's."""
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_trial("t-1")], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        usage_superseded_by_gateway=superseded,
+    )
+
+    extra = intake.atif_requests[0].get("extra") or {}
+    assert extra.get(USAGE_SUPERSEDED_ATTRIBUTE) is (True if superseded else None)
+
+
+@pytest.mark.parametrize("superseded", [True, False], ids=["gateway-recorded", "not gateway-recorded"])
+async def test_a_gateway_recorded_trials_otlp_root_says_its_usage_is_superseded(superseded: bool) -> None:
+    from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+
+    child = {"traceId": _OTLP_TRACE_ID, "spanId": "aabbccddeeff0011", "parentSpanId": _OTLP_SPAN_ID, "name": "child"}
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_otlp_trial(extra_spans=[child])], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        usage_superseded_by_gateway=superseded,
+    )
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(intake.otlp_requests[0]["body"])
+    spans = {
+        span.name: {a.key: a.value for a in span.attributes} for span in sent.resource_spans[0].scope_spans[0].spans
+    }
+    assert (USAGE_SUPERSEDED_ATTRIBUTE in spans["agent run"]) is superseded
+    if superseded:
+        assert spans["agent run"][USAGE_SUPERSEDED_ATTRIBUTE].bool_value is True
+    assert USAGE_SUPERSEDED_ATTRIBUTE not in spans["child"]

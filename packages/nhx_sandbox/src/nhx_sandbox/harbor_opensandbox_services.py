@@ -40,10 +40,12 @@ images that can't install them, such as images with a non-root ``USER``.
 
 from __future__ import annotations
 
+import posixpath
 from decimal import Decimal
+from pathlib import PurePosixPath
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 # The create request's extensions key. The stock server copies keys with this prefix onto the
 # sandbox pod as the annotation below, which is how the extension reads the spec back.
@@ -61,7 +63,10 @@ AGENT_BUNDLE_FEATURE = "agent-bundle"
 # A spec with no services, and ``main``'s ``command`` and ``working_dir``: what a compose file that only changes
 # ``main`` needs. An extension from before them refuses such a spec.
 COMPOSE_MAIN_FEATURE = "compose-main"
-EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE, COMPOSE_MAIN_FEATURE)
+# Each container's ``security`` and ``tmpfs``: the restrictions a compose file sets with ``user``, ``read_only``,
+# ``cap_drop``, ``security_opt`` and ``tmpfs``. An older extension would ignore them and run the task unrestricted.
+COMPOSE_SECURITY_FEATURE = "compose-security"
+EXTENSION_FEATURES = (COMPOSE_SERVICES_FEATURE, AGENT_BUNDLE_FEATURE, COMPOSE_MAIN_FEATURE, COMPOSE_SECURITY_FEATURE)
 
 # The agent bundle's extensions key and pod annotation, copied the same way as the services'.
 AGENT_BUNDLE_EXTENSION_KEY = "opensandbox.extensions.nemo-agent-bundle"
@@ -79,10 +84,26 @@ MAX_SERVICES = 16
 # egress policy API (18080). Every container shares the pod network, so a service can't use them.
 RESERVED_PORTS = frozenset({44772, 15353, 18080})
 
-# A Kubernetes DNS label short enough that "nemo-vol-<name>" and "nemo-shm-<name>" still fit in 63.
+# A Kubernetes DNS label short enough that "nemo-vol-<name>", "nemo-shm-<name>" and "nemo-t<n>-<name>" still fit in 63.
 Name = Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]{0,52}[a-z0-9])?$")]
+# A Linux capability as Kubernetes names it, without ``CAP_``: ``NET_RAW``, or ``ALL``.
+Capability = Annotated[str, Field(pattern=r"^[A-Z][A-Z0-9_]*$", max_length=64)]
+# The most tmpfs mounts one container takes, so each one's volume name, ``nemo-t<n>-<name>``, has a single digit.
+MAX_TMPFS_MOUNTS = 10
 Port = Annotated[int, Field(ge=1, le=65535)]
-AbsolutePath = Annotated[str, Field(pattern=r"^/", max_length=4096)]
+
+
+def _clean_path(path: str) -> str:
+    """``path`` spelled one way for each folder: ``/tmp/`` becomes ``/tmp``, and ``//installed-agent`` ``/installed-agent``.
+
+    Checks on mount paths compare strings, so two spellings of one folder would pass as two folders: a second mount at
+    ``/tmp/`` would hide the one at ``/tmp``, and ``//installed-agent`` would get past the guard on the agent's install.
+    ``normpath`` alone keeps a leading ``//``, which POSIX leaves to the system but Linux reads as ``/``.
+    """
+    return "/" + posixpath.normpath(path).lstrip("/")
+
+
+AbsolutePath = Annotated[str, Field(pattern=r"^/", max_length=4096), AfterValidator(_clean_path)]
 Quantity = Annotated[str, Field(pattern=r"^[0-9]+(\.[0-9]+)?(m|k|Ki|M|Mi|G|Gi|T|Ti)?$")]
 EnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_.-]*$")]
 # CRI-O resolves no short names, so a service image must name its registry.
@@ -117,6 +138,50 @@ class VolumeMount(_Strict):
     name: Name
     mount_path: AbsolutePath
     read_only: bool = False
+
+
+class Tmpfs(_Strict):
+    """A memory-backed scratch directory in one container (Compose ``tmpfs``), as an ``emptyDir`` with medium ``Memory``.
+
+    What's written to it counts against the container's memory limit, as a tmpfs does under Docker. A container with
+    no memory limit, and no ``size_limit``, can fill it until the node is short of memory and the kubelet evicts the pod.
+    """
+
+    mount_path: AbsolutePath
+    # The tmpfs's size; None leaves it bounded only by the container's memory limit, if it has one.
+    size_limit: Quantity | None = None
+
+
+class Security(_Strict):
+    """Restrictions on one container (Compose ``user``, ``read_only``, ``cap_drop`` and ``security_opt``).
+
+    None of them grants a privilege the task's image couldn't already have: capabilities are only dropped (the one
+    ``main`` may add is ``Main.add_capabilities``), and a uid or gid, root included, is one the image could run as
+    anyway. One the sandbox's template already sets can't be replaced (see the server extension).
+    """
+
+    # Compose `user`, as numbers: Kubernetes can't look a user name up in the image.
+    run_as_user: int | None = Field(default=None, ge=0)
+    run_as_group: int | None = Field(default=None, ge=0)
+    # Compose `read_only`: the image's filesystem can't be written; only mounts can.
+    read_only_root_filesystem: bool = False
+    # Compose `cap_drop`.
+    drop_capabilities: list[Capability] = Field(default_factory=list)
+    # Compose `security_opt: [no-new-privileges]`: setuid programs and file capabilities don't raise privileges.
+    no_new_privileges: bool = False
+
+    @model_validator(mode="after")
+    def _check(self) -> Security:
+        """Reject a group without a user: Kubernetes would run the image's own user in that group, which Compose can't."""
+        if self.run_as_group is not None and self.run_as_user is None:
+            raise ValueError("run_as_group needs run_as_user")
+        return self
+
+
+def _check_tmpfs(owner: str, tmpfs: list[Tmpfs]) -> None:
+    """Reject more tmpfs mounts than ``MAX_TMPFS_MOUNTS``, which their volume names can't number."""
+    if len(tmpfs) > MAX_TMPFS_MOUNTS:
+        raise ValueError(f"{owner}: at most {MAX_TMPFS_MOUNTS} tmpfs mounts per container")
 
 
 # Multipliers for the suffixes ``Quantity`` allows.
@@ -170,10 +235,13 @@ class Service(_Strict):
     resources: Resources | None = None
     volume_mounts: list[VolumeMount] = Field(default_factory=list)
     shm_size: Quantity | None = None
+    security: Security | None = None
+    tmpfs: list[Tmpfs] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check(self) -> Service:
         """Reject names and ports the sandbox pod already uses, and readiness on a ``run_once`` service."""
+        _check_tmpfs(self.name, self.tmpfs)
         if self.name in RESERVED_NAMES:
             raise ValueError(f"service name {self.name!r} is reserved")
         reserved = RESERVED_PORTS.intersection(self.ports)
@@ -207,6 +275,40 @@ class Main(_Strict):
     # The only capability ``main`` may gain; anything broader (e.g. NET_ADMIN) could bypass egress.
     add_capabilities: list[Literal["SYS_PTRACE"]] = Field(default_factory=list)
     readiness: MainReadiness | None = None
+    security: Security | None = None
+    tmpfs: list[Tmpfs] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check(self) -> Main:
+        """Reject more tmpfs mounts than the sandbox container takes, and a read-only ``main`` commands can't run in."""
+        _check_tmpfs(MAIN_SERVICE, self.tmpfs)
+        if self.security is not None and self.security.read_only_root_filesystem:
+            # execd, which runs every command in main, first writes the command's output to files in its temp folder.
+            # On a read-only root with nothing writable there, every command fails, even `true`.
+            temp_dir = self.env.get("TMPDIR") or "/tmp"
+            if not self._is_writable(temp_dir):
+                raise ValueError(
+                    f"main is read-only, so it needs a writable tmpfs or volume at {temp_dir}, "
+                    "where commands write their output"
+                )
+        return self
+
+    def _is_writable(self, path: str) -> bool:
+        """Whether ``path`` can be written in a read-only ``main``: the closest mount over it is writable.
+
+        A read-only mount inside a writable one wins over it, as it does in the container.
+        """
+        mounts = [(tmpfs.mount_path, True) for tmpfs in self.tmpfs]
+        mounts += [(mount.mount_path, not mount.read_only) for mount in self.volume_mounts]
+        covering_mounts = [
+            (PurePosixPath(mount_path), writable)
+            for mount_path, writable in mounts
+            if PurePosixPath(path).is_relative_to(mount_path)
+        ]
+        if not covering_mounts:
+            return False
+        _closest_path, writable = max(covering_mounts, key=lambda mount: len(mount[0].parts))
+        return writable
 
 
 class ComposeServices(_Strict):
@@ -242,10 +344,13 @@ class ComposeServices(_Strict):
         # Kubernetes requires a container's mount paths to be unique; separate containers may share one. A service
         # with `shm_size` already has a mount at /dev/shm, which the server adds for it.
         seen = {(s.name, "/dev/shm") for s in self.services if s.shm_size is not None}
-        for owner, mount in mounts:
-            if (owner, mount.mount_path) in seen:
-                raise ValueError(f"{owner}: mount_path {mount.mount_path!r} is used by more than one volume mount")
-            seen.add((owner, mount.mount_path))
+        paths = [(owner, mount.mount_path) for owner, mount in mounts]
+        paths += [(MAIN_SERVICE, t.mount_path) for t in self.main.tmpfs]
+        paths += [(s.name, t.mount_path) for s in self.services for t in s.tmpfs]
+        for owner, path in paths:
+            if (owner, path) in seen:
+                raise ValueError(f"{owner}: mount_path {path!r} is used by more than one mount")
+            seen.add((owner, path))
         return self
 
     def names(self) -> list[str]:
@@ -263,6 +368,11 @@ class ComposeServices(_Strict):
     def uses_main_settings(self) -> bool:
         """Whether the spec needs the extension's ``COMPOSE_MAIN_FEATURE``: no services, or ``main``'s command or working directory."""
         return not self.services or self.main.command is not None or self.main.working_dir is not None
+
+    def uses_security_settings(self) -> bool:
+        """Whether the spec needs the extension's ``COMPOSE_SECURITY_FEATURE``: any container's ``security`` or ``tmpfs``."""
+        containers: list[Main | Service] = [self.main, *self.services]
+        return any(container.security is not None or container.tmpfs for container in containers)
 
     def to_json(self) -> str:
         """The value sent in ``extensions[EXTENSION_KEY]``."""

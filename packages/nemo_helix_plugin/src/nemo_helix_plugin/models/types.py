@@ -456,11 +456,12 @@ class ModelEntityBaseModel(BaseModel):
 # ---------------------------------------------------------------------------
 
 _AUTH_HEADER_FORMAT_DESCRIPTION = (
-    "Jinja2 template string controlling how the API key secret is sent to the upstream. "
-    "Must contain exactly one variable named `auth_secret`, which is substituted with the "
-    "resolved secret value at request time. "
-    "Example: `'X-Api-Key: {{ auth_secret }}'`. "
-    "If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`."
+    "Literal header format controlling how the API key secret is sent to the upstream. "
+    "Must contain exactly one `<auth_secret>` placeholder, which is replaced with the "
+    "resolved secret value at request time. It is plain text, not a template: no `{` or `}` "
+    "characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. "
+    "Example: `'X-Api-Key: <auth_secret>'`. "
+    "If not set, defaults to `'Authorization: Bearer <auth_secret>'`."
 )
 
 
@@ -555,6 +556,15 @@ class ModelProvider(ModelEntityBaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
 
 class ModelProviderSort(StrEnum):
@@ -635,6 +645,15 @@ class CreateModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
 
 class UpsertModelProviderRequest(BaseModel):
@@ -699,6 +718,15 @@ class UpsertModelProviderRequest(BaseModel):
         default=None,
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
+    )
+    calls_back_as_caller: bool | None = Field(
+        default=None,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused. Left unset, an update keeps the provider's current setting."
+        ),
     )
 
 

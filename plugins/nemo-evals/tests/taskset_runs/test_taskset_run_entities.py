@@ -170,7 +170,7 @@ def test_member_defaults_and_index() -> None:
 def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
     """Verify the plan fixture round-trips while retaining its strict frozen schema.
 
-    Assertions pin the ten stored fields and expect validation errors for
+    Assertions pin the eleven stored fields and expect validation errors for
     rebinding, extras, an invalid cap, and a missing nullable cap field,
     protecting the resolved-input contract of stored plans.
     """
@@ -186,6 +186,7 @@ def test_frozen_plan_roundtrip(plan: TasksetRunPlan) -> None:
         "dispatcher_profile",
         "task_environments",
         "intake",
+        "gateway_url_override",
     }
     with pytest.raises(ValidationError, match="frozen"):
         setattr(plan, "run_id", "changed")  # setattr: ty already rejects a direct write to a frozen field
