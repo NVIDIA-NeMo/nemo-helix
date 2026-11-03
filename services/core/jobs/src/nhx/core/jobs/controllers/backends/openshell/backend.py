@@ -22,7 +22,7 @@ import hashlib
 import logging
 import os
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -605,7 +605,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             return config.ttl_seconds_before_active
         return None
 
-    def cleanup_steps(self) -> None:
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None) -> None:
         if self._executor_config.gateway_credentials is not None:
             try:
                 asyncio.run(self._cleanup_unused_providers())

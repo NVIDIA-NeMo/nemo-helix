@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -432,7 +433,7 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             pass
         return True
 
-    def cleanup_steps(self) -> None:
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None) -> None:
         for key, metadata in self._process_registry.items():
             if metadata.process.poll() is None:
                 continue
