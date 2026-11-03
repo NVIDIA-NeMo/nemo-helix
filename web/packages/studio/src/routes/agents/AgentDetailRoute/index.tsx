@@ -446,13 +446,20 @@ export const AgentDetailRoute: FC = () => {
             <DeploymentLogsView workspace={workspace} deployment={selectedDeployment} />
           </TabsContent>
 
-          <TabsContent className="min-h-0 flex-1 overflow-hidden p-0" value="chat">
-            <Flex className="h-full min-h-0 w-full">
-              {/* Side panes give way to the conversation on narrow viewports. */}
-              <Block className="hidden h-full w-[240px] shrink-0 xl:block">
+          <TabsContent className="min-h-0 flex-1 overflow-hidden p-0 py-6" value="chat">
+            <Flex gap="density-2xl" className="h-full min-h-0 w-full">
+              <Stack
+                gap="density-2xl"
+                className="hidden h-full w-90 shrink-0 overflow-y-auto lg:flex"
+              >
                 <AgentRuntimePanel deployment={selectedDeployment} modelNames={modelNames} />
-              </Block>
-              <Block className="h-full min-w-0 flex-1">
+                <AgentToolsPanel
+                  workspace={workspace}
+                  config={agent?.config}
+                  deployment={selectedDeployment}
+                />
+              </Stack>
+              <Block className="h-full min-w-0 flex-1 overflow-hidden rounded-xl border border-base bg-surface-raised">
                 <ChatPlaygroundContent
                   workspace={workspace}
                   agentName={agentName}
@@ -464,13 +471,6 @@ export const AgentDetailRoute: FC = () => {
                   onDeploy={onDeploy}
                   canDeploy={canDeploy}
                   isAgentPending={isAgentPending}
-                />
-              </Block>
-              <Block className="hidden h-full w-[320px] shrink-0 lg:block">
-                <AgentToolsPanel
-                  workspace={workspace}
-                  config={agent?.config}
-                  deployment={selectedDeployment}
                 />
               </Block>
             </Flex>

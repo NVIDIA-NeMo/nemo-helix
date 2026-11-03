@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { Refresh } from '@nemo/icons/icons';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Badge, Banner, Button, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
+import { Badge, Banner, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
 import type {
   DeclaredMcpServer,
   KnownMcpServerState,
@@ -13,7 +12,7 @@ import type {
 } from '@studio/api/agents/types';
 import { getDeclaredMcpServers, useMcpStatus } from '@studio/api/agents/useMcpStatus';
 import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
-import { ChatSidePane } from '@studio/routes/agents/AgentDetailRoute/ChatSidePane';
+import { ChatInfoSection } from '@studio/routes/agents/AgentDetailRoute/ChatInfoSection';
 import { McpToolRow } from '@studio/routes/agents/AgentDetailRoute/McpToolRow';
 import { AxiosError } from 'axios';
 import type { ComponentProps, FC, ReactNode } from 'react';
@@ -153,21 +152,12 @@ interface AgentToolsPanelProps {
   config?: AgentConfig;
   /** The header's selection; tools are only probed when it is running. */
   deployment?: AgentDeployment;
-  className?: string;
 }
 
-/** Chat tab pane listing each declared MCP server, its launch state, and the tools it serves. */
-export const AgentToolsPanel: FC<AgentToolsPanelProps> = ({
-  workspace,
-  config,
-  deployment,
-  className,
-}) => {
+/** Chat tab section listing each declared MCP server, its launch state, and the tools it serves. */
+export const AgentToolsPanel: FC<AgentToolsPanelProps> = ({ workspace, config, deployment }) => {
   const runningDeployment = deployment?.status === 'running' ? deployment.name : undefined;
-  const { data, error, isLoading, isFetching, dataUpdatedAt, refetch } = useMcpStatus(
-    workspace,
-    runningDeployment
-  );
+  const { data, error, isLoading } = useMcpStatus(workspace, runningDeployment);
   const declared = getDeclaredMcpServers(config);
 
   const renderBody = () => {
@@ -187,11 +177,6 @@ export const AgentToolsPanel: FC<AgentToolsPanelProps> = ({
     if (!data?.servers.length) return <Muted>This agent declares no MCP servers.</Muted>;
     return (
       <>
-        {dataUpdatedAt ? (
-          <Text kind="body/regular/xs" className="text-secondary">
-            Checked at {new Date(dataUpdatedAt).toLocaleTimeString()}
-          </Text>
-        ) : null}
         {data.servers.map((server) => (
           <ServerSection key={server.name} server={server} />
         ))}
@@ -200,23 +185,8 @@ export const AgentToolsPanel: FC<AgentToolsPanelProps> = ({
   };
 
   return (
-    <ChatSidePane
-      title="Tools"
-      side="end"
-      className={className}
-      slotAction={
-        <Button
-          kind="tertiary"
-          size="small"
-          aria-label="Recheck MCP servers"
-          disabled={!runningDeployment || isFetching}
-          onClick={() => refetch()}
-        >
-          <Refresh size="14" className={isFetching ? 'animate-spin' : undefined} aria-hidden />
-        </Button>
-      }
-    >
-      {renderBody()}
-    </ChatSidePane>
+    <ChatInfoSection title="Tools">
+      <Stack gap="density-md">{renderBody()}</Stack>
+    </ChatInfoSection>
   );
 };

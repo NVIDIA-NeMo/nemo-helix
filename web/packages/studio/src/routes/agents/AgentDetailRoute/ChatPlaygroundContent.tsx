@@ -3,7 +3,7 @@
 
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Banner, Block } from '@nvidia/foundations-react-core';
+import { Banner, Block, Stack } from '@nvidia/foundations-react-core';
 import { useMcpStatus } from '@studio/api/agents/useMcpStatus';
 import { ModelChat } from '@studio/components/ModelChat';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -45,7 +45,7 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
   );
 
   return (
-    <div ref={chatAreaRef} className="mx-auto flex h-full min-h-0 w-full max-w-4xl flex-col">
+    <Stack ref={chatAreaRef} className="h-full min-h-0 w-full">
       {showBanner && (
         <Block padding="4" className="shrink-0">
           <NoHealthyDeploymentsBanner
@@ -82,6 +82,6 @@ export const ChatPlaygroundContent: FC<ChatPlaygroundContentProps> = ({
           describeError={describeChatError}
         />
       </Block>
-    </div>
+    </Stack>
   );
 };

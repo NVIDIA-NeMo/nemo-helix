@@ -88,7 +88,7 @@ describe('AgentToolsPanel', () => {
     expect(screen.getByText('iocs')).toBeInTheDocument();
     expect(screen.queryByText('email-security-triage-iocs')).not.toBeInTheDocument();
     expect(screen.getByText('Not started')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Recheck MCP servers' })).toBeDisabled();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
   it('shows runtime state, errors, stderr, and tool policy for a running deployment', () => {

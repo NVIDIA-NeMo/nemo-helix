@@ -6,7 +6,7 @@ import { AgentRuntimePanel } from '@studio/routes/agents/AgentDetailRoute/AgentR
 import { render, screen } from '@testing-library/react';
 
 describe('AgentRuntimePanel', () => {
-  it('summarizes the selected deployment and its models', () => {
+  it('details how the selected deployment runs without repeating the header', () => {
     render(
       <AgentRuntimePanel
         deployment={
@@ -22,17 +22,19 @@ describe('AgentRuntimePanel', () => {
       />
     );
 
-    expect(screen.getByRole('complementary', { name: 'Runtime' })).toBeInTheDocument();
-    expect(screen.getByText('weather-dep')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Details' })).toBeInTheDocument();
+    expect(screen.queryByText('weather-dep')).not.toBeInTheDocument();
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument();
     expect(screen.getByText('docker')).toBeInTheDocument();
     expect(screen.getByText('0123456')).toBeInTheDocument();
     expect(screen.getByText('Health check timed out after 120s.')).toBeInTheDocument();
     expect(screen.getByText('nvidia/nemotron')).toBeInTheDocument();
   });
 
-  it('says when no deployment is selected', () => {
-    render(<AgentRuntimePanel modelNames={[]} />);
+  it('still lists the models without a deployment', () => {
+    render(<AgentRuntimePanel modelNames={['nvidia/nemotron']} />);
 
-    expect(screen.getByText('No deployment selected.')).toBeInTheDocument();
+    expect(screen.getByText('nvidia/nemotron')).toBeInTheDocument();
+    expect(screen.queryByText('Mode')).not.toBeInTheDocument();
   });
 });

@@ -1,80 +1,60 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
+import { KVPair } from '@nemo/common/src/components/KVPair';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { ChatSidePane } from '@studio/routes/agents/AgentDetailRoute/ChatSidePane';
+import { Block, Stack, Text } from '@nvidia/foundations-react-core';
+import { ChatInfoSection } from '@studio/routes/agents/AgentDetailRoute/ChatInfoSection';
 import { shortRevision } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import type { FC, ReactNode } from 'react';
 
-const Field: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
-  <Stack gap="density-xs">
-    <Text kind="label/regular/sm" className="text-secondary">
-      {label}
-    </Text>
-    {children}
-  </Stack>
-);
-
-const Value: FC<{ children: ReactNode; mono?: boolean }> = ({ children, mono }) => (
-  <Text kind="body/regular/sm" className={mono ? 'font-mono break-all' : 'break-words'}>
-    {children}
-  </Text>
+const Row: FC<{ label: string; value: ReactNode }> = ({ label, value }) => (
+  <Block className="py-density-sm">
+    <KVPair label={label} value={value} size="narrow" orientation="horizontal" />
+  </Block>
 );
 
 interface AgentRuntimePanelProps {
+  /** The header's selection; its name and status already show in the header. */
   deployment?: AgentDeployment;
   modelNames: string[];
-  className?: string;
 }
 
-/** Summarizes the deployment the chat talks to: its status, how it runs, and its models. */
-export const AgentRuntimePanel: FC<AgentRuntimePanelProps> = ({
-  deployment,
-  modelNames,
-  className,
-}) => (
-  <ChatSidePane title="Runtime" side="start" className={className}>
-    {deployment ? (
-      <>
-        <Field label="Deployment">
-          <Value mono>{deployment.name}</Value>
-          <Flex>
-            <StatusBadge status={deployment.status} />
-          </Flex>
-        </Field>
-        {deployment.deployment_mode ? (
-          <Field label="Mode">
-            <Value>{deployment.deployment_mode}</Value>
-          </Field>
-        ) : null}
-        {deployment.spec_revision ? (
-          <Field label="Revision">
-            <Value mono>{shortRevision(deployment.spec_revision)}</Value>
-          </Field>
-        ) : null}
-        {deployment.error ? (
-          <Field label="Error">
+/** How the deployment the chat talks to runs, and the models behind it. */
+export const AgentRuntimePanel: FC<AgentRuntimePanelProps> = ({ deployment, modelNames }) => (
+  <ChatInfoSection title="Details">
+    <Stack className="divide-y divide-base">
+      <Row
+        label={modelNames.length > 1 ? 'Models' : 'Model'}
+        value={
+          modelNames.length > 0 ? (
+            <Stack gap="1">
+              {modelNames.map((model) => (
+                <span key={model} className="break-all">
+                  {model}
+                </span>
+              ))}
+            </Stack>
+          ) : null
+        }
+      />
+      {deployment?.deployment_mode ? <Row label="Mode" value={deployment.deployment_mode} /> : null}
+      {deployment?.spec_revision ? (
+        <Row
+          label="Revision"
+          value={<span className="font-mono">{shortRevision(deployment.spec_revision)}</span>}
+        />
+      ) : null}
+      {deployment?.error ? (
+        <Row
+          label="Error"
+          value={
             <Text kind="body/regular/sm" className="text-feedback-danger [overflow-wrap:anywhere]">
               {deployment.error}
             </Text>
-          </Field>
-        ) : null}
-      </>
-    ) : (
-      <Text kind="body/regular/sm" className="text-secondary">
-        No deployment selected.
-      </Text>
-    )}
-    {modelNames.length > 0 ? (
-      <Field label={modelNames.length === 1 ? 'Model' : 'Models'}>
-        {modelNames.map((model) => (
-          <Value key={model} mono>
-            {model}
-          </Value>
-        ))}
-      </Field>
-    ) : null}
-  </ChatSidePane>
+          }
+        />
+      ) : null}
+    </Stack>
+  </ChatInfoSection>
 );
