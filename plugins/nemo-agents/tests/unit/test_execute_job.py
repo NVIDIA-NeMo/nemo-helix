@@ -1213,11 +1213,10 @@ async def test_to_spec_rejects_local_provider_credentials_before_workdir_access(
     client = _sdk_with_files()
     environment = AgentEnvironmentInline(
         environment_spec=EnvironmentSpecInline(
-            secrets={"SERVICE_SECRET": "default/service-token"},
             settings={
                 "openshell": {
                     "providers": {
-                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}
+                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "default/service-token"}}
                     }
                 }
             },
@@ -1250,11 +1249,10 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
     entity_client.get.return_value = _agent()
     environment = AgentEnvironmentInline(
         environment_spec=EnvironmentSpecInline(
-            secrets={"SERVICE_SECRET": "default/service-token"},
             settings={
                 "openshell": {
                     "providers": {
-                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_SECRET"}}
+                        "service": {"profile": "service-read", "credentials": {"API_TOKEN": "default/service-token"}}
                     }
                 }
             },
@@ -1281,6 +1279,10 @@ async def test_provider_bindings_survive_remote_compilation_without_env_secrets(
         return
     authorize.assert_awaited_once()
     assert isinstance(spec, ExecuteAgentStepConfig)
+    assert spec.providers["service"].credentials == {"API_TOKEN": "default/service-token"}
+    assert authorize.await_args is not None
+    assert authorize.await_args.args[0] == spec.providers
+    assert authorize.await_args.kwargs["workspace"] == "default"
     assert spec.secrets == {}
     assert spec.stage_ethos_fileset == (ethos_status == 200)
     lookup.assert_awaited_once_with(workspace=spec.agent.workspace, name=f"{spec.agent.name}-ethos")

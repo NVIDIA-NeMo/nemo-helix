@@ -5,6 +5,7 @@
 
 from typing import Annotated
 
+from nemo_helix_plugin.refs import ENTITY_REF_PATTERN
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 CredentialSlot = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
@@ -12,18 +13,17 @@ ProviderBindingName = Annotated[str, StringConstraints(min_length=1, pattern=r"^
 
 
 class ProviderFulfillment(BaseModel):
-    """Select an injection profile and map its credential slots to environment secret aliases.
+    """Select an injection profile and map its credential slots to Helix secret references.
 
-    Agent environment resolution replaces the aliases with secret references for
-    the OpenShell backend. The backend checks profile approval and creator access.
+    The OpenShell backend checks profile approval and creator access.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     profile: ProviderBindingName = Field(description="Operator-approved credential injection profile identifier.")
-    credentials: dict[CredentialSlot, CredentialSlot] = Field(
+    credentials: dict[CredentialSlot, Annotated[str, StringConstraints(pattern=ENTITY_REF_PATTERN)]] = Field(
         min_length=1,
-        description="Profile credential slot -> key in this EnvironmentSpec's secrets map, not a secret value.",
+        description="Profile credential slot -> Helix secret reference (name or workspace/name), not a secret value.",
     )
 
 
@@ -32,16 +32,10 @@ class OpenShellEnvironmentSettings(BaseModel):
 
     providers: dict[ProviderBindingName, ProviderFulfillment] = Field(default_factory=dict)
 
-    def validate_secrets(self, secrets: dict[str, str]) -> None:
+    def validate_slots(self) -> None:
         slots: set[str] = set()
-        for name, provider in self.providers.items():
-            missing = sorted(set(provider.credentials.values()) - secrets.keys())
-            if missing:
-                raise ValueError(f"Provider {name!r} references unknown secret entries: {', '.join(missing)}.")
+        for provider in self.providers.values():
             duplicates = slots.intersection(provider.credentials)
             if duplicates:
                 raise ValueError(f"Providers declare duplicate credential slots: {', '.join(sorted(duplicates))}.")
             slots.update(provider.credentials)
-            for alias in provider.credentials.values():
-                if not secrets[alias].strip():
-                    raise ValueError(f"Provider {name!r} references empty secret entry {alias!r}.")

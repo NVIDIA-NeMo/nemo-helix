@@ -706,13 +706,12 @@ class TestCreateDeployment:
                 "name": "fabric-dep",
                 "environment": {
                     "environment_spec": {
-                        "secrets": {"SERVICE_SECRET": "default/service-token"},
                         "settings": {
                             "openshell": {
                                 "providers": {
                                     "service": {
                                         "profile": "service-read",
-                                        "credentials": {"API_TOKEN": "SERVICE_SECRET"},
+                                        "credentials": {"API_TOKEN": "default/service-token"},
                                     }
                                 }
                             }
