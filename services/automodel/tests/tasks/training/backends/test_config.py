@@ -6,7 +6,7 @@
 import json
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -17,6 +17,44 @@ import pytest
 sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
+
+
+def _hf_config(**overrides: object) -> SimpleNamespace:
+    """A checkpoint config whose nested language configs are None.
+
+    The expert walk reads these names. A MagicMock invents a new child for each
+    one and never repeats an id, so the walk allocates until the worker is killed.
+    """
+    config = SimpleNamespace(
+        architectures=None,
+        num_local_experts=None,
+        num_experts=None,
+        n_routed_experts=None,
+        text_config=None,
+        thinker_config=None,
+        language_config=None,
+        llm_config=None,
+    )
+    for name, value in overrides.items():
+        setattr(config, name, value)
+    return config
+
+
+class _AutoConfig:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return _hf_config()
+
+
+class _AutoTokenizer:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(vocab_size=None)
+
+
+class _TransformersStandIn(ModuleType):
+    AutoConfig = _AutoConfig
+    AutoTokenizer = _AutoTokenizer
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +75,7 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
     try:
         import transformers  # noqa: F401
     except ImportError:
-        monkeypatch.setitem(sys.modules, "transformers", MagicMock())
+        monkeypatch.setitem(sys.modules, "transformers", _TransformersStandIn("transformers"))
 
 
 from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
@@ -1019,10 +1057,20 @@ def _vision_training_config(
     return config
 
 
+def test_the_missing_transformers_stand_in_is_a_finite_config() -> None:
+    config = _AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B")
+
+    assert config.text_config is None
+    assert config.thinker_config is None
+    assert config.language_config is None
+    assert config.llm_config is None
+
+
 def _compile_vision(config: TrainingStepConfig, tmp_path: Path) -> dict[str, Any]:
     with (
         patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
         patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+        patch("transformers.AutoConfig.from_pretrained", return_value=_hf_config()),
     ):
         return compile_automodel_config(config, tmp_path / "work", MagicMock())
 
