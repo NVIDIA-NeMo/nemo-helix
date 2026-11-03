@@ -1266,6 +1266,7 @@ async def virtual_model_proxy(
                 resolved_model_provider_info.model_provider.name,
             )
 
+        ctx.provider_calls_back_as_caller = resolved_model_provider_info.model_provider.calls_back_as_caller
         if is_mock_provider(resolved_model_provider_info.model_provider.name):
             # Pass json_body explicitly so that middleware body mutations are visible to
             # the mock handler (consistent with the real-backend path).  body["model"] is

@@ -206,9 +206,9 @@ class TrialRecordingMiddleware(NemoInferenceMiddleware):
             return response
         call = _ObservedCall(ctx, credential, self._served_model_name)
         started_at = ctx.state(MIDDLEWARE_NAME).get(STARTED_AT_STATE_KEY) or datetime.now(UTC)
-        routing_span = ctx.state(MIDDLEWARE_NAME).get(ROUTING_SPAN_STATE_KEY)
-        if routing_span is None and self._calls_back_as_caller(ctx.original_request.body.get("model")):
-            routing_span = os.urandom(8).hex()
+        routing_span: str | None = None
+        if ctx.provider_calls_back_as_caller:
+            routing_span = ctx.state(MIDDLEWARE_NAME).get(ROUTING_SPAN_STATE_KEY) or os.urandom(8).hex()
         if isinstance(response.result, Mapping):
             call.observe(response.result)
             recorder.record(call.finished(started_at, cancelled=False, routing_span=routing_span))

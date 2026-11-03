@@ -377,6 +377,7 @@ async def test_a_call_to_a_router_that_calls_back_as_the_trial_is_a_routing_span
     forwarded = await middleware.process_request(
         ctx, InferenceRequest(body=dict(original.body), headers=dict(original.headers), path=original.path), config
     )
+    ctx.provider_calls_back_as_caller = True
     await middleware.process_response(
         ctx, InferenceResponse(result={"usage": {"prompt_tokens": 7}}, headers={}), config
     )
@@ -396,6 +397,7 @@ async def test_a_routed_call_recorded_only_on_its_response_is_still_a_routing_sp
     sink = Sink()
     middleware = _middleware(_reader(TOKEN), sink, routed=True)
     ctx = _ctx({"authorization": f"Bearer {TOKEN}"})
+    ctx.provider_calls_back_as_caller = True
 
     await middleware.process_response(
         ctx, InferenceResponse(result={"usage": {"prompt_tokens": 7}}, headers={}), TrialRecordingConfig()
@@ -407,6 +409,36 @@ async def test_a_routed_call_recorded_only_on_its_response_is_still_a_routing_sp
     attributes = _attributes(span)
     assert attributes[OPENINFERENCE_SPAN_KIND] == "CHAIN"
     assert GATEWAY_CALL_ATTRIBUTE not in attributes
+
+
+@pytest.mark.parametrize(
+    ("requested_router", "selected_router", "kind"),
+    [
+        pytest.param(False, True, "CHAIN", id="switched to a router"),
+        pytest.param(True, False, "LLM", id="switched away"),
+    ],
+)
+async def test_a_call_is_recorded_by_the_provider_routing_middleware_finally_selected(
+    requested_router: bool, selected_router: bool, kind: str
+) -> None:
+    """Recording listed before a middleware that switches the model sees the model before the switch."""
+    sink = Sink()
+    middleware = _middleware(_reader(TOKEN), sink, routed=requested_router)
+    ctx = _ctx({"authorization": f"Bearer {TOKEN}"})
+    config = TrialRecordingConfig()
+
+    await middleware.process_request(ctx, ctx.original_request, config)
+    ctx.provider_calls_back_as_caller = selected_router
+    await middleware.process_response(
+        ctx, InferenceResponse(result={"usage": {"prompt_tokens": 7}}, headers={}), config
+    )
+    assert middleware._recorder is not None
+    await middleware._recorder.flush()
+
+    [(_, span)] = _spans(sink.sent)
+    attributes = _attributes(span)
+    assert attributes.get(OPENINFERENCE_SPAN_KIND) == ("CHAIN" if selected_router else None)
+    assert (GATEWAY_CALL_ATTRIBUTE in attributes) is not selected_router
 
 
 async def test_a_call_to_an_ordinary_provider_keeps_the_callers_traceparent() -> None:
