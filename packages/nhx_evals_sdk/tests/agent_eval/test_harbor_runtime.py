@@ -38,6 +38,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     discover_harbor_tasks,
     scoped_harbor_agent_import,
 )
+from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import MAX_CONCURRENT_SETUPS_ENV
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
     HARBOR_SPLIT_MARKER,
     _rewards_mapping,
@@ -2048,11 +2049,13 @@ class _FakeJob(_HookableJob):
         return None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="no flock on Windows, so no setup slots")
 @pytest.mark.asyncio
 async def test_each_harbor_job_takes_setup_slots_for_its_trials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Local Docker setups that overlap time out, so every job the runtime creates registers the slot hooks."""
+    monkeypatch.setenv(MAX_CONCURRENT_SETUPS_ENV, "4")
     registered: list[str] = []
 
     class _RecordingJob(_FakeJob):
@@ -2072,6 +2075,23 @@ async def test_each_harbor_job_takes_setup_slots_for_its_trials(
     )
     await run_job()
     assert registered == ["environment-start", "agent-start"]
+
+
+@pytest.mark.asyncio
+async def test_a_bad_slot_count_refuses_the_run_before_force_rerun_deletes_its_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(MAX_CONCURRENT_SETUPS_ENV, "four")
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="kept")
+    result = tmp_path / "jobs" / "kept" / "result.json"
+    result.parent.mkdir(parents=True)
+    result.write_text("{}")
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="kept", force_rerun=True, env_templates={}
+    )
+    with pytest.raises(ValueError, match=MAX_CONCURRENT_SETUPS_ENV):
+        await run_job()
+    assert result.exists()
 
 
 @pytest.mark.asyncio

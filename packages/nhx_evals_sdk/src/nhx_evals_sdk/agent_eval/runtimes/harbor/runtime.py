@@ -1033,6 +1033,9 @@ def _build_native_job(
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        # Local Docker trials of every run of this user share these, so concurrent setups don't time out. Read
+        # before the force_rerun rmtree too: a bad slot count must refuse the run before it deletes anything.
+        setup_slots = SetupSlots(max_concurrent_setups(), default_slot_dir())
         if config.environment is not None:
             require_no_plaintext_credentials(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
@@ -1073,9 +1076,6 @@ def _build_native_job(
             }.items()
             if value is not None
         }
-
-        # Local Docker trials of every run on this machine share these, so concurrent setups don't time out.
-        setup_slots = SetupSlots(max_concurrent_setups(), default_slot_dir())
 
         async def _run_harbor_job(
             agent: Any, *, name: str, parent: Path, selected: Sequence[str] | None, environment: Any

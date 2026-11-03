@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Cap how many local Docker trials start and set up their agent at once, across every run on the machine.
+"""Cap how many local Docker trials start and set up their agent at once, across every run of a user on the machine.
 
 Each local Docker trial installs its agent from scratch, so setups that overlap slow each other down until
 they pass Harbor's setup timeout. A trial takes one of :data:`MAX_CONCURRENT_SETUPS_ENV` slots (default
@@ -9,7 +9,7 @@ they pass Harbor's setup timeout. A trial takes one of :data:`MAX_CONCURRENT_SET
 the trial ends. Waiting happens in Harbor's ``ENVIRONMENT_START`` hook, before Harbor starts the environment's
 or setup's timers, so a queued trial never spends its setup budget waiting.
 
-A slot is an exclusive ``flock`` on one of N files in :func:`default_slot_dir`. The kernel drops the lock when
+A slot is an exclusive ``flock`` on one of N files in :func:`default_slot_dir`, one directory per user. The kernel drops the lock when
 its process exits, so a crashed run never keeps a slot. A trial takes one when it runs in Harbor's Docker
 environment or an ``import_path`` environment built on it, such as the agent-layer environment; trials in any
 other environment (OpenSandbox, other providers) don't.
@@ -33,7 +33,7 @@ if sys.platform != "win32":  # Windows has no flock, so no cap there.
 logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_SETUPS_ENV = "NHX_HARBOR_MAX_CONCURRENT_SETUPS"
-"""Slots per machine; ``0`` turns the cap off. Every run on the machine should use the same value."""
+"""Slots per user on the machine; ``0`` turns the cap off. Every run of the user should use the same value."""
 DEFAULT_MAX_CONCURRENT_SETUPS = 4
 POLL_INTERVAL_SEC = 0.5
 
@@ -67,8 +67,14 @@ class _HookedJob(Protocol):
 
 
 def default_slot_dir() -> Path:
-    """Shared by every run of this user on the machine."""
-    return Path(tempfile.gettempdir()) / "nemo-harbor-setup-slots"
+    """Shared by every run of this user on the machine, whatever its ``TMPDIR``.
+
+    Per user: another user couldn't open lock files this one created. In ``/tmp``, not the temp directory: runs
+    with different ``TMPDIR`` values would each get their own slots.
+    """
+    if sys.platform == "win32":  # never used: Windows has no flock, so no cap
+        return Path(tempfile.gettempdir()) / "nemo-harbor-setup-slots"
+    return Path("/tmp") / f"nemo-harbor-setup-slots-{os.getuid()}"
 
 
 def max_concurrent_setups() -> int:
@@ -105,7 +111,7 @@ class SetupSlots:
     async def _acquire(self, event: _TrialHookEvent) -> None:
         if not _is_local_docker(event.config.environment) or event.trial_name in self._held:
             return
-        self._directory.mkdir(parents=True, exist_ok=True)
+        self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         waiting = False
         while (handle := self._try_lock()) is None:
             if not waiting:

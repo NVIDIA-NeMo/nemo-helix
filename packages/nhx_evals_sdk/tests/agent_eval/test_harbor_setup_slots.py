@@ -4,6 +4,7 @@
 """Machine-wide slots that cap how many local Docker trials start and set up their agent at once."""
 
 import asyncio
+import os
 import subprocess
 import sys
 import textwrap
@@ -17,6 +18,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import (
     DEFAULT_MAX_CONCURRENT_SETUPS,
     MAX_CONCURRENT_SETUPS_ENV,
     SetupSlots,
+    default_slot_dir,
     max_concurrent_setups,
 )
 
@@ -165,3 +167,9 @@ def test_a_bad_slot_count_is_refused(monkeypatch: pytest.MonkeyPatch, raw: str) 
     monkeypatch.setenv(MAX_CONCURRENT_SETUPS_ENV, raw)
     with pytest.raises(ValueError, match=MAX_CONCURRENT_SETUPS_ENV):
         max_concurrent_setups()
+
+
+def test_each_user_has_one_slot_directory_whatever_their_temp_directory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Another user can't open this one's lock files, and runs with different TMPDIRs must share slots."""
+    monkeypatch.setenv("TMPDIR", "/elsewhere")
+    assert default_slot_dir() == Path("/tmp") / f"nemo-harbor-setup-slots-{os.getuid()}"
