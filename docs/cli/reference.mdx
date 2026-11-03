@@ -9693,7 +9693,7 @@ nemo customization [OPTIONS] [COMMAND] [ARGS]...
 * `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
 * `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
 * `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment, for GRPO.
-* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--exist-ok`: Use whichever of the above already exists. A dataset fileset has its files deleted and the local source uploaded in their place; a model or environment is reused as it is.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 **Commands:**
@@ -9773,7 +9773,7 @@ nemo customization dataset prepare [OPTIONS] SOURCE
 * `--val-fraction <FLOAT>`: Share of rows for validation. 0 writes no validation.jsonl; training then holds out its own. [default: 0.1]
 * `--test-fraction <FLOAT>`: Share of rows held out for evaluation. Default: 0 for preference, else 0.1.
 * `--seed <INTEGER>`: Shuffle seed. The same seed gives the same split. [default: 42]
-* `--exist-ok`: Reuse the filesets if they already exist; their files are left as they are. The dataset and its -test fileset are reused together, never one beside a new other.
+* `--exist-ok`: If the filesets already exist, delete their files and upload these splits in their place, so the platform holds exactly the rows this run wrote.
 * `--workspace, -w`: Target workspace. Resolution order: (1) this `--workspace` flag; (2) NHX_WORKSPACE; (3) the active CLI context's workspace (`nemo config use-context`); (4) 'default'.
 
 **Column mapping:**
@@ -9876,7 +9876,7 @@ nemo customization automodel [OPTIONS] [COMMAND] [ARGS]...
 * `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
 * `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
 * `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
-* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--exist-ok`: Use whichever of the above already exists. A dataset fileset has its files deleted and the local source uploaded in their place; a model or environment is reused as it is.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 **Commands:**
@@ -9991,7 +9991,7 @@ nemo customization rl [OPTIONS] [COMMAND] [ARGS]...
 * `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
 * `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
 * `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
-* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--exist-ok`: Use whichever of the above already exists. A dataset fileset has its files deleted and the local source uploaded in their place; a model or environment is reused as it is.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 **Commands:**
@@ -10099,7 +10099,7 @@ nemo customization unsloth [OPTIONS] [COMMAND] [ARGS]...
 * `--upload-model SOURCE`: Local path to model weights, or a HuggingFace repo id. Creates the fileset and model entity.
 * `--upload-dataset SOURCE`: Local file or directory to upload as the dataset. Pass a directory to send several files, the same as 'nemo files upload'.
 * `--upload-environment SOURCE`: Local directory to upload as a NeMo Gym environment. GRPO only.
-* `--exist-ok`: Reuse whichever of the above already exists. Its files are left as they are.
+* `--exist-ok`: Use whichever of the above already exists. A dataset fileset has its files deleted and the local source uploaded in their place; a model or environment is reused as it is.
 * `--hf-token-secret`: Platform secret holding a HuggingFace token, for a gated or private repo.
 
 **Commands:**

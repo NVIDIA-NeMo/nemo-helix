@@ -139,7 +139,10 @@ def _add_upload_callback(app: typer.Typer) -> None:
         exist_ok: bool = typer.Option(
             False,
             "--exist-ok",
-            help="Reuse whichever of the above already exists. Its files are left as they are.",
+            help=(
+                "Use whichever of the above already exists. A dataset fileset has its files deleted and the "
+                "local source uploaded in their place; a model or environment is reused as it is."
+            ),
             rich_help_panel=_UPLOAD_PANEL,
         ),
         workspace: WorkspaceOption = None,

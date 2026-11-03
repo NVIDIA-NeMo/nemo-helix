@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -37,12 +38,14 @@ class _Response:
 
 
 class _FakeFiles:
-    """Records calls; `existing` names the filesets the platform already has."""
+    """Records calls; `existing` names the filesets the platform already has, and `stored` their files."""
 
     workspace = "default"
 
-    def __init__(self, existing: set[str] | None = None) -> None:
+    def __init__(self, existing: set[str] | None = None, stored: dict[str, list[str]] | None = None) -> None:
         self.existing = existing or set()
+        self.stored = stored or {}
+        self.deleted: list[tuple[str, str]] = []
         self.created: list[dict[str, Any]] = []
         self.uploaded: list[tuple[str, str]] = []
         #: Per uploaded path: the blocks received, and the headers the call carried.
@@ -62,6 +65,14 @@ class _FakeFiles:
     def create_fileset(self, *, workspace: str, body: Any, exist_ok: bool) -> _Response:
         self.created.append({"name": body.name, "purpose": body.purpose, "storage": body.storage})
         return _Response({"name": body.name})
+
+    def list_files(self, *, workspace: str, name: str) -> SimpleNamespace:
+        listing = SimpleNamespace(data=[SimpleNamespace(path=f"/{path}") for path in self.stored.get(name, [])])
+        return SimpleNamespace(data=lambda: listing)
+
+    def delete_file(self, *, workspace: str, name: str, path: str) -> _Response:
+        self.deleted.append((name, path))
+        return _Response({"path": path})
 
     def upload_file(self, *, workspace: str, name: str, path: str, content: Iterable[bytes]) -> _Response:
         assert not isinstance(content, bytes), "file content must be streamed, not read into memory"
@@ -404,25 +415,18 @@ class TestExistOk:
         with pytest.raises(UploadError, match=r"Fileset default/train already exists"):
             _run(files=files, models=models, dataset_source=str(train))
 
-    def test_existing_fileset_is_reused_with_exist_ok(self, tmp_path: Path) -> None:
+    def test_an_existing_dataset_fileset_has_its_files_replaced_with_exist_ok(self, tmp_path: Path) -> None:
+        """The remote dataset then holds exactly the local source: no old file stays behind."""
         train = tmp_path / "train.jsonl"
         train.write_text("{}\n")
-        files, models = _FakeFiles(existing={"train"}), _FakeModels()
-        report = _run(files=files, models=models, dataset_source=str(train), exist_ok=True)
+        files = _FakeFiles(existing={"train"}, stored={"train": ["train.jsonl", "validation.jsonl"]})
+        report = _run(files=files, models=_FakeModels(), dataset_source=str(train), exist_ok=True)
 
         assert report.dataset_ref == "default/train"
-        assert report.reused == ["default/train"]
-        assert report.created == []
-
-    def test_reused_fileset_does_not_re_upload_files(self, tmp_path: Path) -> None:
-        """Matches the Files service: --exist-ok reuses the fileset and leaves its files."""
-        train = tmp_path / "train.jsonl"
-        train.write_text("{}\n")
-        files, models = _FakeFiles(existing={"train"}), _FakeModels()
-        report = _run(files=files, models=models, dataset_source=str(train), exist_ok=True)
-
-        assert files.uploaded == []
-        assert report.reused_files_untouched
+        assert (report.replaced, report.reused, report.created) == (["default/train"], [], [])
+        assert files.deleted == [("train", "train.jsonl"), ("train", "validation.jsonl")]
+        assert files.uploaded == [("train", "train.jsonl")]
+        assert not report.reused_files_untouched
 
     def test_exist_ok_applies_to_both_when_both_are_given(self, tmp_path: Path) -> None:
         train = tmp_path / "train.jsonl"
@@ -436,8 +440,7 @@ class TestExistOk:
             exist_ok=True,
         )
 
-        assert sorted(report.reused) == ["default/qwen3-1-7b", "default/train"]
-        assert report.created == []
+        assert (report.reused, report.replaced, report.created) == (["default/qwen3-1-7b"], ["default/train"], [])
 
 
 class TestEnvironmentUpload:
@@ -545,8 +548,8 @@ class TestCreateDatasetFileset:
         assert files.created[0]["purpose"].value == "dataset"
         assert files.uploaded == [("sft-data", "train.jsonl"), ("sft-data", "validation.jsonl")]
 
-    def test_an_existing_fileset_fails_without_exist_ok_and_is_left_alone_with_it(self, tmp_path: Path) -> None:
-        files = _FakeFiles(existing={"sft-data"})
+    def test_an_existing_fileset_fails_without_exist_ok_and_is_replaced_with_it(self, tmp_path: Path) -> None:
+        files = _FakeFiles(existing={"sft-data"}, stored={"sft-data": ["train.jsonl", "old.jsonl"]})
 
         with pytest.raises(UploadError, match="already exists"):
             create_dataset_fileset(
@@ -562,8 +565,9 @@ class TestCreateDatasetFileset:
             files, name="sft-data", source=self._splits(tmp_path), workspace="ws", exist_ok=True, report=report
         )
 
-        assert report.reused == ["ws/sft-data"]
-        assert files.uploaded == []
+        assert report.replaced == ["ws/sft-data"]
+        assert files.deleted == [("sft-data", "train.jsonl"), ("sft-data", "old.jsonl")]
+        assert files.uploaded == [("sft-data", "train.jsonl"), ("sft-data", "validation.jsonl")]
 
 
 class TestExistingFilesets:

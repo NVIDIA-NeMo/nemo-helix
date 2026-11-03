@@ -174,8 +174,8 @@ def add_dataset_commands(app: typer.Typer) -> None:
             False,
             "--exist-ok",
             help=(
-                "Reuse the filesets if they already exist; their files are left as they are. The dataset and its "
-                "-test fileset are reused together, never one beside a new other."
+                "If the filesets already exist, delete their files and upload these splits in their place, so "
+                "the platform holds exactly the rows this run wrote."
             ),
         ),
         workspace: WorkspaceOption = None,
@@ -289,36 +289,23 @@ def _prepare(
     result["columns"] = dict(mapping.columns)
     result["rows"] = {"train": len(splits.train), "validation": len(splits.validation), "test": len(splits.test)}
     result["dropped"] = dropped
-    # A reused fileset keeps its files, so format, columns and rows describe these rows, not its files.
-    result["reused"] = list(report.reused)
+    result["replaced"] = list(report.replaced)
     if dropped:
         typer.echo(f"Dropped {dropped} rows with an empty required field.", err=True)
-    if report.reused:
-        typer.echo(
-            f"Reused {', '.join(report.reused)} as it is: its files were not replaced with these rows.", err=True
-        )
+    if report.replaced:
+        typer.echo(f"Replaced the files of {', '.join(report.replaced)} with these rows.", err=True)
     return result
 
 
 def _check_filesets(files: FilesClient, names: list[str], *, workspace: str, exist_ok: bool) -> None:
-    """Check the dataset and test filesets before anything is uploaded.
+    """Without ``--exist-ok``, refuse any that exists before anything is uploaded.
 
-    Without ``--exist-ok``, any that exists is refused, so a taken test fileset does not leave the
-    dataset uploaded on its own. With it, the pair is reused together or created together: reusing
-    one beside a new other would pair splits from different runs, so test rows could be trained on.
+    So a taken test fileset does not leave the dataset uploaded on its own. With ``--exist-ok``,
+    every one that exists has its files replaced with this run's splits.
     """
-    existing = existing_filesets(files, names=names, workspace=workspace)
-    if not existing:
+    if exist_ok or not (existing := existing_filesets(files, names=names, workspace=workspace)):
         return
-    taken = " and ".join(existing)
-    if not exist_ok:
-        raise UploadError(
-            f"{taken} already exist{'s' if len(existing) == 1 else ''}. Pass --exist-ok to reuse what exists as it "
-            "is, or delete it if you want it rebuilt from these rows."
-        )
-    if len(existing) < len(names):
-        missing = next(f"{workspace}/{name}" for name in names if f"{workspace}/{name}" not in existing)
-        raise UploadError(
-            f"{taken} exists but {missing} does not. --exist-ok reuses the dataset and its test split together, "
-            "so their rows come from one run. Delete it, or prepare under a new --name."
-        )
+    raise UploadError(
+        f"{' and '.join(existing)} already exist{'s' if len(existing) == 1 else ''}. Pass --exist-ok to replace "
+        "their files with these rows."
+    )

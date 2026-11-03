@@ -16,10 +16,10 @@ Neither needs to know the backend. Files keep their local names, so a fileset
 holds exactly what was on disk, and only ``--job-json`` cares where the reference
 lands in the job JSON.
 
-``--exist-ok`` follows the Files service: an existing fileset is reused **and its
-files are left alone**. Editing a local dataset and re-running with
-``--exist-ok`` therefore trains on the old contents. Callers are told this
-explicitly, because silently training on stale data is worse than a slow upload.
+With ``--exist-ok``, an existing dataset fileset has its files deleted and the
+local source uploaded in their place, so the job trains on the data on disk and
+no old file stays behind. An existing model or environment is reused **and its
+files are left alone**: weights are large, and callers are told it was reused.
 """
 
 from __future__ import annotations
@@ -57,6 +57,10 @@ class FilesUploadClient(Protocol):
 
     def upload_file(self, *, workspace: str, name: str, path: str, content: Iterable[bytes]) -> Any: ...
 
+    def list_files(self, *, workspace: str, name: str) -> Any: ...
+
+    def delete_file(self, *, workspace: str, name: str, path: str) -> Any: ...
+
     def with_headers(self, headers: Mapping[str, str]) -> FilesUploadClient: ...
 
     @property
@@ -87,13 +91,15 @@ class SpecRefs:
 
 @dataclass(slots=True)
 class UploadReport:
-    """What was created and what was reused, so the caller can report it."""
+    """What was created, replaced and reused, so the caller can report it."""
 
     model_ref: str | None = None
     dataset_ref: str | None = None
     environment_ref: str | None = None
     created: list[str] = field(default_factory=list)
     reused: list[str] = field(default_factory=list)
+    #: Dataset filesets that existed, emptied and uploaded again from the local source.
+    replaced: list[str] = field(default_factory=list)
 
     @property
     def reused_files_untouched(self) -> bool:
@@ -179,6 +185,7 @@ def create_resources(
                 "A dataset is uploaded from a local file or directory; convert a "
                 "HuggingFace dataset to the backend's format first."
             ),
+            replace=True,
         )
     if environment_source is not None:
         report.environment_ref = _create_fileset_from_source(
@@ -301,10 +308,16 @@ def create_dataset_fileset(
 ) -> str:
     """Create the dataset fileset *name* from a local file or directory, and return its reference.
 
-    The same create, reuse and upload rules as ``--upload-dataset``, for a caller that picks the name.
+    The same create, replace and upload rules as ``--upload-dataset``, for a caller that picks the name.
     """
     if _create_fileset(
-        files, name=name, purpose=FilesetPurpose.DATASET, workspace=workspace, exist_ok=exist_ok, report=report
+        files,
+        name=name,
+        purpose=FilesetPurpose.DATASET,
+        workspace=workspace,
+        exist_ok=exist_ok,
+        report=report,
+        replace=True,
     ):
         _upload_source(files, name=name, workspace=workspace, source=source)
     return f"{workspace}/{name}"
@@ -325,8 +338,12 @@ def _create_fileset_from_source(
     exist_ok: bool,
     report: UploadReport,
     missing_hint: str,
+    replace: bool = False,
 ) -> str:
-    """Upload one local file or directory into a new fileset, and return its reference."""
+    """Upload one local file or directory into a new fileset, and return its reference.
+
+    With *replace*, an existing fileset (``--exist-ok``) is emptied and uploaded again, not reused.
+    """
     path = Path(source)
     if not path.exists():
         raise UploadError(f"Source {source!r} does not exist. {missing_hint}")
@@ -339,6 +356,7 @@ def _create_fileset_from_source(
         workspace=workspace,
         exist_ok=exist_ok,
         report=report,
+        replace=replace,
     )
     if created:
         _upload_source(files, name=name, workspace=workspace, source=path)
@@ -354,14 +372,25 @@ def _create_fileset(
     exist_ok: bool,
     report: UploadReport,
     storage: HuggingfaceStorageConfig | None = None,
+    replace: bool = False,
 ) -> bool:
-    """Create the fileset. Return True when it was created, False when reused."""
+    """Create the fileset. Return True when it is ready for the upload, False when reused as it is.
+
+    With *replace*, ``--exist-ok`` empties an existing fileset so the upload replaces its files:
+    reusing it would leave the remote data different from the local source the caller asked for.
+    """
     if _fileset_exists(files, name=name, workspace=workspace):
         if not exist_ok:
-            raise UploadError(
-                f"Fileset {workspace}/{name} already exists. Pass --exist-ok to reuse it as it is, "
-                "or delete it if you want it rebuilt from the local source."
+            action = (
+                "replace its files with" if replace else "reuse it as it is, or delete it if you want it rebuilt from"
             )
+            raise UploadError(
+                f"Fileset {workspace}/{name} already exists. Pass --exist-ok to {action} the local source."
+            )
+        if replace:
+            _delete_files(files, name=name, workspace=workspace)
+            report.replaced.append(f"{workspace}/{name}")
+            return True
         report.reused.append(f"{workspace}/{name}")
         return False
 
@@ -369,6 +398,12 @@ def _create_fileset(
     files.create_fileset(workspace=workspace, body=body, exist_ok=exist_ok)
     report.created.append(f"{workspace}/{name}")
     return True
+
+
+def _delete_files(files: FilesUploadClient, *, name: str, workspace: str) -> None:
+    """Delete every file in the fileset, so files the local source no longer has do not stay behind."""
+    for file in files.list_files(workspace=workspace, name=name).data().data:
+        files.delete_file(workspace=workspace, name=name, path=file.path.lstrip("/"))
 
 
 def _fileset_exists(files: FilesUploadClient, *, name: str, workspace: str) -> bool:

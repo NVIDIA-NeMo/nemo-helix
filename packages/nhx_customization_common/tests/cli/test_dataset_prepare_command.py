@@ -46,7 +46,7 @@ def _run(
 ) -> tuple[Result, dict[str, dict[str, list[dict[str, Any]]]]]:
     """Run the command; return its result and, per fileset uploaded, each file's rows.
 
-    *existing* names the filesets the platform already has: they are reused, not uploaded to.
+    *existing* names the filesets the platform already has: with --exist-ok their files are replaced.
     """
     uploaded: dict[str, dict[str, list[dict[str, Any]]]] = {}
 
@@ -55,11 +55,10 @@ def _run(
 
     def create(files: object, *, name: str, source: Path, workspace: str, report: Any, **_: object) -> str:
         if name in existing:
-            report.reused.append(f"{workspace}/{name}")
-        else:
-            uploaded[name] = {
-                path.name: [json.loads(line) for line in path.read_text().splitlines()] for path in source.iterdir()
-            }
+            report.replaced.append(f"{workspace}/{name}")
+        uploaded[name] = {
+            path.name: [json.loads(line) for line in path.read_text().splitlines()] for path in source.iterdir()
+        }
         return f"{workspace}/{name}"
 
     with (
@@ -85,7 +84,7 @@ def test_local_parquet_instruction_rows_become_chat_splits(tmp_path: Path) -> No
         "columns": {"prompt": "instruction", "response": "response"},
         "rows": {"train": 16, "validation": 2, "test": 2},
         "dropped": 0,
-        "reused": [],
+        "replaced": [],
     }
     assert report["trained_by"] == [
         "automodel, training.training_type sft or distillation",
@@ -215,38 +214,26 @@ def test_a_taken_test_fileset_fails_before_the_dataset_is_uploaded(tmp_path: Pat
     assert uploaded == {}
 
 
-def test_exist_ok_reuses_the_dataset_and_its_test_split_together(tmp_path: Path) -> None:
-    source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
-    both = frozenset({"sft-data", "sft-data-test"})
-
-    result, uploaded = _run(str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=both)
-
-    assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["reused"] == ["default/sft-data", "default/sft-data-test"]
-    assert uploaded == {}
-
-
-@pytest.mark.parametrize("taken", ["sft-data", "sft-data-test"])
-def test_exist_ok_refuses_to_reuse_one_of_the_pair_beside_a_new_other(tmp_path: Path, taken: str) -> None:
-    """Splits from two runs could overlap, so test rows could be trained on."""
+def test_exist_ok_replaces_the_files_of_whichever_filesets_exist(tmp_path: Path) -> None:
     source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
 
     result, uploaded = _run(
-        str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=frozenset({taken})
+        str(source), "--name", "sft-data", "--format", "chat", "--exist-ok", existing=frozenset({"sft-data"})
     )
 
-    assert result.exit_code == 1
-    assert f"default/{taken} exists but" in result.output
-    assert uploaded == {}
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["replaced"] == ["default/sft-data"]
+    assert sorted(uploaded) == ["sft-data", "sft-data-test"]
+    assert "Replaced the files of default/sft-data with these rows." in result.stderr
 
 
-def test_dropped_and_reused_are_reported_even_when_empty(tmp_path: Path) -> None:
+def test_dropped_and_replaced_are_reported_even_when_empty(tmp_path: Path) -> None:
     source = _parquet(tmp_path / "data.parquet", _INSTRUCTION)
 
     result, _ = _run(str(source), "--name", "sft-data", "--format", "chat")
 
     report = json.loads(result.stdout)
-    assert (report["dropped"], report["reused"]) == (0, [])
+    assert (report["dropped"], report["replaced"]) == (0, [])
 
 
 def test_a_fileset_is_downloaded_into_a_directory(tmp_path: Path) -> None:
