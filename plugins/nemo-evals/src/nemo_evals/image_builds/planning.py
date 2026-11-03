@@ -289,6 +289,8 @@ def dockerfile_pin(dockerfile: str) -> str | None:
 
 
 def _dockerfile_image(image_type: str, archive: TaskArchive, context_path: str, dockerfile: str) -> BuildImage:
+    # One spelling per file (`./Dockerfile` is `Dockerfile`): the Builder build is keyed by it.
+    dockerfile = posixpath.normpath(dockerfile)
     path = posixpath.normpath(posixpath.join(context_path, dockerfile))
     if not archive.has(path):
         raise ImagePlanError("dockerfile_missing", f"{image_type} has no {context_path}/{dockerfile}")

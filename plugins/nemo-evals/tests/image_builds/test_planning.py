@@ -193,6 +193,8 @@ def test_a_compose_file_that_was_not_parsed_is_refused() -> None:
     [
         ("{dockerfile: Dockerfile.agent}", "sort-task/environment", "Dockerfile.agent"),
         ("{context: ., dockerfile: Dockerfile.agent}", "sort-task/environment", "Dockerfile.agent"),
+        # One spelling per file: the Builder build is keyed by it.
+        ("{context: ., dockerfile: ./Dockerfile.agent}", "sort-task/environment", "Dockerfile.agent"),
         ("./app", "sort-task/environment/app", "Dockerfile"),
     ],
 )
