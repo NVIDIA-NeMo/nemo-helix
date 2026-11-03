@@ -38,6 +38,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agent_hardener_plugin.project_resolver import inspect_project
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -383,6 +384,7 @@ def build_manifest_dict(
     relay_artifacts: str | None = None,
     harness: str | None = None,
     env: dict[str, str] | None = None,
+    binaries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the ``agent-hardener.yaml`` mapping (mirrors ``agent_hardener.manifest.build_manifest``).
 
@@ -398,19 +400,11 @@ def build_manifest_dict(
         "harness": harness,
         "dockerfile": DOCKERFILE_FILENAME,
         "start_command": fabric_start_command(port),
-        "binaries": list(VICTIM_BINARIES),
+        "binaries": list(VICTIM_BINARIES) if binaries is None else binaries,
         "port": port,
         "secrets": secrets,
         "secrets_file": secrets_file,
     }
-    if harness == "hermes":
-        # OpenShell drops image ENV and matches egress against resolved executables.
-        env = {
-            "ADAPTER_PYTHON": "/opt/hermes-venv/bin/python",
-            "HERMES_NEMO_RELAY_PLUGINS_TOML": "/etc/nemo-relay/plugins.toml",
-            **(env or {}),
-        }
-        agent["binaries"].extend(["/opt/hermes-venv/bin/**", "/opt/uv/python/**/bin/python*"])
     if env:
         agent["env"] = env
     if relay_artifacts:
@@ -661,6 +655,7 @@ def resolve_agent_to_manifest(
     port: int | None = None,
     secrets: list[str] | None = None,
     backends: list[dict[str, Any]] | None = None,
+    env: dict[str, str] | None = None,
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
@@ -720,6 +715,16 @@ def resolve_agent_to_manifest(
         dockerfile_override=shipped_dockerfile(client, name, workspace),
         bundle=lambda destination: download_agent_bundle(client, name, workspace, destination),
     )
+    image = inspect_project(
+        project_path,
+        dockerfile=DOCKERFILE_FILENAME,
+        env_overrides={**derive_agent_env(agent_config), **(env or {})},
+    )
+    if "binaries" in image["unresolved"]:
+        raise AgentResolutionError(
+            "Cannot determine the adapter's resolved Python path. Declare an absolute UV_PYTHON_INSTALL_DIR "
+            "in the Dockerfile, or use --project-dir with --binary naming the resolved interpreter."
+        )
     # The deployment's secret-backed env vars are victim secrets too, even if the config never names them.
     secrets = list(dict.fromkeys([*(secrets or derive_secret_names(agent_config)), *deployed_secret_refs]))
 
@@ -734,7 +739,8 @@ def resolve_agent_to_manifest(
         egress=egress,
         backends=[*([gw_backend] if gw_backend else []), *(backends or [])],
         harness=harness,
-        env=derive_agent_env(agent_config),
+        env=image["env"],
+        binaries=image["binaries"],
     )
 
     return ResolvedManifest(

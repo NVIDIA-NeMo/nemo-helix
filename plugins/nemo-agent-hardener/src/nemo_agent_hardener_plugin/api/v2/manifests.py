@@ -345,6 +345,7 @@ async def _resolve_and_store_scaffold(
     port: int | None,
     secrets: list[str] | None,
     backends: list[dict[str, Any]],
+    env: dict[str, str] | None = None,
 ) -> tuple[ResolvedManifest, str]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
@@ -369,6 +370,7 @@ async def _resolve_and_store_scaffold(
                 port=port,
                 secrets=secrets,
                 backends=backends,
+                env=env,
             )
             return resolved, upload_project_dir(client, resolved.project_dir, workspace=workspace)
 
@@ -394,6 +396,7 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         port=body.port,
         secrets=secret_names,
         backends=_backends_or_422(body.backends),
+        env=body.env,
     )
 
     manifest = AgentHardenerManifest.from_agent_resolution(
@@ -413,7 +416,6 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         declared_secrets=secret_names or [],
         deployed_secret_refs=resolved.deployed_secret_refs,
     )
-    # resolve_agent_to_manifest has no `env` parameter, so it is absent from the YAML it produced.
     manifest.manifest_yaml = _yaml_with_agent_settings(manifest.manifest_yaml, manifest)
     return manifest
 
@@ -434,6 +436,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
             return inspect_project(
                 download_and_extract_project(client, body.project_fileset or "", Path(tmp)),
                 dockerfile=body.dockerfile or None,
+                env_overrides=body.env,
             )
 
     try:
@@ -473,7 +476,7 @@ async def _build_project_manifest(workspace: str, body: ManifestInit) -> AgentHa
         backends=backends,
         harness=body.harness,
         relay_integration_confirmed=body.relay_integration_confirmed,
-        env=body.env or derived.get("env", {}),
+        env=derived.get("env", {}),
     )
     manifest = AgentHardenerManifest.from_project_upload(
         name=body.name,
@@ -571,6 +574,7 @@ async def refresh_manifest(
         port=existing.port or None,
         secrets=kept_secrets or None,
         backends=_stored_user_backends(existing.manifest_yaml),
+        env=existing.env,
     )
     stale = existing.agent_fileset
 

@@ -179,8 +179,9 @@ def test_telemetry_dir_complaint_names_only_a_path_agent_hardener_will_not_read(
 
 
 # --------------------------------------------------------------------------- resolve_agent_to_manifest
-def test_resolve_builds_a_runnable_agent_package(tmp_path):
-    agent = _agent()
+@pytest.mark.parametrize("harness", ["deepagents", "hermes"])
+def test_resolve_builds_a_runnable_agent_package(tmp_path, harness):
+    agent = _agent(default_harness=harness, harnesses={harness: {"kind": harness}})
     client = _client(
         agent,
         deployments=[{"agent": "calc", "status": "running", "port": 9123}],
@@ -213,6 +214,9 @@ def test_resolve_builds_a_runnable_agent_package(tmp_path):
     dockerfile = (resolved.project_dir / "Dockerfile").read_text(encoding="utf-8")
     assert "nemo_agents_plugin.fabric.server" in dockerfile
     assert "sandbox" in dockerfile  # the openshell profile's non-root user
+    if harness == "hermes":
+        assert agent_block["env"]["ADAPTER_PYTHON"] == "/opt/hermes-venv/bin/python"
+        assert "/opt/uv/python/**/bin/python*" in agent_block["binaries"]
 
 
 def test_resolve_declares_gateway_backend_for_local_platform(tmp_path):
@@ -394,13 +398,39 @@ def test_the_manifest_carries_the_harness() -> None:
     )
 
     assert manifest["agent"]["harness"] == "hermes"
-    assert manifest["agent"]["env"] == {
-        "ADAPTER_PYTHON": "/opt/hermes-venv/bin/python",
-        "HERMES_NEMO_RELAY_PLUGINS_TOML": "/etc/nemo-relay/plugins.toml",
-        "EXAMPLE": "value",
-    }
-    assert "/opt/hermes-venv/bin/**" in manifest["agent"]["binaries"]
-    assert "/opt/uv/python/**/bin/python*" in manifest["agent"]["binaries"]
+    assert manifest["agent"]["env"] == {"EXAMPLE": "value"}
+
+
+@pytest.mark.parametrize("install_dir", ["/custom/python", None])
+def test_registered_hermes_uses_image_paths_and_agent_overrides(tmp_path, monkeypatch, install_dir):
+    dockerfile = (
+        "FROM python:3.12-slim\n"
+        "ENV ADAPTER_PYTHON=/image/hermes/bin/python\n"
+        "ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/custom/plugins.toml\n"
+    )
+    if install_dir:
+        dockerfile += f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n"
+    _fake_ethos(monkeypatch, {"Dockerfile": dockerfile})
+    agent = _agent(
+        default_harness="hermes",
+        harnesses={"hermes": {"kind": "hermes"}},
+        environment={"env": {"ADAPTER_PYTHON": "/custom/hermes/bin/python"}},
+    )
+    client = _client(agent)
+    if install_dir is None:
+        with pytest.raises(AgentResolutionError, match="UV_PYTHON_INSTALL_DIR"):
+            resolve_agent_to_manifest(
+                "calc", client=client, base_url="http://host:8080", default_workspace="default", manifest_dir=tmp_path
+            )
+        return
+    victim = resolve_agent_to_manifest(
+        "calc", client=client, base_url="http://host:8080", default_workspace="default", manifest_dir=tmp_path
+    ).manifest["agent"]
+    assert victim["env"]["ADAPTER_PYTHON"] == "/custom/hermes/bin/python"
+    assert victim["env"]["HERMES_NEMO_RELAY_PLUGINS_TOML"] == "/custom/plugins.toml"
+    assert "/custom/hermes/bin/python" in victim["binaries"]
+    assert "/custom/python/**/bin/python*" in victim["binaries"]
+    assert not any(path.startswith(("/image/", "/opt/")) for path in victim["binaries"])
 
 
 def test_declared_env_reaches_the_manifest() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from nemo_agent_hardener_plugin.project_resolver import (
     derive_binaries,
     derive_port,
@@ -82,14 +83,22 @@ def test_binaries_include_the_system_interpreter_the_venv_resolves_to():
     assert "/usr/local/bin/python*" in binaries
 
 
-def test_hermes_project_preserves_adapter_environment_and_egress(tmp_path: Path):
+@pytest.mark.parametrize("install_dir", ["/custom/python", None])
+def test_hermes_project_preserves_adapter_environment_and_egress(tmp_path: Path, install_dir):
     project = _project(tmp_path)
     with (project / "Dockerfile").open("a") as dockerfile:
-        dockerfile.write("\nENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python\nENV UV_PYTHON_INSTALL_DIR=/opt/uv/python\n")
-    derived = inspect_project(project)
-    assert derived["env"]["ADAPTER_PYTHON"] == "/opt/hermes-venv/bin/python"
-    assert "/opt/hermes-venv/bin/python" in derived["binaries"]
-    assert "/opt/uv/python/**/bin/python*" in derived["binaries"]
+        dockerfile.write("\nENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python\n")
+        if install_dir:
+            dockerfile.write(f"ENV UV_PYTHON_INSTALL_DIR={install_dir}\n")
+    derived = inspect_project(project, env_overrides={"ADAPTER_PYTHON": "/custom/hermes/bin/python"})
+    assert derived["env"]["ADAPTER_PYTHON"] == "/custom/hermes/bin/python"
+    if install_dir:
+        assert "/custom/hermes/bin/python" in derived["binaries"]
+        assert "/custom/python/**/bin/python*" in derived["binaries"]
+    else:
+        assert not derived["binaries"]
+        assert "binaries" in derived["unresolved"]
+        assert any("--binary" in warning for warning in derived["warnings"])
 
 
 def test_port_prefers_env_over_expose():
