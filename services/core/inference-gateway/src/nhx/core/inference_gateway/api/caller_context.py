@@ -127,6 +127,20 @@ def caller_headers(
     return acting
 
 
+def refuse_router_keys(headers: Mapping[str, str], router_keys: Mapping[str, str | None]) -> None:
+    """Refuse a call that reaches a handler still carrying a router's key: its caller was never put in place.
+
+    Raises:
+        HTTPException: 403 for a call made with a router's key.
+    """
+    credential = _credential({name.lower(): value for name, value in headers.items()})
+    if credential is None:
+        return
+    router = next((router for router, key in router_keys.items() if _same_secret(credential, key)), None)
+    if router is not None:
+        raise _refusal(router, "the gateway didn't put the caller in its place")
+
+
 def context_headers(provider: ModelProvider, headers: Mapping[str, str], seal: CallerContextSeal) -> dict[str, str]:
     """The caller context to send ``provider`` with the call ``headers`` describe; none for an ordinary provider."""
     if not provider.calls_back_as_caller:

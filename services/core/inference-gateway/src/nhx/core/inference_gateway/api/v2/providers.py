@@ -13,7 +13,7 @@ from nhx.core.inference_gateway.api.authz import (
     PROVIDER_READ_PERMISSION,
     enforce_delegated_workspace_access,
 )
-from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal
+from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal, refuse_router_keys
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -144,6 +144,7 @@ async def provider_proxy(
     if is_mock_request(request):
         return await handle_mock_request(request=request, trailing_uri=trailing_uri)
 
+    refuse_router_keys(request.headers, model_cache.router_keys())
     await execute_access_checks(
         registry.plugins,
         InferenceAccessRequest(

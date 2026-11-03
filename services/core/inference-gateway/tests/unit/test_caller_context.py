@@ -10,9 +10,10 @@ from collections.abc import Iterator
 
 import httpx
 import pytest
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from multidict import CIMultiDict
+from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.core.inference_gateway.api import caller_context
 from nhx.core.inference_gateway.api.caller_context import (
     CALLER_CONTEXT_HEADER,
@@ -22,7 +23,9 @@ from nhx.core.inference_gateway.api.caller_context import (
     caller_headers,
 )
 from nhx.core.inference_gateway.api.caller_context_middleware import GATEWAY_PATH_PREFIX, CallerContextMiddleware
+from nhx.core.inference_gateway.api.dependencies import global_virtual_model_cache
 from nhx.core.inference_gateway.api.model_cache import ModelCache
+from nhx.core.inference_gateway.api.virtual_model_cache import VirtualModelCache
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
 from pydantic import ValidationError
 from starlette.responses import PlainTextResponse
@@ -173,6 +176,33 @@ def test_calling_a_router_sends_its_own_key_and_the_callers_context(
     assert sent["authorization"] == f"Bearer {ROUTER_KEY}"
     assert CALLER not in str(dict(sent))
     assert seal.open(router, sent[CALLER_CONTEXT_HEADER]) == CALLER
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        pytest.param("/v2/workspaces/default/provider/ollama/-/v1/chat/completions", id="provider route"),
+        pytest.param("/v2/workspaces/e2e-test/openai/-/v1/chat/completions", id="virtual model route"),
+    ],
+)
+def test_a_routers_key_that_reaches_a_handler_is_refused_even_with_its_context(
+    app: FastAPI, client: TestClient, mock_proxy_client, router: str, seal: CallerContextSeal, path: str
+) -> None:
+    """The service app alone has no caller-context middleware: a call back reaching it must not run as the router."""
+    vm_cache = VirtualModelCache()
+    vm_cache.rebuild(
+        [VirtualModel(name="alias", workspace="e2e-test", default_model_entity="e2e-test/meta_llama-3.2-1b-instruct")]
+    )
+    app.dependency_overrides[global_virtual_model_cache] = lambda: vm_cache
+
+    response = client.post(
+        path,
+        headers={"Authorization": f"Bearer {ROUTER_KEY}", CALLER_CONTEXT_HEADER: seal.seal(router, CALLER)},
+        json={"model": "e2e-test/alias", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert response.status_code == 403
+    mock_proxy_client.request.assert_not_called()
 
 
 async def _seen_through_middleware(headers: list[tuple[bytes, bytes]], path: str = GATEWAY_PATH) -> dict | int:
