@@ -937,3 +937,27 @@ def test_run_scores_every_row_with_oversized_operand(
     scores = [outputs[0].value for row in result.row_scores for outputs in row.metrics.values()]
     assert scores == [1.0, 0.0, 0.0]
     assert [bool(row.metric_diagnostics) for row in result.row_scores] == [False, False, True]
+
+
+class TestUnsupportedNumberFormats:
+    @pytest.mark.parametrize(
+        "answer",
+        ["1,000", "The total is 12,345.67", "-1,000,000", "6.02e23", "1.5E-3", "1e+05", "5.e3"],
+    )
+    def test_comma_between_digits_or_scientific_notation_is_rejected(self, answer: str):
+        assert math.isnan(_parse_number_answer(answer))
+
+    @pytest.mark.parametrize(
+        ("answer", "expected"),
+        [("1, 2, and 3", 3), ("The answer is 42, final", 42), ("3 eggs", 3), ("version 2e", 2)],
+    )
+    def test_commas_and_letters_elsewhere_still_parse(self, answer: str, expected: int):
+        assert _parse_number_answer(answer) == expected
+
+    @pytest.mark.asyncio
+    async def test_rejected_answer_scores_nan(self):
+        assert math.isnan((await _check("equals", "1,000", "1000")).outputs[0].value)
+
+    @pytest.mark.asyncio
+    async def test_native_float_printed_in_scientific_notation_is_rejected(self):
+        assert math.isnan((await _check("equals", 1e16, "42")).outputs[0].value)

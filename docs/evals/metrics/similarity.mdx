@@ -330,7 +330,7 @@ Number Check performs numerical comparisons and operations on extracted values. 
 - Checking value ranges or thresholds
 - Comparing predicted vs expected numbers
 
-**Metric Output:** 1 if the condition is true, 0 otherwise. If either value cannot be parsed as a number, the row score is `NaN`.
+**Metric Output:** 1 if the condition is true, 0 otherwise. If either value cannot be parsed as a number, the row score is `NaN`. The metric reads the last number in each value, and a last number with a comma between digits (`1,000`) or in scientific notation (`6.02e23`) counts as unparseable.
 
 **Large Numbers:**
 

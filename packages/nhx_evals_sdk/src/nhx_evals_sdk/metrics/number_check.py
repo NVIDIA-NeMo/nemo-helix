@@ -32,17 +32,24 @@ _OUT_OF_FLOAT_RANGE_REASON = "operand_out_of_float_range"
 def _parse_number_answer(answer: str) -> int | float:
     """Parse the last numeric value from text; return ``NaN`` when parsing fails.
 
+    A last number written with a comma between digits (``1,000``) or in scientific notation (``6.02e23``) also
+    returns ``NaN``, since the pattern would otherwise read only its trailing ``000`` or ``23``.
+
     An integer with more digits than ``sys.get_int_max_str_digits()`` allows becomes signed infinity rather
     than ``NaN``, so it still compares correctly against in-range values instead of marking the row as
     unparseable. ``int()`` counts leading zeros toward that limit, so they are stripped before the length
     check to keep a zero-padded value exact. The pattern matches digits from every script, so the zeros
     stripped are all matched characters whose value is 0, not only ASCII ``"0"``.
     """
-    numbers = re.findall(r"[+-]?[\.\d]*\d+", answer)
-    if not numbers:
+    matches = list(re.finditer(r"[+-]?[\.\d]*\d+", answer))
+    if not matches:
         return float("nan")
 
-    last_number = numbers[-1]
+    last_match = matches[-1]
+    if re.fullmatch(r"\d,|[\d.][eE]", answer[max(0, last_match.start() - 2) : last_match.start()]):
+        return float("nan")
+
+    last_number = last_match.group()
     decimal = last_number.count(".")
     if decimal == 1:
         return float(last_number)
