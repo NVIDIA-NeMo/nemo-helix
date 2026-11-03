@@ -111,6 +111,14 @@ class TelemetryConfig(BaseModel):
     output_dir: str | None = None
     project: str | None = None
     agent_name: str | None = None
+    insecure_http_hosts: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Explicitly allow plain HTTP observability exports to these bare hostnames or IP addresses. "
+            "Entries must not contain a scheme, port, path, or wildcard. Relay validates host syntax "
+            "and matches exact hosts; model-provider HTTP policy is separate."
+        ),
+    )
     atif: dict[str, Any] | None = None
     atof: dict[str, Any] | None = None
     opentelemetry: dict[str, Any] | None = None

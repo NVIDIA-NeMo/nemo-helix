@@ -262,7 +262,7 @@ def test_harbor_preflight_accepts_the_agent_kwargs_a_target_carries() -> None:
         {
             "fabric_config": _registered_agent_config(),
             "fabric_default_max_turns": 20,
-            "fabric_package": "nemo-fabric[deepagents]==0.5.0",
+            "fabric_package": "nemo-fabric[deepagents]==0.6.0",
             "fabric_workspace": "/app",
         }
     )
@@ -359,11 +359,11 @@ def test_install_and_run_keywords_still_pass_through(tmp_path: Path) -> None:
     bundle.mkdir()
     agent = _agent(
         tmp_path,
-        fabric_package="nemo-fabric[deepagents]==0.5.0",
+        fabric_package="nemo-fabric[deepagents]==0.6.0",
         fabric_config_bundle=bundle,
         fabric_config_target="/tmp/agent",
     )
-    assert agent.fabric_package == "nemo-fabric[deepagents]==0.5.0"
+    assert agent.fabric_package == "nemo-fabric[deepagents]==0.6.0"
     assert agent.fabric_config_bundle == bundle
     # Relative paths in the config (skills) resolve against the uploaded bundle.
     assert str(agent._build_spec("hi").config_base_dir) == "/tmp/agent"

@@ -26,7 +26,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent import (
 )
 
 _DEEPAGENTS = "nvidia.fabric.langchain.deepagents"
-_PACKAGE = "nemo-fabric[deepagents,relay]==0.5.0"
+_PACKAGE = "nemo-fabric[deepagents,relay]==0.6.0"
 _CONFIG: dict[str, Any] = {
     "metadata": {"name": "hello-world"},
     "harness": {"adapter_id": _DEEPAGENTS},
@@ -186,14 +186,14 @@ async def test_fabric_package_may_carry_several_requirements(tmp_path: Path) -> 
     """A harness's companions can be pinned next to Fabric; a quoted specifier with a marker stays whole."""
     agent = _agent(
         tmp_path,
-        fabric_package="""nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
+        fabric_package="""nemo-fabric[deepagents,relay]==0.6.0 mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""",
     )
     environment = _RecordingEnvironment()
 
     await agent.install(cast(BaseEnvironment, environment))
 
     install = _ran(environment, "astral.sh/uv")
-    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.5.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
+    assert install.endswith("""'nemo-fabric[deepagents,relay]==0.6.0' mcp==1.29.0 'pkg==1.0; python_version<"3.13"'""")
 
 
 async def test_a_blank_fabric_package_fails_before_any_install_command(tmp_path: Path) -> None:

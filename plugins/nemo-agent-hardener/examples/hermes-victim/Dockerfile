@@ -7,32 +7,33 @@
 # what a `telemetry:` block does for the DeepAgents victim — because Hermes reaches Relay through
 # an opt-in plugin, not through the adapter's telemetry wiring.
 FROM python:3.12-slim
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /usr/local/bin/uv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
 
 # iproute2 and a `sandbox` user: the OpenShell sandbox needs both.  [war-game]
 RUN apt-get update \
- && apt-get install -y --no-install-recommends iproute2 \
+ && apt-get install -y --no-install-recommends iproute2 git ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && groupadd --system sandbox \
  && useradd --system --gid sandbox --create-home --home-dir /home/sandbox --shell /bin/bash sandbox
 
 WORKDIR /workspace
 
-# The Fabric entrypoint, its Hermes adapter, and the MCP SDK the tool server uses.
-# nemo-relay is pinned to the 0.9 line because the Fabric 0.4 adapters require >=0.9,<0.10.
-#
-# `hermes-agent` is what provides the `hermes` CLI used below. It is deliberately NOT a platform
-# dependency — it pins a vulnerable requests (see the TODO in plugins/nemo-agents) — and
-# `nemo-fabric-adapters-hermes` ships only the adapter, no binary. Without it the build dies with
-# `hermes: not found` (exit 127). Installing it *here* is the right trade: this is a throwaway
-# victim image, built to be attacked inside a sandbox, never shipped or served to anyone.
-RUN python -m venv /workspace/.venv \
- && /workspace/.venv/bin/pip install --no-cache-dir \
+# The main runtime uses Relay 0.11; Fabric 0.6's Hermes adapter needs Relay 0.10
+# and Python 3.14 in a separate environment, just as in generated agent images.
+RUN uv venv --python 3.12 /workspace/.venv \
+ && uv pip install --python /workspace/.venv/bin/python \
       "nemo-helix[nemo-agents-plugin]" \
-      "nemo-fabric" \
-      "nemo-fabric-adapters-hermes" \
-      "hermes-agent" \
-      "nemo-relay>=0.9.3,<0.10" \
       "mcp[cli]"
+RUN uv venv --python 3.14 /opt/hermes-venv \
+ && git init --quiet /opt/hermes-agent \
+ && git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git \
+ && git -C /opt/hermes-agent fetch --depth 1 origin bf0203a794a07aac3ff764972ab9087baa4e4f4e \
+ && git -C /opt/hermes-agent checkout --quiet --detach FETCH_HEAD \
+ && /workspace/.venv/bin/python -m nemo_agents_plugin.container.install_hermes \
+      --checkout /opt/hermes-agent --python /opt/hermes-venv/bin/python \
+ && chmod -R a+rX /opt/uv /opt/hermes-agent /opt/hermes-venv
+ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
 
 COPY agent.yaml /workspace/agent.yaml
 COPY ledger_mcp.py /app/ledger_mcp.py
@@ -53,7 +54,7 @@ ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/etc/nemo-relay/plugins.toml
 # Enable it as `sandbox`, not root: Hermes keeps plugin state per-user (~/.hermes), so enabling as
 # root leaves it "not enabled" for the user the victim actually runs as.
 USER sandbox
-RUN /workspace/.venv/bin/hermes plugins enable observability/nemo_relay
+RUN /opt/hermes-venv/bin/hermes plugins enable observability/nemo_relay
 USER root
 
 ENV AGENT_CONFIG_PATH=/workspace/agent.yaml

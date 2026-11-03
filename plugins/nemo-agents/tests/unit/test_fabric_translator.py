@@ -81,6 +81,28 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
+    @pytest.mark.parametrize("hosts", [[], ["collector.observability.svc.cluster.local", "10.0.0.8"]])
+    def test_http_allowlist_survives_config_roundtrip_and_translation(self, hosts: list[str]) -> None:
+        payload = _example_yaml_config()
+        payload["telemetry"].update(enabled=True, insecure_http_hosts=hosts)
+        config = AgentConfig.model_validate(payload)
+        config = AgentConfig.model_validate(config.model_dump(exclude_unset=True))
+
+        translated = translate_agent_config(config)
+
+        assert translated.relay is not None
+        assert translated.relay.observability is not None
+        assert translated.relay.observability.model_dump()["insecure_http_hosts"] == hosts
+        assert payload["telemetry"]["insecure_http_hosts"] == hosts
+
+    def test_http_allowlist_is_not_implicitly_enabled(self) -> None:
+        payload = _example_yaml_config()
+        payload["telemetry"]["enabled"] = True
+        translated = translate_agent_config(AgentConfig.model_validate(payload))
+        assert translated.relay is not None
+        assert translated.relay.observability is not None
+        assert "insecure_http_hosts" not in translated.relay.observability.model_dump()
+
     @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
     @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])
     def test_remote_agent_keeps_endpoint_in_harness_settings(self, kind: str, api_type: str) -> None:
