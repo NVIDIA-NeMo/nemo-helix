@@ -9,10 +9,11 @@ vi.mock('@nemo/sdk/generated/platform/models', () => ({ useModelsGetModel: vi.fn
 
 const mockGetModel = vi.mocked(useModelsGetModel);
 
-const returnsModel = (spec: unknown) =>
-  mockGetModel.mockReturnValue({ data: spec ? { spec } : undefined } as ReturnType<
-    typeof useModelsGetModel
-  >);
+const returnsModel = (spec: unknown, isLoading = false) =>
+  mockGetModel.mockReturnValue({
+    data: spec ? { spec } : undefined,
+    isLoading,
+  } as ReturnType<typeof useModelsGetModel>);
 
 const queryOptions = () => mockGetModel.mock.lastCall?.[3]?.query;
 
@@ -31,18 +32,26 @@ describe('useResolvedAutomodelRecipe', () => {
     expect(queryOptions()?.enabled).toBe(true);
   });
 
-  it('is unresolved until the model loads, or when it fails to load', () => {
-    returnsModel(undefined);
+  it('is unresolved while the model loads', () => {
+    returnsModel(undefined, true);
     const { result } = renderHook(() =>
       useResolvedAutomodelRecipe('default/embedder', 'auto', true)
     );
     expect(result.current).toBeNull();
   });
 
-  it('is unresolved on auto before a model is chosen', () => {
+  it('falls back to auto when the model fails to load', () => {
+    returnsModel(undefined);
+    const { result } = renderHook(() =>
+      useResolvedAutomodelRecipe('default/embedder', 'auto', true)
+    );
+    expect(result.current).toBe('auto');
+  });
+
+  it('stays auto before a model is chosen', () => {
     returnsModel(undefined);
     const { result } = renderHook(() => useResolvedAutomodelRecipe('', 'auto', true));
-    expect(result.current).toBeNull();
+    expect(result.current).toBe('auto');
   });
 
   it('treats an omitted recipe as auto', () => {

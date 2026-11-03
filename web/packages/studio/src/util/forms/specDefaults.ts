@@ -9,12 +9,12 @@ import {
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
-import { type ModelSpec } from '@nemo/sdk/generated/platform/schema';
+import type { ModelSpec } from '@nemo/sdk/generated/platform/schema';
 import {
   LEARNING_RATE_DEFAULTS,
   type LearningRateDefaultRule,
 } from '@nemo/sdk/generated/schema-extensions/learningRateDefaults';
-import { type CustomizationBackend } from '@studio/util/customizationBackend';
+import type { CustomizationBackend } from '@studio/util/customizationBackend';
 import { isPlainObject } from '@studio/util/functions';
 
 /**
@@ -96,10 +96,7 @@ export const hasLearningRate = (backend: CustomizationBackend, spec: unknown): b
   return isPlainObject(group) && group.learning_rate != null;
 };
 
-/**
- * The backend only resolves a per-selection learning rate when the request omits it; the
- * spec's single `default:` is the LoRA rate and would pin the wrong value for full weights.
- */
+/** Drops learning_rate so the backend resolves the per-selection default. */
 export const withoutLearningRate = <T extends object>(
   backend: CustomizationBackend,
   spec: T
@@ -225,9 +222,9 @@ const matchLearningRateDefault = (
  * does. Stays `auto` (SFT) for a causal LM or an unknown head.
  */
 export const resolveAutomodelRecipe = (
-  recipe: string | undefined,
+  recipe: string,
   modelSpec: Pick<ModelSpec, 'head_type' | 'is_embedding_model'> | undefined
-): string | undefined => {
+): string => {
   if (recipe !== 'auto' || !modelSpec) {
     return recipe;
   }
@@ -294,4 +291,39 @@ export const learningRateSliderProps = (
     unsetPlaceholder: rate === undefined ? UNSET_PLACEHOLDER : String(rate),
     unsetValue: rate,
   };
+};
+
+const learningRateSelectionOf = (
+  backend: CustomizationBackend,
+  spec: object
+): LearningRateSelection => {
+  const training = (spec as Record<string, unknown>).training;
+  const fields = isPlainObject(training) ? training : {};
+  const finetuningType =
+    typeof fields.finetuning_type === 'string' ? fields.finetuning_type : undefined;
+  switch (backend) {
+    case 'automodel':
+      // `auto` stays unresolved here, so a retrieval job's default reads as a custom rate.
+      return {
+        backend,
+        finetuningType,
+        recipe: typeof fields.recipe === 'string' ? fields.recipe : undefined,
+      };
+    case 'unsloth':
+      return { backend, finetuningType };
+    case 'rl':
+      return { backend, method: fields.type === 'grpo' ? 'grpo' : 'dpo', finetuningType };
+  }
+};
+
+/** A stored job carries the rate the backend resolved; drop it when it is that default. */
+export const withoutDefaultLearningRate = <T extends object>(
+  backend: CustomizationBackend,
+  spec: T
+): T => {
+  const group = (spec as Record<string, unknown>)[LEARNING_RATE_GROUP[backend]];
+  const rate = isPlainObject(group) ? group.learning_rate : undefined;
+  return rate != null && rate === learningRateDefault(learningRateSelectionOf(backend, spec))
+    ? withoutLearningRate(backend, spec)
+    : spec;
 };

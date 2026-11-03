@@ -7,9 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { parse as parseYaml } from 'yaml';
 import { serviceConfigs } from './constants';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+import { isRecord } from './utils';
 
 interface SchemaExtension {
   readonly module: string;

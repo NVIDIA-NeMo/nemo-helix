@@ -23,6 +23,7 @@ import {
 import {
   AUTOMODEL_SPEC_DEFAULTS,
   GRPO_SPEC_DEFAULTS,
+  learningRateDefault,
   numberDefault,
   stringDefault,
 } from '@studio/util/forms/specDefaults';
@@ -424,6 +425,46 @@ describe('learning rate', () => {
     expect(messages(validUnsloth())).toEqual([]);
     expect(messages(validGrpo())).toEqual([]);
   });
+
+  describe('min learning rate', () => {
+    const validDpo = (): CustomizationFormFields => {
+      const data = validGrpo();
+      data.rl.training = structuredClone(RL_DPO_TRAINING_DEFAULTS);
+      data.grpo.trainingType = 'dpo';
+      return data;
+    };
+    const minIssue = (data: CustomizationFormFields) =>
+      customizationFormSchema
+        .safeParse(data)
+        .error?.issues.find((i) => i.path.join('.') === 'rl.training.min_learning_rate');
+
+    it.each([
+      ['DPO', validDpo, { backend: 'rl', method: 'dpo' }],
+      ['GRPO', validGrpo, { backend: 'rl', method: 'grpo', finetuningType: 'lora' }],
+    ] as const)(
+      'rejects a %s min above the peak the backend would resolve',
+      (_, valid, selection) => {
+        const data = valid();
+        if (data.grpo.trainingType === 'grpo') {
+          data.grpo.finetuning_type = 'lora';
+        }
+        const peak = learningRateDefault(selection) as number;
+        data.rl.training.min_learning_rate = peak;
+        expect(minIssue(data)).toBeUndefined();
+        data.rl.training.min_learning_rate = peak * 2;
+        expect(minIssue(data)?.message).toContain(String(peak));
+      }
+    );
+
+    it('checks against a peak the user set', () => {
+      const data = validDpo();
+      data.rl.training.learning_rate = 1e-4;
+      data.rl.training.min_learning_rate = 5e-5;
+      expect(minIssue(data)).toBeUndefined();
+      data.rl.training.min_learning_rate = 2e-4;
+      expect(minIssue(data)?.message).toContain('0.0001');
+    });
+  });
 });
 
 describe('GRPO form validation', () => {
@@ -544,6 +585,66 @@ describe('jobToFormFields', () => {
     } as unknown as typeof customizationJob1;
     const fields = jobToFormFields(jobWithNulls);
     expect(fields.automodel.optimizer?.learning_rate).toBeUndefined();
+  });
+
+  // A stored spec carries the rate the backend resolved, so a clone would otherwise pin it.
+  describe('learning rate', () => {
+    const withRate = <T extends { spec: object }>(
+      source: T,
+      group: 'optimizer' | 'training',
+      finetuningType: string,
+      rate: number
+    ): T => {
+      const spec = source.spec as Record<string, Record<string, unknown> | undefined>;
+      const training = { ...spec.training, finetuning_type: finetuningType };
+      return {
+        ...source,
+        spec: {
+          ...spec,
+          training: group === 'training' ? { ...training, learning_rate: rate } : training,
+          ...(group === 'optimizer' && { optimizer: { ...spec.optimizer, learning_rate: rate } }),
+        },
+      };
+    };
+    const rateOf = (fields: CustomizationFormFields, backend: 'automodel' | 'unsloth' | 'rl') =>
+      backend === 'rl'
+        ? fields.rl.training.learning_rate
+        : fields[backend].optimizer?.learning_rate;
+
+    it.each([
+      [
+        'automodel',
+        customizationJob1,
+        'optimizer',
+        { backend: 'automodel', finetuningType: 'all_weights' },
+      ],
+      [
+        'unsloth',
+        customizationJob3,
+        'optimizer',
+        { backend: 'unsloth', finetuningType: 'all_weights' },
+      ],
+      [
+        'rl',
+        grpoCustomizationJob,
+        'training',
+        { backend: 'rl', method: 'grpo', finetuningType: 'lora' },
+      ],
+    ] as const)('drops a %s rate that matches the default', (backend, source, group, selection) => {
+      const rate = learningRateDefault(selection);
+      expect(rate).toBeDefined();
+      const job = withRate(source, group, selection.finetuningType, rate as number);
+      expect(rateOf(jobToFormFields(job), backend)).toBeUndefined();
+    });
+
+    it.each([
+      ['automodel', customizationJob1, 'optimizer'],
+      ['unsloth', customizationJob3, 'optimizer'],
+      ['rl', grpoCustomizationJob, 'training'],
+    ] as const)('keeps a custom %s rate', (backend, source, group) => {
+      const job = withRate(source, group, 'lora', 3.21e-5);
+      expect(rateOf(jobToFormFields(job), backend)).toBe(3.21e-5);
+    });
   });
 
   // A stored spec is the backend's output shape, and every backend's submit forbids extras.
