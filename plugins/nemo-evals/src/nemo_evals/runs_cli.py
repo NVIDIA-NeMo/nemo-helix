@@ -701,6 +701,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         flag = _workspace_flag(workspace, client.resolve_workspace())
         taskset_ref: str | None = None
         waiting_for_builds = False
+        submitting_key: str | None = None
         try:
             if list_tasks:
                 _print_tasks(
@@ -751,10 +752,17 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 dataset=source,
                 idempotency_key=idempotency_key,
             )
+            submitting_key = request.idempotency_key
             status = submit_run(
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
             )
         except KeyboardInterrupt:
+            if submitting_key is not None:  # the run may already be accepted: only the same key avoids a second one
+                echo(
+                    "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
+                    f"a second run, rerun the same command with --idempotency-key {submitting_key}"
+                )
+                raise typer.Exit(code=130) from None
             stopped = "Stopped waiting; the image builds keep going." if waiting_for_builds else "Interrupted."
             hint = f" Submit with: nemo evals runs submit --taskset {taskset_ref}{flag}" if taskset_ref else ""
             echo(f"{stopped}{hint}")
