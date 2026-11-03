@@ -208,7 +208,9 @@ class ScanSshHostKeysRequest(BaseModel):
 class SshHostKey(BaseModel):
     key_type: str = Field(description="Key algorithm, e.g. 'ssh-ed25519'")
     fingerprint: str = Field(description="SHA256 fingerprint, in the form ssh prints it")
-    known_hosts_line: str = Field(description="The key as a known_hosts line, ready for `known_hosts`")
+    known_hosts_line: str = Field(
+        description="The key as a known_hosts line. Store only the line of the key whose fingerprint was confirmed"
+    )
 
 
 class ScanSshHostKeysResponse(BaseModel):

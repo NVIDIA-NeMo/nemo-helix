@@ -39,12 +39,14 @@ from nhx.common.service.dependencies import (
     get_service_config_factory,
 )
 from nhx.core.files.api.endpoint_helpers import (
+    HTTP_EXCEPTION_DETAIL,
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
     get_fileset,
     list_storage_files,
     resolve_storage_secrets_for_user,
+    storage_errors_as_http,
     stream_file_download,
 )
 from nhx.core.files.api.v2.filesets.schemas import (
@@ -62,10 +64,6 @@ from nhx.core.files.api.v2.filesets.schemas import (
 from nhx.core.files.app.backends import storage_impl_factory
 from nhx.core.files.app.backends.factory import StorageConfig
 from nhx.core.files.app.cache import CacheStatus, warm_fileset_cache
-from nhx.core.files.app.external_hosts import (
-    ExternalHostInvalidError,
-    ExternalHostNotAllowedError,
-)
 from nhx.core.files.app.file_lock import FileLockManager
 from nhx.core.files.app.streaming import (
     MultipartChunkProcessor,
@@ -78,10 +76,6 @@ from nhx.core.files.exceptions import (
     InactivityTimeoutError,
     InvalidPathError,
     NotFoundError,
-    StorageAccessError,
-    StorageBackendError,
-    StorageConfigError,
-    StorageUnavailableError,
 )
 from starlette.status import (
     HTTP_200_OK,
@@ -132,18 +126,6 @@ _REFERENCE_COUNT_PAGE_SIZE = 1
 def _sanitize_for_log(value: object) -> str:
     """Strip line breaks from a value before logging."""
     return str(value).replace("\r", "").replace("\n", "")
-
-
-_HTTP_EXCEPTION_DETAIL = {
-    "content": {
-        "application/json": {
-            "schema": {
-                "type": "object",
-                "properties": {"detail": {"type": "string"}},
-            }
-        }
-    }
-}
 
 
 class _ModelFilesetReference(EntityBase):
@@ -297,7 +279,7 @@ async def create_fileset(
     except EntityNotFoundError:
         pass
 
-    try:
+    with storage_errors_as_http("Error creating fileset"):
         if create_request.storage is None:
             default_config = config.default_storage_config
             storage = default_config.copy_config(f"filesets/{workspace}/{create_request.name}")
@@ -316,46 +298,6 @@ async def create_fileset(
 
         # Re-create storage_impl with resolved config for validation
         storage_impl = storage_impl_factory(storage, secrets)
-    except ExternalHostNotAllowedError as exc:
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Storage host or endpoint not in allowed list: {exc}",
-        ) from exc
-    except ExternalHostInvalidError as exc:
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid URL for external host: {exc}") from exc
-    except StorageAccessError as exc:
-        logger.warning(f"Storage access denied: {exc}")
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Access denied to storage backend: {exc}",
-        ) from exc
-    except SecretNotFoundError as exc:
-        logger.warning(f"Secret not found: {exc}")
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Secret not found: {exc}",
-        ) from exc
-    except SecretAccessDeniedError as exc:
-        logger.warning(f"Secret access denied: {exc}")
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Access denied to secret: {exc}",
-        ) from exc
-    except StorageConfigError as exc:
-        logger.warning(f"Storage config invalid: {exc}")
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Invalid storage configuration: {exc}",
-        ) from exc
-    except StorageUnavailableError as exc:
-        logger.warning(f"Storage backend unavailable: {exc}")
-        raise HTTPException(
-            HTTP_502_BAD_GATEWAY,
-            f"Storage backend unavailable: {exc}",
-        ) from exc
-    except StorageBackendError as exc:
-        logger.warning(f"Storage validation failed: {exc}")
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Error creating fileset: {[str(exc)]}") from exc
 
     try:
         custom_fields = create_request.custom_fields or dict()
@@ -472,11 +414,11 @@ async def retrieve_fileset(
     responses={
         HTTP_409_CONFLICT: {
             "description": "Fileset is referenced by a model or adapter entity",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
         HTTP_503_SERVICE_UNAVAILABLE: {
             "description": "Fileset references could not be verified",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
     },
 )
@@ -617,19 +559,19 @@ async def update_fileset_metadata(
     responses={
         HTTP_400_BAD_REQUEST: {
             "description": "Storage configuration, secret, or source rejected the refresh",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
         HTTP_404_NOT_FOUND: {
             "description": "Fileset not found",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
         HTTP_409_CONFLICT: {
             "description": "Fileset does not track a mutable revision",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
         HTTP_502_BAD_GATEWAY: {
             "description": "Storage backend unavailable",
-            **_HTTP_EXCEPTION_DETAIL,
+            **HTTP_EXCEPTION_DETAIL,
         },
     },
 )
@@ -669,7 +611,7 @@ async def refresh_fileset(
             f"Fileset '{workspace}/{name}' does not track a revision that can be refreshed",
         )
 
-    try:
+    with storage_errors_as_http("Error refreshing fileset"):
         secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
         storage_impl = storage_impl_factory(fileset.storage, secrets)
         tracked_impl = storage_impl_factory(storage_impl.config_at_tracked_revision(), secrets)
@@ -677,33 +619,6 @@ async def refresh_fileset(
         # removed from it since then stops being reachable through a refresh.
         await tracked_impl.validate_storage()
         storage = await tracked_impl.resolve_config()
-    except ExternalHostNotAllowedError as exc:
-        raise HTTPException(
-            HTTP_400_BAD_REQUEST,
-            f"Storage host or endpoint not in allowed list: {exc}",
-        ) from exc
-    except ExternalHostInvalidError as exc:
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid URL for external host: {exc}") from exc
-    except (SecretNotFoundError, SecretAccessDeniedError) as exc:
-        logger.warning(
-            "Secret unavailable while refreshing %s/%s: %s",
-            _sanitize_for_log(workspace),
-            _sanitize_for_log(name),
-            exc,
-        )
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Secret unavailable: {exc}") from exc
-    except StorageAccessError as exc:
-        logger.warning(f"Storage access denied: {exc}")
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Access denied to storage backend: {exc}") from exc
-    except StorageConfigError as exc:
-        logger.warning(f"Storage config invalid: {exc}")
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Invalid storage configuration: {exc}") from exc
-    except StorageUnavailableError as exc:
-        logger.warning(f"Storage backend unavailable: {exc}")
-        raise HTTPException(HTTP_502_BAD_GATEWAY, f"Storage backend unavailable: {exc}") from exc
-    except StorageBackendError as exc:
-        logger.warning(f"Storage refresh failed: {exc}")
-        raise HTTPException(HTTP_400_BAD_REQUEST, f"Error refreshing fileset: {exc}") from exc
 
     fileset = await entity_store.update(fileset.model_copy(update={"storage": storage}))
 

@@ -344,9 +344,8 @@ class SessionSSHVendor(SSHVendor):
 
 
 async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[SshHostKey]:
-    """Fetch the host's public keys for the user to confirm, as ssh does on a first connection."""
     port = ["-p", str(remote.port)] if remote.port else []
-    subject = remote.host_url.removeprefix("ssh://")
+    subject = remote.authority
     try:
         proc = await asyncio.create_subprocess_exec(
             "ssh-keyscan",
@@ -356,15 +355,16 @@ async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[S
             remote.host,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
         )
     except FileNotFoundError as exc:
         raise GitServerFault("ssh-keyscan is not installed in the files service") from exc
     try:
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout_seconds + 5)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout_seconds + 5)
     except (TimeoutError, asyncio.CancelledError) as exc:
-        proc.kill()
+        with suppress(ProcessLookupError):
+            proc.kill()
         await proc.wait()
         if isinstance(exc, TimeoutError):
             raise GitUnavailableError(f"Timed out scanning host keys of {subject}") from None
@@ -372,8 +372,16 @@ async def scan_host_keys(remote: SshRemote, timeout_seconds: int = 10) -> list[S
 
     keys = parse_keyscan_output(stdout.decode(errors="replace"))
     if not keys:
-        raise GitUnavailableError(f"{subject} returned no SSH host keys; check the host and port")
+        raise _keyscan_failure(stderr.decode(errors="replace"), subject)
     return keys
+
+
+def _keyscan_failure(stderr: str, subject: str) -> GitUnavailableError:
+    # ssh-keyscan prints a "# host SSH-2.0-..." banner per connection it opened.
+    errors = "\n".join(line for line in stderr.splitlines() if not line.startswith("#"))
+    if not errors.strip():
+        return GitUnavailableError(f"{subject} returned no SSH host keys before the scan timed out")
+    return GitUnavailableError(f"Could not scan host keys of {subject}: {_failure_detail(errors)}")
 
 
 def _regular_files(store: BaseObjectStore, tree_id: ObjectID) -> Iterator[tuple[str, ObjectID]]:
