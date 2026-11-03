@@ -52,6 +52,11 @@ _CREATE_TIMEOUT_SECONDS = 60.0
 #: This step's namespace, which Kubernetes mounts beside the ServiceAccount token.
 _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 
+#: Files kind's createContainer hook copies to the root of every container, to bind-mount them over /sys's DMI files.
+#: They aren't mount points at the root, so kaniko's ignore list misses them: `--cleanup` fails deleting them
+#: (`unlinkat //product_uuid: device or resource busy`), and a snapshot would put the node's in the image.
+_RUNTIME_ROOT_FILES = ("/product_uuid", "/product_name")
+
 
 def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     """The shell the sandbox runs: one kaniko invocation per image, in turn, with ``--cleanup`` between them.
@@ -79,6 +84,7 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
             # Not the google, ECR, ACR and GitLab lookups compiled into the executor: the sandbox holds no credential.
             "--credential-helpers=",
             "--cleanup",
+            *(f"--ignore-path={path}" for path in _RUNTIME_ROOT_FILES),
             "--verbosity=info",
         ]
         lines.append(" ".join(shlex.quote(a) for a in args))

@@ -211,6 +211,12 @@ class TestTheBuildScript:
         assert script.count("/kaniko/executor") == 3
         assert script.count("--cleanup") == 3
 
+    def test_leaves_the_files_kind_puts_at_the_root(self) -> None:
+        # kind copies them into every container; deleting them fails `--cleanup` with EBUSY.
+        script = _build_script(_group(), _sandbox())
+        assert "--ignore-path=/product_uuid" in script
+        assert "--ignore-path=/product_name" in script
+
 
 class TestTheBuildScriptRuns:
     @staticmethod
