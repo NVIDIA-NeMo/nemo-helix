@@ -32,7 +32,7 @@ nemo agents package --agent plugins/nemo-agent-hardener/examples/hermes-victim/a
                     --dockerfile plugins/nemo-agent-hardener/examples/hermes-victim/Dockerfile \
                     --tag ledger-hermes:v1
 nemo agents register  --name ledger-hermes --agent-config plugins/nemo-agent-hardener/examples/hermes-victim/agent.yaml
-nemo agents deploy  --agent ledger-hermes --image ledger-hermes:v1
+nemo agents deploy  --agent ledger-hermes --image ledger-hermes:v1 --mode docker
 
 nemo agent-hardener init --agent ledger-hermes --name ledger-hermes --harness hermes
 nemo agent-hardener synth-benign --manifest-id ledger-hermes --yes
