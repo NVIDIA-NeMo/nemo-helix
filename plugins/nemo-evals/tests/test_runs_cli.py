@@ -159,7 +159,7 @@ def _ready(name):
 
 def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting):
     result = submitting.invoke(
-        "--taskset", STORED, "--experiment", "m4", "--dataset", "datacurve/deep-swe@sha256:" + "a" * 64
+        "--taskset", STORED, "--experiment", "m4", "--intake-dataset", "datacurve/deep-swe@sha256:" + "a" * 64
     )
     assert result.exit_code == 0, result.output
     assert submitting.published == [] and submitting.posts == []
@@ -171,6 +171,7 @@ def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting
         "dataset_version": "sha256:" + "a" * 64,
     }
     assert "Run run-1 accepted: 2 tasks, queued" in result.output
+    assert "Rerun these tasks" not in result.output  # --taskset already names it
 
 
 @pytest.mark.parametrize("phase", ["running", "cancelled"])
@@ -200,8 +201,8 @@ def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting):
     "args",
     [
         ["--taskset", STORED, "--harbor-hub", "x/y@1"],
-        ["--taskset", STORED, "--dataset", "x/y"],  # no --experiment
-        ["--harbor-hub", "x/y@1", "--experiment", "e", "--dataset", "x/y"],  # the source sets the dataset
+        ["--taskset", STORED, "--intake-dataset", "x/y"],  # no --experiment
+        ["--harbor-hub", "x/y@1", "--experiment", "e", "--intake-dataset", "x/y"],  # the source sets the dataset
     ],
 )
 def test_taskset_flags_that_do_not_combine(submitting, args):
@@ -235,11 +236,25 @@ def test_the_wrapper_follows_one_retry_and_never_submits_after_a_failed_build(
     result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--experiment", "m4", "--poll-seconds", "0")
     assert bool(submitting.bodies) is submitted, result.output
     assert len(attempts) == min(failures, 1) + 1  # at most one retry
-    assert "Submit later with: nemo evals runs submit --taskset " + STORED in result.output
+    assert "Submit later" not in result.output
     if submitted:
+        assert "Rerun these tasks: nemo evals runs submit --taskset " + STORED in result.output
         assert submitting.bodies[0]["publication"]["intake"]["dataset_name"] == "datacurve/deep-swe"
     else:
         assert result.exit_code == 1 and "image builds failed" in result.output
+
+
+def test_ctrl_c_during_the_build_wait_says_how_to_submit_later(submitting, monkeypatch):
+    created = CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    monkeypatch.setattr("nemo_evals.runs_cli.create_taskset", lambda *a, **k: created)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nemo_evals.runs_cli.wait_for_builds", interrupted)
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest")
+    assert result.exit_code == 130 and submitting.bodies == []
+    assert "the image builds keep going. Submit with: nemo evals runs submit --taskset " + STORED in result.output
 
 
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):

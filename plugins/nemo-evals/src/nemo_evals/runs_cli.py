@@ -293,7 +293,7 @@ def create_taskset(
             prefix, total = harbor_dir.resolve().name, len(all_dirs)
         refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
     ref = publish_taskset(evaluator, refs, name=entity_name(f"{prefix}-{selection_suffix(refs)}"), workspace=workspace)
-    echo(f"Published taskset {ref.partition('#')[0]} ({len(refs)} of {total} tasks)")
+    echo(f"Published taskset {ref} ({len(refs)} of {total} tasks)")
     return CreatedTaskset(ref, refs, total, dataset)
 
 
@@ -305,13 +305,13 @@ def publish_taskset(evaluator: Evaluator, refs: Sequence[str], *, name: str, wor
 
 
 def dataset_flag(dataset: tuple[str, str | None]) -> str:
-    """``--dataset`` as ``runs submit --taskset`` takes it: ``name@version``, or the bare name."""
+    """``--intake-dataset`` as ``runs submit --taskset`` takes it: ``name@version``, or the bare name."""
     name, version = dataset
     return f"{name}@{version}" if version else name
 
 
 def parse_dataset(value: str) -> tuple[str, str | None]:
-    """``--dataset NAME[@VERSION]``: the version is everything after the last ``@`` (``sha256:…`` or a commit)."""
+    """``--intake-dataset NAME[@VERSION]``: the version is everything after the last ``@`` (``sha256:…`` or a commit)."""
     name, at, version = value.rpartition("@")
     return (name, version or None) if at and name else (value, None)
 
@@ -618,11 +618,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             help="TasksetRunInput JSON: its target and execution, and its taskset unless --taskset, --harbor-dir, "
             "--harbor-hub or --harbor-git supplies the tasks.",
         ),
-        dataset: str | None = typer.Option(
+        intake_dataset: str | None = typer.Option(
             None,
-            "--dataset",
-            help="Intake dataset, NAME[@VERSION], for the run's Evaluation (with --taskset and --experiment); "
-            "`tasksets create` prints it. --harbor-hub and --harbor-git set it themselves.",
+            "--intake-dataset",
+            help="Intake label, NAME[@VERSION], shown as the dataset of the run's Evaluation; doesn't select tasks. "
+            "With --taskset and --experiment only; `tasksets create` prints it. --harbor-hub and --harbor-git set "
+            "it themselves.",
         ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
@@ -678,8 +679,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             raise typer.BadParameter(f"--taskset names the tasks already; drop {sources[0]}")
         if not sources and spec_file is None and taskset is None:
             raise typer.BadParameter("pass --taskset, --harbor-dir, --harbor-hub, --harbor-git or --spec-file")
-        if dataset is not None and (taskset is None or experiment is None):
-            raise typer.BadParameter("--dataset applies with --taskset and --experiment only")
+        if intake_dataset is not None and (taskset is None or experiment is None):
+            raise typer.BadParameter("--intake-dataset applies with --taskset and --experiment only")
         if harbor_git is not None:
             try:
                 check_git_source(harbor_git)
@@ -698,6 +699,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         workspace = client.resolve_workspace(workspace)
         stored_ref = qualify_ref(taskset, workspace) if taskset is not None else None
         flag = _workspace_flag(workspace, client.resolve_workspace())
+        taskset_ref: str | None = None
         try:
             if list_tasks:
                 _print_tasks(
@@ -711,7 +713,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 )
                 return
             evaluator = Evaluator.from_client(client)
-            source: tuple[str, str | None] | None = parse_dataset(dataset) if dataset is not None else None
+            source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
             if stored_ref is not None and tasks is None:
                 refs, taskset_ref = taskset_members(evaluator, stored_ref), stored_ref
             elif from_stored:
@@ -720,7 +722,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 taskset_ref = publish_taskset(
                     evaluator, refs, name=entity_name(f"{prefix}-sel-{selection_suffix(refs)}"), workspace=workspace
                 )
-                echo(f"Published taskset {taskset_ref.partition('#')[0]} ({len(refs)} of {total} tasks)")
+                echo(f"Published taskset {taskset_ref} ({len(refs)} of {total} tasks)")
             else:
                 created = create_taskset(
                     evaluator,
@@ -733,7 +735,6 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 )
                 refs, taskset_ref, source = created.refs, created.ref, created.dataset
                 if not no_build_images:
-                    echo(f"Submit later with: nemo evals runs submit --taskset {taskset_ref}{flag}")
                     builds = wait_for_builds(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
                     if (failed := failed_builds(builds)) is not None:
                         raise RuntimeError(f"image builds failed: {failed}")
@@ -751,7 +752,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
             )
         except KeyboardInterrupt:
-            echo("Stopped waiting; the image builds keep going.")
+            hint = f" Submit with: nemo evals runs submit --taskset {taskset_ref}{flag}" if taskset_ref else ""
+            echo(f"Stopped waiting; the image builds keep going.{hint}")
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
@@ -769,6 +771,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             )
         for line in status.get("warnings", []):
             echo(f"  {line}")
+        if taskset_ref != stored_ref:  # a new taskset: reruns can skip the upload and the builds
+            echo(f"Rerun these tasks: nemo evals runs submit --taskset {taskset_ref}{flag}")
         echo("")
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
 

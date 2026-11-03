@@ -105,11 +105,16 @@ def add_tasksets_commands(app: typer.Typer, client_factory: Callable[[], NemoCli
             raise typer.Exit(code=1) from exc
         dataset = dataset_flag(created.dataset) if created.dataset is not None else None
         if output_json:
-            body = {"taskset_ref": created.ref, "tasks": created.refs, "total": created.total, "dataset": dataset}
+            body = {
+                "taskset_ref": created.ref,
+                "tasks": created.refs,
+                "total": created.total,
+                "intake_dataset": dataset,
+            }
             typer.echo(json.dumps(body, indent=2))
             return
         if dataset is not None:
-            typer.echo(f"Dataset for Intake: --dataset {dataset}")
+            typer.echo(f"Intake label: --intake-dataset {dataset}")
         typer.echo(created.ref)
 
     @tasksets.command("build-images")

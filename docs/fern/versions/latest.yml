@@ -102,6 +102,9 @@ navigation:
               - page: Evaluate a Harbor Task Suite
                 slug: harbor-runner
                 path: ../../evals/agent-eval/harbor-runner.mdx
+              - page: Run a Harbor Task Suite on Kubernetes
+                slug: harbor-kubernetes
+                path: ../../evals/agent-eval/harbor-kubernetes.mdx
               - page: Run a NeMo Fabric Agent inside Harbor
                 slug: harbor-fabric-agent
                 path: ../../evals/agent-eval/harbor-fabric-agent.mdx
@@ -463,6 +466,9 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
+                  - page: Harbor Sandbox Profiles
+                    slug: harbor-sandbox-profiles
+                    path: ../../set-up/helm/harbor-sandbox-profiles.mdx
                   - page: Secure Sandboxed GRPO
                     slug: sandboxed-grpo
                     path: ../../set-up/helm/sandboxed-grpo.mdx
