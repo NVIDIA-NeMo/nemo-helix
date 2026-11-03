@@ -14,7 +14,7 @@ from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
-from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT, SetupEgressNotReadyError
+from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT
 from nhx_sandbox import egress
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from nhx_sandbox.opensandbox_policy import EgressVerificationError
@@ -163,16 +163,17 @@ async def test_only_the_setup_hostnames_are_looked_up(monkeypatch):
     assert resolve_env["HOSTS"] == "registry.npmjs.org"
 
 
-async def test_a_setup_host_that_does_not_resolve_fails_before_setup_and_closes_the_window(monkeypatch):
+async def test_a_setup_host_that_does_not_resolve_is_logged_and_setup_still_runs(monkeypatch, caplog):
+    """The hosts serve every agent on the profile; one this agent doesn't need mustn't stop its setup."""
     environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "astral.sh"))
     environment.unresolved = ("astral.sh",)
     ran = False
-    with pytest.raises(SetupEgressNotReadyError, match="setup egress not ready .*astral.sh did not resolve"):
+    with caplog.at_level(logging.WARNING):
         async with environment.agent_setup_egress():
             ran = True
-    assert not ran
-    assert _allowed_now(environment) == {IGW}
-    assert environment.calls[-2:] == ["delete", "kill"]
+    assert ran
+    assert "astral.sh did not resolve" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
 
 
 async def test_setup_window_closes_when_setup_fails(monkeypatch):

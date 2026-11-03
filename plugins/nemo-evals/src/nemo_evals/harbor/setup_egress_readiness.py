@@ -6,7 +6,8 @@
 OpenSandbox's egress sidecar (``dns+nft``) answers the sandbox's DNS itself and allows only addresses it has
 answered for. Reading the rules back proves they were stored, not that names resolve through the sidecar yet,
 so :data:`RESOLVE_HOSTS_SCRIPT` looks each setup host up from inside the sandbox, with short retries. The
-lookup also teaches the sidecar the host's addresses before setup connects to them.
+lookup also teaches the sidecar the host's addresses before setup connects to them. A host that never resolves
+is only reported: the list serves every agent on the profile, and the selected one may not need that host.
 """
 
 import ipaddress
@@ -29,7 +30,9 @@ resolve() {
     fi
   done
   if command -v nslookup > /dev/null 2>&1; then
-    nslookup "$1" > /dev/null 2>&1
+    # An address after the answer's Name line, not the exit status: BusyBox's nslookup can fail for a host it
+    # resolved when another search-domain candidate got NXDOMAIN.
+    nslookup "$1" 2> /dev/null | awk '/^Name:/ { name = 1 } name && /^Address/ { found = 1 } END { exit !found }'
     return
   fi
   exit 0
@@ -50,10 +53,6 @@ done
 for host in $failed; do echo "$host"; done
 exit 1
 """
-
-
-class SetupEgressNotReadyError(RuntimeError):
-    """The setup egress window opened, but a setup host doesn't resolve from inside the sandbox."""
 
 
 def resolvable_hosts(hosts: tuple[str, ...]) -> tuple[str, ...]:

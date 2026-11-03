@@ -55,8 +55,21 @@ def test_hosts_that_never_resolve_are_named(bin_dir):
     assert result.stdout.split() == ["astral.sh", "nodejs.org"]
 
 
+#: BusyBox's output for a host it resolved, with the exit status it gives when a search-domain candidate failed.
+BUSYBOX_ANSWER = (
+    'printf "Server:\\t\\t10.0.0.10\\nAddress:\\t10.0.0.10:53\\n\\nName:\\t%s\\nAddress: 1.2.3.4\\n" "$1"; exit 1'
+)
+#: Its output for one it didn't: the server's address, and no answer.
+BUSYBOX_NO_ANSWER = (
+    'printf "Server:\\t\\t10.0.0.10\\nAddress:\\t10.0.0.10:53\\n\\n** server can\'t find %s: NXDOMAIN\\n" "$1"; exit 1'
+)
+
+
 def test_nslookup_is_used_when_there_is_no_getent_or_python(bin_dir):
-    _tool(bin_dir, "nslookup", '[ "$1" != astral.sh ]')
+    _tool(bin_dir, "nslookup", f'if [ "$1" = astral.sh ]; then {BUSYBOX_NO_ANSWER}; fi; {BUSYBOX_ANSWER}')
+    for tool in ("awk", "printf"):
+        if (real := shutil.which(tool)) is not None:
+            (bin_dir / tool).symlink_to(real)
     result = _resolve(bin_dir, "astral.sh github.com", attempts=1)
     assert result.returncode == 1 and result.stdout.split() == ["astral.sh"]
 
