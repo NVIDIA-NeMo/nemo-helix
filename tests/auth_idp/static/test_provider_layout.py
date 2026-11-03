@@ -73,7 +73,8 @@ def test_authentik_compose_reaches_docker_through_socket_proxy():
     assert not any("docker.sock" in volume for volume in nemo_service["volumes"])
     assert nemo_service["environment"]["DOCKER_HOST"] == "tcp://docker-socket-proxy:2375"
     assert "no-new-privileges:true" in nemo_service["security_opt"]
-    assert "docker-socket-proxy" in nemo_service["depends_on"]
+    assert nemo_service["depends_on"]["docker-socket-proxy"]["condition"] == "service_healthy"
+    assert "healthcheck" in services["docker-socket-proxy"]
 
     proxy_volumes = services["docker-socket-proxy"]["volumes"]
     assert proxy_volumes == ["/var/run/docker.sock:/var/run/docker.sock:ro"]

@@ -55,7 +55,7 @@ services:
       AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD: ${AUTHENTIK_WORKLOAD_IDENTITY_PASSWORD:?run contrib/auth/authentik/run.sh prepare-local}
     depends_on:
       docker-socket-proxy:
-        condition: service_started
+        condition: service_healthy
       gateway-tls-init:
         condition: service_completed_successfully
     healthcheck:
@@ -78,7 +78,11 @@ services:
   # the nemo container unable to become host root: it can still create containers,
   # including privileged ones or ones with host bind mounts, because the proxy cannot
   # inspect request bodies. Only nemo shares the docker-api network with the proxy, so
-  # the other services (the IdP in particular) cannot reach the Docker API.
+  # the other services (the IdP in particular) cannot reach the Docker API. The
+  # network is internal, so nothing outside Docker can route to it from the network;
+  # on a Linux host, though, a local user can still reach the proxy's bridge address
+  # and its unauthenticated API, which is root-equivalent. Run this stack only on
+  # hosts where every local user is trusted with Docker access.
   docker-socket-proxy:
     image: docker.io/tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
     environment:
@@ -94,6 +98,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     security_opt:
       - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1:2375/_ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
     networks:
       docker-api: {}
 

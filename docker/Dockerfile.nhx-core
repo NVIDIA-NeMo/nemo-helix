@@ -47,9 +47,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --python /app/.venv/bin/python \
         --output /app/.source-distributions/nhx-core
 
-# Empty writable home for the non-root nvs user (UID/GID 1000). COPY --chown
-# only sets ownership on directories it creates, so seed it from here.
-RUN mkdir -p /nvs-skel/home/nvs/.cache
+# Empty writable home for the non-root nvs user (UID 1000, GID 0 so OpenShift's
+# arbitrary UIDs, which always get GID 0, can write too). COPY --chown only sets
+# ownership on directories it creates, so seed it from here.
+RUN mkdir -p /nvs-skel/home/nvs/.cache && \
+    chmod -R g=u /nvs-skel/home/nvs
 
 FROM ${NHX_CORE_RUNTIME_BASE} AS runtime
 WORKDIR /app
@@ -78,7 +80,9 @@ ENV USERNAME=nvs \
     HOME=/home/nvs
 # DuckDB extension cache (aws, httpfs) for S3 log storage
 COPY --chown=1000:1000 --from=builder /root/.duckdb /root/.duckdb
-COPY --chown=1000:1000 --from=builder /nvs-skel/home/nvs/ /home/nvs/
+COPY --chown=1000:0 --from=builder /nvs-skel/home/nvs/ /home/nvs/
+# COPY creates the destination directory 755; make it group-writable too.
+RUN chmod g=u /home/nvs
 COPY --chown=1000:1000 --from=builder /root/.duckdb /home/nvs/.duckdb
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --chown=1000:1000 --from=builder /app/.venv /app/.venv
