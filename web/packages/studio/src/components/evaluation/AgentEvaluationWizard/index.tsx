@@ -502,15 +502,11 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
-  // The default is fixed the first time it is shown, so a poll cannot swap the deployment the user
-  // saw. Kept out of the form, which holds only an explicit pick.
-  const [shownDefault, setShownDefault] = useState<{ agent: string; name: string }>();
+  // Fixed the first time it is shown, so a poll cannot swap the deployment the user saw.
+  const [shownDefault, setShownDefault] = useState<string>();
   const firstRunning = runningDeployments[0]?.name;
-  if (selectedAgent && firstRunning && shownDefault?.agent !== selectedAgent) {
-    setShownDefault({ agent: selectedAgent, name: firstRunning });
-  }
-  const selectedDeployment =
-    deployment || (shownDefault?.agent === selectedAgent ? shownDefault.name : '');
+  if (!shownDefault && firstRunning) setShownDefault(firstRunning);
+  const selectedDeployment = deployment || shownDefault || '';
 
   const deploymentIssue = (() => {
     if (!selectedAgent || isDeploymentsLoading) return undefined;
