@@ -96,7 +96,7 @@ export const hasLearningRate = (backend: CustomizationBackend, spec: unknown): b
   return isPlainObject(group) && group.learning_rate != null;
 };
 
-/** Drops learning_rate so the backend resolves the per-selection default. */
+/** Drops learning_rate so the backend picks it. */
 export const withoutLearningRate = <T extends object>(
   backend: CustomizationBackend,
   spec: T
@@ -122,7 +122,7 @@ const UNSLOTH_PARSED_SPEC = specOf<UnslothJobInput>(
 const RL_DPO_PARSED_SPEC = specOf<RlJobInput>(CustomizationCreateRlJobBody, rlSeed('dpo'));
 const RL_GRPO_PARSED_SPEC = specOf<RlJobInput>(CustomizationCreateRlJobBody, rlSeed('grpo'));
 
-/** Fully-defaulted spec objects, minus the learning rate. Bind forms to these directly. */
+/** Fully-defaulted specs, minus learning_rate. Bind forms to these. */
 export const AUTOMODEL_DEFAULT_SPEC = withoutLearningRate('automodel', AUTOMODEL_PARSED_SPEC);
 export const UNSLOTH_DEFAULT_SPEC = withoutLearningRate('unsloth', UNSLOTH_PARSED_SPEC);
 export const RL_DPO_DEFAULT_SPEC = withoutLearningRate('rl', RL_DPO_PARSED_SPEC);
@@ -149,7 +149,7 @@ const flatten = (
   return out;
 };
 
-/** Flattened from the parsed specs so the learning rate's spec default is kept. */
+/** From the parsed specs, which still carry learning_rate. */
 export const AUTOMODEL_SPEC_DEFAULTS = flatten(AUTOMODEL_PARSED_SPEC);
 export const UNSLOTH_SPEC_DEFAULTS = flatten(UNSLOTH_PARSED_SPEC);
 /** Keyed off `training`, so callers use `epochs` / `parallelism_num_nodes`. */
@@ -206,10 +206,7 @@ export const specSliderProps = (
   unsetPlaceholder: placeholderFor(defaults, field),
 });
 
-/**
- * The backend's per-selection learning rate, published as `x-learning-rate-defaults` and
- * matched the way `match_learning_rate_default` matches it: the first rule wins.
- */
+/** Mirrors `match_learning_rate_default`: the first matching rule wins. */
 const matchLearningRateDefault = (
   rules: readonly LearningRateDefaultRule[],
   values: Readonly<Record<string, string | undefined>>
@@ -217,10 +214,7 @@ const matchLearningRateDefault = (
   rules.find((rule) => Object.entries(rule.when).every(([path, value]) => values[path] === value))
     ?.value;
 
-/**
- * Resolves `auto` from the base model's head type, as `AutomodelJobInput.with_resolved_recipe`
- * does. Stays `auto` (SFT) for a causal LM or an unknown head.
- */
+/** Mirrors `with_resolved_recipe`: `auto` becomes a retrieval recipe for retrieval heads. */
 export const resolveAutomodelRecipe = (
   recipe: string,
   modelSpec: Pick<ModelSpec, 'head_type' | 'is_embedding_model'> | undefined
@@ -244,12 +238,12 @@ export const resolveAutomodelRecipe = (
 };
 
 export type LearningRateSelection =
-  /** `recipe: null`: `auto` has not resolved yet. */
+  /** `recipe: null` while `auto` resolves. */
   | { backend: 'automodel'; finetuningType?: string; recipe?: string | null }
   | { backend: 'unsloth'; finetuningType?: string }
   | { backend: 'rl'; method: 'dpo' | 'grpo'; finetuningType?: string };
 
-/** Pass the recipe through {@link resolveAutomodelRecipe} first; `auto` reads as SFT. */
+/** `auto` reads as SFT; resolve it first. */
 export const learningRateDefault = (selection: LearningRateSelection): number | undefined => {
   switch (selection.backend) {
     case 'automodel':
@@ -281,7 +275,7 @@ export const learningRateDefault = (selection: LearningRateSelection): number | 
   }
 };
 
-/** Leaves the rate unset for the backend to pick, showing that pick as the placeholder. */
+/** Leaves the rate unset, with the backend's pick as the placeholder. */
 export const learningRateSliderProps = (
   selection: LearningRateSelection
 ): { defaultValue: undefined; unsetPlaceholder: string; unsetValue: number | undefined } => {
@@ -303,7 +297,7 @@ const learningRateSelectionOf = (
     typeof fields.finetuning_type === 'string' ? fields.finetuning_type : undefined;
   switch (backend) {
     case 'automodel':
-      // `auto` stays unresolved here, so a retrieval job's default reads as a custom rate.
+      // Unresolved `auto` reads as SFT, so a retrieval job keeps its rate.
       return {
         backend,
         finetuningType,
@@ -316,7 +310,7 @@ const learningRateSelectionOf = (
   }
 };
 
-/** A stored job carries the rate the backend resolved; drop it when it is that default. */
+/** Drops a stored learning_rate that equals the backend default. */
 export const withoutDefaultLearningRate = <T extends object>(
   backend: CustomizationBackend,
   spec: T
