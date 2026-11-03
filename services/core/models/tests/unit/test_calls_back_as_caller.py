@@ -44,3 +44,42 @@ async def test_the_setting_is_stored_and_returned() -> None:
 
     assert entity_client.create.await_args.args[0].calls_back_as_caller is True
     assert provider.calls_back_as_caller is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("sent", "stored"), [({}, True), ({"calls_back_as_caller": False}, False)])
+async def test_an_update_that_leaves_the_setting_out_keeps_it(sent: dict[str, bool], stored: bool) -> None:
+    """Studio's provider edit, and a CLI update without the flag, leave it out: a router must stay one."""
+    existing = ModelProviderEntity(
+        name="switchyard", workspace="default", host_url="http://switchyard:4002", calls_back_as_caller=True
+    )
+    existing._id = "provider-1"
+    existing._created_at = existing._updated_at = datetime.now(timezone.utc)
+    entity_client = AsyncMock(spec=EntityClient)
+    entity_client.get.return_value = existing
+    entity_client.update.side_effect = lambda entity: entity
+
+    provider = await ModelProviderService(entity_client).upsert_model_provider(
+        "default", "switchyard", UpsertModelProviderRequest(host_url="http://switchyard:4002", **sent)
+    )
+
+    assert provider.calls_back_as_caller is stored
+
+
+@pytest.mark.asyncio
+async def test_an_upsert_that_creates_a_provider_leaves_the_setting_off_unless_sent() -> None:
+    entity_client = AsyncMock(spec=EntityClient)
+    entity_client.get.side_effect = EntityNotFoundError("not found")
+
+    async def created(entity: ModelProviderEntity) -> ModelProviderEntity:
+        entity._id = "provider-1"
+        entity._created_at = entity._updated_at = datetime.now(timezone.utc)
+        return entity
+
+    entity_client.create.side_effect = created
+
+    provider = await ModelProviderService(entity_client).upsert_model_provider(
+        "default", "switchyard", UpsertModelProviderRequest(host_url="http://switchyard:4002")
+    )
+
+    assert provider.calls_back_as_caller is False

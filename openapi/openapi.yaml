@@ -23230,14 +23230,14 @@ components:
           type: string
           maxLength: 1024
         calls_back_as_caller:
-          type: boolean
           title: Calls Back As Caller
           description: For a router that calls models back through the gateway on
             its caller's behalf. The gateway sends it this provider's stored key and
             a caller context, the caller's credential sealed so only the gateway can
             read it, and acts as the caller on each call back that returns the context.
-            A call back with the stored key and no context is refused.
-          default: false
+            A call back with the stored key and no context is refused. Left unset,
+            an update keeps the provider's current setting.
+          type: boolean
       type: object
       required:
       - host_url

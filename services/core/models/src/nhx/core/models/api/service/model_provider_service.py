@@ -265,7 +265,8 @@ class ModelProviderService:
             existing_entity.required_extra_headers = request.required_extra_headers
             existing_entity.model_deployment_id = request.model_deployment_id
             existing_entity.auth_header_format = request.auth_header_format
-            existing_entity.calls_back_as_caller = request.calls_back_as_caller
+            if request.calls_back_as_caller is not None:
+                existing_entity.calls_back_as_caller = request.calls_back_as_caller
             existing_entity.status = status
             existing_entity.status_message = status_message
             if auth_context:
@@ -289,7 +290,7 @@ class ModelProviderService:
                 required_extra_headers=request.required_extra_headers,
                 model_deployment_id=request.model_deployment_id,
                 auth_header_format=request.auth_header_format,
-                calls_back_as_caller=request.calls_back_as_caller,
+                calls_back_as_caller=bool(request.calls_back_as_caller),
                 status=status,
                 status_message=status_message,
             ).with_auth_context(auth_context)
