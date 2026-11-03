@@ -18,8 +18,11 @@ from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.access_keys import (
     ACCESS_KEY_JTI_PATTERN,
+    AccessKeyServiceAttributesForbiddenError,
     AccessKeyValidationError,
 )
+from nhx.common.auth.openapi import BEARER_AUTH_OPENAPI
+from nhx.common.auth.principal_identifier import parse_principal_identifier
 from nhx.common.config import get_auth_config
 from nhx.common.entities import EntityConflictError
 from nhx.common.service.dependencies import get_nemo_client
@@ -34,6 +37,9 @@ from nhx.core.auth.app.access_keys import (
 from . import schemas
 
 router = APIRouter(tags=["Scoped Access Keys"])
+
+# Authentication is enforced by middleware, not an additional FastAPI dependency.
+_ACCESS_KEY_AUTH_OPENAPI = BEARER_AUTH_OPENAPI
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
@@ -71,7 +77,10 @@ _ACCESS_KEY_CREATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": schemas.AccessKeyErrorResponse,
     },
     403: {
-        "description": "Service-bound Scoped Access Keys require HelixAdmin",
+        "description": (
+            "Service-bound Scoped Access Keys require HelixAdmin, or service_attributes were set by a caller "
+            "that isn't a platform service"
+        ),
         "model": schemas.AccessKeyErrorResponse,
     },
     404: _ACCESS_KEY_DISABLED_ERROR_RESPONSE,
@@ -132,6 +141,18 @@ def _caller_access_key_scope(auth_client: AuthClient) -> list[str] | None:
     return services or None
 
 
+def _acting_service(auth_client: AuthClient) -> str | None:
+    """The platform service making the request, whether or not it acts for a user.
+
+    None with auth off, where any caller can claim a service identity in its headers.
+    """
+    principal_id = auth_client.principal.id
+    if not auth_client.auth_enabled or not principal_id:
+        return None
+    identifier = parse_principal_identifier(principal_id, validate=False)
+    return identifier.service_name if identifier.is_service_principal() else None
+
+
 def get_access_key_issuer(
     auth_client: AuthClient = Depends(get_auth_client),
     registry: AccessKeyRegistry = Depends(get_access_key_registry),
@@ -144,6 +165,7 @@ def get_access_key_issuer(
         workspaces_client,
         admin_override=lambda: _is_platform_admin(auth_client),
         caller_scope=_caller_access_key_scope(auth_client),
+        acting_service=_acting_service(auth_client),
     )
 
 
@@ -180,6 +202,7 @@ async def _change_suspension_status(
 @router.post(
     "/v2/access-keys",
     response_model=schemas.AccessKeyCreateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_CREATE_ERROR_RESPONSES,
 )
 async def create_access_key(
@@ -204,6 +227,8 @@ async def create_access_key(
         return _disabled_response()
     except AccessKeyOperationNotImplementedError as exc:
         raise _not_implemented(exc) from exc
+    except AccessKeyServiceAttributesForbiddenError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except AccessKeyValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except EntityConflictError as exc:
@@ -213,6 +238,7 @@ async def create_access_key(
 @router.get(
     "/v2/access-keys",
     response_model=schemas.AccessKeyListResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_LIFECYCLE_ERROR_RESPONSES,
 )
 async def list_access_keys(
@@ -231,6 +257,7 @@ async def list_access_keys(
 @router.delete(
     "/v2/access-keys/{jti}",
     response_model=schemas.AccessKeyRevokeResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_REVOKE_ERROR_RESPONSES,
 )
 async def revoke_access_key(
@@ -252,6 +279,7 @@ async def revoke_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/suspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -264,6 +292,7 @@ async def suspend_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/unsuspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -277,6 +306,7 @@ async def unsuspend_access_key(
 @router.post(
     "/v2/access-keys/{jti}/rotate",
     response_model=schemas.AccessKeyRotateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_ROTATE_ERROR_RESPONSES,
 )
 async def rotate_access_key(

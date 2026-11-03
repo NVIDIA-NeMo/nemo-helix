@@ -383,7 +383,9 @@ async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy
     ],
 )
 async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, sandbox_policy, config, code):
-    rejected = await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
+    rejected = (
+        await prepare_task_images.check(task("f" * 64, config=config), policy=sandbox_policy, clients=clients)
+    ).error
     assert rejected is not None and rejected.code == code
 
 
@@ -408,7 +410,12 @@ def compose_task(archive, tmp_path):
 
 
 async def check(clients, policy, config=None):
-    """Run the preparer's submit-time check on a task with ``config``, as submit would."""
+    """Run the preparer's submit-time check on a task with ``config``, as submit would; its error, or None."""
+    return (await check_result(clients, policy, config)).error
+
+
+async def check_result(clients, policy, config=None):
+    """The whole result of the preparer's submit-time check: its error and its notices."""
     return await prepare_task_images.check(task("f" * 64, config=config), policy=policy, clients=clients)
 
 
@@ -420,6 +427,15 @@ async def test_check_passes_a_compose_task_the_pod_can_run(clients, sandbox_poli
 async def test_check_passes_a_compose_file_that_only_changes_main(clients, sandbox_policy, compose_task):
     compose_task("services:\n  main:\n    command: [/app/tests/run.sh]\n    working_dir: /app\n")
     assert await check(clients, sandbox_policy) is None
+
+
+async def test_check_passes_net_admin_on_main_with_a_notice(clients, sandbox_policy, compose_task):
+    compose_task("services:\n  main:\n    cap_add: [NET_ADMIN]\n")
+    result = await check_result(clients, sandbox_policy)
+    assert result.error is None
+    assert result.notices == [
+        "services.main.cap_add: NET_ADMIN isn't granted; the sandbox's egress policy controls outbound traffic instead"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -464,7 +480,7 @@ async def test_check_reports_an_unsafe_archive(clients, sandbox_policy, archive)
 
 
 async def test_check_passes_a_dockerfile_task_without_starting_a_build(clients, archive, sandbox_policy, jobs):
-    assert await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients) is None
+    assert (await prepare_task_images.check(task("f" * 64), policy=sandbox_policy, clients=clients)).error is None
     assert not jobs.created
 
 

@@ -354,7 +354,8 @@ def _publish_all(config: PushStepConfig, *, builder: _Builder, sign: Sign | None
             logger.exception("cannot read %s; not publishing it", sanitize_for_log(image.image))
             failures += 1
             continue
-        if row.status != "pending":
+        # ``queued`` too: the queue controller moves the rows to ``pending`` only after it creates this job.
+        if row.status not in ("queued", "pending"):
             logger.info(
                 "%s is already %s; nothing to publish", sanitize_for_log(image.image), sanitize_for_log(row.status)
             )

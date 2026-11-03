@@ -1834,6 +1834,62 @@ async def test_update_job_status_from_step_skips_step_store_when_noop(
 
 
 @pytest.mark.asyncio
+async def test_update_job_status_from_step_queues_created_attempt_for_first_step(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    current_step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert current_step is not None
+
+    await mock_dispatcher.update_job_status_from_step(
+        current_step, HelixJobStatus.QUEUED, status_details={"message": "waiting for capacity"}
+    )
+
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    assert attempt.status == HelixJobStatus.QUEUED
+
+
+@pytest.mark.asyncio
+async def test_update_job_status_from_step_queued_later_step_leaves_running_attempt_unchanged(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+):
+    multi_step_spec = sample_platform_job_request.platform_spec.model_copy(deep=True)
+    multi_step_spec.steps.append(
+        HelixJobStepSpec(
+            name="second-step", executor=sample_platform_job_request.platform_spec.steps[0].executor, config={}
+        )
+    )
+    sample_platform_job_request.platform_spec = multi_step_spec
+    job = await mock_dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    attempt.status = HelixJobStatus.ACTIVE
+    await mock_store.update(attempt)
+
+    second_step = await mock_store.add(
+        HelixJobStep(
+            attempt_id=job.attempt_id,
+            name="second-step",
+            workspace=DEFAULT_WORKSPACE,
+            config={},
+            status=HelixJobStatus.CREATED,
+        )
+    )
+
+    await mock_dispatcher.update_job_status_from_step(second_step, HelixJobStatus.QUEUED)
+
+    attempt = await mock_store.get_by_id(HelixJobAttempt, job.attempt_id)
+    assert attempt is not None
+    assert attempt.status == HelixJobStatus.ACTIVE
+
+
+@pytest.mark.asyncio
 async def test_update_job_status_from_step_missing_job_raises_typed_skip(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,

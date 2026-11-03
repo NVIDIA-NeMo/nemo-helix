@@ -172,11 +172,11 @@ def _probe_nvidia_build_credentials(api_key: str) -> None:
 
 @pytest.fixture(scope="module", autouse=True)
 def nvidia_build_provider(request: pytest.FixtureRequest, nhx_base_url: str, cluster_url: str | None) -> None:
-    """Create the system/nvidia-build provider used by provider-backed docs notebooks.
+    """Create the default/nvidia-build provider used by provider-backed docs notebooks.
 
     Quickstart does not run ``nemo setup``, so docs E2E must register the
     provider explicitly before notebooks call Data Designer or Inference
-    Gateway examples that reference ``system/nvidia-build``.
+    Gateway examples that reference ``default/nvidia-build``.
     """
     # Existing external providers and credentials belong to their operator.
     if cluster_url:
@@ -186,7 +186,7 @@ def nvidia_build_provider(request: pytest.FixtureRequest, nhx_base_url: str, clu
         return
 
     client = request.getfixturevalue("client")
-    workspace = "system"
+    workspace = "default"
     secret_name = "nvidia-build-api-key"
     provider_name = "nvidia-build"
 

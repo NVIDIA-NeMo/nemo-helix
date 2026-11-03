@@ -25,6 +25,7 @@ from dataclasses import replace
 from typing import Any, Literal
 
 from nemo_helix_plugin.job_context import JobContext
+from nhx.customization_common.dataset_files import select_split_files
 from nhx.customization_common.schemas.values import TrainingPhase
 from nhx.customization_common.service.context import NHXJobContext
 from nhx.customization_common.training.pause import (
@@ -134,7 +135,6 @@ def train_sft(
     *,
     model_path: str | None = None,
     dataset_path: str | None = None,
-    validation_path: str | None = None,
     output_path: str | None = None,
     checkpoint_path: str | None = None,
     progress_callback: TrainingProgressCallback | None = None,
@@ -149,11 +149,9 @@ def train_sft(
             ``FastLanguageModel.from_pretrained``. Pass ``None`` to use
             ``spec.model.name`` directly (legacy behavior, kept for
             tests that exercise raw HF ids).
-        dataset_path: Resolved local path to the training dataset. When
-            set, overrides ``spec.dataset.path``. ``None`` keeps the
-            spec value verbatim.
-        validation_path: Resolved local path to the validation dataset
-            (optional).
+        dataset_path: Resolved local path to the dataset, holding the
+            training files and any validation files. When set, overrides
+            ``spec.dataset.path``. ``None`` keeps the spec value verbatim.
         output_path: Resolved local path the saved checkpoint must
             land at. Set by the container entrypoint to the upload
             step's expected location. When ``None`` falls back to
@@ -254,28 +252,13 @@ def train_sft(
             # for `finetuning_type='all_weights'`).
 
             # ── Dataset ────────────────────────────────────────────────────────
-            resolved_train_path = dataset_path or spec.dataset.path
-            train_ds = _load_training_dataset(
-                path=resolved_train_path,
-                text_field=spec.dataset.text_field,
-                apply_chat_template=spec.dataset.apply_chat_template,
+            train_ds, eval_ds = _load_datasets(
+                path=dataset_path or spec.dataset.path,
+                spec=spec,
                 tokenizer=tokenizer,
                 load_dataset=load_dataset,
                 Dataset=Dataset,
-                split="train",
             )
-            eval_ds = None
-            resolved_validation_path = validation_path or spec.dataset.validation_path
-            if resolved_validation_path:
-                eval_ds = _load_training_dataset(
-                    path=resolved_validation_path,
-                    text_field=spec.dataset.text_field,
-                    apply_chat_template=spec.dataset.apply_chat_template,
-                    tokenizer=tokenizer,
-                    load_dataset=load_dataset,
-                    Dataset=Dataset,
-                    split="validation",
-                )
 
             # ── SFTConfig ───────────────────────────────────────────────────
             bf16 = spec.hardware.precision == "bf16"
@@ -446,88 +429,103 @@ def _create_progress_callback(reporting: ProgressReportingConfig) -> TrainingPro
     )
 
 
-TRAIN_FILE = "train.jsonl"
-VAL_FILE = "validation.jsonl"
-
-
 def _resolve_local_data_files(
     path: str,
     *,
-    split: Literal["train", "validation"] | None = None,
-) -> str | list[str]:
-    """Resolve a local dataset path to the JSON/JSONL file(s) to load.
+    split: Literal["train", "validation"] = "train",
+) -> str | list[str] | None:
+    """Resolve a local dataset path to the JSON/JSONL file(s) of ``split``.
 
-    A file path is returned unchanged. A directory (the file_io download
-    step's output dir) is expanded to the sorted ``.jsonl`` files inside
-    it, falling back to ``.json``. Both ``.json``/``.jsonl`` and nested
-    layouts are handled via a recursive glob.
+    A file path is training data, returned unchanged, and has no validation
+    files. A directory (the file_io download step's output dir) is expanded
+    to the files of ``split``, picked by the rule every Customizer backend
+    shares (:mod:`nhx.customization_common.dataset_files`): a name matching
+    ``TRAIN_PATTERNS`` or ``VAL_PATTERNS`` (``train*.jsonl``, ``val*.jsonl``),
+    or a ``train/`` or ``val/``-style directory; with neither, every top-level
+    ``.jsonl`` file is training data. One file is returned alone, several as
+    a list.
 
-    When both ``train.jsonl`` and ``validation.jsonl`` live in the same
-    directory, pass ``split`` so training and eval each load the right
-    file instead of concatenating every JSONL in the folder.
+    Returns:
+        The files, or ``None`` for a validation split the dataset does not have.
 
     Raises:
-        FileNotFoundError: if ``path`` is a directory with no JSON/JSONL
-            files under it.
+        FileNotFoundError: if the dataset has no training file.
     """
     from pathlib import Path
 
     p = Path(path).expanduser()
     if not p.is_dir():
-        return str(p)
+        return str(p) if split == "train" else None
 
-    if split == "train":
-        train_file = p / TRAIN_FILE
-        if train_file.is_file():
-            return str(train_file)
-    elif split == "validation":
-        val_file = p / VAL_FILE
-        if val_file.is_file():
-            return str(val_file)
-
-    for pattern in ("*.jsonl", "*.json"):
-        files = sorted(str(f) for f in p.rglob(pattern))
-        if files:
-            return files
-
-    raise FileNotFoundError(
-        f"No .jsonl/.json files found under dataset directory {path!r}. "
-        "Ensure the dataset fileset contains a JSON or JSONL file.",
-    )
+    train, validation = select_split_files(f.relative_to(p).as_posix() for f in p.rglob("*") if f.is_file())
+    files = train if split == "train" else validation
+    if not files:
+        if split == "validation":
+            return None
+        raise FileNotFoundError(
+            f"No training .jsonl/.json files found in dataset directory {path!r}. "
+            "Expected files matching patterns like train*.jsonl or a train/ directory."
+        )
+    if len(files) == 1:
+        return str(p / files[0])
+    return [str(p / file) for file in files]
 
 
-def _load_training_dataset(
+def _load_datasets(
     *,
     path: str,
-    text_field: str,
-    apply_chat_template: bool,
+    spec: UnslothJobOutput,
     tokenizer: Any,
     load_dataset: Any,
     Dataset: Any,
-    split: Literal["train", "validation"] | None = None,
-) -> Any:
-    """Load a JSONL or HF dataset; optionally apply the chat template.
+) -> tuple[Any, Any]:
+    """Load the training and validation rows; apply the chat template if asked.
 
     Heuristic for HF id vs local path: presence of a ``.jsonl`` /
     ``.json`` extension or a leading path-ish token (``/``, ``./``,
     ``~``) implies a local path. Anything else is routed through
-    ``load_dataset`` as an HF dataset id.
+    ``load_dataset`` as an HF dataset id, and has no validation rows.
 
     Container submit hands us the dataset *directory* the file_io
     download step populated (``DEFAULT_DATASET_PATH``), not a single
     file. ``Dataset.from_json`` does not expand a directory, so a local
-    directory is resolved to the ``.jsonl`` / ``.json`` file(s) inside it
-    before loading. A local file path is passed through unchanged (the
-    in-process plugin run hands us a concrete file).
+    directory is resolved to the files of each split before loading.
+    The validation rows are the dataset's validation files; without any,
+    ``schedule.validation_split`` of the training rows is held out with
+    ``schedule.seed``, as the automodel backend does.
     """
     is_local = path.endswith((".jsonl", ".json")) or path.startswith(("/", "./", "~"))
-    raw = Dataset.from_json(_resolve_local_data_files(path, split=split)) if is_local else load_dataset(path)
+    if not is_local:
+        return _render_chat_template(load_dataset(path), spec, tokenizer), None
 
-    if not apply_chat_template:
+    train = Dataset.from_json(_resolve_local_data_files(path, split="train"))
+    validation_files = _resolve_local_data_files(path, split="validation")
+    if validation_files is not None:
+        validation = Dataset.from_json(validation_files)
+    else:
+        ratio = spec.schedule.validation_split or 0.1
+        if len(train) < 2:
+            raise ValueError(
+                f"The dataset has {len(train)} training row(s), too few to hold out {ratio:.0%} for validation. "
+                "Add rows, or a validation file named like validation*.jsonl."
+            )
+        split = train.train_test_split(test_size=ratio, seed=spec.schedule.seed)
+        train, validation = split["train"], split["test"]
+        logger.info(
+            "No validation files in the dataset; held out %d of %d training rows (%.0f%%) for validation",
+            len(validation),
+            len(train) + len(validation),
+            ratio * 100,
+        )
+    return _render_chat_template(train, spec, tokenizer), _render_chat_template(validation, spec, tokenizer)
+
+
+def _render_chat_template(raw: Any, spec: UnslothJobOutput, tokenizer: Any) -> Any:
+    """With ``apply_chat_template``, render each row's ``messages`` into ``text_field``."""
+    if not spec.dataset.apply_chat_template:
         return raw
+    text_field = spec.dataset.text_field
 
-    # Chat-template mode: rows must have a "messages" field; we render
-    # each into the requested ``text_field`` so SFTTrainer can find it.
     def _render(example: dict[str, Any]) -> dict[str, Any]:
         rendered = tokenizer.apply_chat_template(example["messages"], tokenize=False)
         return {**example, text_field: rendered}

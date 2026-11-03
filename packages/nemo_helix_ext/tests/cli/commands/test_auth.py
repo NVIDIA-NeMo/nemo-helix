@@ -328,7 +328,7 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
     def discover_refresh_config(url: str, http_client: httpx.Client, timeout: float = 10.0) -> NHXOIDCConfig:
         return _mock_oidc_config(
             client_id="test-user-login-client-id",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
             default_scopes="openid profile email",
             scope_prefix=None,
         )
@@ -352,7 +352,7 @@ def test_auth_refresh_updates_selected_context_only(oauth_config_file: Path, mon
     assert foo_user["refresh_token"] == "foo-refreshed-refresh"
     assert foo_user["expires_at"] == 1893456000.0
     assert provider_kwargs["client_id"] == "test-user-login-client-id"
-    assert provider_kwargs["bearer_token_source"] == "id_token"
+    assert provider_kwargs["bearer_token_source"] == "access_token"
     assert callable(provider_kwargs["load_tokens"])
     assert callable(provider_kwargs["refresh_lock"])
     assert callable(provider_kwargs["on_tokens_refreshed"])
@@ -1379,7 +1379,7 @@ def test_auth_login_passes_device_compatibility_settings(
     def discover_config(*_args, **_kwargs) -> NHXOIDCConfig:
         return _mock_oidc_config(
             client_id="user-login-client",
-            bearer_token_source="id_token",
+            bearer_token_source="access_token",
             device_authorization_requires_device_id=True,
             device_authorization_display_name=None,
             device_token_request_includes_scope=False,
@@ -1389,7 +1389,7 @@ def test_auth_login_passes_device_compatibility_settings(
     async def device_flow(**kwargs) -> SimpleNamespace:
         calls.append(kwargs)
         return SimpleNamespace(
-            token_for_nhx="signed-id-token",
+            token_for_nhx="opaque-access-token",
             refresh_token="refresh-token",
             scope="openid profile email offline_access",
             expires_in=3600,
@@ -1409,7 +1409,7 @@ def test_auth_login_passes_device_compatibility_settings(
             "client_id": "user-login-client",
             "scope": "openid profile email offline_access",
             "open_browser": False,
-            "bearer_token_source": "id_token",
+            "bearer_token_source": "access_token",
             "include_device_id": True,
             "device_display_name": "NeMo Helix CLI",
             "include_scope_in_token_request": False,
@@ -1420,44 +1420,9 @@ def test_auth_login_passes_device_compatibility_settings(
     with open(oauth_config_file) as f:
         data = yaml.safe_load(f)
     foo_user = next(user for user in data["users"] if user["name"] == "foo")
-    assert foo_user["token"] == "signed-id-token"
+    assert foo_user["token"] == "opaque-access-token"
     assert foo_user["refresh_token"] == "refresh-token"
     assert foo_user["expires_at"] > time.time()
-
-
-def test_auth_login_id_token_without_scope_signal_skips_scope_preflight(
-    oauth_config_file: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    oidc_config = _mock_oidc_config(bearer_token_source="id_token")
-
-    async def device_flow(**_kwargs) -> SimpleNamespace:
-        return SimpleNamespace(
-            token_for_nhx="signed-id-token-without-scope",
-            refresh_token="refresh-token",
-            scope=None,
-            expires_in=3600,
-        )
-
-    monkeypatch.setattr(
-        "nemo_helix_ext.cli.commands.auth.discover_nhx_config",
-        lambda *_args, **_kwargs: oidc_config,
-    )
-    monkeypatch.setattr("nemo_helix_ext.auth.device_flow.authenticate_with_device_flow", device_flow)
-    monkeypatch.setattr(
-        "nemo_helix_ext.auth.login.decode_jwt_claims",
-        lambda _token: {"sub": "alice", "email": "alice@example.com"},
-    )
-
-    result = runner.invoke(
-        app,
-        ["--context", "foo", "auth", "login", "--no-browser", "--scope", "platform:read"],
-    )
-
-    assert_exit_code(result, 0)
-    with open(oauth_config_file) as f:
-        data = yaml.safe_load(f)
-    foo_user = next(user for user in data["users"] if user["name"] == "foo")
-    assert foo_user["token"] == "signed-id-token-without-scope"
 
 
 def test_auth_login_without_refresh_token_uses_provider_neutral_guidance(

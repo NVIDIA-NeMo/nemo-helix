@@ -67,8 +67,6 @@ async def transform_input_to_output(
     # Strict refs: both calls error if the entity / fileset is missing.
     model_entity = await fetch_model_entity(input_spec.model.name, workspace, platform)
     await check_dataset_access(platform, input_spec.dataset.path, workspace)
-    if input_spec.dataset.validation_path:
-        await check_dataset_access(platform, input_spec.dataset.validation_path, workspace)
 
     model_spec = model_entity.spec
     if model_spec is not None and _is_encoder_model(model_spec):

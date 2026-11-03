@@ -23,7 +23,9 @@ from nemo_deployments_plugin.validation import (
     prerequisite_names,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -37,6 +39,8 @@ from nemo_helix_plugin.schema import PaginationData
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+deployment_policy = AuthContextResponsePolicy(dto_type=Deployment, field="auth_context")
+deployment_routes = PolicyRoutes(router, deployment_policy)
 
 _deployment_filter_dep = make_filter_obj_dep(DeploymentFilter)
 
@@ -71,7 +75,7 @@ def _parse_deployment_config_ref(ref: str, default_workspace: str) -> tuple[str,
     return default_workspace, ref
 
 
-@router.post("/deployments", response_model=Deployment, status_code=201, tags=["Deployments"])
+@deployment_routes.post("/deployments", status_code=201, tags=["Deployments"])
 @scope.write
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.CREATE])
 async def create_deployment(
@@ -121,7 +125,7 @@ async def create_deployment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/deployments", response_model=DeploymentPage, tags=["Deployments"])
+@deployment_routes.get("/deployments", tags=["Deployments"])
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.LIST])
 async def list_deployments(
@@ -158,7 +162,7 @@ async def list_deployments(
     return DeploymentPage(data=result.data, pagination=pagination, sort=sort, filter=filter)
 
 
-@router.get("/deployments/{name}", response_model=Deployment, tags=["Deployments"])
+@deployment_routes.get("/deployments/{name}", tags=["Deployments"])
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL, CallerKind.SERVICE_PRINCIPAL], permissions=[DeploymentPerms.READ])
 async def get_deployment(

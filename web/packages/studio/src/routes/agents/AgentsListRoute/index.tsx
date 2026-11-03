@@ -13,8 +13,8 @@ import {
   usePluginsLoaded,
 } from '@studio/plugins/PluginContext';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { CreateDeploymentModal } from '@studio/routes/agents/AgentDeploymentsListRoute/CreateDeploymentModal';
 import { CloneAgentModal } from '@studio/routes/agents/AgentsListRoute/CloneAgentModal';
+import { CreateDeploymentModal } from '@studio/routes/agents/AgentsListRoute/CreateDeploymentModal';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { getAgentDetailRoute } from '@studio/routes/utils';
 import { type FC, useState } from 'react';

@@ -1,8 +1,7 @@
 {
   "model": "default/nemotron-3-5-lightning-30b-a3b",
   "dataset": {
-    "training": "default/commonsense_qa",
-    "validation": "default/commonsense_qa"
+    "training": "default/commonsense_qa"
   },
   "training": {
     "training_type": "sft",

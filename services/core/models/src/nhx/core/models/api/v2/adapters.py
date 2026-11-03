@@ -6,8 +6,9 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.files.client import AsyncFilesClient
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -79,6 +80,8 @@ async def create_adapter(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(err))
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to create adapter - {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create adapter")
@@ -120,6 +123,8 @@ async def list_adapters(
             sort=sort,
             parsed_filter=parsed_filter,
         )
+    except PermissionDeniedError:
+        raise
     except Exception:
         logger.exception("Failed to list adapter entities")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to list adapter entities")
@@ -128,6 +133,7 @@ async def list_adapters(
 @router.get(
     "/v2/workspaces/{workspace}/adapters/{name}",
     summary="Get Adapter",
+    responses={404: {"model": ErrorResponse, "description": "Adapter not found"}},
     response_description="Get one adapter by name. Parent model is taken from the adapter's stored parent (entity `parent` field).",
     status_code=status.HTTP_200_OK,
     response_model=Adapter,
@@ -210,6 +216,8 @@ async def update_adapter(
         logger.warning(f"Adapter update: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception as e:
         logger.exception(f"Failed to update adapter - {e}")

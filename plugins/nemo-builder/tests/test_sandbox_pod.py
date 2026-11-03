@@ -16,7 +16,6 @@ from kubernetes.client.exceptions import ApiException
 from nemo_builder_plugin.run import supervise
 from nemo_builder_plugin.run.supervise import (
     KANIKO_CAPABILITIES,
-    KANIKO_FEATURE_FLAGS,
     RESULT_MARKER,
     SANDBOX_ROOT,
     _build_group,
@@ -103,10 +102,9 @@ class TestTheSandboxHoldsNothing:
     def test_no_service_account_token(self) -> None:
         assert _pod().spec.automount_service_account_token is False
 
-    def test_no_environment_but_kanikos_flags_and_no_secret_volume(self) -> None:
+    def test_no_environment_and_no_secret_volume(self) -> None:
         container = _pod().spec.containers[0]
-        assert {e.name: e.value for e in container.env} == KANIKO_FEATURE_FLAGS
-        assert all(e.value_from is None for e in container.env)
+        assert not container.env
         assert not container.env_from
         # Nor the `<SERVICE>_SERVICE_HOST` variables the kubelet injects by default.
         assert _pod().spec.enable_service_links is False
@@ -201,16 +199,12 @@ class TestTheBuildScript:
         assert "--no-push" in script
         assert "crane" not in script and "cosign" not in script
 
-    def test_reproducible_with_kanikos_credential_helpers_off(self) -> None:
+    def test_not_reproducible_with_kanikos_credential_helpers_off(self) -> None:
         script = _build_script(_group(2), _sandbox())
-        assert script.count("--reproducible") == 2
+        # `--reproducible` needs more memory than a sandbox has on a large base.
+        assert "--reproducible" not in script
         # An empty value turns them all off; without the flag, all of them are on.
         assert script.count("--credential-helpers= ") == 2
-
-    def test_reproducible_keeps_the_base_format_and_layers(self) -> None:
-        """Without these, the fork's `--reproducible` writes Docker v2s2 and re-tars every base layer."""
-        assert KANIKO_FEATURE_FLAGS["FF_KANIKO_REPRODUCIBLE_PRESERVE_FORMAT"] == "true"
-        assert KANIKO_FEATURE_FLAGS["FF_KANIKO_REPRODUCIBLE_PRESERVE_BASE_LAYERS"] == "true"
 
     def test_one_invocation_per_image_with_cleanup_between(self) -> None:
         script = _build_script(_group(3), _sandbox())
@@ -297,6 +291,9 @@ class _Api:
         if self._delete:
             raise self._delete
 
+    def list_namespaced_pod(self, **kwargs: object) -> None:
+        """Only named: the faked Watch streams the pods."""
+
 
 class TestEachSandboxFailsAlone:
     NAME = "nhx-sbx-abc-g0"
@@ -375,6 +372,34 @@ class TestEachSandboxFailsAlone:
             self._build(monkeypatch, _Api(), log="STEP 1/2\nSTEP 2/2\n" + self.BUILT)
         messages = [record.getMessage() for record in caplog.records]
         assert "  STEP 1/2" in messages and "  STEP 2/2" in messages
+
+
+def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    killed = k8s.V1ContainerStatus(
+        name="sandbox",
+        image="nhx-kaniko:test",
+        image_id="",
+        ready=False,
+        restart_count=0,
+        state=k8s.V1ContainerState(terminated=k8s.V1ContainerStateTerminated(exit_code=137, reason="OOMKilled")),
+    )
+    pod = k8s.V1Pod(status=k8s.V1PodStatus(phase="Failed", container_statuses=[killed]))
+
+    class Watch:
+        def stream(self, *args: object, **kwargs: object) -> list[dict[str, object]]:
+            return [{"object": pod}]
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
+    with caplog.at_level(logging.ERROR, logger=supervise.__name__):
+        failures = _build_group(
+            cast(k8s.CoreV1Api, _Api()), name="nhx-sbx-abc-g0", manifest=_pod(), group=_group(1), namespace="b"
+        )
+    assert failures == 1
+    assert "no result recorded (sandbox phase Failed: sandbox OOMKilled (exit 137))" in caplog.text
 
 
 class TestResultParsing:

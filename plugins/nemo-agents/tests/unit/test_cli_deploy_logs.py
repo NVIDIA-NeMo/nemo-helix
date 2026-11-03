@@ -77,7 +77,7 @@ def test_deploy_default_waits_and_returns_success_on_running(make_cli_state) -> 
     with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--timeout", "10"],
+            ["deploy", "--agent", "calc", "--mode", "subprocess", "--timeout", "10"],
             obj=make_cli_state(handler),
         )
 
@@ -115,7 +115,7 @@ def test_deploy_default_exits_failure_when_subprocess_dies(make_cli_state) -> No
     with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--timeout", "10"],
+            ["deploy", "--agent", "calc", "--mode", "subprocess", "--timeout", "10"],
             obj=make_cli_state(handler),
         )
 
@@ -153,7 +153,7 @@ def test_deploy_polls_through_multiple_pending_responses(make_cli_state) -> None
     with patch("nemo_agents_plugin.cli.sleep"):
         result = CliRunner().invoke(
             app,
-            ["deploy", "--agent", "calc", "--timeout", "60"],
+            ["deploy", "--agent", "calc", "--mode", "subprocess", "--timeout", "60"],
             obj=make_cli_state(handler),
         )
 
@@ -176,7 +176,7 @@ def test_deploy_no_wait_returns_immediately_with_pending_json(make_cli_state) ->
     app = AgentsCLI().get_cli()
     result = CliRunner().invoke(
         app,
-        ["deploy", "--agent", "calc", "--no-wait"],
+        ["deploy", "--agent", "calc", "--mode", "subprocess", "--no-wait"],
         obj=make_cli_state(handler),
     )
 

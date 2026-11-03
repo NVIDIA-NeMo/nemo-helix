@@ -68,7 +68,7 @@ The container image targets the same compute capabilities NVIDIA's stock `pytorc
 ## Schema reference
 
 - `model: ModelLoadSpec` — `name`, `max_seq_length`, `load_in_4bit`, `load_in_8bit`, `dtype`, `trust_remote_code`.
-- `dataset: DatasetSpec` — `path` (required), `text_field`, `apply_chat_template`, `validation_path`, `packing`.
+- `dataset: DatasetSpec` — `path` (required), `text_field`, `apply_chat_template`, `packing`. `path` holds the training files and any validation files, told apart by name.
 - `training: TrainingSpec` — `training_type`, `finetuning_type` (`lora` or `all_weights`), `lora: LoRAParams`, `use_gradient_checkpointing`.
 - `schedule: ScheduleSpec` — `epochs` (default 1) and optional `max_steps`, which overrides `epochs` when set; `warmup_steps` xor `warmup_ratio`, `lr_scheduler_type`, `logging_steps`, `save_steps`, `eval_steps`, `seed`.
 - `batch: BatchSpec` — `per_device_train_batch_size`, `gradient_accumulation_steps`.

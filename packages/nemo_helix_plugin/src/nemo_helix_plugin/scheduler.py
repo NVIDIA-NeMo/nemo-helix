@@ -40,6 +40,8 @@ class NemoJobScheduler:
         http_client: httpx.Client | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
+        dry_run: bool = False,
+        dry_run_full: bool = False,
     ) -> dict:
         """POST the job to the plugin service's per-job submit route.
 
@@ -64,6 +66,10 @@ class NemoJobScheduler:
             headers: Optional per-request headers (e.g. ``Authorization`` from
                 the CLI). Merged on each POST; not inferred from *http_client*.
             timeout: Request timeout in seconds.
+            dry_run: Check the job as submit would and create nothing (``?dry_run=true``).
+                A failed check is a 422 whose ``detail`` lists every check.
+            dry_run_full: With *dry_run*, run the checks in full (``?dry_run_full=true``), such as
+                every dataset row rather than the first few.
 
         Returns:
             The decoded JSON response from the plugin service.
@@ -73,6 +79,8 @@ class NemoJobScheduler:
             httpx.HTTPStatusError: On 4xx / 5xx responses.
         """
         url = self._build_submit_url(job_cls, base_url=base_url, workspace=workspace)
+        if dry_run:
+            url += "?dry_run=true&dry_run_full=true" if dry_run_full else "?dry_run=true"
         body = self._build_submit_body(spec, profile=profile, options=options, metadata=metadata)
         return self._post_submit(url, body, http_client=http_client, headers=headers, timeout=timeout)
 

@@ -157,26 +157,10 @@ clickhouse_statefulset_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOL
   --set clickhouse.startupProbe.periodSeconds=17)
 api_deployment_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
   --show-only templates/api/api-deployment.yaml)
-rotated_api_deployment_output=$(helm template "${HELM_RELEASE_NAME}" "${HELM_FOLDER}" \
-  --show-only templates/api/api-deployment.yaml \
-  --set-string clickhouse.auth.password=rotated-test-password)
 grep -A6 -F "startupProbe:" <<<"${clickhouse_statefulset_output}" \
   | grep -Fq "periodSeconds: 17"
-clickhouse_credentials_checksum=$(awk \
-  '$1 == "checksum/clickhouse-credentials:" { print $2; exit }' \
-  <<<"${clickhouse_statefulset_output}")
-api_credentials_checksum=$(awk \
-  '$1 == "checksum/clickhouse-credentials:" { print $2; exit }' \
-  <<<"${api_deployment_output}")
-rotated_credentials_checksum=$(awk \
-  '$1 == "checksum/clickhouse-credentials:" { print $2; exit }' \
-  <<<"${rotated_api_deployment_output}")
-if [[ -z "${clickhouse_credentials_checksum}" || "${clickhouse_credentials_checksum}" != "${api_credentials_checksum}" ]]; then
-  echo "API and ClickHouse workloads do not share the same credential checksum" >&2
-  exit 1
-fi
-if [[ -z "${rotated_credentials_checksum}" || "${rotated_credentials_checksum}" == "${api_credentials_checksum}" ]]; then
-  echo "ClickHouse credential checksum did not change with the configured password" >&2
+if grep -Fq "checksum/clickhouse-credentials:" <<<"${clickhouse_statefulset_output}${api_deployment_output}"; then
+  echo "ClickHouse credentials still have a pod checksum that rolls workloads" >&2
   exit 1
 fi
 clickhouse_pvc_template=$(sed -n '/^  volumeClaimTemplates:/,$p' <<<"${clickhouse_statefulset_output}")

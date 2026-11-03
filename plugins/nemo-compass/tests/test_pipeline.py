@@ -140,10 +140,9 @@ async def test_streams_cannot_close_the_platform_model_client():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("workspace,agent", [("other", "target"), ("test", "other")])
-async def test_persistence_rechecks_insight_ownership(workspace, agent):
+async def test_persistence_rechecks_insight_agent():
     backend = object.__new__(RemoteCompassBackend)
-    backend._get = AsyncMock(return_value=MagicMock(workspace=workspace, agent=agent))
+    backend._get = AsyncMock(return_value=MagicMock(workspace="test", agent="other"))
     with pytest.raises(ValueError, match="no longer belongs"):
         await backend._add_evidence(
             workspace="test", agent="target", insight_id="id", evidence=[TraceEvidence(trace_id="a")]

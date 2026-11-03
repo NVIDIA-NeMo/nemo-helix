@@ -2,24 +2,37 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import uuid
 from typing import Annotated
 
 from aiohttp import ClientSession
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from nemo_helix_plugin.inference_middleware import InferenceAccessRequest
 from nhx.core.inference_gateway.api.authz import (
     PROVIDER_EXEC_PERMISSION,
     PROVIDER_READ_PERMISSION,
     enforce_delegated_workspace_access,
 )
-from nhx.core.inference_gateway.api.dependencies import global_http_client, global_model_cache
+from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal, refuse_router_keys
+from nhx.core.inference_gateway.api.dependencies import (
+    global_http_client,
+    global_middleware_registry,
+    global_model_cache,
+)
 from nhx.core.inference_gateway.api.errors import raise_unresolved_provider_secret
+from nhx.core.inference_gateway.api.middleware_registry import MiddlewareRegistry, execute_access_checks
 from nhx.core.inference_gateway.api.mock_provider import (
     handle_mock_request,
     is_mock_provider,
     is_mock_request,
 )
 from nhx.core.inference_gateway.api.model_cache import ModelCache
-from nhx.core.inference_gateway.api.proxy import PROXY_OPENAPI_EXTRA, build_next_request, proxy_request
+from nhx.core.inference_gateway.api.proxy import (
+    PROXY_OPENAPI_EXTRA,
+    UpstreamProviderContext,
+    build_next_request,
+    proxy_request,
+)
 from nhx.core.inference_gateway.api.validation import validate_workspace_and_name
 
 logger = logging.getLogger(__name__)
@@ -113,9 +126,10 @@ async def provider_proxy(
     request: Request,
     workspace: str,
     name: str,
-    trailing_uri: str,
+    trailing_uri: Annotated[str, Path(examples=["v1/chat/completions"])],
     http_client: Annotated[ClientSession, Depends(global_http_client)],
     model_cache: Annotated[ModelCache, Depends(global_model_cache)],
+    registry: Annotated[MiddlewareRegistry, Depends(global_middleware_registry)],
 ) -> Response:
     """
     Proxy requests to provider inference endpoints.
@@ -130,6 +144,17 @@ async def provider_proxy(
     if is_mock_request(request):
         return await handle_mock_request(request=request, trailing_uri=trailing_uri)
 
+    refuse_router_keys(request.headers, model_cache.router_keys())
+    await execute_access_checks(
+        registry.plugins,
+        InferenceAccessRequest(
+            request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            workspace=workspace,
+            path=trailing_uri,
+            headers=dict(request.headers),
+            provider_name=name,
+        ),
+    )
     model_info = model_cache.get_from_provider(workspace, name)
     if model_info is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"Model provider not found for {workspace}/{name}")
@@ -156,5 +181,15 @@ async def provider_proxy(
         required_extra_body=model_info.model_provider.required_extra_body,
         required_extra_headers=model_info.model_provider.required_extra_headers,
     )
+    next_request_info.headers.update(context_headers(model_info.model_provider, request.headers, gateway_seal()))
 
-    return await proxy_request(http_client, next_request_info)
+    return await proxy_request(
+        http_client,
+        next_request_info,
+        upstream_context=UpstreamProviderContext(
+            model_provider_name=name,
+            provider_host_url=model_info.model_provider.host_url,
+            workspace=workspace,
+            purpose=f"proxying {trailing_uri!r}",
+        ),
+    )

@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import json
+import math
+import re
 from datetime import datetime
 from typing import Literal, Self, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 AccessKeyStatus = Literal["ACTIVE", "EXPIRED", "REVOKED", "SUSPENDED", "ROTATING"]
 AccessKeyReversibleStatus = Literal["ACTIVE", "EXPIRED", "SUSPENDED"]
@@ -16,6 +19,10 @@ ACCESS_KEY_JTI_PATTERN = r"^ak_[0-9a-f]{32}$"
 _NON_BLANK_PATTERN = r"^\s*\S.*$"
 # A service/role name with no whitespace or ':' once trimmed (those chars are claim delimiters).
 _SCOPE_ITEM_PATTERN = r"^\s*[^\s:]+\s*$"
+SERVICE_ATTRIBUTE_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+SERVICE_ATTRIBUTES_MAX_BYTES = 2048
+SERVICE_ATTRIBUTES_MAX_ENTRIES = 32
+SERVICE_ATTRIBUTES_MAX_STRING_LENGTH = 256
 
 
 class AccessKeyWorkspaceGrant(BaseModel):
@@ -115,6 +122,23 @@ class AccessKeyCreateRequest(BaseModel):
         json_schema_extra={"nullable": True},
         description="Optional workspace memberships to grant to the newly created key principal.",
     )
+    service_attributes: dict[str, JsonValue] | None = Field(
+        default=None,
+        json_schema_extra={"nullable": True},
+        description=(
+            "Facts a platform service vouches for, signed into the token under that service's name in the "
+            "nhx_service_attributes claim. Only a service principal, usually acting for a user, may set them. "
+            f"At most {SERVICE_ATTRIBUTES_MAX_ENTRIES} names matching {SERVICE_ATTRIBUTE_NAME_PATTERN}, values "
+            "nested at most one object or array deep, strings of at most "
+            f"{SERVICE_ATTRIBUTES_MAX_STRING_LENGTH} characters, and {SERVICE_ATTRIBUTES_MAX_BYTES} bytes as JSON."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_service_attributes(self) -> Self:
+        if self.service_attributes is not None:
+            validate_service_attributes(self.service_attributes)
+        return self
 
     @model_validator(mode="after")
     def _validate_scope(self) -> Self:
@@ -195,6 +219,10 @@ class AccessKeyMetadataResponse(BaseModel):
         default=None,
         json_schema_extra={"nullable": True},
         description="Timestamp of the most recent successful authentication with this Scoped Access Key.",
+    )
+    service_attributes: dict[str, dict[str, JsonValue]] = Field(
+        default_factory=dict,
+        description="Attributes platform services signed into the key, by service name. Read-only to the key's owner.",
     )
 
 
@@ -282,3 +310,47 @@ class JsonWebKey(BaseModel):
     """JSON Web Key object."""
 
     model_config = ConfigDict(extra="allow")
+
+
+def validate_service_attributes(attributes: dict[str, JsonValue]) -> None:
+    """Raise ``ValueError`` unless ``attributes`` fits the limits a token claim can carry."""
+    if not attributes:
+        raise ValueError("service_attributes, if provided, must not be empty")
+    if len(attributes) > SERVICE_ATTRIBUTES_MAX_ENTRIES:
+        raise ValueError(f"service_attributes must have at most {SERVICE_ATTRIBUTES_MAX_ENTRIES} names")
+    for name, value in attributes.items():
+        if not re.fullmatch(SERVICE_ATTRIBUTE_NAME_PATTERN, name):
+            raise ValueError(f"service_attributes name {name!r} must match {SERVICE_ATTRIBUTE_NAME_PATTERN}")
+        _validate_service_attribute_value(name, value, depth=0)
+    if len(json.dumps(attributes, separators=(",", ":")).encode()) > SERVICE_ATTRIBUTES_MAX_BYTES:
+        raise ValueError(f"service_attributes must be at most {SERVICE_ATTRIBUTES_MAX_BYTES} bytes as JSON")
+
+
+def _validate_service_attribute_value(name: str, value: JsonValue, *, depth: int) -> None:
+    if isinstance(value, str):
+        try:
+            value.encode()
+        except UnicodeEncodeError as exc:
+            raise ValueError(f"service_attributes[{name!r}] strings must be valid Unicode") from exc
+        if len(value) > SERVICE_ATTRIBUTES_MAX_STRING_LENGTH:
+            raise ValueError(
+                f"service_attributes[{name!r}] strings must be at most {SERVICE_ATTRIBUTES_MAX_STRING_LENGTH} characters"
+            )
+        return
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(f"service_attributes[{name!r}] numbers must be finite")
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    if depth > 0:
+        raise ValueError(f"service_attributes[{name!r}] may nest at most one object or array deep")
+    children = value.items() if isinstance(value, dict) else ((name, item) for item in value)
+    if isinstance(value, dict) and len(value) > SERVICE_ATTRIBUTES_MAX_ENTRIES:
+        raise ValueError(f"service_attributes[{name!r}] must have at most {SERVICE_ATTRIBUTES_MAX_ENTRIES} entries")
+    if isinstance(value, list) and len(value) > SERVICE_ATTRIBUTES_MAX_ENTRIES:
+        raise ValueError(f"service_attributes[{name!r}] must have at most {SERVICE_ATTRIBUTES_MAX_ENTRIES} items")
+    for child_name, child in children:
+        if isinstance(value, dict) and not re.fullmatch(SERVICE_ATTRIBUTE_NAME_PATTERN, child_name):
+            raise ValueError(
+                f"service_attributes[{name!r}] key {child_name!r} must match {SERVICE_ATTRIBUTE_NAME_PATTERN}"
+            )
+        _validate_service_attribute_value(name, child, depth=depth + 1)

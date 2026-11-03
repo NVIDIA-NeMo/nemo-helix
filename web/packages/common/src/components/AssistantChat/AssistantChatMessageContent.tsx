@@ -4,8 +4,21 @@
 import { MessagePrimitive } from '@assistant-ui/react';
 import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
+import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import { Banner } from '@nvidia/foundations-react-core';
+
+// The message body above carries the human-readable explanation; the banner shows the raw error
+// (status and provider detail) for anyone who needs to look closer.
+const ChatErrorBanner = () => {
+  const error = useMessageError();
+
+  return (
+    <Banner kind="inline" status="error" className="mt-density-sm">
+      {error}
+    </Banner>
+  );
+};
 
 interface AssistantChatMessageContentProps extends MessageRenderProps {
   contentSurfaceClassName?: string;
@@ -57,9 +70,7 @@ export const AssistantChatMessageContent = ({
       }}
     />
     <MessagePrimitive.Error>
-      <Banner kind="inline" status="error" className="mt-density-sm">
-        There was an error generating a response.
-      </Banner>
+      <ChatErrorBanner />
     </MessagePrimitive.Error>
   </>
 );

@@ -374,7 +374,7 @@ Harbor's task model sets one difference: a task's `allowlist` may name hostnames
 and `*.` wildcards on 0.13.2, and also IP addresses and CIDRs on 0.20.0. The
 operator allowlist accepts all of them on both.
 
-To support another runner, pin `opensandbox==0.1.16` in its
+To support another runner, pin `opensandbox==1.2.0` in its
 `packages/nhx_sandbox/harbor-runners/<version>.txt` and list `opensandbox` under that release's
 `packages` in `data/harbor_runner_qualifications.json` (the image then installs the
 environment into that venv, and CI runs the environment tests against it), then

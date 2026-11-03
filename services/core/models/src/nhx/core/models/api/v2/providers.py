@@ -2,10 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.response_policy import PolicyRoutes
+from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.common.api.common import Page
+from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
@@ -28,14 +32,15 @@ from nhx.core.models.schemas import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+provider_policy = AuthContextResponsePolicy(dto_type=ModelProvider, field="auth_context")
+provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth_client)
 
 
-@router.get(
+@provider_routes.get(
     "/v2/workspaces/{workspace}/providers",
     summary="List ModelProviders By Workspace",
     response_description="Return model providers for a workspace",
     status_code=status.HTTP_200_OK,
-    response_model=Page[ModelProvider],
     response_model_exclude_none=True,
     openapi_extra=generate_openapi_extra_params(
         filter_schema=ModelProviderFilter,
@@ -72,12 +77,14 @@ async def list_providers(
         return result
     except NOT_FOUND_ERRORS:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to list model providers for workspace {workspace}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.post(
+@provider_routes.post(
     "/v2/workspaces/{workspace}/providers",
     summary="Create ModelProvider",
     response_description="Create a new model provider",
@@ -85,13 +92,29 @@ async def list_providers(
 )
 async def create_provider(
     workspace: str,
-    request: CreateModelProviderRequest,
+    request: Annotated[
+        CreateModelProviderRequest,
+        Body(
+            openapi_examples={
+                "provider": {
+                    "summary": "NVIDIA API provider (create the API-key secret first)",
+                    "value": {
+                        "name": "my-provider",
+                        "host_url": "https://integrate.api.nvidia.com/v1",
+                        "api_key_secret_name": "my-provider-api-key",
+                    },
+                }
+            }
+        ),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
     Create a new model provider.
+
+    The NVIDIA API example requires the named API-key secret to exist first.
     """
     logger.info(f"Creating model provider: {workspace}/{request.name}")
     auth_context = AuthContext.from_principal(auth_client.principal)
@@ -124,12 +147,14 @@ async def create_provider(
             )
         logger.warning(f"Model provider creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to create model provider")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.put(
+@provider_routes.put(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Upsert ModelProvider",
     response_description="Create or update a model provider",
@@ -138,13 +163,36 @@ async def create_provider(
 async def upsert_provider(
     workspace: str,
     name: str,
-    request: UpsertModelProviderRequest,
+    request: Annotated[
+        UpsertModelProviderRequest,
+        Body(
+            description=(
+                "PUT replaces the provider configuration. When updating, first read the existing provider and "
+                "preserve every configuration field you intend to keep, including its API-key secret reference. "
+                "The example assumes the named API-key secret already exists."
+            ),
+            openapi_examples={
+                "provider": {
+                    "value": {
+                        "host_url": "https://integrate.api.nvidia.com/v1",
+                        "api_key_secret_name": "my-provider-api-key",
+                        "description": "NVIDIA API provider",
+                    }
+                }
+            },
+        ),
+    ],
     service: ModelProviderService = Depends(get_model_provider_service),
     auth_client: AuthClient = Depends(get_auth_client),
     secrets: AsyncSecretsClient = Depends(get_secrets_client),
 ) -> ModelProvider:
     """
-    Create or update a model provider.
+    Create or replace a model provider.
+
+    PUT replaces the configuration, including optional fields. For an existing
+    provider, first read its current configuration and preserve all fields you
+    intend to keep, especially api_key_secret_name. The NVIDIA API example requires
+    the named API-key secret to exist before this request.
     """
     logger.debug(f"Upserting model provider: {workspace}/{name}")
     auth_context = AuthContext.from_principal(auth_client.principal)
@@ -171,12 +219,14 @@ async def upsert_provider(
     except ValueError as e:
         logger.warning(f"Model provider upsert validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to upsert model provider")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.put(
+@provider_routes.put(
     "/v2/workspaces/{workspace}/providers/{name}/status",
     summary="Update ModelProvider Status Fields",
     response_description="Update status-related fields of a model provider",
@@ -217,14 +267,17 @@ async def update_provider_status(
         )
     except HTTPException:
         raise
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception("Failed to update model provider status fields")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
-@router.get(
+@provider_routes.get(
     "/v2/workspaces/{workspace}/providers/{name}",
     summary="Get ModelProvider",
+    responses={404: {"model": ErrorResponse, "description": "Model provider not found"}},
     response_description="Return model provider details",
     status_code=status.HTTP_200_OK,
 )
@@ -251,6 +304,8 @@ async def get_provider(
 
         return provider
     except HTTPException:
+        raise
+    except PermissionDeniedError:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model provider {workspace}/{name}")
@@ -291,6 +346,8 @@ async def delete_provider(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
+    except PermissionDeniedError:
+        raise
     except Exception as e:
         logger.exception(f"Failed to delete model provider {workspace}/{name}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

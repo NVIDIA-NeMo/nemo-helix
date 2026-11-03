@@ -8,6 +8,7 @@ import {
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
 import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
+import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import {
   ThemeProvider as KaizenThemeProvider,
   TooltipProvider,
@@ -804,6 +805,87 @@ describe('AssistantChat', () => {
         expect(screen.queryByRole('button', { name: /Stop/i })).not.toBeInTheDocument()
       );
       expect(screen.queryByText('aborted')).not.toBeInTheDocument();
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'explains a recognised failure in a red-barred message and keeps the raw error in the banner',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      const retired =
+        "RuntimeError: internal error: APIStatusError: Error code: 410 - {'detail': 'The model \\'acme/old-model\\' has reached its end of life on 2026-09-01T09:00:00Z'}";
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error(retired));
+
+      renderAssistantChat(
+        <AssistantChat model="test-model" workspace="default" describeError={describeChatError} />
+      );
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      const surface = await screen.findByTestId('assistant-chat-message-surface');
+      expect(surface).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
+      expect(surface).toHaveClass('border-l-feedback-danger');
+      expect(surface).not.toHaveClass('border-l-[var(--border-color-brand)]');
+      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      expect(
+        screen.queryByText('There was an error generating a response.')
+      ).not.toBeInTheDocument();
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'shows the generic line in the message and the raw error in the banner when no rule matches',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error('Something nobody mapped'));
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      const surface = await screen.findByTestId('assistant-chat-message-surface');
+      expect(surface).toHaveTextContent('There was an error generating a response.');
+      expect(surface).toHaveClass('border-l-feedback-danger');
+      expect(await screen.findByText('Something nobody mapped')).toBeInTheDocument();
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'copies the raw error, not the explanation, from a failed reply',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      const raw = 'RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited';
+      mocks.createChatCompletion.mockRejectedValueOnce(new Error(raw));
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      await user.click(await screen.findByRole('button', { name: 'Copy error' }));
+
+      await expect(navigator.clipboard.readText()).resolves.toBe(raw);
+    },
+    interactionTimeoutMs
+  );
+
+  it(
+    'leaves a recognisable failure unexplained when the surface passes no describeError',
+    async () => {
+      const user = userEvent.setup({ delay: null });
+      mocks.createChatCompletion.mockRejectedValueOnce(
+        new Error("APIStatusError: Error code: 410 - {'detail': 'gone'}")
+      );
+
+      renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
+      await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
+      await user.click(screen.getByRole('button', { name: /Submit/i }));
+
+      const surface = await screen.findByTestId('assistant-chat-message-surface');
+      expect(surface).toHaveTextContent('There was an error generating a response.');
+      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
     },
     interactionTimeoutMs
   );

@@ -9,9 +9,10 @@ from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, List
 
+from fastapi import FastAPI
 from nhx.common.entities.client import EntityClient
 from nhx.common.service import RouterConfig, Service
-from nhx.intake.api.v2.experiments import endpoints as experiments
+from nhx.common.service.dependencies import service_instance_dependency
 from nhx.intake.background_worker import BackgroundWorker
 from nhx.intake.config import IntakeConfig, should_provision_local_clickhouse
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
@@ -26,10 +27,7 @@ from nhx.intake.readiness import CLICKHOUSE_UNAVAILABLE_MESSAGE, LOCAL_CLICKHOUS
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
-from nhx.intake.spans.api import annotations, evaluator_results, sessions, spans, trace_metrics, traces
 from nhx.intake.spans.clickhouse_client import ClickHouseSettings, ClickHouseSpanClient
-from nhx.intake.spans.ingest import atif, chat_completions, otlp
-from nhx.intake.spans.ingest import spans as span_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +137,10 @@ class IntakeService(Service[IntakeConfig]):
         self._reconciler: _LocalClickHouseProvisioner | None = None
         self._denormalizer_entity_client: EntityClient | None = None
 
+    def _setup_dependencies(self, app: FastAPI) -> None:
+        super()._setup_dependencies(app)
+        service_instance_dependency(self.name, IntakeService).bind(app, self)
+
     @property
     def title(self) -> str:
         return "Intake API"
@@ -154,6 +156,11 @@ class IntakeService(Service[IntakeConfig]):
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the intake service."""
+        from nhx.intake.api.v2.experiments import endpoints as experiments
+        from nhx.intake.spans.api import annotations, evaluator_results, sessions, spans, trace_metrics, traces
+        from nhx.intake.spans.ingest import atif, chat_completions, otlp
+        from nhx.intake.spans.ingest import spans as span_ingest
+
         return [
             RouterConfig(spans.router, tag="Spans", description="ClickHouse-backed span read endpoints"),
             # Must precede traces: /traces/metrics would otherwise bind to /traces/{id}.

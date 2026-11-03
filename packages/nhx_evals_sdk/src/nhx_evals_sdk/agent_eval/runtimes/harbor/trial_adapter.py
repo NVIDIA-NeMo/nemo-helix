@@ -86,6 +86,12 @@ _TRIAL_LOG_DESCRIPTIONS = {
     "verifier/test-stdout.txt": "Verifier stdout captured while Harbor runs the task tests from the /tests directory.",
 }
 _MAX_TRACEBACK_CHARS = 8192
+# NeMo's sandbox environments write one of these into the trial directory for each sandbox that
+# stopped before the trial finished with it, whatever the backend (nhx_sandbox.core.termination).
+# Matched by name, since the published SDK doesn't ship nhx_sandbox; keep the two in step.
+_SANDBOX_TERMINATION_GLOB = "nemo-sandbox-termination-*.json"
+#: Error type of a trial whose sandbox stopped under it (out of memory, evicted, out of lifetime, deleted).
+SANDBOX_TERMINATED_ERROR_TYPE = "SandboxTerminated"
 _HARBOR_EXTRA_REQUIRED_MESSAGE = (
     "Harbor execution and result adaptation require the optional `harbor` extra on Python >=3.12. "
     "If NeMo Helix is installed as a package, run: uv pip install 'nemo-helix[harbor]' "
@@ -160,6 +166,8 @@ def _trial_from_harbor_result(
     rewards = _rewards_mapping(data)
     reward = _primary_reward(rewards, reward_key)
     error = _trial_error(_reported_exception_info(data))
+    if error is not None:
+        error = _with_sandbox_termination(error, _sandbox_terminations(trial_dir))
 
     metadata: dict[str, Any] = {
         HARBOR_PRIMARY_REWARD_KEY: reward_key,
@@ -618,6 +626,58 @@ def _trial_error(exception_info: Any) -> TrialError | None:
         message=_first_string(exception_info, ("exception_message", "message")),
         traceback=traceback[:_MAX_TRACEBACK_CHARS] if traceback is not None else None,
         occurred_at=_error_timestamp(exception_info.get("occurred_at")),
+    )
+
+
+def _sandbox_terminations(trial_dir: Path) -> list[Mapping[str, Any]]:
+    """The trial's sandboxes that stopped before the trial finished with them, as NeMo's OpenSandbox environment recorded them.
+
+    Args:
+        trial_dir: Harbor attempt directory the environment writes its records into.
+
+    Returns:
+        Each readable record with a ``detail``, in file-name order; unreadable files are skipped
+        with a warning, since a missing cause must not lose the trial.
+    """
+    terminations = []
+    for path in sorted(trial_dir.glob(_SANDBOX_TERMINATION_GLOB)):
+        try:
+            record = json.loads(path.read_bytes())
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            logger.warning("Skipping unreadable sandbox termination record %s: %s", path, exc)
+            continue
+        if isinstance(record, Mapping) and isinstance(record.get("detail"), str):
+            terminations.append(record)
+    return terminations
+
+
+def _with_sandbox_termination(error: TrialError, terminations: Sequence[Mapping[str, Any]]) -> TrialError:
+    """Report a trial whose sandbox stopped under it as that, rather than as the error that happened to follow.
+
+    Harbor records whichever operation hit the dead sandbox first, such as a failed verifier
+    download, which names neither the sandbox nor the cause. Harbor's error stays in the message
+    and its traceback is kept.
+
+    Args:
+        error: The error Harbor reported for the trial.
+        terminations: Records from :func:`_sandbox_terminations`.
+
+    Returns:
+        ``error`` unchanged when no sandbox stopped, else a :data:`SANDBOX_TERMINATED_ERROR_TYPE` error.
+    """
+    if not terminations:
+        return error
+    causes = "; ".join(
+        f"{record.get('role', 'trial')} sandbox {record.get('sandbox_id', '?')} {record.get('cause', 'unknown')}: "
+        f"{record['detail']}"
+        for record in terminations
+    )
+    harbor = f"{error.type}: {error.message}" if error.message else error.type
+    return TrialError(
+        type=SANDBOX_TERMINATED_ERROR_TYPE,
+        message=f"{causes}. Harbor then reported {harbor}",
+        traceback=error.traceback,
+        occurred_at=error.occurred_at,
     )
 
 

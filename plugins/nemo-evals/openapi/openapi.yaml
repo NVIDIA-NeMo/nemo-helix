@@ -780,6 +780,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '403':
+          description: Caller lacks permission to access a source or run resource.
         '409':
           description: The idempotency key already belongs to a different request,
             or the run's Intake Evaluation exists with different dataset metadata.
@@ -801,8 +803,8 @@ paths:
         \    caller: Effective principal supplied by the platform dependency.\n  \
         \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
         \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
-        \   HTTPException: Unexpected storage or projection failure, sanitized to\
-        \ 500."
+        \   HTTPException: Permission denied (403), or unexpected storage or projection\
+        \ failure (500)."
       operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
       parameters:
       - name: workspace
@@ -857,6 +859,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatussPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '422':
           description: Validation Error
           content:
@@ -874,8 +878,8 @@ paths:
         \    service: Shared request-scoped run service.\n\nReturns:\n    Current\
         \ stored status with ``progress`` (omitted while the run has no members),\
         \ excluding null\n    optionals and internal metadata.\n\nRaises:\n    HTTPException:\
-        \ The record is absent (404), or an unexpected storage or\n        projection\
-        \ failure occurs (sanitized 500)."
+        \ Permission denied (403), the record is absent (404), or an unexpected\n\
+        \        storage or projection failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -897,6 +901,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatus'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
@@ -968,8 +974,9 @@ paths:
         \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
         \    Stored task page and filtered counts; existing runs with no members return\n\
         \    an empty page. Null Job, Job status and error details are omitted.\n\n\
-        Raises:\n    HTTPException: The parent run is absent (404), or unexpected\
-        \ storage or\n        projection failure occurs (sanitized 500)."
+        Raises:\n    HTTPException: Permission denied (403), the parent run is absent\
+        \ (404), or an unexpected\n        storage or projection failure occurs (sanitized\
+        \ 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
@@ -1021,6 +1028,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunTasksPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
@@ -6059,6 +6068,16 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        closed_book:
+          type: boolean
+          title: Closed Book
+          description: Run the trials closed-book. Each trial's gateway calls are
+            held to closed-book capable VirtualModels (ones whose request_middleware
+            ends with nemo-evals-closed-book), and the closed-book middleware applies
+            to them. Every VirtualModel the agent can reach, a router's routes_to
+            included, must be closed-book capable. Taskset runs set it for tasks whose
+            agent runs with no network.
+          default: false
         agent_setup_timeout_multiplier:
           title: Agent Setup Timeout Multiplier
           description: Harbor agent-setup timeout multiplier. An agent that installs
@@ -6354,6 +6373,7 @@ components:
       type: string
       enum:
       - created
+      - queued
       - pending
       - active
       - cancelled
@@ -6369,7 +6389,15 @@ components:
 
         This enum represents the various states a job can be in during its lifecycle,
 
-        from creation to a terminal state.'
+        from creation to a terminal state.
+
+
+        ``CREATED`` means the controller has not yet considered the job. ``QUEUED``
+        means
+
+        the controller has seen the job but not admitted it (waiting for capacity).
+
+        ``PENDING`` means the backend resource exists and is waiting to start.'
     HelixJobStatusResponse:
       properties:
         id:
@@ -6795,6 +6823,18 @@ components:
             leaves the results intact to re-publish. Set False to keep the job successful
             and report the failure in its output instead.
           default: true
+        max_otlp_request_bytes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Otlp Request Bytes
+          description: Largest serialized OTLP request, envelope included, sent to
+            Intake for one trial's trace. A larger trace is split into several requests
+            in span order, keeping each span's ids, parent, and resource and scope
+            metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request
+            body limits; this setting does not change those limits. A trial with a
+            single span too large to fit fails publication before any of its trace
+            is sent.
+          default: 4194304
       additionalProperties: false
       type: object
       required:
@@ -8436,6 +8476,18 @@ components:
             leaves the results intact to re-publish. Set False to keep the job successful
             and report the failure in its output instead.
           default: true
+        max_otlp_request_bytes:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Otlp Request Bytes
+          description: Largest serialized OTLP request, envelope included, sent to
+            Intake for one trial's trace. A larger trace is split into several requests
+            in span order, keeping each span's ids, parent, and resource and scope
+            metadata. Defaults to 4 MiB. Keep it within Intake's and any proxy's request
+            body limits; this setting does not change those limits. A trial with a
+            single span too large to fit fails publication before any of its trace
+            is sent.
+          default: 4194304
         test_case_id_field:
           title: Test Case Id Field
           description: "Dataset column identifying each row, recorded as the published\
@@ -9515,8 +9567,9 @@ components:
             type: string
           type: array
           title: Warnings
-          description: Advisory notices about this caller's overlapping active runs
-            on the same taskset revision.
+          description: 'Advisory notices for this submission: this caller''s overlapping
+            active runs on the same taskset revision, sandbox defaults applied, and
+            what tasks ask for that the run does differently.'
       additionalProperties: false
       type: object
       required:

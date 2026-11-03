@@ -6,14 +6,15 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "${script_dir}/../../../.." && pwd)"
-clickhouse_version="$(tr -d '[:space:]' < "${script_dir}/../../.clickhouse-version")"
 
 # Preserve the script's historical credential overrides while delegating all
 # lifecycle, identity, port allocation, and readiness logic to Intake's Python
-# provisioner.
+# provisioner. Without an image override, Intake uses its digest-pinned default.
 export NHX_INTAKE_CLICKHOUSE_USER="${NHX_INTAKE_CLICKHOUSE_USER:-${CLICKHOUSE_USER:-default}}"
 export NHX_INTAKE_CLICKHOUSE_PASSWORD="${NHX_INTAKE_CLICKHOUSE_PASSWORD:-${CLICKHOUSE_PASSWORD:-}}"
-export NHX_INTAKE_CLICKHOUSE_IMAGE="${NHX_INTAKE_CLICKHOUSE_IMAGE:-${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:${clickhouse_version}}}"
+if [[ -n "${NHX_INTAKE_CLICKHOUSE_IMAGE:-${CLICKHOUSE_IMAGE:-}}" ]]; then
+  export NHX_INTAKE_CLICKHOUSE_IMAGE="${NHX_INTAKE_CLICKHOUSE_IMAGE:-${CLICKHOUSE_IMAGE}}"
+fi
 export NHX_INTAKE_CLICKHOUSE_DATA_DIR="${NHX_INTAKE_CLICKHOUSE_DATA_DIR:-${CLICKHOUSE_DATA_DIR:-${repo_root}/tmp/intake-clickhouse}}"
 
 cd "${repo_root}"

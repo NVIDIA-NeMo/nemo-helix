@@ -25,6 +25,7 @@ dependencies = [
     "nhx-common",
     "nemo-helix-plugin",
     "aiohttp[speedups]>=3.14.1",
+    "cryptography>=42.0.0",
 ]
 version = "0.0.0"
 

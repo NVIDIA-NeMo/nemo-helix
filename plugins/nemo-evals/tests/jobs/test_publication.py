@@ -18,6 +18,7 @@ import pytest
 import respx
 from nemo_evals.api.schemas import MetricInline
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
+from nemo_evals.intake.publish import publish_to_intake
 from nemo_evals.jobs.agent_evaluate import AsyncAgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalInputSpec,
@@ -67,6 +68,7 @@ from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
 from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values import Model, RunConfigOnline, RunConfigOnlineModel
 from nhx_evals_sdk.values.agents import NemoAgentToolkitAgent
+from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.multi_metric_results import BenchmarkEvaluationResult  # noqa: F401
 from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from pydantic import ValidationError
@@ -774,3 +776,71 @@ def test_row_agent_target_derives_its_name() -> None:
         publication=RowPublicationSpec(intake=RowIntakePublicationSpec(evaluation_id="eval-1")),
     )
     assert target_agent_identity(spec.target) == ("my-agent", None)
+
+
+# --- OTLP request budget ------------------------------------------------------
+
+
+@pytest.mark.parametrize("spec_type", [IntakePublicationSpec, RowIntakePublicationSpec])
+def test_otlp_request_budget_defaults_to_4_mib(spec_type: type[IntakePublicationSpec]) -> None:
+    assert spec_type(evaluation_id="eval-1").max_otlp_request_bytes == 4 * 1024 * 1024
+
+
+@pytest.mark.parametrize("spec_type", [IntakePublicationSpec, RowIntakePublicationSpec])
+@pytest.mark.parametrize("budget", [0, -1])
+def test_a_non_positive_otlp_request_budget_is_rejected(spec_type: type[IntakePublicationSpec], budget: int) -> None:
+    with pytest.raises(ValidationError, match="max_otlp_request_bytes"):
+        spec_type(evaluation_id="eval-1", max_otlp_request_bytes=budget)
+
+
+def test_agent_publication_splits_otlp_traces_at_the_spec_budget(intake: InMemoryIntakeService) -> None:
+    trace_id, root_id = "0123456789abcdef0123456789abcdef", "0102030405060708"
+    spans = [{"traceId": trace_id, "spanId": root_id, "name": "agent run"}] + [
+        {
+            "traceId": trace_id,
+            "spanId": f"{index:016x}",
+            "parentSpanId": root_id,
+            "name": f"child-{index}",
+            "attributes": [{"key": "payload", "value": {"stringValue": "x" * 1000}}],
+        }
+        for index in range(1, 4)
+    ]
+    trace = EvidenceDescriptor(
+        kind="trace", format="otlp", data={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
+    )
+    result = _result()
+    result = result.model_copy(
+        update={
+            "trials": [
+                result.trials[0].model_copy(update={"evidence": CandidateEvidence(descriptors={"trace": trace})})
+            ]
+        }
+    )
+
+    outcome = publish_agent_eval_result(
+        result,
+        spec=IntakePublicationSpec(evaluation_id="eval-1", agent_name="a", max_otlp_request_bytes=2500),
+        target=None,
+        workspace="default",
+        intake=intake.client(),
+    )
+
+    assert outcome.status == HelixJobStatus.COMPLETED
+    bodies = [request["body"] for request in intake.otlp_requests]
+    assert len(bodies) > 1
+    assert all(isinstance(body, bytes) and len(body) <= 2500 for body in bodies)
+
+
+def test_evaluate_job_forwards_the_otlp_request_budget(
+    tmp_path: Path, mocker: MockerFixture, intake: InMemoryIntakeService
+) -> None:
+    mocker.patch("nemo_evals.jobs.utils.Evaluator", return_value=_FakeRowEvaluator())
+    forwarded = mocker.patch("nemo_evals.jobs.publication.publish_to_intake", wraps=publish_to_intake)
+
+    AsyncEvaluateJob().run(
+        _evaluate_spec(max_otlp_request_bytes=2_097_152).model_dump(),
+        ctx=_job_context(tmp_path, job_id="job-1"),
+        async_client=intake.client(),
+    )
+
+    assert forwarded.call_args.kwargs["max_otlp_request_bytes"] == 2_097_152

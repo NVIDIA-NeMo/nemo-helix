@@ -32,9 +32,6 @@ from nemo_helix_plugin.agents.validation import require_registered_agent_config
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.errors import (
-    InternalServerError,
-    NemoResponseValidationError,
-    NemoTransportError,
     NotFoundError,
 )
 from nemo_helix_plugin.errors import LocalRunError
@@ -42,17 +39,10 @@ from nemo_helix_plugin.inference_middleware_models import MiddlewareCall, Virtua
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
-    ContainerSpec,
-    CPUExecutionProviderSpec,
-    ExecutorSpec,
     HelixJobSpec,
     HelixJobStep,
-    SubprocessExecutionProviderSpec,
 )
-from nemo_helix_plugin.jobs.client import AsyncJobsClient
-from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError, HelixJobDependencyUnavailableError
-from nemo_helix_plugin.jobs.execution_profiles import SubprocessJobExecutionProfile
-from nemo_helix_plugin.jobs.image import get_qualified_image
+from nemo_helix_plugin.jobs.executor import resolve_task_executor
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.virtual_models.client import VirtualModelsClient
 from nemo_helix_plugin.virtual_models.types import CreateVirtualModelRequest
@@ -125,7 +115,14 @@ class SwitchyardOptimizeJob(NemoJob):
             steps=[
                 HelixJobStep(
                     name=STRATEGY_NAME,
-                    executor=await _resolve_executor(profile=profile or "default", async_sdk=async_sdk),
+                    executor=await resolve_task_executor(
+                        profile=profile or "default",
+                        async_sdk=async_sdk,
+                        image=TASK_IMAGE,
+                        entrypoint=TASK_ENTRYPOINT,
+                        command=TASK_COMMAND,
+                        step="switchyard",
+                    ),
                     config=config,
                 ),
             ],
@@ -196,43 +193,4 @@ def virtual_model_request(combo: Combination) -> CreateVirtualModelRequest:
         name=combo.virtual_model,
         models=[VirtualModelInferenceConfig(model=ref) for ref in combo.models],
         request_middleware=[MiddlewareCall(name=MIDDLEWARE_NAME, config_type=combo.config_type, config=combo.config)],
-    )
-
-
-async def _resolve_executor(*, profile: str, async_sdk: AsyncNemoClient) -> ExecutorSpec:
-    """Prefer the platform host's own venv (subprocess); fall back to the cpu container profile."""
-    try:
-        profiles = (await client_from_platform(async_sdk, AsyncJobsClient).get_execution_profiles()).data()
-    except (NemoTransportError, NemoResponseValidationError, InternalServerError) as exc:
-        raise HelixJobDependencyUnavailableError(
-            f"Unable to resolve execution profile '{profile}': the Jobs service is temporarily "
-            "unavailable.  Retry the submission."
-        ) from exc
-
-    if any(
-        isinstance(candidate, SubprocessJobExecutionProfile) and candidate.profile == profile for candidate in profiles
-    ):
-        return SubprocessExecutionProviderSpec(
-            provider="subprocess",
-            profile=profile,
-            command=[*TASK_ENTRYPOINT, *TASK_COMMAND],
-        )
-
-    # Jobs keys execution profiles by (provider, profile); "cpu" is whatever container backend
-    # the deployment registered under that name.
-    if any(candidate.provider == "cpu" and candidate.profile == profile for candidate in profiles):
-        return CPUExecutionProviderSpec(
-            provider="cpu",
-            profile=profile,
-            container=ContainerSpec(
-                image=get_qualified_image(TASK_IMAGE),
-                entrypoint=TASK_ENTRYPOINT,
-                command=TASK_COMMAND,
-            ),
-        )
-
-    available = sorted({f"{candidate.provider}/{candidate.profile}" for candidate in profiles})
-    raise HelixJobCompilationError(
-        f"No 'subprocess' or 'cpu' execution profile named {profile!r} is registered, so the "
-        f"switchyard step has nowhere to run.  Available profiles: {available or ['<none>']}."
     )

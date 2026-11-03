@@ -89,6 +89,7 @@ def _make_model_provider_info(workspace: str, name: str, host_url: str = "http:/
     provider.host_url = host_url
     provider.api_key_secret_name = None
     provider.auth_header_format = None
+    provider.calls_back_as_caller = False
     provider.default_extra_body = {}
     provider.required_extra_body = {}
     provider.default_extra_headers = {}
@@ -185,6 +186,19 @@ class TestInferenceMiddlewareCacheAccessorImpl:
         accessor = self._make_accessor(virtual_model_cache=vm_cache)
         result = accessor.list_virtual_models_for_workspace("ws")
         assert set(result) == {"ws/vm-a", "ws/vm-b"}
+
+    def test_get_inference_url_and_model_rejects_invalid_stored_auth_header_format(self):
+        model_cache = ModelCache()
+        provider_info = _make_model_provider_info("ws", "nim-provider", host_url="http://nim.svc:8080")
+        provider_info.model_provider.auth_header_format = "X-Api-Key: {{ auth_secret | upper }}"
+        provider_info.secret_value = "secret-value"
+        entity_info = ModelEntityInfo(workspace="ws", name="llama", backend_format=BackendFormat.ANTHROPIC_MESSAGES)
+        entity_info.model_providers.append(("llama-v1", provider_info))
+        model_cache.model_entity_info_map[("ws", "llama")] = entity_info
+
+        accessor = self._make_accessor(model_cache=model_cache, virtual_model_cache=VirtualModelCache())
+        with pytest.raises(ValueError, match="auth_header_format is invalid"):
+            accessor.get_inference_url_and_model("ws/llama")
 
     def test_get_inference_url_and_model_returns_target(self):
         model_cache = ModelCache()

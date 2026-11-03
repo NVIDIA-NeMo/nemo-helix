@@ -17,7 +17,6 @@ responses.  The return type of :meth:`send` is determined by the endpoint's
 from __future__ import annotations
 
 import copy
-import email.utils
 import inspect
 import json
 import logging
@@ -34,12 +33,10 @@ from collections.abc import (
 )
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
-from datetime import timezone
 from functools import cache
 from ipaddress import ip_address
 from pathlib import Path
 from time import sleep
-from time import time as wall_time
 from typing import Any, Generic, Self, TypeVar, cast, get_args, get_origin, overload
 from urllib.parse import quote, urlsplit
 
@@ -70,6 +67,7 @@ from nemo_helix_plugin.client.response import (
     NemoStreamResponse,
     SyncPageFetcher,
 )
+from nemo_helix_plugin.client.retry import body_was_sent, is_retryable, retry_delay
 from nemo_helix_plugin.client.tls import client_verify_from_env
 from nemo_helix_plugin.client.types import (
     PATH_SPEC,
@@ -264,36 +262,6 @@ def _get_paginated_types(
     return cast(type[ModelT], model_type), cast(type[StrategyT], strategy_type)
 
 
-# ---------------------------------------------------------------------------
-# Retry helper
-# ---------------------------------------------------------------------------
-
-
-def _retry_after(response: httpx.Response) -> float | None:
-    """Parse a reasonable server-requested retry delay in seconds."""
-    retry_after_ms = response.headers.get("retry-after-ms")
-    try:
-        delay = float(retry_after_ms) / 1000
-    except (TypeError, ValueError):
-        retry_after = response.headers.get("retry-after")
-        try:
-            delay = float(retry_after)
-        except (TypeError, ValueError):
-            # Retry-After may instead be an RFC 5322 / HTTP-date, e.g.
-            # "Fri, 31 Dec 2027 23:59:59 GMT"; convert that to a delta.
-            try:
-                retry_date = email.utils.parsedate_to_datetime(retry_after)
-            except (TypeError, ValueError, OverflowError):
-                return None
-            if retry_date.tzinfo is None:
-                retry_date = retry_date.replace(tzinfo=timezone.utc)
-            try:
-                delay = retry_date.timestamp() - wall_time()
-            except (OverflowError, OSError, ValueError):
-                return None
-    return delay if 0 < delay <= 60 else None
-
-
 def _format_path(template: str, params: Mapping[str, str]) -> str:
     """Fill a path template, percent-encoding each value per its placeholder kind.
 
@@ -316,21 +284,6 @@ def _format_path(template: str, params: Mapping[str, str]) -> str:
         else:
             parts.append(quote(value, safe=""))
     return "".join(parts)
-
-
-# Transport failures httpx raises before it starts reading the request body: the
-# connection has to exist before any body byte can be written. A one-shot body is
-# therefore still untouched when one of these surfaces, so the request can be sent
-# again as-is. Everything else — a read/write timeout, a dropped connection, a
-# protocol error — can land mid-body, where a replay would send a truncated body
-# under the original ``Content-Length``.
-_PRE_BODY_TRANSPORT_ERRORS = (
-    httpx.ConnectError,
-    httpx.ConnectTimeout,
-    httpx.PoolTimeout,
-    httpx.ProxyError,
-    httpx.UnsupportedProtocol,
-)
 
 
 def _is_replayable(content: bytes | Iterable[bytes] | AsyncIterable[bytes] | None) -> bool:
@@ -376,36 +329,21 @@ def _should_retry(
     """
     if attempt >= policy.max_retries:
         return None
-
-    backoff = policy.backoff_base * (2**attempt)
+    failure: httpx.Response | httpx.TransportError
     if exc is not None:
-        # A connection that never opened leaves the body untouched; anything
-        # later can land mid-body. See :data:`_PRE_BODY_TRANSPORT_ERRORS`.
-        body_is_spent = not isinstance(exc, _PRE_BODY_TRANSPORT_ERRORS)
-    elif response is None:
-        return None
+        failure = exc
+    elif response is not None:
+        failure = response
     else:
-        # A response only arrives once the body has gone out on the wire.
-        body_is_spent = True
-        if response.status_code == 409 and (request.client_options or {}).get("exist_ok"):
-            # The caller declared the conflict an expected outcome that send()
-            # resolves by fetching the existing entity; retrying it is wasted work.
-            return None
-        decision = response.headers.get("x-should-retry") if policy.respect_retry_decision_headers else None
-        if policy.respect_retry_decision_headers and response.status_code < 400:
-            return None
-        if decision == "false":
-            return None
-        if decision != "true":
-            # No explicit verdict from the server, so fall back to the status code.
-            retryable_status = response.status_code in policy.retryable_status_codes
-            if policy.retry_all_server_errors and response.status_code >= 500:
-                retryable_status = True
-            if not retryable_status:
-                return None
-        if policy.respect_retry_after_headers:
-            backoff = _retry_after(response) or backoff
+        return None
 
+    # send() resolves an exist_ok conflict by fetching the existing entity.
+    exist_ok = bool((request.client_options or {}).get("exist_ok"))
+    if not is_retryable(policy, failure, exist_ok=exist_ok):
+        return None
+
+    # A response only arrives once the body has gone out on the wire.
+    body_is_spent = exc is None or body_was_sent(exc)
     if body_is_spent and not _is_replayable(request.content):
         logger.info(
             "Not retrying %s %s: the request body is a one-shot stream that has already been read, "
@@ -414,7 +352,7 @@ def _should_retry(
             request.path_template,
         )
         return None
-    return backoff
+    return retry_delay(policy, attempt, failure)
 
 
 def _should_resolve_conflict(response: httpx.Response, request: PreparedRequest) -> bool:
@@ -533,11 +471,6 @@ class BaseNemoClient(NemoClientRuntimeSource, Generic[HttpClientT]):
         if principal_id is not None:
             return is_service_principal_id(principal_id)
         return self._authenticates_with_direct_service_token()
-
-    @property
-    def can_read_stored_auth_context(self) -> bool:
-        """Whether this client may hydrate stored creator auth context from entities."""
-        return self.authenticates_as_service_principal
 
     @property
     def workspace(self) -> str | None:

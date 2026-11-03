@@ -20,6 +20,7 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.api.utils import register_query_param_schemas
 from nhx.common.auth import Principal
+from nhx.common.auth.openapi import register_bearer_security_scheme
 from nhx.common.config import Configuration, HelixConfig, ServiceConfig, get_platform_config
 from nhx.common.controller import Controller
 from nhx.common.entities.client import EntityClient
@@ -73,6 +74,7 @@ class _ServiceFastAPI(FastAPI):
             tags=self._nhx_service_openapi_tags,
         )
         openapi_schema = register_query_param_schemas(openapi_schema)
+        openapi_schema = register_bearer_security_scheme(openapi_schema)
         self.openapi_schema = openapi_schema
         return self.openapi_schema
 
@@ -552,9 +554,6 @@ class Service(ABC, Generic[TConfig]):
         # Store reference to app for use in on_startup
         self._app = app
 
-        # Store service instance for access by endpoints
-        app.state.service = self
-
         # Setup dependency overrides (e.g., entity client factory)
         self._setup_dependencies(app)
 
@@ -564,6 +563,11 @@ class Service(ABC, Generic[TConfig]):
         from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 
         register_sdk_exception_handlers(app)
+
+        # Invalid request bodies get 422, even when they hold values a response can't encode (NaN, lone surrogates)
+        from nhx.common.errors.validation_exception_handler import register_validation_exception_handler
+
+        register_validation_exception_handler(app)
 
         # Include service-specific routers, tagging any routes that have no tags yet
         for rc in router_configs:

@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 #: Default ceiling on concurrent per-trial publishes.
 DEFAULT_MAX_CONCURRENCY = 8
 
+#: Default ceiling on one serialized OTLP request, envelope included. Below Intake's default
+#: 5 MiB OTLP body limit, leaving headroom for proxies in front of it.
+DEFAULT_MAX_OTLP_REQUEST_BYTES = 4 * 1024 * 1024
+
 
 class PublishError(RuntimeError):
     """Raised when one or more trials fail to publish (or a span never resolves).
@@ -146,12 +150,20 @@ async def publish_to_intake(
     agent_version: str = mapping.DEFAULT_AGENT_VERSION,
     model_name: str | None = None,
     max_concurrency: int = DEFAULT_MAX_CONCURRENCY,
+    max_otlp_request_bytes: int = DEFAULT_MAX_OTLP_REQUEST_BYTES,
+    usage_superseded_by_gateway: bool = False,
 ) -> PublishReport:
     """Publish a completed ``AgentEvalResult`` to Intake under an existing Experiment.
 
     For each trial: POST its OTLP trace when it has one, else fall back to the ATIF
     trajectory, then POST one evaluator-result per metric output against the trial's
     root span. Trials are published concurrently up to ``max_concurrency``.
+
+    An OTLP trace whose serialized request exceeds ``max_otlp_request_bytes`` is sent as
+    several requests, in span order, one after another. Keep the budget within Intake's and
+    any proxy's request body limits; it does not change them. A trial with a span too large
+    to fit on its own fails before any of its trace is sent, and a trial any of whose
+    requests Intake rejects fails before its scores are sent.
 
     Publishing is **not atomic** and Intake has no rollback, so a per-trial failure
     must not abort the others: every trial that can land does, and the failures are
@@ -167,6 +179,9 @@ async def publish_to_intake(
     already landed replaces its rows instead of duplicating them, which is what makes
     a worker retry after a partial publish safe.
 
+    ``usage_superseded_by_gateway`` marks each published trace as one whose model calls the Inference Gateway
+    recorded in the trial's session, so Intake counts the gateway's usage for them instead.
+
     ``experiment_id`` must reference an evaluation that already exists and is not
     deleted; it is checked once up front. ATIF ingest enforces this server-side, but
     OTLP ingest does not, so nothing else would stop the primary path from writing
@@ -177,6 +192,8 @@ async def publish_to_intake(
     arguments because it lives on the run *target*, which ``AgentEvalResult`` does
     not carry (design §3.9 #6).
     """
+    if max_otlp_request_bytes <= 0:
+        raise ValueError(f"max_otlp_request_bytes must be positive, got {max_otlp_request_bytes}")
     validated_trials = [AgentEvalTrial.model_validate(trial) for trial in result.trials]
     intake = client
     resolved_workspace = intake.require_workspace(workspace)
@@ -220,19 +237,29 @@ async def publish_to_intake(
             evaluation_name=experiment_id,
             measurements=measurements,
             started_at=started_at,
+            usage_superseded=usage_superseded_by_gateway,
         )
         if otlp is None:
             return None
         payload, span_id = otlp
-        response = await intake.create_otlp_traces(content=payload, workspace=resolved_workspace)
-        ingest_response = response.data()
-        # OTLP ingest answers 200 with a per-span error list, so a partly-stored trace is
-        # invisible unless the body is read — including the case where the span the scores
-        # are about to reference is the one that was dropped.
-        if ingest_response.errors:
+        try:
+            requests = mapping.split_otlp_request(payload, max_request_bytes=max_otlp_request_bytes)
+        except mapping.OtlpSpanTooLargeError as error:
             raise PublishError(
-                f"Intake rejected {len(ingest_response.errors)} span(s) of trial {trial.id!r}: {ingest_response.errors}"
-            )
+                f"Cannot publish the OTLP trace of trial {trial.id!r}: {error}. Raise max_otlp_request_bytes "
+                "if Intake and any proxy in front of it accept larger requests."
+            ) from error
+        for index, request in enumerate(requests, start=1):
+            response = await intake.create_otlp_traces(content=request, workspace=resolved_workspace)
+            ingest_response = response.data()
+            # OTLP ingest answers 200 with a per-span error list, so a partly-stored trace is
+            # invisible unless the body is read — including the case where the span the scores
+            # are about to reference is the one that was dropped.
+            if ingest_response.errors:
+                raise PublishError(
+                    f"Intake rejected {len(ingest_response.errors)} span(s) of trial {trial.id!r} in OTLP "
+                    f"request {index} of {len(requests)}: {ingest_response.errors}"
+                )
         return span_id
 
     async def _publish_atif(trial: AgentEvalTrial, *, measurements: TrialMeasurements, session_id: str) -> str:
@@ -255,6 +282,7 @@ async def publish_to_intake(
                 final_metrics=_token_final_metrics(measurements),
                 ended_at=ended_at,
                 steps=steps,
+                usage_superseded=usage_superseded_by_gateway,
             )
             body["workspace"] = resolved_workspace
             return body

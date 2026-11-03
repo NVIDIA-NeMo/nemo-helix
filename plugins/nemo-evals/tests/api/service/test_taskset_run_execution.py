@@ -15,7 +15,7 @@ from nemo_evals.api.fields import TaskRef
 from nemo_evals.api.service.taskset_run_service import MAX_CONCURRENT_IMAGE_PREPARATIONS, TasksetRunResolutionError
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity, TasksetEntity, TasksetRevisionEntity
-from nemo_evals.harbor.remote.preparation import prepare_task_images
+from nemo_evals.harbor.remote.preparation import PreparationCheck, prepare_task_images
 from nemo_evals.image_builds.models import BuildImage, ImageBuildRequest, TaskImageBuildEntity, build_entity_name
 from nemo_evals.image_builds.planning import TaskArchive
 from nemo_evals.image_builds.service import ImageBuildService
@@ -240,6 +240,16 @@ async def test_a_task_over_the_profiles_ceiling_is_rejected_before_any_build(
     assert not await runs(entity_store)
 
 
+async def test_the_task_checks_notices_are_on_the_accept_response(service, request_body, run_preparer):
+    """Each notice is named by its task, as a compose file's NET_ADMIN is."""
+    _, spec = await service._resolve(TasksetRunInput.model_validate(request_body), "default")
+    task_id = spec.tasks[0].id
+    run_preparer.notices = {task_id: ["services.main.cap_add: NET_ADMIN isn't granted"]}
+
+    accepted = await submit(service, request_body)
+    assert f"{task_id}: services.main.cap_add: NET_ADMIN isn't granted" in accepted.status.warnings
+
+
 async def test_the_default_resources_notice_is_on_the_accept_response(
     service, request_body, fake_task_jobs, harbor_config, monkeypatch
 ):
@@ -315,7 +325,7 @@ class SlowPreparer:
         self.cancelled: list[str] = []
 
     async def check(self, task, **_):
-        return None
+        return PreparationCheck()
 
     async def __call__(self, task, recorded, **_):
         self.running += 1
@@ -336,7 +346,8 @@ class SlowPreparer:
 async def prepare(service, preparer, count):
     service._preparer = preparer
     tasks = [SimpleNamespace(id=f"task-{i}") for i in range(count)]
-    return await service._prepare_images(tasks, None, caller="user:alice")
+    environments, _notices = await service._prepare_images(tasks, None, caller="user:alice")
+    return environments
 
 
 async def test_images_are_prepared_ten_at_a_time_in_task_order(service):

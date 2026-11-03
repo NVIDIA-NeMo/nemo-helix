@@ -16,10 +16,17 @@ _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ClickHouseMigrationSettings(Protocol):
-    url: str
-    user: str
-    password: str
-    database: str
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def user(self) -> str: ...
+
+    @property
+    def password(self) -> str: ...
+
+    @property
+    def database(self) -> str: ...
 
 
 @dataclass(frozen=True)

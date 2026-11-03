@@ -10,7 +10,7 @@ End-to-end examples for automodel, unsloth and rl (DPO).
 ```json
 {
   "model": "default/qwen3-1.7b",
-  "dataset": { "training": "default/commonsense_qa", "validation": "default/commonsense_qa" },
+  "dataset": { "training": "default/commonsense_qa" },
   "training": {
     "training_type": "sft",
     "finetuning_type": "lora",
@@ -31,7 +31,7 @@ On a ≥48 GB GPU, take batch and learning rate from the LoRA ≤4B **default** 
 ```json
 {
   "model": "default/nemotron-3-5-lightning-30b-a3b",
-  "dataset": { "training": "default/commonsense_qa", "validation": "default/commonsense_qa" },
+  "dataset": { "training": "default/commonsense_qa" },
   "training": {
     "training_type": "sft",
     "finetuning_type": "lora",

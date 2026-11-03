@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
-import { useInProgressCustomizations } from '@studio/hooks/useInProgressCustomizations';
+import {
+  IN_PROGRESS_JOB_STATUSES,
+  useInProgressCustomizations,
+} from '@studio/hooks/useInProgressCustomizations';
 import { server } from '@studio/mocks/node';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
@@ -125,5 +129,11 @@ describe('useInProgressCustomizations', () => {
 
     await waitFor(() => expect(result.current.runs).toHaveLength(1));
     expect(result.current.runs[0].finetuningType).toBeUndefined();
+  });
+});
+
+describe('IN_PROGRESS_JOB_STATUSES', () => {
+  it('includes queued jobs, which have not produced a model yet', () => {
+    expect(IN_PROGRESS_JOB_STATUSES).toContain(HelixJobStatus.queued);
   });
 });

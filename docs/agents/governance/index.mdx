@@ -114,6 +114,39 @@ Before running a war-game, make sure you have:
    stored config and builds its own sandboxed copy. You can also point a run at
    a local agent project directory instead of registering anything.
 
+### On Kubernetes
+
+On a Helm deployment, war-game and benign-suite jobs are not supported yet.
+OpenShell 0.1.0 and later create sandboxes only from a registry image, and the
+current Agent Hardener release still builds the victim from a Dockerfile, so the
+victim sandbox can't be created. Submitting either job fails right away with an
+error that says so. The Agent Hardening pages in Studio and the
+`/apis/agent-hardener` endpoints still work.
+
+<Warning>
+The rest of this section is a preview for testing a future Agent Hardener release.
+With the current release, these jobs fail when the victim sandbox is created.
+</Warning>
+
+Set `platformConfig.agent_hardener.container_jobs: true` to run both jobs in the
+`nhx-agent-hardener-tasks` image on the default `cpu` Jobs profile. That image
+already carries the Agent Hardener and garak virtual environments and the
+`openshell` CLI, so the cluster needs no Docker and no
+`nemo agent-hardener setup`. Instead of the host prerequisites above, you need:
+
+1. An [OpenShell gateway](/documentation/kubernetes-deployment/setup/helm/openshell)
+   in the cluster.
+1. Its endpoint in `platformConfig.agent_hardener.openshell_gateway_endpoint`.
+   Apply `k8s/helm/examples/openshell/agent-hardener-values.yaml` after your
+   platform values and change the endpoint to your gateway's Service address.
+   Each job registers the gateway with the `openshell` CLI before it starts.
+1. For an `https` endpoint, the gateway's mTLS client bundle stored as three NeMo
+   Secrets in the run's workspace, named by `openshell_ca_secret`,
+   `openshell_client_cert_secret` and `openshell_client_key_secret`. An `http`
+   endpoint is plaintext and needs none.
+1. The Agent Hardener model key in the `agent-hardener-inference-key` Secret, the
+   one `nemo agent-hardener setup` reads on a host.
+
 ## Scope
 
 - **Local deployments only.** Agent Governance runs on a platform started from

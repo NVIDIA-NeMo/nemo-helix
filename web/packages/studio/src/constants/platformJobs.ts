@@ -5,6 +5,7 @@ import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
 export const STATUS_FILTER_OPTIONS = [
   { value: HelixJobStatus.created, label: 'Created' },
+  { value: HelixJobStatus.queued, label: 'Queued' },
   { value: HelixJobStatus.pending, label: 'Pending' },
   { value: HelixJobStatus.active, label: 'Active' },
   { value: HelixJobStatus.completed, label: 'Completed' },

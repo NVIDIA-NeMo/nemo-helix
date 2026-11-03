@@ -136,7 +136,10 @@ async def list_span_groups(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
-    by: str = Query(description="Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id."),
+    by: str = Query(
+        description="Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.",
+        examples=["trace_id"],
+    ),
     page: int = Query(default=1, ge=1, description="Page number."),
     page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
     sort: SpanGroupSortField = Query(

@@ -98,6 +98,10 @@ class TasksetRunPlan(BaseModel):
     intake: RunIntakePublication | None = Field(
         default=None, description="Publish the run's trials to this Intake Experiment; None publishes nowhere."
     )
+    gateway_url_override: str | None = Field(
+        default=None,
+        description="The agents plugin's deployments.gateway_url_override at submit, which task Jobs reach the gateway at.",
+    )
 
     @model_validator(mode="after")
     def _one_environment_per_task(self) -> Self:

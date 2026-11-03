@@ -19,7 +19,7 @@ When OIDC is enabled:
 1. **Platform configuration** points to your IdP and defines independent public, confidential, and workload client profiles.
 2. **Discovery**: Clients and the platform discover token and device-auth endpoints from the IdP's `.well-known/openid-configuration` (or from NeMo Helix's aggregated discovery at `{BASE_URL}/apis/auth/discovery`).
 3. **Login**: Users obtain tokens via **device flow** (browser) or **password grant** (CI) using the CLI, or authorization code flow in Studio.
-4. **API calls**: Clients send the configured bearer token in the `Authorization: Bearer <token>` header. The default is the OAuth access token. NeMo Helix validates signed JWT bearers (signature, issuer, audience when configured, and expiry) and extracts the principal and configured groups for authorization.
+4. **API calls**: Clients send the access token in the `Authorization: Bearer <token>` header. NeMo Helix validates signed JWTs (signature, issuer, audience when configured, and expiry) and extracts the principal and configured groups for authorization.
 
 OIDC provides the identity; workspace authorization comes from NeMo Helix role bindings. OAuth `scope` or `scp` values never become group principals or grant roles, but recognized NeMo Helix API scopes such as `platform:read` can narrow which APIs the bearer token can call.
 
@@ -89,9 +89,6 @@ auth:
     issuer: "https://your-idp.example.com/realm"
     public_client:
       client_id: "your-public-client-id"
-      # Optional: use the current OIDC ID token as the API bearer.
-      # Keep the default unless your IdP documents this backend pattern.
-      # bearer_token_source: "id_token"
       # authorization_endpoint: "https://your-idp.example.com/oauth2/authorize"
       # token_endpoint: "https://your-idp.example.com/oauth2/token"
       # device_authorization_endpoint: "https://your-idp.example.com/oauth2/device"
@@ -106,22 +103,6 @@ auth:
 ```
 
 By default, NeMo Helix extracts group principals from the JWT `groups` claim. If your IdP sends group or entitlement values such as `employee`, `ml-team`, or `employee.profile.read` in a different claim, set `groups_claim` to that claim name, then grant roles to those exact principal strings. Values inside the OAuth `scope` or `scp` claim are not group principals and do not grant workspace roles.
-
-### Selecting the API bearer
-
-`bearer_token_source` controls which token from the current OIDC session is sent to NeMo Helix APIs:
-
-- `access_token` (default) preserves the standard OAuth resource-server flow and existing provider behavior.
-- `id_token` supports providers that issue opaque access tokens but explicitly document their signed ID token as the browser application's backend credential.
-
-The setting applies to clients that select that profile. Studio uses the public
-profile and reads the token from the current `oidc-client-ts` user on every
-request, including after silent renewal; it does not retain a separate copy of
-the initial ID token. The CLI fails authentication instead of falling back to
-the access token when the selected profile requires an ID token but none is
-present.
-
-Do not use `id_token` solely to work around an opaque access token. Confirm the provider contract, configure `audience`, and verify that the ID token contains the identity and group claims used by your RBAC policy. The `audience` setting defaults to unset; when it is unset, NeMo Helix validates the token signature, issuer, and expiry but does not require a specific audience.
 
 ### Step 3: Seed Auth Role Bindings
 
@@ -178,8 +159,8 @@ nemo workspaces list
 | `subject_claim` | string | JWT claim for subject (default: `sub`). |
 | `groups_claim` | string | JWT claim for groups (default: `groups`). |
 | `jwks_uri` | string | Override JWKS URI. |
-| `public_client` | object | Optional public browser/device client. Holds its client ID, external endpoints, scopes, bearer source, scope prefix, device-flow options, and optional `server_side_sessions` opt-in. |
-| `confidential_client` | object | Optional server-side Authorization Code + PKCE client. Holds its client ID, secret environment-variable name, public authorization endpoint, internal token endpoint, registered Helix callback, scopes, and bearer source. |
+| `public_client` | object | Optional public browser/device client. Holds its client ID, external endpoints, scopes, scope prefix, device-flow options, and optional `server_side_sessions` opt-in. |
+| `confidential_client` | object | Optional server-side Authorization Code + PKCE client. Holds its client ID, secret environment-variable name, public authorization endpoint, internal token endpoint, registered Helix callback, and scopes. |
 | `server_sessions` | object | Shared server-side session encryption configuration. Required for a confidential client or a public client with `server_side_sessions: true`. |
 | `workload` | object | Optional workload exchange profile. Its presence enables workload identity and holds the workload client ID, token endpoint, audience, scopes, subject validation, and token-signing overrides. |
 
@@ -223,9 +204,6 @@ Regardless of IdP, ensure:
 3. The selected bearer token includes claims for email, subject, and groups (or you have configured `email_claim`, `subject_claim`, `groups_claim` to match your IdP's claim names).
 4. Any group or entitlement values that should grant NeMo roles are present in the configured `groups_claim`.
 5. If an interactive profile's `default_scopes` includes NeMo Helix API scopes, those scopes are exposed by the IdP application and consented according to the provider's model.
-
-For providers that issue opaque access tokens but signed ID tokens, set `bearer_token_source: id_token` only when
-the NeMo Helix deployment is intentionally configured to validate that ID token's issuer, signature, and audience.
 
 When `device_authorization_requires_device_id` is enabled, the CLI stores a random installation identifier at
 `$XDG_STATE_HOME/nhx/oidc-device-id` (or `~/.local/state/nhx/oidc-device-id`) with mode `0600`. It reuses that value

@@ -406,27 +406,6 @@ class TestConflictingReferences:
         assert "already sets model" in result.stderr
         assert submitted_spec == {}, "a refused submit must not reach the platform"
 
-    def test_the_stale_validation_field_is_caught(
-        self, tmp_path: Path, submitted_spec: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Reported bug: training was replaced while validation kept pointing elsewhere."""
-        job = tmp_path / "job.json"
-        job.write_text(
-            json.dumps(
-                {
-                    "dataset": {"training": "default/old", "validation": "default/old"},
-                    "training": {"training_type": "sft"},
-                }
-            )
-        )
-        monkeypatch.setattr(
-            "nhx.customization_common.cli.overrides.create_resources",
-            lambda **_: pytest.fail("must not upload"),
-        )
-        result = self._run_with(job, "--upload-dataset", "./data")
-        assert result.exit_code == 2
-        assert "dataset.validation" in result.stderr
-
     def test_only_the_flagged_field_is_checked(
         self, tmp_path: Path, submitted_spec: dict[str, Any], stub_uploads: dict[str, Any]
     ) -> None:
@@ -438,7 +417,7 @@ class TestConflictingReferences:
         assert result.exit_code == 0, result.stderr
         assert submitted_spec["model"] == "default/keep"
 
-    def test_an_empty_job_json_fills_both_dataset_fields(
+    def test_an_empty_job_json_gets_the_created_references(
         self, tmp_path: Path, submitted_spec: dict[str, Any], stub_uploads: dict[str, Any]
     ) -> None:
         job = tmp_path / "job.json"
@@ -446,7 +425,4 @@ class TestConflictingReferences:
         result = self._run_with(job, "--upload-model", "Qwen/Qwen3-0.6B", "--upload-dataset", "./data")
 
         assert result.exit_code == 0, result.stderr
-        assert submitted_spec["dataset"] == {
-            "training": "default/created-dataset",
-            "validation": "default/created-dataset",
-        }
+        assert submitted_spec["dataset"] == {"training": "default/created-dataset"}
