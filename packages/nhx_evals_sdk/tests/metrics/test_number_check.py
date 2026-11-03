@@ -833,11 +833,15 @@ class TestIntegerDigitLimit:
     async def test_integer_over_limit_scores_without_raising(self):
         assert (await _check("equals", OVER_DIGIT_LIMIT, "42")).outputs[0].value == 0.0
 
+    @pytest.mark.parametrize("sign", ["", "-"], ids=["positive", "negative"])
     @pytest.mark.parametrize("padding", ["", "0" * 10], ids=["unpadded", "padded-past-limit"])
     @pytest.mark.asyncio
-    async def test_distinct_integers_at_limit_stay_distinguishable(self, padding: str):
-        left = padding + "1" + "0" * (INT_DIGIT_LIMIT - 1)
-        right = padding + "1" + "0" * (INT_DIGIT_LIMIT - 2) + "1"
+    async def test_distinct_integers_at_limit_stay_distinguishable(self, padding: str, sign: str):
+        left_digits = "1" + "0" * (INT_DIGIT_LIMIT - 1)
+        right_digits = "1" + "0" * (INT_DIGIT_LIMIT - 2) + "1"
+        left = sign + padding + left_digits
+        right = sign + padding + right_digits
+        assert _parse_number_answer(left) == int(sign + left_digits)
         assert (await _check("equals", left, right)).outputs[0].value == 0.0
         assert (await _check("equals", left, left)).outputs[0].value == 1.0
 
