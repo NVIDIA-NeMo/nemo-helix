@@ -6,15 +6,10 @@ import { Flex, Stack } from '@nvidia/foundations-react-core';
 import { AgentTraceStatistics } from '@studio/components/AgentTraceStatistics';
 import type { TraceStatisticsRange } from '@studio/components/AgentTraceStatistics/types';
 import { bucketAdverbForRange } from '@studio/components/AgentTraceStatistics/utils';
-import {
-  INTAKE_ENABLED,
-  OPTIMIZER_ENABLED,
-  PERSONA_TEST_SETS_ENABLED,
-} from '@studio/constants/environment';
+import { INTAKE_ENABLED, OPTIMIZER_ENABLED } from '@studio/constants/environment';
 import { AgentSummaryPanel } from '@studio/routes/agents/AgentDetailRoute/overview/AgentSummaryPanel';
 import { GetStartedPanel } from '@studio/routes/agents/AgentDetailRoute/overview/GetStartedPanel';
 import { OpenInsightsPanel } from '@studio/routes/agents/AgentDetailRoute/overview/OpenInsightsPanel';
-import { PersonaTestSetPanel } from '@studio/routes/agents/AgentDetailRoute/overview/PersonaTestSetPanel';
 import { toRecentExperiments } from '@studio/routes/agents/AgentDetailRoute/overview/recentExperiments';
 import { RecentExperimentsPanel } from '@studio/routes/agents/AgentDetailRoute/overview/RecentExperimentsPanel';
 import { useAgentTraceMetrics } from '@studio/routes/agents/AgentDetailRoute/overview/useAgentTraceMetrics';
@@ -80,16 +75,10 @@ export const OverviewTab: FC<OverviewTabProps> = ({
     error: insightsError,
   } = useOpenInsights({ workspace, agent: agent?.name, enabled: OPTIMIZER_ENABLED });
 
-  const personaTestSetPanel =
-    PERSONA_TEST_SETS_ENABLED && agent?.name ? (
-      <PersonaTestSetPanel workspace={workspace} agentName={agent.name} agent={agent} />
-    ) : null;
-
   if (!INTAKE_ENABLED) {
     return (
       <Stack gap="density-2xl" className="w-full pb-6">
         <AgentSummaryPanel agent={agent} modelNames={modelNames} />
-        {personaTestSetPanel}
       </Stack>
     );
   }
@@ -126,7 +115,6 @@ export const OverviewTab: FC<OverviewTabProps> = ({
       </Stack>
       <Stack gap="density-2xl" className="w-full shrink-0 lg:w-90">
         <AgentSummaryPanel agent={agent} modelNames={modelNames} />
-        {personaTestSetPanel}
         {OPTIMIZER_ENABLED && (
           <OpenInsightsPanel
             insights={insights}

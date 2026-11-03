@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { LayoutDetail, Add, Sparkle } from '@nemo/icons/icons';
+import { LayoutDetail, Add, Sparkle, ProfileGroup } from '@nemo/icons/icons';
 import type { StartOption } from '@studio/components/CreateFilesetStart/types';
 import type { PromptSuggestion } from '@studio/components/PromptSuggestionTags/types';
 import { ADVANCED, BEGINNER, INTERMEDIATE } from '@studio/components/StartOptions/levels';
+import { PERSONA_TEST_SETS_ENABLED } from '@studio/constants/environment';
 
 /**
  * Example prompts offered as pills inside an empty prompt field. Each is a complete,
@@ -29,7 +30,7 @@ export const PROMPT_SUGGESTIONS: PromptSuggestion[] = [
 ];
 
 /** The non-template ways in; templates are picked directly, below the divider. */
-export const START_OPTIONS: StartOption[] = [
+const ALL_START_OPTIONS: StartOption[] = [
   {
     id: 'ai',
     title: 'Describe with AI',
@@ -37,6 +38,15 @@ export const START_OPTIONS: StartOption[] = [
       'Tell us what you need in plain language. AI drafts the columns and prompts — then you refine everything visually.',
     icon: Sparkle,
     tag: BEGINNER,
+    enabled: true,
+  },
+  {
+    id: 'persona',
+    title: 'Persona test set',
+    description:
+      'Generate test messages for an agent, each written by a different synthetic Nemotron persona.',
+    icon: ProfileGroup,
+    tag: INTERMEDIATE,
     enabled: true,
   },
   {
@@ -56,6 +66,10 @@ export const START_OPTIONS: StartOption[] = [
     enabled: true,
   },
 ];
+
+export const START_OPTIONS = ALL_START_OPTIONS.filter(
+  (option) => option.id !== 'persona' || PERSONA_TEST_SETS_ENABLED
+);
 
 /** Sections in render order; a tag matching none of these falls into OTHER_SECTION, last. */
 export const SECTION_ORDER = ['Evaluation', 'Fine-tuning'] as const;
