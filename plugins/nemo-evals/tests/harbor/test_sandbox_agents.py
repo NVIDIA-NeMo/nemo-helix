@@ -6,12 +6,14 @@
 import asyncio
 import ipaddress
 import logging
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, override
 
 import pytest
 from harbor.environments.base import ExecResult
-from harbor.models.task.config import NetworkMode, NetworkPolicy
+from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
 from nhx_sandbox import egress
@@ -389,3 +391,30 @@ async def test_the_gateway_ca_is_installed_after_the_sandbox_starts(monkeypatch,
 
     assert started == [False]
     assert len(environment.scripts) == installs
+
+
+def _sized_environment(tmp_path: Path, **task: Any) -> AgentChannelOpenSandboxEnvironment:
+    """An agent sandbox for a task with ``task`` in its ``[environment]``; nothing is created."""
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir(exist_ok=True)
+    return AgentChannelOpenSandboxEnvironment(
+        environment_dir=environment_dir,
+        environment_name="tb",
+        session_id="tb__abc",
+        trial_paths=TrialPaths(trial_dir=tmp_path / "tb__abc"),
+        task_env_config=EnvironmentConfig(docker_image="registry.example/tb:1", **task),
+        domain="opensandbox.example",
+        api_key="",
+        sandbox_resource_defaults={"cpus": 1},
+    )
+
+
+@pytest.mark.parametrize(("task", "threads"), [({"cpus": 4}, "4"), ({}, "1")], ids=["task", "default"])
+def test_openmp_threads_match_the_cpu_limit(tmp_path, task, threads):
+    """The sandbox sees every node CPU, so PyTorch and BLAS would otherwise start a thread per one of them."""
+    assert _sized_environment(tmp_path, **task)._persistent_env["OMP_NUM_THREADS"] == threads
+
+
+def test_the_task_can_set_its_own_openmp_threads(tmp_path):
+    environment = _sized_environment(tmp_path, cpus=4, env={"OMP_NUM_THREADS": "1"})
+    assert environment._persistent_env["OMP_NUM_THREADS"] == "1"

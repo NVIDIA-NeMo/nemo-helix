@@ -25,6 +25,7 @@ from typing import Any, Literal, override
 
 from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode
+from harbor.models.trial.config import ResourceMode
 from nemo_evals.harbor.remote.resources import effective_resources
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
@@ -93,6 +94,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         self._agent_channel_hosts = tuple(agent_channel_hosts or ())
         self._agent_setup_hosts = tuple(agent_setup_hosts or ())
         self._gateway_ca_file = gateway_ca_file
+
         if agent_resource_overrides or sandbox_resource_defaults:
             # Harbor's factory passes these as keywords. A copy: the task's own config must keep task.toml's
             # values, since an inherited separate verifier's config is a copy of it, made after this one.
@@ -111,6 +113,13 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                     ", ".join(f"{field}={getattr(config, field)}" for field in defaulted),
                 )
         super().__init__(*args, **kwargs)
+
+        # Kubernetes caps the sandbox's CPU time but not the CPU count programs see, which is the whole
+        # node's: PyTorch, NumPy's BLAS and `nproc` then start a thread per node CPU and are throttled to a
+        # crawl. OpenMP's thread count is the one setting all of them read. A task's own value wins.
+        cpus = self._resource_limit_value("cpu", auto_mode=ResourceMode.LIMIT)
+        if cpus is not None:
+            self._persistent_env.setdefault("OMP_NUM_THREADS", str(cpus))
 
     @override
     async def start(self, force_build: bool) -> None:
