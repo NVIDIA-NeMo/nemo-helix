@@ -65,6 +65,30 @@ def test_authentik_compose_disables_model_provider_seed_without_ngc_key():
     assert "ports" not in nemo_service
 
 
+def test_authentik_compose_reaches_docker_through_socket_proxy():
+    compose = yaml.safe_load(Path("contrib/auth/authentik/compose/docker-compose.yml").read_text())
+    services = compose["services"]
+    nemo_service = services["nemo"]
+
+    assert not any("docker.sock" in volume for volume in nemo_service["volumes"])
+    assert nemo_service["environment"]["DOCKER_HOST"] == "tcp://docker-socket-proxy:2375"
+    assert "no-new-privileges:true" in nemo_service["security_opt"]
+    assert "docker-socket-proxy" in nemo_service["depends_on"]
+
+    proxy_volumes = services["docker-socket-proxy"]["volumes"]
+    assert proxy_volumes == ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+    assert "ports" not in services["docker-socket-proxy"]
+    assert set(services["docker-socket-proxy"]["networks"]) == {"docker-api"}
+    assert [name for name, service in services.items() if "docker-api" in service.get("networks", {})] == [
+        "nemo",
+        "docker-socket-proxy",
+    ]
+    docker_sockets = [
+        name for name, service in services.items() if any("docker.sock" in v for v in service.get("volumes", []))
+    ]
+    assert docker_sockets == ["docker-socket-proxy"]
+
+
 def test_authentik_compose_runs_required_services_and_controllers():
     compose = yaml.safe_load(Path("contrib/auth/authentik/compose/docker-compose.yml").read_text())
 
@@ -312,7 +336,7 @@ def test_authentik_compose_uses_https_gateway_for_workloads():
     )
     assert workload_executor["config"]["cleanup_completed_jobs_immediately"] is True
     assert "workload_identity" not in workload_executor["config"]
-    assert set(nemo["networks"]) == {"nemo-internal"}
+    assert set(nemo["networks"]) == {"nemo-internal", "docker-api"}
     assert "nemo-direct" not in yaml.safe_dump(nemo)
     assert nemo["depends_on"]["gateway-tls-init"]["condition"] == "service_completed_successfully"
     assert gateway["networks"]["nemo-internal"]["aliases"] == ["nemo-gateway"]

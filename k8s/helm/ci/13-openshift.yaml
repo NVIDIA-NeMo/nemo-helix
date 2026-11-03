@@ -17,6 +17,18 @@ securityContext:
     drop:
       - ALL
 
+# OpenShift assigns the UID/GID from the namespace range, so drop the fixed ones
+# the chart sets on the API and controller pods by default.
+api:
+  podSecurityContext:
+    runAsUser: null
+    runAsGroup: null
+core:
+  controller:
+    podSecurityContext:
+      runAsUser: null
+      runAsGroup: null
+
 # Embedded PostgreSQL: run as non-root so postgres pods pass OpenShift SCC
 postgresql:
   securityContext:
