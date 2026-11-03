@@ -34,7 +34,7 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
-from nhx.core.inference_gateway.api.caller_context import caller_headers, context_headers, gateway_seal
+from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
     raise_no_providers_for_model_entity,
@@ -1096,15 +1096,14 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
-    headers = caller_headers(request.headers, model_cache.router_keys(), gateway_seal())
-    request_id = headers.get("x-request-id") or str(uuid.uuid4())
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     await execute_access_checks(
         registry.plugins,
         InferenceAccessRequest(
             request_id=request_id,
             workspace=workspace,
             path=trailing_uri,
-            headers=dict(headers),
+            headers=dict(request.headers),
             virtual_model_id=f"{workspace}/{vm_name}",
             requested_model=json_body["model"] if isinstance(json_body.get("model"), str) else None,
         ),
@@ -1170,7 +1169,7 @@ async def virtual_model_proxy(
     # mutating the body), so it must not alias any mutable state the chain can touch.
     original_request = build_inference_request(
         body=copy.deepcopy(json_body),
-        headers=dict(headers),
+        headers=dict(request.headers),
         path=trailing_uri,
     )
     ctx = InferenceMiddlewareContext(
@@ -1182,7 +1181,7 @@ async def virtual_model_proxy(
     )
     initial_request = build_inference_request(
         body=json_body,
-        headers=dict(headers),
+        headers=dict(request.headers),
         path=trailing_uri,
     )
 

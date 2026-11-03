@@ -371,16 +371,18 @@ The router never holds the caller's credential:
    the gateway can read it. It is bound to that provider and expires after 15 minutes.
 2. The router returns the context with each call it makes back through the gateway with that key.
    Switchyard does this for a backend with `forward_auth`, which forwards the caller's headers.
-3. The gateway opens the context and acts on that call as the caller.
+3. The gateway opens the context and puts the caller's credential back before platform auth runs, so
+   the call is authenticated and authorized as the caller.
 
 ```bash
 nemo inference providers create switchyard --host-url http://switchyard:4002 \
   --api-key-secret-name switchyard-key --calls-back-as-caller
 ```
 
-With platform auth on, the stored key is an access key with scope `inference` that may call the
-router's targets. The gateway refuses with `403` any call made with that key that doesn't carry a
-valid caller context, so the key is no use on its own.
+The stored key needs no platform permissions of its own. Through the router a caller reaches only
+what its own credential allows, and only while that credential is valid. The gateway refuses with
+`403` any call made with the stored key that doesn't carry a valid caller context, so the key is no
+use on its own.
 
 The gateway seals contexts with `inference_gateway.caller_context_key`, a base64-encoded 32-byte key
 set through `NHX_INFERENCE_GATEWAY_CALLER_CONTEXT_KEY`. A Helm install whose chart generates the API

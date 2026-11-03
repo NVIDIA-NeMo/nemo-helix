@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 from collections.abc import Iterator
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -20,13 +21,16 @@ from nhx.core.inference_gateway.api.caller_context import (
     InvalidCallerContextError,
     caller_headers,
 )
+from nhx.core.inference_gateway.api.caller_context_middleware import GATEWAY_PATH_PREFIX, CallerContextMiddleware
 from nhx.core.inference_gateway.api.model_cache import ModelCache
 from nhx.core.inference_gateway.config import InferenceGatewayConfig
 from pydantic import ValidationError
+from starlette.responses import PlainTextResponse
 
 KEY = bytes(range(32))
 CALLER = "trial-token"
 ROUTER_KEY = "router-key"
+GATEWAY_PATH = f"{GATEWAY_PATH_PREFIX}v2/workspaces/default/openai/-/v1/models"
 
 
 class Clock:
@@ -171,34 +175,58 @@ def test_calling_a_router_sends_its_own_key_and_the_callers_context(
     assert seal.open(router, sent[CALLER_CONTEXT_HEADER]) == CALLER
 
 
-def test_a_call_back_reaches_its_model_with_that_models_key_and_no_context(
-    client: TestClient, mock_proxy_client, model_cache: ModelCache, router: str, seal: CallerContextSeal
-) -> None:
-    ollama = model_cache.get_from_provider("default", "ollama")
-    assert ollama is not None
-    ollama.secret_value = "ollama-key"
+async def _seen_through_middleware(headers: list[tuple[bytes, bytes]], path: str = GATEWAY_PATH) -> dict | int:
+    """The headers the app behind the middleware receives, or the status the middleware answers with itself."""
+    seen: dict[str, str] = {}
 
-    response = client.post(
-        "/v2/workspaces/default/provider/ollama/-/v1/chat/completions",
-        headers={"Authorization": f"Bearer {ROUTER_KEY}", CALLER_CONTEXT_HEADER: seal.seal(router, CALLER)},
+    async def app(scope, receive, send) -> None:  # noqa: ANN001
+        seen.update({name.decode(): value.decode() for name, value in scope["headers"]})
+        await PlainTextResponse("ok")(scope, receive, send)
+
+    middleware = CallerContextMiddleware(
+        app, router_keys=lambda: {"default/tot": ROUTER_KEY}, seal=lambda: CallerContextSeal(KEY)
+    )
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=middleware), base_url="http://testserver") as client:
+        response = await client.get(path, headers=headers)
+    return seen if response.status_code == 200 and seen else response.status_code
+
+
+async def test_the_middleware_puts_the_caller_in_place_of_its_router() -> None:
+    context = CallerContextSeal(KEY).seal("default/tot", CALLER)
+
+    seen = await _seen_through_middleware(
+        [(b"authorization", f"Bearer {ROUTER_KEY}".encode()), (CALLER_CONTEXT_HEADER.encode(), context.encode())]
     )
 
-    assert response.status_code == 200
-    sent = CIMultiDict(mock_proxy_client.request.call_args.kwargs["headers"])
-    assert sent["authorization"] == "Bearer ollama-key"
-    assert CALLER_CONTEXT_HEADER not in sent
+    assert isinstance(seen, dict)
+    assert seen["authorization"] == f"Bearer {CALLER}"
+    assert CALLER_CONTEXT_HEADER not in seen
 
 
-def test_a_routers_key_without_a_context_is_refused_at_the_gateway(
-    client: TestClient, mock_proxy_client, router: str, seal: CallerContextSeal
-) -> None:
-    response = client.post(
-        "/v2/workspaces/default/provider/ollama/-/v1/chat/completions",
-        headers={"Authorization": f"Bearer {ROUTER_KEY}"},
+async def test_the_middleware_drops_a_context_sent_without_its_routers_key() -> None:
+    context = CallerContextSeal(KEY).seal("default/tot", CALLER)
+
+    seen = await _seen_through_middleware(
+        [(b"x-api-key", b"someone-else"), (CALLER_CONTEXT_HEADER.encode(), context.encode())]
     )
 
-    assert response.status_code == 403
-    mock_proxy_client.request.assert_not_called()
+    assert isinstance(seen, dict)
+    assert seen["x-api-key"] == "someone-else"
+    assert "authorization" not in seen
+    assert CALLER_CONTEXT_HEADER not in seen
+
+
+async def test_the_middleware_refuses_a_routers_key_without_a_context() -> None:
+    assert await _seen_through_middleware([(b"authorization", f"Bearer {ROUTER_KEY}".encode())]) == 403
+
+
+async def test_the_middleware_leaves_other_platform_routes_alone() -> None:
+    seen = await _seen_through_middleware(
+        [(b"authorization", f"Bearer {ROUTER_KEY}".encode())], path="/apis/models/v2/x"
+    )
+
+    assert isinstance(seen, dict)
+    assert seen["authorization"] == f"Bearer {ROUTER_KEY}"
 
 
 @pytest.mark.parametrize(
