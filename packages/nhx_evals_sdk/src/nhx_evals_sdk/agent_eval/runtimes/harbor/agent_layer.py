@@ -20,6 +20,7 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -117,11 +118,16 @@ def agent_install(
     An agent whose ``version`` isn't pinned installs whatever is newest, so its layer is keyed by the UTC date: it is
     reused for a day, then installed again. ``agent_env`` is the agent's environment; only its
     :data:`INSTALL_ENV_NAMES` are part of the install.
+
+    An install given a URL with a username or password, such as a private package index, isn't reused either: a
+    layer records its install's inputs, and anyone who can read the layer could read that password.
     """
     harbor_version = importlib.metadata.version("harbor")
     if agent_dir is not None:
         return None
     env = install_env(agent_env)
+    if has_url_credentials(dict(agent_kwargs)) or has_url_credentials(env):
+        return None
     if agent_import_path is not None:
         if agent_import_path != FABRIC_INSTALLED_AGENT:
             return None
@@ -133,6 +139,21 @@ def agent_install(
     return AgentInstall(
         agent=f"harbor:{agent_name}", inputs={"version": pinned, **_env_inputs(env)}, harbor_version=harbor_version
     )
+
+
+#: A URL carrying userinfo, such as ``https://user:token@pypi.example/simple``.  # trufflehog:ignore
+_URL_CREDENTIALS = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s@]+@", re.IGNORECASE)
+
+
+def has_url_credentials(value: object) -> bool:
+    """Whether any string in ``value`` holds a URL with a username or password."""
+    if isinstance(value, str):
+        return _URL_CREDENTIALS.search(value) is not None
+    if isinstance(value, dict):
+        return any(has_url_credentials(item) for item in value.values())
+    if isinstance(value, list):
+        return any(has_url_credentials(item) for item in value)
+    return False
 
 
 def install_env(agent_env: Mapping[str, str] | None) -> dict[str, str]:

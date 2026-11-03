@@ -18,6 +18,8 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
 )
 
 _IMAGE = "sha256:" + "e" * 64
+#: A fake package index URL with a username and password.
+CREDENTIALED_INDEX = "https://user:token@pypi.example/simple"  # trufflehog:ignore
 _FABRIC = {"fabric_package": "nemo-fabric[codex,relay]==0.5.0", "fabric_config": {"metadata": {"name": "a"}}}
 
 
@@ -61,6 +63,23 @@ def test_harbors_installed_agents_are_reused(name: str) -> None:
 )
 def test_agents_a_layer_cant_hold_are_not_reused(agent: dict[str, Any]) -> None:
     assert _install(**agent) is None
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "env"),
+    [
+        ({"version": "0.162.1"}, {"PIP_INDEX_URL": CREDENTIALED_INDEX}),
+        ({"version": "0.162.1"}, {"HTTPS_PROXY": "http://user@proxy.example:3128"}),
+        ({"version": "0.162.1", "extra": [f"--index-url {CREDENTIALED_INDEX}"]}, {}),
+    ],
+    ids=["index-url", "proxy-user", "kwarg"],
+)
+def test_an_install_given_a_url_with_credentials_is_not_reused(kwargs: dict[str, Any], env: dict[str, str]) -> None:
+    """A layer records its install's inputs, so the password would be readable from it."""
+    assert (
+        agent_install(agent_name="codex", agent_import_path=None, agent_dir=None, agent_kwargs=kwargs, agent_env=env)
+        is None
+    )
 
 
 def test_options_that_dont_change_the_install_keep_the_key() -> None:
