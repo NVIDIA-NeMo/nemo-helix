@@ -1142,14 +1142,6 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
-          # xdist never forwards. See conftest.py.
-          PYTEST_CRASH_DUMP_DIR: crash-dumps
-          PYTEST_EXTRA: -p no:faulthandler
-          # A lost worker is almost always a test past --timeout. loadscope requeues that test with
-          # its scope, so each replacement worker re-collects the suite only to time out again and
-          # the job hits the 1800s wall without naming it. Fail fast instead.
-          PYTEST_MAX_WORKER_RESTART: "0"
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1429,10 +1421,6 @@ jobs:
           NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
-          # xdist never forwards. See conftest.py.
-          PYTEST_CRASH_DUMP_DIR: crash-dumps
-          PYTEST_EXTRA: -p no:faulthandler
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
