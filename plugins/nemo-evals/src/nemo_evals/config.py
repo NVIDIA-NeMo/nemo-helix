@@ -101,7 +101,12 @@ class HarborTaskJobsConfig(BaseModel):
         ),
     )
     dispatcher_profiles: tuple[str, ...] = Field(
-        min_length=1, description="Jobs execution profiles a request may name as execution.dispatcher_profile."
+        default=("default",),
+        min_length=1,
+        description=(
+            "Jobs execution profiles a request may name as execution.dispatcher_profile; the default nhx-tasks "
+            "dispatcher is used when a request names none."
+        ),
     )
     sandbox_profiles: dict[str, HarborSandboxProfileConfig] = Field(
         min_length=1, description="Named sandbox profiles; a request picks one with execution.sandbox.profile."

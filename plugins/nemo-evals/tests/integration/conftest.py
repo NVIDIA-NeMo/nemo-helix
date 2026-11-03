@@ -225,7 +225,9 @@ def _materialize_subprocess_config(
     }
     config = {
         "platform": {"runtime": "none", "base_url": base_url},
-        "auth": {"enabled": auth_enabled, "allow_unsigned_jwt": True},
+        # Refresh the embedded PDP every second, not every 30 s, so ``wait_role_propagation`` returns in about a
+        # second instead of waiting out the refresh timer.
+        "auth": {"enabled": auth_enabled, "allow_unsigned_jwt": True, "policy_data_refresh_interval": 1},
         "jobs": {
             "executors": [
                 {
