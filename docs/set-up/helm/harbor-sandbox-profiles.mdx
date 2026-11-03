@@ -17,7 +17,7 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
 
 - OpenSandbox is installed and the platform points at it. See [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
 - `sandboxClusterCapable: true` and `builder.enabled: true`. The chart then enables taskset runs with one profile, `harbor-standard`.
-- Set `FULLNAME`, the prefix of every chart resource: `fullnameOverride` if you set it; otherwise the release name if it contains `nemo-helix`, else `<release>-nemo-helix`.
+- Set `FULLNAME`, the prefix of every chart resource: `fullnameOverride` if you set it. Otherwise, with `<name>` = `nameOverride` if set, else `nemo-helix`: the release name if it contains `<name>`, else `<release>-<name>`.
 
   ```bash
   NHX_NAMESPACE=nemo-helix
@@ -85,7 +85,7 @@ How the profile combines with the network mode in the task's `task.toml`:
 | `enforce_disk_limit` | `true` | Sets each sandbox pod's `ephemeral-storage` limit to the task's `storage_mb`. Kubernetes evicts a pod that goes over. Turn it off only on a runtime that doesn't enforce the limit |
 | `max_disk_mb` | `131072` | While `enforce_disk_limit` is on: a `task.toml` `storage_mb` above it is lowered to it; a request above it returns a 422. `null`: each task's value is used as given |
 
-- Without a ceiling, users can request any size.
+- Without a ceiling, users can request any number of CPUs and any memory. Storage stays capped by `max_disk_mb` while `enforce_disk_limit` is on.
 - Ceilings are per profile. Set them on every profile users may select.
 
 ### Lifetime
