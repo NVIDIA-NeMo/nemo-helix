@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from datetime import datetime
 from typing import ClassVar
 
@@ -14,7 +13,7 @@ from nemo_evals.content_hash import DIGEST_LENGTH, DIGEST_PATTERN
 from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.models import BuildImage, BuildStatus
 from nemo_helix_plugin.entities import EntityBase
-from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import INSTALL_ENV_NAMES
+from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import INSTALL_ENV_NAMES, has_url_credentials
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 AGENT_LAYER_BUILD_JOB_SOURCE = "nemo-evals.agent-layer-build"
@@ -62,21 +61,6 @@ class AgentLayerRequest(BaseModel):
                 "password"
             )
         return self
-
-
-#: A URL carrying userinfo, such as ``https://user:token@pypi.example/simple``.  # trufflehog:ignore
-_URL_CREDENTIALS = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s@]+@", re.IGNORECASE)
-
-
-def has_url_credentials(value: object) -> bool:
-    """Whether any string in ``value`` holds a URL with a username or password."""
-    if isinstance(value, str):
-        return _URL_CREDENTIALS.search(value) is not None
-    if isinstance(value, dict):
-        return any(has_url_credentials(item) for item in value.values())
-    if isinstance(value, list):
-        return any(has_url_credentials(item) for item in value)
-    return False
 
 
 class AgentLayerEntity(EntityBase):
