@@ -3,8 +3,20 @@
 
 """Tier-4 tests for the Evaluator Run Controller: the real services answer what the unit-test fakes assume.
 
-Each test talks to a real ``nemo services run`` platform, with auth off (``subprocess_platform``) and on
-(``auth_subprocess_platform``). The controller itself is not started: these tests drive the real
+Each test talks to a real ``nemo services run`` platform that is already running, with auth off
+(``NHX_AGENT_BASE_URL``) and on (``NHX_AGENT_AUTH_BASE_URL``). Nothing here starts, binds or stops a platform: a
+mode whose URL is unset skips, and a set URL that is not ready fails. ``launch_test_platform.py`` starts one with
+this harness's config, as CI does::
+
+    uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18090 &
+    uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18092 --auth &
+    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
+        uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py -m integration
+
+Run this file on its own when the variables are set: the shared ``subprocess_platform`` fixtures read the same
+variables as the port to start their own platform on, and would find it taken.
+
+The controller itself is not started: these tests drive the real
 ``TasksetRunStore`` and ``JobsServiceRunJobs`` through clients that carry exactly the headers the controller's
 ``_service_client`` builds (the platform's own client provider makes them; only the base URL differs).
 
@@ -18,6 +30,8 @@ dependency and its full-principal delegation.
 """
 
 import asyncio
+import os
+import urllib.request
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -42,6 +56,37 @@ from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, CreateWorkspaceRequest
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(600)]
+
+#: Base URLs of the already-running platforms, one per auth mode. No default: unset skips that mode.
+AUTH_OFF_URL_ENV = "NHX_AGENT_BASE_URL"
+AUTH_ON_URL_ENV = "NHX_AGENT_AUTH_BASE_URL"
+
+
+def _supplied_platform(env_var: str, mode: str) -> str:
+    """The platform URL in ``env_var``; skip when unset, fail when it does not answer ready."""
+    base_url = os.environ.get(env_var, "").rstrip("/")
+    if not base_url:
+        pytest.skip(f"{env_var} is not set: point it at a running {mode} platform to run these tests")
+    try:
+        with urllib.request.urlopen(f"{base_url}/health/ready", timeout=10) as response:  # noqa: S310
+            problem = None if response.status == 200 else f"returned {response.status}"
+    except OSError as error:  # includes HTTPError, e.g. a 404 from something that is not a platform
+        problem = str(error)
+    if problem:
+        pytest.fail(f"{env_var}={base_url} is not a ready platform: GET /health/ready: {problem}", pytrace=False)
+    return base_url
+
+
+@pytest.fixture(scope="session")
+def controller_platform() -> str:
+    """An auth-off platform someone else runs; never started or stopped here."""
+    return _supplied_platform(AUTH_OFF_URL_ENV, "auth-off")
+
+
+@pytest.fixture(scope="session")
+def auth_controller_platform() -> str:
+    """An auth-on platform someone else runs; never started or stopped here."""
+    return _supplied_platform(AUTH_ON_URL_ENV, "auth-on")
 
 
 @asynccontextmanager
@@ -219,25 +264,25 @@ async def _check_store_semantics(base_url: str, workspace: str) -> None:
         assert {(workspace, run.name), (workspace, other.name)} <= open_runs
 
 
-async def test_store_semantics_auth_off(subprocess_platform: str) -> None:
-    await _check_store_semantics(subprocess_platform, await _new_workspace(subprocess_platform, "ctl-store"))
+async def test_store_semantics_auth_off(controller_platform: str) -> None:
+    await _check_store_semantics(controller_platform, await _new_workspace(controller_platform, "ctl-store"))
 
 
-async def test_store_semantics_auth_on(auth_subprocess_platform: str) -> None:
-    space = await _shared_group_only_workspace(auth_subprocess_platform)
-    await _check_store_semantics(auth_subprocess_platform, space.workspace)
+async def test_store_semantics_auth_on(auth_controller_platform: str) -> None:
+    space = await _shared_group_only_workspace(auth_controller_platform)
+    await _check_store_semantics(auth_controller_platform, space.workspace)
 
 
-async def test_auth_context_snapshot_is_service_only_and_survives_service_writes(auth_subprocess_platform: str) -> None:
-    async with _controller_client(auth_subprocess_platform) as service:
+async def test_auth_context_snapshot_is_service_only_and_survives_service_writes(auth_controller_platform: str) -> None:
+    async with _controller_client(auth_controller_platform) as service:
         store = _store(service)
-        space = await _shared_group_only_workspace(auth_subprocess_platform)
+        space = await _shared_group_only_workspace(auth_controller_platform)
         created = await store.entity_client.create(_run(space.workspace, space.user))
 
         stored = await store.find(space.workspace, created.name)
         assert stored is not None and stored.auth_context == space.user
 
-        async with _controller_client(auth_subprocess_platform, on_behalf_of(stored)) as delegated:
+        async with _controller_client(auth_controller_platform, on_behalf_of(stored)) as delegated:
             seen = await _store(delegated).find(space.workspace, created.name)
         assert seen is not None and seen.auth_context is None
 
@@ -289,14 +334,14 @@ async def _cancel_and_wait(reads: JobsServiceRunJobs, name: str) -> None:
     raise AssertionError(f"Job {name} still {status} a minute after its cancel")
 
 
-async def test_group_only_creator_creates_records_through_full_principal_only(auth_subprocess_platform: str) -> None:
-    async with _controller_client(auth_subprocess_platform) as service:
-        space, run = await _group_run(auth_subprocess_platform, service)
+async def test_group_only_creator_creates_records_through_full_principal_only(auth_controller_platform: str) -> None:
+    async with _controller_client(auth_controller_platform) as service:
+        space, run = await _group_run(auth_controller_platform, service)
         principal = on_behalf_of(run)
         assert not isinstance(principal, str) and list(principal.groups) == [space.group]
         async with (
-            _controller_client(auth_subprocess_platform, principal) as creating,
-            _controller_client(auth_subprocess_platform, space.user.principal_id) as id_only,
+            _controller_client(auth_controller_platform, principal) as creating,
+            _controller_client(auth_controller_platform, space.user.principal_id) as id_only,
         ):
             assert await _store(creating).create_member(run, 0) is not None
             # Delegating the id alone loses the group, and with it the workspace.
@@ -304,27 +349,27 @@ async def test_group_only_creator_creates_records_through_full_principal_only(au
                 await _store(id_only).create_member(run, 1)
 
 
-async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_subprocess_platform: str) -> None:
+async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_controller_platform: str) -> None:
     """The controller's GET and cancel need no binding: the group is gone and ``service:evals`` never had one.
 
     The Job is created by the undelegated client; a delegated create is in
     ``test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service``.
     """
-    async with _controller_client(auth_subprocess_platform) as service:
-        space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
+    async with _controller_client(auth_controller_platform) as service:
+        space, run = await _group_run(auth_controller_platform, service, own_workspace=True)
         task_job = f"{run.name}-task-0"
         assert await JobsServiceRunJobs(service, service, space.workspace).create(_sleep_job(task_job)) is not None
-        await _unbind_group(auth_subprocess_platform, space)
+        await _unbind_group(auth_controller_platform, space)
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
-async def test_service_client_lists_jobs_without_any_binding(auth_subprocess_platform: str) -> None:
+async def test_service_client_lists_jobs_without_any_binding(auth_controller_platform: str) -> None:
     """Settling's one list per run needs no binding either: it finds the run's Job, and leaves out a name with none."""
-    async with _controller_client(auth_subprocess_platform) as service:
-        space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
+    async with _controller_client(auth_controller_platform) as service:
+        space, run = await _group_run(auth_controller_platform, service, own_workspace=True)
         task_job = f"{run.name}-task-0"
         assert await JobsServiceRunJobs(service, service, space.workspace).create(_sleep_job(task_job)) is not None
-        await _unbind_group(auth_subprocess_platform, space)
+        await _unbind_group(auth_controller_platform, space)
         reading = JobsServiceRunJobs(service, None, space.workspace)
         listed = await reading.list_named([task_job, f"{run.name}-task-9"])
         assert list(listed) == [task_job] and listed[task_job].name == task_job
@@ -332,17 +377,17 @@ async def test_service_client_lists_jobs_without_any_binding(auth_subprocess_pla
 
 
 async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service(
-    auth_subprocess_platform: str,
+    auth_controller_platform: str,
 ) -> None:
     """A task Job created for a group-only creator, then read and cancelled after the creator loses access."""
-    async with _controller_client(auth_subprocess_platform) as service:
-        space, run = await _group_run(auth_subprocess_platform, service, own_workspace=True)
+    async with _controller_client(auth_controller_platform) as service:
+        space, run = await _group_run(auth_controller_platform, service, own_workspace=True)
         task_job = f"{run.name}-task-0"
-        async with _controller_client(auth_subprocess_platform, on_behalf_of(run)) as creating:
+        async with _controller_client(auth_controller_platform, on_behalf_of(run)) as creating:
             jobs = JobsServiceRunJobs(service, creating, space.workspace)
             job = await jobs.create(_sleep_job(task_job))
             assert job is not None and job.name == task_job
-            await _unbind_group(auth_subprocess_platform, space)
+            await _unbind_group(auth_controller_platform, space)
             # The creator lost access: new creates are refused (the controller's job_forbidden) ...
             with pytest.raises(PermissionDeniedError):
                 await jobs.create(_sleep_job(f"{run.name}-task-1"))
@@ -350,24 +395,24 @@ async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
-async def test_a_forbidden_delegated_job_create_is_a_403(auth_subprocess_platform: str) -> None:
+async def test_a_forbidden_delegated_job_create_is_a_403(auth_controller_platform: str) -> None:
     """A Job create for a principal without access to the workspace is a 403, the controller's ``job_forbidden``."""
-    async with _controller_client(auth_subprocess_platform) as service:
-        space, run = await _group_run(auth_subprocess_platform, service)
-        async with _controller_client(auth_subprocess_platform, space.user.principal_id) as id_only:
+    async with _controller_client(auth_controller_platform) as service:
+        space, run = await _group_run(auth_controller_platform, service)
+        async with _controller_client(auth_controller_platform, space.user.principal_id) as id_only:
             with pytest.raises(PermissionDeniedError):
                 await JobsServiceRunJobs(service, id_only, space.workspace).create(_sleep_job(f"{run.name}-task-0"))
 
 
-async def test_submit_dependency_delegates_group_only_caller(auth_subprocess_platform: str) -> None:
+async def test_submit_dependency_delegates_group_only_caller(auth_controller_platform: str) -> None:
     """``get_taskset_run_service`` with a group-only caller reads the workspace's run records.
 
     Submit needs a Kubernetes dispatcher profile, so this goes through the run read routes, which build their
     service with the same dependency: an id-only delegation would not find the run.
     """
-    async with _controller_client(auth_subprocess_platform) as service:
+    async with _controller_client(auth_controller_platform) as service:
         store = _store(service)
-        space = await _shared_group_only_workspace(auth_subprocess_platform)
+        space = await _shared_group_only_workspace(auth_controller_platform)
         run = await store.entity_client.create(_run(space.workspace, space.user))
         await store.create_member(run, 0)
 
@@ -379,7 +424,7 @@ async def test_submit_dependency_delegates_group_only_caller(auth_subprocess_pla
         "X-NHX-Actor-Aliases": ",".join(user.principal_authz_aliases),
     }
     runs_path = f"/apis/evals/v2/workspaces/{space.workspace}/agent-evaluate/runs"
-    async with httpx.AsyncClient(base_url=auth_subprocess_platform, headers=headers, timeout=30) as http:
+    async with httpx.AsyncClient(base_url=auth_controller_platform, headers=headers, timeout=30) as http:
         status = await http.get(f"{runs_path}/{run.name}")
         assert status.status_code == 200, status.text
         assert status.json()["run_id"] == run.name

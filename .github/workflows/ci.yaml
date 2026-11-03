@@ -1476,6 +1476,35 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
+      # Host one per auth mode on ports the shared fixtures don't use, then run that file on its own: the
+      # shared fixtures read the same variables as the port to start their own platform on.
+      - name: Run taskset-run controller integration
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          logs="$RUNNER_TEMP/controller-platforms"
+          mkdir -p "$logs"
+          launcher=plugins/nemo-evals/tests/integration/launch_test_platform.py
+          uv run python "$launcher" --port 18090 --work-dir "$logs/auth-off" > "$logs/auth-off.log" 2>&1 &
+          uv run python "$launcher" --port 18092 --auth --work-dir "$logs/auth-on" > "$logs/auth-on.log" 2>&1 &
+          for port in 18090 18092; do
+            if ! timeout 300 bash -c "until curl -sf http://localhost:$port/health/ready > /dev/null; do sleep 2; done"; then
+              echo "::error::platform on port $port was not ready within 300s"
+              tail -n 200 "$logs"/*.log
+              exit 1
+            fi
+          done
+          status=0
+          NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
+            uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py \
+            -m integration -n 0 -v || status=$?
+          if [ "$status" -ne 0 ]; then tail -n 200 "$logs"/*.log; fi
+          kill %1 %2 2>/dev/null || true
+          exit "$status"
+        env:
+          UV_FROZEN: "1"
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
       # Run separately from xdist: the shared platform fixture binds one port.
       # Keep opt-in and plugin isolation scoped to this step, not the general suite.
       - name: Run Harbor taskset integration
