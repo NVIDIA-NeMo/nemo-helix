@@ -51,10 +51,10 @@ def _parse_number_answer(answer: str) -> int | float:
         except ValueError:
             sign = last_number[0] if last_number[0] in "+-" else ""
             digits = last_number[len(sign) :]
-            zeros = "".join(c for c in set(digits) if int(c) == 0)
-            significant = digits.lstrip(zeros) or "0"
-            if len(significant) <= sys.get_int_max_str_digits():
-                return int(sign + significant)
+            zero_chars = "".join(c for c in set(digits) if int(c) == 0)
+            unpadded_digits = digits.lstrip(zero_chars) or "0"
+            if len(unpadded_digits) <= sys.get_int_max_str_digits():
+                return int(sign + unpadded_digits)
             return -math.inf if sign == "-" else math.inf
     return float("nan")
 
