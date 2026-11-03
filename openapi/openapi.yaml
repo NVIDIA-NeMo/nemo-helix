@@ -20522,10 +20522,6 @@ components:
           items:
             type: string
           type: array
-        checkpoint_size_bytes:
-          title: Checkpoint Size Bytes
-          description: Total size of the files in the model's fileset, in bytes
-          type: integer
         num_layers:
           type: integer
           title: Num Layers

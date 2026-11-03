@@ -7,7 +7,6 @@ Parity ports from ``k8s_nim_operator/nimservice_compiler.py`` — please review
 mapping of ``k8s_nim_operator_config`` → plugin ``K8sDeploymentConfig``.
 """
 
-import math
 from dataclasses import dataclass
 
 from nemo_deployments_plugin.entities import (
@@ -83,18 +82,6 @@ _SCRATCH_VOLUME_SIZE = "1Gi"
 # SGLang's health check waits a second before it answers, so the 1s probe default
 # never sees the SGLang model-free NIM become ready.
 _READINESS_PROBE_TIMEOUT_SECONDS = 5
-# Room beyond the checkpoint for filesystem overhead and the puller's in-progress downloads.
-_WEIGHTS_VOLUME_HEADROOM = 1.2
-_QUANTITY_FACTORS = {
-    "Ki": 2**10,
-    "Mi": 2**20,
-    "Gi": 2**30,
-    "Ti": 2**40,
-    "k": 10**3,
-    "M": 10**6,
-    "G": 10**9,
-    "T": 10**12,
-}
 
 
 @dataclass(frozen=True)
@@ -125,31 +112,6 @@ def _image(name: str, tag: str) -> str:
 
 def _busybox_image(config: DeploymentsPluginConfig) -> str:
     return _image(config.busybox_image, config.busybox_image_tag)
-
-
-def _quantity_bytes(quantity: str) -> float | None:
-    """Bytes in a Kubernetes storage quantity such as ``200Gi``; ``None`` if unrecognized."""
-    number, factor = quantity, 1
-    for suffix, suffix_factor in _QUANTITY_FACTORS.items():
-        if quantity.endswith(suffix):
-            number, factor = quantity[: -len(suffix)], suffix_factor
-            break
-    try:
-        return float(number) * factor
-    except ValueError:
-        return None
-
-
-def _weights_volume_size(resolved: ResolvedPluginDeployment, config: DeploymentsPluginConfig) -> str:
-    """The configured disk size, else the default grown to fit the checkpoint the model spec measured."""
-    if resolved.view.disk_size:
-        return resolved.view.disk_size
-    checkpoint_bytes = getattr(getattr(resolved.model_entity, "spec", None), "checkpoint_size_bytes", None)
-    default_bytes = _quantity_bytes(config.default_pvc_size)
-    if not checkpoint_bytes or default_bytes is None:
-        return config.default_pvc_size
-    needed_gib = math.ceil(checkpoint_bytes * _WEIGHTS_VOLUME_HEADROOM / 2**30)
-    return config.default_pvc_size if needed_gib * 2**30 <= default_bytes else f"{needed_gib}Gi"
 
 
 def _weights_permissions_init_container(config: DeploymentsPluginConfig, volume_name: str) -> Container:
@@ -325,7 +287,7 @@ def compile_model_deployment(
         volume = Volume(
             name=names.volume,
             workspace=resolved.deployment.workspace,
-            size=_weights_volume_size(resolved, config),
+            size=resolved.view.disk_size or config.default_pvc_size,
             backendConfig=VolumeBackendConfig(
                 docker=docker_volume_config,
                 k8s=K8sVolumeConfig(storageClass=config.default_storage_class),

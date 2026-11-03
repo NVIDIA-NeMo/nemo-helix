@@ -261,8 +261,6 @@ class ModelSpecRunner:
         logger.info(os.listdir(dest_dir))
         is_trusted = me.trust_remote_code if me.trust_remote_code is not None else False
         model_spec = infer_model_cfg_from_hf(str(dest_dir), is_trusted=is_trusted, file_listing=all_file_paths)
-        # Deployments size the weight volume from this.
-        model_spec.checkpoint_size_bytes = sum(f.size for f in response.data)
         model_spec.head_type, head_type_reason = infer_model_head_type(str(dest_dir))
 
         # Legacy filesets may omit model-card/config signals. Preserve the old

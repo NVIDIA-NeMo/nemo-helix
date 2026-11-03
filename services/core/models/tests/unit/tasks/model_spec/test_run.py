@@ -122,8 +122,8 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
     transfer_mock = MagicMock()
     transfer_mock.list_files.return_value = SimpleNamespace(
         data=[
-            SimpleNamespace(path="config.json", size=1_000),
-            SimpleNamespace(path="model.safetensors", size=1_200_000_000),
+            SimpleNamespace(path="config.json"),
+            SimpleNamespace(path="model.safetensors"),
         ]
     )
     transfer_mock.download.side_effect = lambda _files, **kwargs: Path(kwargs["local_path"]).mkdir(
@@ -197,8 +197,6 @@ def test_analyze_checkpoint_updates_model_with_plugin_model_spec(tmp_path: Path)
 
     assert body.spec.minimum_gpus_all_weights == 4
     assert body.spec.minimum_gpus_lora == 2
-    # Every listed file counts, including the tensor files the task does not download.
-    assert body.spec.checkpoint_size_bytes == 1_200_001_000
     assert body.spec.moe_config is not None
     assert body.spec.moe_config.num_experts == 8
     assert body.spec.mamba_config is not None
@@ -243,10 +241,10 @@ def test_analyze_checkpoint_classifies_onnx_primary_retrieval_output(tmp_path: P
     transfer_mock = MagicMock()
     transfer_mock.list_files.return_value = SimpleNamespace(
         data=[
-            SimpleNamespace(path="model.onnx", size=100),
-            SimpleNamespace(path="alternates/hf/config.json", size=10),
-            SimpleNamespace(path="alternates/hf/model.safetensors", size=100),
-            SimpleNamespace(path="alternates/last/config.json", size=10),
+            SimpleNamespace(path="model.onnx"),
+            SimpleNamespace(path="alternates/hf/config.json"),
+            SimpleNamespace(path="alternates/hf/model.safetensors"),
+            SimpleNamespace(path="alternates/last/config.json"),
         ]
     )
     transfer_mock.download.side_effect = _download

@@ -223,9 +223,6 @@ class ModelSpec(BaseModel):
         "checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'), while the other fields "
         "describe its language model.",
     )
-    checkpoint_size_bytes: Optional[int] = Field(
-        default=None, description="Total size of the files in the model's fileset, in bytes"
-    )
 
     # Architecture dimensions
     num_layers: int = Field(description="Number of transformer layers")

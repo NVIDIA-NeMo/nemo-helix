@@ -548,7 +548,7 @@ models:
         # default: 5
         max_restart_count: 5
         default_storage_class:
-        # Weights volume size for a deployment that sets no disk_size. When the model spec records a larger checkpoint, the volume gets the checkpoint size plus 20% instead. | default: '200Gi'
+        # default: '200Gi'
         default_pvc_size: 200Gi
         # Platform-default pod annotations applied to every k8s model deployment/job (all engines). Merged key-wise into the compiled K8sDeploymentConfig; a per-entity annotation for the same key wins over the platform default. Used to ship the Istio native-sidecar annotation so a mesh-injected proxy terminates when a puller Job's main container exits.
         default_pod_annotations: {}
