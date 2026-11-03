@@ -14,8 +14,8 @@ Do not tell candidates apart by time window or by a temporary agent name:
 
 - Candidates that run concurrently overlap in time, so a time window mixes their runs. A discarded
   candidate's runs also stay in every window that covers them.
-- Compass files Insights per agent. A per-candidate agent name scatters findings about one agent
-  across several names.
+- Compass stores Insights under the agent name. A per-candidate agent name scatters findings about
+  one agent across several names.
 
 ## Before You Start
 
@@ -45,9 +45,13 @@ runs. See
 
 If you run candidates as agent evaluation jobs, the job publishes each run and its scores to the
 Evaluation named by `publication.intake.evaluation_id`, which covers the next two steps. The job
-derives the recorded agent name from the target, so when candidates are separate targets, set
-`publication.intake.agent_name` to the shared agent name. The
-**Run Evaluation** wizard in [NeMo Studio Agents](/documentation/studio/agents#evaluate-an-agent)
+derives the recorded agent name from the target. When candidates are separate targets and the job
+publishes an ATIF trajectory because the trial has no OTLP trace, set
+`publication.intake.agent_name` to the shared agent name. That field is written onto the ATIF
+trajectory only. When the job publishes the trial's OTLP trace, the agent name stays whatever the
+trace already records as `gen_ai.agent.name`. The producer must record the shared name. See
+[Telemetry Requirement](/documentation/agents/traces-and-insights/insights-from-traces#telemetry-requirement).
+The **Run Evaluation** wizard in [NeMo Studio Agents](/documentation/studio/agents#evaluate-an-agent)
 also creates the Experiment and Evaluation. See
 [Where Evaluations Come From](/documentation/evaluate-models/experiments#where-evaluations-come-from).
 
@@ -56,8 +60,8 @@ also creates the Experiment and Evaluation. See
 Tag each run at ingest with the candidate's Evaluation name and the test case it ran:
 
 - For chat-completions, add a top-level `evaluation_context` object to the ingest payload.
-- For ATIF, put the same object in the trajectory's `extra.evaluation_context`. Intake also accepts
-  it at the top level of the ingest payload.
+- For ATIF, put the same object in the trajectory's `extra.evaluation_context`. The ingest payload
+  also accepts that object as a top-level `evaluation_context`. When both are present, they must match.
 - For OTLP, set `nemo.evaluation.name` and `nemo.test_case.name` on each trace's root span.
 
 ```json
@@ -112,12 +116,14 @@ nemo compass analysis-runs create \
 `--evaluation-id` restricts every trace and span the run reads to that Evaluation. `--agent` is still
 required and must match the traces' `agent_name`. Do not use `--since` to isolate a candidate.
 
-Keep these limits in mind when you scope a run to one Evaluation:
+Two things stay true when the run reads only one Evaluation:
 
-- Compass counts independent cases by test case name, so a tool issue must recur in 3 distinct test
-  cases before it is filed. Repeating one test case does not add cases. See
+- Compass still applies its recurrence thresholds to the traces it reads. It counts independent
+  cases by test case name, so a tool issue is recorded only after it shows up in 3 distinct test
+  cases in that Evaluation. Repeating one test case does not add a case, so a smaller Evaluation can
+  leave a real problem `below threshold`. See
   [Recurrence Thresholds](/documentation/agents/traces-and-insights/insights-from-traces#recurrence-thresholds).
-- Insights belong to the agent, not to the Evaluation. The run's `analysis-report` records which
+- Insights are stored on the agent, not on the Evaluation. The run's `analysis-report` records which
   Insights that run created or updated. See
   [Read the Analysis Report](/documentation/agents/traces-and-insights/insights-from-traces#read-the-analysis-report).
 
