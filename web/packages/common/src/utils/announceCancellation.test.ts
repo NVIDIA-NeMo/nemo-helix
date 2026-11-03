@@ -98,4 +98,19 @@ describe('announceCancellation', () => {
     await vi.advanceTimersByTimeAsync(INTERVAL * 5);
     expect(fetchStatus).toHaveBeenCalledTimes(callsAtDeadline);
   });
+
+  it.each([
+    ['every status check failed', [new Error('network')]],
+    ['the last status seen was active', ['active']],
+  ])('does not claim it is still cancelling when %s', async (_, statuses) => {
+    const { toast, run } = setup(statuses);
+
+    const done = run('cancelling');
+    await vi.advanceTimersByTimeAsync(TIMEOUT + INTERVAL);
+    await done;
+
+    expect(toast.info).toHaveBeenCalledTimes(2);
+    expect(toast.info).toHaveBeenLastCalledWith(expect.stringContaining(JOB));
+    expect(toast.info).not.toHaveBeenLastCalledWith(expect.stringMatching(/still cancelling/i));
+  });
 });
