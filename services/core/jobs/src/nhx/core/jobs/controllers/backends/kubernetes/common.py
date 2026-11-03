@@ -1244,6 +1244,15 @@ def _storage_cleanup_labels(
     return cleanup_common_labels
 
 
+# Without these the namespace's LimitRange default (often several CPUs and GiB) applies, and many finished jobs'
+# cleanups then exhaust the ResourceQuota the workloads need. ponytail: fixed; make configurable if `rm -rf`
+# ever needs more on some storage backend.
+STORAGE_CLEANUP_RESOURCES = client.V1ResourceRequirements(
+    requests={"cpu": "50m", "memory": "64Mi"},
+    limits={"cpu": "500m", "memory": "256Mi"},
+)
+
+
 def _storage_cleanup_job(
     namespace: str,
     pvc_name: str,
@@ -1283,6 +1292,7 @@ def _storage_cleanup_job(
                         client.V1Container(
                             name="cleanup",
                             image=permissions_image,
+                            resources=STORAGE_CLEANUP_RESOURCES,
                             command=["sh", "-c"],
                             args=[
                                 f"""

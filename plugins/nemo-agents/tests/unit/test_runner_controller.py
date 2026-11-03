@@ -37,6 +37,7 @@ from nemo_agents_plugin.spec_revision import SpecRevision
 from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
+from nemo_helix_plugin.refs import FilesetRef
 
 EXPIRATION_NOW = datetime(2026, 8, 26, 12, 0, tzinfo=UTC)
 
@@ -627,12 +628,14 @@ async def test_start_deployment_records_the_spec_revision_the_backend_staged() -
         status="pending",
         spec_revision="1" * 40,
         spec_tracked_revision="main",
+        source_fileset=FilesetRef("sources/agent-source"),
     )
 
     await ctrl._start_deployment(dep)
 
     assert dep.spec_revision == "2" * 40
     assert dep.spec_tracked_revision == "main"
+    assert backend.create_deployment.call_args.kwargs["source_fileset"] == "sources/agent-source"
 
 
 @pytest.mark.asyncio

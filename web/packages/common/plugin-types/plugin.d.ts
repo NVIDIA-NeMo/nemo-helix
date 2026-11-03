@@ -825,7 +825,7 @@ type PrimitivePropsWithRef$1<E extends React$1.ElementType> = React$1.ComponentP
   asChild?: boolean;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.16.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_07145dee84c0a9c7bf0d1ad2c2905fa3/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-i4E6mVJ9.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.19.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e6b7e3dc6aefef577a16d193a23e5c52/node_modules/@nvidia/foundations-react-core/dist/sanitize-href-hVQjmGx5.d.ts
 /**
  * Common attributes
  * @see {@link https://react.dev/reference/react-dom/components/common}
@@ -1109,12 +1109,12 @@ type SafeHrefProp<T extends {
   href: string;
 };
 //#endregion
-//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.16.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_07145dee84c0a9c7bf0d1ad2c2905fa3/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
+//#region ../../node_modules/.pnpm/@nvidia+foundations-react-core@1.19.0_@types+react-dom@19.2.3_@types+react@19.2.14__@ty_e6b7e3dc6aefef577a16d193a23e5c52/node_modules/@nvidia/foundations-react-core/dist/index.d.ts
 declare const text$1: (props?: ({
   fontFamily?: "sans" | "mono" | null | undefined;
-  fontWeight?: "bold" | "light" | "regular" | "semibold" | null | undefined;
+  fontWeight?: "light" | "regular" | "semibold" | "bold" | null | undefined;
   fontStyle?: "normal" | "italic" | null | undefined;
-  fontSize?: "10" | "12" | "14" | "16" | "18" | "20" | "22" | "24" | "28" | "32" | "36" | "40" | "44" | "48" | "50" | "56" | "60" | "64" | "72" | "80" | null | undefined;
+  fontSize?: "10" | "12" | "14" | "16" | "18" | "20" | "24" | "28" | "32" | "36" | "40" | "44" | "48" | "56" | "60" | "64" | "72" | "80" | "22" | "50" | null | undefined;
   underline?: boolean | null | undefined;
   lineHeight?: "100" | "125" | "150" | "175" | null | undefined;
   kind?: "inherit" | "body/bold/2xl" | "body/bold/3xl" | "body/bold/lg" | "body/bold/md" | "body/bold/xl" | "body/bold/sm" | "body/bold/xs" | "body/regular/lg" | "body/regular/md" | "body/regular/sm" | "body/regular/xl" | "body/regular/2xl" | "body/regular/3xl" | "body/regular/xs" | "body/semibold/2xl" | "body/semibold/3xl" | "body/semibold/lg" | "body/semibold/md" | "body/semibold/sm" | "body/semibold/xl" | "body/semibold/xs" | "display/2xl" | "display/xl" | "display/lg" | "display/md" | "display/sm" | "display/xs" | "label/bold/2xl" | "label/bold/3xl" | "label/bold/lg" | "label/bold/md" | "label/bold/sm" | "label/bold/xl" | "label/bold/xs" | "label/light/lg" | "label/light/xl" | "label/light/2xl" | "label/light/3xl" | "label/light/md" | "label/light/sm" | "label/light/xs" | "label/regular/lg" | "label/regular/md" | "label/regular/sm" | "label/regular/xs" | "label/regular/xl" | "label/regular/2xl" | "label/regular/3xl" | "label/semibold/lg" | "label/semibold/md" | "label/semibold/sm" | "label/semibold/xl" | "label/semibold/2xl" | "label/semibold/3xl" | "label/semibold/xs" | "mono/md" | "mono/sm" | "mono/lg" | "mono/xl" | "mono/2xl" | "title/2xl" | "title/xl" | "title/lg" | "title/md" | "title/sm" | "title/xs" | null | undefined;
@@ -1313,7 +1313,7 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  * <caption>HTML</caption>
  * ```html
  * <a
- *   href="https://nvidia.com"
+ *   href="https://example.com"
  *   class="nv-text nv-text--body-regular-md nv-anchor"
  * >
  *   Anchor
@@ -1322,7 +1322,7 @@ interface AnchorProps extends PrimitivePropsWithRef<"a">, Pick<TextProps, "fontW
  */
 declare const Anchor: React$1.ForwardRefExoticComponent<Omit<AnchorProps, "ref"> & React$1.RefAttributes<HTMLAnchorElement>>;
 declare const button: (props?: ({
-  size?: "small" | "medium" | "large" | "tiny" | null | undefined;
+  size?: "small" | "tiny" | "medium" | "large" | null | undefined;
   kind?: "primary" | "secondary" | "tertiary" | null | undefined;
   color?: "brand" | "neutral" | "danger" | null | undefined;
   loading?: boolean | null | undefined;
@@ -1391,6 +1391,7 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  * @llm Guard repeated submissions in the form's submit handler; loading only blocks this button's activation after hydration.
  * @llm Native link destinations, submit types, and popover targets remain unchanged; guard those actions in your application, including before hydration.
  * @llm Custom children must forward props and refs, render children directly inside their root element, and guard handlers they own.
+ * @llm For a single-button file upload, use `asChild` on a `<label>` that wraps `UploadInputElement` inside `UploadRoot`. Set `disabled` on `UploadRoot` rather than `loading` on the Button, since a label has no busy or disabled state of its own.
  * @llm Use children for the label in both states; `slotLoading` customizes only the indicator, including with `asChild`.
  * @llm For a custom arrow indicator, pass `<Spinner size="small" aria-label="Loading" />` to `slotLoading`. The slot makes it decorative; announce progress in a live region outside the button.
  * @llm Prefer an ellipsis (`...`) at the end of loading labels, such as "Sending..."; this is writing guidance, not automatic punctuation.
@@ -1567,8 +1568,8 @@ interface ButtonProps extends Omit<PrimitivePropsWithRef<"button">, "color"> {
  */
 declare const Button: react__default.ForwardRefExoticComponent<Omit<ButtonProps, "ref"> & react__default.RefAttributes<HTMLButtonElement>>;
 declare const badge: (props?: ({
-  kind?: "solid" | "outline" | null | undefined;
-  color?: "blue" | "gray" | "green" | "purple" | "red" | "teal" | "yellow" | null | undefined;
+  kind?: "outline" | "solid" | null | undefined;
+  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
   size?: "small" | "medium" | "large" | null | undefined;
 } & ClassProp) | undefined) => string;
 type BadgeVariantProps = VariantProps<typeof badge>;
@@ -1598,7 +1599,7 @@ interface CardContentProps extends ComponentPropsWithRef<"div"> {}
  */
 declare const CardContent: react__default.ForwardRefExoticComponent<Omit<CardContentProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
 declare const cardMedia: (props?: ({
-  mediaTheme?: "dark" | "light" | null | undefined;
+  mediaTheme?: "light" | "dark" | null | undefined;
 } & ClassProp) | undefined) => string;
 interface CardMediaProps extends SlottablePropsWithRef<"div"> {
   /**
@@ -1618,7 +1619,7 @@ declare const CardMedia: react__default.ForwardRefExoticComponent<Omit<CardMedia
 declare const cardRoot: (props?: ({
   density?: "compact" | "standard" | "spacious" | null | undefined;
   interactive?: boolean | null | undefined;
-  kind?: "solid" | "float" | "gradient" | null | undefined;
+  kind?: "solid" | "gradient" | "float" | null | undefined;
   layout?: "horizontal" | "vertical" | null | undefined;
   selected?: boolean | null | undefined;
 } & ClassProp) | undefined) => string;
@@ -1999,7 +2000,7 @@ interface CheckboxInputProps extends Omit<ComponentPropsWithRef<"input">, "defau
  */
 declare const CheckboxInput: react__default.ForwardRefExoticComponent<Omit<CheckboxInputProps, "ref"> & react__default.RefAttributes<HTMLInputElement>>;
 declare const checkboxRoot: (props?: ({
-  labelSide?: "left" | "right" | null | undefined;
+  labelSide?: "right" | "left" | null | undefined;
 } & ClassProp) | undefined) => string;
 interface CheckboxRootProps extends PrimitivePropsWithRef<"div"> {
   /**
@@ -2185,7 +2186,7 @@ interface RadioGroupInputProps extends Omit<react__default.ComponentPropsWithRef
 declare const RadioGroupInput: react__default.ForwardRefExoticComponent<Omit<RadioGroupInputProps, "ref"> & react__default.RefAttributes<HTMLInputElement>>;
 interface RadioGroupItemProps extends Omit<PrimitivePropsWithRef<"label">, "children" | "value" | "defaultValue"> {
   /** Label for the radio input. */
-  children: React.ReactNode;
+  children: ReactNode;
 }
 /**
  * A `<label>` that wraps a radio input and its visible content so clicking anywhere on the item toggles the input.
@@ -2267,6 +2268,10 @@ interface MenuCheckboxItemProps extends Omit<react__default.LabelHTMLAttributes<
    */
   onClick?: react__default.MouseEventHandler<HTMLLabelElement>;
 }
+/**
+ * A menu item with a checkbox that turns an option on or off independently of the other items. Use for settings and filters where several options can be active at once.
+ * @param props - {@link MenuCheckboxItemProps}
+ */
 declare const MenuCheckboxItem: react__default.ForwardRefExoticComponent<MenuCheckboxItemProps & react__default.RefAttributes<HTMLLabelElement>>;
 interface MenuHeadingProps extends PrimitivePropsWithRef<"div"> {}
 /**
@@ -2411,7 +2416,7 @@ interface TextInputProps extends PropsFromRoot$3, PropsFromInput$2 {
   /** Native HTML attributes forwarded to the internal composed components. */
   attributes?: {
     Input?: ComponentPropsWithRef<"input">;
-    InputDismissButton?: React.ComponentProps<typeof InputDismissButton>;
+    InputDismissButton?: ComponentProps<typeof InputDismissButton>;
   };
 }
 /**
@@ -2962,16 +2967,27 @@ type DropdownProps = PropsWithChildren<Pick<DropdownRootProps, "id" | "open" | "
   };
 };
 interface PopoverContentProps extends PrimitiveProps<"div">, Pick<PortalProps, "portal" | "portalContainer"> {
+  /** Renders the popover panel into the element passed as `children` instead of a `<div>`. */
+  asChild?: boolean;
   /** Called when focus returns to the trigger after the popover closes. Call `event.preventDefault()` to skip the default focus restoration. */
   onCloseAutoFocus?: (event: Event) => void;
   /** Called when focus first moves into the popover after it opens. Call `event.preventDefault()` to skip the default focus behavior. */
   onOpenAutoFocus?: (event: Event) => void;
   /** Called when Escape is pressed inside the popover. Call `event.preventDefault()` to keep the popover open. */
   onEscapeKeyDown?: (event: KeyboardEvent) => void;
-  /** Called when a pointer event occurs outside the popover. Call `event.preventDefault()` to keep the popover open. */
+  /** Called when a pointer is pressed outside the popover. Call `event.preventDefault()` to keep the popover open. */
   onPointerDownOutside?: (event: Event) => void;
-  /** Called when any interaction occurs outside the popover. Call `event.preventDefault()` to keep the popover open. */
+  /** Called after `onPointerDownOutside` when a pointer is pressed outside the popover. Focus moving outside calls `onFocusOutside` instead. Call `event.preventDefault()` to keep the popover open. */
   onInteractOutside?: (event: Event) => void;
+  /**
+   * Closes the popover when focus moves from it, its trigger, or its anchor to an element outside all three. Applies to programmatic focus too, and has no effect on a modal popover.
+   *
+   * "Outside" is decided by DOM containment, so a nested surface given its own `portalContainer` counts as outside and closes this popover. Leave nested content on the inherited portal, which mounts inside this popover.
+   * @defaultValue true
+   */
+  closeOnFocusOutside?: boolean;
+  /** Called when focus moves outside the popover, its trigger, and its anchor, while `closeOnFocusOutside` is enabled. Call `event.preventDefault()` to keep the popover open. The event's `target` is the newly focused element. */
+  onFocusOutside?: (event: Event) => void;
   /**
    * Alignment of the popover relative to its anchor.
    * @defaultValue "center"
@@ -3019,6 +3035,8 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
   children?: react__default.ReactNode;
   /** Content rendered inside the popover panel. */
   slotContent: react__default.ReactNode;
+  /** Renders the popover panel into the element passed as `slotContent` instead of a `<div>`. */
+  asChild?: boolean;
   /** Native HTML attributes forwarded to the internal composed components. */
   attributes?: {
     PopoverTrigger?: NativeElementAttributes<"button", typeof PopoverTrigger>;
@@ -3189,9 +3207,9 @@ interface PopoverProps extends PopoverContentProps, Pick<PopoverRootProps, "id" 
  */
 declare const Popover: react__default.ForwardRefExoticComponent<Omit<PopoverProps, "ref"> & react__default.RefAttributes<HTMLDivElement>>;
 declare const flex: (props?: ({
-  align?: "center" | "end" | "start" | "baseline" | "stretch" | null | undefined;
+  align?: "center" | "baseline" | "start" | "end" | "stretch" | null | undefined;
   direction?: "col" | "row" | "row-reverse" | "col-reverse" | "column" | "column-reverse" | null | undefined;
-  justify?: "center" | "end" | "start" | "stretch" | "normal" | "between" | "around" | "evenly" | null | undefined;
+  justify?: "center" | "start" | "end" | "stretch" | "normal" | "between" | "around" | "evenly" | null | undefined;
   wrap?: "wrap" | "nowrap" | "wrap-reverse" | null | undefined;
 } & ClassProp) | undefined) => string;
 type FlexVariantProps = VariantProps<typeof flex>;
@@ -3234,7 +3252,7 @@ interface FormFieldControlGroupProps extends PrimitivePropsWithRef<"div"> {}
  */
 declare const FormFieldControlGroup: React$1.ForwardRefExoticComponent<Omit<FormFieldControlGroupProps, "ref"> & React$1.RefAttributes<HTMLDivElement>>;
 declare const formFieldHelper: (props?: ({
-  kind?: "error" | "info" | "success" | null | undefined;
+  kind?: "error" | "success" | "info" | null | undefined;
 } & ClassProp) | undefined) => string;
 type FormFieldHelperVariantProps = VariantProps<typeof formFieldHelper>;
 interface FormFieldHelperProps extends PrimitivePropsWithRef<"div"> {
@@ -3305,6 +3323,7 @@ interface FormFieldRootProps extends Omit<PrimitivePropsWithRef<"div">, "id"> {
    */
   infoId?: string | null;
   /**
+   * Field context shared with descendants, used in place of the one derived from the individual field props, which are then ignored.
    * @deprecated Prefer using the individual props
    */
   context?: FormFieldContextType;
@@ -3347,7 +3366,7 @@ interface FormFieldProps extends Omit<PrimitivePropsWithRef<"div">, "children">,
   } & FormFieldInfoProps["attributes"];
 }
 declare const tabsContent: (props?: ({
-  padding?: "default" | "none" | null | undefined;
+  padding?: "none" | "default" | null | undefined;
 } & ClassProp) | undefined) => string;
 type TabsContentVariantProps = VariantProps<typeof tabsContent>;
 interface TabsContentProps extends PrimitivePropsWithRef<"div">, TabsContentVariantProps {
@@ -3674,6 +3693,11 @@ interface PropsFromInputShell extends WithInputShellStatus, Omit<InputShellProps
 interface PropsFromSelect extends Pick<ComponentPropsWithoutRef<"select">, SelectAttributes> {}
 interface SelectTriggerProps extends PropsFromInputShell, PropsFromSelect {
   /**
+   * Displays multi-select values as tags or the existing text display. A custom `renderValue` takes precedence.
+   * @defaultValue "count"
+   */
+  multipleMode?: "tags" | "count";
+  /**
    * Renders a clear button on the trigger that resets the selection.
    */
   dismissible?: boolean;
@@ -3701,7 +3725,17 @@ interface SelectTriggerProps extends PropsFromInputShell, PropsFromSelect {
  * @param props - {@link SelectTriggerProps}
  */
 declare const SelectTrigger: react__default.ForwardRefExoticComponent<SelectTriggerProps & react__default.RefAttributes<HTMLButtonElement>>;
-interface BaseSelectProps extends Pick<SelectContentProps, "autoFocusOnHide" | "hideOnEscape" | "portal" | "portalContainer">, Pick<SelectListboxProps, "density" | "onScrollToBottom">, Pick<SelectRootProps, "allowBackspaceRemoval" | "defaultOpen" | "defaultValue" | "disabled" | "readOnly" | "onOpenChange" | "open" | "side" | "size" | "tabBehavior" | "value">, Pick<SelectTriggerProps, "name" | "form" | "dismissible" | "placeholder" | "required" | "selectRef" | "slotStart" | "slotEnd" | "status">, Omit<MergedHoistedElementAttributes<[["div", typeof SelectTrigger], ["div", typeof SelectContent]]>, "defaultValue" | "onKeyDown" | "value"> {
+interface BaseSelectProps extends Pick<SelectContentProps, "autoFocusOnHide" | "hideOnEscape" | "portal" | "portalContainer">, Pick<SelectListboxProps, "density" | "onScrollToBottom">, Pick<SelectRootProps, "defaultOpen" | "defaultValue" | "disabled" | "readOnly" | "onOpenChange" | "open" | "side" | "size" | "tabBehavior" | "value">, Pick<SelectTriggerProps, "name" | "form" | "dismissible" | "placeholder" | "required" | "selectRef" | "slotStart" | "slotEnd" | "status">, Omit<MergedHoistedElementAttributes<[["div", typeof SelectTrigger], ["div", typeof SelectContent]]>, "defaultValue" | "onKeyDown" | "value"> {
+  /**
+   * In multi-select mode, allows pressing `Backspace` on the focused trigger to remove the last selected value. On by default when `multipleMode="tags"` shows the selections as tags; otherwise opt in only when the visible selection (e.g. via `renderValue`) makes the target value obvious to the user.
+   * @defaultValue `true` with `multipleMode="tags"`, otherwise `false`
+   */
+  allowBackspaceRemoval?: boolean;
+  /**
+   * Displays multi-select values as removable tags or a compact count summary. Prefer `"tags"`; the default will change to `"tags"` in the next major release.
+   * @defaultValue "count"
+   */
+  multipleMode?: "tags" | "count";
   /**
    * Keyboard event handler invoked on the trigger before the Select's built-in shortcuts run. Call `event.preventDefault()` to cancel the default ArrowDown/ArrowUp open and (when enabled) Backspace removal behavior.
    */
@@ -3733,6 +3767,7 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  * @llm Group items only when there are 10+ options with natural categories; keep groups to 3–5. Alphabetical ordering optimizes for lookup, not selection — order groups by usage frequency when selection is the primary task.
  * @llm Enable `dismissible` on optional fields and leave it off on required fields (a required field must always have a value).
  * @llm Single-select closes the listbox on selection; multi-select keeps it open and accumulates picks.
+ * @llm For multi-select, set `multipleMode="tags"` so each selection shows as a removable tag; the default `"count"` shows a compact summary and becomes `"tags"` in the next major release. Use `renderValue` for a custom display.
  * @llm Top-level props are split by element kind: recognized `<button>` attributes go to `SelectToggle`; every other top-level prop (`className`, `onPointerEnter`, `data-*`, …) is spread onto `SelectTrigger`'s `InputShell` (the field chrome). Use `attributes.SelectContent` when something must target the popover.
  * @llm Default to `size="medium"` to match NVIDIA's uniform control-height rule. Use `size="small"` only when an explicit dense-layout requirement calls for it.
  * @see {@link Combobox}
@@ -3823,30 +3858,14 @@ type SelectProps = BaseSelectProps & SelectSingleAndMultipleProps;
  *
  * @example
  * <caption>Multi Tag Select</caption>
- * Pair multiple + allowBackspaceRemoval with a tag-based renderValue when each selected value should appear as a clearly removable chip. The Backspace shortcut is opt-in because the default `N selected` summary has no per-item target.
+ * Set multipleMode="tags" so users can see and remove individual selections. Backspace on the focused trigger removes the last selection.
  * ```tsx
  * <Select
- * 	allowBackspaceRemoval
  * 	multiple
- * 	defaultValue={["Apple", "Banana"]}
- * 	items={["Apple", "Banana", "Cherry", "Orange", "Pineapple"]}
- * 	renderValue={(value, setValue) =>
- * 		value.length > 0 &&
- * 		value.map((v) => (
- * 			<Tag
- * 				key={v}
- * 				color="gray"
- * 				density="compact"
- * 				onClick={(e) => {
- * 					e.stopPropagation();
- * 					setValue(value.filter((p) => p !== v));
- * 				}}
- * 			>
- * 				{v}
- * 				<Close />
- * 			</Tag>
- * 		))
- * 	}
+ * 	multipleMode="tags"
+ * 	aria-label="GPU models"
+ * 	defaultValue={["H100", "A100"]}
+ * 	items={["H100", "A100", "L40S"]}
  * />
  * ```
  *
@@ -4059,10 +4078,10 @@ interface StatusMessageProps extends StatusMessageRootProps {
 }
 declare const tableRoot: (props?: ({
   density?: "compact" | "standard" | "spacious" | null | undefined;
-  layout?: "fixed" | "auto" | null | undefined;
-  align?: "center" | "left" | "right" | null | undefined;
+  layout?: "auto" | "fixed" | null | undefined;
+  align?: "center" | "right" | "left" | null | undefined;
   hoverableRows?: boolean | null | undefined;
-  cellHeight?: "default" | "dense" | null | undefined;
+  cellHeight?: "dense" | "default" | null | undefined;
 } & ClassProp) | undefined) => string;
 type TableRootVariantProps = VariantProps<typeof tableRoot>;
 interface TableRootProps extends Omit<ComponentPropsWithRef<"table">, "align">, DensityVariantProps {
@@ -4102,9 +4121,9 @@ interface TableToolbarProps extends react__default.ComponentPropsWithoutRef<"sec
   slotBulkActions?: react__default.ReactNode;
 }
 declare const tagRoot: (props?: ({
-  color?: "blue" | "gray" | "green" | "purple" | "red" | "teal" | "yellow" | null | undefined;
+  color?: "blue" | "green" | "red" | "yellow" | "purple" | "teal" | "gray" | null | undefined;
   density?: "compact" | "standard" | "spacious" | null | undefined;
-  kind?: "solid" | "outline" | null | undefined;
+  kind?: "outline" | "solid" | null | undefined;
   selected?: boolean | null | undefined;
 } & ClassProp) | undefined) => string;
 type TagRootVariants = VariantProps<typeof tagRoot>;

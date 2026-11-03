@@ -55,6 +55,7 @@ from nemo_agents_plugin.utils import get_base_url
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.refs import FilesetRef
 
 # Match characters not safe for filesystem paths.  Deployment names are
 # normally URL-safe identifiers, but we sanitise defensively to ensure we
@@ -339,6 +340,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         port: int,
         *,
         agent: str = "",
+        source_fileset: FilesetRef | None = None,
         image: str | None = None,
         deployment_mode: DeploymentMode = "subprocess",
         created_by: str | None = None,
@@ -356,7 +358,9 @@ class InMemoryRunnerBackend(RunnerBackend):
         # resource isolation and injects no managed secrets.
         del image, deployment_mode, created_by, auth_context, resources, secrets, use_image_entrypoint
         if config.get("config_format") == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-            return await self._create_fabric_deployment(workspace, name, config, agent=agent)
+            return await self._create_fabric_deployment(
+                workspace, name, config, agent=agent, source_fileset=source_fileset
+            )
 
         port = port or self.allocate_port()
         key = (workspace, name)
@@ -396,6 +400,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         config: dict[str, Any],
         *,
         agent: str = "",
+        source_fileset: FilesetRef | None = None,
     ) -> DeploymentInfo:
         """Validate and start a Platform-owned Fabric-backed agent server."""
         key = (workspace, name)
@@ -404,7 +409,7 @@ class InMemoryRunnerBackend(RunnerBackend):
         try:
             with self.reserve_socket() as reserved:
                 port = reserved.getsockname()[1]
-                staged_spec = await self._stage_ethos(workspace, agent, config, base_dir)
+                staged_spec = await self._stage_ethos(workspace, agent, config, base_dir, source_fileset=source_fileset)
                 # After staging so the support probe plans against a populated
                 # base_dir, and before the write so the staged config -- which is
                 # what the child process reads -- carries the export.
@@ -565,9 +570,11 @@ class InMemoryRunnerBackend(RunnerBackend):
         agent: str,
         config: dict[str, Any],
         base_dir: Path,
+        *,
+        source_fileset: FilesetRef | None = None,
     ) -> SpecRevision | None:
-        """Deliver the agent's Ethos fileset into *base_dir* and report what it staged."""
-        client = get_async_nemo_client(as_service="agents", internal=True) if agent else None
+        """Stage the agent's source fileset into *base_dir* and report its revision."""
+        client = get_async_nemo_client(as_service="agents", internal=True) if agent or source_fileset else None
         files_client = AsyncFilesClient.from_client(client) if client else None
 
         async def _stage() -> None:
@@ -577,6 +584,7 @@ class InMemoryRunnerBackend(RunnerBackend):
                 agent_config=config,
                 base_dir=base_dir,
                 files_client=files_client,
+                source_fileset=source_fileset,
             )
 
         if files_client is None:
@@ -588,6 +596,7 @@ class InMemoryRunnerBackend(RunnerBackend):
             workspace=workspace,
             agent_name=agent,
             stage=_stage,
+            source_fileset=source_fileset,
         )
         return spec
 

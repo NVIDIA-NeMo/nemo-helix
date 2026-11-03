@@ -15,6 +15,7 @@ import typer
 from nhx.customization_common.cli.overrides import apply_job_cli_overrides
 from nhx.customization_common.cli.uploads import SpecRefs
 
+from nemo_rl_plugin.jobs.jobs import RlJob
 from nemo_rl_plugin.schema import RlJobInput
 
 _JOB_JSON_HELP = "Path to NeMo-RL job JSON (RlJobInput schema)."
@@ -105,4 +106,5 @@ def apply_rl_job_cli_overrides(group: typer.Typer) -> None:
         spec_refs=_SPEC_REFS,
         job_json_help=_JOB_JSON_HELP,
         submit_help=_SUBMIT_HELP,
+        job_cls=RlJob,
     )

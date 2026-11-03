@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTION
 from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.files.storage_config import HuggingfaceStorageConfig, StorageConfigType
@@ -61,6 +62,9 @@ class FilesUploadClient(Protocol):
 
     @property
     def workspace(self) -> str | None: ...
+
+    @property
+    def retry(self) -> RetryPolicy | None: ...
 
 
 class ModelsRegistryClient(Protocol):

@@ -23,6 +23,7 @@ data-designer==0.9.7
 datasets==5.1.0
 docker==7.2.0
 duckdb==1.5.6
+dulwich==1.2.20
 fastapi==0.141.1
 fastmcp==3.4.11
 fsspec==2026.7.0

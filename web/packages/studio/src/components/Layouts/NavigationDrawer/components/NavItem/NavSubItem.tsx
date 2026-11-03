@@ -19,7 +19,7 @@ export const NavSubItem: FC<NavSubItemProps> = ({ item, isActive }) => {
   return (
     <VerticalNavSubListItem {...item.attributes?.VerticalNavSubListItem}>
       <StudioNavItem
-        padding="subItem"
+        kind="secondary"
         active={resolveActive(item, isActive)}
         disabled={!href}
         slotStart={item.slotIcon}

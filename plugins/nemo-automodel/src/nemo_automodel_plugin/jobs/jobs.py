@@ -22,7 +22,11 @@ from nemo_helix_plugin.jobs.api_factory import BaseJobsListFilter, HelixJobSpec
 from nemo_helix_plugin.jobs.docker import validate_gpu_available_for_docker
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nhx.automodel.compile import platform_job_config_compiler
+from nhx.automodel.entities.values import TrainingType
+from nhx.automodel.tasks.training.datasets.preparation import select_dataset_files
+from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
+from nhx.customization_common.dry_run import DatasetRows
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -50,6 +54,18 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
     @classmethod
     def _job_input_schema(cls) -> type[AutomodelJobInput]:
         return AutomodelJobInput
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: AutomodelJobOutput, workspace: str) -> list[DatasetRows]:
+        validator = DatasetValidator(training_type=TrainingType(spec.training.training_type))
+        return [
+            DatasetRows(
+                name="training dataset",
+                fileset=spec.dataset.training,
+                select_files=lambda paths: [file for split in select_dataset_files(paths) for file in split],
+                validate_lines=validator.validate_lines,
+            )
+        ]
 
     @classmethod
     async def _transform(
