@@ -43,7 +43,7 @@ class ParallelismParams(RlSchema):
     expert_parallel_size: int = Field(
         default=1,
         gt=0,
-        description="Expert parallel size for MoE models. GRPO only.",
+        description="Expert parallel size for MoE models. DPO and GRPO.",
     )
     sequence_parallel: bool = Field(default=False, description="Enable sequence parallelism.")
 

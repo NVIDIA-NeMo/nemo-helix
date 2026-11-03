@@ -5360,7 +5360,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Expert Parallel Size
-          description: Expert parallel size for MoE models. GRPO only.
+          description: Expert parallel size for MoE models. DPO and GRPO.
           default: 1
         sequence_parallel:
           type: boolean

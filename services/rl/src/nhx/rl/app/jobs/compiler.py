@@ -443,6 +443,7 @@ def _build_dpo_training_step_config(
             tensor_parallel_size=p.tensor_parallel_size,
             pipeline_parallel_size=p.pipeline_parallel_size,
             context_parallel_size=p.context_parallel_size,
+            expert_parallel_size=p.expert_parallel_size,
             sequence_parallel=p.sequence_parallel,
             activation_checkpointing=t.activation_checkpointing,
             env_vars=t.env_vars,
@@ -770,9 +771,9 @@ async def platform_job_config_compiler(
             expert_parallel_size=parallelism.expert_parallel_size,
             num_gpus_per_node=parallelism.num_gpus_per_node,
             num_nodes=parallelism.num_nodes,
-            # DPO does not forward expert_parallel_size, and GRPO defaults it to 1
-            # without the Automodel fill. Requiring it here would reject jobs that
-            # cannot turn it on.
+            # Both paths default expert_parallel_size to 1 and neither fills it from
+            # the GPU count. Requiring it here would reject a multi-GPU text-MoE job
+            # that left the field unset. A value the caller set is still forwarded.
             enforce_text_moe_expert_parallel=False,
         )
     except ValueError as exc:

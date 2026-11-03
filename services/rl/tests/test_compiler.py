@@ -144,6 +144,7 @@ def test_training_step_config_maps_exposed_knobs() -> None:
         val_at_end=True,
         ref_policy_kl_penalty=0.2,
         max_grad_norm=2.0,
+        parallelism=ParallelismParams(expert_parallel_size=4),
     )
     sc = _build_training_step_config(_make_job_output(t), trust_remote_code=True)
 
@@ -152,6 +153,7 @@ def test_training_step_config_maps_exposed_knobs() -> None:
     assert sc.optimizer.eps == 3e-7
     # Memory / checkpoint / validation knobs.
     assert sc.parallelism.activation_checkpointing is True
+    assert sc.parallelism.expert_parallel_size == 4
     assert sc.schedule.keep_top_k == 5
     assert sc.schedule.val_at_end is True
     # DPO hyperparameters + passthrough.
