@@ -34,6 +34,7 @@ from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.entities.utils import format_adapter_composite, parse_adapters_suffix, parse_model_entity_ref
 from nhx.core.inference_gateway.api.authz import enforce_model_ref_access
 from nhx.core.inference_gateway.api.backend_format import resolve_backend_format
+from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal, refuse_router_keys
 from nhx.core.inference_gateway.api.errors import (
     raise_model_entity_not_found,
     raise_no_providers_for_model_entity,
@@ -1095,6 +1096,7 @@ async def virtual_model_proxy(
     instead of silently bypassing the middleware chain. Recovery is automatic
     once the next IGW polling cycle re-resolves the VM cleanly.
     """
+    refuse_router_keys(request.headers, model_cache.router_keys())
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     await execute_access_checks(
         registry.plugins,
@@ -1265,6 +1267,7 @@ async def virtual_model_proxy(
                 resolved_model_provider_info.model_provider.name,
             )
 
+        ctx.provider_calls_back_as_caller = resolved_model_provider_info.model_provider.calls_back_as_caller
         if is_mock_provider(resolved_model_provider_info.model_provider.name):
             # Pass json_body explicitly so that middleware body mutations are visible to
             # the mock handler (consistent with the real-backend path).  body["model"] is
@@ -1353,6 +1356,9 @@ async def virtual_model_proxy(
                 required_extra_body=resolved_model_provider_info.model_provider.required_extra_body,
                 required_extra_headers=resolved_model_provider_info.model_provider.required_extra_headers,
                 request_headers=modified_request.headers,
+            )
+            next_request_info.headers.update(
+                context_headers(resolved_model_provider_info.model_provider, modified_request.headers, gateway_seal())
             )
             proxy_response_result, response_headers, response_status = await fetch_proxy_response(
                 http_client,
