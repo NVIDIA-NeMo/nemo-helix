@@ -258,6 +258,7 @@ class FabricInstalledAgent(BaseInstalledAgent):
             env={name: value for name, value in self.extra_env.items() if name in _INSTALL_ENV_NAMES},
             timeout_sec=self.fabric.fabric_timeout_sec,
         )
+        await self.fabric.prepare_relay(environment)
 
     async def _ensure_curl(self, environment: BaseEnvironment) -> None:
         """Install curl and CA certificates through whichever package manager the image has.

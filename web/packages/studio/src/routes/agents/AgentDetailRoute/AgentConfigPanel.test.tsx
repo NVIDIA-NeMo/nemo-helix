@@ -17,8 +17,6 @@ const PINNED = 'a'.repeat(40);
 const agent = { name: 'calc', workspace: 'ws', config: { llms: {} } } as unknown as Agent;
 
 const source = (trackedRevision?: string): AgentSpecSource => ({
-  owner: 'acme',
-  repo: 'agents',
   repository: 'acme/agents',
   trackedRevision,
   revision: PINNED,
