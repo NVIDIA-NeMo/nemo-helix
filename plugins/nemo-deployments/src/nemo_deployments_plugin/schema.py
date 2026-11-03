@@ -113,6 +113,11 @@ class CreateDeploymentConfigRequest(BaseModel):
     drift_recovery: DriftRecoveryPolicy | None = Field(default=None, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    shm_size: str | None = Field(
+        default=None,
+        alias="shmSize",
+        description="Size of /dev/shm in the main containers (e.g. '32Gi'). Unset keeps the runtime default of 64Mi.",
+    )
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)

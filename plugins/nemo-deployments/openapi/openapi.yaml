@@ -718,6 +718,11 @@ components:
           title: Labels
         backendConfig:
           $ref: '#/components/schemas/DeploymentBackendConfig'
+        shmSize:
+          title: Shmsize
+          description: Size of /dev/shm in the main containers (e.g. '32Gi'). Unset
+            keeps the runtime default of 64Mi.
+          type: string
         workloadIdentity:
           $ref: '#/components/schemas/WorkloadIdentitySpec'
       type: object

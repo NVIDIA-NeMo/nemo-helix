@@ -22,6 +22,7 @@ from nhx.core.models.controllers.backends.deployments_plugin.nim_compiler import
     compile_nim_server_env,
     pod_security_context_for_engine,
 )
+from nhx.core.models.controllers.backends.deployments_plugin.request_converters import deployment_config_create_request
 from nhx.core.models.controllers.backends.deployments_plugin.resolve import ResolvedPluginDeployment
 from nhx.core.models.controllers.backends.vllm_compiler import MODEL_STORE_PATH
 
@@ -891,4 +892,6 @@ def test_gpu_server_gets_shared_memory_per_gpu(engine: str, gpu: int, expected: 
     resolved.view.gpu = gpu
     compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
     assert compiled.server_config.shm_size == expected
+    # The controller sends the plugin a request DTO, which must carry the field.
+    assert deployment_config_create_request(compiled.server_config).shm_size == expected
     assert compiled.puller_config is not None and compiled.puller_config.shm_size is None
