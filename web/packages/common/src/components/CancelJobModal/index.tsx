@@ -33,7 +33,10 @@ export const CancelJobModal: FC<CancelJobModalProps> = ({ open, jobName, onClose
       onClose();
     } catch (e) {
       setPending(false);
-      setError(getErrorMessage(e as Error, 'Failed to cancel job'));
+      // A rejection is not guaranteed to be an Error (`throw undefined`); getErrorMessage reads `.message`.
+      setError(
+        e instanceof Error ? getErrorMessage(e, 'Failed to cancel job') : 'Failed to cancel job'
+      );
     }
   };
 
