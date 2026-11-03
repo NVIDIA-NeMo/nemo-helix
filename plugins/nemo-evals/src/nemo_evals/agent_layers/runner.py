@@ -138,7 +138,7 @@ async def _submit(
     The build's name comes from the task's plan alone, so a task whose layer another task already built or is
     building uploads nothing: across a taskset, one task per environment does.
     """
-    user = parse_task_config(definition.config).agent.user
+    user = install_user(parse_task_config(definition.config).agent.user, layer.image_user)
     with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as scratch:
         context = Path(scratch) / CONTEXT_ROOT
         async with downloaded_archive(files, definition.source) as path:
@@ -158,7 +158,9 @@ async def _submit(
             (mounted / AGENT_DIR).mkdir(parents=True)
             # In the agent's mount, not the context: a task's `COPY . .` would copy it into the image.
             (mounted / AGENT_DIR / LAYER_DOCKERFILE).write_text(
-                layer_dockerfile(environment_dockerfile=environment_dockerfile, base_image=base_image),
+                layer_dockerfile(
+                    environment_dockerfile=environment_dockerfile, base_image=base_image, image_user=layer.image_user
+                ),
                 encoding="utf-8",
             )
             agent = {**layer.agent.model_dump(mode="json"), "user": user}
@@ -195,6 +197,24 @@ def _base_image(image: str, digest: str | None) -> str:
     """
     reference = normalize_reference(image)
     return str(replace(reference, tag=None, digest=digest) if digest is not None else reference)
+
+
+def install_user(agent_user: str | int | None, image_user: str | None) -> str | int | None:
+    """Who a trial runs the agent as, so who installs it: the task's ``agent.user``, or else the image's ``USER``.
+
+    None is root. A ``USER`` of ``name:group`` or ``uid:gid`` is its user part; a uid is an int.
+
+    Raises:
+        ImagePlanError: The task names no agent user and the image's ``USER`` wasn't recorded.
+    """
+    if agent_user is not None:
+        return agent_user
+    if image_user is None:
+        raise ImagePlanError("image_user_unknown", "the task names no agent user, and its image's USER wasn't recorded")
+    name = image_user.partition(":")[0]
+    if not name:
+        return None
+    return int(name) if name.isdigit() else name
 
 
 def layer_builder_name(*, environment: str, agent_key: str, user: str | int | None, platform: str | None) -> str:

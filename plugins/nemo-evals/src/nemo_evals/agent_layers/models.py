@@ -105,6 +105,14 @@ class AgentLayerEntity(EntityBase):
             "uses."
         ),
     )
+    image_user: str | None = Field(
+        default=None,
+        description=(
+            "The `USER` of that image as Builder recorded it: empty for root, None when it wasn't recorded. A task "
+            "that names no `agent.user` runs its trials as this user, so the install runs as it too, and the layer "
+            "image is left running as it."
+        ),
+    )
     error: str | None = None
     expires_at: datetime | None = Field(
         default=None,

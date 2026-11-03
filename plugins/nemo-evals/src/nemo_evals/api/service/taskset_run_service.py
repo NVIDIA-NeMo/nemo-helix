@@ -12,9 +12,9 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException
-from nemo_evals.agent_layers.models import AgentLayer, image_digest
+from nemo_evals.agent_layers.models import AgentLayer
 from nemo_evals.agent_layers.run_agents import agent_layer_request
-from nemo_evals.agent_layers.service import AgentLayerService, agent_layer_key
+from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.api.taskset_run_schemas import (
@@ -28,6 +28,7 @@ from nemo_evals.api.taskset_run_schemas import (
 )
 from nemo_evals.config import EvaluatorConfig, HarborTaskJobsConfig, platform_config
 from nemo_evals.entities import TasksetEntity, TasksetRevisionEntity
+from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.harbor.remote.preparation import (
     ImagePreparer,
     PreparationCheck,
@@ -347,16 +348,14 @@ class TasksetRunService:
         # Keyed by name and digest: provenance models don't hash, and two members may name one revision. Each maps to
         # the environment image the run prepared for it (in task order): a prebuilt image's tag may have moved since.
         revisions = {
-            (task.spec.provenance.entity_name, task.spec.provenance.revision_digest): image_digest(
-                environment.agent.image_ref
-            )
+            (task.spec.provenance.entity_name, task.spec.provenance.revision_digest): environment.agent
             for task, environment in zip(spec.tasks, prepared, strict=True)
             if isinstance(task.spec, ResolvedHarborTaskDefinition)
         }
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
         now = self._clock()
 
-        async def start(revision: tuple[str, str], environment_digest: str) -> AgentLayer | None:
+        async def start(revision: tuple[str, str], environment: PreparedImage) -> AgentLayer | None:
             entity_name, digest = revision
             task_workspace, _, name = entity_name.partition("/")
             jobs = JobsServiceBuildJobs(AsyncJobsClient.from_client(self._async_client), workspace=task_workspace)
@@ -368,11 +367,16 @@ class TasksetRunService:
                         name,
                         digest,
                         agent,
-                        environment_digest=environment_digest,
+                        environment=environment,
                         ttl=timedelta(seconds=timeout),
                         now=now,
                     )
-                except (ImagePlanError, UnsupportedTaskKindError, ImageBuildForbiddenError) as exc:
+                except (
+                    ImagePlanError,
+                    UnsupportedTaskKindError,
+                    ImageBuildForbiddenError,
+                    AgentNotLayerableError,
+                ) as exc:
                     logger.info("Task %s gets no agent layer; its trials install the agent: %s", entity_name, exc)
                     return None
                 except Exception:

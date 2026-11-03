@@ -12,12 +12,14 @@ from nemo_evals.agent_layers.models import (
     AgentLayer,
     AgentLayerEntity,
     AgentLayerRequest,
+    image_digest,
     layer_entity_name,
     layer_job_name,
 )
 from nemo_evals.agent_layers.runner import AgentLayerBuildSpec
 from nemo_evals.api.task_definitions.harbor import HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
+from nemo_evals.harbor.remote.images import PreparedImage
 from nemo_evals.image_builds.planning import parse_task_config
 from nemo_evals.image_builds.service import (
     AuthorizeBuilds,
@@ -86,14 +88,14 @@ class AgentLayerService:
         revision: str,
         request: AgentLayerRequest,
         *,
-        environment_digest: str,
+        environment: PreparedImage,
         ttl: timedelta,
         now: datetime,
     ) -> AgentLayer | None:
         """Start a layer of a revision for an agent, or return the one already running, or ready and unexpired.
 
-        ``environment_digest`` is the digest of the task's environment image as the run prepared it. Only a layer on
-        that image is returned; one on another digest (a prebuilt image whose tag has moved since) gets a new attempt.
+        ``environment`` is the task's environment image as the run prepared it. Only a layer on that image is returned;
+        one on another digest (a prebuilt image whose tag has moved since) gets a new attempt.
 
         A new attempt expires ``ttl`` after ``now`` and reuses only a Builder build made within ``ttl`` before it.
         Returns ``None`` when the task doesn't exist.
@@ -115,7 +117,15 @@ class AgentLayerService:
             raise UnsupportedTaskKindError(
                 f"Task {workspace}/{name} is not a Harbor task; only Harbor tasks have images"
             )
-        parse_task_config(task_revision.spec.config)
+        config = parse_task_config(task_revision.spec.config)
+        environment_digest = image_digest(environment.image_ref)
+        image_user = environment.runtime_config.user if environment.runtime_config is not None else None
+        if config.agent.user is None and image_user is None:
+            # Trials run as the image's `USER`; installing as anyone else would leave them an install they can't use.
+            raise AgentNotLayerableError(
+                f"task {workspace}/{name} names no agent user, and Builder didn't record its image's USER; rebuild "
+                "the task's images to give it a layer"
+            )
         key = agent_layer_key(request)
 
         layers = await self._layers(head, task_revision.content_hash, key)
@@ -146,6 +156,7 @@ class AgentLayerService:
             attempt=attempt,
             job=layer_job_name(task, task_revision.content_hash, key, attempt),
             environment_digest=environment_digest,
+            image_user=image_user,
             expires_at=now + ttl,
             built_after=now - ttl,
         )

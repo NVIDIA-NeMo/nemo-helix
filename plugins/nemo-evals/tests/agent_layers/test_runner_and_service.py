@@ -20,12 +20,15 @@ from nemo_evals.agent_layers.dockerfile import AGENT_MOUNT, INSTALLER_MOUNT
 from nemo_evals.agent_layers.models import AgentLayer, AgentLayerEntity, AgentLayerRequest, layer_entity_name
 from nemo_evals.agent_layers.runner import (
     AgentLayerBuildSpec,
+    install_user,
     layer_builder_name,
     relative_link,
     run_agent_layer_build,
 )
 from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key, newest_layer
 from nemo_evals.entities import TaskEntity
+from nemo_evals.harbor.remote.images import PreparedImage
+from nemo_evals.image_builds.planning import ImagePlanError
 from nemo_evals.image_builds.service import BuildJob
 from nemo_evals.jobs.agent_layer_build import INSTALLER_ARCHIVE, agent_layer_build_job_request, is_job_for
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -38,14 +41,21 @@ _TTL = timedelta(hours=1)
 _ENVIRONMENT_DIGEST = "sha256:" + "e" * 64
 
 
-async def _request(service: AgentLayerService, name: str, digest: str, agent: AgentLayerRequest = _CODEX, **at: Any):
-    """``service.request_layer`` for a run with a one-hour timeout that prepared ``_ENVIRONMENT_DIGEST``, now unless
-    ``now`` says otherwise."""
-    now = at.get("now", datetime.now(timezone.utc))
-    environment_digest = at.get("environment_digest", _ENVIRONMENT_DIGEST)
-    return await service.request_layer(
-        "default", name, digest, agent, environment_digest=environment_digest, ttl=_TTL, now=now
+def _prepared(digest: str = _ENVIRONMENT_DIGEST, user: str | None = "") -> PreparedImage:
+    """The environment image a run prepared: at ``digest``, running as ``user`` (empty for root)."""
+    return PreparedImage(
+        image_ref=f"registry.example/env@{digest}",
+        preparation_key=digest,
+        runtime_config=ImageRuntimeConfig(user=user),
     )
+
+
+async def _request(service: AgentLayerService, name: str, digest: str, agent: AgentLayerRequest = _CODEX, **at: Any):
+    """``service.request_layer`` for a run with a one-hour timeout that prepared ``_prepared()``, now unless ``now``
+    says otherwise."""
+    now = at.get("now", datetime.now(timezone.utc))
+    environment = at.get("environment", _prepared())
+    return await service.request_layer("default", name, digest, agent, environment=environment, ttl=_TTL, now=now)
 
 
 class _Jobs:
@@ -184,7 +194,10 @@ _ENV = {
 async def _requested(entity_store, store_task, name: str = "sort-task") -> tuple[AgentLayerBuildSpec, _Jobs]:
     jobs = _Jobs()
     digest = await store_task(name, config={"agent": {"user": "agent"}})
-    layer = await _request(AgentLayerService(entity_store, jobs, _allow), name, digest)
+    # The environment's Dockerfile ends `USER agent`, so its image runs as agent.
+    layer = await _request(
+        AgentLayerService(entity_store, jobs, _allow), name, digest, environment=_prepared(user="agent")
+    )
     assert layer is not None
     spec = AgentLayerBuildSpec(
         workspace="default", task=name, revision_digest=digest, agent_key=layer.agent_key, attempt=1
@@ -262,6 +275,61 @@ async def test_a_prebuilt_images_layer_starts_from_the_digest_the_run_prepared(
     assert dockerfile.splitlines()[0] == f"FROM docker.io/library/python@{_ENVIRONMENT_DIGEST}"
 
 
+async def test_a_task_without_an_agent_user_installs_as_its_images_user(
+    entity_store, store_task, monkeypatch, tmp_path
+) -> None:
+    """A prebuilt image that runs as `node`: the trial runs as node, so the install does, and the layer stays node."""
+    config = {"environment": {"docker_image": "node:22"}}
+    _serve_archive(monkeypatch, {"task.toml": b""})
+    digest = await store_task("sort-task", config=config)
+    service = AgentLayerService(entity_store, _Jobs(), _allow)
+    layer = await _request(service, "sort-task", digest, environment=_prepared(user="node:node"))
+    assert layer is not None
+    spec = AgentLayerBuildSpec(
+        workspace="default", task="sort-task", revision_digest=digest, agent_key=layer.agent_key, attempt=1
+    )
+    builder, files = _Builder(), _Files()
+
+    await _run(entity_store, spec, builder, files, tmp_path)
+
+    ((name, _, _),) = builder.submits
+    mounted = _context(files.uploads[(name, "mounts.tar.gz")])
+    assert json.loads(mounted["mounts/nhx-agent-layer/agent.json"])["user"] == "node"
+    dockerfile = mounted["mounts/nhx-agent-layer/Dockerfile.nhx-agent-layer"].decode()
+    assert dockerfile.splitlines()[-1] == "USER node:node"
+
+
+async def test_a_task_without_an_agent_user_on_an_image_whose_user_is_unknown_gets_no_layer(
+    entity_store, store_task
+) -> None:
+    """Builder recorded no USER for an image it built before it started to: who trials run as is unknown."""
+    digest = await store_task(config={})
+    service = AgentLayerService(entity_store, _Jobs(), _allow)
+
+    with pytest.raises(AgentNotLayerableError, match="USER"):
+        await _request(service, "sort-task", digest, environment=_prepared(user=None))
+
+
+@pytest.mark.parametrize(
+    ("agent_user", "image_user", "expected"),
+    [
+        ("agent", "node", "agent"),
+        (1001, None, 1001),
+        (None, "", None),
+        (None, "node", "node"),
+        (None, "1000:1000", 1000),
+    ],
+    ids=["task-names-one", "task-uid", "image-root", "image-name", "image-uid-gid"],
+)
+def test_the_install_user(agent_user: str | int | None, image_user: str | None, expected: str | int | None) -> None:
+    assert install_user(agent_user, image_user) == expected
+
+
+def test_the_install_user_is_unknown_without_either() -> None:
+    with pytest.raises(ImagePlanError, match="USER"):
+        install_user(None, None)
+
+
 async def test_a_layer_on_another_environment_digest_isnt_reused(entity_store, store_task) -> None:
     """A prebuilt image's tag moved and a run prepared the new image: the layer on the old one isn't its layer."""
     jobs = _Jobs()
@@ -271,7 +339,7 @@ async def test_a_layer_on_another_environment_digest_isnt_reused(entity_store, s
     await _make_ready(entity_store, digest)
     moved = "sha256:" + "f" * 64
 
-    layer = await _request(service, "sort-task", digest, environment_digest=moved)
+    layer = await _request(service, "sort-task", digest, environment=_prepared(moved))
     newest = await newest_layer(entity_store, "default", "sort-task", digest, agent_layer_key(_CODEX))
 
     assert layer is not None and layer.id == "2" and layer.status == "pending"

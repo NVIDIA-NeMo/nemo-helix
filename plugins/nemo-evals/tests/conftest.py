@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 from nemo_agents_plugin.jobs import gateway_proxy
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
@@ -442,6 +443,8 @@ def _prepared(task_id: str, image_type: ImageType) -> PreparedImage:
     return PreparedImage(
         image_ref=f"registry.invalid/fake/{task_id}-{image_type}@sha256:{_key(task_id, image_type)}",
         preparation_key=_key(task_id, image_type),
+        # As Builder records an image that sets no USER: it runs as root.
+        runtime_config=ImageRuntimeConfig(user=""),
     )
 
 

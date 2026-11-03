@@ -35,12 +35,18 @@ _FROM = re.compile(r"^\s*FROM\s", re.IGNORECASE)
 _USER = re.compile(r"^\s*USER\s+(?P<user>\S+)", re.IGNORECASE)
 
 
-def layer_dockerfile(*, environment_dockerfile: str | None, base_image: str | None) -> str:
-    """The layer's Dockerfile, over the task's ``environment_dockerfile``, or ``FROM base_image`` for a prebuilt one."""
+def layer_dockerfile(
+    *, environment_dockerfile: str | None, base_image: str | None, image_user: str | None = None
+) -> str:
+    """The layer's Dockerfile, over the task's ``environment_dockerfile``, or ``FROM base_image`` for a prebuilt one.
+
+    ``image_user`` is the environment image's ``USER`` as Builder recorded it, inherited ones included (empty for
+    root), which the layer is left running as. When it wasn't recorded, the final stage's own ``USER`` is.
+    """
     if (environment_dockerfile is None) == (base_image is None):
         raise ValueError("give exactly one of environment_dockerfile and base_image")
     base = environment_dockerfile if environment_dockerfile is not None else f"FROM {base_image}\n"
-    user = final_stage_user(base)
+    user = (image_user or None) if image_user is not None else final_stage_user(base)
     install = (
         f"RUN {json.dumps([f'{INSTALLER_MOUNT}/venv/bin/python', '-m', INSTALL_MODULE, f'{AGENT_MOUNT}/{AGENT_FILE}'])}"
     )

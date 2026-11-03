@@ -52,6 +52,19 @@ def test_a_prebuilt_environment_starts_from_its_image() -> None:
     assert layered.splitlines()[-1].startswith("RUN [")  # no USER to restore
 
 
+def test_the_images_recorded_user_is_restored_even_when_inherited() -> None:
+    """The base image sets USER node and the Dockerfile none: without the recorded user the layer would stay root."""
+    layered = layer_dockerfile(environment_dockerfile=None, base_image="docker.io/library/node:22", image_user="node")
+
+    assert layered.splitlines()[-1] == "USER node"
+
+
+def test_an_image_recorded_as_root_is_left_root() -> None:
+    layered = layer_dockerfile(environment_dockerfile="FROM a\nUSER agent\nUSER root\n", base_image=None, image_user="")
+
+    assert layered.splitlines()[-1].startswith("RUN [")
+
+
 def test_exactly_one_base_is_given() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         layer_dockerfile(environment_dockerfile=None, base_image=None)
