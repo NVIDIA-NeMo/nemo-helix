@@ -10,6 +10,9 @@ from nemo_evals.agent_layers.service import agent_layer_key
 from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborImportedAgentSource, HarborRunnerTarget
 from pydantic import ValidationError
 
+#: A fake package index URL with a username and password.
+CREDENTIALED_INDEX = "https://user:token@pypi.example/simple"  # trufflehog:ignore
+
 
 def test_a_harbor_installed_agent_is_layered_with_its_kwargs() -> None:
     target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex"), agent_kwargs={"version": "0.162.1"})
@@ -27,6 +30,34 @@ def test_only_the_install_env_of_the_runs_env_vars_reaches_the_layer() -> None:
 
     assert request is not None and request.env == {"PIP_INDEX_URL": "https://pypi.example/simple"}
     assert agent_layer_key(request) != agent_layer_key(request.model_copy(update={"env": {}}))
+
+
+@pytest.mark.parametrize(
+    ("env_vars", "kwargs"),
+    [
+        ({"PIP_INDEX_URL": CREDENTIALED_INDEX}, {}),
+        ({"HTTPS_PROXY": "http://user@proxy.example:3128"}, {}),
+        ({}, {"version": "0.162.1", "fabric_package": f"nemo-fabric --index-url {CREDENTIALED_INDEX}"}),
+    ],
+    ids=["index-url", "proxy-user", "kwarg"],
+)
+def test_an_install_with_url_credentials_gets_no_layer(env_vars: dict[str, str], kwargs: dict[str, str]) -> None:
+    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex"), env_vars=env_vars, agent_kwargs=kwargs)
+
+    assert agent_layer_request(target) is None
+
+
+def test_a_layer_request_refuses_url_credentials() -> None:
+    with pytest.raises(ValidationError, match="username or password"):
+        AgentLayerRequest(name="codex", env={"PIP_INDEX_URL": CREDENTIALED_INDEX})
+
+
+def test_a_plain_url_is_layered() -> None:
+    target = HarborRunnerTarget(
+        source=HarborBuiltinAgentSource(name="codex"), env_vars={"PIP_INDEX_URL": "https://pypi.example/simple"}
+    )
+
+    assert agent_layer_request(target) is not None
 
 
 def test_a_layer_request_refuses_other_env() -> None:

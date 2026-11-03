@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import datetime
 from typing import ClassVar
 
@@ -55,7 +56,27 @@ class AgentLayerRequest(BaseModel):
             raise ValueError("give exactly one of name and import_path")
         if other := sorted(set(self.env) - INSTALL_ENV_NAMES):
             raise ValueError(f"env holds only what an agent's install runs with, not {', '.join(other)}")
+        if has_url_credentials(self.kwargs) or has_url_credentials(self.env):
+            raise ValueError(
+                "a layer request is stored and uploaded for its build, so it can't hold a URL with a username or "
+                "password"
+            )
         return self
+
+
+#: A URL carrying userinfo, such as ``https://user:token@pypi.example/simple``.  # trufflehog:ignore
+_URL_CREDENTIALS = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s@]+@", re.IGNORECASE)
+
+
+def has_url_credentials(value: object) -> bool:
+    """Whether any string in ``value`` holds a URL with a username or password."""
+    if isinstance(value, str):
+        return _URL_CREDENTIALS.search(value) is not None
+    if isinstance(value, dict):
+        return any(has_url_credentials(item) for item in value.values())
+    if isinstance(value, list):
+        return any(has_url_credentials(item) for item in value)
+    return False
 
 
 class AgentLayerEntity(EntityBase):
