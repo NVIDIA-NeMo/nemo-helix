@@ -148,8 +148,20 @@ async def _agent_and_deployment(
     )
     if active is not None:
         return active, agent_created, False
+    mode = (await agents.list_deployment_modes(workspace=workspace)).data().default_mode()
+    if mode is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No deployment mode can run the sample agent on this platform. Turn on subprocess deployments "
+                "('agents.subprocess_enabled: true'), or configure a container mode with "
+                "'agents.deployments.default_image'."
+            ),
+        )
     deployment = (
-        await agents.create_deployment(workspace=workspace, body=CreateDeploymentRequest(agent=_AGENT_NAME))
+        await agents.create_deployment(
+            workspace=workspace, body=CreateDeploymentRequest(agent=_AGENT_NAME, deployment_mode=mode)
+        )
     ).data()
     return deployment, agent_created, True
 

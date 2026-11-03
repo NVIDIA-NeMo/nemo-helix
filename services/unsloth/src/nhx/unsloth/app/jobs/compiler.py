@@ -56,7 +56,6 @@ from nhx.unsloth.app.constants import (
     DEFAULT_DATASET_PATH,
     DEFAULT_MODEL_PATH,
     DEFAULT_OUTPUT_MODEL_PATH,
-    DEFAULT_VALIDATION_DATASET_PATH,
 )
 from nhx.unsloth.app.jobs.training.compiler import compile_training_step
 from nhx.unsloth.config import config
@@ -114,29 +113,6 @@ def _build_peft_config(spec: UnslothJobOutput) -> PEFTConfig | None:
     )
 
 
-def _same_fileset_ref(a: str, b: str, *, workspace: str) -> bool:
-    """Return True when two platform fileset refs denote the same fileset."""
-    ra = FileSetRef.model_validate(a)
-    rb = FileSetRef.model_validate(b)
-    return (ra.workspace or workspace) == (rb.workspace or workspace) and ra.name == rb.name
-
-
-def _resolve_validation_dataset_path(
-    job_spec: UnslothJobOutput,
-    workspace: str,
-) -> str | None:
-    """Map ``spec.dataset.validation_path`` to the local PVC path the download step uses."""
-    if not job_spec.dataset.validation_path:
-        return None
-    if _same_fileset_ref(
-        job_spec.dataset.path,
-        job_spec.dataset.validation_path,
-        workspace=workspace,
-    ):
-        return DEFAULT_DATASET_PATH
-    return DEFAULT_VALIDATION_DATASET_PATH
-
-
 def _require_fileset(name: str | None, *, label: str) -> str:
     if not name or not str(name).strip():
         raise HelixJobCompilationError(
@@ -149,8 +125,6 @@ def _require_fileset(name: str | None, *, label: str) -> str:
 def _build_file_download_config(
     job_spec: UnslothJobOutput,
     me: ModelEntity,
-    *,
-    workspace: str,
 ) -> FileIOTaskConfig:
     """Compile the download step: model fileset + dataset fileset."""
     model_fileset = _require_fileset(
@@ -167,17 +141,6 @@ def _build_file_download_config(
             dest=DEFAULT_DATASET_PATH,
         ),
     ]
-    if job_spec.dataset.validation_path and not _same_fileset_ref(
-        job_spec.dataset.path,
-        job_spec.dataset.validation_path,
-        workspace=workspace,
-    ):
-        downloads.append(
-            DownloadItem(
-                src=FileSetRef.model_validate(job_spec.dataset.validation_path),
-                dest=DEFAULT_VALIDATION_DATASET_PATH,
-            ),
-        )
     return FileIOTaskConfig(download=downloads)
 
 
@@ -368,8 +331,7 @@ async def platform_job_config_compiler(
     base_env = _get_base_environment()
     task_profile = profile or config.default_training_execution_profile
 
-    validation_dataset_path = _resolve_validation_dataset_path(job_spec, workspace=workspace)
-    download_config = _build_file_download_config(job_spec, me, workspace=workspace)
+    download_config = _build_file_download_config(job_spec, me)
     upload_config = _build_file_upload_config(job_spec, me)
     model_entity_config = _build_model_entity_config(
         workspace,
@@ -396,7 +358,6 @@ async def platform_job_config_compiler(
         compile_training_step(
             job_spec,
             base_env,
-            validation_dataset_path=validation_dataset_path,
             profile=task_profile,
         ),
         HelixJobStep(

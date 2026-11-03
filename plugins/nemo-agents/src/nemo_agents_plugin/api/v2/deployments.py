@@ -27,7 +27,7 @@ from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, reso
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
-from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
+from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
     Agent,
@@ -59,6 +59,7 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_deployments_plugin.entities import Deployment
+from nemo_helix_plugin.agents.validation import resolve_agent_fileset
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
@@ -127,19 +128,24 @@ async def create_deployment(
 
     # Stricter than the controller's reconcile-time check, which runs after a pending deployment exists.
     try:
-        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get().deployments, body.deployment_mode)
+        await asyncio.to_thread(require_deployment_mode_available, AgentsConfig.get(), body.deployment_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    image = body.image.strip()
+    if not image and is_container_deployment_mode(body.deployment_mode) and agent.reference is not None:
+        image = agent.reference.container_image or ""
+
     # The runner fails the deployment for this; the answer is already available here.
     if is_container_deployment_mode(body.deployment_mode) and not (
-        body.image or AgentsConfig.get().deployments.default_image
+        image or AgentsConfig.get().deployments.default_image
     ):
         raise HTTPException(
             status_code=400,
             detail=(
                 f"deployment_mode '{body.deployment_mode}' requires a container image. "
-                "Set 'image' on the request, or configure 'deployments.default_image'."
+                "Set 'image' on the request, register 'reference.container_image' on the agent, "
+                "or configure 'deployments.default_image'."
             ),
         )
 
@@ -156,17 +162,29 @@ async def create_deployment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
     merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
-    # A requested image may install adapters this server can't see; the container checks them itself.
+    # An agent image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
-        body.image.strip() and is_container_deployment_mode(body.deployment_mode)
+        image and is_container_deployment_mode(body.deployment_mode)
     ):
         # Off the event loop: the first check scans installed manifests and may run ADAPTER_PYTHON.
         await asyncio.to_thread(_validate_harness_kinds, merged.config)
 
-    # 5. Only a Fabric agent stages a spec fileset; a same-named one would mislead.
+    # 5. Snapshot the source reference and revision for agents that stage files.
+    source_fileset = None
     spec = SpecRevision()
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT:
-        spec = await read_spec_revision(files_client, workspace=workspace, agent_name=body.agent)
+        if agent.reference is not None and agent.reference.fileset is not None:
+            try:
+                source_fileset = await resolve_agent_fileset(
+                    agent.reference.fileset, workspace=workspace, files_client=files_client
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except PermissionError as exc:
+                raise HTTPException(status_code=403, detail=str(exc)) from exc
+        spec = await read_spec_revision(
+            files_client, workspace=workspace, agent_name=body.agent, source_fileset=source_fileset
+        )
 
     # 6. Create the entity with status "pending"
     deployment = AgentDeployment(
@@ -178,10 +196,11 @@ async def create_deployment(
         compute=resolved_environment.compute_spec,
         secrets=merged.secrets,
         spec_revision=spec.revision,
+        source_fileset=source_fileset,
         spec_tracked_revision=spec.tracked_revision,
         status="pending",
         deployment_mode=body.deployment_mode,
-        image=body.image,
+        image=image,
         use_image_entrypoint=body.use_image_entrypoint,
         plugin_deployment=deployment_name if is_container_deployment_mode(body.deployment_mode) else "",
     ).with_auth_context(current_auth_context())
@@ -252,23 +271,23 @@ def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline |
 )
 async def list_deployment_modes(workspace: str) -> DeploymentModeList:
     """List every deployment mode and whether this platform can run it."""
-    return DeploymentModeList(data=await asyncio.to_thread(_all_mode_availability, AgentsConfig.get().deployments))
+    return await asyncio.to_thread(deployment_modes, AgentsConfig.get())
 
 
-def _all_mode_availability(runner_config: DeploymentsRunnerConfig) -> list[DeploymentModeAvailability]:
-    return [_mode_availability(runner_config, mode) for mode in get_args(DeploymentMode)]
+def deployment_modes(agents_config: AgentsConfig) -> DeploymentModeList:
+    return DeploymentModeList(data=[_mode_availability(agents_config, mode) for mode in get_args(DeploymentMode)])
 
 
-def _mode_availability(runner_config: DeploymentsRunnerConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
+def _mode_availability(agents_config: AgentsConfig, mode: DeploymentMode) -> DeploymentModeAvailability:
     try:
-        require_deployment_mode_available(runner_config, mode)
+        require_deployment_mode_available(agents_config, mode)
         enabled = True
     except ValueError:
         enabled = False
     return DeploymentModeAvailability(
         mode=mode,
         enabled=enabled,
-        requires_image=is_container_deployment_mode(mode) and not runner_config.default_image,
+        requires_image=is_container_deployment_mode(mode) and not agents_config.deployments.default_image,
     )
 
 

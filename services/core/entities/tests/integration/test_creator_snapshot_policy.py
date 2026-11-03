@@ -50,7 +50,15 @@ def _client(principal: Principal, *, auth_enabled: bool) -> AsyncClient:
 
 
 @pytest_asyncio.fixture
-async def policy_store(session_maker: async_sessionmaker[AsyncSession]) -> AsyncIterator[SQLAlchemyEntityRepository]:
+async def policy_store(
+    session_maker: async_sessionmaker[AsyncSession], monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[SQLAlchemyEntityRepository]:
+    async def allow_entity_reads(self: AuthClient, workspace_id: str, permissions: list[str]) -> bool:
+        assert workspace_id == "policy-one"
+        assert permissions == ["entities.read"]
+        return True
+
+    monkeypatch.setattr(AuthClient, "has_permissions", allow_entity_reads)
     old_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_async_session_maker] = lambda: session_maker
     workspace_repo = SQLAlchemyWorkspaceRepository(session_maker)

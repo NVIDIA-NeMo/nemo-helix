@@ -395,6 +395,49 @@ def test_chat_completion_without_session_id_invokes_once_without_creating_sessio
     assert asyncio.run(app.state.session_registry.count()) == 0
 
 
+def test_chat_completion_returns_reasoning_from_fabric_messages(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_agent_config(tmp_path)
+    app = create_fabric_serving_app(config_path)
+
+    async def invoke_once(request: Any) -> FabricRuntimeResult:
+        return FabricRuntimeResult(
+            status="succeeded",
+            output={
+                "response": "There are 0 entries.",
+                "messages": [
+                    {"role": "human", "content": "List /"},
+                    {
+                        "role": "ai",
+                        "content": [
+                            {"type": "reasoning", "reasoning": "I should list it."},
+                            {"type": "text", "text": "Listing."},
+                        ],
+                        "tool_calls": [{"name": "ls", "args": {"path": "/"}, "id": "call_1"}],
+                    },
+                    {"role": "tool", "content": "No files found"},
+                    {"role": "ai", "content": "There are 0 entries."},
+                ],
+            },
+            response="There are 0 entries.",
+            invocation_id="invocation-1",
+        )
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.session_manager, "invoke_once", invoke_once)
+        response = client.post("/v1/chat/completions", json={"messages": [{"role": "user", "content": "List /"}]})
+
+    assert response.status_code == 200
+    assert response.json()["choices"][0]["message"] == {
+        "role": "assistant",
+        "content": "There are 0 entries.",
+        "reasoning_content": "I should list it.\n\nListing.",
+    }
+
+
 def test_chat_completion_with_session_id_reuses_session(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],

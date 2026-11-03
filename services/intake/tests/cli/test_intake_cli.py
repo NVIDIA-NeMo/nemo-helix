@@ -243,6 +243,302 @@ def test_traces_get_metrics_bad_timezone_maps_to_remote_error(intake_cli) -> Non
     assert "Bad request: (400) Unknown timezone: Mars/Olympus" in result.stderr
 
 
+TRANSCRIPT_SPANS = [
+    {**SPAN, "span_id": "root", "kind": "AGENT", "name": "agent", "input": "agent input"},
+    {
+        **SPAN,
+        "span_id": "llm-1",
+        "parent_span_id": "root",
+        "model": "gpt-4o",
+        "started_at": "2026-01-01T00:00:01Z",
+        "ended_at": "2026-01-01T00:00:01.250Z",
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "input": "What is the weather?",
+        "output": "call get_weather",
+    },
+    {
+        **SPAN,
+        "span_id": "tool-1",
+        "parent_span_id": "root",
+        "kind": "TOOL",
+        "name": "tool",
+        "tool_name": "get_weather",
+        "started_at": "2026-01-01T00:00:02Z",
+        "ended_at": "2026-01-01T00:00:03.500Z",
+        "input": '{"city": "Paris"}',
+        "output": "sunny " * 20,
+    },
+]
+
+
+def test_traces_show_renders_llm_and_tool_spans_in_order(intake_cli) -> None:
+    result, recorder = intake_cli.run(
+        ["traces", "show", "trace-1", "--max-chars", "12"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    trace_request, spans_request = recorder.requests
+    assert trace_request.url.path == f"{WS}/traces/trace-1"
+    assert dict(trace_request.url.params) == {"mode": "summary"}
+    assert spans_request.url.path == f"{WS}/spans"
+    params = dict(spans_request.url.params)
+    assert json.loads(params.pop("filter")) == {"trace_id": "trace-1"}
+    assert params == {"sort": "started_at", "mode": "detailed", "page_size": "1000"}
+
+    out = result.stdout
+    assert "Trace trace-1 · run · success" in out
+    assert "2 of 3 spans shown (LLM, TOOL)" in out
+    assert "hidden: 1 AGENT (add them with --kinds, or --kinds all)" in out
+    assert "agent input" not in out
+    assert "[1] LLM chat · gpt-4o · 250ms · tokens in 10 / out 5" in out
+    assert "    input: What is the …" in out
+    assert "[2] TOOL get_weather · 1.50s" in out
+    assert '    args: {"city": "Pa…' in out
+    assert "    result: sunny sunny …" in out
+    assert out.index("[1] LLM") < out.index("[2] TOOL")
+
+
+def test_traces_show_json_has_same_blocks_and_bound(intake_cli) -> None:
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "--max-chars", "12", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert body["trace_id"] == "trace-1"
+    assert body["span_count"] == 3
+    assert body["kinds"] == ["LLM", "TOOL"]
+    assert body["hidden_kinds"] == {"AGENT": 1}
+    assert body["max_chars"] == 12
+    llm, tool = body["blocks"]
+    assert (llm["span_id"], llm["kind"], llm["model"]) == ("llm-1", "LLM", "gpt-4o")
+    assert llm["duration_ms"] == 250
+    assert (llm["input_tokens"], llm["output_tokens"]) == (10, 5)
+    assert llm["input"] == "What is the " and llm["input_truncated"] is True
+    assert (tool["span_id"], tool["kind"], tool["tool_name"]) == ("tool-1", "TOOL", "get_weather")
+    assert tool["output"] == "sunny sunny " and tool["output_truncated"] is True
+
+
+def test_traces_show_no_truncate_returns_full_payloads(intake_cli) -> None:
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "--no-truncate", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert body["max_chars"] is None
+    assert body["blocks"][1]["output"] == "sunny " * 20
+    assert body["blocks"][1]["output_truncated"] is False
+
+
+def test_traces_show_pages_every_span(intake_cli) -> None:
+    result, recorder = intake_cli.run(
+        ["traces", "show", "trace-1", "-f", "json"],
+        [
+            httpx.Response(200, json=TRACE),
+            intake_cli.page([TRANSCRIPT_SPANS[1]], 1, 2),
+            intake_cli.page([TRANSCRIPT_SPANS[2]], 2, 2),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert dict(recorder.last.url.params)["page"] == "2"
+    assert [block["span_id"] for block in json.loads(result.stdout)["blocks"]] == ["llm-1", "tool-1"]
+
+
+def test_traces_show_without_transcript_spans(intake_cli) -> None:
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1"],
+        [httpx.Response(200, json=TRACE), intake_cli.page([TRANSCRIPT_SPANS[0]], 1, 1)],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "0 of 1 spans shown" in result.stdout
+    assert "No spans of the selected kinds in this trace." in result.stdout
+
+
+def test_traces_show_kinds_selects_extra_kinds(intake_cli) -> None:
+    retriever = {
+        **SPAN,
+        "span_id": "retrieve-1",
+        "kind": "RETRIEVER",
+        "name": "vector-retrieve",
+        "started_at": "2026-01-01T00:00:00.500Z",
+        "input": "weather paris",
+    }
+    spans = [TRANSCRIPT_SPANS[0], retriever, *TRANSCRIPT_SPANS[1:]]
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "--kinds", " retriever, llm ,LLM", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(spans, 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert body["kinds"] == ["RETRIEVER", "LLM"]
+    assert [block["span_id"] for block in body["blocks"]] == ["retrieve-1", "llm-1"]
+    assert body["hidden_kinds"] == {"AGENT": 1, "TOOL": 1}
+
+
+@pytest.mark.parametrize("kinds", ["all", "LLM,all"])
+def test_traces_show_kinds_all_shows_every_span(intake_cli, kinds: str) -> None:
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "--kinds", kinds],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "3 of 3 spans shown (all kinds)" in result.stdout
+    assert "hidden:" not in result.stdout
+    assert "[1] AGENT agent" in result.stdout
+    assert "    input: agent input" in result.stdout
+
+
+def test_traces_show_kinds_rejects_empty_list(intake_cli) -> None:
+    result, recorder = intake_cli.run(["traces", "show", "trace-1", "--kinds", " , "])
+
+    assert result.exit_code == 2
+    assert "--kinds" in result.stderr
+    assert recorder.requests == []
+
+
+def test_traces_show_tool_name_selects_genai_tool_spans(intake_cli) -> None:
+    # OTel GenAI execute_tool spans are stored as UNKNOWN but keep gen_ai.tool.name as tool_name.
+    genai_tool = {**TRANSCRIPT_SPANS[2], "kind": "UNKNOWN", "name": "execute_tool get_weather"}
+    unknown = {**SPAN, "span_id": "mystery", "kind": "UNKNOWN", "started_at": "2026-01-01T00:00:04Z"}
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1"],
+        [
+            httpx.Response(200, json=TRACE),
+            intake_cli.page([TRANSCRIPT_SPANS[1], genai_tool, unknown], 1, 1, page_size=1000),
+        ],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "2 of 3 spans shown (LLM, TOOL)" in result.stdout
+    assert "hidden: 1 UNKNOWN" in result.stdout
+    assert "[2] UNKNOWN get_weather · 1.50s" in result.stdout
+    assert '    args: {"city": "Paris"}' in result.stdout
+
+
+def test_traces_show_tool_name_on_llm_span_stays_a_model_turn(intake_cli) -> None:
+    llm = {**TRANSCRIPT_SPANS[1], "tool_name": "get_weather"}
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "--kinds", "TOOL"],
+        [httpx.Response(200, json=TRACE), intake_cli.page([llm], 1, 1, page_size=1000)],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "0 of 1 spans shown (TOOL)" in result.stdout
+    assert "hidden: 1 LLM" in result.stdout
+
+
+def test_traces_show_llm_message_list_shows_last_message(intake_cli) -> None:
+    messages = {
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant. " * 10},
+            {"role": "assistant", "content": "Earlier answer."},
+            {"role": "user", "content": [{"type": "text", "text": "And the weather in Paris?"}]},
+        ]
+    }
+    span = {**TRANSCRIPT_SPANS[1], "input": json.dumps(messages)}
+    responses = [httpx.Response(200, json=TRACE), intake_cli.page([span], 1, 1, page_size=1000)]
+
+    text, _ = intake_cli.run(["traces", "show", "trace-1", "--max-chars", "20"], responses, output_format="table")
+    assert text.exit_code == 0, text.output
+    assert "    input (3 messages, last shown) user: And the weather in P…" in text.stdout
+    assert "You are a helpful" not in text.stdout
+
+    responses = [httpx.Response(200, json=TRACE), intake_cli.page([span], 1, 1, page_size=1000)]
+    as_json, _ = intake_cli.run(["traces", "show", "trace-1", "--max-chars", "20", "-f", "json"], responses)
+    assert as_json.exit_code == 0, as_json.output
+    (block,) = json.loads(as_json.stdout)["blocks"]
+    assert block["input"] == '{"messages": [{"role' and block["input_truncated"] is True
+    assert block["input_last_message"] == {
+        "role": "user",
+        "content": "And the weather in P",
+        "content_truncated": True,
+        "message_count": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "span_input",
+    [
+        "plain prompt text",
+        '{"messages": "not a list"}',
+        '{"messages": []}',
+        '[{"role": "user", "content": {"unexpected": "shape"}}]',
+        '{"messages": [{"content": "no role"}]}',
+    ],
+)
+def test_traces_show_falls_back_to_raw_input(intake_cli, span_input: str) -> None:
+    span = {**TRANSCRIPT_SPANS[1], "input": span_input}
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page([span], 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    (block,) = json.loads(result.stdout)["blocks"]
+    assert block["input"] == span_input
+    assert block["input_last_message"] is None
+
+
+def test_traces_show_tool_input_is_never_parsed_as_messages(intake_cli) -> None:
+    span = {**TRANSCRIPT_SPANS[2], "input": '{"messages": [{"role": "user", "content": "hi"}]}'}
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1"],
+        [httpx.Response(200, json=TRACE), intake_cli.page([span], 1, 1, page_size=1000)],
+        output_format="table",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert '    args: {"messages": [{"role": "user", "content": "hi"}]}' in result.stdout
+
+
+def test_traces_show_output_schema_needs_no_trace_or_api(intake_cli) -> None:
+    result, recorder = intake_cli.run(["traces", "show", "--output-schema"], workspace=None)
+
+    assert result.exit_code == 0, result.output
+    assert recorder.requests == []
+    schema = json.loads(result.stdout)
+    assert schema["title"] == "Transcript"
+    assert {"blocks", "kinds", "hidden_kinds", "max_chars"} <= set(schema["properties"])
+
+
+def test_traces_show_output_schema_matches_json_output(intake_cli) -> None:
+    schema_result, _ = intake_cli.run(["traces", "show", "--output-schema"])
+    schema = json.loads(schema_result.stdout)
+    result, _ = intake_cli.run(
+        ["traces", "show", "trace-1", "-f", "json"],
+        [httpx.Response(200, json=TRACE), intake_cli.page(TRANSCRIPT_SPANS, 1, 1, page_size=1000)],
+    )
+
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.stdout)
+    assert set(body) == set(schema["properties"])
+    assert set(body["blocks"][0]) == set(schema["$defs"]["TranscriptBlock"]["properties"])
+
+
+def test_traces_show_not_found(intake_cli) -> None:
+    result, recorder = intake_cli.run(
+        ["traces", "show", "nope"], [httpx.Response(404, json={"detail": "Trace default/nope not found"})]
+    )
+
+    assert result.exit_code == 3
+    assert "Not found: (404) Trace default/nope not found" in result.stderr
+    assert len(recorder.requests) == 1
+
+
 # ---------------------------------------------------------------------------
 # spans
 # ---------------------------------------------------------------------------

@@ -14,7 +14,7 @@ from nemo_agents_plugin.agent_config import load_agent_config
 from nemo_agents_plugin.fabric.runtime import FabricInvocationRequest, FabricOneShotRequest, run_fabric_agent_once
 from nemo_agents_plugin.fabric.session_manager import FabricSessionManager
 from nemo_agents_plugin.fabric.session_registry import FabricSessionRegistry
-from nemo_agents_plugin.fabric.streaming import extract_assistant_text_delta
+from nemo_agents_plugin.fabric.streaming import extract_assistant_delta
 from nemo_agents_plugin.fabric.translator import translate_agent_config
 from nemo_fabric_collector import serve_collector
 from pytest_httpserver import HTTPServer
@@ -142,9 +142,9 @@ async def test_remote_streams_from_shared_collector(
                 async with asyncio.timeout(20), context as stream:
                     texts = []
                     async for record in stream.records():
-                        text = extract_assistant_text_delta(record)
-                        if text is not None:
-                            texts.append(text)
+                        delta = extract_assistant_delta(record)
+                        if delta is not None and delta.content is not None:
+                            texts.append(delta.content)
                             received.set()
                     result = await stream.result()
                 assert texts == ["Live " + request_id]

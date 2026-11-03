@@ -3,14 +3,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response, status
-from fastapi.encoders import jsonable_encoder
-from fastapi.exceptions import RequestValidationError
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
 from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyFeatureDisabledError,
     AccessKeyOperationNotImplementedError,
@@ -24,6 +21,7 @@ from nhx.common.auth.access_keys import (
     AccessKeyServiceAttributesForbiddenError,
     AccessKeyValidationError,
 )
+from nhx.common.auth.openapi import BEARER_AUTH_OPENAPI
 from nhx.common.auth.principal_identifier import parse_principal_identifier
 from nhx.common.config import get_auth_config
 from nhx.common.entities import EntityConflictError
@@ -38,29 +36,10 @@ from nhx.core.auth.app.access_keys import (
 
 from . import schemas
 
+router = APIRouter(tags=["Scoped Access Keys"])
 
-class _RejectedInputNotEchoedRoute(APIRoute):
-    """Answers a request that fails validation with 422 and without the rejected input, which may not be JSON."""
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        handler = super().get_route_handler()
-
-        async def handle(request: Request) -> Response:
-            try:
-                return await handler(request)
-            except RequestValidationError as exc:
-                errors = [
-                    {key: value for key, value in error.items() if key not in ("input", "ctx")}
-                    for error in exc.errors()
-                ]
-                return JSONResponse(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": jsonable_encoder(errors)}
-                )
-
-        return handle
-
-
-router = APIRouter(tags=["Scoped Access Keys"], route_class=_RejectedInputNotEchoedRoute)
+# Authentication is enforced by middleware, not an additional FastAPI dependency.
+_ACCESS_KEY_AUTH_OPENAPI = BEARER_AUTH_OPENAPI
 
 _ACCESS_KEY_DISABLED_CODE = "access_keys_disabled"
 _ACCESS_KEY_DISABLED_DETAIL = "Scoped Access Keys are not enabled"
@@ -223,6 +202,7 @@ async def _change_suspension_status(
 @router.post(
     "/v2/access-keys",
     response_model=schemas.AccessKeyCreateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_CREATE_ERROR_RESPONSES,
 )
 async def create_access_key(
@@ -258,6 +238,7 @@ async def create_access_key(
 @router.get(
     "/v2/access-keys",
     response_model=schemas.AccessKeyListResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_LIFECYCLE_ERROR_RESPONSES,
 )
 async def list_access_keys(
@@ -276,6 +257,7 @@ async def list_access_keys(
 @router.delete(
     "/v2/access-keys/{jti}",
     response_model=schemas.AccessKeyRevokeResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_REVOKE_ERROR_RESPONSES,
 )
 async def revoke_access_key(
@@ -297,6 +279,7 @@ async def revoke_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/suspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -309,6 +292,7 @@ async def suspend_access_key(
 
 @router.post(
     "/v2/access-keys/{jti}/unsuspend",
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     response_model=schemas.AccessKeyStatusChangeResponse,
     responses=_ACCESS_KEY_SUSPENSION_ERROR_RESPONSES,
 )
@@ -322,6 +306,7 @@ async def unsuspend_access_key(
 @router.post(
     "/v2/access-keys/{jti}/rotate",
     response_model=schemas.AccessKeyRotateResponse,
+    openapi_extra=_ACCESS_KEY_AUTH_OPENAPI,
     responses=_ACCESS_KEY_ROTATE_ERROR_RESPONSES,
 )
 async def rotate_access_key(

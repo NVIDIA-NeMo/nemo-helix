@@ -40,6 +40,7 @@ class ChatCompletionResponseMessage(BaseModel):
 
     role: Literal["assistant"] = "assistant"
     content: str
+    reasoning_content: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class ChatCompletionChoice(BaseModel):
@@ -65,6 +66,7 @@ class ChatCompletionStreamDelta(BaseModel):
 
     role: Literal["assistant"] | None = None
     content: str | None = None
+    reasoning_content: str | None = None
 
 
 class ChatCompletionStreamChoice(BaseModel):

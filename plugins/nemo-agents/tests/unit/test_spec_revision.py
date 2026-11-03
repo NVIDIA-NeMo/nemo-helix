@@ -10,8 +10,10 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision, stage_with_spec_revision
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig
+from nemo_helix_plugin.refs import FilesetRef
 
 FIRST_SHA = "1" * 40
 SECOND_SHA = "2" * 40
@@ -36,16 +38,23 @@ def _fileset_reporting(*revisions: str) -> Generator[AsyncMock, None, None]:
 
 
 class TestStageWithSpecRevision:
-    async def test_records_the_revision_staging_read(self) -> None:
+    @pytest.mark.parametrize("source_fileset", [None, FilesetRef("sources/agent-source")])
+    async def test_records_the_revision_staging_read(self, source_fileset: FilesetRef | None) -> None:
         stage = AsyncMock(return_value="staged")
 
         with _fileset_reporting(FIRST_SHA) as files_client:
             staged, spec = await stage_with_spec_revision(
-                files_client, workspace="default", agent_name="calc", stage=stage
+                files_client, workspace="default", agent_name="calc", stage=stage, source_fileset=source_fileset
             )
 
         assert (staged, spec) == ("staged", SpecRevision(revision=FIRST_SHA, tracked_revision="main"))
         assert stage.await_count == 1
+        expected = (
+            {"workspace": "sources", "name": "agent-source"}
+            if source_fileset
+            else {"workspace": "default", "name": "calc-ethos"}
+        )
+        assert all(call.kwargs == expected for call in files_client.get_fileset.await_args_list)
 
     async def test_restages_when_a_refresh_lands_mid_stage(self) -> None:
         stage = AsyncMock(return_value="staged")

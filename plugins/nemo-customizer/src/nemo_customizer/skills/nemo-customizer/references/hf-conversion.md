@@ -93,11 +93,11 @@ nemo files filesets create cord-v2 --workspace default --purpose dataset
 nemo files upload /tmp/cord-v2 cord-v2 --workspace default
 ```
 
-`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`.
+`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
 
 `nemo customization automodel --upload-dataset /tmp/cord-v2` uploads that same directory.
 
-Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit.
+Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit. Each directory also holds `test.jsonl` next to `train.jsonl` and `validation.jsonl`, and the whole directory is one fileset. That is the other exception to the own-fileset rule: the trainer reads `train.jsonl` and `validation.jsonl` and does not train on `test.jsonl`.
 
 Unsloth stays on string `content` or pre-rendered `text`. Do not give it image parts.
 
@@ -165,10 +165,10 @@ Only the **chat-template / `messages` (`to_chat`) output is backend-agnostic** �
 
 | Backend | Row format used | Dataset block in job JSON |
 |---------|----------------|---------------------------|
-| automodel (CHAT) | `to_chat` output (`messages`, string `content`) | `{ "training": "default/<DATASET_NAME>", "validation": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
-| automodel (MULTIMODAL) | `to_multimodal_chat` output (part list + sibling images) | same fileset refs. Text-only rows in the same file stay string `content`. |
+| automodel (CHAT) | `to_chat` output (`messages`, string `content`) | `{ "training": "default/<DATASET_NAME>" }` — schema auto-detected from row 1 |
+| automodel (MULTIMODAL) | `to_multimodal_chat` output (part list + sibling images) | same fileset ref. Text-only rows in the same file stay string `content`. |
 | automodel (SFT)  | `to_sft` output (`prompt` / `completion`) | same as above (no `prompt_template`) |
-| **unsloth (preferred)** | `to_chat` output (`messages`) | `{ "path": "default/<DATASET_NAME>", "apply_chat_template": true }` (+ `validation_path` if present) |
+| **unsloth (preferred)** | `to_chat` output (`messages`) | `{ "path": "default/<DATASET_NAME>", "apply_chat_template": true }` |
 | unsloth (no chat template) | **Custom `to_text` rendering**: emit `{"text": "<prompt>\n<completion>"}` rows (not the `to_sft` output directly) | `{ "path": "default/<DATASET_NAME>", "text_field": "text" }` |
 
 **Note:** Unsloth does **not** read the automodel SFT shape `{"prompt": ..., "completion": ...}`. If `has_chat` is False *and* the user picked unsloth, swap `to_sft` for a `to_text` that renders one `text` column. Sketch:

@@ -209,7 +209,7 @@ class TestAutoSetupWire:
         assert body_of(recorder.requests[3]) == {
             "host_url": "https://api.anthropic.com",
             "api_key_secret_name": "anthropic-api-key",
-            "auth_header_format": "X-Api-Key: {{ auth_secret }}",
+            "auth_header_format": "X-Api-Key: <auth_secret>",
             "required_extra_headers": None,
             "default_extra_headers": {"anthropic-version": "2023-06-01"},
         }

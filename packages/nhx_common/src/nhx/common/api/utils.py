@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 
 from fastapi import HTTPException
 from nemo_helix_plugin.jobs.openapi_utils import (
-    QueryParamSchemaFastAPI as QueryParamSchemaFastAPI,  # noqa: F401
+    QueryParamSchemaFastAPI as _QueryParamSchemaFastAPI,
 )
 from nemo_helix_plugin.jobs.openapi_utils import clear_query_param_schemas as clear_query_param_schemas  # noqa: F401
 from nemo_helix_plugin.jobs.openapi_utils import (
@@ -35,6 +35,25 @@ from starlette.requests import Request
 T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
+
+
+class QueryParamSchemaFastAPI(_QueryParamSchemaFastAPI):
+    """Platform-owned OpenAPI metadata layered on the plugin's query-schema hook."""
+
+    def openapi(self) -> dict[str, Any]:
+        if self.openapi_schema:
+            return self.openapi_schema
+
+        # Keep authentication imports and schema registration off the startup path.
+        from nhx.common.auth.openapi import register_bearer_security_scheme
+
+        try:
+            openapi_schema = register_bearer_security_scheme(super().openapi())
+        except Exception:
+            self.openapi_schema = None
+            raise
+        self.openapi_schema = openapi_schema
+        return self.openapi_schema
 
 
 class IDConvertor(Convertor):
