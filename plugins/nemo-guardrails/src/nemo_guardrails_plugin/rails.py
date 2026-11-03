@@ -214,6 +214,17 @@ def build_guardrails_data(
 # ---------------------------------------------------------------------------
 
 
+def require_request_model(request_body: dict[str, Any]) -> None:
+    """Raise :class:`ValueError` unless the request names its model as a non-empty string.
+
+    Shared by every rails engine so a malformed request gets the same 400 whichever engine would
+    have served it.
+    """
+    request_model_name = request_body.get("model")
+    if not request_model_name or not isinstance(request_model_name, str):
+        raise ValueError("request body must include a non-empty string 'model'")
+
+
 def build_main_llm(
     request_body: dict[str, Any],
     request_headers: dict[str, str],
@@ -241,11 +252,8 @@ def build_main_llm(
     :class:`ValueError` when ``request_body`` lacks a non-empty string
     ``model`` — the middleware maps this to a 400 at the plugin boundary.
     """
-    request_model_name = request_body.get("model")
-    # Reject non-strings here so they 4xx instead of failing deep inside
-    # init_llm_model's provider lookup.
-    if not request_model_name or not isinstance(request_model_name, str):
-        raise ValueError("request body must include a non-empty string 'model'")
+    require_request_model(request_body)
+    request_model_name = request_body["model"]
 
     engine = DEFAULT_MAIN_ENGINE
     static_params: dict[str, Any] = {}

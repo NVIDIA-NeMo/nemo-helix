@@ -17,9 +17,15 @@ from typing import Any
 
 import pytest
 from nemo_guardrails_plugin.constants import GUARDRAILS_PLUGIN_CONFIG_TYPE
+from nemo_guardrails_plugin.iorails_runtime import IORAILS_ENGINE_ENV
 from nemo_helix_plugin.entities import EntityBase
 from nhx.core.inference_gateway.testing.harness import IGWLoopbackHarness
-from nhx.testing.mock_chat_completions import ChatCompletion, chat_completion
+from nhx.testing.mock_chat_completions import (
+    ChatCompletion,
+    build_chat_completion_stream_from_content,
+    build_content_from_chunks,
+    chat_completion,
+)
 
 from .utils import (
     GUARDRAILS_PLUGIN_NAME,
@@ -71,6 +77,14 @@ class TestLegacyStreamingConfig:
         if streaming is not None:
             output["streaming"] = streaming
         return {"rails": {"config": {"injection_detection": INJECTION_DETECTION}, "output": output}}
+
+    @staticmethod
+    def _set_engine(monkeypatch: pytest.MonkeyPatch, *, iorails: bool) -> None:
+        """Choose the engine before the plugin loads, because it reads the switch at startup."""
+        if iorails:
+            monkeypatch.setenv(IORAILS_ENGINE_ENV, "true")
+        else:
+            monkeypatch.delenv(IORAILS_ENGINE_ENV, raising=False)
 
     @staticmethod
     def _store_legacy_config(harness: IGWLoopbackHarness, name: str, data: dict[str, Any]) -> None:
@@ -140,6 +154,7 @@ class TestLegacyStreamingConfig:
             },
         )
 
+    @pytest.mark.parametrize("iorails", [False, True], ids=["llmrails", "iorails"])
     @pytest.mark.parametrize(
         "backend_response,expect_blocked",
         [
@@ -150,10 +165,13 @@ class TestLegacyStreamingConfig:
     def test_saved_config_serves_inference(
         self,
         igw_loopback_harness: Callable[..., IGWLoopbackHarness],
+        monkeypatch: pytest.MonkeyPatch,
+        iorails: bool,
         backend_response: str,
         expect_blocked: bool,
     ) -> None:
         """A row in the old shape loads and still blocks and passes output as its rail dictates."""
+        self._set_engine(monkeypatch, iorails=iorails)
         harness = igw_loopback_harness()
 
         with harness.load_plugin(GUARDRAILS_PLUGIN_NAME):
@@ -176,8 +194,10 @@ class TestLegacyStreamingConfig:
     def test_saved_config_is_repaired_when_read_and_left_unchanged_in_storage(
         self,
         igw_loopback_harness: Callable[..., IGWLoopbackHarness],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """The service serves ``stream_first=false`` and ``context_size=0``; the stored row keeps the old values."""
+        self._set_engine(monkeypatch, iorails=False)
         harness = igw_loopback_harness()
 
         with harness.load_plugin(GUARDRAILS_PLUGIN_NAME):
@@ -189,5 +209,54 @@ class TestLegacyStreamingConfig:
                 assert served.chunk_size == LEGACY_STREAMING["chunk_size"]
 
                 assert self._stored_streaming(harness, names.guardrail_config_name) == LEGACY_STREAMING
+            finally:
+                delete_guardrail_config_if_present(harness, names.guardrail_config_name)
+
+    @pytest.mark.parametrize(
+        "backend_response,expect_blocked",
+        [
+            pytest.param(SAFE_BACKEND_RESPONSE, False, id="safe-output"),
+            pytest.param(CODE_BACKEND_RESPONSE, True, id="unsafe-output"),
+        ],
+    )
+    def test_saved_config_streams_on_iorails(
+        self,
+        igw_loopback_harness: Callable[..., IGWLoopbackHarness],
+        monkeypatch: pytest.MonkeyPatch,
+        backend_response: str,
+        expect_blocked: bool,
+    ) -> None:
+        """Streaming through the rewriting rail holds each chunk back until the rail has judged it.
+
+        Runs on IORails only: nemoguardrails 0.24.1's LLMRails fails to stream through this rail with
+        any settings (it passes an argument ``injection_detection`` does not accept).
+        """
+        self._set_engine(monkeypatch, iorails=True)
+        harness = igw_loopback_harness()
+
+        with harness.load_plugin(GUARDRAILS_PLUGIN_NAME):
+            names = self._add_virtual_model(harness)
+            self._store_legacy_config(harness, names.guardrail_config_name, self._config_data(LEGACY_STREAMING))
+            self._attach_output_rail(harness, names)
+            try:
+                harness.handler.reset()
+                harness.mock_chat_completions(
+                    names.main_model_served_name,
+                    responses=[build_chat_completion_stream_from_content(backend_response)],
+                )
+                chunks = harness.stream_chat_completions(
+                    workspace=harness.workspace,
+                    body={
+                        "model": f"{harness.workspace}/{names.request_virtual_model_name}",
+                        "messages": [{"role": "user", "content": self.USER_INPUT}],
+                    },
+                )
+
+                assert isinstance(chunks, list)
+                if expect_blocked:
+                    assert chunks[-1]["error"]["code"] == "content_blocked"
+                    assert "import requests" not in build_content_from_chunks(chunks[:-1])
+                else:
+                    assert build_content_from_chunks(chunks) == self.SAFE_BACKEND_RESPONSE
             finally:
                 delete_guardrail_config_if_present(harness, names.guardrail_config_name)
