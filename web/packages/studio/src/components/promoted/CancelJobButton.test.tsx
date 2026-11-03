@@ -176,4 +176,25 @@ describe('CancelJobButton', () => {
     await waitFor(() => expect(screen.queryByText(`Cancel ${JOB_NAME}`)).not.toBeInTheDocument());
     expect(posts).toBe(2);
   });
+
+  it('announces the request, then the result once the job reaches cancelled', async () => {
+    server.use(
+      http.post(CANCEL_URL, () =>
+        HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelling })
+      ),
+      http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`, () =>
+        HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelled })
+      )
+    );
+    const user = userEvent.setup();
+    renderButton(HelixJobStatus.active);
+    const modalSubmit = await openAndGetSubmit(user);
+
+    await user.click(modalSubmit);
+
+    expect(await screen.findByText(`Cancellation requested for ${JOB_NAME}.`)).toBeInTheDocument();
+    expect(
+      await screen.findByText(`Job ${JOB_NAME} cancelled.`, undefined, { timeout: 6000 })
+    ).toBeInTheDocument();
+  }, 15_000);
 });
