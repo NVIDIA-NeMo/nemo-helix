@@ -33,6 +33,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast, override
 
@@ -156,7 +157,8 @@ def environment_digest(environment_dir: Path) -> str:
             elif stat.S_ISDIR(info.st_mode):
                 entry = f"dir {relative} {stat.S_IMODE(info.st_mode):o}"
             else:
-                contents = hashlib.sha256(path.read_bytes()).hexdigest()
+                with path.open("rb") as handle:
+                    contents = hashlib.file_digest(handle, "sha256").hexdigest()
                 entry = f"file {relative} {stat.S_IMODE(info.st_mode):o} {contents}"
             digest.update(entry.encode() + b"\0")
     return digest.hexdigest()
@@ -256,7 +258,9 @@ async def build_agent_layer(
             harbor_agent = AgentFactory.create_agent_from_config(agent, logs_dir=Path(logs))
             # Agents' setup() uses only exec, upload_file/upload_dir and default_user, which is all a bare
             # container offers: no trial, task directory or lifecycle to build a real BaseEnvironment from.
-            environment = cast(BaseEnvironment, ContainerExecEnvironment(container, default_user=user))
+            environment = cast(
+                BaseEnvironment, ContainerExecEnvironment(container, default_user=user, env=dict(agent.env or {}))
+            )
             await harbor_agent.setup(environment=environment)
         labels = {LAYER_LABEL: tag.rpartition(":")[2], f"{LAYER_LABEL}.agent": install.agent, **_input_labels(install)}
         # A compose-built image carries its trial's project label, and `down --rmi local` deletes every image that
@@ -284,9 +288,11 @@ class ContainerExecEnvironment:
 
     session_id = "agent-layer-build"
 
-    def __init__(self, container: str, *, default_user: str | int | None) -> None:
+    def __init__(self, container: str, *, default_user: str | int | None, env: Mapping[str, str] | None = None) -> None:
         self.container = container
         self.default_user = default_user
+        #: The install's environment, on every exec over the exec's own: what Harbor's trial scopes onto setup.
+        self.env = dict(env or {})
 
     async def exec(
         self,
@@ -301,7 +307,7 @@ class ContainerExecEnvironment:
             args += ["--user", str(user)]
         if cwd is not None:
             args += ["--workdir", cwd]
-        for name, value in (env or {}).items():
+        for name, value in {**(env or {}), **self.env}.items():
             args += ["--env", f"{name}={value}"]
         args += [self.container, "bash", "-c", command]
         process = await asyncio.create_subprocess_exec(

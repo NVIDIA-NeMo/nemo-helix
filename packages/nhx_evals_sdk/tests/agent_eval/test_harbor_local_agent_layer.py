@@ -221,13 +221,15 @@ async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_start
     monkeypatch.setattr(local_agent_layer, "_docker", fake_docker)
     monkeypatch.setattr(local_agent_layer.AgentFactory, "create_agent_from_config", lambda *a, **k: _Agent())
 
-    await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user="agent")
+    agent = _AGENT.model_copy(update={"env": {"HTTPS_PROXY": "http://proxy.example:3128"}})
+    await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, agent, user="agent")
 
     run = next(call for call in calls if call[0] == "run")
     # The task's entrypoint doesn't run: state it initializes belongs to each trial, not the shared layer.
     assert run[-5:] == ("--entrypoint", "sh", "task-image", "-c", "sleep infinity")
     (environment,) = set_up
     assert isinstance(environment, ContainerExecEnvironment) and environment.default_user == "agent"
+    assert environment.env == {"HTTPS_PROXY": "http://proxy.example:3128"}
     commit = next(call for call in calls if call[0] == "commit")
     changes = [commit[i + 1] for i, arg in enumerate(commit) if arg == "--change"]
     assert 'ENTRYPOINT ["/init.sh"]' in changes and 'CMD ["bash"]' in changes
@@ -294,6 +296,35 @@ async def test_container_exec_runs_as_the_default_user_unless_told_otherwise(mon
         "npm -v",
     )
     assert ran[1][:4] == ("docker", "exec", "--user", "root")
+
+
+async def test_the_install_env_reaches_every_exec_over_the_execs_own(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Harbor's trial scopes the agent's env onto every setup exec; a layer build has to do the same."""
+    ran: list[tuple[str, ...]] = []
+
+    class _Process:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+    async def create(*args: str, **kwargs: Any) -> _Process:
+        ran.append(args)
+        return _Process()
+
+    monkeypatch.setattr(local_agent_layer.asyncio, "create_subprocess_exec", create)
+    environment = ContainerExecEnvironment(
+        "box", default_user=None, env={"HTTPS_PROXY": "http://proxy.example:3128", "A": "install"}
+    )
+
+    await environment.exec("npm install", env={"A": "exec", "B": "exec"})
+    await environment.exec("true")
+
+    def passed(args: tuple[str, ...]) -> list[str]:
+        return [args[i + 1] for i, arg in enumerate(args) if arg == "--env"]
+
+    assert passed(ran[0]) == ["A=install", "B=exec", "HTTPS_PROXY=http://proxy.example:3128"]
+    assert passed(ran[1]) == ["HTTPS_PROXY=http://proxy.example:3128", "A=install"]
 
 
 def _environment(tmp_path: Path, agent: dict[str, Any], *, compose: bool = False) -> AgentLayerDockerEnvironment:

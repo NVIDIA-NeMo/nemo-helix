@@ -38,6 +38,10 @@ class ImagePlanError(ValueError):
         self.detail = detail
 
 
+#: How much of a context file is read at a time to digest it.
+_DIGEST_CHUNK_BYTES = 1 << 20
+
+
 @dataclass(frozen=True)
 class TaskArchive:
     """The file listing of a published task archive, which holds one task directory."""
@@ -87,7 +91,11 @@ class TaskArchive:
                 content = ""
                 if member.isfile():
                     handle = archive.extractfile(member)
-                    content = hashlib.sha256(handle.read() if handle is not None else b"").hexdigest()
+                    digest = hashlib.sha256()
+                    if handle is not None:
+                        for chunk in iter(lambda: handle.read(_DIGEST_CHUNK_BYTES), b""):
+                            digest.update(chunk)
+                    content = digest.hexdigest()
                 entries.append(
                     [
                         member.name.removeprefix(prefix),

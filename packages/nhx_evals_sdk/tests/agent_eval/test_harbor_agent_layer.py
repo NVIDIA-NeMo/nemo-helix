@@ -82,6 +82,23 @@ def test_an_install_given_a_url_with_credentials_is_not_reused(kwargs: dict[str,
     )
 
 
+@pytest.mark.parametrize(
+    "url",
+    ["https://pypi.example?email=a@b.example", "https://pypi.example#a@b", "https://pypi.example/@a/simple"],
+    ids=["query", "fragment", "path"],
+)
+def test_an_at_sign_after_the_host_isnt_a_credential(url: str) -> None:
+    install = agent_install(
+        agent_name="codex",
+        agent_import_path=None,
+        agent_dir=None,
+        agent_kwargs={"version": "0.162.1"},
+        agent_env={"PIP_INDEX_URL": url},
+    )
+
+    assert install is not None
+
+
 def test_options_that_dont_change_the_install_keep_the_key() -> None:
     base = _key(name="codex", version="0.162.1")
 

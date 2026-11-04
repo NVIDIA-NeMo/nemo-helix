@@ -142,7 +142,7 @@ def agent_install(
 
 
 #: A URL carrying userinfo, such as ``https://user:token@pypi.example/simple``.  # trufflehog:ignore
-_URL_CREDENTIALS = re.compile(r"[a-z][a-z0-9+.-]*://[^/\s@]+@", re.IGNORECASE)
+_URL_CREDENTIALS = re.compile(r"[a-z][a-z0-9+.-]*://[^/?#\s@]+@", re.IGNORECASE)
 
 
 def has_url_credentials(value: object) -> bool:
