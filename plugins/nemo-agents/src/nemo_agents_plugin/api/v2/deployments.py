@@ -369,6 +369,13 @@ async def get_deployment(
 async def delete_deployment(
     workspace: str,
     name: str,
+    remove_image: bool = Query(
+        default=True,
+        description=(
+            "After teardown, also remove the deployment's image if the platform built it and no other "
+            "deployment uses it. Images you built or pulled yourself are never removed."
+        ),
+    ),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
     """Stop and remove a deployment.
@@ -382,6 +389,7 @@ async def delete_deployment(
                 entity_client,
                 workspace=workspace,
                 name=name,
+                remove_image=remove_image,
                 retrying=attempt > 0,
             )
             return
@@ -404,6 +412,7 @@ async def _mark_deployment_deleting_once(
     *,
     workspace: str,
     name: str,
+    remove_image: bool,
     retrying: bool,
 ) -> None:
     try:
@@ -422,10 +431,11 @@ async def _mark_deployment_deleting_once(
 
     if is_container_deployment_mode(dep.deployment_mode):
         await _reopen_timed_out_backend_delete(entity_client, workspace=workspace, name=name)
-    if dep.status == "deleting":
+    if dep.status == "deleting" and dep.remove_image_on_delete == remove_image:
         return
 
     dep.status = "deleting"
+    dep.remove_image_on_delete = remove_image
     try:
         await entity_client.update(dep)
     except NemoEntityNotFoundError:
