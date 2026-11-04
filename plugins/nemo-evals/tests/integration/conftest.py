@@ -115,6 +115,14 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 #: ``/health/ready`` never returns 200 and every fixture below times out.
 REQUIRED_CONTROLLERS = ("jobs", "entities", "models")
 
+#: Services these tests call. Not ``--service-group all``: that also starts about 15 plugins no test
+#: here uses, including intake, whose local ClickHouse container dominates startup and needs Docker
+#: (``compass`` then waits on it). The evals plugin only reaches intake on an explicit publish, which
+#: ``test_publish_to_intake`` covers with its own ClickHouse.
+PLATFORM_SERVICES = ("auth", "entities", "files", "jobs", "secrets", "models", "inference-gateway", "evals")
+
+PLATFORM_RUN_ARGS = ("--services", ",".join(PLATFORM_SERVICES), "--controllers", ",".join(REQUIRED_CONTROLLERS))
+
 
 @contextmanager
 def running_platform(
@@ -277,8 +285,8 @@ def subprocess_platform(tmp_path_factory: pytest.TempPathFactory, request: pytes
     Subprocess backend: the compiled task runs as a host process, so a runner target sees the host's
     agent toolchain. IGW mock mode (``NHX_INFERENCE_GATEWAY_MOCK_PROVIDER_PREFIX``) lets
     Model/Agent-target tests register a mock provider returning a canned response — no real model or
-    key. Tests may indirectly parameterize this fixture with explicit service/controller arguments
-    to avoid starting unrelated installed plugins.
+    key. Tests may indirectly parameterize this fixture with other service/controller arguments, but
+    each distinct parameter starts its own platform, so prefer widening ``PLATFORM_SERVICES``.
     """
     work_root = tmp_path_factory.mktemp("platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_PLATFORM_BASE_URL)
@@ -286,7 +294,7 @@ def subprocess_platform(tmp_path_factory: pytest.TempPathFactory, request: pytes
         run_args=getattr(
             request,
             "param",
-            ["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+            list(PLATFORM_RUN_ARGS),
         ),
         base_url=AGENT_PLATFORM_BASE_URL,
         env_vars={
@@ -309,7 +317,7 @@ def auth_subprocess_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterat
     work_root = tmp_path_factory.mktemp("auth-platform")
     config_path = _materialize_subprocess_config(work_root, base_url=AGENT_AUTH_PLATFORM_BASE_URL, auth_enabled=True)
     with running_platform(
-        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+        run_args=list(PLATFORM_RUN_ARGS),
         base_url=AGENT_AUTH_PLATFORM_BASE_URL,
         env_vars={
             "NHX_CONFIG_FILE_PATH": str(config_path),
@@ -340,7 +348,7 @@ def cloudpickle_toggle_platform(
             allow_cloudpickle_metrics=allow_cloudpickle_metrics,
         )
         with running_platform(
-            run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+            run_args=list(PLATFORM_RUN_ARGS),
             base_url=CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL,
             env_vars={
                 "NHX_CONFIG_FILE_PATH": str(config_path),
@@ -411,7 +419,7 @@ def docker_platform(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     work_root = tmp_path_factory.mktemp("docker-platform")
     config_path = _materialize_docker_config(work_root, base_url=AGENT_DOCKER_PLATFORM_BASE_URL)
     with running_platform(
-        run_args=["--service-group", "all", "--controllers", ",".join(REQUIRED_CONTROLLERS)],
+        run_args=list(PLATFORM_RUN_ARGS),
         base_url=AGENT_DOCKER_PLATFORM_BASE_URL,
         env_vars={"NHX_CONFIG_FILE_PATH": str(config_path), DATA_DIR_ENVVAR: str(work_root / "data")},
     ) as base_url:
