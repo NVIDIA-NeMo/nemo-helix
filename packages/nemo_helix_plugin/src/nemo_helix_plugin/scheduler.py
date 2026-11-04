@@ -228,8 +228,8 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
     Jobs register under the ``nemo.jobs`` entry-point group keyed as
     ``<plugin>.<job>``, and the platform mounts their routes under that
     ``<plugin>`` segment. The authoritative source of truth is therefore
-    the entry-point key — not the Python module path. We resolve it via
-    :func:`~nemo_helix_plugin.discovery.discover_jobs` so a plugin registered
+    the entry-point key — not the Python module path. We resolve it from the
+    ``nemo.jobs`` entry points so a plugin registered
     as ``agents.evaluate`` correctly maps to ``/apis/agents/...``, even
     though its package directory is ``nemo_agents_plugin/`` (which the
     module-name heuristic would have collapsed to ``agents-plugin`` and
@@ -242,16 +242,31 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
     The fallback does *not* strip a trailing ``_plugin``: a plugin whose
     actual key happens to be ``my-plugin`` would be silently rewritten
     to ``my``.
-    """
-    from nemo_helix_plugin.discovery import discover_jobs
 
+    The lookup reads entry-point metadata and does not import other plugins' jobs: loading every
+    ``nemo.jobs`` entry costs seconds per process, and this runs on every submit. An entry whose
+    value is *job_cls*'s ``module:qualname`` matches without loading. Failing that, entries whose
+    key ends in ``job_cls.name`` (the convention :func:`discover_jobs` enforces) are loaded and
+    compared by identity, which covers a class registered through a re-export.
+    """
+    from nemo_helix_plugin.discovery import discover_entry_points
+
+    target = f"{job_cls.__module__}:{job_cls.__qualname__}"
     try:
-        registered = discover_jobs()
+        entries = {key: ep for key, ep in discover_entry_points("nemo.jobs").items() if "." in key}
     except Exception:
-        registered = {}
-    for key, registered_cls in registered.items():
-        if registered_cls is job_cls and "." in key:
+        entries = {}
+    for key, entry_point in entries.items():
+        if entry_point.value == target:
             return key.split(".", 1)[0]
+    for key, entry_point in entries.items():
+        if key.split(".", 1)[1] != job_cls.name:
+            continue
+        try:
+            if entry_point.load() is job_cls:
+                return key.split(".", 1)[0]
+        except Exception:
+            continue
 
     module = job_cls.__module__.split(".")[0]
     if module.startswith("nemo_"):
