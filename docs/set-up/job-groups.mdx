@@ -151,9 +151,10 @@ print(group.name, group.status, group.member_count)
 
 ## Group Status
 
-A group's `status` is an aggregate **derived from its members** — it is never
-stored or set directly, and is recomputed on every read. A group is terminal
-only once every member is terminal.
+A group's `status` is an aggregate **derived from its members' statuses** and
+kept current as members change. You do not set it directly — it reflects where
+the members are, plus a top-down `cancelling` intent when you cancel the group
+(see below). A group is terminal only once every member is terminal.
 
 | Status | Meaning |
 | --- | --- |
@@ -161,11 +162,13 @@ only once every member is terminal.
 | `running` | At least one member is active, pending, or otherwise past `created`, and the group is not terminal. |
 | `completed` | Every member completed successfully. |
 | `failed` | Every member is terminal and at least one errored. |
-| `cancelling` | A cancel is sweeping the group — some members are cancelling or cancelled while others are still non-terminal. |
+| `cancelling` | A group-level cancel has been requested and is sweeping the group's members; set when you cancel the group and held until every member is terminal. |
 | `cancelled` | Every member is terminal and at least one was cancelled (and none errored). |
 
 Precedence when every member is terminal: any error makes the group `failed`;
 otherwise any cancellation makes it `cancelled`; otherwise it is `completed`.
+`cancelling` is a group-level intent recorded by a [group cancel](#cancel-and-retry) —
+a single member cancelling on its own does not move the group to `cancelling`.
 
 ## Manage a Group
 
