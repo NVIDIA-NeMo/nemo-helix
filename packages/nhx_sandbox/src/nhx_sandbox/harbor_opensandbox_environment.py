@@ -92,7 +92,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
 from nhx_sandbox.opensandbox_policy import (
     EgressVerificationError,
     EgressVerificationMode,
-    canonical_egress_target,
+    egress_target_covers,
     to_opensandbox_policy,
     verify_applied_egress,
 )
@@ -302,7 +302,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._health_check_poll_interval_sec = health_check_poll_interval_sec
         self._metadata = dict(metadata or {})
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
-        self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._image_entrypoints = dict(image_entrypoints or {})
         self._runtime: SandboxRuntime = runtime
@@ -412,7 +411,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if network_policy.network_mode != NetworkMode.ALLOWLIST:
             return
         outside = sorted(
-            host for host in network_policy.allowed_hosts if canonical_egress_target(host) not in self._trusted_targets
+            host
+            for host in network_policy.allowed_hosts
+            if not any(egress_target_covers(trusted, host) for trusted in self._trusted_allowed_hosts)
         )
         if outside:
             raise ValueError(

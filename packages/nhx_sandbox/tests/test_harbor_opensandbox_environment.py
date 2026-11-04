@@ -262,6 +262,16 @@ async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, serv
     assert allowed == {"*.NVIDIA.com", "10.96.0.10"}
 
 
+async def test_allowlist_task_narrows_a_trusted_wildcard_and_cidr(tmp_path: Path, server: Server) -> None:
+    """A task may ask for a subdomain of a trusted wildcard and an address inside a trusted CIDR."""
+    environment = _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["docs.nvidia.com", "2001:db8::1"])
+
+    await environment._create_sandbox()
+
+    allowed = {rule["target"] for rule in _policy_sent(server)["egress"] if rule["action"] == "allow"}
+    assert allowed == {"docs.nvidia.com", "2001:db8::1", "10.96.0.10"}
+
+
 def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:
     """A task asking for a host outside the trusted allowlist is rejected before any sandbox exists."""
     with pytest.raises(ValueError, match=r"\['pypi.org'\].*does not include"):

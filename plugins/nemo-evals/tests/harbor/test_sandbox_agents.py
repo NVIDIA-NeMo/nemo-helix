@@ -122,7 +122,6 @@ def _setup_environment(
     environment._agent_channel_hosts = (IGW,)
     environment._agent_setup_hosts = setup
     environment._trusted_allowed_hosts = ("registry.npmjs.org",)
-    environment._trusted_targets = frozenset(environment._trusted_allowed_hosts)
     environment._resolver_addresses = ()
     environment._egress_verification = "strict"
     environment._services = None
