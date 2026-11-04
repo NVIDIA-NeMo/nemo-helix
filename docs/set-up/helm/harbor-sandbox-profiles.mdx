@@ -280,10 +280,10 @@ An invalid `evals` config doesn't stop the rollout. The API starts without the e
 
 </Warning>
 
-1. Validate the rendered `evals` config. Pass the values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment (`pip install 'nemo-helix[nemo-evals-plugin]==<chart appVersion>'`): another version may accept different keys.
+1. Validate the rendered `evals` config. Pass the chart version and values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment (`pip install 'nemo-helix[nemo-evals-plugin]==<chart appVersion>'`): another version may accept different keys.
 
    ```bash
-   helm template <release> <chart> -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml \
+   helm template <release> <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml \
      --show-only templates/platform-configmap.yaml \
      | yq '.data["config.yaml"]' | yq -o json '.evals' \
      | python -c 'import json, sys; from nemo_evals.config import EvaluatorConfig; EvaluatorConfig.model_validate(json.load(sys.stdin)); print("valid")'
@@ -292,10 +292,10 @@ An invalid `evals` config doesn't stop the rollout. The API starts without the e
    - `valid` → apply.
    - A `ValidationError` names the bad key, such as `runs.harbor.sandbox_profiles.harbor-web.egress_alow  Extra inputs are not permitted`. Fix the file and validate again.
 
-2. Upgrade the release with the same values files and wait for it:
+2. Upgrade the release with the same chart version and values files and wait for it:
 
    ```bash
-   helm upgrade <release> <chart> -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml --wait --timeout 10m
+   helm upgrade <release> <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml --wait --timeout 10m
    kubectl rollout status deploy/"${FULLNAME:0:59}-api" -n "$NHX_NAMESPACE" --timeout 5m
    kubectl rollout status deploy/"${FULLNAME:0:52}-core-controller" -n "$NHX_NAMESPACE" --timeout 5m
    ```
