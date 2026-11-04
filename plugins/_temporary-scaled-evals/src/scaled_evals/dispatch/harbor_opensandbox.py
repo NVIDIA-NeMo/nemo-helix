@@ -49,7 +49,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     SandboxAgentBundle,
     parse_compose_services,
 )
-from nhx_sandbox.opensandbox_policy import canonical_egress_target
+from nhx_sandbox.opensandbox_policy import egress_target_covers
 from tomlkit.items import InlineTable, Table
 
 from scaled_evals.api.build.task_image_identity import (
@@ -338,8 +338,9 @@ def preflight_staged_task(
     environment = document.get("environment") or {}
     if environment.get("network_mode") == "allowlist":
         requested = [str(host) for host in environment.get("allowed_hosts") or []]
-        trusted_targets = {canonical_egress_target(host) for host in trusted_hosts}
-        extra = sorted({host for host in requested if canonical_egress_target(host) not in trusted_targets})
+        extra = sorted(
+            {host for host in requested if not any(egress_target_covers(trusted, host) for trusted in trusted_hosts)}
+        )
         if extra:
             raise ValueError(
                 f"task requests egress to {extra}, which the operator allowlist for "

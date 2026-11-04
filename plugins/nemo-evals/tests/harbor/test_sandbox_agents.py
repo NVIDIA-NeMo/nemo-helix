@@ -94,7 +94,7 @@ def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(monkeypatch, a
     )
 
     for built in (policy, opened):
-        assert "internal.attacker.com" in _allowed(built)
+        assert {"internal.attacker.com"} <= _allowed(built)
         assert _is_denied(built, address)
         assert not _is_denied(built, "10.0.0.60")
 
@@ -112,7 +112,7 @@ def test_a_task_naming_a_setup_host_gets_no_carve_out_from_the_closed_policy(mon
     environment._agent_setup_hosts = ("registry.corp.example",)
 
     policy = environment.egress_policy()
-    assert "registry.corp.example" in _allowed(policy)
+    assert {"registry.corp.example"} <= _allowed(policy)
     assert _is_denied(policy, "10.77.0.9")
 
 
@@ -322,7 +322,7 @@ async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatc
 async def test_a_setup_host_the_task_already_allows_is_left_in_place(monkeypatch):
     environment = _setup_environment(monkeypatch, mode=NetworkMode.PUBLIC)
     before = _allowed_now(environment)
-    assert "registry.npmjs.org" in before  # the trusted allowlist already has it
+    assert {"registry.npmjs.org"} <= before  # the trusted allowlist already has it
     async with environment.agent_setup_egress():
         assert "*.pypi.org" in _allowed_now(environment)
     assert _allowed_now(environment) == before
@@ -379,7 +379,7 @@ async def test_a_task_naming_a_private_setup_host_reaches_it_only_during_setup(m
     assert any(registry in network for network in _denied_networks(environment))  # before setup: denied
     async with environment.agent_setup_egress():
         assert not any(registry in network for network in _denied_networks(environment))  # during: allowed
-    assert "registry.corp.example" in _allowed_now(environment)  # the task still has it by name
+    assert {"registry.corp.example"} <= _allowed_now(environment)  # the task still has it by name
     assert any(registry in network for network in _denied_networks(environment))  # after setup: denied
 
 

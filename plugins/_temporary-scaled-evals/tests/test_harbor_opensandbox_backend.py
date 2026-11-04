@@ -156,6 +156,19 @@ def test_staged_preflight_accepts_task_narrowing(tmp_path: Path) -> None:
     backend.preflight_staged_task(tmp_path, ["pypi.org", "igw.example.internal"])
 
 
+def test_staged_preflight_accepts_hosts_covered_by_a_wildcard_or_cidr(tmp_path: Path) -> None:
+    _write_task(tmp_path, 'network_mode = "allowlist"\nallowed_hosts = ["en.wikipedia.org", "10.1.2.3"]\n')
+
+    backend.preflight_staged_task(tmp_path, ["*.wikipedia.org", "10.0.0.0/8"])
+
+
+def test_staged_preflight_rejects_hosts_outside_a_wildcard_or_cidr(tmp_path: Path) -> None:
+    _write_task(tmp_path, 'network_mode = "allowlist"\nallowed_hosts = ["wikipedia.org.evil.example", "11.0.0.1"]\n')
+
+    with pytest.raises(ValueError, match=r"11\.0\.0\.1.*wikipedia\.org\.evil\.example"):
+        backend.preflight_staged_task(tmp_path, ["*.wikipedia.org", "10.0.0.0/8"])
+
+
 SEPARATE_VERIFIER = '\n[verifier]\nenvironment_mode = "separate"\n'
 
 
