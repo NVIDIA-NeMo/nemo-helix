@@ -112,7 +112,7 @@ def task_resources_violation(task_config: TaskConfig, policy: ResolvedHarborSand
     return None
 
 
-GpuRefusal = Literal["gpu_unsupported", "gpu_request_exceeds_policy", "unsupported_gpu_type"]
+GpuRefusal = Literal["invalid_task_config", "gpu_unsupported", "gpu_request_exceeds_policy", "unsupported_gpu_type"]
 
 
 def task_gpus_violation(task_config: TaskConfig, policy: ResolvedHarborSandboxPolicy) -> tuple[GpuRefusal, str] | None:
@@ -120,10 +120,17 @@ def task_gpus_violation(task_config: TaskConfig, policy: ResolvedHarborSandboxPo
 
     A separate verifier asks for its own GPUs. A task's ``gpu_types`` lists the types it accepts, so one that
     names none of the profile's types is refused rather than run on another GPU; one that names none accepts any.
+    A negative count is a malformed task: Harbor accepts any integer, but sandboxes only get GPUs for a positive
+    count, so letting it through would run the task without the GPUs it appears to ask for.
     """
     profile_types = {gpu_type.casefold() for gpu_type in policy.gpu_types}
     for sandbox in task_sandboxes(task_config, policy):
         gpus = sandbox.config.gpus or 0
+
+        # Checked before the profile's limits, so a negative count is malformed whatever the profile offers.
+        if gpus < 0:
+            return "invalid_task_config", f"{sandbox.role} sandbox gpus={gpus} must not be negative"
+
         if gpus == 0:
             continue
 

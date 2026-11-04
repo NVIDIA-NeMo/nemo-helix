@@ -374,6 +374,8 @@ async def test_settled_preparation_is_returned_unchanged(clients, sandbox_policy
     ("config", "code"),
     [
         ({"environment": {"gpus": 1}}, "gpu_unsupported"),
+        # A negative count is malformed, not just more GPUs than the profile has.
+        ({"environment": {"gpus": -1}}, "invalid_task_config"),
         ({"environment": {"os": "windows"}}, "windows_unsupported"),
         # A CPU agent with a GPU verifier would still ask OpenSandbox for a GPU.
         (
@@ -415,8 +417,15 @@ async def test_a_gpu_profile_takes_gpu_tasks(clients, archive, sandbox_policy, c
         ),
         # Running an H100 task on an A100 would change what it measures, so it isn't run at all.
         ({"environment": {"gpus": 1, "gpu_types": ["H100"]}}, "unsupported_gpu_type", "accepts GPU types H100"),
+        # Sandboxes only get GPUs for a positive count, so a negative one would run without any.
+        ({"environment": {"gpus": -1}}, "invalid_task_config", "agent sandbox gpus=-1 must not be negative"),
+        (
+            {"environment": {"gpus": 0}, "verifier": {"environment_mode": "separate", "environment": {"gpus": -1}}},
+            "invalid_task_config",
+            "verifier sandbox gpus=-1 must not be negative",
+        ),
     ],
-    ids=["count", "verifier-count", "type"],
+    ids=["count", "verifier-count", "type", "negative", "verifier-negative"],
 )
 async def test_a_gpu_profile_refuses_what_it_cannot_give(clients, archive, sandbox_policy, config, code, detail):
     policy = sandbox_policy.model_copy(update={"max_gpus": 2, "gpu_types": ("A100",)})
