@@ -27,7 +27,7 @@ import type {
   RunJobsListFilter as AnonymizerJobsListFilter,
   RunJobsSortField as AnonymizerJobsSortField,
 } from '@nemo/sdk/generated/anonymizer/schema';
-import { Banner, Button, Text } from '@nvidia/foundations-react-core';
+import { Button, Text } from '@nvidia/foundations-react-core';
 import { AnonymizerJobActionsMenu } from '@studio/components/AnonymizerJobActionsMenu';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
@@ -52,7 +52,6 @@ export const AnonymizerJobsDataView: FC = () => {
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<AnonymizerJobWithId[]>([]);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
 
   const deleteJobMutation = useAnonymizerDeleteRunJob({
     mutation: {
@@ -182,13 +181,7 @@ export const AnonymizerJobsDataView: FC = () => {
         rowActionsColumn({
           size: 70,
           enableResizing: false,
-          cell: ({ row }) => (
-            <AnonymizerJobActionsMenu
-              job={row.original}
-              includeViewDetails
-              onCancelError={setCancelError}
-            />
-          ),
+          cell: ({ row }) => <AnonymizerJobActionsMenu job={row.original} includeViewDetails />,
         }),
       ],
       []
@@ -198,12 +191,6 @@ export const AnonymizerJobsDataView: FC = () => {
 
   return (
     <>
-      {cancelError && (
-        <Banner kind="inline" status="error">
-          {cancelError}
-        </Banner>
-      )}
-
       <StudioDataView<AnonymizerJobWithId>
         dataViewState={dataViewState}
         searchField="name"
