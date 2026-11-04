@@ -472,3 +472,42 @@ uv run --frozen python script/test_e2e.py start --url http://localhost:8080
 # tail a job running at http://production:8000
 uv run --frozen python script/test_e2e.py tail JOB_ID --url http://production:8000
 ```
+
+## Step ConfigMap ownership and recovery
+
+New step ConfigMaps are attached to their Kubernetes or Volcano Job using its
+actual UID. Kubernetes garbage collection removes the ConfigMap when that Job
+is deleted, including TTL deletion while the execution controller is stopped.
+Explicit termination remains idempotent.
+
+The execution backends also sweep existing unowned step ConfigMaps once per
+minute. Each pass scans up to five pages of five ConfigMaps, advancing past
+pages without eligible candidates, and processes at most five candidates. It
+reads pods once for the batch and reports progress between requests. The scan
+retains its continuation token when the page limit or work budget is reached.
+When a snapshot expires, the server's replacement token preserves forward
+progress through retained ConfigMaps. A missing or invalid replacement token
+restarts the scan safely.
+A two-second work budget stops starting further candidates; in-flight requests
+use connection/read timeouts of one/two seconds. Unfinished candidates resume
+on the next pass. Restarting the controller starts the scan again.
+
+Candidates must be managed step ConfigMaps older than five minutes with complete
+identity labels and configuration data. A live Job repairs missing ownership.
+Otherwise, deletion requires a terminal or missing platform step, no Kubernetes
+or Volcano Job, and no pod reference. API lookup failures preserve configuration.
+UID and resourceVersion preconditions protect concurrent changes.
+
+The controller Role grants ConfigMap patch access and read-only Volcano Job
+access even when Volcano scheduling is disabled. Legacy ConfigMaps do not record
+their backend, so both Job APIs must be checked before deletion. Custom Roles
+must include these permissions; forbidden lookups never establish absence.
+
+The existing Job cleanup pass also checks a rotating batch of up to five
+fully identified managed workloads for cancelled platform steps, with a
+two-second work budget. It terminates cancelled workloads even when their Job
+is unfinished, so a launch that finishes after cancellation is caught on a
+later pass. Failed and completed step retention is unchanged. Cancellation cleanup requires complete step identity and an explicit cancelled
+status; missing records and failed lookups defer this cleanup.
+This adds bounded platform lookups and uses the existing Job list and termination
+path; it adds no pod listings. Progress is reported after lookups and termination.
