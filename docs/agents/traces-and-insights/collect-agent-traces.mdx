@@ -350,6 +350,10 @@ Once you are ingesting evaluation runs, group them into an **Experiment** to com
 side. Refer to [Experiments](/documentation/evaluate-models/experiments), or use the agent-assisted
 `nemo-experiments-upload` skill to go from zero to a populated leaderboard.
 
+To compare versions of one agent, give each candidate its own Evaluation and select its traces by
+Evaluation name. Refer to
+[Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates).
+
 ## Operations
 
 ### Limits
@@ -391,6 +395,8 @@ for interactive reads over recent traces and periodic aggregate queries.
 
 - [Experiments](/documentation/evaluate-models/experiments): roll evaluation runs up into a comparable
   leaderboard built from this telemetry.
+- [Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates):
+  keep each candidate's traces apart by Evaluation.
 - [Insights from Traces](/documentation/agents/traces-and-insights/insights-from-traces): find
   recurring failures in these traces.
 - [Optimize Agents](/documentation/agents/optimize-agents): use captured traces as the baseline for

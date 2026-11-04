@@ -5,15 +5,20 @@
 
 Every job passes an unbound vLLM template as its ``deployment_config``, so the job's own
 model_entity step deploys the output. The test waits for that deployment, sends one request
-through the inference gateway, and deletes it. Smoke checks that the path works, not quality.
+through the inference gateway, and deletes it. Automodel SFT outputs are then also served on the
+model-free NIM (NIM 2.x). Smoke checks that the path works, not quality.
 """
 
+import logging
+import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 from nemo_automodel_plugin.schema import AutomodelJobInput
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.client.errors import NemoHTTPError
+from nemo_helix_plugin.models.types import ToolCallConfig
 from nemo_unsloth_plugin.schema import UnslothJobInput
 from pydantic import BaseModel
 
@@ -21,11 +26,36 @@ from e2e.customizer import customizer_eval as ceval
 from e2e.customizer import customizer_jobs as jobs
 from e2e.customizer.customization_helpers import assert_output_registered, unique_name
 
+logger = logging.getLogger(__name__)
+
 MAX_STEPS = 5
 GRPO_MAX_STEPS = 3
 JOB_TIMEOUT_SECONDS = 2700
 
 ServeCheck = Callable[[NemoClient, str, str, str], None]
+
+# NIM loads LoRA adapters from a folder it polls, so an adapter is routable a short while
+# after the base deployment is READY.
+ADAPTER_LOAD_TIMEOUT_S = 600
+# A ChatML template behind a fixed preamble of this many words. Qwen's own template renders the
+# question in a few dozen prompt tokens and this one in at least this many, so `prompt_tokens`
+# shows the model-free NIM applied the deployment's template while the deployment still answers.
+# The empty think block is what Qwen3's template emits for enable_thinking=False.
+CHAT_TEMPLATE_PREAMBLE_WORDS = 256
+PREAMBLE_CHAT_TEMPLATE = (
+    "{% for _ in range(" + str(CHAT_TEMPLATE_PREAMBLE_WORDS) + ") %} nhx{% endfor %}\n"
+    "{% for message in messages %}<|im_start|>{{ message['role'] }}\n{{ message['content'] }}<|im_end|>\n{% endfor %}"
+    "{% if add_generation_prompt %}<|im_start|>assistant\n<think>\n\n</think>\n\n{% endif %}"
+)
+WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]},
+    },
+}
+WEATHER_QUESTION = [{"role": "user", "content": "What is the weather in Paris right now?"}]
 
 
 def _rl_job_input() -> type[BaseModel]:
@@ -85,9 +115,82 @@ def test_automodel_sft_smoke(
             "deployment_config": f"{ws}/{vllm_lora_template}",
         }
     )
-    _train_and_serve(
-        client, ws, "automodel", spec, base_entity=automodel_base_entity, output=output, lora=finetuning_type == "lora"
+    lora = finetuning_type == "lora"
+    _train_and_serve(client, ws, "automodel", spec, base_entity=automodel_base_entity, output=output, lora=lora)
+    _serve_on_model_free_nim(client, ws, base_entity=automodel_base_entity, output=output, lora=lora)
+
+
+def _serve_on_model_free_nim(client: NemoClient, workspace: str, *, base_entity: str, output: str, lora: bool) -> None:
+    """Serve the same trained output on the model-free NIM and check the settings NIM 2.x reads.
+
+    A LoRA adapter is served from its base model, which also carries a custom chat template. A
+    full-weight output is served with tool calling.
+    """
+    if lora:
+        deployment, config = jobs.deploy_model_free_nim(
+            client, workspace, base_entity, lora_enabled=True, chat_template=PREAMBLE_CHAT_TEMPLATE
+        )
+        try:
+            base = ceval.base_model_field(workspace, base_entity)
+            response = jobs.provider_chat(client, workspace, deployment, model=base)
+            prompt_tokens = response["usage"]["prompt_tokens"]
+            assert prompt_tokens >= CHAT_TEMPLATE_PREAMBLE_WORDS, (
+                f"model-free NIM did not apply the deployment's chat template: {prompt_tokens} prompt tokens"
+            )
+            jobs.assert_chat_completion(client, workspace, deployment, base)
+            _assert_chat_when_adapter_loads(client, workspace, deployment, ceval.lora_model_field(workspace, output))
+        finally:
+            jobs.delete_deployment(client, workspace, deployment, config)
+        return
+
+    deployment, config = jobs.deploy_model_free_nim(
+        client,
+        workspace,
+        output,
+        tool_call_config=ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=True),
     )
+    try:
+        model = ceval.base_model_field(workspace, output)
+        jobs.assert_chat_completion(client, workspace, deployment, model)
+        # vLLM rejects tool_choice "auto" unless --enable-auto-tool-choice and --tool-call-parser
+        # are set, so a successful response shows the tool calling settings reached NIM.
+        jobs.provider_chat(
+            client,
+            workspace,
+            deployment,
+            model=model,
+            messages=WEATHER_QUESTION,
+            tools=[WEATHER_TOOL],
+            tool_choice="auto",
+        )
+        # "auto" may answer in plain text, so force a call to check one comes back.
+        response = jobs.provider_chat(
+            client,
+            workspace,
+            deployment,
+            model=model,
+            messages=WEATHER_QUESTION,
+            tools=[WEATHER_TOOL],
+            tool_choice="required",
+            max_tokens=64,
+        )
+        tool_calls = response["choices"][0]["message"].get("tool_calls")
+        assert isinstance(tool_calls, list) and tool_calls, response
+    finally:
+        jobs.delete_deployment(client, workspace, deployment, config)
+
+
+def _assert_chat_when_adapter_loads(client: NemoClient, workspace: str, deployment: str, adapter_model: str) -> None:
+    deadline = time.monotonic() + ADAPTER_LOAD_TIMEOUT_S
+    while True:
+        try:
+            jobs.assert_chat_completion(client, workspace, deployment, adapter_model)
+            return
+        except NemoHTTPError as error:
+            if time.monotonic() > deadline:
+                raise
+            logger.info("Adapter %s not served yet (HTTP %s), retrying", adapter_model, error.status_code)
+            time.sleep(15)
 
 
 @pytest.mark.platform("docker", "kubernetes")

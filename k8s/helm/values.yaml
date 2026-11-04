@@ -729,6 +729,10 @@ baseHelixConfig: |
   # -- garak is the configuration specific to the Garak service
   garak: {}
 
+  # -- tavily is the configuration for the Tavily web-search plugin. Set `enabled: false` to mount no routes.
+  tavily:
+    enabled: true
+
   # -- data_designer is the configuration specific to the Data Designer service
   data_designer:
     model_provider_registry:

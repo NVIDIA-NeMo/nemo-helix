@@ -73,20 +73,29 @@ def test_rl_grpo_reward_uplift(
     job_name, final = jobs.submit_and_wait_customization_job(client, "rl", spec, ws, timeout=TRAINING_TIMEOUT)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
 
-    val = jobs.training_metric_values(client, ws, job_name, "val_accuracy")
-    train = jobs.training_metric_values(client, ws, job_name, "train_reward")
+    metrics = jobs.training_metrics(client, ws, job_name)
+    val = jobs.require_metric(metrics, "val_accuracy", job_name)
+    train = jobs.require_metric(metrics, "train_reward", job_name)
     assert len(val) >= 2, f"expected validation before and after training, got val_accuracy={val}"
     quarter = max(1, len(train) // 4)
     early_train, late_train = mean(train[:quarter]), mean(train[-quarter:])
+    # Why a reward stays flat: rollouts cut off before their answer, or prompt groups whose
+    # rollouts all scored the same (GRPO gets no gradient from those). (first, last) per series.
+    health = {
+        name: (round(values[0], 4), round(values[-1], 4))
+        for name, values in sorted(metrics.items())
+        if values and name.endswith(("truncation_rate", "pct_mixed", "gen_tokens_per_sample/mean"))
+    }
     logger.info(
-        "rl grpo: val_accuracy %.4f -> %.4f; train_reward first-quarter mean %.4f -> last-quarter mean %.4f",
+        "rl grpo: val_accuracy %.4f -> %.4f; train_reward first-quarter mean %.4f -> last-quarter mean %.4f; %s",
         val[0],
         val[-1],
         early_train,
         late_train,
+        health,
     )
-    assert val[-1] > val[0], f"val_accuracy did not increase: start={val[0]} end={val[-1]} (all: {val})"
+    assert val[-1] > val[0], f"val_accuracy did not increase: start={val[0]} end={val[-1]} (all: {val}); {health}"
     assert late_train > early_train, (
         f"train_reward did not increase: first-quarter mean={early_train} last-quarter mean={late_train} "
-        f"over {len(train)} steps"
+        f"over {len(train)} steps; {health}"
     )

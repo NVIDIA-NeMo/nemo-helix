@@ -9,8 +9,8 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent, { UserEvent } from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 
 const JOB_NAME = 'test-job-abc123';
@@ -58,7 +58,11 @@ describe('CancelJobButton', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel Job' }));
 
     expect(screen.getByText(`Cancel ${JOB_NAME}`)).toBeInTheDocument();
-    expect(screen.getByText(/Canceling this job will permanently stop it/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Cancelling stops this job and can't be undone. A cancelled job can't be resumed or rerun, but it can still be deleted. It may show as Cancelling briefly before it stops."
+      )
+    ).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'Cancel Job' }).length).toBeGreaterThan(0);
   });
 
@@ -103,4 +107,94 @@ describe('CancelJobButton', () => {
 
     expect(await screen.findByRole('status')).toBeInTheDocument();
   });
+
+  const CANCEL_URL = `${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name/cancel`;
+  const openAndGetSubmit = async (user: UserEvent) => {
+    await user.click(screen.getByRole('button', { name: 'Cancel Job' }));
+    const buttons = screen.getAllByRole('button', { name: 'Cancel Job' });
+    return buttons[buttons.length - 1];
+  };
+
+  it('dismissing sends no POST', async () => {
+    let posts = 0;
+    server.use(
+      http.post(CANCEL_URL, () => {
+        posts += 1;
+        return HttpResponse.json({});
+      })
+    );
+    const user = userEvent.setup();
+    renderButton(HelixJobStatus.active);
+    await openAndGetSubmit(user);
+
+    await user.keyboard('{Escape}');
+
+    await waitFor(() => expect(screen.queryByText(`Cancel ${JOB_NAME}`)).not.toBeInTheDocument());
+    expect(posts).toBe(0);
+  });
+
+  it('sends exactly one POST even when submit is clicked twice', async () => {
+    let posts = 0;
+    server.use(
+      http.post(CANCEL_URL, async () => {
+        posts += 1;
+        await delay(50);
+        return HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelled });
+      })
+    );
+    const user = userEvent.setup();
+    renderButton(HelixJobStatus.active);
+    const modalSubmit = await openAndGetSubmit(user);
+
+    await user.dblClick(modalSubmit);
+
+    await waitFor(() => expect(screen.queryByText(`Cancel ${JOB_NAME}`)).not.toBeInTheDocument());
+    expect(posts).toBe(1);
+  });
+
+  it('shows a 409 detail inside the open dialog and closes after a successful retry', async () => {
+    let posts = 0;
+    server.use(
+      http.post(CANCEL_URL, () => {
+        posts += 1;
+        return posts === 1
+          ? HttpResponse.json({ detail: 'Job is already finishing' }, { status: 409 })
+          : HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelled });
+      })
+    );
+    const user = userEvent.setup();
+    renderButton(HelixJobStatus.active);
+    const modalSubmit = await openAndGetSubmit(user);
+
+    await user.click(modalSubmit);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('Job is already finishing')).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel Job' }));
+
+    await waitFor(() => expect(screen.queryByText(`Cancel ${JOB_NAME}`)).not.toBeInTheDocument());
+    expect(posts).toBe(2);
+  });
+
+  it('announces the request, then the result once the job reaches cancelled', async () => {
+    server.use(
+      http.post(CANCEL_URL, () =>
+        HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelling })
+      ),
+      http.get(`${PLATFORM_BASE_URL}/apis/jobs/v2/workspaces/:workspace/jobs/:name`, () =>
+        HttpResponse.json({ name: JOB_NAME, status: HelixJobStatus.cancelled })
+      )
+    );
+    const user = userEvent.setup();
+    renderButton(HelixJobStatus.active);
+    const modalSubmit = await openAndGetSubmit(user);
+
+    await user.click(modalSubmit);
+
+    expect(await screen.findByText(`Cancellation requested for ${JOB_NAME}.`)).toBeInTheDocument();
+    expect(
+      await screen.findByText(`Job ${JOB_NAME} cancelled.`, undefined, { timeout: 6000 })
+    ).toBeInTheDocument();
+  }, 15_000);
 });
