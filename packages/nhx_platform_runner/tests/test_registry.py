@@ -29,10 +29,14 @@ class _FakeEntryPoint:
         return self._loaded
 
 
-def install_plugin_services(monkeypatch, entries: dict[str, _FakeEntryPoint]) -> dict[str, _FakeEntryPoint]:
-    """Make *entries* the installed ``nemo.services`` entry points for the registry."""
-    monkeypatch.setattr(registry, "discover_entry_points", lambda group: entries if group == "nemo.services" else {})
+def install_plugins(monkeypatch, group: str, entries: dict[str, _FakeEntryPoint]) -> dict[str, _FakeEntryPoint]:
+    """Make *entries* the installed entry points of *group* (and no other group) for the registry."""
+    monkeypatch.setattr(registry, "discover_entry_points", lambda name: entries if name == group else {})
     return entries
+
+
+def install_plugin_services(monkeypatch, entries: dict[str, _FakeEntryPoint]) -> dict[str, _FakeEntryPoint]:
+    return install_plugins(monkeypatch, "nemo.services", entries)
 
 
 class AgentsService(NemoService):
@@ -95,7 +99,7 @@ def test_service_groups_include_evaluator_plugin_service(monkeypatch):
 
 def test_controller_groups_include_plugin_controllers(monkeypatch):
     clear_registry_caches()
-    monkeypatch.setattr(registry, "discover_controllers", lambda: {"agents-deployment": AgentsDeploymentController})
+    install_plugins(monkeypatch, "nemo.controllers", {"agents-deployment": _FakeEntryPoint(AgentsDeploymentController)})
     monkeypatch.setattr(registry, "AVAILABLE_CONTROLLERS", {"jobs": "nhx.core.jobs.controllers.main:run"})
 
     available = registry.get_available_controllers()
@@ -107,7 +111,7 @@ def test_controller_groups_include_plugin_controllers(monkeypatch):
 
 def test_default_controllers_include_plugin_controllers(monkeypatch):
     clear_registry_caches()
-    monkeypatch.setattr(registry, "discover_controllers", lambda: {"agents-deployment": AgentsDeploymentController})
+    install_plugins(monkeypatch, "nemo.controllers", {"agents-deployment": _FakeEntryPoint(AgentsDeploymentController)})
     monkeypatch.setattr(registry, "AVAILABLE_CONTROLLERS", {"jobs": "nhx.core.jobs.controllers.main:run"})
 
     available = registry.get_available_controllers()
@@ -247,3 +251,46 @@ def test_a_broken_plugin_falls_back_to_the_built_in_service_of_the_same_name(mon
 
     assert available["agents"] == "nhx.agents.main:service"
     assert "agents" in available
+
+
+def test_controller_names_do_not_import_plugin_controllers(monkeypatch):
+    clear_registry_caches()
+    entry = _FakeEntryPoint(error=AssertionError("must not be imported"))
+    install_plugins(monkeypatch, "nemo.controllers", {"agents-deployment": entry})
+
+    available = registry.get_available_controllers()
+    groups = registry.get_controller_groups(available)
+
+    assert "agents-deployment" in groups["all"]
+    assert "agents-deployment" in registry.get_default_controllers(groups)
+    assert entry.loads == 0
+
+
+def test_controller_lookup_builds_a_run_function_once(monkeypatch):
+    clear_registry_caches()
+    entry = _FakeEntryPoint(AgentsDeploymentController)
+    install_plugins(monkeypatch, "nemo.controllers", {"agents-deployment": entry})
+
+    available = registry.get_available_controllers()
+    run_func = available["agents-deployment"]
+
+    assert callable(run_func)
+    assert available["agents-deployment"] is run_func
+    assert entry.loads == 1
+
+
+def test_a_controller_that_fails_to_load_is_reported_absent(monkeypatch):
+    clear_registry_caches()
+    install_plugins(monkeypatch, "nemo.controllers", {"agents-deployment": _FakeEntryPoint(error=ImportError("boom"))})
+
+    available = registry.get_available_controllers()
+
+    assert available.get("agents-deployment") is None
+    assert "agents-deployment" not in available
+
+
+def test_an_entry_that_is_not_a_service_class_is_reported_absent(monkeypatch):
+    clear_registry_caches()
+    install_plugin_services(monkeypatch, {"agents": _FakeEntryPoint(object())})
+
+    assert registry.get_available_services().get("agents") is None

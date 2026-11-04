@@ -245,8 +245,13 @@ def _plugin_service_class(service_name: str) -> type:
     return _Plugin
 
 
-def _install_plugins(monkeypatch: pytest.MonkeyPatch, entries: dict[str, _PluginEntryPoint]) -> None:
-    monkeypatch.setattr(registry, "discover_entry_points", lambda group: entries if group == "nemo.services" else {})
+def _install_plugins(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: dict[str, _PluginEntryPoint],
+    controllers: dict[str, _PluginEntryPoint] | None = None,
+) -> None:
+    groups = {"nemo.services": entries, "nemo.controllers": controllers or {}}
+    monkeypatch.setattr(registry, "discover_entry_points", lambda group: groups.get(group, {}))
 
 
 def test_resolving_selected_services_loads_only_selected_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,6 +273,23 @@ def test_an_unloadable_plugin_named_explicitly_is_an_unknown_service(monkeypatch
 
     with pytest.raises(ValueError, match="Unknown services: agents"):
         resolve(services=["agents"], controllers=[])
+
+
+def test_resolving_without_controllers_imports_no_plugin_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _PluginEntryPoint(error=AssertionError("unselected controllers must not be imported"))
+    _install_plugins(monkeypatch, {}, controllers={"agents-deployment": controller})
+
+    resolved = resolve(services=["entities"], controllers=[])
+
+    assert resolved.controllers == set()
+    assert controller.loads == 0
+
+
+def test_an_unloadable_controller_named_explicitly_is_an_unknown_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_plugins(monkeypatch, {}, controllers={"agents-deployment": _PluginEntryPoint(error=ImportError("boom"))})
+
+    with pytest.raises(ValueError, match="Unknown controllers: agents-deployment"):
+        resolve(services=["entities"], controllers=["agents-deployment"])
 
 
 def test_an_unloadable_plugin_drops_out_of_a_service_group(monkeypatch: pytest.MonkeyPatch) -> None:

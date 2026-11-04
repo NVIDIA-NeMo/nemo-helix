@@ -520,6 +520,8 @@ def create_default_app() -> FastAPI:
     services = []
     for service_name in service_names:
         service_value = available_services.get(service_name)
+        if service_value is None and not service_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if service_value is None:
             available = ", ".join(sorted(available_services))
             raise ValueError(
@@ -535,6 +537,8 @@ def create_default_app() -> FastAPI:
     controller_run_funcs: dict[str, ControllerRunFunc] = {}
     for controller_name in controller_names:
         controller_value = available_controllers.get(controller_name)
+        if controller_value is None and not controller_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if controller_value is None:
             available = ", ".join(sorted(available_controllers))
             raise ValueError(
