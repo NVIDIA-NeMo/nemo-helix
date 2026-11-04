@@ -6,7 +6,8 @@
 These tests spawn REAL child processes via ``daemonize_services()``, exercise
 real lock acquisition, descriptor file I/O, HTTP readiness probing, and
 graceful shutdown via ``stop_instance()``.  Nothing is monkeypatched away —
-the child runs a real uvicorn server with the ``hello-world`` service.
+the child runs a real uvicorn server with the ``hello-world`` service. The
+early-exit test only rewrites the run request so the real child rejects it.
 
 Requirements:
 - All packages installed (``uv sync --all-packages``) so entry-point
@@ -16,6 +17,7 @@ Requirements:
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import subprocess
@@ -122,14 +124,26 @@ def test_daemonize_services_spawns_child_that_becomes_ready(tmp_path: Path) -> N
 
 
 @pytest.mark.integration
-def test_daemonize_services_child_exit_before_readiness(tmp_path: Path) -> None:
+def test_daemonize_services_child_exit_before_readiness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """When the child exits before becoming ready, ``daemonize_services``
     should raise ``ServicesStartupExitedError`` with the log path."""
-    # Spawn a child that will exit immediately: give it a bogus service name
-    # that will fail validation in resolve_run_configuration.
+    # The child must exit well inside the readiness window. An unknown service
+    # name is not early enough: the child only rejects it after
+    # ``resolve_run_configuration`` imports every installed plugin service,
+    # which takes ~8 s warm and can exceed the timeout on a loaded CI runner.
+    # Instead, hand the real child a run request it rejects while building
+    # ``ServiceRunConfig``, before any plugin discovery.
+    write_run_request = services._write_run_request
+
+    def write_rejected_run_request(config: ServiceRunConfig) -> Path:
+        path = write_run_request(config)
+        path.write_text(json.dumps({"not_a_run_config_field": True}), encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(services, "_write_run_request", write_rejected_run_request)
     bad_cfg = ServiceRunConfig(
         mode=services.ServiceMode.DAEMON,
-        services=("nonexistent-service-xyz",),
+        services=("hello-world",),
         controllers=(),
         sidecars=(),
         transport="tcp",
