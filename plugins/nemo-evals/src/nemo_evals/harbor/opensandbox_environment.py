@@ -36,7 +36,7 @@ from nemo_evals.harbor.setup_egress_readiness import (
     RESOLVE_TIMEOUT_SEC,
     resolvable_hosts,
 )
-from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
+from nhx_sandbox.egress import EgressPolicy, EgressRule, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, sandbox_role
 from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_egress_target, verify_applied_egress
 
@@ -175,11 +175,12 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         if mode == NetworkMode.PUBLIC or not self._agent_channel_hosts:
             return super().egress_policy()
         task_hosts = tuple(self._network_policy.allowed_hosts) if mode == NetworkMode.ALLOWLIST else ()
-        return build_egress_policy(
-            EgressAllowlist(
-                targets=(*task_hosts, *self._agent_channel_hosts), resolver_addresses=self._resolver_addresses
-            )
-        )
+        return build_egress_policy(self._egress_allowlist((*task_hosts, *self._agent_channel_hosts)))
+
+    @override
+    def _operator_hosts(self) -> tuple[str, ...]:
+        # The setup hosts are trusted only while the setup window is open; see ``agent_setup_egress``.
+        return (*super()._operator_hosts(), *self._agent_channel_hosts)
 
     @asynccontextmanager
     async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
@@ -199,7 +200,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         closed = self.egress_policy()
         allowed = tuple(rule.target for rule in closed.rules if rule.action == "allow")
         opened = build_egress_policy(
-            EgressAllowlist(targets=(*allowed, *self._agent_setup_hosts), resolver_addresses=self._resolver_addresses)
+            self._egress_allowlist((*allowed, *self._agent_setup_hosts), extra_operator_hosts=self._agent_setup_hosts)
         )
         label = f"OpenSandbox sandbox for session {self.session_id}"
         keep = await self._list_processes()
