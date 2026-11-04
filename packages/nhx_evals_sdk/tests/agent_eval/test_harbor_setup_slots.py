@@ -193,6 +193,14 @@ async def test_a_slot_directory_others_can_write_to_isnt_used(tmp_path: Path, ca
     assert list(directory.iterdir()) == []
 
 
+async def test_a_file_in_the_slot_directorys_place_isnt_used(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """mkdir can't make a directory there: trials set up without the cap rather than failing at environment start."""
+    directory = tmp_path / "slots"
+    directory.write_text("not a directory")
+    assert await _uncapped(directory)
+    assert "isn't this user's own" in caplog.text
+
+
 async def test_a_slot_directory_another_user_owns_isnt_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     directory = tmp_path / "slots"
     directory.mkdir(mode=0o700)

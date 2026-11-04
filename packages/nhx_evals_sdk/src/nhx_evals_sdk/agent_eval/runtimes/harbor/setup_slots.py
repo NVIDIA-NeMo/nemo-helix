@@ -14,9 +14,9 @@ its process exits, so a crashed run never keeps a slot. A trial takes one when i
 environment or an ``import_path`` environment built on it, such as the agent-layer environment; trials in any
 other environment (OpenSandbox, other providers) don't.
 
-``/tmp`` is shared, so another user may create the directory first, or put a FIFO or link at a slot's path. The
-directory is used only when it is this user's own and no one else can write to it; otherwise the run sets up
-without the cap. A slot file that isn't a regular file of the directory is skipped, never opened in a way that
+``/tmp`` is shared, so another user may create the directory first, put a file in its place, or put a FIFO or link
+at a slot's path. The directory is used only when it is this user's own and no one else can write to it;
+otherwise the run sets up without the cap. A slot file that isn't a regular file of the directory is skipped, never opened in a way that
 could block.
 """
 
@@ -120,8 +120,12 @@ class SetupSlots:
         if not _is_local_docker(event.config.environment) or event.trial_name in self._held:
             return
         if self._trusted is None:
-            self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self._trusted = _owned_by_this_user(self._directory)
+            try:
+                self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            except OSError:  # something else is at the path, or it can't be made: as untrusted as another's
+                self._trusted = False
+            else:
+                self._trusted = _owned_by_this_user(self._directory)
             if not self._trusted:
                 logger.warning(
                     "Agent setup slot directory %s isn't this user's own, or others can write to it; trials set up "
