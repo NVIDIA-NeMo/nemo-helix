@@ -7,14 +7,14 @@ import asyncio
 import ipaddress
 import logging
 from types import SimpleNamespace
-from typing import Any, override
+from typing import Any, Literal, override
 
 import pytest
 from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode, NetworkPolicy
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
-from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT
+from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT, RESOLVE_TIMEOUT_SEC
 from nhx_sandbox import egress
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from nhx_sandbox.opensandbox_policy import EgressVerificationError
@@ -100,13 +100,21 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
     execs: list[tuple[str, dict[str, Any]]]
     kill_exit: int
     unresolved: tuple[str, ...]
+    #: What the host check does instead of answering: raise this, or hang.
+    resolve_fails: Exception | Literal["hang"] | None
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         command = f"{opensandbox_environment.SHELL} -c {script}"
-        self.execs.append((command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}}))
+        self.execs.append(
+            (command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}, "timeout": timeout_sec})
+        )
         if script == RESOLVE_HOSTS_SCRIPT:
             self.calls.append("resolve")
+            if self.resolve_fails == "hang":
+                await asyncio.Event().wait()
+            if isinstance(self.resolve_fails, Exception):
+                raise self.resolve_fails
             unresolved = [host for host in env["HOSTS"].split() if host in self.unresolved]
             return ExecResult(stdout="".join(f"{host}\n" for host in unresolved), return_code=1 if unresolved else 0)
         if "kill -9" in command:
@@ -136,6 +144,7 @@ def _setup_environment(
     environment.execs = []
     environment.kill_exit = kill_exit
     environment.unresolved = ()
+    environment.resolve_fails = None
     environment._sandbox = _FakeSandbox(environment.egress_policy().rules, environment.calls)
     return environment
 
@@ -173,6 +182,31 @@ async def test_a_setup_host_that_does_not_resolve_is_logged_and_setup_still_runs
             ran = True
     assert ran
     assert "astral.sh did not resolve" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_the_host_check_is_bounded_in_the_sandbox(monkeypatch):
+    environment = _setup_environment(monkeypatch)
+    async with environment.agent_setup_egress():
+        pass
+    (timeout,) = [kwargs["timeout"] for command, kwargs in environment.execs if "getent" in command]
+    assert timeout == RESOLVE_TIMEOUT_SEC
+
+
+@pytest.mark.parametrize("failure", [ConnectionError("execd unreachable"), "hang"], ids=["raises", "hangs"])
+async def test_a_host_check_that_fails_or_hangs_is_logged_and_setup_still_runs(monkeypatch, caplog, failure):
+    """A failed or stuck check is only a warning: setup runs, inside the window, which then closes as usual."""
+    monkeypatch.setattr(opensandbox_environment, "RESOLVE_TIMEOUT_SEC", 0)
+    monkeypatch.setattr(opensandbox_environment, "_RESOLVE_TIMEOUT_SLACK_SEC", 0.05)
+    environment = _setup_environment(monkeypatch)
+    environment.resolve_fails = failure
+    ran = False
+    with caplog.at_level(logging.WARNING):
+        async with asyncio.timeout(5):
+            async with environment.agent_setup_egress():
+                ran = _allowed_now(environment) == {IGW, *SETUP}
+    assert ran and _allowed_now(environment) == {IGW}
+    assert "running agent setup anyway" in caplog.text
     assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
 
 
@@ -314,7 +348,7 @@ class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
         self.uploads.append((str(source_path), target_path))
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         self.scripts.append((script, env))
         self.script_env.append({**self._persistent_env, **env})
         return self.result

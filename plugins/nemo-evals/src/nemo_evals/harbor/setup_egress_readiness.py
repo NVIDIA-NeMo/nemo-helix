@@ -14,6 +14,9 @@ import ipaddress
 
 RESOLVE_ATTEMPTS = 5
 RESOLVE_RETRY_DELAY_SEC = 2
+#: The most the whole check may take: a resolver tool has no timeout of its own, so a DNS lookup that hangs must not
+#: spend the agent's setup budget. Past it, setup runs as it would with a host unresolved.
+RESOLVE_TIMEOUT_SEC = 30
 
 # Looks up each of $HOSTS with the first resolver tool the image has: getent, Python or nslookup. Prints each host
 # that never resolved, one per line, and exits 1 if any didn't; exits 0 without checking when the image has none.
