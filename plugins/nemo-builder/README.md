@@ -280,8 +280,8 @@ it too. Use a credential you can rotate.
 
 **If the push fails with `401`** on crane's first `HEAD`, rather than at login, check the username
 and password: Harbor answers bad credentials with an anonymous token, so the failure shows up only
-once crane uses it. Fix the secret, then submit with the next `revision`: the failed image's row stays
-`pending` (see [Reliability](#reliability)).
+once crane uses it. Fix the secret, then submit with the next `revision`: the failed image's row is
+failed once its job ends (see [Reliability](#reliability)).
 
 `helm uninstall` deletes `$NS-builds` and its work volume. The images stay in the registry.
 
@@ -389,7 +389,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
+| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit or Jobs refuses the build, or by the `builder-queue` controller once the image's job has ended without publishing it, or when no job was ever created for it (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -532,7 +532,7 @@ sequenceDiagram
    in one write.
 
 One failed Dockerfile, or one sandbox that can't run, doesn't stop the rest of the set: the other
-images still build, push and complete. The failed image's row stays `pending` (see
+images still build, push and complete. The failed image's row is failed once the job ends (see
 [Reliability](#reliability)). If every image in a set fails, `push` never runs.
 
 | | Runs as | Holds | Work volume | Runs your code |
@@ -732,10 +732,17 @@ volume and `node_selector`, so the profiles must agree with each other:
 
 ### Reliability
 
-- **Nothing fails a row whose build fails.** Its row stays `pending`. So do the rows of a submit
-  that died, or that Jobs refused, between writing them and creating its job, and the rows of a job
-  whose push step never started, because a secret was deleted after the submit checked it. Poll
-  with a deadline. Submitting the same request again reuses its rows.
+- **A row whose build fails stays `pending` until its job ends.** The `builder-queue` controller then
+  fails it, with the reason in `status_detail`. Each pass it fails the images a queued build's ended
+  job left unpublished. Once a minute it also sweeps every other waiting image:
+  - one whose job has ended, as a build submitted without `max_concurrent_builds` leaves;
+  - one with neither a job nor a queued build ten minutes after it was written, as a submit that died,
+    or that Jobs refused, between writing its rows and creating its job leaves.
+
+  So poll until a row is `ready` or `failed`, with a deadline longer than your builds take. The
+  controller has to run: without it nothing fails a row, and with `max_concurrent_builds` set nothing
+  starts a build. Submitting the same request again reuses its rows while they wait; once they have
+  failed, submit the next `revision`.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
@@ -745,9 +752,12 @@ volume and `node_selector`, so the profiles must agree with each other:
   closes early, the sandbox's unfinished images fail. A retried `build` step fails while the
   previous attempt's sandbox still exists, and a sandbox whose `build` was killed is never deleted:
   it stays until someone deletes it.
-- **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
-  sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
-  profiles set it, so a failed build's contexts and layouts stay until someone deletes them.
+- **A failed build's files stay on the work volume for hours.** Jobs deletes a job's directory as soon
+  as its last step succeeds, when the push step's profile sets `cleanup_completed_jobs_immediately`,
+  as the chart's do. A failed job's directory goes once the platform's
+  `jobs.storage.failed_storage_ttl_seconds` has passed, four hours by default, and a cancelled job's on
+  Jobs' next retention pass. Until then its contexts and layouts take space on the volume every build
+  shares.
 - **`fetch` reads each file of a fileset whole into memory.** A build context with very large files
   can exhaust the step's memory. An archive is streamed to the work volume instead.
 - **An archive unpacks to at most 4 GiB and 100,000 entries.** A larger one fails the whole set,
@@ -839,6 +849,7 @@ The tests need no cluster, registry or running platform.
 | `backends.py`, `execution.py` | The deployment's backend, and the `execution` backend |
 | `compile.py` | Turns a plan into the `HelixJobSpec`, fetch, build and push, as a pure function |
 | `submit.py` | The submit sequence: plan, secrets, rows, then the job |
+| `controller.py` | `builder-queue`: starts queued builds under `max_concurrent_builds`, and fails the images no job will publish |
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
 | `signing.py` | What a signature says, cosign's format for storing it, and the key that makes it |
 | `registry.py` | The registry calls the push step makes to store a signature |

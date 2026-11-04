@@ -7,6 +7,10 @@ A submit with the cap set writes a :class:`QueuedBuild` instead of creating the 
 forgets the started builds whose jobs ended (failing any image they left unpublished), then creates jobs for the oldest queued ones until the cap is met,
 each as the user who submitted it, and moves that build's images from ``queued`` to ``pending``.
 
+Once a minute it also sweeps the waiting images no queued build accounts for, and fails those no job will publish:
+an image whose job ended, as a build submitted without the cap leaves, and one whose job and queued build were never
+created, as a submit that died or was refused after writing its rows leaves.
+
 Every step is safe to repeat: a job that already exists for the same request is adopted, so a pass that dies
 between creating a job and marking its build started just finishes the work on the next pass.
 """
@@ -14,8 +18,10 @@ between creating a job and marking its build started just finishes the work on t
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 from nemo_builder_plugin.config import BuilderConfig
@@ -38,6 +44,14 @@ logger = logging.getLogger(__name__)
 
 _ENDED = set(HelixJobStatus.terminals())
 ClientFactory = Callable[[str | RuntimePrincipal | None], AbstractAsyncContextManager[AsyncNemoClient]]
+
+ENDED_UNPUBLISHED = "not built: its build job ended without publishing it"
+NEVER_CREATED = "not built: its build job was never created"
+#: How long a waiting image with neither a job nor a queued build is left alone: far longer than a submit takes between
+#: writing its rows and creating either.
+ORPHAN_GRACE = timedelta(minutes=10)
+#: The sweep reads every waiting image and its job, so it runs less often than the queue.
+SWEEP_SECONDS = 60.0
 
 
 @asynccontextmanager
@@ -66,6 +80,7 @@ class BuildQueueController(NemoController):
         self._context: AbstractAsyncContextManager[AsyncNemoClient] | None = None
         self._entities: EntityClient | None = None
         self._jobs: AsyncJobsClient | None = None
+        self._next_sweep = 0.0
 
     @property
     def interval_seconds(self) -> float:
@@ -89,12 +104,20 @@ class BuildQueueController(NemoController):
         raise NotImplementedError
 
     async def reconcile(self) -> None:
+        builds = await self._queue()
+        await self._advance(builds)
+        if time.monotonic() >= self._next_sweep:
+            self._next_sweep = time.monotonic() + SWEEP_SECONDS
+            await self._sweep({(build.workspace, build.name) for build in builds})
+
+    async def _advance(self, builds: list[QueuedBuild]) -> None:
+        """Settle the queued builds whose jobs ended, then start the oldest waiting ones while the cap allows."""
         # ponytail: one global FIFO, so a workspace that submits 100 builds holds every slot until they drain.
         # Per-workspace fairness would take turns across workspaces in this loop.
         cap = self._cap()
         running = 0
         waiting: list[QueuedBuild] = []
-        for build in await self._queue():
+        for build in builds:
             if build.state == "queued":
                 waiting.append(build)
             elif await self._still_running(build):
@@ -198,7 +221,77 @@ class BuildQueueController(NemoController):
 
     async def _end(self, build: QueuedBuild) -> None:
         """Forget ``build``, whose job ended; any image it did not publish by then never will be, so fail it."""
-        await self._settle(build, "not built: its build job ended without publishing it")
+        await self._settle(build, ENDED_UNPUBLISHED)
+
+    async def _sweep(self, queued: set[tuple[str, str]]) -> None:
+        """Fail the waiting images that no queued build accounts for and that no job will publish.
+
+        ``queued`` names the builds the queue holds: it settles those itself. Any other waiting image belongs to a
+        build submitted without the cap, or to a submit that died or was refused between writing its rows and
+        creating its job or queued build.
+        """
+        try:
+            waiting = await self._waiting_rows()
+        except Exception:
+            logger.exception("could not list the waiting images; retrying next sweep")
+            return
+        groups: dict[tuple[str, str], list[ContainerImage]] = {}
+        for row in waiting:
+            workspace, _, job = row.provenance.job.partition("/")
+            if (workspace, job) not in queued:
+                groups.setdefault((workspace, job), []).append(row)
+        assert self._entities is not None
+        now = datetime.now(UTC)
+        for (workspace, job), rows in groups.items():
+            try:
+                detail = await self._abandoned(workspace, job, rows, now)
+                if detail is not None:
+                    await fail_rows(self._entities, await self._reread(rows), detail)
+            except Exception:
+                logger.exception(
+                    "could not sweep the images of job %s/%s; retrying next sweep",
+                    sanitize_for_log(workspace),
+                    sanitize_for_log(job),
+                )
+
+    async def _waiting_rows(self) -> list[ContainerImage]:
+        """Every ``queued`` and ``pending`` image in every workspace."""
+        assert self._entities is not None
+        rows: list[ContainerImage] = []
+        for status in ("queued", "pending"):
+            page = 1
+            while True:
+                result = await self._entities.list(
+                    ContainerImage, workspace="-", filter_obj={"status": status}, sort="created_at", page=page
+                )
+                rows.extend(result.data)
+                if not result.data or page >= result.pagination.total_pages:
+                    break
+                page += 1
+        return rows
+
+    async def _abandoned(self, workspace: str, job: str, rows: list[ContainerImage], now: datetime) -> str | None:
+        """Why no job will publish ``rows``, or None while one still might."""
+        assert self._jobs is not None
+        try:
+            found = (await self._jobs.get_job(workspace=workspace, name=job)).data()
+        except NotFoundError:
+            # A submit writes its rows first: give it time to create the job or queued build.
+            if all(_age(row, now) >= ORPHAN_GRACE for row in rows):
+                return NEVER_CREATED
+            return None
+        return ENDED_UNPUBLISHED if found.status in _ENDED else None
+
+    async def _reread(self, rows: list[ContainerImage]) -> list[ContainerImage]:
+        """``rows`` as they are now: a push step may have published one since the sweep listed it."""
+        assert self._entities is not None
+        fresh: list[ContainerImage] = []
+        for row in rows:
+            try:
+                fresh.append(await self._entities.get(ContainerImage, name=row.name, workspace=row.workspace))
+            except EntityNotFoundError:
+                continue
+        return fresh
 
     async def _settle(self, build: QueuedBuild, detail: str) -> None:
         """Fail ``build``'s waiting images, then forget it; kept for the next pass if any image couldn't be failed."""
@@ -226,3 +319,11 @@ class BuildQueueController(NemoController):
 
 def _label(build: QueuedBuild) -> str:
     return f"{sanitize_for_log(build.workspace)}/{sanitize_for_log(build.name)}"
+
+
+def _age(row: ContainerImage, now: datetime) -> timedelta:
+    """How long ago ``row`` was written; zero if the store didn't say, so an undated row is never taken for old."""
+    created = row.created_at
+    if created is None:
+        return timedelta(0)
+    return now - (created if created.tzinfo is not None else created.replace(tzinfo=UTC))
