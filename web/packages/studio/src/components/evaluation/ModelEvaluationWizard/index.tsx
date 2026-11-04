@@ -18,10 +18,6 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import { EvalWizard } from '@studio/components/evaluation/EvalWizard';
-import { ConfigureStep } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigureStep';
-import { EvaluationStep } from '@studio/components/evaluation/ModelEvaluationWizard/EvaluationStep';
-import { MetricPanel } from '@studio/components/evaluation/ModelEvaluationWizard/MetricPanel';
-import { specToFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/specToFormValues';
 import {
   COMPARISON_METRICS,
   EVALUATION_FORM_DEFAULTS,
@@ -29,7 +25,11 @@ import {
   evaluationSchema,
   NEW_CONFIG,
   REFERENCE_METRICS,
-} from '@studio/components/evaluation/ModelEvaluationWizard/types';
+} from '@studio/components/evaluation/EvalWizard/types';
+import { ConfigureStep } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigureStep';
+import { EvaluationStep } from '@studio/components/evaluation/ModelEvaluationWizard/EvaluationStep';
+import { MetricPanel } from '@studio/components/evaluation/ModelEvaluationWizard/MetricPanel';
+import { specToFormValues } from '@studio/components/evaluation/ModelEvaluationWizard/specToFormValues';
 import { useConfigNameStatus } from '@studio/components/evaluation/ModelEvaluationWizard/useConfigNameStatus';
 import { useCreateEvaluation } from '@studio/components/evaluation/ModelEvaluationWizard/useCreateEvaluation';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';

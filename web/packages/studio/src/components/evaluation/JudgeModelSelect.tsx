@@ -10,7 +10,7 @@ import { FormField } from '@nvidia/foundations-react-core';
 import { useSetFieldErrorOnApiError } from '@studio/hooks/evaluation/useSetFieldErrorOnApiError';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { parseEvaluationModelValue } from '@studio/util/evaluations';
-import { useState } from 'react';
+import { ReactNode, useState } from 'react';
 import { type FieldValues, type Path, useController, useFormContext } from 'react-hook-form';
 
 /** Judging needs a model that can actually serve a chat completion. */
@@ -30,7 +30,7 @@ export interface JudgeModelSelectProps<TFieldValues extends FieldValues = FieldV
   allowAdapters?: boolean;
   required?: boolean;
   placeholder?: string;
-  slotLabel?: string;
+  slotLabel?: ReactNode;
   /** Error to show instead of the field's own, for a problem derived outside the form state. */
   slotError?: string;
   requiredMessage?: string;

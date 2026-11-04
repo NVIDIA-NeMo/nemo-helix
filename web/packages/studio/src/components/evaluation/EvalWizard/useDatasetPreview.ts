@@ -12,7 +12,8 @@ import {
   useFilesListFilesetFiles,
   useFilesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
-import { isArrayPath } from '@studio/components/evaluation/ModelEvaluationWizard/types';
+import { useFilesetFile } from '@studio/api/files/useFilesetFile';
+import { isArrayPath } from '@studio/components/evaluation/EvalWizard/types';
 import { useDownloadFileHead } from '@studio/components/filesets/hooks/useDownloadFileHead';
 import {
   detectFormatFromPath,
@@ -125,10 +126,8 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     { query: { enabled: filesetEnabled } }
   );
 
-  const fileSize = useMemo(
-    () => filesResponse?.data?.find((file) => file.path === path)?.size,
-    [filesResponse, path]
-  );
+  const fileSize = filesResponse?.data?.find((file) => file.path === path)?.size;
+  const readsWholeFile = format === 'json' || format === 'parquet';
 
   /** Byte budget for the Range request.
    *
@@ -139,26 +138,36 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
    *  row query so it never fires with a bad budget.
    *
    *  A head is only safe for line-delimited formats. A truncated JSON array
-   *  cannot be parsed at all, so ``.json`` is read whole -- the same thing
-   *  ``handleInferFromExisting`` does for every format. */
-  const fileBytes = useMemo(() => {
-    if (fileSize === undefined) return undefined;
-    return format === 'json' ? fileSize : Math.min(fileSize, HEAD_BYTES);
-  }, [fileSize, format]);
+   *  cannot be parsed at all, and Parquet keeps its metadata in the footer, so
+   *  both are read whole -- the same thing ``handleInferFromExisting`` does for
+   *  every format. */
+  const fileBytes =
+    readsWholeFile || fileSize === undefined ? fileSize : Math.min(fileSize, HEAD_BYTES);
+
+  const wholeFile = useFilesetFile({
+    workspace: parsed?.workspace ?? '',
+    fileset: parsed?.name ?? '',
+    path,
+    enabled: readsWholeFile,
+  });
 
   /** Whether the read covers the entire file, i.e. whether a row total is real. */
-  const isComplete = useMemo(
-    () => fileBytes !== undefined && fileBytes === fileSize,
-    [fileBytes, fileSize]
-  );
+  const isComplete = fileBytes !== undefined && fileBytes === fileSize;
 
   const {
     data: preview,
     isFetching,
     error,
   } = useQuery({
-    queryKey: ['evaluation-new', 'dataset-row', datasetRef, fileBytes, rowIndex],
-    enabled: Boolean(parsed && path && format && fileBytes !== undefined),
+    queryKey: [
+      'evaluation-new',
+      'dataset-row',
+      datasetRef,
+      fileBytes,
+      wholeFile.dataUpdatedAt,
+      rowIndex,
+    ],
+    enabled: readsWholeFile ? Boolean(wholeFile.data) : Boolean(format) && fileBytes !== undefined,
     staleTime: Infinity,
     placeholderData: keepPreviousData,
     // A failed head is a dead end, not a flake: retrying just parks the user
@@ -166,16 +175,19 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     retry: false,
     queryFn: async () => {
       if (!parsed || !format) return null;
-      const buffer = await downloadFileHead({
-        workspace: parsed.workspace,
-        datasetName: parsed.name,
-        path,
-        bytes: fileBytes,
-      });
-      if (!buffer) {
-        throw new Error('Could not read the selected file.');
+      let blob = wholeFile.data;
+      if (!blob) {
+        const buffer = await downloadFileHead({
+          workspace: parsed.workspace,
+          datasetName: parsed.name,
+          path,
+          bytes: fileBytes,
+        });
+        if (!buffer) {
+          throw new Error('Could not read the selected file.');
+        }
+        blob = new File([buffer], path);
       }
-      const blob = new File([new TextDecoder('utf-8').decode(buffer)], path);
       return {
         row: await getRowAtIndex(blob, format, rowIndex),
         rowCount: await getFileRowCount(blob, format),
@@ -244,10 +256,10 @@ export function useDatasetPreview(datasetRef: string | null, rowIndex = 0): Data
     keyOptions,
     messagesColumn,
     messageSelectors,
-    isLoading: isFetching,
+    isLoading: isFetching || wholeFile.isFetching,
     error: unsupportedFormat
-      ? 'Unsupported file type. Pick a .json, .jsonl, or .csv file.'
-      : error || unreadable
+      ? 'Unsupported file type. Pick a .json, .jsonl, .csv, or .parquet file.'
+      : error || wholeFile.error || unreadable
         ? 'Could not read the selected file.'
         : null,
   };

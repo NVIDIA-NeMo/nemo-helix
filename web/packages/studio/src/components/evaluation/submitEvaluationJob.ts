@@ -234,10 +234,22 @@ export const buildAgentEvalRequestBody = (
 
 /** The bare agent target for ``evaluate/jobs``. Unlike the agent-evaluate target
  *  this is NOT wrapped in {kind, agent}: EvaluateInputSpec forbids extra keys and
- *  takes the agent object directly. The body renders the row-based ``prompt``
- *  rather than a task ``instruction``. */
-export const buildDatasetAgentTarget = (workspace: string, agent: string) =>
-  agentEndpoint(workspace, agent, 'prompt');
+ *  takes the agent object directly. The body renders the row-based request rather
+ *  than a task ``instruction``: a chat-messages ``prompt_template`` renders to
+ *  ``{messages}`` and is passed through whole, anything else renders to ``{prompt}``
+ *  — the same ``"messages" in request`` split the evaluator makes for a model. */
+export const buildDatasetAgentTarget = (
+  workspace: string,
+  agent: string,
+  promptTemplate: DatasetEvalSpec['prompt_template']
+) => {
+  const target = agentEndpoint(workspace, agent, 'prompt');
+  const isChatPrompt =
+    typeof promptTemplate === 'object' && promptTemplate !== null && 'messages' in promptTemplate;
+  return isChatPrompt
+    ? { ...target, body: { ...target.body, messages: '{{ messages }}' } }
+    : target;
+};
 
 /** Build the ``evaluate/jobs`` POST body from a dataset-driven config. ``params``
  *  must be exactly RunConfigOnline for an agent target, and ``prompt_template``
@@ -253,7 +265,7 @@ export const buildDatasetEvalRequestBody = (
     metrics: judgeModel
       ? spec.metrics.map((metric) => injectJudgeModel(metric, judgeModel))
       : spec.metrics,
-    target: buildDatasetAgentTarget(selections.workspace, selections.agent),
+    target: buildDatasetAgentTarget(selections.workspace, selections.agent, spec.prompt_template),
     prompt_template: spec.prompt_template,
     ...(spec.field_mapping ? { field_mapping: spec.field_mapping } : {}),
     params: agentRunParams(selections.parallelism),
