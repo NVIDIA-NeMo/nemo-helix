@@ -1,18 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-r"""Tier-4 tests for the Evaluator Run Controller: the real services answer what the unit-test fakes assume.
+"""Tier-4 tests for the Evaluator Run Controller: the real services answer what the unit-test fakes assume.
 
 Each test talks to a real ``nemo services run`` platform that is already running, with auth off
 (``NHX_AGENT_BASE_URL``) and on (``NHX_AGENT_AUTH_BASE_URL``). Nothing here starts, binds or stops a platform: a
 mode whose URL is unset skips, and a set URL fails unless it is a ready platform in that auth mode that is not
-running the Run Controller itself. ``launch_test_platform.py`` starts one with this harness's config, as CI does::
+running the Run Controller itself. The CI script starts one per auth mode with ``launch_test_platform.py``, waits
+for both, and runs this file against them; from the repository root::
 
-    uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18090 &
-    uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18092 --auth &
-    until curl -sf localhost:18090/health/ready && curl -sf localhost:18092/health/ready; do sleep 2; done
-    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
-        uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py -m integration
+    bash .github/scripts/run-taskset-run-controller-integration.sh
 
 Run this file on its own when the variables are set: the shared ``subprocess_platform`` fixtures read the same
 variables as the port to start their own platform on, and would find it taken.
@@ -283,6 +280,7 @@ async def test_store_semantics_auth_on(auth_controller_platform: str) -> None:
 
 @requires_auth_on_platform
 async def test_auth_context_snapshot_is_service_only_and_survives_service_writes(auth_controller_platform: str) -> None:
+    """The run's ``AuthContext`` snapshot: service reads see it, delegated reads don't, and service writes keep it."""
     async with _controller_client(auth_controller_platform) as service:
         store = _store(service)
         space = await _shared_group_only_workspace(auth_controller_platform)
@@ -345,6 +343,7 @@ async def _cancel_and_wait(reads: JobsServiceRunJobs, name: str) -> None:
 
 @requires_auth_on_platform
 async def test_group_only_creator_creates_records_through_full_principal_only(auth_controller_platform: str) -> None:
+    """A group-only creator's records need the full delegated principal; delegating only the id is refused."""
     async with _controller_client(auth_controller_platform) as service:
         space, run = await _group_run(auth_controller_platform, service)
         principal = on_behalf_of(run)
