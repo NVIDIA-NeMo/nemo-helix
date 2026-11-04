@@ -119,15 +119,6 @@ How the profile combines with the network mode in the task's `task.toml`:
 
 - The server address and API key aren't profile keys. They come from the `opensandbox` Helm values.
 
-### Reserved
-
-Accepted, but no effect in this release. Leave them unset:
-
-- `scoring_reserve_s`
-- `unschedulable_after_s`
-- `stale_attempt_cleanup_timeout_s`
-- `image_reference_mode`
-
 ## Run limits and controller
 
 These keys sit beside `harbor` under `platformConfig.evals.runs` and apply to every taskset run, whatever its profile.
