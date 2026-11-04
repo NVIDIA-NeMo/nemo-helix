@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import {
   type AutomodelJobInput,
   type RlJobInput,
@@ -15,7 +16,6 @@ import {
   type LearningRateDefaultRule,
 } from '@nemo/sdk/generated/schema-extensions/learningRateDefaults';
 import type { CustomizationBackend } from '@studio/util/customizationBackend';
-import { isPlainObject } from '@studio/util/functions';
 
 /**
  * Backend defaults for the customizer forms, taken from the Zod schemas Orval generates
