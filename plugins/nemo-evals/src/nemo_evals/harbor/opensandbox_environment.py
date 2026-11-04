@@ -167,7 +167,8 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
 
     @override
     def _operator_hosts(self) -> tuple[str, ...]:
-        return (*super()._operator_hosts(), *self._agent_channel_hosts, *self._agent_setup_hosts)
+        # The setup hosts are trusted only while the setup window is open; see ``agent_setup_egress``.
+        return (*super()._operator_hosts(), *self._agent_channel_hosts)
 
     @asynccontextmanager
     async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
@@ -183,7 +184,9 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         sandbox = self._require_sandbox()
         closed = self.egress_policy()
         allowed = tuple(rule.target for rule in closed.rules if rule.action == "allow")
-        opened = build_egress_policy(self._egress_allowlist((*allowed, *self._agent_setup_hosts)))
+        opened = build_egress_policy(
+            self._egress_allowlist((*allowed, *self._agent_setup_hosts), extra_operator_hosts=self._agent_setup_hosts)
+        )
         label = f"OpenSandbox sandbox for session {self.session_id}"
         keep = await self._list_processes()
         try:

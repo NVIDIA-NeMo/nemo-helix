@@ -86,13 +86,33 @@ def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(monkeypatch, a
 
     policy = environment.egress_policy()
     opened = opensandbox_environment.build_egress_policy(
-        environment._egress_allowlist((*_allowed(policy), *environment._agent_setup_hosts))
+        environment._egress_allowlist(
+            (*_allowed(policy), *environment._agent_setup_hosts),
+            extra_operator_hosts=environment._agent_setup_hosts,
+        )
     )
 
     for built in (policy, opened):
         assert "internal.attacker.com" in _allowed(built)
         assert _is_denied(built, address)
         assert not _is_denied(built, "10.0.0.60")
+
+
+def test_a_task_naming_a_setup_host_gets_no_carve_out_from_the_closed_policy(monkeypatch):
+    """Setup hosts are trusted for the window only, so a task naming one under a wildcard is name-only."""
+    monkeypatch.setattr(
+        egress,
+        "_resolve_host",
+        lambda target: (ipaddress.ip_network("10.77.0.9"),) if target == "registry.corp.example" else (),
+    )
+    environment = _environment(
+        NetworkMode.ALLOWLIST, (IGW,), trusted=("*.corp.example",), allowed=("registry.corp.example",)
+    )
+    environment._agent_setup_hosts = ("registry.corp.example",)
+
+    policy = environment.egress_policy()
+    assert "registry.corp.example" in _allowed(policy)
+    assert _is_denied(policy, "10.77.0.9")
 
 
 def test_public_tasks_keep_the_profile_allowlist():
@@ -143,15 +163,25 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
 
 
 def _setup_environment(
-    monkeypatch, *, mode: NetworkMode = NetworkMode.NO_NETWORK, setup: tuple[str, ...] = SETUP, kill_exit: int = 0
+    monkeypatch,
+    *,
+    mode: NetworkMode = NetworkMode.NO_NETWORK,
+    setup: tuple[str, ...] = SETUP,
+    kill_exit: int = 0,
+    trusted: tuple[str, ...] = ("registry.npmjs.org",),
+    allowed: tuple[str, ...] = (),
+    answers: dict[str, str] | None = None,
 ) -> _SetupWindowEnvironment:
     monkeypatch.setattr(opensandbox_environment, "network_rules", lambda rules: list(rules))
-    monkeypatch.setattr(egress, "_resolve_host", lambda target: ())  # no DNS from unit tests
+    answers = answers or {}  # no DNS from unit tests
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
     environment = object.__new__(_SetupWindowEnvironment)
-    environment._network_policy = NetworkPolicy(network_mode=mode)
+    environment._network_policy = NetworkPolicy(network_mode=mode, allowed_hosts=list(allowed))
     environment._agent_channel_hosts = (IGW,)
     environment._agent_setup_hosts = setup
-    environment._trusted_allowed_hosts = ("registry.npmjs.org",)
+    environment._trusted_allowed_hosts = trusted
     environment._resolver_addresses = ()
     environment._egress_verification = "strict"
     environment._services = None
@@ -270,6 +300,24 @@ async def test_a_private_setup_host_is_carved_out_of_the_deny_ranges(monkeypatch
         assert not any(registry in network for network in _denied_networks(environment))
     assert "10.77.0.9" not in _allowed_now(environment)
     assert any(registry in network for network in _denied_networks(environment))
+
+
+async def test_a_task_naming_a_private_setup_host_reaches_it_only_during_setup(monkeypatch):
+    """A task may narrow a wildcard to the setup hostname, but that must not keep its address open."""
+    environment = _setup_environment(
+        monkeypatch,
+        mode=NetworkMode.ALLOWLIST,
+        setup=("registry.corp.example",),
+        trusted=("*.corp.example",),
+        allowed=("registry.corp.example",),
+        answers={"registry.corp.example": "10.77.0.9"},
+    )
+    registry = ipaddress.ip_address("10.77.0.9")
+    assert any(registry in network for network in _denied_networks(environment))  # before setup: denied
+    async with environment.agent_setup_egress():
+        assert not any(registry in network for network in _denied_networks(environment))  # during: allowed
+    assert "registry.corp.example" in _allowed_now(environment)  # the task still has it by name
+    assert any(registry in network for network in _denied_networks(environment))  # after setup: denied
 
 
 @pytest.mark.parametrize("failure", [asyncio.CancelledError, RuntimeError], ids=["cancelled", "failed"])

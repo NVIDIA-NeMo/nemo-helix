@@ -445,14 +445,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Egress targets from the operator rather than the task; their addresses may be carved out."""
         return self._trusted_allowed_hosts
 
-    def _egress_allowlist(self, targets: tuple[str, ...]) -> EgressAllowlist:
+    def _egress_allowlist(
+        self, targets: tuple[str, ...], *, extra_operator_hosts: tuple[str, ...] = ()
+    ) -> EgressAllowlist:
         """Allow ``targets``, carving out the addresses of operator hostnames only.
 
         A task hostname admitted through an operator ``*.`` wildcard is allowed by name only, as the
         wildcard is: carving out its resolved addresses would let it reach private space the operator's
         own policy denies, such as ``internal.example.com`` resolving to ``10.0.0.51`` under ``*.com``.
+        ``extra_operator_hosts`` are trusted for this policy only, such as hosts open for a limited window.
         """
-        operator_names = {canonical_egress_target(host) for host in self._operator_hosts()}
+        operator_names = {canonical_egress_target(host) for host in (*self._operator_hosts(), *extra_operator_hosts)}
         name_only = tuple(
             target
             for target in targets
