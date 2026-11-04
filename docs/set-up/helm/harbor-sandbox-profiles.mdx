@@ -1,0 +1,353 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "Configure Harbor Taskset Runs"
+description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs)."
+---
+
+This page configures Harbor taskset runs on Kubernetes ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)), all under `platformConfig.evals.runs`:
+
+- **Sandbox profiles** (`evals.runs.harbor`): named rules for every OpenSandbox sandbox in a run: egress, resource ceilings, lifetime and client settings.
+- **Run limits and controller** (`evals.runs`): concurrency caps, run time limits and how often the run controller creates and settles task Jobs. See [Run limits and controller](#run-limits-and-controller).
+
+About sandbox profiles:
+
+- Profiles live in two blocks of the chart's [`values.yaml`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml):
+  - **Chart defaults:** [`baseHelixConfig`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml) → [`baseHelixConfig.evals.runs.harbor`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml#L775) defines `harbor-standard`. Don't edit it.
+  - **Your changes:** set them under `platformConfig.evals.runs.harbor` in your own values file. [`platformConfig`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml) is `{}` in the chart, and the chart merges it over the defaults.
+    - Override `harbor-standard` fields or add new profiles there. A list you set replaces the chart's list. See [How your values combine with the chart's](#how-your-values-combine-with-the-charts).
+- Users pick a profile at submit: `nemo evals runs submit --sandbox-profile <name>`, or `"execution": {"sandbox": {"profile": "<name>"}}` in a `--spec-file` request ([example](/documentation/evaluate-models/agent-eval/harbor-kubernetes#run-with-a-model-calling-agent-openhands)). Without one, a run gets `default_sandbox_profile`.
+- Submit copies the profile into the run's plan. Editing a profile never changes a run that's already accepted.
+- A resubmit with the same idempotency key is checked against the current profiles before it returns the existing run. Keep a profile while its runs may be resubmitted.
+- Users can't list profile names. An unknown name returns a 422 that lists them, so tell your users which names exist.
+
+## Before you begin
+
+- The platform is installed as in [Install NeMo Helix Helm Chart](/documentation/kubernetes-deployment/setup/helm/install). This page reuses its variables `NHX_NAMESPACE`, `NHX_HELM_RELEASE` and `NHX_HELM_CHART_VERSION`, and writes the chart reference you installed from as `<chart>`: `nemo-helix/nemo-helix`, `"$NHX_HELM_CHART_REF"` for an RC, or the chart archive.
+- OpenSandbox is installed and the platform points at it. See [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox).
+- `sandboxClusterCapable: true` and `builder.enabled: true`. The chart then enables taskset runs with one profile, `harbor-standard`.
+- Set `FULLNAME`. The chart names its resources `<FULLNAME>-<part>`: ConfigMap `<FULLNAME>-config`, and API Service and Deployment `${FULLNAME:0:59}-api` (it cuts `FULLNAME` to 59 characters there). This page uses it to find them, and writes the API Service as `<api-service>`.
+  - Usually `FULLNAME` is the Helm release name, or `<release>-nemo-helix` when the release name doesn't contain `nemo-helix`.
+  - `nameOverride` and `fullnameOverride` change it, so read it from the cluster instead of guessing:
+
+  ```bash
+  export NHX_NAMESPACE=${NHX_NAMESPACE:-nemo-helix}   # keeps the value from Install, if set
+  helm list -n "$NHX_NAMESPACE"   # NAME is the release, CHART is nemo-helix-<chart version>
+  export NHX_HELM_RELEASE=${NHX_HELM_RELEASE:-nemo-helix}
+  export NHX_HELM_CHART_VERSION=${NHX_HELM_CHART_VERSION:-<chart-version>}   # e.g. 0.10.0 or 0.10.1-rc-20261026010203
+  FULLNAME=$(kubectl get configmap -n "$NHX_NAMESPACE" \
+    -l app.kubernetes.io/instance="$NHX_HELM_RELEASE" -o name \
+    | sed -n 's|^configmap/\(.*\)-config$|\1|p')
+  echo "$FULLNAME"
+  ```
+
+- Read the current config:
+
+  ```bash
+  kubectl get configmap "$FULLNAME-config" -n "$NHX_NAMESPACE" \
+    -o jsonpath='{.data.config\.yaml}' | yq '.evals.runs.harbor'
+  ```
+
+## How your values combine with the chart's
+
+The chart merges `platformConfig` over its own defaults:
+
+- **Maps merge key by key.** Adding `sandbox_profiles.harbor-web` keeps `harbor-standard`.
+- **Lists are replaced.** To add one host to `harbor-standard.agent_setup_egress`, set the whole list.
+- **Scalars:** your value wins.
+- You can't delete the chart's `harbor-standard`. You can override every key in it.
+- `platformConfig.evals.runs.harbor: null` turns taskset runs off.
+
+## `evals.runs.harbor` keys
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `sandbox_profiles` | chart: `harbor-standard` | Map of profile name → profile. At least one is required |
+| `default_sandbox_profile` | `harbor-standard` | The profile a run gets when it names none. Must be a `sandbox_profiles` key |
+| `dispatcher_image` | unset | The task Job image. If unset, defaults to `nhx-tasks:<platform.image_tag>`. If set, pin it by digest: `<image>@sha256:<digest>` |
+
+## Profile properties
+
+A new profile starts empty: it inherits nothing from `harbor-standard`. Every list below defaults to `[]`.
+
+### Network
+
+Host format: hostname, `*.` wildcard hostname, IP or CIDR. No port.
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `egress_allow` | `[]` | Hosts the sandbox of a `public` or `allowlist` task may reach. Everything else is denied |
+| `agent_channel` | `[]` | Hosts the sandbox of a `no-network` or `allowlist` task may also reach, so its agent can call a model through the Inference Gateway. Empty: `no-network` tasks reach nothing; `allowlist` tasks reach only their own hosts |
+| `agent_setup_egress` | `[]` | Hosts added to the sandbox's policy only while the agent installs itself. Removed before the agent runs; processes started during setup that still hold an outside connection are killed |
+| `egress_verification` | `strict` | After creating a sandbox, evals reads back its egress policy. `strict`: any missing rule fails the trial. `default_action`: only a wrong default (allow instead of deny) fails it. Use `default_action` only if `strict` fails on rules the sandbox reformatted |
+
+How the profile combines with the network mode in the task's `task.toml`:
+
+- `public` (Harbor's default) → the sandbox reaches `egress_allow` only.
+- `allowlist` → the sandbox reaches the task's `allowed_hosts` plus `agent_channel`.
+  - Every `allowed_hosts` entry must be covered by an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`. A profile entry covers:
+    - the same host, after lowercasing and IP normalization;
+    - for `*.wikipedia.org`: its subdomains at any depth, such as `en.wikipedia.org`, but not `wikipedia.org` itself;
+    - for a CIDR such as `10.0.0.0/8`: the addresses and ranges inside it, in the same IP family, such as `10.1.2.3` or `10.1.0.0/16`.
+  - A task host covered only by a `*.` wildcard is allowed by name. If it resolves to a private or link-local address, the sandbox still can't reach that address. To allow one, list the address itself, in `egress_allow` (or a CIDR around it) and in the task's `allowed_hosts`.
+- `no-network` → the sandbox reaches `agent_channel` only.
+- With a model-calling agent, the task Job fails with `gateway_unreachable` before any sandbox starts when:
+  - `no-network`: the profile's `agent_channel` doesn't include the API host.
+  - `allowlist`: neither `agent_channel` nor the task's `allowed_hosts` includes it.
+- Any mode → `agent_setup_egress` is added while the agent installs itself.
+
+### Resources
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `max_cpus` | none | Ceiling on CPUs per sandbox. A request above it (`--cpus`, `execution.sandbox.cpus`) returns a 422. A task whose `task.toml` asks for more, for its agent sandbox or a separate verifier sandbox, or whose compose services declare more, fails the whole submit with a 422: `tasks without images: <task>: resources_exceed_policy: agent sandbox cpus=16 (task.toml) exceeds sandbox profile 'harbor-standard''s max_cpus=8`. |
+| `max_memory_mb` | none | Same as `max_cpus`, for memory. A compose service's `shm_size` counts as memory. Also caps the 2048 MB fallback |
+| `max_storage_mb` | none | Same as `max_cpus`, for disk, except that compose services aren't checked. Checked before the `max_disk_mb` clamp |
+| `enforce_disk_limit` | `true` | Sets each sandbox pod's `ephemeral-storage` limit to the task's `storage_mb`. Kubernetes evicts a pod that goes over. Turn it off only on a runtime that doesn't enforce the limit |
+| `max_disk_mb` | `131072` | While `enforce_disk_limit` is on: a `task.toml` `storage_mb` above it is lowered to it; a request above it returns a 422. `null`: each task's value is used as given |
+| `max_gpus` | `0` | Most GPUs per sandbox (`task.toml` `gpus`). `0` refuses every GPU task with `gpu_unsupported`; a task asking for more fails with `gpu_request_exceeds_policy`. Sandboxes get them as `nvidia.com/gpu`, so the cluster needs GPU nodes they can schedule on |
+| `gpu_types` | `[]` | GPU types the profile's sandboxes get, as tasks name them in `gpu_types` (for example `A100`). A task that accepts only other types fails with `unsupported_gpu_type`; a task that names none accepts any. Sandboxes aren't pinned to a type: list only types every GPU node they can land on has |
+
+- Without a ceiling, users can request any number of CPUs and any memory. Storage stays capped by `max_disk_mb` while `enforce_disk_limit` is on.
+- Ceilings are per profile. Set them on every profile users may select.
+
+### Lifetime
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `max_sandbox_lifetime_s` | `30600` | OpenSandbox's time-to-live for each sandbox (8 h 30 min), a backstop for leaked sandboxes. Also cut to the run's deadline. Set it to the longest trial, agent plus verifier, plus a margin |
+
+### Client
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `connection.request_timeout_s` | `960` | Timeout for each OpenSandbox API request. Must be longer than the server's `sandbox_create_timeout_seconds`: the create request stays open while the image is pulled |
+| `connection.use_server_proxy` | `true` | Reach each sandbox through the OpenSandbox server. Leave it on: Job pods can't reach sandbox pod IPs |
+
+- The server address and API key aren't profile keys. They come from the `opensandbox` Helm values.
+
+## Run limits and controller
+
+These keys sit beside `harbor` under `platformConfig.evals.runs` and apply to every taskset run, whatever its profile.
+
+### Concurrency
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `controller.max_cluster_concurrent_jobs` | `50` | Task Jobs at once across every run in every workspace |
+| `controller.max_concurrent_task_jobs_per_creator` | none | Task Jobs at once across all of one user's runs. Must be ≤ `max_cluster_concurrent_jobs`. With auth off every run belongs to one user, so it acts as a second cluster cap |
+| `controller.default_max_concurrent_task_jobs` | `20` | Task Jobs at once for one run. A request's `max_concurrent_task_jobs` may lower it, never raise it. `null`: only the request's value applies |
+
+A task Job starts only when all three caps have room:
+
+```text
+cluster       max_cluster_concurrent_jobs
+└─ user       max_concurrent_task_jobs_per_creator
+   └─ run     the smaller of default_max_concurrent_task_jobs and the request's max_concurrent_task_jobs
+```
+
+- When several users wait, a free slot goes to the user running the fewest task Jobs.
+- Example with the defaults:
+  - One user submits 3 runs of 100 tasks.
+  - At most 50 task Jobs run at once: 20 + 20 + 10, oldest run first.
+
+### Controller timing
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `controller.interval_seconds` | `20` | Time between controller cycles. The controller reports itself unhealthy after 3 intervals without a cycle |
+| `controller.create_grace_seconds` | `600` | How long a task Job create with an unknown outcome stays unknown before a missing Job counts as not created. At least 60 |
+| `controller.settle_concurrency` | `8` | Open runs whose task Jobs are read and settled at once in a cycle. Takes no slot. Higher settles many open runs faster but sends more requests to the Jobs service at once |
+| `controller.max_creates_per_cycle` | `10` | Task Job creates per cycle, new ones and retries alike. At least 2 |
+
+- Cycles start every `interval_seconds`. One that runs longer is followed by the next at once, so under load the interval adds no wait.
+- Raise `interval_seconds` first when cycles run long: a cycle over 3 intervals (60 s by default) marks the core-controller pod not ready. When cycles are short, a longer interval delays new task Jobs by up to one interval.
+- Raise `max_creates_per_cycle` or `settle_concurrency` when many runs are open, and `create_grace_seconds` when the Jobs API is slow to save.
+
+### Run time limits
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `default_timeout_seconds` | `86400` | A run's budget (24 h) when its request omits `timeout_seconds`. Must be ≤ `max_timeout_seconds` |
+| `max_timeout_seconds` | `259200` | The largest `timeout_seconds` a request may ask for (72 h). A larger one returns a 422 |
+| `queue_timeout_seconds` | `172800` | How long an accepted run may wait for its first task slot (48 h). Past it, the run ends `expired` |
+| `finalization_grace_seconds` | `1800` | Time after the budget runs out to stop the run's task Jobs and bundle the tasks that finished (30 min) |
+
+- The budget starts when the run's first task gets a slot, before its task Job is created, so scheduling and Job startup count against it.
+
+### Which key to change
+
+- The cluster is busy with task Jobs → lower `controller.max_cluster_concurrent_jobs`.
+- One user's runs starve everyone else's → set `controller.max_concurrent_task_jobs_per_creator` (auth on only).
+- Suites need more than 24 h → raise `default_timeout_seconds`, and `max_timeout_seconds` if users ask for more.
+- Runs expire in the queue → raise `queue_timeout_seconds`, or raise the concurrency caps.
+
+### When a change applies
+
+A config change restarts the API and core-controller pods. Then:
+
+- Concurrency caps → open runs use them from the next cycle. Lowering a cap cancels nothing; new task Jobs wait until the count is below it.
+- `default_timeout_seconds`, `queue_timeout_seconds`, `finalization_grace_seconds` → new runs only. A run keeps the values it was accepted with, even while it's still queued.
+- `max_timeout_seconds` → checked at submit only.
+
+## Recipes
+
+A new profile must copy the network baseline it needs from `harbor-standard`: the API host in `agent_channel` and the full `agent_setup_egress` list. Without them, model-calling agents can't install themselves or reach their model.
+
+### Add a host an agent needs at install time
+
+1. Copy `harbor-standard.agent_setup_egress` from the current config.
+2. Append the host, then set the full list:
+
+   ```yaml
+   platformConfig:
+     evals:
+       runs:
+         harbor:
+           sandbox_profiles:
+             harbor-standard:
+               agent_setup_egress:
+                 - registry.npmjs.org
+                 # … every host from the current list
+                 - downloads.example.com
+   ```
+
+### Add a profile for tasks that call public hosts
+
+```yaml
+platformConfig:
+  evals:
+    runs:
+      harbor:
+        sandbox_profiles:
+          harbor-web:
+            egress_allow:
+              - <api-service>.<namespace>.svc.cluster.local
+              - "*.wikipedia.org"
+            agent_channel:
+              - <api-service>.<namespace>.svc.cluster.local
+            agent_setup_egress:
+              - registry.npmjs.org
+              # … every host from harbor-standard's list
+```
+
+- The API host in `egress_allow` and `agent_channel` keeps model-calling agents reaching the gateway.
+- `*.wikipedia.org` opens Wikipedia's subdomains, such as `en.wikipedia.org`, to `public` tasks. Add `wikipedia.org` too if tasks need the bare domain. A Harbor task in `allowlist` mode lists the Wikipedia hosts it needs in its own `allowed_hosts`, such as `en.wikipedia.org`.
+
+### Set ceilings on a profile
+
+```yaml
+platformConfig:
+  evals:
+    runs:
+      harbor:
+        sandbox_profiles:
+          harbor-standard:
+            max_cpus: 8
+            max_memory_mb: 32768
+            max_storage_mb: 102400
+```
+
+- Maps merge, so `harbor-standard` keeps its network lists.
+
+### Change the default profile
+
+```yaml
+platformConfig:
+  evals:
+    runs:
+      harbor:
+        default_sandbox_profile: harbor-web
+```
+
+- The new default must carry the network baseline above.
+
+### Raise the run limits
+
+```yaml
+platformConfig:
+  evals:
+    runs:
+      default_timeout_seconds: 172800  # 48 h
+      controller:
+        max_cluster_concurrent_jobs: 100
+        max_concurrent_task_jobs_per_creator: 40
+```
+
+- `default_timeout_seconds` must stay ≤ `max_timeout_seconds` (72 h by default).
+- Maps merge, so the chart's `harbor` block stays.
+
+## Apply and verify
+
+<Warning>
+
+An invalid `evals` config doesn't stop the rollout, but what breaks depends on platform auth:
+
+- **Auth off:** the API starts without the evals service and the run controller. Every `nemo evals` command returns 404, and the API log has only `Failed to load 'evals' from 'nemo.services' … skipping`.
+- **Auth on:** the auth service can't load the evals plugin either. With the default `authz.on_invalid_plugin: hard_fail`, it doesn't build its authorization bundle, so requests to every service fail, not only `nemo evals`. With `quarantine` or `deny_route`, `nemo evals` commands return 403.
+
+Validate before you apply.
+
+</Warning>
+
+1. Validate the rendered `evals` config. Pass the chart version and values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment, since another version may accept different keys:
+
+   - Stable chart `0.10.0` → `pip install 'nemo-helix[nemo-evals-plugin]==0.10.0'`
+   
+   ```bash
+   helm template "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml \
+     --show-only templates/platform-configmap.yaml \
+     | yq '.data["config.yaml"]' | yq -o json '.evals' \
+     | python -c 'import json, sys; from nemo_evals.config import EvaluatorConfig; EvaluatorConfig.model_validate(json.load(sys.stdin)); print("valid")'
+   ```
+
+   - `valid` → apply.
+   - A `ValidationError` names the bad key, such as `runs.harbor.sandbox_profiles.harbor-web.egress_alow  Extra inputs are not permitted`. Fix the file and validate again.
+
+2. Upgrade the release with the same chart version and values files and wait for it:
+
+   ```bash
+   helm upgrade "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml --wait --timeout 10m
+   kubectl rollout status deploy/"${FULLNAME:0:59}-api" -n "$NHX_NAMESPACE" --timeout 5m
+   kubectl rollout status deploy/"${FULLNAME:0:52}-core-controller" -n "$NHX_NAMESPACE" --timeout 5m
+   ```
+
+   - The chart truncates `FULLNAME` in these deployment names, as the commands do.
+
+   - A config change restarts the API and core-controller pods. New runs get the new profile; accepted runs keep theirs.
+   - Don't use `--reuse-values` for profiles: a key you set by mistake stays in the release after you delete it from the file, and setting it to `null` doesn't remove it.
+
+3. Run the hello-world suite with `oracle` on the profile, as in the [Quickstart](/documentation/evaluate-models/agent-eval/harbor-kubernetes#quickstart-one-task-with-oracle) (step 1 copies the suite to `$SUITE_DIR`). The run ends `completed` with result `ready`. This checks that sandboxes start:
+
+   ```bash
+   nemo evals runs submit --workspace default --harbor-dir "$SUITE_DIR" --tasks 0 --agent oracle \
+     --sandbox-profile harbor-web
+   ```
+
+   Save the taskset ref from the `Rerun these tasks:` line. The checks below reuse it, so they upload and build nothing:
+
+   ```bash
+   TASKSET='default/hello-world-suite-…#…'  # the --taskset value in "Rerun these tasks: …"
+   ```
+
+4. Check the profile is offered. The 422 lists every profile name:
+
+   ```bash
+   nemo evals runs submit --workspace default --taskset "$TASKSET" --agent oracle --sandbox-profile does-not-exist
+   ```
+
+   ```console
+   Error: submit failed (422): "unknown execution.sandbox.profile 'does-not-exist'; this deployment offers: harbor-standard, harbor-web"
+   ```
+
+5. Run one task with a model-calling agent on the profile, as in [Run with a model-calling agent](/documentation/evaluate-models/agent-eval/harbor-kubernetes#run-with-a-model-calling-agent-openhands). `--spec-file` rejects `--sandbox-profile`, so set `"execution": {"sandbox": {"profile": "harbor-web"}}` in `openhands-run.json`. The trial has no install error and non-zero tokens. This checks `agent_setup_egress` and `agent_channel`; `oracle` installs nothing and calls no model.
+6. For ceilings, request one more than the ceiling. The 422 names it:
+
+   ```bash
+   nemo evals runs submit --workspace default --taskset "$TASKSET" --agent oracle --sandbox-profile harbor-standard --cpus 9
+   ```
+
+   ```console
+   Error: submit failed (422): "execution.sandbox.cpus=9 exceeds sandbox profile 'harbor-standard''s max_cpus=8"
+   ```
