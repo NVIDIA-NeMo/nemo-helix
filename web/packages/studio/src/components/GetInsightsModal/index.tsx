@@ -15,7 +15,6 @@ import { isQualifiedModelRef } from '@studio/api/insightsAnalysis';
 import { useLatestAnalysisRun } from '@studio/api/useLatestAnalysisRun';
 import { useTriggerInsightsRun } from '@studio/api/useTriggerInsightsRun';
 import { InsightsModelField } from '@studio/components/GetInsightsModal/InsightsModelField';
-import { DEFAULT_LARGE_PAGE_SIZE } from '@studio/constants/constants';
 import {
   DAY_MS,
   type SincePreset,
@@ -43,6 +42,9 @@ interface GetInsightsFormFields {
   defaultModel: string;
   fastModel: string;
 }
+
+/** The agents list API caps page_size at 100. */
+const AGENTS_PAGE_SIZE = 100;
 
 const startOfDay = (date: Date) => new Date(new Date(date).setHours(0, 0, 0, 0));
 
@@ -91,7 +93,7 @@ export const GetInsightsModal: FC<GetInsightsModalProps> = ({
 
   const { data: agentsResponse, isLoading: isAgentsLoading } = useAgentsListAgents(
     workspace,
-    { page_size: DEFAULT_LARGE_PAGE_SIZE },
+    { page_size: AGENTS_PAGE_SIZE },
     { query: { enabled: !lockedAgent } }
   );
   const agentNames = (agentsResponse?.data ?? [])

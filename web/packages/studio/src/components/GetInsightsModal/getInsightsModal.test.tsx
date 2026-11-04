@@ -414,6 +414,24 @@ describe('Get Insights modal from the Insights page', () => {
     expect(submitButton(dialog)).toBeDisabled();
   });
 
+  it('asks for agents within the API page size limit', async () => {
+    const pageSizes: number[] = [];
+    const recordAgentList = ({ request }: { request: Request }) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/agents'))
+        pageSizes.push(Number(url.searchParams.get('page_size')));
+    };
+    server.events.on('request:start', recordAgentList);
+    try {
+      await openFromInsightsPage();
+      await waitFor(() => expect(pageSizes.length).toBeGreaterThan(0));
+      // The agents API rejects page_size above 100 with a 422.
+      expect(Math.max(...pageSizes)).toBeLessThanOrEqual(100);
+    } finally {
+      server.events.removeListener('request:start', recordAgentList);
+    }
+  });
+
   it('lists the registered agents and runs for the one picked', async () => {
     const { user, dialog } = await openFromInsightsPage();
 
