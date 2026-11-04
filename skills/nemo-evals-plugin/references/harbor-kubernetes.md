@@ -147,7 +147,8 @@ trial appears when its task Job finishes.
 ## Failures and retries
 
 - No failure threshold flag. A run ends `completed` if at least one task succeeded, `failed` if none did,
-  unless a cancel or the deadline stopped it first: then `cancelled` or `expired`.
+  unless a cancel or the deadline stopped it first: then `cancelled` or `expired`. A run whose stored plan
+  can't be read ends `failed` with a `plan_unreadable: …` error, even if tasks succeeded: ask the operator.
 - Trial errors (agent install fails, agent crashes) are stored on the trial; the task Job still succeeds.
   `max_retries` in the spec reruns an errored trial up to that many times, each in a new sandbox.
 - Failed task Jobs aren't rerun. Find them with `nemo evals runs tasks "$RUN_ID" --phase failed`, then
