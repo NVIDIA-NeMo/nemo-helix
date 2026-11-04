@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
-from nemo_agents_plugin.fabric.gateway_models import gateway_models, is_gateway_url
+from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_PATH_MARKER, gateway_models, is_gateway_url
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.auth import EnvAccessToken, TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
@@ -49,6 +49,14 @@ _SHUTDOWN_TIMEOUT_SECONDS = 5
 def _onto_proxy(url: str, origin: str) -> str:
     proxy = urlsplit(origin)
     return urlsplit(url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
+
+
+def _gateway_onto_proxy(url: str, origin: str) -> str:
+    """The proxy forwards onto ``NHX_BASE_URL``, which carries any ingress prefix itself, so drop the URL's."""
+    parsed = urlsplit(url)
+    return _onto_proxy(
+        parsed._replace(path=parsed.path[parsed.path.index(PLATFORM_IGW_PATH_MARKER) :]).geturl(), origin
+    )
 
 
 def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
@@ -96,7 +104,7 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
 
     runtime_config = config.model_copy(deep=True)
     for model in _gateway_models(runtime_config):
-        model.base_url = _onto_proxy(model.base_url or model.settings["base_url"], origin)
+        model.base_url = _gateway_onto_proxy(model.base_url or model.settings["base_url"], origin)
         model.settings.pop("base_url", None)
     return runtime_config
 
@@ -115,7 +123,7 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
     for model in gateway_models(runtime_config):
         if not isinstance(model.config, dict):
             continue
-        model.config["base_url"] = _onto_proxy(model.base_url, origin)
+        model.config["base_url"] = _gateway_onto_proxy(model.base_url, origin)
         settings = model.config.get("settings")
         if isinstance(settings, dict):
             settings.pop("base_url", None)

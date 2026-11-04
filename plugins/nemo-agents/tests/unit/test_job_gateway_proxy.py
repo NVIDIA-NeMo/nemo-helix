@@ -136,12 +136,21 @@ def test_a_harness_model_on_the_gateway_is_routed_through_the_proxy() -> None:
     assert runtime["models"]["default"]["base_url"] == "https://provider.test/v1"
 
 
-def test_a_gateway_behind_a_path_prefixed_ingress_is_routed_through_the_proxy() -> None:
+@pytest.mark.parametrize("platform_prefix", ["/nemo", ""])
+def test_a_gateway_behind_a_path_prefixed_ingress_is_reached_once_through_the_proxy(
+    monkeypatch: pytest.MonkeyPatch, httpserver: HTTPServer, workload: Mock, platform_prefix: str
+) -> None:
+    """The proxy's upstream is ``NHX_BASE_URL``, prefix included, so the model URL's prefix must not be forwarded too."""
+    monkeypatch.setenv("NHX_BASE_URL", httpserver.url_for(platform_prefix))
+    httpserver.expect_request(f"{platform_prefix}{GATEWAY_PATH}/models").respond_with_json({"ok": True})
     config = {"models": {"default": {"model": "test", "base_url": f"https://helix.test/nemo{GATEWAY_PATH}"}}}
 
-    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
+    with gateway_proxy.platform_auth_proxy() as origin:
+        assert origin is not None
+        runtime = gateway_proxy.rewrite_fabric_gateway_models(config, origin)
+        assert httpx.get(f"{runtime['models']['default']['base_url']}/models").status_code == 200
 
-    assert runtime["models"]["default"]["base_url"] == f"http://127.0.0.1:9019/nemo{GATEWAY_PATH}"
+    httpserver.check_assertions()
 
 
 @pytest.mark.parametrize("models", [None, "not-a-mapping", {"default": "not-a-mapping", "bad": None}])
