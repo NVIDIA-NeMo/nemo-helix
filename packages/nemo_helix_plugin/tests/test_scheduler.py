@@ -158,6 +158,19 @@ class TestApiSegmentFor:
 
         assert _api_segment_for(_J) == "agents"
 
+    def test_finds_a_reexport_whose_name_breaks_the_key_convention(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.scheduler import _api_segment_for
+
+        class _J(NemoJob):
+            name = "not-the-key-suffix"
+
+        _J.__module__ = "nemo_agents_plugin.jobs._impl"
+        reexport = _FakeEntryPoint("nemo_agents_plugin.jobs:EvaluateAgentJob", loaded=_J)
+        other = _FakeEntryPoint("nemo_evals.jobs.evaluate:EvaluateJob", loaded=object())
+        self._install(monkeypatch, {"agents.evaluate": reexport, "evals.evaluate": other})
+
+        assert _api_segment_for(_J) == "agents"
+
     def test_skips_a_candidate_that_fails_to_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from nemo_helix_plugin.scheduler import _api_segment_for
 
@@ -178,10 +191,9 @@ class TestApiSegmentFor:
             name = "say-hello"
 
         _J.__module__ = "nemo_example_plugin.jobs.say_hello"
-        unrelated = _not_loadable("nemo_anonymizer_plugin.jobs.run:RunJob")
+        unrelated = _FakeEntryPoint("nemo_anonymizer_plugin.jobs.run:RunJob", loaded=object())
         self._install(monkeypatch, {"anonymizer.run": unrelated})
         assert _api_segment_for(_J) == "example-plugin"
-        assert unrelated.loads == 0
 
     def test_fallback_strips_nemo_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from nemo_helix_plugin.scheduler import _api_segment_for

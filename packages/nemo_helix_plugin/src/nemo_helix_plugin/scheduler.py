@@ -245,9 +245,10 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
 
     The lookup reads entry-point metadata and does not import other plugins' jobs: loading every
     ``nemo.jobs`` entry costs seconds per process, and this runs on every submit. An entry whose
-    value is *job_cls*'s ``module:qualname`` matches without loading. Failing that, entries whose
-    key ends in ``job_cls.name`` (the convention :func:`discover_jobs` enforces) are loaded and
-    compared by identity, which covers a class registered through a re-export.
+    value is *job_cls*'s ``module:qualname`` matches without loading. Failing that (a class
+    registered through a re-export), entries are loaded and compared by identity, those whose key
+    ends in ``job_cls.name`` (the convention :func:`discover_jobs` enforces) first. Only a class
+    that no entry point registers pays for loading every entry, as every lookup did before.
     """
     from nemo_helix_plugin.discovery import discover_entry_points
 
@@ -259,11 +260,12 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
     for key, entry_point in entries.items():
         if entry_point.value == target:
             return key.split(".", 1)[0]
-    for key, entry_point in entries.items():
-        if key.split(".", 1)[1] != job_cls.name:
-            continue
+    # Same-named candidates first, then everything else: a class registered through a re-export
+    # under a key that breaks the naming convention is still found by identity, as before.
+    same_named = [key for key in entries if key.split(".", 1)[1] == job_cls.name]
+    for key in [*same_named, *(key for key in entries if key not in same_named)]:
         try:
-            if entry_point.load() is job_cls:
+            if entries[key].load() is job_cls:
                 return key.split(".", 1)[0]
         except Exception:
             continue
