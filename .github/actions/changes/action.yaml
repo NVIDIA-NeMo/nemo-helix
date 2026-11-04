@@ -235,6 +235,8 @@ runs:
             - 'plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/references/**'
           github-scripts:
             - '.github/scripts/**/*.cjs'
+            - '.github/scripts/configure-docker-cache.sh'
+            - '.github/actions/configure-docker-cache/**'
             - '.github/eslint.config.mjs'
             - '.github/workflows/release.yaml'
             - '.github/workflows/ci.yaml'
@@ -246,6 +248,8 @@ runs:
           docker-scripts:
             - 'script/install_duckdb_extensions.sh'
             - 'script/build_policy_wasm.sh'
+            - '.github/scripts/configure-docker-cache.sh'
+            - '.github/actions/configure-docker-cache/**'
           helm:
             - 'k8s/**'
             - 'tools/lint/lint-helm.sh'

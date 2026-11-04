@@ -17,6 +17,10 @@ variable "CACHE_VERSION" {
   default = "cache"
 }
 
+variable "CACHE_IGNORE_ERROR" {
+  default = false
+}
+
 variable "IMAGE_REGISTRY" {
   default = "my-registry"
 }
@@ -294,7 +298,7 @@ function "sha_and_maybe_latest_tags" {
 function "maybe_registry_cache_to" {
   params = [name]
   result = [
-    and(notequal(BAKE_CACHE_TARGET_BRANCH, ""), notequal(BUILD_ARCH, "")) ? "type=registry,ref=${CACHE_REGISTRY}/${name}:${CACHE_VERSION}-${BAKE_CACHE_TARGET_BRANCH}-${get_arch_tag()},mode=max,compression=zstd,force-compression=true" : ""
+    and(notequal(BAKE_CACHE_TARGET_BRANCH, ""), notequal(BUILD_ARCH, "")) ? "type=registry,ref=${CACHE_REGISTRY}/${name}:${CACHE_VERSION}-${BAKE_CACHE_TARGET_BRANCH}-${get_arch_tag()},mode=max,compression=zstd,force-compression=true,ignore-error=${CACHE_IGNORE_ERROR}" : ""
   ]
 }
 
@@ -575,6 +579,7 @@ target "nhx-python-base" {
   args = {
     NHX_PYTHON_IMAGE = "${NHX_PYTHON_IMAGE}"
   }
+  cache-to   = maybe_registry_cache_to("nhx-python-base")
   cache-from = maybe_registry_cache_from("nhx-python-base")
   platforms  = get_platforms()
 }

@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Configure Docker layer cache
+description: Import trusted main caches and export them only from main pushes.
+
+inputs:
+  scope:
+    description: Cache namespace for this image job (cpu, garak, or safe-synthesizer).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Configure registry cache
+      shell: bash
+      env:
+        CACHE_SCOPE: ${{ inputs.scope }}
+      run: bash .github/scripts/configure-docker-cache.sh
+    - name: Log in to GHCR for cache access
+      if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+      uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
