@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { Notes, ThumbDown, ThumbUp } from '@nemo/icons/icons';
+import { IconText, ThumbDown, ThumbUp } from '@nemo/icons/icons';
 import { FeedbackAnnotationInputValue } from '@nemo/sdk/generated/platform/schema';
 import { Button, Divider, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { useSpanAnnotationActions } from '@studio/components/IntakeDetail/IntakeComponents/useSpanAnnotationActions';
@@ -110,7 +110,7 @@ export const SpanFeedbackControls: FC<SpanFeedbackControlsProps> = ({
           onClick={withoutToggle(onAddNote)}
         >
           {/* Tinted to match the Guardrail kind accent (var --text-color-accent-yellow). */}
-          <Notes
+          <IconText
             size="14"
             aria-hidden
             className={hasNotes ? 'text-[color:var(--text-color-accent-yellow)]' : undefined}

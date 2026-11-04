@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChartLegend } from '@nemo/common/src/components/charts/ChartLegend';
-import { HourglassMid } from '@nemo/icons/icons';
+import { CircleTick } from '@nemo/icons/icons';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
@@ -110,7 +110,7 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
     if (sessions.isLoading) {
       return (
         <Flex aria-busy align="center" gap="density-md">
-          <HourglassMid width={16} height={16} className="animate-spin text-brand" />
+          <CircleTick width={16} height={16} className="animate-spin text-brand" />
           <Placeholder>Loading test case results…</Placeholder>
         </Flex>
       );

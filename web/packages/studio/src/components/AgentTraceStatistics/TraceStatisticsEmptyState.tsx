@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Chart, Play } from '@nemo/icons/icons';
+import { ChartPerformance, Play } from '@nemo/icons/icons';
 import { Button, Card, Flex, StatusMessage } from '@nvidia/foundations-react-core';
 import { type FC } from 'react';
 
@@ -22,7 +22,7 @@ export const TraceStatisticsEmptyState: FC<Props> = ({
   <Card>
     <Flex justify="center" padding="density-2xl">
       <StatusMessage
-        slotMedia={<Chart className="size-12 text-placeholder" />}
+        slotMedia={<ChartPerformance className="size-12 text-placeholder" />}
         slotHeading="No traces"
         slotSubheading={
           onExpandRange

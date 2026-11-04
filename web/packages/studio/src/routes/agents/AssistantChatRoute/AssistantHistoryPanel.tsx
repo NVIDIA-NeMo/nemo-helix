@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Collapse, Expand } from '@nemo/icons/icons';
+import { ChevronDoubleRight, ChevronDoubleLeft } from '@nemo/icons/icons';
 import { Button, Flex, Tooltip } from '@nvidia/foundations-react-core';
 import { AssistantArtifactsPane } from '@studio/routes/agents/AssistantChatRoute/historyPanel/AssistantArtifactsPane';
 import { FloatingPanel } from '@studio/routes/agents/AssistantChatRoute/historyPanel/FloatingPanel';
@@ -45,7 +45,7 @@ export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
             type="button"
             onClick={() => setHistoryOpen('true')}
           >
-            <Expand size="18" />
+            <ChevronDoubleLeft size="18" />
           </Button>
         </Tooltip>
       </aside>
@@ -71,7 +71,7 @@ export const AssistantHistoryPanel: FC<AssistantHistoryPanelProps> = ({
               type="button"
               onClick={() => setHistoryOpen('false')}
             >
-              <Collapse size="18" />
+              <ChevronDoubleRight size="18" />
             </Button>
           </Tooltip>
         </Flex>
