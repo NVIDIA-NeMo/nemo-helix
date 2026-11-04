@@ -31,15 +31,12 @@ dependency and its full-principal delegation.
 """
 
 import asyncio
-import json
 import os
-import threading
 import uuid
-from collections.abc import AsyncGenerator, Generator, Mapping
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
@@ -57,6 +54,7 @@ from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, CreateWorkspaceRequest
+from nhx.testing.platforms import supplied_platform
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(600)]
 
@@ -77,44 +75,24 @@ requires_auth_on_platform = pytest.mark.skipif(
 
 #: The controller these tests stand in for. Running on the supplied platform too, it would settle their fake runs.
 RUN_CONTROLLER = "evals-taskset-runs"
-
-
-def _supplied_platform(env_var: str, *, auth_enabled: bool) -> str:
-    """The platform URL in ``env_var``: skip when unset, fail unless it can serve these tests.
-
-    Serving them takes a ready platform in their auth mode that is not running :data:`RUN_CONTROLLER` itself.
-    """
-    mode = "auth-on" if auth_enabled else "auth-off"
-    base_url = os.environ.get(env_var, "").strip().rstrip("/")
-    if not base_url:
-        pytest.skip(f"{env_var} is not set: point it at a running {mode} platform")
-    try:
-        with httpx.Client(base_url=base_url, timeout=10) as http:
-            http.get("/health/ready").raise_for_status()
-            platform_auth = http.get("/apis/auth/discovery").raise_for_status().json()["auth_enabled"]
-            controllers = http.get("/status").raise_for_status().json()["controllers"]["status"]
-    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:  # ValueError: a body that is not JSON
-        problem = f"is not a ready platform: {error}"
-    else:
-        if platform_auth is not auth_enabled:
-            problem = f"has auth {'on' if platform_auth else 'off'}; it must be an {mode} platform"
-        elif RUN_CONTROLLER in controllers:
-            problem = f"runs the {RUN_CONTROLLER} controller, which would act on these tests' runs"
-        else:
-            return base_url
-    pytest.fail(f"{env_var}={base_url} {problem}. launch_test_platform.py starts a suitable one.", pytrace=False)
+#: How to start a platform these tests can use, for the setup failure when the supplied one can't serve them.
+START_HINT = "launch_test_platform.py starts a suitable one."
 
 
 @pytest.fixture(scope="session")
 def controller_platform() -> str:
     """An auth-off platform someone else runs; never started or stopped here."""
-    return _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
+    return supplied_platform(
+        AUTH_OFF_URL_ENV, auth_enabled=False, forbidden_controllers=[RUN_CONTROLLER], start_hint=START_HINT
+    )
 
 
 @pytest.fixture(scope="session")
 def auth_controller_platform() -> str:
     """An auth-on platform someone else runs; never started or stopped here."""
-    return _supplied_platform(AUTH_ON_URL_ENV, auth_enabled=True)
+    return supplied_platform(
+        AUTH_ON_URL_ENV, auth_enabled=True, forbidden_controllers=[RUN_CONTROLLER], start_hint=START_HINT
+    )
 
 
 @asynccontextmanager
@@ -478,72 +456,3 @@ async def test_submit_dependency_delegates_group_only_caller(auth_controller_pla
         # Without the group the same caller is refused.
         outsider = await http.get(f"{runs_path}/{run.name}", headers={"X-NHX-Principal-Groups": ""})
         assert outsider.status_code == 403, outsider.text
-
-
-# The fixtures' own contract, against a stub: no platform needed, so these run wherever this file does.
-
-#: What a platform suitable for the auth-off tests answers to the probes ``_supplied_platform`` makes.
-SUITABLE_AUTH_OFF_PLATFORM: dict[str, tuple[int, object]] = {
-    "/health/ready": (200, {"status": "ready"}),
-    "/apis/auth/discovery": (200, {"auth_enabled": False}),
-    "/status": (200, {"controllers": {"healthy": True, "status": {"entities": True, "jobs": True, "models": True}}}),
-}
-
-
-@contextmanager
-def _stub_platform(responses: Mapping[str, tuple[int, object]]) -> Generator[str]:
-    """Answer GETs from ``responses`` (path: status, JSON body) on a free local port; yield its base URL."""
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
-            status, body = responses.get(self.path, (404, {}))
-            payload = json.dumps(body).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
-
-        def log_message(self, format: str, *args: object) -> None:
-            """Silent: the default writes a line per request to stderr."""
-
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        server.server_close()
-
-
-def test_an_unset_url_skips(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(AUTH_OFF_URL_ENV, raising=False)
-    with pytest.raises(pytest.skip.Exception, match=f"{AUTH_OFF_URL_ENV} is not set"):
-        _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
-
-
-def test_a_suitable_platform_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _stub_platform(SUITABLE_AUTH_OFF_PLATFORM) as base_url:
-        monkeypatch.setenv(AUTH_OFF_URL_ENV, f"{base_url}/")
-        assert _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False) == base_url
-
-
-@pytest.mark.parametrize(
-    ("overrides", "problem"),
-    [
-        pytest.param({"/health/ready": (503, {"status": "not ready"})}, "is not a ready platform", id="not-ready"),
-        pytest.param({"/apis/auth/discovery": (200, {"auth_enabled": True})}, "has auth on", id="auth-on"),
-        pytest.param(
-            {"/status": (200, {"controllers": {"healthy": True, "status": {RUN_CONTROLLER: True}}})},
-            f"runs the {RUN_CONTROLLER} controller",
-            id="controller-running",
-        ),
-    ],
-)
-def test_an_unsuitable_platform_fails(
-    monkeypatch: pytest.MonkeyPatch, overrides: dict[str, tuple[int, object]], problem: str
-) -> None:
-    with _stub_platform({**SUITABLE_AUTH_OFF_PLATFORM, **overrides}) as base_url:
-        monkeypatch.setenv(AUTH_OFF_URL_ENV, base_url)
-        with pytest.raises(pytest.fail.Exception, match=problem):
-            _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
