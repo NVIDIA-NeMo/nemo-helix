@@ -359,6 +359,7 @@ nemo evals runs submit \
 
 - `--cpus`, `--memory-mb` and `--storage-mb` replace `task.toml`'s values for the agent sandbox. A separate verifier sandbox keeps `task.toml`'s values.
 - If the profile sets a ceiling (`max_cpus`, `max_memory_mb`, `max_storage_mb`), values above it return a 422 error. Without one, the value is used as given, except that `--storage-mb` above the profile's `max_disk_mb` (128 GiB by default) also returns a 422.
+- The ceilings also apply to `task.toml`. A task that asks for more fails the submit with 422 `tasks without images: <task>: resources_exceed_policy: …`. The flags above lower the agent sandbox. A separate verifier sandbox can only be lowered in `task.toml`.
 
 With `--spec-file`, the sandbox flags are rejected. Set them in `execution`:
 
@@ -373,7 +374,7 @@ With `--spec-file`, the sandbox flags are rejected. Set them in `execution`:
 ```
 
 - `max_concurrent_task_jobs`: the most task Jobs of this run running at once. If unset, the deployment's [per-run cap](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#concurrency) applies (20 by default); a value above the cap has no effect.
-- `timeout_seconds`: the run's time budget, counted from when its first task gets a slot, so scheduling and starting task Jobs count against it. Image builds don't count against it. If unset, the deployment's [default](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#run-time-limits) applies (24 hours).
+- `timeout_seconds`: the run's time budget, counted from when its first task gets a slot, so scheduling and starting task Jobs count against it. Image builds don't count against it. If unset, the deployment's [default](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#run-time-limits) applies (24 hours). A value above the deployment's maximum (72 hours by default) returns a 422.
 - Until its first task gets a slot, a run waits at most the deployment's [queue timeout](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#run-time-limits) (48 hours by default), then expires.
 - The trials within one task Job run one after another.
 - Each trial's gateway key expires 24 hours after its task Job starts. A trial still waiting after that can't call the model.

@@ -280,7 +280,12 @@ platformConfig:
 
 <Warning>
 
-An invalid `evals` config doesn't stop the rollout. The API starts without the evals service and the run controller: every `nemo evals` command returns 404, and the API log has only `Failed to load 'evals' from 'nemo.services' … skipping`. Validate before you apply.
+An invalid `evals` config doesn't stop the rollout, but what breaks depends on platform auth:
+
+- **Auth off:** the API starts without the evals service and the run controller. Every `nemo evals` command returns 404, and the API log has only `Failed to load 'evals' from 'nemo.services' … skipping`.
+- **Auth on:** the auth service can't load the evals plugin either. With the default `authz.on_invalid_plugin: hard_fail`, it doesn't build its authorization bundle, so requests to every service fail, not only `nemo evals`. With `quarantine` or `deny_route`, `nemo evals` commands return 403.
+
+Validate before you apply.
 
 </Warning>
 
