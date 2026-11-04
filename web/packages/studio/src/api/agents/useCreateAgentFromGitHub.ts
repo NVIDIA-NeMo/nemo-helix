@@ -51,7 +51,9 @@ export const createAgentFromGitHub = async ({
   });
 
   try {
-    const config = parseAgentConfig(await readAgentConfig(workspace, filesetName, source));
+    const config = parseAgentConfig(
+      await readAgentConfig(workspace, filesetName, source, secretName)
+    );
 
     return await agentsRegisterAgent(workspace, {
       name,
@@ -68,7 +70,8 @@ export const createAgentFromGitHub = async ({
 const readAgentConfig = async (
   workspace: string,
   filesetName: string,
-  source: GitHubAgentSource
+  source: GitHubAgentSource,
+  secretName: string | undefined
 ): Promise<string> => {
   try {
     const blob = await filesDownloadFile(workspace, filesetName, AGENT_CONFIG_FILENAME);
@@ -76,10 +79,17 @@ const readAgentConfig = async (
   } catch (error) {
     throw new Error(
       `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ` +
-        'Check the branch and directory, and that the secret can read a private repository.',
+        `Check the branch and directory. ${accessHint(secretName)}`,
       { cause: error }
     );
   }
+};
+
+const accessHint = (secretName: string | undefined): string => {
+  if (secretName) {
+    return `Also check that the token in "${secretName}" can read this repository.`;
+  }
+  return 'If the repository is private, choose an access token secret.';
 };
 
 export type UseCreateAgentFromGitHubOptions = Omit<

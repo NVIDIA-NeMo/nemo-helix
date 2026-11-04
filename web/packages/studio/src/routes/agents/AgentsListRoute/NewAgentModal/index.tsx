@@ -13,6 +13,7 @@ import {
 } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
+  Anchor,
   Button,
   Flex,
   Label,
@@ -34,9 +35,11 @@ import { type DeployOnCreatePlan, useDeployOnCreate } from '@studio/api/agents/u
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
 import { DeployOnCreateFields } from '@studio/components/DeployOnCreateFields';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
   AGENT_CONFIG_FILENAME,
+  GITHUB_TOKEN_SECRET_DEFAULTS,
   UPLOAD_AGENT_FORM_DEFAULTS,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
@@ -84,6 +87,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   onClose,
   workspace,
   initialName,
+  initialTab = 'upload',
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -97,7 +101,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [sourceLabel, setSourceLabel] = useState('');
   const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
-  const [tab, setTab] = useState<NewAgentTab>('upload');
+  const [tab, setTab] = useState<NewAgentTab>(initialTab);
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
@@ -198,7 +202,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
-    setTab('upload');
+    setTab(initialTab);
     setTracedAgent('');
     onClose();
   };
@@ -500,7 +504,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                 formFieldProps={{
                   slotLabel: 'Access token secret',
                   slotInfo:
-                    'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                    "Needed only for a private repository: a workspace secret holding a GitHub personal access token that can read the repository's contents. Choose New Secret to store one.",
                   slotError: errors.secretKey?.message,
                 }}
               />
@@ -566,6 +570,17 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
       {isSecretModalOpen ? (
         <CreateSecretModal
           workspace={workspace}
+          instruction="Store a GitHub personal access token so NeMo Helix can read the repository. A fine-grained token limited to that repository, with Contents set to read-only, is enough."
+          initialValues={GITHUB_TOKEN_SECRET_DEFAULTS}
+          valueHelp={
+            <Anchor
+              href={LINK_GITHUB_NEW_FINE_GRAINED_TOKEN}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Create a token on GitHub
+            </Anchor>
+          }
           open
           onClose={() => setSecretModalOpen(false)}
           onSecretCreated={(secretName) => {

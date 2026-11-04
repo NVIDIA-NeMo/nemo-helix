@@ -18,7 +18,7 @@ import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { Stack } from '@nvidia/foundations-react-core';
-import type { FC } from 'react';
+import type { FC, ReactNode } from 'react';
 import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
@@ -40,7 +40,7 @@ const secretFormSchema = z.object({
 
 export type CreateSecretFormData = z.infer<typeof secretFormSchema>;
 
-const defaultValues: CreateSecretFormData = {
+const EMPTY_SECRET_FORM: CreateSecretFormData = {
   name: '',
   description: '',
   value: '',
@@ -53,6 +53,9 @@ export interface CreateSecretModalProps extends Pick<FormModalProps, 'open' | 'o
   errorText?: string;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  instruction?: FormModalProps['instruction'];
+  initialValues?: Partial<CreateSecretFormData>;
+  valueHelp?: ReactNode;
 }
 
 export const CreateSecretModal: FC<CreateSecretModalProps> = ({
@@ -62,8 +65,12 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
   onNotify,
   open,
   onClose,
+  instruction = 'To create a new secret, provide a name, description, and value. ',
+  initialValues,
+  valueHelp,
 }) => {
   const notify = useNotify(onNotify);
+  const defaultValues: CreateSecretFormData = { ...EMPTY_SECRET_FORM, ...initialValues };
 
   const {
     control,
@@ -103,7 +110,7 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
       open={open}
       onClose={resetAndClose}
       title="Create Secret"
-      instruction="To create a new secret, provide a name, description, and value. "
+      instruction={instruction}
       submitButtonText="Create"
       onSubmit={handleSubmit(onSubmit)}
       disabled={pending}
@@ -144,6 +151,7 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
           formFieldProps={{
             slotInfo:
               'For security, the secret value will be encrypted and not displayed after creation.',
+            slotHelp: valueHelp,
             slotError: errors.value?.message,
           }}
         />

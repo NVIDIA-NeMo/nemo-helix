@@ -7,6 +7,18 @@ import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
 
+export const NEW_AGENT_TABS = [
+  'upload',
+  'github',
+  'imported-traces',
+  'coding-agent-prompt',
+] as const;
+
+export const GITHUB_TOKEN_SECRET_DEFAULTS = {
+  name: 'github-token',
+  description: 'GitHub personal access token with read access to repository contents',
+};
+
 export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
 // Container staging skips this file, so its bytes never reach a deployment.

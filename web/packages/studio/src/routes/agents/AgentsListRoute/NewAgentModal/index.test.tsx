@@ -3,6 +3,7 @@
 
 import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
@@ -24,6 +25,7 @@ const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
 const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
+const SECRETS_URL = `${PLATFORM_BASE_URL}/apis/secrets/v2/workspaces/:workspace/secrets`;
 const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
 
 const FABRIC_YAML = `config_format: nemo-agents-spec-v1
@@ -561,8 +563,102 @@ describe('NewAgentModal GitHub import', () => {
     await submit(dialog, user);
 
     expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/If the repository is private/)).toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+  });
+
+  it('reads a private repository with the chosen access token secret', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    await waitFor(() => expect(filesets).toHaveLength(1));
+    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'huggingface-token' });
+  });
+
+  it('stores a new GitHub token from the modal and reads the repository with it', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    const secrets: { name?: string; value?: string }[] = [];
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)),
+      http.post(SECRETS_URL, async ({ request }) => {
+        const body = (await request.json()) as { name?: string; value?: string };
+        secrets.push(body);
+        return HttpResponse.json({ name: body.name, workspace });
+      })
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog', { name: /Register an agent/ });
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New Secret' }));
+
+    const secretDialog = await screen.findByRole('dialog', { name: 'Create Secret' });
+    expect(within(secretDialog).getByRole('textbox', { name: 'Name' })).toHaveValue('github-token');
+    expect(
+      within(secretDialog).getByRole('link', { name: 'Create a token on GitHub' })
+    ).toHaveAttribute('href', LINK_GITHUB_NEW_FINE_GRAINED_TOKEN);
+    await user.type(
+      within(secretDialog).getByLabelText('Value', { selector: 'input' }),
+      'github_pat_abc'
+    );
+    await user.click(within(secretDialog).getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Create Secret' })).not.toBeInTheDocument()
+    );
+    expect(secrets).toEqual([
+      expect.objectContaining({ name: 'github-token', value: 'github_pat_abc' }),
+    ]);
+    await submit(dialog, user);
+
+    await waitFor(() => expect(filesets).toHaveLength(1));
+    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'github-token' });
+  });
+
+  it('says which secret could not read the repository', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/token in "huggingface-token" can read this repository/)
+    ).toBeInTheDocument();
+  });
+});
+
+describe('NewAgentModal initial tab', () => {
+  it('opens on the requested tab', async () => {
+    renderRoute(<NewAgentModal open onClose={vi.fn()} workspace={workspace} initialTab="github" />);
+
+    const dialog = await screen.findByRole('dialog', { name: /Register an agent/ });
+
+    expect(
+      within(dialog).getByRole('tab', { name: 'Register from GitHub', selected: true })
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Repository' })).toBeInTheDocument();
   });
 });
 
