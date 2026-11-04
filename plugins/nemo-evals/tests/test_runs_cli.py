@@ -189,11 +189,14 @@ def test_submit_narrows_a_taskset_by_publishing_a_selection_without_uploading_ta
     assert submitting.posts == [] and submitting.bodies[0]["spec"]["tasks"].endswith("#" + "3" * 64)
 
 
-def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting):
+@pytest.mark.parametrize("workspace", ["ac9", "team"], ids=["configured", "other"])
+def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting, workspace):
+    """The suggested command must run as printed: build-images reads the workspace from the ref."""
     submitting.refuse = True
-    result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64)
+    result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64, "--workspace", workspace)
     assert result.exit_code == 1
-    assert f"Check with: nemo evals tasksets build-images {STORED} --status" in result.output
+    stored = f"{workspace}/deep-swe-162c7ea7#" + "2" * 64
+    assert f"Check with: nemo evals tasksets build-images {stored} --status\n" in result.output
 
 
 @pytest.mark.parametrize(

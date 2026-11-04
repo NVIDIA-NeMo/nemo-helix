@@ -21,6 +21,12 @@ export const DETAIL_TABS = [
 
 export type AgentDetailTab = (typeof DETAIL_TABS)[number];
 
+export const EVAL_TABS: ReadonlySet<AgentDetailTab> = new Set([
+  'overview',
+  'evaluations',
+  'optimizations',
+]);
+
 export const DEFAULT_TAB: AgentDetailTab = AGENT_OVERVIEW_ENABLED ? 'overview' : 'deployments';
 
 /**

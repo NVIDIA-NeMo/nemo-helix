@@ -178,7 +178,10 @@ def _replace_job_callback(
         exist_ok: bool = typer.Option(
             False,
             "--exist-ok",
-            help="Reuse whichever of the above already exists. Its files are left as they are.",
+            help=(
+                "Use whichever of the above already exists. A dataset fileset has its files deleted and the "
+                "local source uploaded in their place; a model or environment is reused as it is."
+            ),
             rich_help_panel=_UPLOAD_PANEL,
         ),
         hf_token_secret: str | None = typer.Option(
@@ -487,6 +490,8 @@ def report_uploads(report: UploadReport) -> None:
     """Say what was created and what was reused, on stderr."""
     for ref in report.created:
         typer.echo(f"Created {ref}", err=True)
+    for ref in report.replaced:
+        typer.echo(f"Replaced the files of {ref} with the local source.", err=True)
     for ref in report.reused:
         typer.echo(f"Reused {ref}, which already existed.", err=True)
     if report.reused_files_untouched:

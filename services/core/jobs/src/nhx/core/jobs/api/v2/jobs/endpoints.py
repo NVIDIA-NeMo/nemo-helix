@@ -278,6 +278,19 @@ def validate_job_spec(
                 detail=f"The execution profile '{step.executor.provider}/{profile_name}' specified in step '{step.name}' does not exist.",
             )
 
+        if step.gateway_providers and (
+            execution_profile.backend != "openshell"
+            or execution_profile.config.gateway_credentials is None
+            or not execution_profile.config.gateway_credentials.credential_refresh_verified
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Gateway providers require an OpenShell execution profile with gateway_credentials configured "
+                    "and credential_refresh_verified set to true."
+                ),
+            )
+
         if step.requires_persistent_storage and not execution_profile.supports_persistent_storage:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

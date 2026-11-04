@@ -2868,8 +2868,9 @@ async def test_reconcile_creates_virtual_models_even_when_update_status_fails(re
     mock_client.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
+@pytest.mark.parametrize("prompt_root", ["e2e-ws/qwen-lora-base", "qwen-lora-base"])
 @pytest.mark.asyncio
-async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler):
+async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler, prompt_root):
     """Deployment-backed provider builds served_models with base, LoRA (&adapters/), and prompt-tuned
     formats, and creates passthrough VirtualModels for the base and prompt-tuned entries only.
 
@@ -2896,7 +2897,7 @@ async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler
     discovered = [
         {"id": "e2e-ws/qwen-lora-base", "root": "e2e-ws/qwen-lora-base", "parent": None},
         {"id": "qwen-lora-base-lora-e2e-dataset-5c30", "root": "/scratch/loras/...", "parent": "e2e-ws/qwen-lora-base"},
-        {"id": "qwen-lora-prompt-tuned", "root": "e2e-ws/qwen-lora-base", "parent": None},
+        {"id": "qwen-lora-prompt-tuned", "root": prompt_root, "parent": None},
     ]
     reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
@@ -2956,6 +2957,49 @@ def test_handle_model_deployment_provider_unmatched_skipped(reconciler):
     out = reconciler._generate_deployment_served_model_mappings(provider, "ws/p", result, ctx)
     assert len(out) == 1
     assert out[0].model_entity_id == "ws/base"
+
+
+@pytest.mark.parametrize("with_entity", [False, True])
+@pytest.mark.asyncio
+async def test_relative_deployment_model_id_creates_passthrough_virtual_model(reconciler, mock_client, with_entity):
+    """Relative config IDs must match vLLM's qualified discovery ID before VM creation."""
+    ctx = _deployment_backed_ctx()
+    ctx.model_deployment_config.model_entity_id = "base-entity"
+    ctx.model_deployment_config.model_spec = MagicMock(model_namespace="ws")
+    ctx.model_entity = _base_entity([]) if with_entity else None
+    mock_client.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
+        await reconciler.reconcile_model_providers([ctx])
+
+    served = _provider_status_call(mock_client.models_client.update_provider_status)["served_models"]
+    assert {mapping.model_entity_id for mapping in served} == {
+        "ws/base-entity",
+        "ws/base-entity&adapters/default/pirate-speak",
+    }
+    create = mock_client.virtual_models_client.create_virtual_model
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["workspace"] == "ws"
+    assert create.call_args.kwargs["body"].name == "base-entity"
+    assert create.call_args.kwargs["body"].default_model_entity == "ws/base-entity"
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "entity_workspace", "model_namespace", "model_name", "expected"),
+    [
+        ("base", "model-ws", "ignored", "ignored/source", "model-ws/base"),
+        ("base", None, "model-ws", "source-ws/source", "model-ws/base"),
+        ("other/base", "ignored", "ignored", "ignored/source", "other/base"),
+        ("base", None, None, "source", "base"),
+        ("base", None, None, "source-ws/source@revision", "source-ws/base"),
+    ],
+)
+def test_resolve_relative_base_backend_model_id(entity_id, entity_workspace, model_namespace, model_name, expected):
+    config = MagicMock()
+    config.model_entity_id = entity_id
+    config.model_spec = MagicMock(model_namespace=model_namespace, model_name=model_name, model_revision=None)
+    entity = MagicMock(workspace=entity_workspace) if entity_workspace else None
+    assert _resolve_base_backend_model_id(config, entity) == expected
 
 
 def test_resolve_base_backend_model_id_from_nim_deployment_only():

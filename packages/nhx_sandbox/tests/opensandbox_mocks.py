@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import re
 import shlex
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -69,6 +70,8 @@ class Server:
         # What the endpoints route answers instead of ``<pod IP>:<port>``, or raises.
         self.endpoint_answer: httpx.Response | BaseException | None = None
         self.endpoint_requests: list[httpx.Request] = []
+        # False gives sandboxes none of the SDK's private services, as a future SDK might.
+        self.private_services = True
         self._ids = (f"sbx-{n}" for n in itertools.count(1))
 
     def live(self) -> set[str]:
@@ -246,6 +249,12 @@ class Commands:
 class Sandbox:
     """A live sandbox handle, as ``Sandbox.create`` returns it."""
 
+    # The SDK's private services. Declared but unset, so a sandbox only has them when mock_sdk sets them, which it
+    # skips when the server's ``private_services`` knob is off.
+    _sandbox_service: Any
+    _connection_config: Any
+    _egress_service: Any
+
     def __init__(
         self, server: Server, sandbox_id: str, policy: dict[str, Any] | None, expires_at: datetime | None = None
     ) -> None:
@@ -352,7 +361,34 @@ def mock_sdk(server: Server) -> dict[str, Any]:
             policy = kwargs["network_policy"].payload if kwargs["network_policy"] is not None else None
             # The server starts the lifetime when the create reaches it.
             expires_at = server.expiry_override or datetime.now(UTC) + kwargs["timeout"]
-            return Sandbox(server, sandbox_id, policy, expires_at)
+            sandbox = Sandbox(server, sandbox_id, policy, expires_at)
+            if server.private_services:
+                # Where the SDK keeps them; the driver replaces the egress client for a moved policy API.
+                sandbox._sandbox_service = SandboxService()
+                sandbox._connection_config = kwargs["connection_config"]
+                sandbox._egress_service = EgressService(SimpleNamespace(port=18080))
+            return sandbox
+
+    class SandboxService:
+        """The SDK's sandbox service: resolves a sandbox's endpoint on a port."""
+
+        async def get_sandbox_endpoint(self, sandbox_id: str, port: int, use_server_proxy: bool) -> SimpleNamespace:
+            return SimpleNamespace(sandbox_id=sandbox_id, port=port, use_server_proxy=use_server_proxy)
+
+    @dataclass
+    class EgressService:
+        """The SDK's egress client, on the endpoint it was built for."""
+
+        endpoint: Any
+
+    class AdapterFactory:
+        """``opensandbox.adapters.factory.AdapterFactory``: builds the egress client for an endpoint."""
+
+        def __init__(self, connection_config: Any) -> None:
+            self.connection_config = connection_config
+
+        def create_egress_service(self, endpoint: Any) -> EgressService:
+            return EgressService(endpoint)
 
     class MockManager:
         """``opensandbox.manager.SandboxManager``: only ``create`` is called on the class."""
@@ -365,6 +401,7 @@ def mock_sdk(server: Server) -> dict[str, Any]:
     # The model classes only need to carry their keyword arguments for the tests to inspect.
     return {
         "Sandbox": MockSandbox,
+        "AdapterFactory": AdapterFactory,
         "SandboxManager": MockManager,
         "ConnectionConfig": ConnectionConfig,
         "RunCommandOpts": lambda **kwargs: SimpleNamespace(**kwargs),
