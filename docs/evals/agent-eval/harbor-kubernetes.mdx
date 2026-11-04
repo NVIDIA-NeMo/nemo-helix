@@ -467,7 +467,7 @@ nemo evals runs cancel "$RUN_ID" --workspace "$WS"
 - `runs list --mine` lists the runs you submitted. With platform auth off, every run has the same user, so it lists all runs.
 - `runs tasks --phase` filters by task phase: `image_ready`, `registered`, `succeeded`, `failed`, `cancelled` or `expired`.
 - `runs status --json` has the run's `run.phase`, `run.result_state` and `run.taskset_ref`.
-- `runs cancel` cancels the remaining task Jobs. The finished tasks are still merged into the bundle.
+- `runs cancel` cancels the remaining task Jobs. Tasks that already succeeded are still merged into the bundle.
 
 ## Read results
 
@@ -505,8 +505,8 @@ trials = read_trials("run-0123456789abcdef/agent-eval-results")
 | The agent doesn't solve the task | Reward 0. Not a failure | None |
 | A task Job fails: its sandbox doesn't start, or the OpenSandbox server changed after submit | The task is `failed`; the other tasks keep running. Evals doesn't rerun it | Rerun the failed tasks (below) |
 | Every task Job fails | Run `failed`, result `none` | Fix the cause, then resubmit |
-| The run passes `timeout_seconds` | Run `expired`; the finished tasks are merged | Rerun the unfinished tasks |
-| You cancel the run | Run `cancelled`; the finished tasks are merged | None |
+| Tasks are still running when the run passes `timeout_seconds` | Run `expired`; the succeeded tasks are merged | Rerun the unfinished tasks |
+| You cancel the run | Run `cancelled`; the succeeded tasks are merged | None |
 | Merging fails 3 times | Result `failed`; per-task scores are still in `runs results` | `nemo jobs get-logs <bundle-job> --workspace "$WS"`; `runs status` shows the bundle Job |
 
 - A run ends `completed` when at least one task succeeded.
