@@ -101,10 +101,10 @@ IORails is used only when it can serve the request; everything else stays on LLM
 variable never breaks a config that worked before. A request stays on LLMRails when:
 
 - the config uses rails IORails does not support (for example dialog rails or Colang 2.x flows), or
-- the plugin request asks for detailed logs beyond activated rails (`llm_calls`, `internal_events`, ...), or
+- a non-streaming plugin request sets any log option, including `activated_rails` alone (streaming output rails ignore log options), or
 - (service only) a model uses the text-completions engine.
 
-The plugin and the service each log a warning saying why a config stayed on LLMRails. To confirm IORails is on, look for `IORails engine enabled`
+The plugin and the service each log a warning saying why a config stayed on LLMRails. A request that falls back because of its log options is not logged. To confirm IORails is on, look for `IORails engine enabled`
 at plugin startup and `Built IORails engine for config ...` the first time a config runs on it.
 
 ## Running tests

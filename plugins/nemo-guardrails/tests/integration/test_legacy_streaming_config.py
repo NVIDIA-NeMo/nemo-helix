@@ -255,7 +255,7 @@ class TestLegacyStreamingConfig:
                 assert isinstance(chunks, list)
                 if expect_blocked:
                     assert chunks[-1]["error"]["code"] == "content_blocked"
-                    assert "import requests" not in build_content_from_chunks(chunks[:-1])
+                    assert build_content_from_chunks(chunks[:-1]) == ""
                 else:
                     assert build_content_from_chunks(chunks) == self.SAFE_BACKEND_RESPONSE
             finally:
