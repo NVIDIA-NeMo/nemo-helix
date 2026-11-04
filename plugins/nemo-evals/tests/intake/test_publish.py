@@ -29,6 +29,7 @@ from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
@@ -741,6 +742,102 @@ async def test_a_partly_rejected_otlp_batch_fails_the_trial_instead_of_scoring_i
         )
 
     assert intake.evaluator_result_requests == [], "scores must not attach to a trace Intake only partly stored"
+
+
+# --- OTLP caller identity ------------------------------------------------------
+
+
+def _root_attributes(body: bytes) -> dict[str, AnyValue]:
+    """The attributes of the request's root span, as the attribute-type/value pairs Intake reads."""
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(body)
+    roots = [
+        span
+        for resource in sent.resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+        if not span.parent_span_id
+    ]
+    (root,) = roots
+    return {attribute.key: attribute.value for attribute in root.attributes}
+
+
+async def test_caller_identity_overrides_the_published_root_span_only() -> None:
+    # Intake reads a trace's agent from the root span's gen_ai.agent.name, so the publish
+    # identity must reach that span or the trace comes back unattributed. Child spans keep
+    # whatever identity they recorded: stamping them would relabel a subagent as its parent.
+    child = {
+        "traceId": _OTLP_TRACE_ID,
+        "spanId": "aabbccddeeff0011",
+        "parentSpanId": _OTLP_SPAN_ID,
+        "name": "child",
+        "attributes": [{"key": "gen_ai.agent.name", "value": {"stringValue": "subagent"}}],
+    }
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_otlp_trial(extra_spans=[child])], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        agent_name="eval-agent",
+        agent_version="3.1.4",
+        model_name="gpt-x",
+    )
+
+    sent = ExportTraceServiceRequest()
+    sent.ParseFromString(_sent_bodies(intake)[0])
+    spans = {span.name: span for span in sent.resource_spans[0].scope_spans[0].spans}
+    root = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert root["gen_ai.agent.name"] == "eval-agent"
+    assert root["gen_ai.agent.version"] == "3.1.4"
+    assert root["gen_ai.request.model"] == "gpt-x"
+
+    child_attributes = {attribute.key: attribute.value.string_value for attribute in spans["child"].attributes}
+    assert child_attributes["gen_ai.agent.name"] == "subagent"
+    assert "gen_ai.agent.version" not in child_attributes
+    assert "gen_ai.request.model" not in child_attributes
+
+
+async def test_publishing_twice_leaves_the_cached_trace_bytes_untouched() -> None:
+    # The evidence handle caches what it parsed, and a publish that stamped the cached messages
+    # in place would change what every later reader of the cached evidence sees.
+    trial = _otlp_trial()
+    assert trial.evidence is not None
+    handle = await trial.evidence.trace("trace", format="otlp")
+    before = ExportTraceServiceRequest(resource_spans=await handle.resource_spans()).SerializeToString()
+    intake = InMemoryIntakeService()
+
+    result = _result([trial], [])
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1", agent_name="eval-agent")
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1", agent_name="eval-agent")
+
+    after = ExportTraceServiceRequest(resource_spans=await handle.resource_spans()).SerializeToString()
+    assert after == before
+
+
+async def test_a_split_trace_carries_the_identity_on_the_root_request() -> None:
+    # Request splitting repacks spans into several bodies; the identity must still arrive on
+    # the request that carries the root span, wherever the packing put it.
+    intake = InMemoryIntakeService()
+
+    await publish_to_intake(
+        _result([_large_otlp_trial(1000)], []),
+        client=intake.client(),
+        experiment_id="exp-1",
+        agent_name="eval-agent",
+        agent_version="3.1.4",
+        model_name="gpt-x",
+        max_otlp_request_bytes=2500,
+    )
+
+    bodies = _sent_bodies(intake)
+    assert len(bodies) > 1, "the trace must actually be split for this test to say anything"
+    root_bodies = [body for body in bodies if _OTLP_SPAN_ID in _span_ids(body)]
+    (root_body,) = root_bodies
+    root = _root_attributes(root_body)
+    assert root["gen_ai.agent.name"].string_value == "eval-agent"
+    assert root["gen_ai.agent.version"].string_value == "3.1.4"
+    assert root["gen_ai.request.model"].string_value == "gpt-x"
 
 
 # --- OTLP request budget ------------------------------------------------------
