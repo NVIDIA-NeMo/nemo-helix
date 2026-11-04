@@ -24,6 +24,7 @@ from nhx.common.controller import ControllerManager
 from nhx.common.platform_endpoint import _SyncHelixEndpointRoutingTransport
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.core.auth.service import AuthService
 from nhx.platform_runner import config as runner_config
 from nhx.platform_runner import server
@@ -288,6 +289,7 @@ def test_create_app_openapi_registers_rebased_query_param_schemas(monkeypatch):
         spec = app.openapi()
         assert spec["info"]["title"] == "NeMo Helix API"
         assert spec["info"]["description"] == "API for NeMo Helix services"
+        assert spec["info"]["version"] == OPENAPI_SPEC_VERSION
         schemas = spec["components"]["schemas"]
         filter_param = next(
             param
