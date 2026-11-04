@@ -123,7 +123,7 @@ curl -s -X POST "$NHX_BASE_URL/apis/builder/v2/workspaces/default/builds" \
 ```
 
 `kubectl -n nhx-platform-builds get pods -w` shows the `fetch` pod, then `build` with its sandbox, then
-`push`. Poll the image until it leaves `pending`, which takes a minute or two:
+`push`. Poll the image until it's `ready`, which takes a minute or two:
 
 ```bash
 curl -s "$NHX_BASE_URL/apis/builder/v2/workspaces/default/container-images/hello-1" \
@@ -355,25 +355,24 @@ to `<registry>/<repository_prefix>/<workspace>/<name>/<build_specs[].name>`, or
 You can't name a registry: whatever runs the image has to pull it, and one registry means one pull
 credential for every workload.
 
-A successful submit returns `201` with the job's name and the `pending` rows. Poll the rows, not the
+A successful submit returns `201` with the job's name and the `queued` rows. Poll the rows, not the
 job: images in a set finish independently.
 
-With `max_concurrent_builds` set (see [Configuration](#configuration)), the rows come back `queued` and
-the job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
-the build, once fewer than `max_concurrent_builds` builds run across the deployment, oldest submit first,
-and moves the rows to `pending`. If Jobs then
-refuses the job, the rows are failed with the reason in `status_detail` rather than the submit
-returning `403` or `409`.
+The job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
+the build, oldest submit first: on its next pass, or, with `max_concurrent_builds` set (see
+[Configuration](#configuration)), once fewer than that many builds run across the deployment. It then moves
+the rows to `pending`. If Jobs refuses the job, the rows are failed with the reason in `status_detail`
+rather than the submit returning `403` or `409`.
 
 | Status | When |
 |---|---|
-| `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
+| `201` | Rows created and the build queued, or the same request was submitted before and these are its rows. |
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
-| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. Or you're a service that isn't acting for a person. |
-| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
+| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you're a service that isn't acting for a person. |
+| `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
-| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. Or the registry of an image to copy couldn't be reached. |
+| `502` | Another platform service refused the build. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
@@ -389,7 +388,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit or Jobs refuses the build, or by the `builder-queue` controller once the image's job has ended without publishing it, or when no job was ever created for it (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for `builder-queue` to create its job: until its next pass, or for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit or Jobs refuses the build, or by `builder-queue` once the image's job has ended without publishing it (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -419,6 +418,7 @@ flowchart TB
     caller([Caller])
     subgraph platform ["platform (release namespace)"]
         api[Builder routes]
+        queue[builder-queue controller]
         entities["Entities: the ContainerImage rows"]
         jobs[Jobs]
         files[Files]
@@ -439,7 +439,8 @@ flowchart TB
 
     caller -->|submit, poll| api
     api -->|writes and reads the rows| entities
-    api -->|reads the profiles and creates the job, as the caller| jobs
+    api -->|reads the profiles, as the caller| jobs
+    queue -->|creates the job, as the submitter; fails the rows it can't publish| jobs
     jobs -->|runs| fetch & build & push
     fetch -->|reads, acting for the submitter| files
     build -->|creates, reads its log, then deletes| sandbox
@@ -458,6 +459,7 @@ flowchart TB
 sequenceDiagram
     actor Caller
     participant API as Builder routes
+    participant Queue as builder-queue
     participant Entities
     participant Secrets
     participant Jobs
@@ -471,9 +473,11 @@ sequenceDiagram
     API->>Jobs: read the execution profiles, as the caller
     Note over API: check the request, the deployment and the profiles
     API->>Secrets: check the caller can read each secret the push step uses
-    API->>Entities: write one pending row per image
-    API->>Jobs: create the job, as the caller
+    API->>Entities: write one queued row per image, and the queued build
     API-->>Caller: 201, the job and its rows
+    Note over Queue: next pass, or once a slot is free under max_concurrent_builds
+    Queue->>Jobs: create the job, as the submitter
+    Queue->>Entities: move the rows to pending
     Jobs->>Fetch: run
     Note over Fetch: copy each build context onto the work volume, acting for the submitter
     Jobs->>Build: run
@@ -502,7 +506,8 @@ sequenceDiagram
 1. **Submit.** The request is resolved into a job name and a row name per image, and each image is
    placed: registry, repository and system tag. Anything the deployment can't honor is refused
    before anything is written, including a push step secret the caller can't read, and execution
-   profiles the sandbox can't follow. Then one `pending` row per image is written, then the job.
+   profiles the sandbox can't follow. Then one `queued` row per image is written, and a queued build;
+   `builder-queue` creates the job and moves the rows to `pending`.
    Each row records a digest of the request, so the same request submitted again returns the same
    rows, and a different request under the same `name` and `revision` is refused.
 2. **`fetch`** clears what an earlier run left behind, then copies each fileset, or just its
@@ -646,7 +651,7 @@ builder:
   import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
   # The platform for a spec that names none. Set it to the nodes' architecture; this is the default.
   default_platform: linux/amd64
-  # Most builds running at once, across workspaces; later submits queue. Null, the default, never queues.
+  # Most builds running at once, across workspaces; later builds wait. Null, the default, sets no limit.
   # The chart sets it from builder.maxConcurrentBuilds (3).
   max_concurrent_builds: 3
 ```
@@ -733,17 +738,11 @@ volume and `node_selector`, so the profiles must agree with each other:
 ### Reliability
 
 - **A row whose build fails stays `pending` until its job ends.** The `builder-queue` controller then
-  fails it, with the reason in `status_detail`. Each pass it fails the images a queued build's ended
-  job left unpublished. Once a minute it also sweeps every other waiting image:
-  - one whose job has ended, as a build submitted without `max_concurrent_builds` leaves;
-  - one with neither a job nor a queued build ten minutes after it was written, as a submit that died,
-    or that Jobs refused, between writing its rows and creating its job leaves.
-
-  So poll until a row is `ready` or `failed`, with a deadline longer than your builds take. The
-  controller has to run: without it, a row whose job ended or was never created stays `pending` for
-  good, though a submit still fails the rows it refuses itself, and with `max_concurrent_builds` set
-  nothing starts a build. Submitting the same request again reuses its rows while they wait; once they
-  have failed, submit the next `revision`.
+  fails it on its next pass, with the reason in `status_detail`, and it fails a build's rows when Jobs
+  refuses the build's job. So poll until a row is `ready` or `failed`, with a deadline longer than your
+  builds take. The controller has to run: without it no build starts, and its rows stay `queued`. A
+  submit that dies between writing its rows and queuing the build leaves them `queued` too: submitting
+  the same request again queues it. Once a request's rows have failed, submit the next `revision`.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
@@ -850,7 +849,7 @@ The tests need no cluster, registry or running platform.
 | `backends.py`, `execution.py` | The deployment's backend, and the `execution` backend |
 | `compile.py` | Turns a plan into the `HelixJobSpec`, fetch, build and push, as a pure function |
 | `submit.py` | The submit sequence: plan, secrets, rows, then the job |
-| `controller.py` | `builder-queue`: starts queued builds under `max_concurrent_builds`, and fails the images no job will publish |
+| `controller.py` | `builder-queue`: creates each build's job, under `max_concurrent_builds` if set, and fails the images its job leaves unpublished |
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
 | `signing.py` | What a signature says, cosign's format for storing it, and the key that makes it |
 | `registry.py` | The registry calls the push step makes to store a signature |

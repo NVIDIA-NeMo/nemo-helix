@@ -15,6 +15,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
+from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.service import BuilderService
 from nemo_builder_plugin.submit import SubmitResult
@@ -271,6 +272,29 @@ class TestSubmitting:
     )
     def test_anyone_else_may(self, caller: Caller) -> None:
         assert submit_refusal(caller) is None
+
+    @pytest.mark.parametrize("cap", [None, 3], ids=["uncapped", "capped"])
+    def test_every_submit_queues_capped_or_not(self, monkeypatch: pytest.MonkeyPatch, cap: int | None) -> None:
+        """So builder-queue creates every build's job, and fails its images if the job ends without publishing them."""
+        queued: list[bool] = []
+
+        async def submit(*_args, queue: bool, **_kwargs) -> SubmitResult:
+            queued.append(queue)
+            return SubmitResult(job="builder-demo-1", images=[])
+
+        config = BuilderConfig(registry="reg.example.com", max_concurrent_builds=cap)
+        monkeypatch.setattr(BuilderConfig, "get", lambda: config)
+        monkeypatch.setattr(service, "load_backend", lambda *_args: None)
+        monkeypatch.setattr(service, "submit_build_set", submit)
+        profiles = httpx.MockTransport(lambda _request: httpx.Response(200, json=[]))
+        client = AsyncNemoClient(base_url="http://platform.test", http_client=httpx.AsyncClient(transport=profiles))
+        app = _app(AsyncMock())
+        app.dependency_overrides[get_nemo_client] = lambda: client
+
+        response = TestClient(app).post(self.BUILDS, json=self.BODY)
+
+        assert response.status_code == 201, response.text
+        assert queued == [True]
 
 
 class TestWhoTheRoutesAdmit:

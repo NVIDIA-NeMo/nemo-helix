@@ -91,8 +91,9 @@ def _build_router() -> APIRouter:
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
-        Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. With
-        `max_concurrent_builds` set, the images are `queued` instead, and the job starts once a slot is free.
+        Creates one `queued` ``ContainerImage`` per spec. The `builder-queue` controller then creates the job that
+        builds them, on its next pass, or once a slot is free with `max_concurrent_builds` set, and the images move to
+        `pending`.
         """
         refusal = submit_refusal(caller)
         if refusal is not None:
@@ -135,7 +136,9 @@ def _build_router() -> APIRouter:
                 secret_readable=secret_readable,
                 resolve_upstream=resolve_upstream,
                 default_platform=config.default_platform,
-                queue=config.max_concurrent_builds is not None,
+                # Every build queues, capped or not, so that builder-queue fails its images if its job ends without
+                # publishing them, or if Jobs refuses it.
+                queue=True,
             )
         except InvalidBuildRequest as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -144,8 +147,7 @@ def _build_router() -> APIRouter:
         except UpstreamUnavailable as exc:
             raise HTTPException(status_code=502, detail=f"Couldn't resolve an image to copy: {exc}") from exc
         except PermissionDeniedError as exc:
-            # From Jobs, which lists the profiles and creates the job as the caller. A refused listing writes nothing;
-            # a refused job leaves the rows written before it pending.
+            # From Jobs, which lists the profiles as the caller. A refused listing writes nothing.
             raise HTTPException(status_code=403, detail=f"Not permitted: {exc.detail}") from exc
         except NemoHTTPError as exc:
             logger.exception("a platform service refused build set %r", sanitize_for_log(body.name))
