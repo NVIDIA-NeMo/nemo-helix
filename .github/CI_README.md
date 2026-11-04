@@ -30,6 +30,20 @@ reusable actions, and supporting docs.
   On successful `main` pushes, it also sends a completion event to an external
   CI consumer.
 
+  Python integration tests run in two independent, whole-package shards with
+  four xdist workers each. The `services` shard covers services except core
+  secrets; `platform` covers secrets, plugins, packages, and root tests. This
+  allocation balances aggregate JUnit durations rather than test counts; see
+  `tests/integration_shards.py` when rebalancing. Both shards retain the normal
+  pytest discovery paths, integration markers, and `loadgroup` scheduling.
+  Reports and crash dumps are separate per shard; the coverage comment combines
+  raw coverage data from both shards, never averages their percentages.
+
+  Local `make test-integration` still runs the entire suite. To run just one
+  shard, use `make test-integration PYTEST_EXTRA=--integration-shard=services`
+  (or `platform`). Sharding does not change whether integration tests block
+  merges, and does not introduce automatic retries.
+
   The final `ci-status` job is the merge gate for this workflow. Repository
   branch protection or rulesets should require `CI status`, not the individual
   test jobs. The job checks every job listed in its `needs` and passes only
