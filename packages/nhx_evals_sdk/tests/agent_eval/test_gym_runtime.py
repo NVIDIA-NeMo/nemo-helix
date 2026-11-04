@@ -74,7 +74,10 @@ from nhx_evals_sdk.agent_eval.trials import (
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
+from nhx_evals_sdk.values.otlp import final_output_text
 from pydantic import ValidationError
+
+from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import write_answer_trace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = FIXTURES / "gym_mcqa_example.jsonl"
@@ -679,13 +682,14 @@ def _assert_shared_descriptors(trial: AgentEvalTrial, rollouts: Path) -> None:
     )
 
 
-def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: Path) -> None:
     # Fabric 0.6 declares the Relay OpenTelemetry file as a RunResult artifact of kind `otlp`. When
     # exactly one such artifact sits inside the run directory and holds spans, that file — not a
-    # projection built from the rollout record — is the trial's trace.
-    trace = tmp_path / "traces" / "relay.jsonl"
-    trace.parent.mkdir()
-    trace.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    # projection built from the rollout record — is the trial's trace. Read back through the
+    # evidence handle the way Intake and metrics do, so the test proves the file is usable, not
+    # merely that its path was registered.
+    trace = write_answer_trace(tmp_path, "The declared answer.")
 
     trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
 
@@ -696,15 +700,17 @@ def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: P
     assert otlp.ref == str(trace)
     assert otlp.data is None  # the declared file, not an inline projection
     assert EVIDENCE_FORMAT_ATIF not in {d.format for d in trial.evidence.descriptors.values()}
+    handle = await trial.evidence.trace(EVIDENCE_TRACE, format=EVIDENCE_FORMAT_OTLP)
+    assert final_output_text(await handle.resource_spans()) == "The declared answer."
 
 
 def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: Path) -> None:
     # A declared ATIF stays reachable under its format-qualified key, with the OTLP file primary —
-    # the same publication rule the Fabric runtime applies to its own trials.
-    trace = tmp_path / "traces" / "relay.jsonl"
-    trace.parent.mkdir()
-    trace.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    # the same publication shape the Fabric runtime's trials carry.
+    trace = write_answer_trace(tmp_path, "The declared answer.")
     atif = tmp_path / "relay" / "trajectory-session.atif.json"
+    atif.parent.mkdir()
+    atif.write_text('{"trajectory": []}\n', encoding="utf-8")
 
     trial = _trial_declaring_fabric_artifacts(
         tmp_path,
@@ -721,6 +727,31 @@ def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: 
     assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"].ref == str(atif)
 
 
+def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
+    # The dual of the two-OTLP ambiguity: with two ATIF artifacts declared there is no single
+    # unambiguous one to pass along, so none is — while the one declared OTLP still wins.
+    trace = write_answer_trace(tmp_path, "The declared answer.")
+    atif_a = tmp_path / "relay" / "trajectory-a.atif.json"
+    atif_b = tmp_path / "relay" / "trajectory-b.atif.json"
+    atif_a.parent.mkdir()
+    atif_a.write_text('{"trajectory": []}\n', encoding="utf-8")
+    atif_b.write_text('{"trajectory": []}\n', encoding="utf-8")
+
+    trial = _trial_declaring_fabric_artifacts(
+        tmp_path,
+        [
+            {"name": "trace", "kind": "otlp", "path": str(trace)},
+            {"name": "trajectory-a", "kind": "atif", "path": str(atif_a)},
+            {"name": "trajectory-b", "kind": "atif", "path": str(atif_b)},
+        ],
+    )
+
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref == str(trace)
+    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"].ref == str(trace)
+    assert f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}" not in trial.evidence.descriptors
+
+
 @pytest.mark.parametrize(
     "artifacts",
     [
@@ -733,6 +764,7 @@ def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: 
             ],
             id="two-otlp-files",
         ),
+        pytest.param([{"name": "trace", "kind": "otlp", "path": "traces/missing.jsonl"}], id="otlp-path-missing"),
     ],
 )
 def test_trials_without_a_single_declared_trace_keep_the_projection(
@@ -781,13 +813,21 @@ def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path) -> None:
     assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
 
 
-def test_declared_trace_outside_the_run_directory_keeps_the_projection(tmp_path: Path) -> None:
-    # A declared path is agent-supplied data: one resolving outside the run directory (a symlink or
-    # a ``..`` traversal) must not become an evidence ref, exactly as the sandbox download rules.
+@pytest.mark.parametrize("escape", ["absolute", "symlink"])
+def test_declared_trace_outside_the_run_directory_keeps_the_projection(tmp_path: Path, escape: str) -> None:
+    # A declared path is agent-supplied data: one resolving outside the run directory must not
+    # become an evidence ref, exactly as the sandbox download rules. Both escapes present a
+    # readable, non-empty file so only the containment check can reject them: an absolute path
+    # outside the run directory, and a symlink inside it that resolves outside.
     outside = tmp_path.parent / "outside-relay.jsonl"
     outside.write_text('{"resourceSpans": []}\n', encoding="utf-8")
     try:
-        declared = str(Path("..") / outside.name)
+        if escape == "absolute":
+            declared = str(outside)
+        else:
+            escape_link = tmp_path / "escape.jsonl"
+            escape_link.symlink_to(outside)
+            declared = str(escape_link)
 
         trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": declared}])
     finally:
