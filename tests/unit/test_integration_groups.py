@@ -23,11 +23,13 @@ def test_groups_preserve_integration_collection(pytester: pytest.Pytester) -> No
         "    selected = {item.nodeid: [mark.name for mark in item.iter_markers()] for item in session.items}\n"
         "    Path('selected.json').write_text(json.dumps(selected))\n"
     )
+    # In-process pytester shares sys.modules with the outer suite. Use unique
+    # probe names so already-imported real test modules cannot replace these.
     for directory, filename in [
-        ("services/core/models/tests", "test_models.py"),
-        ("services/core/secrets/tests", "test_secrets.py"),
-        ("plugins/nemo-evals/tests", "test_evals.py"),
-        ("tests/integration", "test_auth.py"),
+        ("services/core/models/tests", "test_group_probe_models.py"),
+        ("services/core/secrets/tests", "test_group_probe_secrets.py"),
+        ("plugins/nemo-evals/tests", "test_group_probe_evals.py"),
+        ("tests/integration", "test_group_probe_auth.py"),
     ]:
         path = pytester.path / directory / filename
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,7 +39,7 @@ def test_groups_preserve_integration_collection(pytester: pytest.Pytester) -> No
             "@pytest.mark.xdist_group('shared-service-pool')\n"
             "def test_integration(): pass\n"
         )
-    pytester.makepyfile(test_unit="def test_unit(): pass")
+    pytester.makepyfile(test_group_probe_unit="def test_unit(): pass")
     selections = {}
     for group in (None, "services", "platform"):
         args = ["-m", "integration", "--collect-only", "-q"]
