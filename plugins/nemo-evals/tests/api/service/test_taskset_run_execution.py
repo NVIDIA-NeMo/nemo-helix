@@ -407,6 +407,50 @@ async def test_submit_starts_each_tasks_agent_layer_and_freezes_the_wait(
     assert not any(environment.agent_preinstalled for environment in plan.task_environments)
 
 
+async def test_a_task_whose_setup_network_isnt_public_gets_no_layer(
+    service, request_body, entity_store, published, run_store, monkeypatch
+):
+    """A layer installs in a Builder build, with more network than a restricted task's setup gets (AALGO-1225)."""
+    head = await entity_store.get(TaskEntity, name="task-1", workspace="default")
+    environment = {
+        **head.spec.config.get("environment", {}),
+        "network_mode": "allowlist",
+        "allowed_hosts": ["pypi.org"],
+    }
+    closed = TaskEntity(
+        name="closed",
+        workspace="default",
+        spec=head.spec.model_copy(
+            update={"native_task_id": "closed", "config": {**head.spec.config, "environment": environment}}
+        ),
+    )
+    closed, _, _ = await publish_revision(
+        entity_store, entity_store, await entity_store.create(closed), TaskRevisionEntity
+    )
+    mixed = TasksetEntity(
+        name="mixed",
+        workspace="default",
+        tasks=[*published[1].tasks, TaskRef(f"default/closed#{closed.content_hash}")],
+    )
+    await publish_revision(entity_store, entity_store, await entity_store.create(mixed), TasksetRevisionEntity)
+    request_body["spec"]["tasks"] = "default/mixed"
+    request_body["spec"]["target"] = {
+        "kind": "harbor",
+        "source": {"name": "codex"},
+        "agent_kwargs": {"version": "0.162.1"},
+    }
+    _RecordingJobs.created = []
+    monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)
+    _with_layers(service)
+
+    outcome = await submit(service, request_body)
+
+    plan = await run_store.load_plan(await run_store.find("default", outcome.status.run_id))
+    # task-1's layer starts; closed's doesn't, and its trials install the agent in setup.
+    assert plan.agent_layers is not None
+    assert [request.description for request in _RecordingJobs.created] == ["Agent layer 1 of default/task-1"]
+
+
 async def test_an_agent_that_installs_nothing_gets_no_layers(service, request_body, run_store, monkeypatch):
     _RecordingJobs.created = []
     monkeypatch.setattr("nemo_evals.api.service.taskset_run_service.JobsServiceBuildJobs", _RecordingJobs)

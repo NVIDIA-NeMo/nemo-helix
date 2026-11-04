@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from nemo_evals.agent_layers.models import AgentLayer
-from nemo_evals.agent_layers.run_agents import agent_layer_request
+from nemo_evals.agent_layers.run_agents import agent_layer_request, setup_network_is_public
 from nemo_evals.agent_layers.service import AgentLayerService, AgentNotLayerableError, agent_layer_key
 from nemo_evals.api.fields import TasksetRef, parse_subentity_ref
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
@@ -350,8 +350,19 @@ class TasksetRunService:
         revisions = {
             (task.spec.provenance.entity_name, task.spec.provenance.revision_digest): environment.agent
             for task, environment in zip(spec.tasks, prepared, strict=True)
-            if isinstance(task.spec, ResolvedHarborTaskDefinition)
+            if isinstance(task.spec, ResolvedHarborTaskDefinition) and setup_network_is_public(task.spec.config)
         }
+        if restricted := sorted(
+            {
+                task.spec.provenance.entity_name
+                for task in spec.tasks
+                if isinstance(task.spec, ResolvedHarborTaskDefinition) and not setup_network_is_public(task.spec.config)
+            }
+        ):
+            logger.info(
+                "Tasks %s get no agent layer: their setup network isn't public; their trials install the agent",
+                ", ".join(restricted),
+            )
         limit = asyncio.Semaphore(MAX_CONCURRENT_IMAGE_PREPARATIONS)
         now = self._clock()
 

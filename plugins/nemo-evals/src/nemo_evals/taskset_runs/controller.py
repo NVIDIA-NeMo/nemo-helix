@@ -46,7 +46,9 @@ from typing import ClassVar, Protocol
 import httpx
 from filesets import AsyncFilesetFileSystem, parse_fileset_ref
 from nemo_evals.agent_layers.models import AgentLayerEntity
+from nemo_evals.agent_layers.run_agents import setup_network_is_public
 from nemo_evals.agent_layers.service import expired, newest_layer
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
@@ -317,9 +319,15 @@ AgentLayerLookup = Callable[[str, str, str], Awaitable["AgentLayerEntity | None"
 
 def _task_revision(plan: TasksetRunPlan, index: int) -> tuple[str, str] | None:
     """Task ``index``'s ``(entity name, revision digest)``, the revision its agent layer belongs to; None for a task
-    that isn't stored, which has none."""
-    provenance = plan.spec.tasks[index].spec.provenance
-    return (provenance.entity_name, provenance.revision_digest) if provenance is not None else None
+    that has none: one that isn't stored, or one whose setup network isn't public, which a layer may not serve even
+    when one was built for its revision before that rule."""
+    spec = plan.spec.tasks[index].spec
+    provenance = spec.provenance
+    if provenance is None or not isinstance(spec, ResolvedHarborTaskDefinition):
+        return None
+    if not setup_network_is_public(spec.config):
+        return None
+    return (provenance.entity_name, provenance.revision_digest)
 
 
 def _waiting(member: TasksetRunMemberEntity) -> bool:

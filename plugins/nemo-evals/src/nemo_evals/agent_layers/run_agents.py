@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
+from typing import Any
 
+from harbor.models.task.config import NetworkMode, TaskConfig
 from nemo_evals.agent_layers.models import AgentLayerRequest
 from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.jobs.registered_agent_resolution import upgrade_registered_agent_config
@@ -35,3 +38,17 @@ def agent_layer_request(target: object) -> AgentLayerRequest | None:
     if import_path is not None:
         return AgentLayerRequest(import_path=import_path, kwargs=kwargs, env=env)
     return AgentLayerRequest(name=name, kwargs=kwargs, env=env)
+
+
+def setup_network_is_public(config: Mapping[str, Any]) -> bool:
+    """Whether a task's agent setup runs with an open network: its ``[environment]`` baseline, which setup runs under.
+
+    Only such a task gets an agent layer for now. A layer installs in a Builder build, whose network isn't limited to
+    what a restricted task's setup may reach, so a trial could start from an install it couldn't have made itself
+    (AALGO-1225). A config that doesn't parse counts as restricted.
+    """
+    try:
+        task = TaskConfig.model_validate(dict(config))
+    except ValueError:
+        return False
+    return task.environment.resolve_baseline().network_mode == NetworkMode.PUBLIC

@@ -14,6 +14,7 @@ import httpx
 import nemo_evals.taskset_runs.controller as controller_module
 import pytest
 from nemo_evals.agent_layers.models import AgentLayerEntity, AgentLayerRequest, image_digest
+from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.image_builds.models import BuildImage, BuildStatus
@@ -1987,6 +1988,28 @@ async def test_a_layer_on_another_environment_image_than_the_runs_isnt_used(harn
     plan = layered(harbor_plan)
     moved = agent_layer(plan, 0).model_copy(update={"environment_digest": "sha256:" + "f" * 64})
     harness.layers = {revision(plan, 0): moved, revision(plan, 1): agent_layer(plan, 1)}
+    run = await harness.submit(plan, name="run-a")
+    await harness.cycle()
+    members = await harness.members(run)
+    environments = [member_environment(harness.plans[run.name], member) for member in members]
+    assert [environment.agent_preinstalled for environment in environments] == [False, True]
+    assert environments[0].agent == plan.task_environments[0].agent
+
+
+def with_task_network(plan: TasksetRunPlan, index: int, environment: dict[str, Any]) -> TasksetRunPlan:
+    """``plan`` with task ``index``'s ``[environment]`` network settings set to ``environment``."""
+    tasks = list(plan.spec.tasks)
+    spec = tasks[index].spec
+    assert isinstance(spec, ResolvedHarborTaskDefinition)
+    config = {**spec.config, "environment": {**spec.config.get("environment", {}), **environment}}
+    tasks[index] = tasks[index].model_copy(update={"spec": spec.model_copy(update={"config": config})})
+    return plan.model_copy(update={"spec": plan.spec.model_copy(update={"tasks": tasks})})
+
+
+async def test_a_task_whose_setup_network_isnt_public_never_runs_on_a_layer(harness, harbor_plan, jobs):
+    """Not even a ready one built for its revision: a layer installs with more network than its setup gets."""
+    plan = with_task_network(layered(harbor_plan), 0, {"network_mode": "no-network"})
+    harness.layers = {revision(plan, 0): agent_layer(plan, 0), revision(plan, 1): agent_layer(plan, 1)}
     run = await harness.submit(plan, name="run-a")
     await harness.cycle()
     members = await harness.members(run)

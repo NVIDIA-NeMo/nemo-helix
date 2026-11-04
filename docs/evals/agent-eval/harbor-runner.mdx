@@ -968,6 +968,8 @@ A Kubernetes run reuses installs the same way, through Builder:
 2. Each task waits for its own layer, then runs on it. Its trials' setup only confirms the install, and the run opens no setup egress for them.
 3. If a layer fails, or isn't ready within `evals.runs.harbor.agent_layer_wait_seconds` (30 minutes by default), the task runs on its own image and its trials install the agent during setup.
 
+A task whose `[environment]` network is `no-network` or an allowlist gets no layer, and its trials install the agent during setup. A layer's install runs in a Builder build, which can reach more of the network than that task's setup can.
+
 A layer expires after the `timeout_seconds` of the run that started it. A later run then builds a new one, from a Builder build no older than its own `timeout_seconds`.
 
 To turn Kubernetes layers off, set `evals.runs.harbor.agent_layers: false`.

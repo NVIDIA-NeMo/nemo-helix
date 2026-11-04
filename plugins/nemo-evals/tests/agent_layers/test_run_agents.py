@@ -3,9 +3,11 @@
 
 """The agent layer a run's agent installs into, from its resolved target."""
 
+from typing import Any
+
 import pytest
 from nemo_evals.agent_layers.models import AgentLayerRequest
-from nemo_evals.agent_layers.run_agents import agent_layer_request
+from nemo_evals.agent_layers.run_agents import agent_layer_request, setup_network_is_public
 from nemo_evals.agent_layers.service import agent_layer_key
 from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborImportedAgentSource, HarborRunnerTarget
 from pydantic import ValidationError
@@ -77,3 +79,19 @@ def test_a_layer_request_refuses_other_env() -> None:
 )
 def test_agents_that_dont_install_in_setup_get_no_layer(target: object) -> None:
     assert agent_layer_request(target) is None
+
+
+@pytest.mark.parametrize(
+    ("environment", "public"),
+    [
+        ({}, True),
+        ({"network_mode": "public"}, True),
+        ({"network_mode": "no-network"}, False),
+        ({"network_mode": "allowlist", "allowed_hosts": ["pypi.org"]}, False),
+        ({"network_mode": "not-a-mode"}, False),
+    ],
+    ids=["default", "public", "no-network", "allowlist", "unparseable"],
+)
+def test_only_a_task_whose_setup_network_is_public_is_layered(environment: dict[str, Any], public: bool) -> None:
+    """A layer installs with more network than a restricted task's setup gets (AALGO-1225), so only public ones."""
+    assert setup_network_is_public({"environment": environment}) is public
