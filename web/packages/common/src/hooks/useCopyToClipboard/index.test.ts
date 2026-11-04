@@ -72,11 +72,18 @@ describe('useCopyToClipboard', () => {
   });
 
   it('should call onError callback on error', async () => {
+    suppressConsoleError('Failed to copy text to clipboard');
+    const error = new Error('Clipboard access denied');
+    mockWriteText.mockRejectedValueOnce(error);
     const onError = vi.fn();
-    const { result } = renderHook(() => useCopyToClipboard({ onError }));
+    const onSuccess = vi.fn();
+    const { result } = renderHook(() => useCopyToClipboard({ onError, onSuccess }));
 
     await act(async () => {
       await result.current.copyToClipboard('test content');
     });
+
+    expect(onError).toHaveBeenCalledWith(error);
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 });
