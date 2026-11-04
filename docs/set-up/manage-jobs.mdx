@@ -74,7 +74,7 @@ jobs:
 
 On Kubernetes, the Helm chart sets these through `core.jobs.maxActiveJobsPerUser`, `core.jobs.maxActiveJobsPerWorkspace`, and `core.jobs.maxActiveJobs` (the executor limit for Kubernetes and Volcano profiles).
 
-Each job counts as one unit, no matter how many resources it uses. A job counts toward the limits while it is `pending`, `active`, `cancelling`, or `pausing`. Queued, paused, and finished jobs do not count. The scheduler counts current work each time it runs, so the limits do not depend on past usage.
+Each running job counts as one unit, no matter how many resources or tasks it uses. A job runs its steps one at a time, so the scheduler counts the job's current step: it counts toward the limits while it is `pending`, `active`, `cancelling`, or `pausing`. Queued, paused, and finished steps do not count. The scheduler counts current work each time it runs, so the limits do not depend on past usage.
 
 ### What happens at a limit
 
