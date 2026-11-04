@@ -69,6 +69,10 @@ The following are **not** sent through the gateway bearer-auth callout:
 
 Configure the gateway so these paths are not sent to `/apis/auth/ext-authz` when using gateway bearer-auth callout.
 
+The `/apis/auth/ext-authz` callout is for the gateway only. The chart's default Envoy config and the Authentik gateway answer that prefix with a `404` on the public listener. If you replace the gateway config (for example with `envoyProxy.configOverride`) or route clients straight to the API service, add the same `404` fence for `/apis/auth/ext-authz` before your catch-all route. Otherwise a client holding a session cookie can call the callout and receive a bearer token.
+
+The callout also rejects browsers. A cookie-authenticated callout (a session cookie and no `Authorization` header) that carries `Sec-Fetch-Site`, `Sec-Fetch-Mode`, or `Sec-Fetch-Dest` gets a `403`. Envoy forwards only the headers in `allowed_headers`, so it is unaffected. A gateway that forwards every request header to the callout, such as NGINX `auth_request` by default, must drop the `Sec-Fetch-*` headers from the callout request.
+
 ## Gateway Configuration Examples
 
 ### Envoy Auth-Service Callout

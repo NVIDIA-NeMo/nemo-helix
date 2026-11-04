@@ -60,6 +60,11 @@ _AUTHENTICATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     },
 }
 
+# Fetch metadata headers. Browsers add them to every request sent over HTTPS or to localhost, and page
+# scripts can neither set nor remove them. The session cookie is Secure, so any browser request that
+# carries it also carries these. Gateway callouts forward only allow-listed headers, never these.
+_BROWSER_FETCH_METADATA_HEADERS = ("sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest")
+
 
 class _Verdict(Enum):
     """The outcome of the last issuer-boundary check."""
@@ -474,6 +479,11 @@ async def _ext_authz_bearer_token(
     original_path: str | None = None,
 ) -> Response:
     if request.headers.get("authorization") is None and request.cookies.get(WEB_SESSION_COOKIE):
+        # The callout is for gateways. A browser calling it directly, for example a script on a
+        # same-origin page, would read the minted bearer token or identity headers out of the
+        # response and so turn the HttpOnly session cookie into a portable credential.
+        if any(header in request.headers for header in _BROWSER_FETCH_METADATA_HEADERS):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="ext-authz is a gateway callout")
         if not web_sessions_enabled(get_auth_config()):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
         principal = await resolve_web_session(request, credential_store)
