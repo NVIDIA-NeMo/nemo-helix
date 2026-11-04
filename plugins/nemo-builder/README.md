@@ -740,9 +740,10 @@ volume and `node_selector`, so the profiles must agree with each other:
     or that Jobs refused, between writing its rows and creating its job leaves.
 
   So poll until a row is `ready` or `failed`, with a deadline longer than your builds take. The
-  controller has to run: without it nothing fails a row, and with `max_concurrent_builds` set nothing
-  starts a build. Submitting the same request again reuses its rows while they wait; once they have
-  failed, submit the next `revision`.
+  controller has to run: without it, a row whose job ended or was never created stays `pending` for
+  good, though a submit still fails the rows it refuses itself, and with `max_concurrent_builds` set
+  nothing starts a build. Submitting the same request again reuses its rows while they wait; once they
+  have failed, submit the next `revision`.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
