@@ -33,3 +33,17 @@ def test_the_installer_pins_what_uv_lock_locks(argument: str, package: str) -> N
 
     assert match is not None, f"{_DOCKERFILE.name} has no ARG {argument}"
     assert match[1] == _locked(package), f"bump ARG {argument} in {_DOCKERFILE.name} to uv.lock's {package}"
+
+
+def test_the_installer_ships_the_busybox_kaniko_ships() -> None:
+    """kaniko-busybox.json pins the sources of the BusyBox in this kaniko image, for both images."""
+    kaniko = re.compile(r"^FROM (ghcr\.io/osscontainertools/kaniko:\S+) AS kaniko$", re.MULTILINE)
+    builder_dockerfile = (_ROOT / "docker" / "builder" / "Dockerfile.nhx-kaniko").read_text(encoding="utf-8")
+    installer = kaniko.search(_DOCKERFILE.read_text(encoding="utf-8"))
+    builder = kaniko.search(builder_dockerfile)
+    version = re.search(r"^ARG KANIKO_VERSION=(\S+)$", builder_dockerfile, re.MULTILINE)
+
+    assert installer is not None and builder is not None and version is not None
+    assert installer[1] == builder[1].replace("${KANIKO_VERSION}", version[1]), (
+        f"take BusyBox in {_DOCKERFILE.name} from Dockerfile.nhx-kaniko's kaniko image"
+    )

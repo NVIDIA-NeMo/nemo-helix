@@ -144,7 +144,12 @@ def uncovered(sbom: dict, collected: Collected, policy: Policy) -> dict[str, lis
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--sbom", required=True, help="syft JSON inventory of the image")
+    parser.add_argument(
+        "--sbom",
+        action="append",
+        required=True,
+        help="syft JSON inventory of the image, or of an archive it ships; repeat for each",
+    )
     parser.add_argument("--sources", required=True, help="the image's source-distributions directory, copied out")
     parser.add_argument("--policy", help="coverage policy JSON")
     args = parser.parse_args()
@@ -153,8 +158,11 @@ def main() -> int:
     if any(sources.rglob("source-collection-disabled.txt")):
         print(f"{sources}: source collection was disabled in this build", file=sys.stderr)
         return 1
+    artifacts = [
+        artifact for sbom in args.sbom for artifact in json.loads(Path(sbom).read_text(encoding="utf-8"))["artifacts"]
+    ]
     gaps = uncovered(
-        json.loads(Path(args.sbom).read_text(encoding="utf-8")),
+        {"artifacts": artifacts},
         Collected.read(sources),
         Policy.load(Path(args.policy) if args.policy else None),
     )

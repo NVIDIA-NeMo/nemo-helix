@@ -1026,7 +1026,6 @@ target "nhx-agent-installer-docker" {
   dockerfile = "docker/Dockerfile.nhx-agent-installer"
   contexts = {
     nhx-python-base = "target:nhx-python-base"
-    root-busybox    = "target:root-busybox"
   }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
@@ -1044,7 +1043,6 @@ target "nhx-agent-installer-smoke-test" {
   dockerfile = "docker/Dockerfile.nhx-agent-installer"
   contexts = {
     nhx-python-base = "target:nhx-python-base"
-    root-busybox    = "target:root-busybox"
   }
   args = {
     NHX_COLLECT_SOURCES = NHX_COLLECT_SOURCES
