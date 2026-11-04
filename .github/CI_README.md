@@ -95,32 +95,6 @@ packages/versions separately when retiring a scope or version. Cache manifests
 are replaced at stable tags; monitor GHCR storage for untagged historical
 versions, which are not covered by CI image cleanup.
 
-### Verification and Timing
-
-1. Inspect the `Print Docker bake graph` step. Cached image targets should have
-   `cache-from` entries under their scope. Main pushes should also have
-   `cache-to` with `mode=max` and the matching architecture. Consumers should
-   have no `cache-to`. The job summary records the import/export policy.
-2. After landing on main, verify the first main build logs successful cache
-   export. In a later PR or merge queue build, verify successful cache manifest
-   imports and reused (`CACHED`) layers. An import warning on the first run is
-   expected until main has populated the cache. Investigate persistent export
-   warnings even if the image build passes.
-3. Compare warm runs with similar changes against the November 2–3, 2026 sample:
-   38 completed merge queue runs had median CPU image build time 15.8 minutes
-   (13.6–28.8 minute range), median Gym E2E job time 9.3 minutes, and median
-   elapsed time to `CI status` about 26 minutes. Record image-build duration,
-   cache hits/misses, and elapsed time from workflow creation to the required
-   gate. Keep cold builds and reruns separate; do not infer speedup from graph
-   validation alone.
-
-Local validation needs no registry access or Docker daemon: run
-`make check-github-scripts`, then inspect `docker buildx bake --print` with
-`BUILD_ARCH=linux/amd64`, the scoped `CACHE_REGISTRY`,
-`BAKE_CACHE_SOURCE_BRANCH=main`, and `BAKE_CACHE_TARGET_BRANCH=main` (writer)
-or an empty target branch (consumer). Workflow syntax is checked with
-`flox activate --dir tools/actionlint -- actionlint`.
-
 ## GitHub Apps
 
 - DCO app
