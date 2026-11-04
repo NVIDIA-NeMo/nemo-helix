@@ -85,13 +85,17 @@ def test_submit_evaluate_job_endpoint_shape() -> None:
 def test_submit_agent_eval_job_endpoint_shape() -> None:
     prepared = endpoints.submit_agent_eval_job(
         workspace="team-a",
-        body=SubmitAgentEvalJobRequest(spec={"tasks": "default/suite", "target": {"kind": "gym"}}),
+        body=SubmitAgentEvalJobRequest(
+            spec={"tasks": "default/suite", "target": {"kind": "gym"}}, output_location="evaluation-files"
+        ),
     )
 
     assert prepared.method == "POST"
     assert prepared.path_template == "/apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs"
     assert prepared.path_params == {"workspace": "team-a"}
     assert prepared.response_type is AgentEvalJob
+    assert isinstance(prepared.content, bytes)
+    assert json.loads(prepared.content)["output_location"] == "evaluation-files"
 
 
 def test_health_endpoint_shape() -> None:
