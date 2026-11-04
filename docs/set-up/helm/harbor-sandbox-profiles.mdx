@@ -152,7 +152,9 @@ cluster       max_cluster_concurrent_jobs
 | `controller.settle_concurrency` | `8` | Open runs whose task Jobs are read and settled at once in a cycle. Takes no slot. Higher settles many open runs faster but sends more requests to the Jobs service at once |
 | `controller.max_creates_per_cycle` | `10` | Task Job creates per cycle, new ones and retries alike. At least 2 |
 
-- Leave these as they are unless the controller falls behind: raise `max_creates_per_cycle` or `settle_concurrency` when many runs are open, and `create_grace_seconds` when the Jobs API is slow to save.
+- Cycles start every `interval_seconds`. One that runs longer is followed by the next at once, so under load the interval adds no wait.
+- Raise `interval_seconds` first when cycles run long: a cycle over 3 intervals (60 s by default) marks the core-controller pod not ready. When cycles are short, a longer interval delays new task Jobs by up to one interval.
+- Raise `max_creates_per_cycle` or `settle_concurrency` when many runs are open, and `create_grace_seconds` when the Jobs API is slow to save.
 
 ### Run time limits
 
@@ -219,13 +221,10 @@ platformConfig:
             agent_setup_egress:
               - registry.npmjs.org
               # … every host from harbor-standard's list
-            max_cpus: 8
-            max_memory_mb: 32768
-            max_storage_mb: 102400
 ```
 
 - The API host in `egress_allow` and `agent_channel` keeps model-calling agents reaching the gateway.
-- `*.wikipedia.org` opens every Wikipedia host to `public` tasks. An `allowlist` task must list `*.wikipedia.org` itself.
+- `*.wikipedia.org` opens every Wikipedia host to `public` tasks. A Harbor task in `allowlist` mode must list `*.wikipedia.org` in its own `allowed_hosts`.
 
 ### Set ceilings on a profile
 
@@ -332,9 +331,9 @@ An invalid `evals` config doesn't stop the rollout. The API starts without the e
 6. For ceilings, request one more than the ceiling. The 422 names it:
 
    ```bash
-   nemo evals runs submit --workspace default --taskset "$TASKSET" --agent oracle --sandbox-profile harbor-web --cpus 9
+   nemo evals runs submit --workspace default --taskset "$TASKSET" --agent oracle --sandbox-profile harbor-standard --cpus 9
    ```
 
    ```console
-   Error: submit failed (422): "execution.sandbox.cpus=9 exceeds sandbox profile 'harbor-web''s max_cpus=8"
+   Error: submit failed (422): "execution.sandbox.cpus=9 exceeds sandbox profile 'harbor-standard''s max_cpus=8"
    ```

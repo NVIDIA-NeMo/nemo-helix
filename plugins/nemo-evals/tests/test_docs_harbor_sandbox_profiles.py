@@ -138,7 +138,7 @@ def test_recipes_in_order_keep_profiles_valid_and_connected() -> None:
             assert API_HOST in profile.agent_channel, f"{name} can't reach the gateway from no-network tasks"
             assert profile.agent_setup_egress, f"{name} can't install agents"
     assert config.default_sandbox_profile == "harbor-web"
-    assert config.sandbox_profiles["harbor-web"].max_cpus == 8
+    assert config.sandbox_profiles["harbor-standard"].max_cpus == 8  # the ceiling check in "Apply and verify"
 
 
 def test_links_to_the_guide_name_existing_headings() -> None:
