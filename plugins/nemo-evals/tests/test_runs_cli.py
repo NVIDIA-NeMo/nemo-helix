@@ -1670,3 +1670,14 @@ def test_a_failed_download_is_an_error_not_a_traceback(tmp_path, archive, status
     result, _ = downloading(tmp_path, archive, download_status=status)
     assert result.exit_code == 1 and result.output.startswith("Error: ")
     assert not (tmp_path / "run-x" / "agent-eval-results").exists()
+
+
+@pytest.mark.parametrize("path", ["/dev/stdin", "/dev/fd/63", "/proc/self/fd/0"])
+def test_a_spec_file_under_dev_or_proc_is_a_stream_even_when_redirected_from_a_file(path):
+    assert runs_cli._is_stream(Path(path))  # `--spec-file /dev/stdin < spec.json`: is_file() is true
+
+
+def test_a_regular_spec_file_is_not_a_stream(tmp_path):
+    spec = tmp_path / "spec.json"
+    spec.write_text("{}")
+    assert not runs_cli._is_stream(spec)

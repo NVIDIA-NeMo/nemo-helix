@@ -728,8 +728,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         def rerun(ref: str) -> str:
             """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay."""
             kept: list[tuple[str, object]] = [
-                # A stream (/dev/stdin, <(…)) is gone once this command exits
-                ("--spec-file", spec_file if spec_file is None or spec_file.is_file() else "<spec file>"),
+                ("--spec-file", "<spec file>" if spec_file is not None and _is_stream(spec_file) else spec_file),
                 ("--agent", None if spec_file is not None or agent == "oracle" else agent),
                 ("--sandbox-profile", sandbox_profile),
                 ("--cpus", cpus),
@@ -838,6 +837,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 echo("  It uses the spec file's idempotency_key; pass a new --idempotency-key to start another run")
         echo("")
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+
+
+def _is_stream(path: Path) -> bool:
+    """A path that's gone once this command exits: ``/dev/stdin`` (even redirected from a file), ``<(…)``, a pipe."""
+    return path.parts[:2] in {("/", "dev"), ("/", "proc")} or not path.is_file()
 
 
 def _load_spec(spec_file: Path) -> dict[str, Any]:
