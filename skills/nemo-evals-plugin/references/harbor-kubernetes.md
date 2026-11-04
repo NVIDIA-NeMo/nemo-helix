@@ -68,17 +68,26 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
      --default-extra-body '{"chat_template_kwargs": {"enable_thinking": true}}'
    ```
 
-2. A closed-book virtual model. Required for no-network tasks (all DeepSWE tasks); without it submit
-   returns a 422 naming those tasks:
+2. A closed-book virtual model that records trials. Closed-book is required for no-network tasks (all
+   DeepSWE tasks); without it submit returns a 422 naming those tasks. Trial recording puts each trial's
+   model calls and token usage in Intake; without it the job logs a warning and runs unrecorded. Closed-book
+   comes last in `request_middleware`:
 
    ```bash
    nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
      --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
-     --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
+     --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
+                            {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
+     --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
    ```
 
-3. Platform auth on: an inference-scoped gateway key in a secret. Platform auth off: skip this and remove
-   `env_secrets` from the spec.
+   With platform auth off, this model returns 401 to calls that don't carry an evaluation's credential. To
+   chat with the model, call the model entity instead.
+
+3. Platform auth on: an inference-scoped gateway key in a secret. Submit checks for it; trials don't use it.
+   Each trial gets its own Scoped Access Key, created and revoked by the job, valid 24 hours from the task
+   Job's start, so the deployment must have Scoped Access Keys enabled. Platform auth off: skip this and
+   remove `env_secrets` from the spec.
 
    ```bash
    nemo auth access-keys create --name evals-inference-key --scope inference --expires-in 604800 \

@@ -53,6 +53,7 @@ flowchart LR
 <Note>
 
 Your operator must enable OpenSandbox (`sandboxClusterCapable: true`) and Builder (`builder.enabled: true`) in the Helm values. The chart then enables taskset runs with the `harbor-standard` sandbox profile. See [OpenSandbox](/documentation/kubernetes-deployment/setup/helm/open-sandbox) and [Harbor Sandbox Profiles](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles).
+With platform auth on, a model-calling agent also needs [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) enabled.
 
 </Note>
 
@@ -242,22 +243,31 @@ To use a model the deployment already serves, skip these steps. Use that model's
 
 ### 2. Create a closed-book virtual model
 
-The closed-book middleware strips provider-side tools such as web search.
+The virtual model carries two middlewares:
 
-- A no-network task, such as every DeepSWE task, accepts a model-calling agent only through a closed-book model. Without one, submit returns a 422 that names the tasks.
-- Networked tasks also accept it.
+- **Closed-book** strips provider-side tools such as web search.
+  - A no-network task, such as every DeepSWE task, accepts a model-calling agent only through a closed-book model. Without one, submit returns a 422 that names the tasks.
+  - Networked tasks also accept it.
+- **Trial recording** records each trial's model calls in Intake, with token usage, in the trial's trace.
+  - List it in both middleware lists. In `request_middleware`, closed-book comes last.
+  - Without it, the run still works: the job logs a warning and the calls aren't recorded.
 
 ```bash
 nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
   --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
-  --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
+  --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
+                         {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
+  --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
 ```
+
+- With platform auth off, this model refuses calls without the credential an evaluation issues (401). To chat with it yourself, call `$WS/nvidia-nemotron-3-5-super-vl-120b-a12b` instead.
+- See [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials) for details.
 
 ### 3. Give the agent a gateway key
 
-The agent calls the closed-book model through the deployment's Inference Gateway. The gateway checks a key separate from your provider key:
+Each trial calls the gateway with its own key, which evals creates for it and revokes when the trial ends. Submit still checks for a gateway key of your own:
 
-- **Platform auth on:** create an inference-scoped access key and store it in a secret. Without it, submit fails.
+- **Platform auth on:** create an inference-scoped access key and store it in a secret. Without it, submit fails. Trials don't use it.
 
   ```bash
   nemo auth access-keys create --name evals-inference-key --scope inference --expires-in 604800 \
@@ -266,6 +276,7 @@ The agent calls the closed-book model through the deployment's Inference Gateway
 
   - The key acts on your behalf, can only call models, and expires after 7 days (`--expires-in` is in seconds).
   - When it expires, run the same command with `nemo secrets update` in place of `nemo secrets create`.
+  - Each trial's own key is a Scoped Access Key owned by you, so `nemo auth access-keys list` shows it while the trial runs.
 - **Platform auth off:** skip this step and drop `env_secrets` from the request file. Evals sets a placeholder key.
 
 ### 4. Write the request file
@@ -358,6 +369,7 @@ With `--spec-file`, the sandbox flags are rejected. Set them in `execution`:
 - `timeout_seconds`: the run's time budget, counted from when its first task gets a slot, so scheduling and starting task Jobs count against it. Image builds don't count against it. If unset, the deployment's [default](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#run-time-limits) applies (24 hours).
 - Until its first task gets a slot, a run waits at most the deployment's [queue timeout](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#run-time-limits) (48 hours by default), then expires.
 - The trials within one task Job run one after another.
+- Each trial's gateway key expires 24 hours after its task Job starts. A trial still waiting after that can't call the model.
 
 ## Intake integration
 
@@ -433,6 +445,7 @@ Use `--intake-dataset` so that runs on a stored taskset show the same dataset as
 | One trial's trace | `…/experiment/harbor-runs/<run-id>/sessions/<run-id>-task-<i>%3A<trial>` |
 
 - The trace shows the agent's model calls, tool calls and tokens.
+- With [trial recording](#2-create-a-closed-book-virtual-model), the trial's trace also holds one span per gateway call, with the token usage the provider reported. Usage is counted once.
 - The cost column is empty when the agent reports no cost, as for a model without a known price.
 
 ## Track and cancel runs
@@ -527,6 +540,8 @@ nemo evals runs submit --workspace "$WS" --harbor-dir "$SUITE_DIR" --tasks 0 --a
 | 422 `tasks without images: …` | An image build isn't `ready` | `nemo evals tasksets build-images <taskset> --wait`, then resubmit |
 | 422 naming no-network tasks | A model-calling agent without a closed-book `model.ref` | Use a closed-book model ([step 2](#2-create-a-closed-book-virtual-model)) |
 | `platform auth is on, so the agent needs a key to call the Inference Gateway` | No gateway key in `env_secrets` | [Step 3](#3-give-the-agent-a-gateway-key) |
+| Task Job fails with `could not issue … trials their own Inference Gateway key` | Platform auth is on and Scoped Access Keys are off, or you can't create them | Ask your operator to enable [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) |
+| 401 `… records evaluation trials, so calls to it must carry the credential the evaluation issued` | You called a trial-recording virtual model directly, with platform auth off | Call the model it serves, or a virtual model without trial recording |
 | 422 `Intake Experiment … doesn't exist` | `--experiment` names a missing Experiment | `nemo experiments create <name> --workspace "$WS"` |
 | HTTP 409 | The idempotency key was used for a different request | Use a new key |
 | Trials error during the agent install | The profile blocks an install host | Ask your cluster admin to add the host to the profile's [`agent_setup_egress`](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#network) |
