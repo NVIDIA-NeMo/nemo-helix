@@ -36,10 +36,11 @@ def supplied_platform(
             http.get("/health/ready").raise_for_status()
             platform_auth = http.get("/apis/auth/discovery").raise_for_status().json()["auth_enabled"]
             running = http.get("/status").raise_for_status().json()["controllers"]["status"]
-    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:  # ValueError: a body that is not JSON
+            forbidden_running = [name for name in forbidden_controllers if name in running]
+    # ValueError: a body that is not JSON. KeyError, TypeError: JSON that is not shaped like a platform's.
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError, KeyError, TypeError) as error:
         problem = f"is not a ready platform: {error}"
     else:
-        forbidden_running = [name for name in forbidden_controllers if name in running]
         if platform_auth is not auth_enabled:
             problem = f"has auth {'on' if platform_auth else 'off'}; it must be an {mode} platform"
         elif forbidden_running:

@@ -53,6 +53,12 @@ def test_a_suitable_platform_is_used(httpserver: HTTPServer, monkeypatch: pytest
             f"runs the {CONTROLLER} controller",
             id="forbidden-controller-running",
         ),
+        # JSON from something that is not a platform: a missing field, or one of another type.
+        pytest.param({"/apis/auth/discovery": (200, {})}, "is not a ready platform", id="no-auth-enabled"),
+        pytest.param({"/status": (200, ["jobs"])}, "is not a ready platform", id="status-not-an-object"),
+        pytest.param(
+            {"/status": (200, {"controllers": {"status": None}})}, "is not a ready platform", id="no-controller-list"
+        ),
     ],
 )
 def test_an_unsuitable_platform_fails(
