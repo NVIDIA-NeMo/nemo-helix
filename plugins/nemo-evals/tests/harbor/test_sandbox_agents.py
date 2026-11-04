@@ -8,7 +8,7 @@ import ipaddress
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, override
+from typing import Any, Literal, override
 
 import pytest
 from harbor.environments.base import ExecResult
@@ -16,6 +16,7 @@ from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPol
 from harbor.models.trial.paths import TrialPaths
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
+from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT, RESOLVE_TIMEOUT_SEC
 from nhx_sandbox import egress
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from nhx_sandbox.opensandbox_policy import EgressVerificationError
@@ -100,11 +101,24 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
     calls: list[str]
     execs: list[tuple[str, dict[str, Any]]]
     kill_exit: int
+    unresolved: tuple[str, ...]
+    #: What the host check does instead of answering: raise this, or hang.
+    resolve_fails: Exception | Literal["hang"] | None
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         command = f"{opensandbox_environment.SHELL} -c {script}"
-        self.execs.append((command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}}))
+        self.execs.append(
+            (command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}, "timeout": timeout_sec})
+        )
+        if script == RESOLVE_HOSTS_SCRIPT:
+            self.calls.append("resolve")
+            if self.resolve_fails == "hang":
+                await asyncio.Event().wait()
+            if isinstance(self.resolve_fails, Exception):
+                raise self.resolve_fails
+            unresolved = [host for host in env["HOSTS"].split() if host in self.unresolved]
+            return ExecResult(stdout="".join(f"{host}\n" for host in unresolved), return_code=1 if unresolved else 0)
         if "kill -9" in command:
             self.calls.append("kill")
             return ExecResult(stdout="", stderr="could not kill: 9", return_code=self.kill_exit)
@@ -131,6 +145,8 @@ def _setup_environment(
     environment.calls = []
     environment.execs = []
     environment.kill_exit = kill_exit
+    environment.unresolved = ()
+    environment.resolve_fails = None
     environment._sandbox = _FakeSandbox(environment.egress_policy().rules, environment.calls)
     return environment
 
@@ -145,8 +161,55 @@ async def test_setup_window_opens_the_setup_hosts_only_inside_the_block(monkeypa
     async with environment.agent_setup_egress():
         assert _allowed_now(environment) == {IGW, *SETUP}
     assert _allowed_now(environment) == {IGW}
-    # Processes are listed before opening; rules leave before leftovers are killed, so nothing reconnects.
-    assert environment.calls == ["list", "patch", "delete", "kill"]
+    # Processes are listed before opening; the setup hosts must resolve before the block runs; rules leave
+    # before leftovers are killed, so nothing reconnects.
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_only_the_setup_hostnames_are_looked_up(monkeypatch):
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "*.pypi.org", "10.77.0.9"))
+    async with environment.agent_setup_egress():
+        pass
+    resolve_env = next(kwargs["env"] for command, kwargs in environment.execs if "getent" in command)
+    assert resolve_env["HOSTS"] == "registry.npmjs.org"
+
+
+async def test_a_setup_host_that_does_not_resolve_is_logged_and_setup_still_runs(monkeypatch, caplog):
+    """The hosts serve every agent on the profile; one this agent doesn't need mustn't stop its setup."""
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "astral.sh"))
+    environment.unresolved = ("astral.sh",)
+    ran = False
+    with caplog.at_level(logging.WARNING):
+        async with environment.agent_setup_egress():
+            ran = True
+    assert ran
+    assert "astral.sh did not resolve" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_the_host_check_is_bounded_in_the_sandbox(monkeypatch):
+    environment = _setup_environment(monkeypatch)
+    async with environment.agent_setup_egress():
+        pass
+    (timeout,) = [kwargs["timeout"] for command, kwargs in environment.execs if "getent" in command]
+    assert timeout == RESOLVE_TIMEOUT_SEC
+
+
+@pytest.mark.parametrize("failure", [ConnectionError("execd unreachable"), "hang"], ids=["raises", "hangs"])
+async def test_a_host_check_that_fails_or_hangs_is_logged_and_setup_still_runs(monkeypatch, caplog, failure):
+    """A failed or stuck check is only a warning: setup runs, inside the window, which then closes as usual."""
+    monkeypatch.setattr(opensandbox_environment, "RESOLVE_TIMEOUT_SEC", 0)
+    monkeypatch.setattr(opensandbox_environment, "_RESOLVE_TIMEOUT_SLACK_SEC", 0.05)
+    environment = _setup_environment(monkeypatch)
+    environment.resolve_fails = failure
+    ran = False
+    with caplog.at_level(logging.WARNING):
+        async with asyncio.timeout(5):
+            async with environment.agent_setup_egress():
+                ran = _allowed_now(environment) == {IGW, *SETUP}
+    assert ran and _allowed_now(environment) == {IGW}
+    assert "running agent setup anyway" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
 
 
 async def test_setup_window_closes_when_setup_fails(monkeypatch):
@@ -287,7 +350,7 @@ class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
         self.uploads.append((str(source_path), target_path))
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         self.scripts.append((script, env))
         self.script_env.append({**self._persistent_env, **env})
         return self.result
