@@ -9,6 +9,7 @@ only a real engine proves the caller's identity reaches the rail model.
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncIterator
 from types import MappingProxyType, SimpleNamespace
@@ -26,6 +27,7 @@ from nemo_guardrails_plugin.iorails_runtime import (
 from nemo_guardrails_plugin.llm_clients import _request_headers_ctx
 from nemo_guardrails_plugin.llmrails_cache import StableRailsConfig
 from nemo_guardrails_plugin.middleware import GuardrailsMiddleware, handle_streaming_output_check_on_iorails
+from nemo_guardrails_plugin.rails import IORailsGenerationResponse
 from nemo_helix_plugin.inference_middleware import InferenceMiddlewareError, InferenceMiddlewareUnavailableError
 from nemoguardrails import RailsConfig
 from nemoguardrails.rails.llm.options import GenerationResponse
@@ -275,6 +277,18 @@ async def test_request_headers_reach_rail_model_and_do_not_leak_between_requests
 
 
 @pytest.mark.asyncio
+async def test_check_returns_a_response_that_leaves_log_fields_unset(
+    judge_server: HTTPServer, runtime: IORailsRuntime
+) -> None:
+    """The log builder relies on this type to tell IORails results from LLMRails ones."""
+    stable = _stable(judge_server.url_for("/v1"))
+
+    result = await runtime.check(stable, messages=[{"role": "user", "content": "hi"}], rail_types=["input"])
+
+    assert isinstance(result, IORailsGenerationResponse)
+
+
+@pytest.mark.asyncio
 async def test_streamed_output_rails_carry_request_headers(judge_server: HTTPServer, runtime: IORailsRuntime) -> None:
     """The judge call happens while the stream is consumed, in the caller's header scope."""
     token = _request_headers_ctx.set(MappingProxyType({"x-principal": "alice"}))
@@ -452,13 +466,37 @@ async def test_supported_request_runs_on_iorails() -> None:
 
 
 @pytest.mark.asyncio
+async def test_log_options_do_not_move_a_request_off_iorails() -> None:
+    """The caller's log options are ignored (and warned about), not a reason to switch engines."""
+    runtime = _routing_runtime()
+    options = {"llm_calls": True, "stats": True}
+
+    await _run_rails(_middleware_with(runtime), user_log_options=options)
+
+    runtime.check.assert_awaited_once()
+    runtime.warn_ignored_log_options.assert_called_once_with(options)
+
+
+def test_ignored_log_options_are_warned_once_each(caplog: pytest.LogCaptureFixture) -> None:
+    runtime = IORailsRuntime()
+
+    with caplog.at_level(logging.WARNING, logger=iorails_runtime.logger.name):
+        runtime.warn_ignored_log_options({"llm_calls": True, "stats": False})
+        runtime.warn_ignored_log_options({"llm_calls": True, "internal_events": True})
+        runtime.warn_ignored_log_options(None)
+
+    first, second = (record.getMessage() for record in caplog.records)
+    assert first.endswith("llm_calls")
+    assert second.endswith("internal_events")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("iorails_on", "unsupported_reason", "overrides"),
     [
         pytest.param(False, None, {}, id="iorails-off"),
         pytest.param(True, "rails outside the IORails-supported set", {}, id="unsupported-config"),
         pytest.param(True, None, {"rail_types": ["input", "output"]}, id="several-rail-families"),
-        pytest.param(True, None, {"user_log_options": {"llm_calls": True}}, id="detailed-logs-requested"),
     ],
 )
 async def test_request_stays_on_llmrails(

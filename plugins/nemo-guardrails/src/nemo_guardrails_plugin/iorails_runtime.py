@@ -29,6 +29,8 @@ from typing import Any, TypeVar
 
 from nemo_guardrails_plugin.llm_clients import _request_headers_ctx, get_request_headers
 from nemo_guardrails_plugin.llmrails_cache import StableRailsConfig
+from nemo_guardrails_plugin.rails import IORailsGenerationResponse
+from nemo_helix_plugin.guardrail.types import GenerationLogOptionsParam
 from nemoguardrails import Guardrails
 from nemoguardrails.guardrails._http import merge_headers_case_insensitive
 from nemoguardrails.guardrails.iorails import IORails
@@ -128,7 +130,7 @@ def _to_generation_response(result: RailsResult, rail_type: RailType) -> Generat
         if result.status is RailStatus.BLOCKED
         else []
     )
-    return GenerationResponse(
+    return IORailsGenerationResponse(
         response=[{"role": "assistant", "content": result.content}],
         log=GenerationLog(activated_rails=activated_rails),
     )
@@ -144,6 +146,7 @@ class IORailsRuntime:
     def __init__(self) -> None:
         self._engines: dict[str, Guardrails] = {}
         self._unsupported_reasons: dict[str, str | None] = {}
+        self._warned_log_options: set[str] = set()
         self._build_lock = asyncio.Lock()
         self._closed = False
 
@@ -163,6 +166,20 @@ class IORailsRuntime:
                 )
 
         return self._unsupported_reasons[stable.content_hash]
+
+    def warn_ignored_log_options(self, user_log_options: GenerationLogOptionsParam | None) -> None:
+        """Say once per option that the log fields the caller asked for are not returned.
+
+        IORails reports only a verdict. The request still runs on IORails, so the caller's log options
+        are ignored; warning per request would flood the logs of a caller who sets them every time.
+        """
+        requested = {name for name, enabled in (user_log_options or {}).items() if enabled}
+        unseen = requested - self._warned_log_options
+        if unseen:
+            self._warned_log_options |= unseen
+            logger.warning(
+                "IORails does not return these log options, so they are ignored: %s", ", ".join(sorted(unseen))
+            )
 
     async def check(
         self,

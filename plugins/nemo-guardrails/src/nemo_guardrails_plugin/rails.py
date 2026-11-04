@@ -132,6 +132,14 @@ def _build_generation_stats(
     )
 
 
+class IORailsGenerationResponse(GenerationResponse):
+    """A rail verdict from IORails, which reports no log fields beyond the verdict.
+
+    A caller who asks for ``llm_calls``, ``stats`` and the like gets them left unset rather than empty
+    or zero, so a missing value is not mistaken for "no LLM calls were made".
+    """
+
+
 def _build_generation_log(
     user_log_options: GenerationLogOptionsParam | None,
     input_generation_response: GenerationResponse | None = None,
@@ -144,6 +152,17 @@ def _build_generation_log(
     """
     if not user_log_options:
         return None
+
+    # IORails fills in none of the fields a caller can ask for, so its responses contribute nothing.
+    from_iorails = isinstance(input_generation_response, IORailsGenerationResponse) or isinstance(
+        output_generation_response, IORailsGenerationResponse
+    )
+    if isinstance(input_generation_response, IORailsGenerationResponse):
+        input_generation_response = None
+    if isinstance(output_generation_response, IORailsGenerationResponse):
+        output_generation_response = None
+    if from_iorails and input_generation_response is None and output_generation_response is None:
+        return GenerationLog()
 
     input_log = GenerationResponseMapper.to_platform_generation_log(
         input_generation_response.log if input_generation_response else None

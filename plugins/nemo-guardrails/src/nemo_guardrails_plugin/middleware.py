@@ -571,7 +571,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
             iorails_runtime = self._iorails_runtime
             with self._map_setup_errors("Failed to run streaming output rails"):
                 iorails_stable = self._stable_config_for_iorails(
-                    source, request_body, rail_types=PROCESS_RESPONSE_RAIL_TYPES, user_log_options=None
+                    source, request_body, rail_types=PROCESS_RESPONSE_RAIL_TYPES
                 )
                 iorails_client = (ctx.request_nemo_client or self._ensure_client()) if iorails_stable else None
 
@@ -808,13 +808,12 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         # Pick the engine first, so setup errors map to the same statuses whichever one serves the request.
         iorails_runtime = self._iorails_runtime
         with self._map_setup_errors(error_msg):
-            iorails_stable = self._stable_config_for_iorails(
-                source, request_body, rail_types=rail_types, user_log_options=user_log_options
-            )
+            iorails_stable = self._stable_config_for_iorails(source, request_body, rail_types=rail_types)
             iorails_client = (ctx.request_nemo_client or self._ensure_client()) if iorails_stable else None
 
         # IORails when the request and config allow it; the LLMRails path below is the fallback.
         if iorails_runtime is not None and iorails_stable is not None and iorails_client is not None:
+            iorails_runtime.warn_ignored_log_options(user_log_options)
             with self._map_rails_errors(error_msg), platform_headers_context(iorails_client):
                 return await iorails_runtime.check(iorails_stable, messages=messages, rail_types=rail_types)
 
@@ -837,12 +836,12 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         request_body: dict[str, Any],
         *,
         rail_types: list[str],
-        user_log_options: GenerationLogOptionsParam | None,
     ) -> StableRailsConfig | None:
         """The stabilized config to run on IORails, or ``None`` when the request needs LLMRails.
 
-        That is when IORails is off, the request runs more than one rail family, the caller asked for
-        detailed logs (LLM calls, internal events, ...), or the config has rails IORails doesn't support.
+        That is when IORails is off, the request runs more than one rail family, or the config has
+        rails IORails doesn't support. What the caller put in the request, such as log options, never
+        changes the engine.
         Raises like :meth:`_prepare_lease`, so call it under :meth:`_map_setup_errors`.
         """
         runtime = self._iorails_runtime
@@ -852,8 +851,8 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         if runtime is None or stable_cache is None:
             return None
 
-        # IORails checks one rail family at a time and can't produce LLM-call or event logs.
-        if len(rail_types) != 1 or any((user_log_options or {}).values()):
+        # IORails checks one rail family at a time.
+        if len(rail_types) != 1:
             return None
 
         # The checks need no main model, but a request LLMRails would reject must not succeed here.
