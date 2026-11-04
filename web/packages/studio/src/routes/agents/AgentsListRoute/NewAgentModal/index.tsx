@@ -220,7 +220,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const sshCommitted = Boolean(
     committedSsh && liveSsh && committedSsh.url === liveSsh.url && committedSsh.ref === liveSsh.ref
   );
-  const hostTrust = useSshHostTrust(workspace, open ? committedSsh?.url : undefined);
+  const hostTrust = useSshHostTrust(
+    workspace,
+    open ? committedSsh?.url : undefined,
+    watchedSshKeySecret || undefined
+  );
   // While the field holds an uncommitted URL or branch, nothing looked up for the old one counts.
   const knownHosts = sshCommitted ? hostTrust.knownHosts : '';
 
@@ -254,7 +258,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   // Submitting a directory the search already showed has no agent.yaml can only fail.
   const pathHasNoAgent = foundAgentPaths !== undefined && !foundAgentPaths.includes(currentPath);
 
-  // Until an SSH host is trusted, nothing past the repository can be filled in.
+  // Until an SSH host is trusted, nothing past the SSH key can be filled in.
   const hostUntrusted = isSsh && !knownHosts;
   // An SSH remote cannot be read anonymously, and its host key has to be pinned up front.
   const repoReady = Boolean(
@@ -604,7 +608,24 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                 }}
                 attributes={{ Input: { onBlur: onRepoUrlBlur } }}
               />
-              {isSsh ? (
+              <SecretSearchableSelect
+                key={secretField}
+                workspace={workspace}
+                queryEnabled={open && onGitTab && Boolean(workspace)}
+                ensureOptionValue={(isSsh ? watchedSshKeySecret : watchedSecretKey) || undefined}
+                useControllerProps={{ control, name: secretField }}
+                onRequestNewSecret={() => setSecretModalOpen(true)}
+                triggerPlaceholder=""
+                disabled={isPending}
+                formFieldProps={{
+                  slotLabel: isSsh ? 'SSH Private Key' : 'Access token secret',
+                  slotInfo: isSsh
+                    ? 'An unencrypted private key with read access, such as a deploy key. It stays in the platform and is never sent to your browser.'
+                    : 'Required for a private repository. The token stays in the platform and is never sent to your browser.',
+                  slotError: errors[secretField]?.message,
+                }}
+              />
+              {isSsh && watchedSshKeySecret ? (
                 <HostKeyConfirmation
                   hostKeys={hostTrust.hostKeys}
                   settled={hostTrust.settled && sshCommitted}
@@ -614,23 +635,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
                   disabled={isPending}
                 />
               ) : null}
-              <SecretSearchableSelect
-                key={secretField}
-                workspace={workspace}
-                queryEnabled={open && onGitTab && Boolean(workspace)}
-                ensureOptionValue={(isSsh ? watchedSshKeySecret : watchedSecretKey) || undefined}
-                useControllerProps={{ control, name: secretField }}
-                onRequestNewSecret={() => setSecretModalOpen(true)}
-                triggerPlaceholder=""
-                disabled={isPending || hostUntrusted}
-                formFieldProps={{
-                  slotLabel: isSsh ? 'SSH Private Key' : 'Access token secret',
-                  slotInfo: isSsh
-                    ? 'An unencrypted private key with read access, such as a deploy key. It stays in the platform and is never sent to your browser.'
-                    : 'Required for a private repository. The token stays in the platform and is never sent to your browser.',
-                  slotError: errors[secretField]?.message,
-                }}
-              />
               {searchingAgents ? (
                 <Text kind="body/regular/sm" color="subtle">
                   Looking for agents in the repository…

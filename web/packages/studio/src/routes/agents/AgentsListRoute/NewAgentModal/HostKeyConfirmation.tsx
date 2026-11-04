@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage, isBadRequestError } from '@nemo/common/src/api/common/utils';
-import type { ScanSshHostKeysResponse } from '@nemo/sdk/generated/platform/schema';
+import type { SshHostKey } from '@nemo/sdk/generated/platform/schema';
 import { Banner, Button, Checkbox, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { sshKeyTypeLabel } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/git';
 import type { UseQueryResult } from '@tanstack/react-query';
@@ -10,12 +10,12 @@ import { RefreshCw } from 'lucide-react';
 import type { FC } from 'react';
 
 interface HostKeyConfirmationProps {
-  hostKeys: UseQueryResult<ScanSshHostKeysResponse, unknown>;
+  hostKeys: UseQueryResult<SshHostKey[], unknown>;
   /** False while the lookup still answers for an earlier host, or has not answered yet. */
   settled: boolean;
   trusted: boolean;
   onTrustedChange: (trusted: boolean) => void;
-  /** `host[:port]` from the URL, named when the host is refused. */
+  /** `host[:port]` from the URL. */
   host: string | undefined;
   disabled: boolean;
 }
@@ -74,8 +74,10 @@ export const HostKeyConfirmation: FC<HostKeyConfirmationProps> = ({
     );
   }
 
-  const primary = hostKeys.data?.keys[0];
-  if (!hostKeys.data || !primary) return null;
+  const primary = hostKeys.data?.[0];
+  if (!primary) {
+    return null;
+  }
 
   return (
     <Stack
@@ -84,7 +86,7 @@ export const HostKeyConfirmation: FC<HostKeyConfirmationProps> = ({
       data-testid="host-key-confirmation"
     >
       <Banner kind="inline" status="warning">
-        The authenticity of host &apos;{hostKeys.data.host}&apos; cannot be established.
+        The authenticity of host &apos;{host}&apos; cannot be established.
       </Banner>
       <Stack gap="density-xs">
         <Text kind="label/bold/sm" color="secondary">

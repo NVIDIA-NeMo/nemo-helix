@@ -1,14 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ScanSshHostKeysResponse } from '@nemo/sdk/generated/platform/schema';
+import type { SshHostKey } from '@nemo/sdk/generated/platform/schema';
 import { useSshHostKeys } from '@studio/api/files/useSshHostKeys';
 import { sshHostOf } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/git';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
 export interface SshHostTrust {
-  hostKeys: UseQueryResult<ScanSshHostKeysResponse, unknown>;
+  hostKeys: UseQueryResult<SshHostKey[], unknown>;
   /** The lookup answers for the host in the URL as it stands now. */
   settled: boolean;
   /** `host[:port]` of the URL, as the allowlist names it. */
@@ -21,10 +21,14 @@ export interface SshHostTrust {
 }
 
 /** ssh's first-connection prompt as state: only the key shown, for the host in the URL now, is trusted. */
-export const useSshHostTrust = (workspace: string, url: string | undefined): SshHostTrust => {
-  const { scan: hostKeys, settled } = useSshHostKeys(workspace, url);
+export const useSshHostTrust = (
+  workspace: string,
+  url: string | undefined,
+  sshKeySecret: string | undefined
+): SshHostTrust => {
+  const { scan: hostKeys, settled } = useSshHostKeys(workspace, url, sshKeySecret);
   const [trustedLine, setTrustedLine] = useState<string | null>(null);
-  const shownLine = settled ? hostKeys.data?.keys[0]?.known_hosts_line : undefined;
+  const shownLine = settled ? hostKeys.data?.[0]?.known_hosts_line : undefined;
   // Trust is bound to the exact key shown, so a new host or a changed key asks again.
   const trusted = Boolean(shownLine) && trustedLine === shownLine;
   const setTrusted = useCallback(

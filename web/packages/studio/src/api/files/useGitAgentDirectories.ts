@@ -39,7 +39,7 @@ export const useGitAgentDirectories = (
         },
         signal
       );
-      return paths
+      return (paths ?? [])
         .map(agentDirectoryOf)
         .filter((directory): directory is string => directory !== undefined);
     },

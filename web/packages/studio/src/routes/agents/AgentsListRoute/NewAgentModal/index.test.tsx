@@ -24,7 +24,6 @@ const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
 const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
-const HOST_KEYS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/ssh-host-keys/scan`;
 const HOST_KEY_LINE = 'gitlab.example.com ssh-ed25519 AAAA';
 const FIND_FILES_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/git-repositories/find-files`;
 const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
@@ -548,12 +547,27 @@ describe('NewAgentModal Git import', () => {
     expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
   });
 
+  // find-files without known_hosts is the host key lookup; with them it is the agent search.
+  const isHostKeyLookup = async (request: Request) => {
+    const body = (await request.clone().json()) as { storage?: { known_hosts?: string } };
+    return !body.storage?.known_hosts;
+  };
+
+  const onHostKeyLookup = (
+    resolver: (info: { request: Request }) => Response | Promise<Response>
+  ) =>
+    http.post(FIND_FILES_URL, async ({ request }) => {
+      if (!(await isHostKeyLookup(request))) {
+        return undefined;
+      }
+      return resolver({ request });
+    });
+
   const mockHostKeys = () =>
     server.use(
-      http.post(HOST_KEYS_URL, () =>
+      onHostKeyLookup(() =>
         HttpResponse.json({
-          host: 'gitlab.example.com',
-          keys: [
+          host_keys: [
             {
               key_type: 'ssh-ed25519',
               fingerprint: 'SHA256:tpqkiXZfC92uxW2cbtsytSTUAkCrBCJ29o5pXdMIdY4',
@@ -576,6 +590,9 @@ describe('NewAgentModal Git import', () => {
   ) =>
     server.use(
       http.post(FIND_FILES_URL, async ({ request }) => {
+        if (await isHostKeyLookup(request)) {
+          return undefined;
+        }
         requests.push(await request.json());
         await answered;
         return HttpResponse.json({ revision: 'a'.repeat(40), paths });
@@ -611,8 +628,10 @@ describe('NewAgentModal Git import', () => {
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git@v2#calc');
 
     expect(within(dialog).getByText('SSH Private Key')).toBeInTheDocument();
+    expect(within(dialog).queryByTestId('host-key-confirmation')).not.toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Register' })).toBeDisabled();
 
+    await chooseKey(dialog, user);
     expect(
       await within(dialog).findByText('ED25519 key fingerprint', undefined, { timeout: 3000 })
     ).toBeInTheDocument();
@@ -628,7 +647,6 @@ describe('NewAgentModal Git import', () => {
     expect(within(dialog).queryByText(/RzFdjL/)).not.toBeInTheDocument();
 
     await user.click(within(dialog).getByRole('checkbox', { name: /trust this host/ }));
-    await chooseKey(dialog, user);
     await waitFor(() =>
       expect(within(dialog).getByRole('textbox', { name: 'Name' })).toHaveValue('calc')
     );
@@ -654,11 +672,10 @@ describe('NewAgentModal Git import', () => {
       answer = resolve;
     });
     server.use(
-      http.post(HOST_KEYS_URL, async () => {
+      onHostKeyLookup(async () => {
         await answered;
         return HttpResponse.json({
-          host: 'gitlab.example.com',
-          keys: [
+          host_keys: [
             { key_type: 'ssh-ed25519', fingerprint: 'SHA256:abc', known_hosts_line: HOST_KEY_LINE },
           ],
         });
@@ -669,6 +686,7 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await chooseKey(dialog, user);
 
     expect(within(dialog).getByText('Fetching host key…')).toBeInTheDocument();
     expect(
@@ -694,8 +712,8 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
-    await trustHost(dialog, user);
     await chooseKey(dialog, user);
+    await trustHost(dialog, user);
     await registerEnabled(dialog);
 
     const repository = within(dialog).getByRole('textbox', { name: 'Git Repository' });
@@ -706,30 +724,65 @@ describe('NewAgentModal Git import', () => {
     expect(within(dialog).getByText('Fetching host key…')).toBeInTheDocument();
   });
 
-  it('waits for the repository field to be left before looking anything up', async () => {
+  it('waits for the repository field to be left before looking up a new host', async () => {
     const user = userEvent.setup();
     mockHelix();
     const scans: unknown[] = [];
     server.use(
-      http.post(HOST_KEYS_URL, async ({ request }) => {
+      onHostKeyLookup(async ({ request }) => {
         scans.push(await request.json());
-        return HttpResponse.json({ host: 'gitlab.example.com', keys: [] });
+        return HttpResponse.json({ host_keys: [] });
       })
     );
 
     renderModal();
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
-    await user.type(
-      within(dialog).getByRole('textbox', { name: 'Git Repository' }),
-      'git@gitlab.example.com:acme/agents.git'
-    );
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await chooseKey(dialog, user);
+    await waitFor(() => expect(scans).toHaveLength(1));
+
+    const repository = within(dialog).getByRole('textbox', { name: 'Git Repository' });
+    await user.clear(repository);
+    await user.type(repository, 'git@other.example.com:acme/agents.git');
     await new Promise((resolve) => setTimeout(resolve, 700));
-    expect(scans).toHaveLength(0);
+    expect(scans).toHaveLength(1);
 
     await user.tab();
 
+    await waitFor(() => expect(scans).toHaveLength(2));
+  });
+
+  it('looks up the host key only once an SSH key is chosen', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    const scans: unknown[] = [];
+    server.use(
+      onHostKeyLookup(async ({ request }) => {
+        scans.push(await request.json());
+        return HttpResponse.json({ host_keys: [] });
+      })
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitTab(dialog);
+    await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(scans).toHaveLength(0);
+
+    await chooseKey(dialog, user);
+
     await waitFor(() => expect(scans).toHaveLength(1));
+    expect(scans[0]).toEqual({
+      storage: {
+        type: 'git',
+        url: 'git@gitlab.example.com:acme/agents.git',
+        ssh_key_secret: 'huggingface-token',
+        known_hosts: '',
+      },
+      file_name: 'agent.yaml',
+    });
   });
 
   it('shows a lone agent at the repository root read-only', async () => {
@@ -742,8 +795,8 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
-    await trustHost(dialog, user);
     await chooseKey(dialog, user);
+    await trustHost(dialog, user);
     await registerEnabled(dialog);
 
     const directory = within(dialog).getByRole('combobox', { name: 'Agent Directory' });
@@ -761,8 +814,8 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
-    await trustHost(dialog, user);
     await chooseKey(dialog, user);
+    await trustHost(dialog, user);
 
     const directory = within(dialog).getByRole('combobox', { name: 'Agent Directory' });
     await waitFor(() => expect(directory).toBeEnabled(), { timeout: 3000 });
@@ -773,7 +826,7 @@ describe('NewAgentModal Git import', () => {
     const user = userEvent.setup();
     mockHelix();
     server.use(
-      http.post(HOST_KEYS_URL, () =>
+      onHostKeyLookup(() =>
         HttpResponse.json(
           {
             detail: "Storage host or endpoint not in allowed list: Host 'ssh://gitlab.example.com'",
@@ -787,6 +840,7 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await chooseKey(dialog, user);
 
     expect(
       await within(dialog).findByText(/isn't an allowed host/, undefined, { timeout: 3000 })
@@ -808,8 +862,8 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
-    await trustHost(dialog, user);
     await chooseKey(dialog, user);
+    await trustHost(dialog, user);
 
     const repository = within(dialog).getByRole('textbox', { name: 'Git Repository' });
     await user.clear(repository);
@@ -827,11 +881,10 @@ describe('NewAgentModal Git import', () => {
     mockHelix();
     let allowed = false;
     server.use(
-      http.post(HOST_KEYS_URL, () =>
+      onHostKeyLookup(() =>
         allowed
           ? HttpResponse.json({
-              host: 'gitlab.example.com',
-              keys: [
+              host_keys: [
                 {
                   key_type: 'ssh-ed25519',
                   fingerprint: 'SHA256:abc',
@@ -847,6 +900,7 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git');
+    await chooseKey(dialog, user);
     expect(
       await within(dialog).findByText(/Could not look up the host key/, undefined, {
         timeout: 3000,
@@ -882,8 +936,8 @@ describe('NewAgentModal Git import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitTab(dialog);
     await typeRepo(dialog, user, 'git@gitlab.example.com:acme/agents.git@main');
-    await trustHost(dialog, user);
     await chooseKey(dialog, user);
+    await trustHost(dialog, user);
 
     expect(
       await within(dialog).findByText('Looking for agents in the repository…')
