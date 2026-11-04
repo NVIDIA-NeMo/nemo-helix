@@ -57,8 +57,9 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 `--agent` takes a built-in agent name only. A model-calling agent needs `--spec-file`.
 
 1. The model: either one the deployment serves (`nemo models list --workspace "$WS" | grep <name>`; pass
-   it as `<ws>/<name>` to `--default-model-entity`), or the user's own provider. Never put a key in a
-   command or file:
+   it as `<ws>/<name>` to `--default-model-entity`), or the user's own provider. For build.nvidia.com, the
+   user picks a model ID from https://build.nvidia.com/models and creates a key at
+   https://build.nvidia.com/settings/api-keys. Never put a key in a command or file:
 
    ```bash
    printenv NVIDIA_BUILD_API_KEY | nemo secrets create nvidia-build-api-key --workspace "$WS" --from-file -
