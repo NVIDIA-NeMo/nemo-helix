@@ -106,6 +106,9 @@ dev = [
   # agent-hardener itself, which stays in its own venv (garak pulls litellm/torch, incompatible pins).
   "nemo-agent-hardener-plugin",
   "nemo-agents-plugin[deepagents]", # Fabric agent E2E runtime
+  # Dev only, so its unit tests and type checks run with the rest; it stays out of
+  # `enabled-plugins` and `nemo-helix[all]`, so no shipped image carries Strands.
+  "strands-harness-optimizer-plugin",
   "nvidia-nat-atif>=1.9.0a20260811,<1.10", # ATIF schema models for intake ATIF ingest
   "nemo-helix-tools",               # License and package-layout maintenance tooling
   "nhx-build-tools",                       # Build hook helpers imported by package-local hatch_build.py files
@@ -468,6 +471,7 @@ nemo-compass-plugin = { workspace = true }
 
 nemo-evals-plugin = { workspace = true }
 nemo-scaled-evals-plugin = { path = "plugins/_temporary-scaled-evals", editable = true }
+strands-harness-optimizer-plugin = { path = "plugins/strands-harness-optimizer", editable = true }
 nemo-guardrails-plugin = { workspace = true }
 nemo-garak-plugin = { workspace = true }
 nemo-safe-synthesizer-plugin = { workspace = true }
