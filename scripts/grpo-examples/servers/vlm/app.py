@@ -12,15 +12,23 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from nemo_gym.base_resources_server import (  # ty: ignore[unresolved-import]
     BaseResourcesServerConfig,
     BaseVerifyRequest,
     BaseVerifyResponse,
     SimpleResourcesServer,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from rewards import score_response
+
+# 16x16 pink PNG. simple_agent stores the HTTP body as a string, and the training
+# postprocess treats a string that starts with ``data:image/`` as a tool image.
+INSPECT_SCENE_IMAGE = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAI0lEQVR4nGP8z9DAQApg"
+    "Ikk1w6gG4gATkergYFQDMYDkUAIAxr0Bn/6xQzgAAAAASUVORK5CYII="
+)
 
 
 class RewardFunctionConfig(BaseModel):
@@ -44,6 +52,12 @@ class VlmVerifyResponse(BaseVerifyResponse):
     answer_reward: Optional[float] = None
 
 
+class InspectSceneRequest(BaseModel):
+    """The model calls ``inspect_scene`` with an empty object."""
+
+    model_config = ConfigDict(extra="allow")
+
+
 def _extract_last_assistant_text(body: BaseVerifyRequest) -> str:
     texts: list[str] = []
     for output in body.response.output:
@@ -64,7 +78,17 @@ class VlmResourcesServer(SimpleResourcesServer):
 
     def setup_webserver(self) -> FastAPI:
         app = super().setup_webserver()
+        app.post("/inspect_scene")(self.inspect_scene)
         return app
+
+    async def inspect_scene(self, body: InspectSceneRequest) -> Response:
+        """Return a second view of the scene as a raw image data URL.
+
+        A JSON string would arrive quoted (``"data:image/..."``) and the
+        training postprocess would not treat it as an image.
+        """
+        del body
+        return Response(content=INSPECT_SCENE_IMAGE, media_type="text/plain")
 
     async def verify(self, body: VlmVerifyRequest) -> VlmVerifyResponse:
         scored = score_response(

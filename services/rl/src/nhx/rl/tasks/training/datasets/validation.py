@@ -359,7 +359,13 @@ def _count_prompt_images(row: Any) -> int:
     params = row.get("responses_create_params")
     if not isinstance(params, dict):
         return 0
-    return _count_image_parts(params.get("input"))
+    prompt_images = _count_image_parts(params.get("input"))
+    # A tool can hand the model another image on a later turn. The prompt image
+    # is still in that turn's context, so the vLLM cap has to cover both.
+    tool_images = row.get("tool_images", 0)
+    if type(tool_images) is int and tool_images > 0:
+        return prompt_images + tool_images
+    return prompt_images
 
 
 def _count_image_parts(value: Any) -> int:

@@ -1811,6 +1811,35 @@ def test_grpo_input_image_rows_count_as_images(
     assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 1}
 
 
+def test_grpo_tool_images_raise_the_limit_above_the_prompt(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, dataset = _prepared_step(tmp_path, has_vision_tower=True)
+    row = {
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": "data:image/png;base64,aa", "detail": "auto"},
+                        {"type": "input_text", "text": "how many cubes?"},
+                    ],
+                }
+            ],
+            "tools": [{"type": "function", "name": "inspect_scene"}],
+        },
+        "tool_images": 1,
+        "agent_ref": {"type": "responses_api_agents", "name": "clevr_cogent_tool_agent"},
+        "expected_answer": "3",
+    }
+    (dataset / "training.jsonl").write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    cfg = compile_grpo_config(step, job_ctx)
+
+    assert cfg["policy"]["generation"]["vllm_kwargs"]["limit_mm_per_prompt"] == {"image": 2}
+
+
 def test_grpo_image_limit_is_the_widest_prompt(
     tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
