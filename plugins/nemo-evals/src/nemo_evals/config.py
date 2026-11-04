@@ -84,6 +84,22 @@ class HarborSandboxProfileConfig(BaseModel):
             "None applies each task's value as given."
         ),
     )
+    max_gpus: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Most GPUs a sandbox may request (task.toml gpus); 0 refuses GPU tasks. A sandbox gets them as "
+            "nvidia.com/gpu, so the cluster needs GPU nodes the sandboxes can be scheduled on."
+        ),
+    )
+    gpu_types: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "GPU types this profile's sandboxes get, as tasks name them in gpu_types (e.g. A100). A task "
+            "that accepts only other types is refused, so it never runs on a GPU it didn't ask for. Sandboxes "
+            "aren't pinned to a type: list only types that every GPU node they can land on has."
+        ),
+    )
 
 
 class HarborTaskJobsConfig(BaseModel):
