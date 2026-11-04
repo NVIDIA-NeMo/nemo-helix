@@ -133,3 +133,5 @@ export const usePackageAgent = ({ workspace, agentName }: UsePackageAgentParams)
     published: result.data?.published,
   };
 };
+
+export type PackageAgentBuild = ReturnType<typeof usePackageAgent>;

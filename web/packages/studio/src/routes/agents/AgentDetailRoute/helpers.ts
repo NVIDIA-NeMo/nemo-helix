@@ -6,6 +6,9 @@ import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDep
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 /** Abbreviates a commit SHA; any other revision (a branch, a tag) is shown whole. */
+/** Images the platform built (Studio packaging tags them here); only these are ever removed. */
+export const isPlatformBuiltImage = (image: string): boolean => image.startsWith('nemo-agents/');
+
 export const shortRevision = (revision: string): string =>
   COMMIT_SHA.test(revision) ? revision.slice(0, 7) : revision;
 

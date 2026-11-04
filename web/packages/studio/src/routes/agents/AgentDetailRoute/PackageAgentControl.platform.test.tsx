@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { workspace1 } from '@studio/mocks/entity-store/projects';
-import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
+import { ImagesPanel } from '@studio/routes/agents/AgentDetailRoute/components/ImagesPanel';
 import {
   mockEnabledModes,
   mockExecutionProfiles,
@@ -14,9 +14,7 @@ describe('PackageAgentControl on a Kubernetes platform', () => {
   it('reads the platform capabilities and offers the local Kubernetes build', async () => {
     mockExecutionProfiles([{ profile: 'default', backend: 'kubernetes_job' }]);
     mockEnabledModes('subprocess', 'k8s');
-    renderRoute(
-      <PackageAgentControl workspace={workspace1.workspace} agentName="my-agent" canPackage />
-    );
+    renderRoute(<ImagesPanel workspace={workspace1.workspace} agentName="my-agent" canPackage />);
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Build image' }));
     const dialog = screen.getByRole('dialog');

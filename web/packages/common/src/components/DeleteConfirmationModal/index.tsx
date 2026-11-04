@@ -4,7 +4,7 @@
 import { ConfirmationModal } from '@nemo/common/src/components/ConfirmationModal';
 import { FormModalProps } from '@nemo/common/src/components/FormModal';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
-import { FC } from 'react';
+import { FC, type ReactNode } from 'react';
 
 interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   onDelete: () => boolean | Promise<boolean>;
@@ -17,6 +17,8 @@ interface DeleteModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   suppressResultToasts?: boolean;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  /** Extra content (e.g. options for the delete) rendered below the description. */
+  children?: ReactNode;
 }
 
 export const DeleteConfirmationModal: FC<DeleteModalProps> = ({

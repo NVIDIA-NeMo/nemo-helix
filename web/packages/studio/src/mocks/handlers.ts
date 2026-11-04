@@ -13,6 +13,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
+import { agentImagesHandlers } from '@studio/mocks/handlers/agentImages';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
@@ -725,6 +726,7 @@ export const handlers = [
     HttpResponse.json({ data: [], total: 0 })
   ),
   ...agentDeploymentCapabilitiesHandlers,
+  ...agentImagesHandlers,
   http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () =>
     HttpResponse.json({
       data: [

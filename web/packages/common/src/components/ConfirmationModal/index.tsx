@@ -8,8 +8,8 @@ import { LoadingButton } from '@nemo/common/src/components/LoadingButton';
 import type { NotifyFn } from '@nemo/common/src/providers/toast/types';
 import { useNotify } from '@nemo/common/src/providers/toast/useNotify';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { Stack, Text } from '@nvidia/foundations-react-core';
-import { type ComponentProps, type FC, useState } from 'react';
+import { Block, Stack, Text } from '@nvidia/foundations-react-core';
+import { type ComponentProps, type FC, type ReactNode, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 interface FormFields {
@@ -40,6 +40,8 @@ export interface ConfirmationModalProps extends Pick<
   suppressResultToasts?: boolean;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  /** Extra content (e.g. options for the action) rendered below the description. */
+  children?: ReactNode;
 }
 
 export const ConfirmationModal: FC<ConfirmationModalProps> = ({
@@ -57,6 +59,7 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
   submitButtonColor,
   suppressResultToasts = false,
   onNotify,
+  children,
 }) => {
   const {
     reset,
@@ -128,7 +131,10 @@ export const ConfirmationModal: FC<ConfirmationModalProps> = ({
       }
     >
       <Stack gap="density-md">
-        <Text className={`leading-relaxed ${simpleConfirm ? 'mb-4' : ''}`}>{description}</Text>
+        <Text className={`leading-relaxed ${simpleConfirm && !children ? 'mb-4' : ''}`}>
+          {description}
+        </Text>
+        {children && <Block className={simpleConfirm ? 'mb-4' : ''}>{children}</Block>}
         {!simpleConfirm && (
           <ControlledTextInput
             useControllerProps={{

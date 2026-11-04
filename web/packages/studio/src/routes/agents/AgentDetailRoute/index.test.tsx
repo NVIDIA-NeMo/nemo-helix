@@ -10,6 +10,7 @@ vi.hoisted(() => {
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { AGENT_IMAGES_URL } from '@studio/mocks/handlers/agentImages';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import {
@@ -19,6 +20,7 @@ import {
 } from '@studio/routes/utils';
 import { LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
 import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
+import { mockEnabledModes } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, within } from '@studio/tests/util/render';
 import { waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -178,17 +180,20 @@ describe('AgentDetailRoute', () => {
     await waitFor(() => expect(requests).toBe(2));
   });
 
-  it("offers this agent's built image to a deployment when asked for it", async () => {
+  it('deploys an image picked from the images list', async () => {
     mockPreviouslyPackagedAgent();
+    mockEnabledModes('subprocess', 'docker');
+    server.use(
+      http.get(AGENT_IMAGES_URL, () =>
+        HttpResponse.json({ data: [{ id: 'sha256:a', tags: [BUILT_IMAGE], in_use: false }] })
+      )
+    );
     renderDetail();
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
-    // The tag lives in the packaging modal now; the trigger is what reports it is ready.
-    await screen.findByText('Image ready');
-    await user.click(screen.getByRole('button', { name: /Manage image/ }));
-    const dialog = await screen.findByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: /^Deploy$/ }));
+    const row = await screen.findByTestId('image-row');
+    await user.click(within(row).getByRole('button', { name: 'Deploy' }));
 
     expect(await screen.findByRole('textbox', { name: 'Container Image' })).toHaveValue(
       BUILT_IMAGE
@@ -201,7 +206,7 @@ describe('AgentDetailRoute', () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole('tab', { name: 'Deployment' }));
-    await screen.findByText('Image ready');
+    await screen.findByText('No images built for this agent.');
     await user.click(screen.getAllByRole('button', { name: /^Deploy$/ })[0]);
 
     await screen.findByRole('textbox', { name: /Deployment Name/ });
