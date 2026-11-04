@@ -1,6 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Iterator
+
+import pytest
 from fastapi import APIRouter
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.service import NemoService, RouterSpec
@@ -11,6 +14,13 @@ from nhx.platform_runner.plugin_adapter import NemoServiceAdapter
 def clear_registry_caches() -> None:
     registry.get_available_services.cache_clear()
     registry.get_available_controllers.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _clear_registry_caches_after() -> Iterator[None]:
+    """Drop registries cached from patched discovery so fake plugins never reach later tests."""
+    yield
+    clear_registry_caches()
 
 
 class _FakeEntryPoint:

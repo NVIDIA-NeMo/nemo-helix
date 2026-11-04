@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,7 +21,12 @@ from nhx.platform_runner.config import (
 
 
 @pytest.fixture(autouse=True)
-def clear_registry_caches() -> None:
+def clear_registry_caches() -> Iterator[None]:
+    # Clear after as well: a registry cached while a test patches discovery would otherwise leak
+    # fake plugins into later tests on the same worker.
+    registry.get_available_services.cache_clear()
+    registry.get_available_controllers.cache_clear()
+    yield
     registry.get_available_services.cache_clear()
     registry.get_available_controllers.cache_clear()
 
