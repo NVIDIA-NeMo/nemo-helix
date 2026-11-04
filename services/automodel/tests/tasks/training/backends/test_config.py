@@ -1110,9 +1110,12 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert compiled["peft"]["exclude_modules"] == [
         "*vision_tower*",
         "*vision_model*",
+        "*vision_projector*",
         "*visual*",
         "*image_encoder*",
         "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
         "*mlp1*",
         "*lm_head*",
     ]

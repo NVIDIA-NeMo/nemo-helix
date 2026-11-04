@@ -21,6 +21,7 @@ import logging
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
 
@@ -161,11 +162,19 @@ def _resolve_image(url: str, dataset_root: Path, image_dir: Path) -> str:
     """Map an image URL onto a file under ``dataset_root``.
 
     A ``data:`` URL is decoded into ``image_dir``. Any other URL is a path
-    relative to the dataset. An absolute path is not joined: ``Path / "/etc/shadow"``
-    discards the root and opens that file.
+    relative to the dataset. An ``http`` or ``https`` URL is not a path:
+    ``Path`` does not treat it as absolute, so joining it would look for a
+    file named after the URL. An absolute path is not joined either:
+    ``Path / "/etc/shadow"`` discards the root and opens that file.
     """
     if url.startswith("data:"):
         return _write_data_url(url, image_dir)
+    scheme = urlparse(url).scheme
+    if scheme:
+        raise DatasetFormatError(
+            f"Image URL {url!r} must be a path relative to the dataset directory or a data: URL. "
+            f"Remote {scheme} URLs are not downloaded."
+        )
     relative = Path(url)
     if relative.is_absolute():
         raise DatasetFormatError(f"Image URL {url!r} must be a path relative to the dataset directory.")

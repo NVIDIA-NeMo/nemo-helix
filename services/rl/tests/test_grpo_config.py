@@ -1775,9 +1775,12 @@ def test_grpo_vision_checkpoint_sets_is_vlm_and_leaves_image_urls(
     assert cfg["policy"]["automodel_cfg"]["lora_cfg"]["exclude_modules"] == [
         "*vision_tower*",
         "*vision_model*",
+        "*vision_projector*",
         "*visual*",
         "*image_encoder*",
         "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
         "*mlp1*",
         "*lm_head*",
     ]

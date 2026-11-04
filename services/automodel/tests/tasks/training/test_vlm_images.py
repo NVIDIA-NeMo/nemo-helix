@@ -90,6 +90,12 @@ def test_an_absolute_image_url_is_rejected(tmp_path: Path) -> None:
         _rewrite(tmp_path, "/etc/shadow")
 
 
+@pytest.mark.parametrize("url", ["http://example.com/a.png", "https://example.com/a.png", "HTTPS://example.com/a.png"])
+def test_a_remote_image_url_is_rejected(tmp_path: Path, url: str) -> None:
+    with pytest.raises(DatasetFormatError, match="not downloaded"):
+        _rewrite(tmp_path, url)
+
+
 def test_an_image_url_cannot_leave_the_dataset(tmp_path: Path) -> None:
     with pytest.raises(DatasetFormatError, match="outside the dataset"):
         _rewrite(tmp_path, "../../etc/shadow")
