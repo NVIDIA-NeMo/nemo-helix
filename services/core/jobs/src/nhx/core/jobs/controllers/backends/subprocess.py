@@ -367,18 +367,24 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
 
         self._refresh_task_auth(metadata)
 
-        # The TTLs bound running and scheduling time. A pausing step is bounded by its pause
-        # deadline, and a cancelling step was just terminated above, so neither is timed out here.
-        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING):
+        # The TTL bounds running time. A pausing step is bounded by its pause deadline, and a
+        # cancelling step was just terminated above, so neither is timed out here. A step stays
+        # pending until the first sync after schedule(), but its process is already running, so
+        # the active TTL applies rather than the before-active one. A process that has exited is
+        # not timed out: its exit code decides.
+        exited = metadata.process.poll() is not None
+        if exited:
+            self._remove_task_auth_token_file(metadata)
+        if step.status not in (HelixJobStatus.ACTIVE, HelixJobStatus.PENDING) or exited:
             return self._create_step_update(step, metadata)
-        ttl_seconds = (
-            step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
-            if step.status == HelixJobStatus.ACTIVE
-            else self._execution_profile_config.ttl_seconds_before_active
-        )
+        ttl_seconds = step_ttl_seconds_active(step, self._execution_profile_config.ttl_seconds_active)
         if self.check_step_ttl(step, ttl_seconds):
+            if not self._terminate_process(metadata, force=True):
+                if metadata.process.poll() is not None:
+                    self._remove_task_auth_token_file(metadata)
+                return self._create_step_update(step, metadata)
             message = f"Job timed out after reaching max TTL of {ttl_seconds} seconds"
-            self._terminate_process(metadata, force=True)
+            self._finish_logs(metadata)
             self._remove_task_auth_token_file(metadata)
             self._update_task(
                 step,
@@ -735,34 +741,38 @@ class SubprocessJobBackend(JobBackend[SubprocessExecutionProvider, SubprocessJob
             pass
         return details
 
-    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> None:
+    def _terminate_process(self, metadata: SubprocessProcessMetadata, force: bool = False) -> bool:
+        """Signal the process group. Return False when no signal was sent because it had already exited."""
         if metadata.process.poll() is not None:
-            return
-        self._terminate_process_group(metadata.process, force=force)
-        if force:
-            try:
-                metadata.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
-            return
+            return False
+        signalled = self._terminate_process_group(metadata.process, force=force)
+        timeout = 5 if force else self._execution_profile_config.graceful_shutdown_timeout_seconds
         try:
-            metadata.process.wait(timeout=self._execution_profile_config.graceful_shutdown_timeout_seconds)
+            metadata.process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            self._terminate_process(metadata, force=True)
+            if not force:
+                return self._terminate_process(metadata, force=True)
+            logger.exception("Subprocess did not exit after SIGKILL", extra={"pid": metadata.process.pid})
+        return signalled
 
     @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> None:
+    def _terminate_process_group(process: subprocess.Popen[str], force: bool = False) -> bool:
+        """Signal the process group. Return False when no signal was sent."""
         sig = signal.SIGKILL if force else signal.SIGTERM
         try:
             os.killpg(os.getpgid(process.pid), sig)
         except ProcessLookupError:
-            return
+            return False
         except Exception:
             logger.exception("Failed to signal subprocess group", extra={"pid": process.pid})
             try:
                 process.send_signal(sig)
+            except ProcessLookupError:
+                return False
             except Exception:
                 logger.exception("Failed to signal subprocess", extra={"pid": process.pid})
+                return False
+        return True
 
     def _finish_logs(self, metadata: SubprocessProcessMetadata) -> None:
         for thread in metadata.log_threads:
