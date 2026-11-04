@@ -57,13 +57,15 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 ### Failed replies
 
-When a request fails for a non-cancel reason the assistant message is marked `incomplete`/`error` and renders as:
+When a request fails for a non-cancel reason the assistant message is marked `incomplete`/`error` and renders as one inline error banner (successful replies render directly on the canvas without a bubble):
 
-- a body with a **red** left bar (a successful reply has the brand-colored bar), holding the human-readable explanation;
-- an error banner holding the **raw** error, with the status code and provider detail;
-- a "Copy error" action that copies the raw error. If the browser blocks clipboard access (for example a page served over plain `http` outside `localhost`) the tooltip says so instead of showing the check mark.
+- the banner message is the reply's text, which holds the human-readable explanation;
+- a "Show details" toggle reveals the **raw** error, with the status code and provider detail;
+- a "Retry" action reruns the reply, and a "Copy error" action copies the raw error. If the browser blocks clipboard access (for example a page served over plain `http` outside `localhost`) the tooltip says so instead of showing the check mark.
 
-The body is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line above the raw error.
+A failed reply hides the hover action row, since its actions live in the banner.
+
+The explanation is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line above the raw error.
 
 `describeChatError.ts` holds the agent rules. The platform returns 502 for any agent failure and the model's HTTP status survives only inside the message text, so the rules match phrases the platform writes (`Fabric runtime startup failed`, `Could not connect to agent`, a bodyless `502`) and the envelope the Fabric runtime wraps an openai SDK failure in (`RuntimeError: internal error: APIStatusError: Error code: NNN - ...`). Every rule is anchored at the start of the message, and platform phrases are checked before the upstream status, so a status or phrase that only appears inside quoted detail is ignored and a failure that merely quotes a status code is not blamed on the model provider. Statuses without a rule (400, 409, 422...) fall back to the generic line. Replace the text matching with a switch on a structured error code once the platform returns one.
 

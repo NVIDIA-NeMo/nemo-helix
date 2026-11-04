@@ -5,9 +5,25 @@ import { INLINE_CODE_CLASS } from '@nemo/common/src/components/Chat/MessageConte
 import { renderListItemChildren } from '@nemo/common/src/components/Chat/MessageContent/helpers';
 import { MarkdownDataViewTable } from '@nemo/common/src/components/Chat/MessageContent/MarkdownDataViewTable';
 import { MarkdownParagraph } from '@nemo/common/src/components/Chat/MessageContent/MarkdownParagraph';
+import { useMessageTextStyle } from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import { Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { Components } from 'react-markdown';
+
+const MarkdownListItem: Components['li'] = ({ children, className }) => {
+  const textStyle = useMessageTextStyle();
+  return (
+    <li
+      className={cn(
+        'mb-density-xs whitespace-normal pl-density-xs last:mb-0 [&>p]:my-0',
+        textStyle.className,
+        className
+      )}
+    >
+      {renderListItemChildren(children, textStyle)}
+    </li>
+  );
+};
 
 export const messageMarkdownComponents: Components = {
   h1: ({ children }) => (
@@ -49,16 +65,7 @@ export const messageMarkdownComponents: Components = {
       {children}
     </ol>
   ),
-  li: ({ children, className }) => (
-    <li
-      className={cn(
-        'mb-density-xs whitespace-normal pl-density-xs text-sm leading-6 last:mb-0 [&>p]:my-0',
-        className
-      )}
-    >
-      {renderListItemChildren(children)}
-    </li>
-  ),
+  li: MarkdownListItem,
   hr: () => <hr className="my-density-md border-base" />,
   blockquote: ({ children, className }) => (
     <blockquote

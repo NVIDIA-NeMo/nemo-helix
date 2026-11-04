@@ -43,9 +43,9 @@ export const createTextMessage = (
 });
 
 /**
- * The content and status of an assistant reply whose request failed: the explanation as the body
- * (see `humanizeChatError`) and the raw error in the status, where the error banner and the copy
- * action read it.
+ * The content and status of an assistant reply whose request failed: the explanation as the text
+ * (see `humanizeChatError`), which the error banner shows as its message, and the raw error in the
+ * status, where the banner's details and copy action read it.
  */
 export const getFailedReply = (
   errorMessage: string,

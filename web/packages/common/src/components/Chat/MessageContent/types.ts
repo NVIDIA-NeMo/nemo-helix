@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { MessageTextSize } from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import type { PropsWithChildren, ReactNode } from 'react';
 import type { Components } from 'react-markdown';
 
@@ -13,6 +14,8 @@ export interface MessageContentProps {
   markdownLinkComponent?: Components['a'];
   markdownTableOptions?: MarkdownTableOptions;
   renderAsMarkdown?: boolean;
+  /** Body text size: `md` (14px) for replies, `lg` (16px) for user prompts. */
+  textSize?: MessageTextSize;
 }
 
 export interface MarkdownTableColumn {
