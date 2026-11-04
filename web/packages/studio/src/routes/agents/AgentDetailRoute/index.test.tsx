@@ -11,7 +11,6 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import {
-  AGENT_DEPLOYMENTS_URL,
   agentDeployment,
   agentDeploymentsHandler,
 } from '@studio/mocks/handlers/agentDeployments';
@@ -281,30 +280,16 @@ describe('AgentDetailRoute', () => {
     );
   });
 
-  it('disables Run Evaluation and says why when the agent has no running deployment', async () => {
+  it('disables Run Evaluation when the agent has no running deployment', async () => {
     server.use(
       agentDeploymentsHandler([
         agentDeployment(agentName, `${agentName}-down`, { status: 'failed' }),
       ])
     );
-    const user = userEvent.setup();
     renderDetail();
 
     const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
     await waitFor(() => expect(headerButton).toBeDisabled());
-    await user.hover(headerButton);
-    expect(await screen.findByText('Deploy the agent to run an evaluation.')).toBeInTheDocument();
-  });
-
-  it('says the deployments could not load rather than asking to deploy', async () => {
-    server.use(http.get(AGENT_DEPLOYMENTS_URL, () => HttpResponse.json({}, { status: 500 })));
-    const user = userEvent.setup();
-    renderDetail();
-
-    const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
-    await waitFor(() => expect(headerButton).toBeDisabled());
-    await user.hover(headerButton);
-    expect(await screen.findByText("Couldn't load this agent's deployments.")).toBeInTheDocument();
   });
 
   const renderRunEvaluationLink = () =>

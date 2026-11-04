@@ -84,7 +84,6 @@ export const useAgentDetails = ({
     isLoading: isDeploymentsLoading,
     refetch: refetchDeployments,
     isPending: isDeploymentsPending,
-    isUnavailable: isDeploymentsUnavailable,
   } = useAgentDeployments({
     workspace,
     agent: agentName,
@@ -238,7 +237,6 @@ export const useAgentDetails = ({
     isDeploymentsLoading,
     refetchDeployments,
     isDeploymentsPending,
-    isDeploymentsUnavailable,
     agent,
     isAgentLoading,
     isAgentPending,

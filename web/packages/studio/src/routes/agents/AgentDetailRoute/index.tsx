@@ -120,7 +120,6 @@ export const AgentDetailRoute: FC = () => {
     isDeploymentsLoading,
     refetchDeployments,
     isDeploymentsPending,
-    isDeploymentsUnavailable,
   } = useAgentDetails({
     workspace,
     agentName,
@@ -226,12 +225,6 @@ export const AgentDetailRoute: FC = () => {
 
   const hasRunningDeployment = healthyDeployments.length > 0;
   const canRunEvaluation = !!agentName && canDeploy && hasRunningDeployment;
-  const runEvaluationDisabledReason = (() => {
-    if (!canDeploy || isDeploymentsLoading || hasRunningDeployment) return undefined;
-    return isDeploymentsUnavailable
-      ? "Couldn't load this agent's deployments."
-      : 'Deploy the agent to run an evaluation.';
-  })();
   const navigate = useNavigate();
   // Carries the deployment the header is showing, so the run evaluates what the user is looking at.
   const contextDeployment =
@@ -383,7 +376,6 @@ export const AgentDetailRoute: FC = () => {
                 canDeploy={canDeploy}
                 isAgentPending={isAgentPending}
                 canRunEvaluation={canRunEvaluation}
-                runEvaluationDisabledReason={runEvaluationDisabledReason}
                 isDeploying={isDeploying}
                 canOptimize={!isCreatingOptimization}
                 deployButtonRef={deployButtonRef}
