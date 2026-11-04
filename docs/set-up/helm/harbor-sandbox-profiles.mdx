@@ -28,10 +28,10 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
   - `nameOverride` and `fullnameOverride` change it, so read it from the cluster instead of guessing:
 
   ```bash
-  export NHX_NAMESPACE=nemo-helix
+  export NHX_NAMESPACE=${NHX_NAMESPACE:-nemo-helix}   # keeps the value from Install, if set
   helm list -n "$NHX_NAMESPACE"   # NAME is the release, CHART is nemo-helix-<chart version>
-  export NHX_HELM_RELEASE=nemo-helix
-  export NHX_HELM_CHART_VERSION=<chart-version>   # e.g. 0.10.0 or 0.10.1-rc-20261026010203
+  export NHX_HELM_RELEASE=${NHX_HELM_RELEASE:-nemo-helix}
+  export NHX_HELM_CHART_VERSION=${NHX_HELM_CHART_VERSION:-<chart-version>}   # e.g. 0.10.0 or 0.10.1-rc-20261026010203
   FULLNAME=$(kubectl get configmap -n "$NHX_NAMESPACE" \
     -l app.kubernetes.io/instance="$NHX_HELM_RELEASE" -o name \
     | sed -n 's|^configmap/\(.*\)-config$|\1|p')
@@ -61,7 +61,7 @@ The chart merges `platformConfig` over its own defaults:
 | --- | --- | --- |
 | `sandbox_profiles` | chart: `harbor-standard` | Map of profile name → profile. At least one is required |
 | `default_sandbox_profile` | `harbor-standard` | The profile a run gets when it names none. Must be a `sandbox_profiles` key |
-| `dispatcher_image` | unset | The task Job image. If unset, defaults to `nhx-tasks:<platform.image_tag>` |
+| `dispatcher_image` | unset | The task Job image. If unset, defaults to `nhx-tasks:<platform.image_tag>`. If set, pin it by digest: `<image>@sha256:<digest>` |
 
 ## Profile properties
 
