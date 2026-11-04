@@ -1022,10 +1022,26 @@ api:
   # -- Pod-level security context settings for the API service.
   # @default -- This object has the following default values for the pod security context.
   podSecurityContext:
+    # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID.
+    runAsUser: 1000
+    # -- GID of the `nvs` user.
+    runAsGroup: 1000
     # -- The file system group ID to use for all containers.
     fsGroup: 1000
   # -- Container-level security context settings for the API service.
-  securityContext: {}
+  # @default -- This object has the following default values for the container security context.
+  securityContext:
+    # -- Refuse to start if the image resolves to UID 0.
+    runAsNonRoot: true
+    # -- Block setuid binaries from gaining privileges.
+    allowPrivilegeEscalation: false
+    # -- Linux capabilities to drop.
+    capabilities:
+      drop:
+        - ALL
+    # -- Seccomp profile applied to the container.
+    seccompProfile:
+      type: RuntimeDefault
   # -- Service configuration for the API service.
   # @default -- This object has the following default values for the service configuration.
   service:
@@ -1263,10 +1279,26 @@ core:
     # -- Pod-level security context settings for the controller service.
     # @default -- This object has the following default values for the pod security context.
     podSecurityContext:
+      # -- UID of the `nvs` user the image files are owned by. Set to `null` (and `runAsGroup`) where the platform assigns UIDs, such as OpenShift. Overrides a global `podSecurityContext.runAsUser`, so set both if you need a different UID.
+      runAsUser: 1000
+      # -- GID of the `nvs` user.
+      runAsGroup: 1000
       # -- The file system group ID to use for all containers.
       fsGroup: 1000
     # -- Container-level security context settings for the controller service.
-    securityContext: {}
+    # @default -- This object has the following default values for the container security context.
+    securityContext:
+      # -- Refuse to start if the image resolves to UID 0.
+      runAsNonRoot: true
+      # -- Block setuid binaries from gaining privileges.
+      allowPrivilegeEscalation: false
+      # -- Linux capabilities to drop.
+      capabilities:
+        drop:
+          - ALL
+      # -- Seccomp profile applied to the container.
+      seccompProfile:
+        type: RuntimeDefault
     # -- Kubernetes deployment resources configuration for the controller service.
     resources: {}
 
