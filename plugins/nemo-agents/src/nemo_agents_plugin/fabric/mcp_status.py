@@ -34,6 +34,8 @@ from pydantic import BaseModel, Field
 
 PROBE_TIMEOUT_SECONDS = 15.0
 _STDERR_TAIL_CHARS = 2000
+# Shorter literal env values are usually flags ("1", "true") whose redaction would garble stderr.
+_MIN_REDACTED_LITERAL_CHARS = 8
 _BRACED_VAR = re.compile(r"\$\{([^}]+)\}")
 _ENV_REFERENCE = re.compile(r"\$(?:\{([^}]+)\}|(\w+))")
 _STDIO_TRANSPORTS = {"stdio", "command", "process"}
@@ -166,6 +168,12 @@ async def probe_mcp_server(
     ]
     # Map every environment-substituted value back to its reference for redaction.
     expanded = {new: old for old, new in pairs if new and new != old}
+    # Literal env values may be credentials too, so redact them as their key.
+    expanded |= {
+        value: f"${{{key}}}"
+        for key, value in env.items()
+        if len(value) >= _MIN_REDACTED_LITERAL_CHARS and value not in expanded
+    }
 
     def redact(text: str | None) -> str | None:
         for value in sorted(expanded, key=len, reverse=True):
@@ -185,7 +193,7 @@ async def probe_mcp_server(
             status.error = f"Command '{raw_target}' was not found on the runtime PATH."
             return status
 
-    with tempfile.TemporaryFile(mode="w+") as errlog:
+    with tempfile.TemporaryFile(mode="w+", errors="replace") as errlog:
         try:
             with anyio.fail_after(timeout_seconds):
                 async with _open_streams(transport, target, spec, env, errlog) as (read, write):

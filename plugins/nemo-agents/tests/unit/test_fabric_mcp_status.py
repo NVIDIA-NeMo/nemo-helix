@@ -111,13 +111,36 @@ async def test_unsupported_transport() -> None:
 
 async def test_stdio_probe_inherits_environment_env() -> None:
     spec = McpServerConfig.model_validate(
-        _stdio("-c", "import os, sys; sys.stderr.write(os.environ['PROBE_VAR']); sys.exit(1)")
+        _stdio("-c", "import os, sys; sys.stderr.write(str(os.environ['PROBE_VAR'] == 'from-env')); sys.exit(1)")
     )
-    config = _config({}, environment={"env": {"PROBE_VAR": "from-environment"}})
+    config = _config({}, environment={"env": {"PROBE_VAR": "from-env"}})
 
     status = await probe_mcp_server("env", spec, config, timeout_seconds=5)
 
-    assert status.stderr == "from-environment"
+    assert status.stderr == "True"
+
+
+async def test_stdio_probe_redacts_literal_env_values() -> None:
+    spec = McpServerConfig.model_validate(
+        _stdio(
+            "-c",
+            "import os, sys; sys.stderr.write(f\"{os.environ['API_TOKEN']} {os.environ['DEBUG']}\"); sys.exit(1)",
+            env={"API_TOKEN": "secret-value", "DEBUG": "1"},
+        )
+    )
+
+    status = await probe_mcp_server("env", spec, _config({}), timeout_seconds=5)
+
+    assert status.stderr == "${API_TOKEN} 1"
+
+
+async def test_stdio_probe_tolerates_invalid_utf8_stderr() -> None:
+    spec = McpServerConfig.model_validate(_stdio("-c", "import os, sys; os.write(2, b'\\xffboom'); sys.exit(1)"))
+
+    status = await probe_mcp_server("bad-bytes", spec, _config({}), timeout_seconds=5)
+
+    assert status.state == "failed"
+    assert status.stderr == "\ufffdboom"
 
 
 async def test_stdio_probe_expands_env_references_and_redacts_them(monkeypatch: pytest.MonkeyPatch) -> None:
