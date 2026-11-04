@@ -173,3 +173,47 @@ def test_each_user_has_one_slot_directory_whatever_their_temp_directory(monkeypa
     """Another user can't open this one's lock files, and runs with different TMPDIRs must share slots."""
     monkeypatch.setenv("TMPDIR", "/elsewhere")
     assert default_slot_dir() == Path("/tmp") / f"nemo-harbor-setup-slots-{os.getuid()}"
+
+
+async def _uncapped(directory: Path) -> bool:
+    """Whether one slot in ``directory`` lets a second trial start while the first holds it."""
+    job = _Job()
+    SetupSlots(1, directory).attach(job)
+    await job.hooks["environment-start"](_event("a"))
+    return not await _blocks(job.hooks["environment-start"](_event("b")))
+
+
+async def test_a_slot_directory_others_can_write_to_isnt_used(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Another user could plant a FIFO at a slot's path there: trials set up without the cap instead."""
+    directory = tmp_path / "slots"
+    directory.mkdir()
+    directory.chmod(0o777)
+    assert await _uncapped(directory)
+    assert "isn't this user's own" in caplog.text
+    assert list(directory.iterdir()) == []
+
+
+async def test_a_slot_directory_another_user_owns_isnt_used(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    directory = tmp_path / "slots"
+    directory.mkdir(mode=0o700)
+    owner = directory.stat().st_uid
+    monkeypatch.setattr(os, "getuid", lambda: owner + 1)
+    assert await _uncapped(directory)
+
+
+async def test_a_linked_slot_directory_isnt_used(tmp_path: Path) -> None:
+    target = tmp_path / "elsewhere"
+    target.mkdir(mode=0o700)
+    (tmp_path / "slots").symlink_to(target)
+    assert await _uncapped(tmp_path / "slots")
+
+
+async def test_a_fifo_at_a_slots_path_is_skipped_without_blocking(tmp_path: Path) -> None:
+    """Opening a FIFO to write waits for a reader: the slot is skipped instead, and the event loop never stalls."""
+    directory = tmp_path / "slots"
+    directory.mkdir(mode=0o700)
+    os.mkfifo(directory / "slot-0.lock")
+    job = _Job()
+    SetupSlots(2, directory).attach(job)
+    await asyncio.wait_for(job.hooks["environment-start"](_event("a")), timeout=2)  # takes slot 1
+    assert await _blocks(job.hooks["environment-start"](_event("b")))  # slot 0 is no slot

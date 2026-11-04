@@ -13,6 +13,11 @@ A slot is an exclusive ``flock`` on one of N files in :func:`default_slot_dir`, 
 its process exits, so a crashed run never keeps a slot. A trial takes one when it runs in Harbor's Docker
 environment or an ``import_path`` environment built on it, such as the agent-layer environment; trials in any
 other environment (OpenSandbox, other providers) don't.
+
+``/tmp`` is shared, so another user may create the directory first, or put a FIFO or link at a slot's path. The
+directory is used only when it is this user's own and no one else can write to it; otherwise the run sets up
+without the cap. A slot file that isn't a regular file of the directory is skipped, never opened in a way that
+could block.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import asyncio
 import importlib
 import logging
 import os
+import stat
 import sys
 import tempfile
 from collections.abc import Awaitable, Callable
@@ -98,6 +104,8 @@ class SetupSlots:
         self._slots = slots
         self._directory = directory
         self._held: dict[str, IO[bytes]] = {}
+        #: Whether the directory is this user's own, once checked; None before the first trial needs it.
+        self._trusted: bool | None = None
 
     def attach(self, job: _HookedJob) -> None:
         """Take a slot when each local Docker trial's environment starts; give it back when it no longer needs it."""
@@ -111,7 +119,18 @@ class SetupSlots:
     async def _acquire(self, event: _TrialHookEvent) -> None:
         if not _is_local_docker(event.config.environment) or event.trial_name in self._held:
             return
-        self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self._trusted is None:
+            self._directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._trusted = _owned_by_this_user(self._directory)
+            if not self._trusted:
+                logger.warning(
+                    "Agent setup slot directory %s isn't this user's own, or others can write to it; trials set up "
+                    "without the %s cap. Remove it to restore the cap.",
+                    self._directory,
+                    MAX_CONCURRENT_SETUPS_ENV,
+                )
+        if not self._trusted:
+            return
         waiting = False
         while (handle := self._try_lock()) is None:
             if not waiting:
@@ -134,7 +153,9 @@ class SetupSlots:
         if sys.platform == "win32":
             return None
         for index in range(self._slots):
-            handle = (self._directory / f"slot-{index}.lock").open("ab")
+            handle = _open_slot(self._directory / f"slot-{index}.lock")
+            if handle is None:
+                continue
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -142,6 +163,30 @@ class SetupSlots:
                 continue
             return handle
         return None
+
+
+def _owned_by_this_user(directory: Path) -> bool:
+    """Whether ``directory`` is a directory, not a link, that this user owns and no one else can write to."""
+    try:
+        info = directory.lstat()
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    )
+
+
+def _open_slot(path: Path) -> IO[bytes] | None:
+    """``path`` opened for its lock, or None when it is anything but a regular file: never follows a link, and never
+    waits on a FIFO."""
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        return None
+    return os.fdopen(descriptor, "ab")
 
 
 def _is_local_docker(environment: _Environment) -> bool:
