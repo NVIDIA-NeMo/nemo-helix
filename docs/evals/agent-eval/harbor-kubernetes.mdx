@@ -544,7 +544,7 @@ nemo evals runs submit --workspace "$WS" --harbor-dir "$SUITE_DIR" --tasks 0 --a
 | --- | --- | --- |
 | 422 `unknown execution.sandbox.profile '…'` | The profile isn't defined on this deployment | Use a name the error lists, or omit it |
 | `Kubernetes taskset runs aren't configured in this deployment` | The operator hasn't enabled taskset runs | Ask your operator; see the Note in [Before you begin](#before-you-begin) |
-| 422 `tasks without images: …` | An image build isn't `ready` | `nemo evals tasksets build-images <taskset> --wait`, then resubmit |
+| 422 `tasks without images: <task>: <code>: …` | Each rejected task is listed with a code | Unbuilt image: `nemo evals tasksets build-images <taskset> --wait`, then resubmit. `resources_exceed_policy`: lower the task's `task.toml` resources or use a profile with higher ceilings. `gpu_unsupported`, `invalid_task_config`, `invalid_compose_file`: fix the task |
 | 422 naming no-network tasks | A model-calling agent without a closed-book `model.ref` | Use a closed-book model ([step 2](#2-create-a-closed-book-virtual-model)) |
 | `platform auth is on, so the agent needs a key to call the Inference Gateway` | No gateway key in `env_secrets` | [Step 3](#3-give-the-agent-a-gateway-key) |
 | Task Job fails with `could not issue … trials their own Inference Gateway key` | Platform auth is on and Scoped Access Keys are off, you can't create them, or `auth.access_keys.max_expires_in_seconds` is under 86400 (trial keys last 24 h) | Ask your operator to enable [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) with a maximum lifetime of at least 24 h |
