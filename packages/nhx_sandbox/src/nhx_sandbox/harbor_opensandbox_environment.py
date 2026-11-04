@@ -744,13 +744,15 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
         if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
-                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles."
+                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
+                "the current nemo-opensandbox-ext ConfigMap and restart the server."
             )
         # An extension from before them would refuse a spec with no services, or main's command or working directory.
         if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
-                "change main, or main's command and working directory."
+                "change main, or main's command and working directory; upgrade it to the current "
+                "nemo-opensandbox-ext ConfigMap and restart the server."
             )
         # An older extension would leave the egress API on 18080, so the service that needs that port couldn't start.
         if (
@@ -760,7 +762,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         ):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension is too old to move the egress policy API "
-                "off port 18080, which one of this task's containers needs."
+                "off port 18080, which one of this task's containers needs; upgrade it to the current "
+                "nemo-opensandbox-ext ConfigMap and restart the server."
             )
         # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
         if (
@@ -770,7 +773,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         ):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support a compose file's user, "
-                "read_only, cap_drop, security_opt or tmpfs."
+                "read_only, cap_drop, security_opt or tmpfs; upgrade it to the current nemo-opensandbox-ext "
+                "ConfigMap and restart the server."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:

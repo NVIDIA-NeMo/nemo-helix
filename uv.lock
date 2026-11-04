@@ -7889,9 +7889,11 @@ nhx-services-runtime = [
 nhx-task-runtime = [
     { name = "nhx-platform" },
 ]
+opensandbox-ext = [
+    { name = "opensandbox-server" },
+]
 scaled-evals = [
     { name = "nemo-scaled-evals-plugin" },
-    { name = "opensandbox-server" },
 ]
 typecheck = [
     { name = "transformers" },
@@ -8170,10 +8172,8 @@ nhx-base = [
 ]
 nhx-services-runtime = [{ name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" }]
 nhx-task-runtime = [{ name = "nhx-platform", editable = "packages/nhx_platform" }]
-scaled-evals = [
-    { name = "nemo-scaled-evals-plugin", editable = "plugins/_temporary-scaled-evals" },
-    { name = "opensandbox-server", specifier = "==0.2.1" },
-]
+opensandbox-ext = [{ name = "opensandbox-server", specifier = "==0.2.1" }]
+scaled-evals = [{ name = "nemo-scaled-evals-plugin", editable = "plugins/_temporary-scaled-evals" }]
 typecheck = [{ name = "transformers", specifier = ">=5.5.0,<5.9.0" }]
 
 [[package]]

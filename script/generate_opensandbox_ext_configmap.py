@@ -5,12 +5,11 @@
 """
 Generate the OpenSandbox compose services extension ConfigMap from its source files.
 
-The extension is four Python files that the stock OpenSandbox server loads from a ConfigMap. Three
-sources stay in the scaled-evals plugin; the fourth is part of the shared nhx-sandbox package. The chart
-ships a generated copy, with no namespace, at k8s/helm/files/opensandbox-ext/configmap.yaml, and
-renders it into the OpenSandbox server's namespace.
-
-To move the plugin directory, change PLUGIN_DIR.
+The extension is four Python files that the stock OpenSandbox server loads from a ConfigMap. All four
+live in the shared nhx-sandbox package: three in its opensandbox_ext directory, which is never installed,
+and the Compose services model the extension shares with the Harbor environment. The chart ships a
+generated copy, with no namespace, at k8s/helm/files/opensandbox-ext/configmap.yaml, and renders it into
+the OpenSandbox server's namespace.
 
 Usage (run from the repository root):
 
@@ -27,9 +26,11 @@ import yaml
 # The repository root, so the script works from any directory.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Where the extension's source files live. This is the one place to change when the plugin moves.
-PLUGIN_DIR = REPO_ROOT / "plugins" / "_temporary-scaled-evals"
-SANDBOX_PACKAGE_DIR = REPO_ROOT / "packages" / "nhx_sandbox" / "src" / "nhx_sandbox"
+# Where the extension's source files live. The server-side files sit beside the package's src, not in it:
+# they run in the stock server image (Python 3.10), not in an install of nhx-sandbox.
+SANDBOX_PACKAGE_ROOT = REPO_ROOT / "packages" / "nhx_sandbox"
+EXTENSION_DIR = SANDBOX_PACKAGE_ROOT / "opensandbox_ext"
+SANDBOX_PACKAGE_DIR = SANDBOX_PACKAGE_ROOT / "src" / "nhx_sandbox"
 
 # The ConfigMap the chart ships: its name, the generated file, and the example server values that mount it.
 CONFIGMAP_NAME = "nemo-opensandbox-ext"
@@ -38,9 +39,9 @@ SERVER_VALUES_PATH = REPO_ROOT / "k8s" / "helm" / "examples" / "opensandbox" / "
 
 # ConfigMap key -> source file. The keys are what the server values' `items` list names.
 SOURCES: dict[str, Path] = {
-    "sitecustomize.py": PLUGIN_DIR / "opensandbox_ext" / "sitecustomize.py",
-    "nemo_ext_server.py": PLUGIN_DIR / "opensandbox_ext" / "nemo_ext_server.py",
-    "nemo_ext_pod.py": PLUGIN_DIR / "opensandbox_ext" / "nemo_ext_pod.py",
+    "sitecustomize.py": EXTENSION_DIR / "sitecustomize.py",
+    "nemo_ext_server.py": EXTENSION_DIR / "nemo_ext_server.py",
+    "nemo_ext_pod.py": EXTENSION_DIR / "nemo_ext_pod.py",
     "harbor_opensandbox_services.py": SANDBOX_PACKAGE_DIR / "harbor_opensandbox_services.py",
 }
 
