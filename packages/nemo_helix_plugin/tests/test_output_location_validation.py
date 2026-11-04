@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import pytest
+from nemo_helix_plugin.evals.types import SubmitAgentEvalJobRequest
 from nemo_helix_plugin.jobs.api_factory import BaseJobRequest
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, job_artifact_base_path
 from pydantic import BaseModel, ValidationError
@@ -59,6 +60,23 @@ def test_create_request_applies_the_same_validation() -> None:
     # Other fields are left out on purpose; only the output_location error matters here.
     with pytest.raises(ValidationError, match="must not be empty"):
         CreateHelixJobRequest.model_validate({"output_location": "   "})
+
+
+@pytest.mark.parametrize("value", ["", "   ", "default/my-fileset", "my-fileset#runs", "my fileset"])
+def test_agent_eval_request_applies_the_same_validation(value: str) -> None:
+    with pytest.raises(ValidationError, match="output_location"):
+        SubmitAgentEvalJobRequest(spec={}, output_location=value)
+
+
+def test_agent_eval_request_normalizes_output_location() -> None:
+    request = SubmitAgentEvalJobRequest(spec={}, output_location="  evaluation-files  ")
+    assert request.output_location == "evaluation-files"
+
+
+def test_agent_eval_request_omits_default_output_location() -> None:
+    request = SubmitAgentEvalJobRequest(spec={})
+    assert request.output_location is None
+    assert request.model_dump(exclude_unset=True) == {"spec": {}}
 
 
 def test_artifact_base_path_nests_under_jobs_when_output_location_set() -> None:
