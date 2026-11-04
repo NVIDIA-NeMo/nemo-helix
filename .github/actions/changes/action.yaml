@@ -63,7 +63,7 @@ outputs:
     value: ${{ steps.filter.outputs.helm }}
   python-runtime:
     description: "'true' if Python runtime packages, services, plugins, or SDK files changed"
-    value: ${{ steps.filter.outputs.python-runtime }}
+    value: ${{ steps.runtime.outputs.python-runtime }}
   k8s-smoke:
     description: "'true' if Kubernetes smoke test support files changed"
     value: ${{ steps.filter.outputs.k8s-smoke }}
@@ -81,7 +81,7 @@ outputs:
     value: ${{ steps.filter.outputs.ngc-metadata }}
   cpu-smoke:
     description: "'true' if CPU smoke image or Kubernetes smoke test inputs changed"
-    value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.filter.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
+    value: ${{ steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.docker-scripts == 'true' || steps.filter.outputs.helm == 'true' || steps.filter.outputs.openapi == 'true' || steps.runtime.outputs.python-runtime == 'true' || steps.filter.outputs.web-studio == 'true' || steps.filter.outputs.k8s-smoke == 'true' }}
   auth-idp:
     description: "'true' if auth-idp tests or their containerized E2E harness inputs changed"
     value: ${{ steps.filter.outputs.auth-idp == 'true' }}
@@ -253,10 +253,6 @@ runs:
             - '.github/workflows/ci.yaml'
             - '.github/actions/changes/action.yaml'
             - '.pre-commit-config.yaml'
-          python-runtime:
-            - 'packages/**'
-            - 'services/**'
-            - 'plugins/**'
           k8s-smoke:
             - 'e2e/k8s/scripts/**'
             - 'e2e/k8s/values/**'
@@ -316,3 +312,20 @@ runs:
             - 'tests/auth_idp/**'
             - 'e2e/**'
             - 'contrib/auth/**'
+
+    # A separate step because exclusions need predicate-quantifier: every (a file must match every
+    # pattern), which would break the step above's lists of alternatives. A plugin's tests, examples,
+    # docs and top-level Markdown aren't installed or run by the Kind jobs, so they don't rebuild the
+    # images. Markdown under src/ (skills) ships in the wheels and still counts.
+    - name: Detect changed Python runtime paths
+      id: runtime
+      uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d
+      with:
+        predicate-quantifier: every
+        filters: |
+          python-runtime:
+            - '{packages,services,plugins}/**'
+            - '!plugins/*/tests/**'
+            - '!plugins/*/examples/**'
+            - '!plugins/*/docs/**'
+            - '!plugins/*/*.md'
