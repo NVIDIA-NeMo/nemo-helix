@@ -24,6 +24,15 @@ LINKING = [
     ROOT / "skills/nemo-evals-plugin/references/harbor-kubernetes.md",
     ROOT / "skills/nemo-evals-plugin/references/troubleshooting.md",
 ]
+# Keys the guide leaves out on purpose: admins keep the default.
+UNDOCUMENTED = {
+    "dispatcher_profiles",
+    # Accepted, but no effect in this release.
+    "image_reference_mode",
+    "scoring_reserve_s",
+    "stale_attempt_cleanup_timeout_s",
+    "unschedulable_after_s",
+}
 API_HOST = "<api-service>.<namespace>.svc.cluster.local"
 # The chart's evals.runs.harbor (k8s/helm/values.yaml), trimmed: what the recipes merge over.
 CHART_HARBOR = {
@@ -67,11 +76,6 @@ def _profile_rows() -> dict[str, str]:
     return _rows(GUIDE.read_text().replace(_limits_section(), ""))
 
 
-def _reserved() -> set[str]:
-    section = GUIDE.read_text().split("### Reserved", 1)[1].split("\n#", 1)[0]
-    return set(re.findall(r"^- `([a-z_]+)`$", section, re.MULTILINE))
-
-
 def _slug(heading: str) -> str:
     return re.sub(r"\s+", "-", re.sub(r"[^a-z0-9 -]", "", heading.lower()).strip())
 
@@ -103,9 +107,9 @@ def _recipes() -> list[dict[str, Any]]:
 
 
 def test_every_config_key_is_documented_once() -> None:
-    rows, reserved = _profile_rows(), _reserved()
-    assert not rows.keys() & reserved, "a key is both in a table and Reserved"
-    assert rows.keys() | reserved == _fields().keys()
+    rows = _profile_rows()
+    assert not rows.keys() & UNDOCUMENTED, "a key is both in a table and UNDOCUMENTED"
+    assert rows.keys() | UNDOCUMENTED == _fields().keys()
 
 
 def test_documented_defaults_match_the_models() -> None:
