@@ -509,7 +509,7 @@ trials = read_trials("run-0123456789abcdef/agent-eval-results")
 | You cancel the run | Run `cancelled`; the succeeded tasks are merged | None |
 | Merging fails 3 times | Result `failed`; per-task scores are still in `runs results` | `nemo jobs get-logs <bundle-job> --workspace "$WS"`; `runs status` shows the bundle Job |
 
-- A run ends `completed` when at least one task succeeded. The exception: a run whose stored plan can't be read ends `failed` with a `plan_unreadable: …` error. Ask your operator.
+- A run ends `completed` when at least one task succeeded, unless a cancel or the deadline stopped it first: then it ends `cancelled` or `expired`, as in the table. A run whose stored plan can't be read ends `failed` with a `plan_unreadable: …` error. Ask your operator.
 - Rerun failed tasks on the same taskset:
 
   ```bash
