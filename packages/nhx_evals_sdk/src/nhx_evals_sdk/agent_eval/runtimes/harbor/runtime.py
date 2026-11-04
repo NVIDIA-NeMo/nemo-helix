@@ -72,6 +72,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.env import (
     warn_unscrubbed_secret_keys,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.scoring import harbor_scoring_metrics
+from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import SetupSlots, default_slot_dir, max_concurrent_setups
 from nhx_evals_sdk.agent_eval.runtimes.harbor.tasks import (
     HARBOR_DATASET_PATH_KEY,
     HARBOR_TASK_DIR_KEY,
@@ -1032,6 +1033,9 @@ def _build_native_job(
         # field validator: `model_copy(update=...)` skips validators, and a run that refuses after
         # deleting the job dir has destroyed completed trials to reach the same refusal.
         require_no_plaintext_credentials(config.agent_kwargs, field="agent_kwargs", alternative="env_secrets")
+        # Local Docker trials of every run of this user share these, so concurrent setups don't time out. Read
+        # before the force_rerun rmtree too: a bad slot count must refuse the run before it deletes anything.
+        setup_slots = SetupSlots(max_concurrent_setups(), default_slot_dir())
         if config.environment is not None:
             require_no_plaintext_credentials(
                 config.environment.kwargs, field="environment.kwargs", alternative="worker environment"
@@ -1096,6 +1100,7 @@ def _build_native_job(
 
             async def _attempt() -> None:
                 job = await Job.create(job_config)
+                setup_slots.attach(job)
                 async with job_scope(job) if job_scope is not None else contextlib.nullcontext():
                     await job.run()
 
