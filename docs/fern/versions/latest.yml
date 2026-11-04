@@ -471,7 +471,7 @@ navigation:
                   - page: OpenSandbox
                     slug: open-sandbox
                     path: ../../set-up/helm/opensandbox.mdx
-                  - page: Harbor Sandbox Profiles
+                  - page: Configure Harbor Taskset Runs
                     slug: harbor-sandbox-profiles
                     path: ../../set-up/helm/harbor-sandbox-profiles.mdx
                   - page: Secure Sandboxed GRPO

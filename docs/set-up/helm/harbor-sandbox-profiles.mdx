@@ -2,11 +2,16 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-title: "Harbor Sandbox Profiles"
-description: "Define the network, resource and lifetime rules for the sandboxes of Kubernetes taskset runs."
+title: "Configure Harbor Taskset Runs"
+description: "Set sandbox profiles (network, resources, lifetime), concurrency caps, run time limits and run controller timing for Harbor taskset runs on Kubernetes (platformConfig.evals.runs)."
 ---
 
-A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Harbor taskset run ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)): egress, resource ceilings, lifetime and client settings.
+This page configures Harbor taskset runs on Kubernetes ([Run a Harbor Task Suite on Kubernetes](/documentation/evaluate-models/agent-eval/harbor-kubernetes)), all under `platformConfig.evals.runs`:
+
+- **Sandbox profiles** (`evals.runs.harbor`): named rules for every OpenSandbox sandbox in a run: egress, resource ceilings, lifetime and client settings.
+- **Run limits and controller** (`evals.runs`): concurrency caps, run time limits and how often the run controller creates and settles task Jobs. See [Run limits and controller](#run-limits-and-controller).
+
+About sandbox profiles:
 
 - Profiles live in two blocks of the chart's [`values.yaml`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml):
   - **Chart defaults:** [`baseHelixConfig`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml) → [`baseHelixConfig.evals.runs.harbor`](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/k8s/helm/values.yaml#L775) defines `harbor-standard`. Don't edit it.
@@ -15,7 +20,6 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
 - Users pick a profile at submit: `nemo evals runs submit --sandbox-profile <name>`, or `"execution": {"sandbox": {"profile": "<name>"}}` in a `--spec-file` request ([example](/documentation/evaluate-models/agent-eval/harbor-kubernetes#run-with-a-model-calling-agent-openhands)). Without one, a run gets `default_sandbox_profile`.
 - Submit copies the profile into the run's plan. Editing a profile never changes a run that's already accepted.
 - A resubmit with the same idempotency key is checked against the current profiles before it returns the existing run. Keep a profile while its runs may be resubmitted.
-- Concurrency caps and run time limits live beside them, in the same `platformConfig` block at `platformConfig.evals.runs`. See [Run limits and controller](#run-limits-and-controller).
 - Users can't list profile names. An unknown name returns a 422 that lists them, so tell your users which names exist.
 
 ## Before you begin
