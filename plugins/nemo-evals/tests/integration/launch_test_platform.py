@@ -37,7 +37,8 @@ def main() -> None:
 
     harness = _harness()
     base_url = f"http://localhost:{args.port}"
-    work_root: Path = args.work_dir or Path(tempfile.mkdtemp(prefix="evals-test-platform-"))
+    # Absolute: the platform runs from REPO_ROOT, and the config's storage paths must not depend on the cwd.
+    work_root: Path = (args.work_dir or Path(tempfile.mkdtemp(prefix="evals-test-platform-"))).resolve()
     work_root.mkdir(parents=True, exist_ok=True)
     config_path = harness._materialize_subprocess_config(work_root, base_url=base_url, auth_enabled=args.auth)
     env = {

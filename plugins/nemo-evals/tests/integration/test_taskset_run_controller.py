@@ -5,16 +5,14 @@
 
 Each test talks to a real ``nemo services run`` platform that is already running, with auth off
 (``NHX_AGENT_BASE_URL``) and on (``NHX_AGENT_AUTH_BASE_URL``). Nothing here starts, binds or stops a platform: a
-mode whose URL is unset skips, and a set URL that is not ready fails. ``launch_test_platform.py`` starts one with
-this harness's config, as CI does::
+mode whose URL is unset skips, and a set URL fails unless it is a ready platform in that auth mode that is not
+running the Run Controller itself. ``launch_test_platform.py`` starts one with this harness's config, as CI does::
 
     uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18090 &
     uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18092 --auth &
-    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
+    until curl -sf localhost:18090/health/ready && curl -sf localhost:18092/health/ready; do sleep 2; done
+    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \\
         uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py -m integration
-
-Run this file on its own when the variables are set: the shared ``subprocess_platform`` fixtures read the same
-variables as the port to start their own platform on, and would find it taken.
 
 The controller itself is not started: these tests drive the real
 ``TasksetRunStore`` and ``JobsServiceRunJobs`` through clients that carry exactly the headers the controller's
@@ -30,13 +28,15 @@ dependency and its full-principal delegation.
 """
 
 import asyncio
+import json
 import os
-import urllib.request
+import threading
 import uuid
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Generator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
@@ -61,32 +61,57 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(600)]
 AUTH_OFF_URL_ENV = "NHX_AGENT_BASE_URL"
 AUTH_ON_URL_ENV = "NHX_AGENT_AUTH_BASE_URL"
 
+#: Each mode's gate, per test, so one mode runs while the other is unset. Marks that name the variables directly,
+#: unlike the fixtures' own skip, so ``.github/scripts/check_test_gates.py`` fails CI when no workflow sets one.
+requires_auth_off_platform = pytest.mark.skipif(
+    not os.environ.get(AUTH_OFF_URL_ENV),
+    reason=f"{AUTH_OFF_URL_ENV} is not set: point it at a running auth-off platform",
+)
+requires_auth_on_platform = pytest.mark.skipif(
+    not os.environ.get(AUTH_ON_URL_ENV),
+    reason=f"{AUTH_ON_URL_ENV} is not set: point it at a running auth-on platform",
+)
 
-def _supplied_platform(env_var: str, mode: str) -> str:
-    """The platform URL in ``env_var``; skip when unset, fail when it does not answer ready."""
-    base_url = os.environ.get(env_var, "").rstrip("/")
+#: The controller these tests stand in for. Running on the supplied platform too, it would settle their fake runs.
+RUN_CONTROLLER = "evals-taskset-runs"
+
+
+def _supplied_platform(env_var: str, *, auth_enabled: bool) -> str:
+    """The platform URL in ``env_var``: skip when unset, fail unless it can serve these tests.
+
+    Serving them takes a ready platform in their auth mode that is not running :data:`RUN_CONTROLLER` itself.
+    """
+    mode = "auth-on" if auth_enabled else "auth-off"
+    base_url = os.environ.get(env_var, "").strip().rstrip("/")
     if not base_url:
-        pytest.skip(f"{env_var} is not set: point it at a running {mode} platform to run these tests")
+        pytest.skip(f"{env_var} is not set: point it at a running {mode} platform")
     try:
-        with urllib.request.urlopen(f"{base_url}/health/ready", timeout=10) as response:  # noqa: S310
-            problem = None if response.status == 200 else f"returned {response.status}"
-    except OSError as error:  # includes HTTPError, e.g. a 404 from something that is not a platform
-        problem = str(error)
-    if problem:
-        pytest.fail(f"{env_var}={base_url} is not a ready platform: GET /health/ready: {problem}", pytrace=False)
-    return base_url
+        with httpx.Client(base_url=base_url, timeout=10) as http:
+            http.get("/health/ready").raise_for_status()
+            platform_auth = http.get("/apis/auth/discovery").raise_for_status().json()["auth_enabled"]
+            controllers = http.get("/status").raise_for_status().json()["controllers"]["status"]
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:  # ValueError: a body that is not JSON
+        problem = f"is not a ready platform: {error}"
+    else:
+        if platform_auth is not auth_enabled:
+            problem = f"has auth {'on' if platform_auth else 'off'}; it must be an {mode} platform"
+        elif RUN_CONTROLLER in controllers:
+            problem = f"runs the {RUN_CONTROLLER} controller, which would act on these tests' runs"
+        else:
+            return base_url
+    pytest.fail(f"{env_var}={base_url} {problem}. launch_test_platform.py starts one that fits.", pytrace=False)
 
 
 @pytest.fixture(scope="session")
 def controller_platform() -> str:
     """An auth-off platform someone else runs; never started or stopped here."""
-    return _supplied_platform(AUTH_OFF_URL_ENV, "auth-off")
+    return _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
 
 
 @pytest.fixture(scope="session")
 def auth_controller_platform() -> str:
     """An auth-on platform someone else runs; never started or stopped here."""
-    return _supplied_platform(AUTH_ON_URL_ENV, "auth-on")
+    return _supplied_platform(AUTH_ON_URL_ENV, auth_enabled=True)
 
 
 @asynccontextmanager
@@ -264,15 +289,18 @@ async def _check_store_semantics(base_url: str, workspace: str) -> None:
         assert {(workspace, run.name), (workspace, other.name)} <= open_runs
 
 
+@requires_auth_off_platform
 async def test_store_semantics_auth_off(controller_platform: str) -> None:
     await _check_store_semantics(controller_platform, await _new_workspace(controller_platform, "ctl-store"))
 
 
+@requires_auth_on_platform
 async def test_store_semantics_auth_on(auth_controller_platform: str) -> None:
     space = await _shared_group_only_workspace(auth_controller_platform)
     await _check_store_semantics(auth_controller_platform, space.workspace)
 
 
+@requires_auth_on_platform
 async def test_auth_context_snapshot_is_service_only_and_survives_service_writes(auth_controller_platform: str) -> None:
     async with _controller_client(auth_controller_platform) as service:
         store = _store(service)
@@ -334,6 +362,7 @@ async def _cancel_and_wait(reads: JobsServiceRunJobs, name: str) -> None:
     raise AssertionError(f"Job {name} still {status} a minute after its cancel")
 
 
+@requires_auth_on_platform
 async def test_group_only_creator_creates_records_through_full_principal_only(auth_controller_platform: str) -> None:
     async with _controller_client(auth_controller_platform) as service:
         space, run = await _group_run(auth_controller_platform, service)
@@ -349,6 +378,7 @@ async def test_group_only_creator_creates_records_through_full_principal_only(au
                 await _store(id_only).create_member(run, 1)
 
 
+@requires_auth_on_platform
 async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_controller_platform: str) -> None:
     """The controller's GET and cancel need no binding: the group is gone and ``service:evals`` never had one.
 
@@ -363,6 +393,7 @@ async def test_service_client_gets_and_cancels_jobs_without_any_binding(auth_con
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
+@requires_auth_on_platform
 async def test_service_client_lists_jobs_without_any_binding(auth_controller_platform: str) -> None:
     """Settling's one list per run needs no binding either: it finds the run's Job, and leaves out a name with none."""
     async with _controller_client(auth_controller_platform) as service:
@@ -376,6 +407,7 @@ async def test_service_client_lists_jobs_without_any_binding(auth_controller_pla
         await _cancel_and_wait(reading, task_job)
 
 
+@requires_auth_on_platform
 async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the_service(
     auth_controller_platform: str,
 ) -> None:
@@ -395,6 +427,7 @@ async def test_a_creators_job_is_created_for_them_then_read_and_cancelled_as_the
         await _cancel_and_wait(JobsServiceRunJobs(service, None, space.workspace), task_job)
 
 
+@requires_auth_on_platform
 async def test_a_forbidden_delegated_job_create_is_a_403(auth_controller_platform: str) -> None:
     """A Job create for a principal without access to the workspace is a 403, the controller's ``job_forbidden``."""
     async with _controller_client(auth_controller_platform) as service:
@@ -404,6 +437,7 @@ async def test_a_forbidden_delegated_job_create_is_a_403(auth_controller_platfor
                 await JobsServiceRunJobs(service, id_only, space.workspace).create(_sleep_job(f"{run.name}-task-0"))
 
 
+@requires_auth_on_platform
 async def test_submit_dependency_delegates_group_only_caller(auth_controller_platform: str) -> None:
     """``get_taskset_run_service`` with a group-only caller reads the workspace's run records.
 
@@ -441,3 +475,72 @@ async def test_submit_dependency_delegates_group_only_caller(auth_controller_pla
         # Without the group the same caller is refused.
         outsider = await http.get(f"{runs_path}/{run.name}", headers={"X-NHX-Principal-Groups": ""})
         assert outsider.status_code == 403, outsider.text
+
+
+# The fixtures' own contract, against a stub: no platform needed, so these run wherever this file does.
+
+#: What a platform that fits the auth-off tests answers to the probes ``_supplied_platform`` makes.
+FITTING_AUTH_OFF_PLATFORM: dict[str, tuple[int, object]] = {
+    "/health/ready": (200, {"status": "ready"}),
+    "/apis/auth/discovery": (200, {"auth_enabled": False}),
+    "/status": (200, {"controllers": {"healthy": True, "status": {"entities": True, "jobs": True, "models": True}}}),
+}
+
+
+@contextmanager
+def _stub_platform(responses: Mapping[str, tuple[int, object]]) -> Generator[str]:
+    """Answer GETs from ``responses`` (path: status, JSON body) on a free local port; yield its base URL."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            status, body = responses.get(self.path, (404, {}))
+            payload = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format: str, *args: object) -> None:
+            """Silent: the default writes a line per request to stderr."""
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_an_unset_url_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(AUTH_OFF_URL_ENV, raising=False)
+    with pytest.raises(pytest.skip.Exception, match=f"{AUTH_OFF_URL_ENV} is not set"):
+        _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
+
+
+def test_a_platform_that_fits_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _stub_platform(FITTING_AUTH_OFF_PLATFORM) as base_url:
+        monkeypatch.setenv(AUTH_OFF_URL_ENV, f"{base_url}/")
+        assert _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False) == base_url
+
+
+@pytest.mark.parametrize(
+    ("overrides", "problem"),
+    [
+        pytest.param({"/health/ready": (503, {"status": "not ready"})}, "is not a ready platform", id="not-ready"),
+        pytest.param({"/apis/auth/discovery": (200, {"auth_enabled": True})}, "has auth on", id="auth-on"),
+        pytest.param(
+            {"/status": (200, {"controllers": {"healthy": True, "status": {RUN_CONTROLLER: True}}})},
+            f"runs the {RUN_CONTROLLER} controller",
+            id="controller-running",
+        ),
+    ],
+)
+def test_a_platform_that_does_not_fit_fails(
+    monkeypatch: pytest.MonkeyPatch, overrides: dict[str, tuple[int, object]], problem: str
+) -> None:
+    with _stub_platform({**FITTING_AUTH_OFF_PLATFORM, **overrides}) as base_url:
+        monkeypatch.setenv(AUTH_OFF_URL_ENV, base_url)
+        with pytest.raises(pytest.fail.Exception, match=problem):
+            _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
