@@ -451,7 +451,7 @@ def test_chat_completion_with_session_id_reuses_session(
         resolve_calls.append(session_id)
         return SimpleNamespace(session_id="session-1", runtime=object())
 
-    async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
         return FabricRuntimeResult(status="succeeded", response="hello again")
 
     with TestClient(app) as client:
@@ -466,6 +466,53 @@ def test_chat_completion_with_session_id_reuses_session(
     assert response.status_code == 200
     assert response.headers[SESSION_ID_HEADER] == "session-1"
     assert resolve_calls == ["session-1"]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_session_chat_completion_passes_transcript_and_latest_turn(
+    tmp_path: Path,
+    mock_validate_agent_config: list[tuple[AgentConfig, Path]],
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+) -> None:
+    app = create_fabric_serving_app(_write_agent_config(tmp_path))
+    session_calls: list[tuple[Any, Any]] = []
+    result = FabricRuntimeResult(status="succeeded", response="50")
+
+    async def resolve_session(session_id: str) -> Any:
+        return SimpleNamespace(session_id=session_id, runtime=object())
+
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
+        session_calls.append((request, continuation_request))
+        return result
+
+    def stream_session(session: Any, request: Any, *, continuation_request: Any) -> _FakeStreamContext:
+        session_calls.append((request, continuation_request))
+        return _FakeStreamContext(_FakeFabricStream(result=result))
+
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.session_manager, "resolve_session", resolve_session)
+        monkeypatch.setattr(app.state.session_manager, "invoke_session", invoke_session)
+        monkeypatch.setattr(app.state.session_manager, "stream_session", stream_session)
+        response = client.post(
+            "/v1/chat/completions",
+            headers={SESSION_ID_HEADER: "session-1"},
+            json={
+                "messages": [
+                    {"role": "user", "content": "What is 2+3?"},
+                    {"role": "assistant", "content": "5"},
+                    {"role": "user", "content": "Multiply that by 10."},
+                ],
+                "stream": stream,
+            },
+        )
+
+    assert response.status_code == 200
+    [(request, continuation_request)] = session_calls
+    assert request.input == "user: What is 2+3?\n\nassistant: 5\n\nuser: Multiply that by 10."
+    assert continuation_request.input == "Multiply that by 10."
+    assert continuation_request.caller_context == request.caller_context == {"session_id": "session-1"}
+    assert continuation_request.relay_session_root == request.relay_session_root
 
 
 @pytest.mark.parametrize(
@@ -510,7 +557,7 @@ def test_session_chat_completion_runtime_error_returns_session_header(
     async def resolve_session(session_id: str) -> Any:
         return SimpleNamespace(session_id=session_id, runtime=object())
 
-    async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
+    async def invoke_session(session: Any, request: Any, *, continuation_request: Any) -> FabricRuntimeResult:
         raise FabricRuntimeTimeoutError("timed out")
 
     with TestClient(app) as client:
@@ -655,7 +702,7 @@ def test_streaming_chat_completion_reuses_supplied_session_id(
         resolve_calls.append(session_id)
         return SimpleNamespace(session_id="session-1", runtime=object())
 
-    def stream_session(session: Any, request: Any) -> _FakeStreamContext:
+    def stream_session(session: Any, request: Any, *, continuation_request: Any) -> _FakeStreamContext:
         return _FakeStreamContext(_FakeFabricStream(result=FabricRuntimeResult(status="succeeded", response="done")))
 
     with TestClient(app) as client:
@@ -1026,6 +1073,7 @@ def test_chat_completion_request_preserves_single_user_turn() -> None:
 
     assert invocation_request.input == "Say hello."
     assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
 
 
 def test_chat_completion_request_serializes_full_transcript() -> None:
@@ -1045,6 +1093,45 @@ def test_chat_completion_request_serializes_full_transcript() -> None:
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {"session_id": "session-1"}
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
+
+
+def test_session_runtime_with_history_receives_only_the_latest_message() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {
+            "messages": [
+                {"role": "user", "content": "What is 2+3?"},
+                {"role": "assistant", "content": "5"},
+                {"role": "user", "content": "Multiply that by 10."},
+            ],
+            "model": "test-model",
+        }
+    )
+
+    invocation_request = server._to_fabric_invocation_request(
+        request,
+        session_id="session-1",
+        runtime_has_history=True,
+    )
+
+    assert invocation_request.input == "Multiply that by 10."
+    assert invocation_request.relay_session_root == server._relay_session_root("session-1")
+
+
+def test_turns_of_one_session_share_a_relay_session_root() -> None:
+    request = ChatCompletionRequest.model_validate(
+        {"messages": [{"role": "user", "content": "Say hello."}], "model": "test-model"}
+    )
+
+    first = server._to_fabric_invocation_request(request, session_id="agent-session-1")
+    second = server._to_fabric_invocation_request(request, session_id="agent-session-1")
+    other = server._to_fabric_invocation_request(request, session_id="agent-session-2")
+
+    root = first.relay_session_root
+    assert root is not None
+    assert second.relay_session_root == root
+    assert other.relay_session_root != root
+    assert any(uuid.UUID(root).bytes[8:])
 
 
 def test_stateless_chat_completion_request_serializes_full_transcript_without_session_context() -> None:
@@ -1062,6 +1149,7 @@ def test_stateless_chat_completion_request_serializes_full_transcript_without_se
 
     assert invocation_request.input == ("system: Be concise.\n\nassistant: How can I help?\n\nuser: Say hello.")
     assert invocation_request.caller_context == {}
+    assert invocation_request.relay_session_root is None
 
 
 def test_close_session_stops_registered_runtime(
