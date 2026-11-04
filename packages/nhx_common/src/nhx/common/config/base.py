@@ -467,7 +467,7 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
         default="embedded",
         description=(
             "Policy Decision Point provider: "
-            "'embedded' for auth service's built-in WASM engine, "
+            "'embedded' for auth service's built-in Rego interpreter (regopy), "
             "'opa' for external OPA sidecar."
         ),
     )
@@ -493,15 +493,6 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
         description=(
             "Allow unsigned JWTs (`alg=none`) for local development/testing. "
             "Disabled by default and should not be enabled in production."
-        ),
-    )
-
-    embedded_pdp_auto_build_wasm: bool = Field(
-        default=True,
-        description=(
-            "When auth is enabled with the embedded PDP and policy.wasm is missing, "
-            "build it automatically from a local NeMo Helix source checkout. Packaged deployments "
-            "should include policy.wasm at build time and can disable this for fail-fast startup."
         ),
     )
 

@@ -23,11 +23,11 @@ For each request, the authorization middleware:
 
 ## Embedded PDP (Default)
 
-The embedded PDP uses a WASM-compiled Rego policy engine built into the auth service. No external OPA sidecar is required.
+The embedded PDP evaluates Rego sources with regopy inside the auth service. No external OPA sidecar or policy build step is required.
 
 ### How It Works
 
-- Rego policy files are compiled into the `policy.wasm` artifact loaded by the auth service
+- Rego policy sources are shipped in the auth package's `app/policies` directory and loaded by the embedded evaluator
 - Policy data (role bindings, workspace visibility, endpoint permissions) is served by the auth service
 - Data is refreshed on a configurable interval (default: 30 seconds)
 
@@ -38,9 +38,18 @@ auth:
  enabled: true
  policy_decision_point_provider: "embedded"
  policy_decision_point_base_url: "http://auth:8000"
- embedded_pdp_auto_build_wasm: true
  policy_data_refresh_interval: 30 # seconds
 ```
+
+### Runtime and Resource Boundaries
+
+regopy evaluates policy in native C++ inside the auth service process, without
+the former WASM sandbox's memory or fuel limits. The removed
+`embedded_pdp_cpu_limit`, `embedded_pdp_memory_limit_mb`, and
+`embedded_pdp_auto_build_wasm` settings no longer apply. Use external OPA in a
+separate container with resource limits when policy evaluation needs an
+independent resource boundary; container limits on the auth service apply to
+the whole service, not just policy evaluation.
 
 ### PDP URL Format
 

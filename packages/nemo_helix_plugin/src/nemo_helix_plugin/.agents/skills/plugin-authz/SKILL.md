@@ -150,10 +150,10 @@ A deployment loading dynamically-discovered or third-party plugins CI never vett
 # From repo root, workspace installed. Reports 0 degraded plugins when every route is ruled:
 uv run python services/core/auth/scripts/auth-tools.py sync-plugins --dry-run
 
-make build-policy && make test-policy
+make test-policy
 ```
 
-> **Local dev:** `services/core/auth/.../assets/policy.wasm` is a gitignored build artifact. Run `make build-policy` after pulling authz/Rego changes, otherwise `test_embedded_pdp.py` fails against a stale copy (misleading `sprintf` / fence-fails-open errors).
+> **Local dev:** The embedded PDP loads packaged Rego sources with regopy; no policy build step is required. Restart the auth service after changing Rego sources. `make test-policy` uses OPA to test the shared policy independently.
 
 For a fast in-process check with no running platform, add a `tests/test_authz.py` that derives your service's contribution and asserts it's clean (copy any plugin's `tests/test_authz.py`):
 

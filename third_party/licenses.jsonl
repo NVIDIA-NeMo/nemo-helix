@@ -363,6 +363,7 @@
 {"name": "realtime", "license": "MIT", "compatible": true}
 {"name": "referencing", "license": "MIT", "compatible": true}
 {"name": "regex", "license": "APACHE-2.0 AND CNRI-PYTHON", "compatible": true}
+{"name": "regopy", "license": "MIT", "compatible": true}
 {"name": "requests", "license": "APACHE-2.0", "compatible": true}
 {"name": "requests-oauthlib", "license": "ISC", "compatible": true}
 {"name": "requests-toolbelt", "license": "APACHE-2.0", "compatible": true}
@@ -450,7 +451,6 @@
 {"name": "uvloop", "license": "MIT", "compatible": true}
 {"name": "validators", "license": "MIT", "compatible": true}
 {"name": "wandb", "license": "MIT", "compatible": true}
-{"name": "wasmtime", "license": "APACHE-2.0 WITH LLVM-EXCEPTION", "compatible": true}
 {"name": "watchfiles", "license": "MIT", "compatible": true}
 {"name": "wcmatch", "license": "MIT", "compatible": true}
 {"name": "wcwidth", "license": "MIT", "compatible": true}

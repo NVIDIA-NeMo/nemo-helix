@@ -21,36 +21,56 @@ storage_principals := {
 	"service:legacy": {"workspaces": {"private": ["Admin"]}},
 }
 
-storage_permission(principal, workspace, permission) := result if {
+test_admin_and_storage_roles_compose if {
 	result := authz.has_permissions with data.authz.roles as storage_roles
 		with data.authz.principals as storage_principals
-		with input as {"principal_id": principal, "workspace": workspace, "permissions": [permission]}
-}
-
-test_admin_and_storage_roles_compose if {
-	storage_permission("service:scaled-evals", "private", "entities.read").allowed
-	storage_permission("service:scaled-evals", "private", "workspaces.read").allowed
+		with input as {"principal_id": "service:scaled-evals", "workspace": "private", "permissions": ["entities.read", "workspaces.read"]}
+	result.allowed
 }
 
 test_reader_does_not_get_entity_access if {
-	not storage_permission("reader", "private", "entities.read").allowed
-	storage_permission("reader", "private", "workspaces.read").allowed
+	entity := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "reader", "workspace": "private", "permissions": ["entities.read"]}
+	not entity.allowed
+	workspace := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "reader", "workspace": "private", "permissions": ["workspaces.read"]}
+	workspace.allowed
 }
 
 test_entity_role_does_not_get_workspace_reads if {
-	storage_permission("service:entities-only", "private", "entities.read").allowed
-	not storage_permission("service:entities-only", "private", "workspaces.read").allowed
+	entity := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "service:entities-only", "workspace": "private", "permissions": ["entities.read"]}
+	entity.allowed
+	workspace := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "service:entities-only", "workspace": "private", "permissions": ["workspaces.read"]}
+	not workspace.allowed
 }
 
 test_human_inheritance_does_not_grant_service_permissions if {
-	not storage_permission("human", "private", "entities.read").allowed
-	storage_permission("human", "private", "workspaces.read").allowed
+	entity := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "human", "workspace": "private", "permissions": ["entities.read"]}
+	not entity.allowed
+	workspace := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "human", "workspace": "private", "permissions": ["workspaces.read"]}
+	workspace.allowed
 }
 
 test_creator_admin_still_has_no_entity_access if {
-	not storage_permission("service:legacy", "private", "entities.read").allowed
+	result := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "service:legacy", "workspace": "private", "permissions": ["entities.read"]}
+	not result.allowed
 }
 
 test_other_workspaces_retain_the_legacy_fallback if {
-	storage_permission("service:scaled-evals", "other", "entities.read").allowed
+	result := authz.has_permissions with data.authz.roles as storage_roles
+		with data.authz.principals as storage_principals
+		with input as {"principal_id": "service:scaled-evals", "workspace": "other", "permissions": ["entities.read"]}
+	result.allowed
 }

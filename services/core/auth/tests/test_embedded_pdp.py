@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the WASM policy engine."""
+"""Tests for the embedded Rego policy engine."""
 
+import copy
+import json
 from pathlib import Path
 from queue import Queue
 from threading import Thread
@@ -11,8 +13,8 @@ from typing import Any, ClassVar
 import pytest
 import yaml
 from nhx.core.auth.app.embedded_pdp import (
-    OPAPolicy,
     PolicyEngineError,
+    RegoPolicy,
     evaluate,
     get_policy,
     get_valid_entrypoints,
@@ -115,7 +117,7 @@ class TestPolicyLoading:
     def test_policy_loads(self):
         policy = get_policy()
         assert policy is not None
-        assert isinstance(policy, OPAPolicy)
+        assert isinstance(policy, RegoPolicy)
 
     def test_policy_reused_within_thread(self):
         policy1 = get_policy()
@@ -159,41 +161,136 @@ class TestPolicyLoading:
 
         error = errors.get_nowait()
         assert isinstance(error, RuntimeError)
-        assert "OPAPolicy used from a different thread" in str(error)
-
-    def test_policy_load_forwards_auto_build_config(self, monkeypatch: pytest.MonkeyPatch):
-        import nhx.core.auth.app.embedded_pdp.engine as pe
-        from nhx.common.config import Configuration
-        from nhx.core.auth.config import AuthServiceConfig
-
-        calls: list[bool] = []
-
-        class FakePolicy:
-            def __init__(self, *_args, **_kwargs):
-                pass
-
-            def set_data(self, _data):
-                pass
-
-        monkeypatch.setattr(
-            pe,
-            "ensure_embedded_policy_wasm",
-            lambda *, auto_build: calls.append(auto_build) or Path("/tmp/policy.wasm"),
-        )
-        monkeypatch.setattr(pe, "OPAPolicy", FakePolicy)
-        Configuration.set_override(AuthServiceConfig(embedded_pdp_auto_build_wasm=False))
-        try:
-            pe.get_policy()
-        finally:
-            Configuration.clear_override(AuthServiceConfig)
-
-        assert calls == [False]
+        assert "RegoPolicy used from a different thread" in str(error)
 
     def test_reload_policy(self):
         policy1 = get_policy()
         reload_policy()
         policy2 = get_policy()
         assert policy1 is not policy2
+
+
+class TestPolicyLifecycle:
+    """Data replacement and request isolation must not retain stale authorization."""
+
+    def test_data_refresh_revokes_removed_principal(self, minimal_authz_data):
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        request = {"principal_id": "viewer@example.com", "workspace": "test-workspace", "role": "Viewer"}
+        assert policy.evaluate(request, 2)[0]["result"]["has_role"] is True
+        replacement = copy.deepcopy(minimal_authz_data)
+        replacement["authz"]["principals"] = {}
+        policy.set_data(replacement)
+        assert policy.evaluate(request, 2)[0]["result"]["has_role"] is False
+
+    def test_module_data_refresh_revokes_existing_runtime(self, minimal_authz_data):
+        set_policy_data(minimal_authz_data)
+        request = {"principal_id": "viewer@example.com", "workspace": "test-workspace", "role": "Viewer"}
+        assert evaluate("has_role", request)["has_role"] is True
+        replacement = copy.deepcopy(minimal_authz_data)
+        replacement["authz"]["principals"] = {}
+        set_policy_data(replacement)
+        assert evaluate("has_role", request)["has_role"] is False
+
+    def test_request_input_does_not_leak(self, minimal_authz_data):
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        request = {"path": "/apis/models/v2/workspaces/test-workspace/models", "method": "GET"}
+        assert policy.evaluate({**request, "principal_id": "service:probe"})[0]["result"]["allowed"] is True
+        assert policy.evaluate(request)[0]["result"]["allowed"] is False
+
+    def test_nul_in_principal_cannot_alias_existing_grant(self, minimal_authz_data):
+        set_policy_data(minimal_authz_data)
+        request = {"principal_id": "test@example.com", "workspace": "test-workspace", "role": "Editor"}
+        assert evaluate("has_role", request)["has_role"] is True
+        request["principal_id"] = "test@example.com\x00attacker"
+        assert evaluate("has_role", request)["has_role"] is False
+
+    def test_nul_in_scope_cannot_alias_required_scope(self, minimal_authz_data):
+        endpoint = minimal_authz_data["authz"]["endpoints"]["/apis/models/v2/workspaces/{workspace_id}/models"]
+        endpoint["get"]["scopes"] = ["models:read"]
+        set_policy_data(minimal_authz_data)
+        request = {
+            "principal_id": "viewer@example.com",
+            "path": "/apis/models/v2/workspaces/test-workspace/models",
+            "method": "GET",
+            "scopes": ["models:read"],
+        }
+        assert evaluate("allow", request)["allowed"] is True
+        request["scopes"] = ["models:read\x00invalid"]
+        assert evaluate("allow", request)["allowed"] is False
+
+    def test_nul_in_input_key_cannot_alias_trusted_key(self, minimal_authz_data):
+        set_policy_data(minimal_authz_data)
+        request = {"principal_id": "test@example.com", "workspace": "test-workspace", "role": "Editor"}
+        assert evaluate("has_role", request)["has_role"] is True
+        principal = request.pop("principal_id")
+        request["principal_id\x00attacker"] = principal
+        assert evaluate("has_role", request)["has_role"] is False
+
+    @pytest.mark.parametrize("principal", ["élève@example.com", "用户@example.com", "🙂@example.com"])
+    def test_unicode_identity_is_preserved(self, minimal_authz_data, principal):
+        workspace = "équipe-工作区-🙂"
+        role = "éditeur-编辑者-🙂"
+        minimal_authz_data["authz"]["principals"] = {principal: {"workspaces": {workspace: [role]}}}
+        set_policy_data(minimal_authz_data)
+        request = {"principal_id": principal, "workspace": workspace, "role": role}
+        assert evaluate("has_role", request)["has_role"] is True
+        assert evaluate("has_role", {**request, "principal_id": principal + "other"})["has_role"] is False
+
+    def test_source_policy_returns_json_serializable_envelope(self, minimal_authz_data):
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        output = policy.evaluate({"path": "/health/live", "method": "GET"})
+        assert output[0]["result"]["allowed"] is True
+        assert json.loads(json.dumps(output)) == output
+
+    def test_failed_compile_invalidates_previous_grants(self, minimal_authz_data):
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        request = {"principal_id": "viewer@example.com", "workspace": "test-workspace", "role": "Viewer"}
+        assert policy.evaluate(request, 2)[0]["result"]["has_role"] is True
+        policy._modules = {"broken.rego": "package authz\nthis is not valid rego !!!"}
+        with pytest.raises(PolicyEngineError):
+            policy.set_data(minimal_authz_data)
+        with pytest.raises(PolicyEngineError):
+            policy.evaluate(request, 2)
+
+    def test_failed_native_evaluation_is_not_formatted(self, minimal_authz_data, monkeypatch):
+        import nhx.core.auth.app.embedded_pdp.rego_engine as pe
+
+        class UnsafeErrorOutput:
+            def ok(self):
+                return False
+
+            def __str__(self):
+                raise AssertionError("Unsuccessful native output must never be formatted")
+
+            def __repr__(self):
+                raise AssertionError("Unsuccessful native output must never be inspected")
+
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        monkeypatch.setattr(pe.Interpreter, "query_bundle_entrypoint", lambda *_args: UnsafeErrorOutput())
+        with pytest.raises(PolicyEngineError):
+            policy.evaluate({"path": "/health/live", "method": "GET"})
+
+    def test_set_data_rejects_cross_thread_use(self, minimal_authz_data):
+        policy = RegoPolicy()
+        errors = Queue()
+
+        def replace_leaked_policy_data():
+            try:
+                policy.set_data(minimal_authz_data)
+            except BaseException as exc:
+                errors.put(exc)
+
+        thread = Thread(target=replace_leaked_policy_data)
+        thread.start()
+        thread.join()
+        error = errors.get_nowait()
+        assert isinstance(error, RuntimeError)
+        assert "different thread" in str(error)
 
 
 class TestAllowEntrypoint:
@@ -369,78 +466,6 @@ class TestInvalidEntrypoint:
         assert "Invalid entrypoint" in str(exc_info.value)
 
 
-class TestResourceLimits:
-    """Tests for fuel and memory limits."""
-
-    def test_fuel_exhaustion_raises_policy_error(self, minimal_authz_data):
-        """Verify that an absurdly low fuel limit triggers PolicyEngineError."""
-        import nhx.core.auth.app.embedded_pdp.engine as pe
-        from nhx.common.config import Configuration
-        from nhx.core.auth.config import AuthServiceConfig
-
-        Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=0, embedded_pdp_memory_limit_mb=32))
-        try:
-            pe.reload_policy()
-            set_policy_data(minimal_authz_data)
-
-            with pytest.raises(PolicyEngineError, match="exceeded fuel limit"):
-                evaluate(
-                    "allow",
-                    {
-                        "principal_id": "test@example.com",
-                        "path": "/apis/models/v2/workspaces/test-workspace/models",
-                        "method": "GET",
-                    },
-                )
-        finally:
-            Configuration.clear_override(AuthServiceConfig)
-            pe._reset_policy_state_for_testing()
-
-    def test_default_fuel_allows_normal_evaluation(self, minimal_authz_data):
-        """Verify that the default fuel limit is sufficient for normal evaluations."""
-        set_policy_data(minimal_authz_data)
-        result = evaluate(
-            "allow",
-            {
-                "principal_id": "test@example.com",
-                "path": "/apis/models/v2/workspaces/test-workspace/models",
-                "method": "GET",
-            },
-        )
-        assert result["allowed"] is True
-
-    def test_memory_limit_applied(self):
-        """Verify that memory limits are set on the WASM store."""
-        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
-        policy = OPAPolicy(str(path), fuel_limit=100_000_000, memory_limit_mb=16)
-        assert policy.store is not None
-        assert policy.fuel_limit == 100_000_000
-
-    def test_custom_fuel_limit(self, minimal_authz_data):
-        """Verify that a custom fuel limit works when sufficient."""
-        import nhx.core.auth.app.embedded_pdp.engine as pe
-        from nhx.common.config import Configuration
-        from nhx.core.auth.config import AuthServiceConfig
-
-        Configuration.set_override(AuthServiceConfig(embedded_pdp_cpu_limit=50, embedded_pdp_memory_limit_mb=32))
-        try:
-            pe.reload_policy()
-            set_policy_data(minimal_authz_data)
-
-            result = evaluate(
-                "allow",
-                {
-                    "principal_id": "test@example.com",
-                    "path": "/apis/models/v2/workspaces/test-workspace/models",
-                    "method": "GET",
-                },
-            )
-        finally:
-            Configuration.clear_override(AuthServiceConfig)
-            pe._reset_policy_state_for_testing()
-        assert result["allowed"] is True
-
-
 class TestDefaultDenyWithoutData:
     """Tests that the PDP denies all requests when policy data is not loaded."""
 
@@ -451,9 +476,8 @@ class TestDefaultDenyWithoutData:
     }
 
     def test_evaluate_without_set_data_raises(self):
-        """OPAPolicy.evaluate() must raise when set_data() was never called."""
-        path = Path(__file__).parent.parent / "src/nhx/core/auth/assets/policy.wasm"
-        policy = OPAPolicy(str(path))
+        """RegoPolicy.evaluate() must raise when set_data() was never called."""
+        policy = RegoPolicy()
         with pytest.raises(PolicyEngineError, match="Policy data not loaded"):
             policy.evaluate(self.AUTHENTICATED_REQUEST)
 
@@ -1047,27 +1071,11 @@ class TestPerAreaScopes:
         assert not missing, "Workspace audit endpoints missing audit:* scope:\n" + "\n".join(missing)
 
 
-class TestWasmNativeBuiltins:
-    """The embedded engine stubs host-provided builtins (env::opa_builtin*) to return 0.
+class TestNamespaceFence:
+    """Namespace denies must work in the production runtime, including subpaths."""
 
-    Any rego that calls an SDK-dependent builtin (sprintf, glob.match, ...) therefore
-    silently evaluates to undefined in production: allow rules fail closed, but DENY
-    rules fail OPEN — and ``opa test`` cannot catch it because the Go evaluator
-    implements every builtin. These tests pin the policy to wasm-native builtins only.
-    """
-
-    def test_policy_wasm_requires_no_host_builtins(self):
-        """The compiled policy must not depend on any host-provided builtin."""
-        policy = get_policy()
-        required = policy._read_json(policy.exports["builtins"](policy.store))
-        assert required == {}, (
-            f"policy.wasm requires host builtins {list(required)} which the embedded "
-            "engine stubs out — rewrite the policy using wasm-native builtins only "
-            "(a deny rule depending on a stubbed builtin silently never fires)."
-        )
-
-    def test_namespace_fence_denies_subpaths_in_wasm(self, static_authz_data):
-        """Regression: the fence's subpath arm was written with sprintf and never fired in WASM."""
+    def test_namespace_fence_denies_subpaths(self, static_authz_data):
+        """A deny rule must fence both bare prefixes and nested paths."""
         static_authz_data["authz"].setdefault("config", {})["denied_plugin_prefixes"] = ["/apis/brokenplugin"]
         set_policy_data(static_authz_data)
         cases = [

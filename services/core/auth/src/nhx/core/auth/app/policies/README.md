@@ -1,7 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# OPA Authorization Policies
+# Shared Rego Authorization Policies
+
+The embedded PDP interprets these sources with regopy; the external PDP evaluates
+these same sources with OPA. No compiled policy artifact or OPA build is needed
+for the embedded runtime.
 
 ## Entry Points
 
@@ -94,6 +98,17 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ## Testing
 
 ```bash
-make test-policy
+make test-policy      # regopy: shared corpus plus test-runner safety checks
+make test-policy-opa  # OPA compatibility oracle (requires the opa executable)
 ```
+
+The shared Rego tests use `with` to install request and authorization-data
+fixtures. regopy 1.5.2 cannot compile transitive calls under native `with`, so
+`script/test_regopy_policies.py` installs those input/base-data overrides in fresh
+interpreters and evaluates the original Rego assertions. The test-only runner
+supports a bounded grammar and rejects unsupported constructs rather than
+skipping tests. Production policies are loaded unchanged and do not use `with`.
+
+When adding or changing policy behavior, run both evaluators. A passing native
+OPA test alone does not verify the embedded evaluator's behavior.
 

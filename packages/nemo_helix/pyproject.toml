@@ -65,7 +65,7 @@ auth-service = [
   "pyyaml>=6.0.0",
   "nhx-common",
   "nhx-entities",
-  "wasmtime>=20.0.0",
+  "regopy==1.5.2",
 ]
 
 # Generated from [tool.bundle-package]; do not edit by hand.

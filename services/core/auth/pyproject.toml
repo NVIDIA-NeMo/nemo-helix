@@ -16,7 +16,7 @@ dependencies = [
     "pyyaml>=6.0.0",
     "nhx-common",
     "nhx-entities",
-    "wasmtime>=20.0.0",
+    "regopy==1.5.2",
 ]
 version = "0.0.0"
 

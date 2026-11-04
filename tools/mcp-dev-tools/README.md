@@ -120,7 +120,6 @@ This structured summary allows Claude to immediately understand test results wit
 - `make_target(target)` - Run allowlisted make targets:
   - Testing: test-unit, test-integration, test-all, test-policy
   - SDK/API: refresh-openapi, update-sdk
-  - Policy: build-policy, check-policy
   - Licenses: update-licenses, check-licenses
 
 ## Key Features

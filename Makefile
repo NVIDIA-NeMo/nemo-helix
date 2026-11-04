@@ -84,7 +84,7 @@ update-web-sdk: verify-toolchain ## Regenerate the TypeScript web SDK (web/packa
 	cd web && $(PNPM) gen
 
 .PHONY: update-sdk
-update-sdk: build-policy refresh-openapi update-web-sdk vendor update-cli ## Regenerate the OpenAPI spec, web SDK, wheel metadata, and CLI docs
+update-sdk: refresh-openapi update-web-sdk vendor update-cli ## Regenerate the OpenAPI spec, web SDK, wheel metadata, and CLI docs
 
 .PHONY: generate-cli-reference-docs
 generate-cli-reference-docs: ## Generate the CLI reference documentation
@@ -357,7 +357,7 @@ bootstrap: bootstrap-python ## Bootstrap the local dev environment, including St
 	@$(BOOTSTRAP_ACTIVATION_REMINDER)
 
 .PHONY: run
-run: build-policy ## Run the NeMo Helix locally with Docker job backend
+run: ## Run the NeMo Helix locally with Docker job backend
 	NHX_CONFIG_FILE_PATH=${NHX_CONFIG_FILE_PATH} $(UV) run nemo services run
 
 .PHONY: clean
@@ -656,7 +656,11 @@ test-markers: ## List all available pytest markers
 	$(UV) run --frozen pytest --markers
 
 .PHONY: test-policy
-test-policy: ## Run OPA policy tests for auth service
+test-policy: ## Run the shared Rego policy corpus with the embedded evaluator
+	$(UV) run --frozen pytest services/core/auth/tests/test_regopy_compatibility.py -v
+
+.PHONY: test-policy-opa
+test-policy-opa: ## Run the shared Rego policy corpus with OPA as a compatibility oracle
 	@if ! command -v opa >/dev/null 2>&1; then \
 		echo ""; \
 		echo "ERROR: OPA (Open Policy Agent) is not installed."; \
@@ -666,27 +670,6 @@ test-policy: ## Run OPA policy tests for auth service
 	fi
 	@echo "Running OPA policy tests..."
 	opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
-
-# Policy WASM bundle paths
-ASSETS_DIR := services/core/auth/src/nhx/core/auth/assets
-
-.PHONY: build-policy
-build-policy: ## Build OPA policies into WASM bundle
-	./script/build_policy_wasm.sh
-
-.PHONY: check-policy
-check-policy: ## Verify WASM bundle is up-to-date with policies
-	@echo "Checking if policy.wasm is up-to-date..."
-	@cp $(ASSETS_DIR)/policy.wasm $(ASSETS_DIR)/policy.wasm.bak 2>/dev/null || true
-	@$(MAKE) build-policy >/dev/null 2>&1
-	@if ! cmp -s $(ASSETS_DIR)/policy.wasm $(ASSETS_DIR)/policy.wasm.bak 2>/dev/null; then \
-		mv $(ASSETS_DIR)/policy.wasm.bak $(ASSETS_DIR)/policy.wasm 2>/dev/null || true; \
-		echo "ERROR: policy.wasm is out of date. Run 'make build-policy' and commit the result."; \
-		exit 1; \
-	fi
-	@rm -f $(ASSETS_DIR)/policy.wasm.bak
-	@echo "policy.wasm is up-to-date"
-
 
 .PHONY: build-jobs-launcher
 build-jobs-launcher:

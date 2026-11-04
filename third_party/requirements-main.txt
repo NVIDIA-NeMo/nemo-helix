@@ -3383,6 +3383,26 @@ regex==2026.3.32 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   tiktoken
     #   transformers
     #   unsloth-zoo
+regopy==1.5.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:1b4b1594e0a0cdad004e6b27eae214d3ccd166cc59874d2c26a5bfe9679ca9c9 \
+    --hash=sha256:213075bee128a6dfc142fe70b2ec76457fb31bc89e6ee6e02ac50ef28b2c6b6e \
+    --hash=sha256:2138ee26a253dcbf8fb2d0df4e05cf8677b28cc4676c560bc04563098c9a6721 \
+    --hash=sha256:2411206da3cc98520dfc61ae44e333c44c5f95dd6935a3b6af0a0b6ba311c39c \
+    --hash=sha256:420124cf0b34e1ae154eb505b2ed33a83729f44fb26be700a4b447e154235a66 \
+    --hash=sha256:42d557ea696bc113566b75e474134a314e609bbb602a1974783701326dbcea5e \
+    --hash=sha256:5b7ec337b338631c6d3fa56215932a6aa4b233bbf5e78c278d14ab40e8d53124 \
+    --hash=sha256:6389be1200a4bbd52a93d7368b43932793ea928887b7b8a66af15ef05c26fa5f \
+    --hash=sha256:6cd2c16f0165e5b2dc5c3797ccb0e7321c92d137094f64860e76aa262fbdae39 \
+    --hash=sha256:7e2c6226b1891d0907c4cd34f394a46b5a959023ebbbb7eeb550d0bb658fd0e7 \
+    --hash=sha256:886016ce3064efbfcb5bf0fd8cb737629928be2c8dbd13621edf8ef9e23ca022 \
+    --hash=sha256:af07e0ec772532ee2e5546b752d81548e4a945514e5ca145ab411a5d4a547f10 \
+    --hash=sha256:b7e06cb8ba4afb306fb5057a1b84b34deb190252d2f7dae6b1ac2d30213d1a26 \
+    --hash=sha256:e1b3ca26b33b6e7e1fe91404ce247c1d7ba5aca0cc2e7e12f81b3a4726fc4970 \
+    --hash=sha256:e61a8e3cd2bb12b022d73692b62f4f47983470cad16b5ba6d2424be8c5d226f2 \
+    --hash=sha256:f75a0d45ca1ad2cd776822d325b6fe7e3172d58cb4349b84d53dc58b9d00e6da
+    # via
+    #   nemo-helix
+    #   nhx-auth
 requests==2.34.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
@@ -4259,17 +4279,6 @@ wandb==0.30.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (p
     # via
     #   nhx-rl
     #   nhx-unsloth
-wasmtime==47.0.1 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:0aeb53d4c8e682cccebbaac48882939b34e71a1243b622129de3e6834728044d \
-    --hash=sha256:4f72162ceed1d50de8226fac6b12e1ecce54883a0c3f7355bb141eae40df488a \
-    --hash=sha256:5146a700c93909e797e0f6c05707c992fc75f4f5f5c5ecf826a9aff689ec6af1 \
-    --hash=sha256:58da69f71750e844e32614c1805246ffca4c8b032d46a8145faa26c228c6c5ac \
-    --hash=sha256:9724600b036c6e95c4fe952e29fad83b4f02bdc11d23f25c4ee3ffff2c1d7257 \
-    --hash=sha256:f900fa571a9a5668b6210de9ecca1c5b66db14d85b7c36514c3d307d4f4cdc90 \
-    --hash=sha256:fab6ee0e87354f14ef228fa71b40841dd3c2c713f6efce636af234b4e3e6edcc
-    # via
-    #   nemo-helix
-    #   nhx-auth
 watchfiles==1.2.0 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
     --hash=sha256:01859b11fd9fbca670f4d5da00fbac282cfea9bd67a2125d8b2833a3b5617ea9 \
     --hash=sha256:054dc20fd2e3132b4c3883b4a00d72fd6e1f56fdaf89fccd12e8057d74cd74d7 \

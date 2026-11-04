@@ -207,7 +207,6 @@ runs:
             - 'services/core/auth/src/nhx/core/auth/app/policies/**'
             - 'services/core/auth/src/nhx/core/auth/app/scope_families.py'
             - 'services/core/auth/src/nhx/core/auth/assets/static-authz.yaml'
-            - 'script/build_policy_wasm.sh'
             # test_files_backend.py imports these from outside the plugin tree.
             - 'packages/filesets/src/filesets/resources.py'
             - 'packages/nhx_testing/src/nhx/testing/**'
@@ -245,7 +244,6 @@ runs:
             - 'Makefile'
           docker-scripts:
             - 'script/install_duckdb_extensions.sh'
-            - 'script/build_policy_wasm.sh'
           helm:
             - 'k8s/**'
             - 'tools/lint/lint-helm.sh'
