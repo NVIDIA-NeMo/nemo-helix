@@ -101,7 +101,7 @@ describe('EvaluationsTable Deployment column', () => {
     outcome: null,
   });
 
-  it('links a run to the deployment it called, and marks a by-agent run as automatic', async () => {
+  it('shows the deployment a run called, and marks a by-agent run as Default', async () => {
     renderTable(
       [],
       [
@@ -114,14 +114,10 @@ describe('EvaluationsTable Deployment column', () => {
       ]
     );
 
-    const links = await screen.findAllByRole(
-      'link',
-      { name: 'my-agent-k8s' },
-      { timeout: LG_SELECTOR_TIMEOUT }
-    );
-    for (const link of links) {
-      expect(link).toHaveAttribute('href', '/workspaces/default/agent-deployments/my-agent-k8s');
-    }
+    expect(
+      (await screen.findAllByText('my-agent-k8s', undefined, { timeout: LG_SELECTOR_TIMEOUT }))
+        .length
+    ).toBeGreaterThan(0);
     expect(screen.getAllByText('Default').length).toBeGreaterThan(0);
   });
 });

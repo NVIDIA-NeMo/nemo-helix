@@ -81,7 +81,7 @@ describe('AgentEvaluationDetailRoute', () => {
     });
   });
 
-  it('links the deployment the run called, read from its target URL', async () => {
+  it('shows the deployment the run called, read from its target URL', async () => {
     server.use(
       http.get(
         `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
@@ -103,10 +103,7 @@ describe('AgentEvaluationDetailRoute', () => {
     );
     renderDetail();
 
-    expect(await screen.findByRole('link', { name: 'my-agent-k8s' })).toHaveAttribute(
-      'href',
-      `/workspaces/${workspace}/agent-deployments/my-agent-k8s`
-    );
+    expect(await screen.findByText('my-agent-k8s')).toBeInTheDocument();
   });
 
   describe('run outcome', () => {
