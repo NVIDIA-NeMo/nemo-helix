@@ -50,6 +50,46 @@ nemo jobs tail <job-name> --workspace default -n 500
 
 Both commands support `--attempt-id`, `--step-id`, and `--task-id` to narrow the log output. The attempt selector accepts an attempt ID or `current`.
 
+## Concurrency Limits and Queueing
+
+The Jobs service bounds how much work runs at once. Before it starts a job step, the scheduler checks the number of jobs currently running against three limits. A step starts only when it is under all of them:
+
+| Limit | Applies to | Default | Setting |
+|---|---|---|---|
+| Executor | Jobs running on one execution profile (`provider` and `profile`) | 8 for `docker` and `subprocess`, 500 for `kubernetes_job` and `volcano_job` | `max_active_jobs` in the execution profile `config` |
+| Workspace | Jobs running in one workspace | 200 | `max_active_jobs_per_workspace` |
+| User | Jobs running for one user | 50 | `max_active_jobs_per_user` |
+
+```yaml
+jobs:
+  max_active_jobs_per_workspace: 200
+  max_active_jobs_per_user: 50
+  executors:
+    - provider: gpu
+      profile: a100-pool
+      backend: kubernetes_job
+      config:
+        max_active_jobs: 20
+```
+
+On Kubernetes, the Helm chart sets these through `core.jobs.maxActiveJobsPerUser`, `core.jobs.maxActiveJobsPerWorkspace`, and `core.jobs.maxActiveJobs` (the executor limit for Kubernetes and Volcano profiles).
+
+Each running job counts as one unit, no matter how many resources or tasks it uses. A job runs its steps one at a time, so the scheduler counts the job's current step: it counts toward the limits while it is `pending`, `active`, `cancelling`, or `pausing`. Queued, paused, and finished steps do not count. The scheduler counts current work each time it runs, so the limits do not depend on past usage.
+
+### What happens at a limit
+
+A step that does not fit is not failed. It moves to `queued`, and the reason, such as `executor cpu/default is at its limit (8/8 active jobs)`, appears in the step's `status_details.message`. The scheduler retries queued steps on every pass (every `schedule_interval_seconds`, 5 by default) and starts them as running jobs finish.
+
+When many steps are waiting and capacity is limited, the scheduler takes one step per user in turn, so a user with a large backlog does not block other users. Each user's own steps still start in the order they were created.
+
+If the scheduler cannot read the current load, it queues the steps for that pass and tries again on the next one.
+
+<Note>
+
+A per-workspace override is not available yet. Every workspace uses `max_active_jobs_per_workspace`. A limit per job group is also not available yet.
+
+</Note>
+
 ## Execution Profiles
 
 You can configure jobs to run on different hardware by specifying an execution profile. This allows you to define different compute resources and job execution backends for different job types and use cases.
