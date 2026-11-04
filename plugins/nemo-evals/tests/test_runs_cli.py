@@ -400,16 +400,25 @@ def test_a_spec_file_alone_is_read_once(submitting, monkeypatch, tmp_path):
     assert submitting.bodies and submitting.bodies[0]["spec"]["target"]["source"]["name"] == "openhands"
 
 
-def test_ctrl_c_during_the_submit_says_to_retry_with_the_same_key(submitting, monkeypatch):
+def test_ctrl_c_during_the_submit_says_to_retry_the_published_taskset_with_the_same_key(submitting, monkeypatch):
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt
 
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
     monkeypatch.setattr("nemo_evals.runs_cli.submit_run", interrupted)
-    result = submitting.invoke("--taskset", STORED, "--idempotency-key", "k-$USER")
+    result = submitting.invoke(
+        "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--idempotency-key", "k-$USER"
+    )
     assert result.exit_code == 130
     assert "the run may still be accepted" in result.output
-    assert "rerun the same command with --idempotency-key 'k-$USER'" in result.output  # quoted: the shell keeps it
-    assert "image builds" not in result.output and "--taskset" not in result.output
+    # The published taskset, not the source, which may have moved since; the key is quoted, so the shell keeps it.
+    retry = (
+        f"submit with the same key: nemo evals runs submit --taskset {shlex.quote(STORED)} --idempotency-key 'k-$USER'"
+    )
+    assert retry in result.output
+    assert "image builds" not in result.output and "--harbor-hub" not in result.output
 
 
 def test_ctrl_c_before_the_submit_names_the_taskset(submitting, monkeypatch):

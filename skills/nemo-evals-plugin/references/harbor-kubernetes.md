@@ -59,7 +59,8 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 1. The model: either one the deployment serves (`nemo models list --workspace "$WS" | grep <name>`; pass
    it as `<ws>/<name>` to `--default-model-entity`), or the user's own provider. For build.nvidia.com, the
    user picks a model ID from https://build.nvidia.com/models and creates a key at
-   https://build.nvidia.com/settings/api-keys. Never put a key in a command or file:
+   https://build.nvidia.com/settings/api-keys. For a model other than the example, replace its ID here and, in
+   step 2, the entity name `nemo inference providers get nvidia-build` lists under `served_models`. Never put a key in a command or file:
 
    ```bash
    printenv NVIDIA_BUILD_API_KEY | nemo secrets create nvidia-build-api-key --workspace "$WS" --from-file -
@@ -83,7 +84,8 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
    ```
 
    With platform auth off, this model returns 401 to calls that don't carry an evaluation's credential. To
-   chat with the model, call the model entity instead.
+   chat with the model, call the model entity instead. Closed-book holds against an agent that tries to get
+   around it only with platform auth on: with auth off, an agent can forge its credential or call another model.
 
 3. Platform auth on: an inference-scoped gateway key in a secret. Submit checks for it; trials don't use it.
    Each trial gets its own Scoped Access Key, created and revoked by the job, valid 24 hours from the task

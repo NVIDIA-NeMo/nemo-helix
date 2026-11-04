@@ -798,10 +798,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
             )
         except KeyboardInterrupt:
-            if submitting_key is not None:  # the run may already be accepted: only the same key avoids a second one
+            # The run may already be accepted: only the same key avoids a second one
+            if submitting_key is not None and taskset_ref is not None:
                 echo(
                     "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
-                    f"a second run, rerun the same command with --idempotency-key {shlex.quote(submitting_key)}"
+                    # the published ref, not the source: a changed source would send a different request (409)
+                    f"a second run, submit with the same key: {rerun(taskset_ref)} --idempotency-key {shlex.quote(submitting_key)}"
                 )
                 raise typer.Exit(code=130) from None
             if waiting_for_builds and taskset_ref:  # --taskset doesn't wait: it rejects tasks still building

@@ -206,7 +206,7 @@ A model-calling agent also needs a request file (`--spec-file`), because the com
 
 This uses Nemotron 3.5 Super on [build.nvidia.com](https://build.nvidia.com), an OpenAI-compatible endpoint, with your own key (`custom-provider` in the [DeepSWE notebook](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-evals/examples/deepswe_k8s_demo)). Calls are billed to your key.
 
-- **Model:** pick one from the [build.nvidia.com catalog](https://build.nvidia.com/models). Its ID, such as `nvidia/nemotron-3.5-super-vl-120b-a12b`, goes in `--enabled-models`.
+- **Model:** pick one from the [build.nvidia.com catalog](https://build.nvidia.com/models). This page uses `nvidia/nemotron-3.5-super-vl-120b-a12b`. For another model, replace that ID, and the model name step 3 prints (`default/nvidia-nemotron-3-5-super-vl-120b-a12b`), wherever this page uses them.
 - **API key:** create one at [build.nvidia.com API keys](https://build.nvidia.com/settings/api-keys).
 
 1. Store your key in a secret. Export it in your shell first; don't put the key in a command:
@@ -251,6 +251,7 @@ The virtual model carries two middlewares:
 - **Closed-book** strips provider-side tools such as web search.
   - A no-network task, such as every DeepSWE task, accepts a model-calling agent only through a closed-book model. Without one, submit returns a 422 that names the tasks.
   - Networked tasks also accept it.
+  - It holds against an agent that tries to get around it only with platform auth on. With auth off, an agent can forge its trial credential or call a model that isn't closed-book.
 - **Trial recording** records each trial's model calls in Intake, with token usage, in the trial's trace.
   - List it in both middleware lists. In `request_middleware`, closed-book comes last.
   - Without it, the run still works: the job logs a warning and the calls aren't recorded.
@@ -546,7 +547,7 @@ nemo evals runs submit --workspace "$WS" --harbor-dir "$SUITE_DIR" --tasks 0 --a
 | 422 `tasks without images: …` | An image build isn't `ready` | `nemo evals tasksets build-images <taskset> --wait`, then resubmit |
 | 422 naming no-network tasks | A model-calling agent without a closed-book `model.ref` | Use a closed-book model ([step 2](#2-create-a-closed-book-virtual-model)) |
 | `platform auth is on, so the agent needs a key to call the Inference Gateway` | No gateway key in `env_secrets` | [Step 3](#3-give-the-agent-a-gateway-key) |
-| Task Job fails with `could not issue … trials their own Inference Gateway key` | Platform auth is on and Scoped Access Keys are off, or you can't create them | Ask your operator to enable [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) |
+| Task Job fails with `could not issue … trials their own Inference Gateway key` | Platform auth is on and Scoped Access Keys are off, you can't create them, or `auth.access_keys.max_expires_in_seconds` is under 86400 (trial keys last 24 h) | Ask your operator to enable [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) with a maximum lifetime of at least 24 h |
 | 401 `… records evaluation trials, so calls to it must carry the credential the evaluation issued` | You called a trial-recording virtual model directly, with platform auth off | Call the model it serves, or a virtual model without trial recording |
 | 422 `Intake Experiment … doesn't exist` | `--experiment` names a missing Experiment | `nemo experiments create <name> --workspace "$WS"` |
 | HTTP 409 | The idempotency key was used for a different request | Use a new key |
