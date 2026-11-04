@@ -141,6 +141,8 @@ async def test_requests_without_credentials_are_sent_unchanged(
     model_server: HTTPServer, iorails_config: RailsConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(IORAILS_ENGINE_ENV, "true")
+    # The ``nim`` models send this key when it is set, which would not be a credential the factory added.
+    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     engine = create_rails_engine(iorails_config)
 
     await run_generate_async(engine, messages=[{"role": "user", "content": "hello"}])

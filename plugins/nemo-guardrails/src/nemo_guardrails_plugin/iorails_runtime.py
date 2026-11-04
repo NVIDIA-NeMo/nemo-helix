@@ -118,6 +118,32 @@ def _carry_request_headers_through_queue(engine: Guardrails) -> None:
     queue.submit = submit
 
 
+def _text_of_parts(parts: list[Any]) -> str:
+    texts = []
+    for part in parts:
+        if isinstance(part, str):
+            texts.append(part)
+        elif isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
+
+
+def _text_only_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The messages with list-valued ``content`` flattened to its text.
+
+    IORails reads a message's text only when ``content`` is a string. For OpenAI content parts it sees
+    an empty message and skips the rail, so the request would pass unchecked. Text parts are joined with
+    newlines; parts a text rail cannot inspect (images, audio, files) are dropped. The caller's messages
+    are not changed, so what goes upstream is the original.
+    """
+    return [
+        {**message, "content": _text_of_parts(message["content"])}
+        if isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
 def _to_generation_response(result: RailsResult, rail_type: RailType) -> GenerationResponse:
     """Shape an IORails verdict like the LLMRails result the middleware already consumes.
 
@@ -198,7 +224,7 @@ class IORailsRuntime:
         rail_type = RailType(rail_types[0])
 
         engine = await self._get_or_build(stable)
-        result = await engine.check_async(messages, rail_types=[rail_type])
+        result = await engine.check_async(_text_only_messages(messages), rail_types=[rail_type])
         return _to_generation_response(result, rail_type)
 
     async def stream_output_rails(
@@ -227,7 +253,9 @@ class IORailsRuntime:
             )
 
         # Run all of the config's output rails over the stream IGW is relaying.
-        guarded = run_output_rails(token_stream, _TurnConversation(messages=messages), enabled=True)
+        guarded = run_output_rails(
+            token_stream, _TurnConversation(messages=_text_only_messages(messages)), enabled=True
+        )
         try:
             async for chunk in guarded:
                 yield chunk

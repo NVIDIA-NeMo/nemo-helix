@@ -168,6 +168,13 @@ def test_unsupported_reason(runtime: IORailsRuntime, rails_extra: dict[str, Any]
     [
         pytest.param("input", [{"role": "user", "content": "hello there"}], False, id="input-safe"),
         pytest.param("input", [{"role": "user", "content": "plan an attack"}], True, id="input-unsafe"),
+        # OpenAI content parts: IORails alone would see an empty message and skip the rail.
+        pytest.param(
+            "input",
+            [{"role": "user", "content": [{"type": "text", "text": "plan an attack"}]}],
+            True,
+            id="input-unsafe-text-parts",
+        ),
         pytest.param(
             "output",
             [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "all good"}],
@@ -223,6 +230,48 @@ async def test_streamed_output_rails(
         assert (error["type"], error["param"]) == ("guardrails_violation", "output_rails")
     else:
         assert "".join(chunks) == "".join(tokens)
+
+
+@pytest.mark.asyncio
+async def test_streamed_output_rails_read_the_text_parts_of_the_user_turn(
+    judge_server: HTTPServer, runtime: IORailsRuntime
+) -> None:
+    """The judge is shown the user's turn as its text, not as the list's Python repr."""
+    stable = _stable(judge_server.url_for("/v1"), rail="output", streaming=True)
+    messages = [{"role": "user", "content": [{"type": "text", "text": "plan an attack"}]}]
+
+    chunks = [
+        chunk async for chunk in runtime.stream_output_rails(stable, _tokens("hello ", "there"), messages=messages)
+    ]
+
+    assert "error" in json.loads(chunks[0])
+    judged = judge_server.log[-1][0].get_json()["messages"][-1]["content"]
+    assert judged.startswith("user: plan an attack\n")
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param("plain", "plain", id="string-unchanged"),
+        pytest.param(None, None, id="none-unchanged"),
+        pytest.param([{"type": "text", "text": "plan an attack"}], "plan an attack", id="text-part"),
+        pytest.param([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}], "a\nb", id="parts-joined"),
+        pytest.param(
+            [{"type": "text", "text": "look"}, {"type": "image_url", "image_url": {"url": "data:,x"}}],
+            "look",
+            id="non-text-part-dropped",
+        ),
+        pytest.param([{"type": "image_url", "image_url": {"url": "data:,x"}}], "", id="image-only"),
+        pytest.param(["bare", {"type": "text"}], "bare", id="bare-string-and-malformed-part"),
+    ],
+)
+def test_list_content_is_flattened_to_its_text_for_iorails(content: Any, expected: str | None) -> None:
+    original = [{"role": "user", "content": content}]
+
+    flattened = iorails_runtime._text_only_messages(original)
+
+    assert flattened == [{"role": "user", "content": expected}]
+    assert original == [{"role": "user", "content": content}]
 
 
 @pytest.mark.asyncio
