@@ -777,7 +777,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Workload token exchange is off in both: the builder doesn't work with it on yet.
         auth: ["off", "on"]
     env:
       KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-builder-auth-${{ matrix.auth }}

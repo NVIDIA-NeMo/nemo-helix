@@ -56,7 +56,6 @@ ANNOTATION_PREFIX = "nhx.nvidia.com/"
 ON_BEHALF_OF_HEADER = "X-NHX-Principal-On-Behalf-Of"
 BUILD_SET = "kind-e2e"
 TAG = "v1"
-# Pulling the step and sandbox images, then two builds one after the other under the queue, on a CI runner.
 BUILD_DEADLINE_SECONDS = 1200
 POD_TIMEOUT_SECONDS = 600
 
@@ -75,7 +74,7 @@ CONTEXTS = {
         dockerfile=("FROM docker.io/library/busybox:1.36\nRUN echo 'hello from nemo-builder' > /hello.txt\n"),
         hello="hello from nemo-builder",
     ),
-    # The last RUN's output ends without a newline, so the sandbox's log does too, as on 2026-10-05.
+    # Its last RUN's output ends without a newline, so the sandbox's log does too.
     "done": Context(
         dockerfile=(
             "FROM docker.io/library/busybox:1.36\n"
@@ -229,7 +228,6 @@ def build(client: NemoClient, auth_on: bool, builder_workspace: str, registry_pa
         .submit_build(workspace=workspace, body=BuildSet(name=BUILD_SET, revision=1, build_specs=specs))
         .data()
     )
-    # Every spec here is named, so every row's provenance names its spec.
     images = {spec: image.name for image in submitted.images if (spec := image.provenance.spec) is not None}
     assert set(images) == set(CONTEXTS), f"submit returned rows {[image.name for image in submitted.images]}"
     return Build(workspace=workspace, job=submitted.job, images=images, public_key=public_key)
@@ -269,7 +267,8 @@ def test_complete_refuses_callers_not_acting_for_the_submitter(client: NemoClien
     grant_workspace_role(client, workspace=build.workspace, principal=editor, roles=["Editor"])
     service = as_user(client, "service:builder")
 
-    # Each caller, and the reason it is refused, or None where the platform refuses before the builder's check.
+    # Each caller, and the builder's reason for refusing it. None for the non-member: Entities refuses to read the
+    # row as them first.
     callers: dict[str, tuple[NemoClient, str | None]] = {
         "the submitter's own identity": (
             as_user(client, submitter),
@@ -280,7 +279,6 @@ def test_complete_refuses_callers_not_acting_for_the_submitter(client: NemoClien
             service.with_headers({ON_BEHALF_OF_HEADER: editor}),
             "was submitted by someone else",
         ),
-        # Entities refuses to read the row as someone who isn't a member.
         "a service acting for a non-member": (
             service.with_headers({ON_BEHALF_OF_HEADER: f"stranger-{uuid.uuid4().hex[:8]}@example.com"}),
             None,
@@ -315,7 +313,6 @@ def test_images_are_published_and_signed(
         assert row.provenance.job == job, f"{name} names job {row.provenance.job}, not {job}"
         ref = f"{row.registry}/{row.repository}"
 
-        # The tag resolves to the recorded digest, and the image holds what its Dockerfile wrote.
         checked = kube.run(
             "check",
             tasks_image,
@@ -341,7 +338,6 @@ def test_images_are_published_and_signed(
         )
         assert checked.returncode == 0, f"{name}: registry check failed: {_ended(checked)}"
 
-        # The signature verifies with the workspace's public key, and says which workspace and image it is for.
         verify_args = [
             "verify",
             "--key",

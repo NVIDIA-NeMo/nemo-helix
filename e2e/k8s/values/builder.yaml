@@ -12,15 +12,12 @@ builder:
     accessModes:
       - ReadWriteOnce
     size: 5Gi
-  # The in-cluster registry the chart sets `builder.registry` to: plain HTTP, the username `builder`.
   devRegistry:
     enabled: true
 
 platformConfig:
   builder:
-    # Images land at <prefix>/<workspace>/..., as on a shared registry.
     repository_prefix: e2e-builds
-    # Sized for a CI runner. The test's Dockerfiles only copy busybox and write a file.
     sandbox:
       cpu: 500m
       memory: 1Gi
