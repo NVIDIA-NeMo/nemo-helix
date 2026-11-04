@@ -440,9 +440,11 @@ class GitStorageConfig(BaseStorageConfig):
     )
     ssh_key_secret: SecretRef = Field(description="Secret holding an unencrypted SSH private key with read access")
     known_hosts: str = Field(
+        default="",
         description="known_hosts lines for the remote host, e.g. the output of `ssh-keyscan host` once its "
         "fingerprint has been checked against one obtained through a trusted channel. "
-        "The host key is verified against these and nothing else.",
+        "The host key is verified against these and nothing else. Required to read the repository; "
+        "leave it empty only to have find-files return the host's keys.",
     )
 
     @field_validator("url")
@@ -477,8 +479,8 @@ class GitStorageConfig(BaseStorageConfig):
 
     @field_validator("known_hosts")
     @classmethod
-    def require_known_hosts(cls, v: str) -> str:
-        return _reject_control_chars("known_hosts", _reject_blank("known_hosts", v), allow_newlines=True)
+    def reject_unsafe_known_hosts(cls, v: str) -> str:
+        return _reject_control_chars("known_hosts", v, allow_newlines=True)
 
     @property
     def remote(self) -> SshRemote:

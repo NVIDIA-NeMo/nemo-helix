@@ -41,17 +41,10 @@ def test_access_key_lifecycle_routes_are_available_to_authenticated_owners(
         assert rule == {"permissions": [], "scopes": ["auth:write", "platform:write"]}
 
 
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/apis/files/v2/workspaces/{workspace}/ssh-host-keys/scan",
-        "/apis/files/v2/workspaces/{workspace}/git-repositories/find-files",
-    ],
-)
-def test_git_registration_lookups_need_the_permission_to_create_a_fileset(
-    static_authz_data: dict[str, Any], path: str
-) -> None:
-    rule = static_authz_data["authz"]["endpoints"][path]["post"]
+def test_git_find_files_needs_the_permission_to_create_a_fileset(static_authz_data: dict[str, Any]) -> None:
+    rule = static_authz_data["authz"]["endpoints"]["/apis/files/v2/workspaces/{workspace}/git-repositories/find-files"][
+        "post"
+    ]
     assert rule == {"permissions": ["filesets.create"], "scopes": ["files:write", "platform:write"]}
 
 

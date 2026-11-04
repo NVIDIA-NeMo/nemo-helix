@@ -197,12 +197,8 @@ class OtlpExportLogsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# SSH host key types
+# Git repository preview types
 # ---------------------------------------------------------------------------
-
-
-class ScanSshHostKeysRequest(BaseModel):
-    url: str = Field(description="SSH remote whose host is scanned, e.g. 'git@gitlab.example.com:org/repo.git'")
 
 
 class SshHostKey(BaseModel):
@@ -213,18 +209,10 @@ class SshHostKey(BaseModel):
     )
 
 
-class ScanSshHostKeysResponse(BaseModel):
-    host: str = Field(description="The scanned host, with its port when it is not 22")
-    keys: list[SshHostKey]
-
-
-# ---------------------------------------------------------------------------
-# Git repository preview types
-# ---------------------------------------------------------------------------
-
-
 class FindGitRepositoryFilesRequest(BaseModel):
-    storage: GitStorageConfig = Field(description="The storage a git fileset would be created with")
+    storage: GitStorageConfig = Field(
+        description="The storage a git fileset would be created with. Leave known_hosts empty to get the host's keys."
+    )
     file_name: str = Field(
         min_length=1,
         pattern=r"^[^/]+$",
@@ -233,5 +221,15 @@ class FindGitRepositoryFilesRequest(BaseModel):
 
 
 class FindGitRepositoryFilesResponse(BaseModel):
-    revision: str = Field(description="The commit SHA the storage's revision resolved to")
-    paths: list[str] = Field(description="Paths of every file with that name, relative to the storage path")
+    host_keys: list[SshHostKey] = Field(
+        default_factory=list,
+        description="Set when the storage had no known_hosts: the keys the host presents, ed25519 first. "
+        "Each was fetched over its own unverified connection, so confirm one key's fingerprint and repeat the "
+        "request with only that key's known_hosts_line. The repository is not read.",
+    )
+    revision: str | None = Field(
+        default=None, description="The commit SHA the storage's revision resolved to. Unset when host_keys is set."
+    )
+    paths: list[str] = Field(
+        default_factory=list, description="Paths of every file with that name, relative to the storage path"
+    )

@@ -249,7 +249,6 @@ class TestGitStorageConfig:
             ("original_revision", "-upload-pack=evil"),
             ("original_revision", "main\n"),
             ("path", "agents\x00/calc"),
-            ("known_hosts", " "),
             ("known_hosts", "host ssh-ed25519 AAAA\x00"),
         ],
     )
@@ -345,6 +344,16 @@ class TestSshCredentials:
         config = GitStorageConfig(url=url, ssh_key_secret=SecretRef("key"), known_hosts=KNOWN_HOSTS)
         with GitStorageImpl(config, SECRETS, cache_root=tmp_path)._remote() as remote:
             assert (remote.client.host, remote.client.username, remote.path) == ("host.example", "git", path)
+
+    @pytest.mark.parametrize("known_hosts", ["", " \n"])
+    def test_refuses_to_connect_without_known_hosts(self, tmp_path, known_hosts):
+        config = GitStorageConfig(url="git@host.example:org/repo.git", ssh_key_secret=SecretRef("key"))
+        config = config.model_copy(update={"known_hosts": known_hosts})
+        with (
+            pytest.raises(GitConfigError, match="known_hosts is required to connect to host.example"),
+            GitStorageImpl(config, SECRETS, cache_root=tmp_path)._remote(),
+        ):
+            pass
 
     def test_repr_leaves_out_the_private_key(self, tmp_path):
         impl = GitStorageImpl(_config("ssh://localhost/x"), {"ssh_key": "SECRET-KEY-MATERIAL"}, cache_root=tmp_path)

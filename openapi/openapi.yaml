@@ -3080,12 +3080,21 @@ paths:
         config resolves to.
 
 
-        Runs the same checks as creating a fileset with this storage, without creating
+        Without `known_hosts`, returns the host''s public keys instead and reads nothing,
+        as
 
-        one. A fileset created afterwards from the same branch or tag resolves it
-        again,
+        ssh prompts on a first connection: confirm one key''s fingerprint, then repeat
+        the
 
-        so if the branch has moved since, its files may differ from the paths returned.'
+        request with only that key''s `known_hosts_line`.
+
+
+        With `known_hosts`, runs the same checks as creating a fileset with this storage,
+
+        without creating one. A fileset created afterwards from the same branch or
+        tag
+
+        resolves it again, so if the branch has moved since, its files may differ.'
       operationId: find_git_repository_files_apis_files_v2_workspaces__workspace__git_repositories_find_files_post
       parameters:
       - name: workspace
@@ -3117,68 +3126,7 @@ paths:
                   detail:
                     type: string
         '502':
-          description: The repository could not be reached
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
-        '422':
-          description: Validation Error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPValidationError'
-  /apis/files/v2/workspaces/{workspace}/ssh-host-keys/scan:
-    post:
-      tags:
-      - Files
-      summary: Scan SSH Host Keys
-      description: 'Return the public host keys an SSH remote presents, with their
-        fingerprints.
-
-
-        Each key type is fetched over its own unauthenticated connection, so confirm
-        one
-
-        key''s fingerprint and use only that key''s `known_hosts_line` as a git fileset''s
-
-        `known_hosts`. Only hosts in the allowed external hosts list are scanned.'
-      operationId: scan_ssh_host_keys_apis_files_v2_workspaces__workspace__ssh_host_keys_scan_post
-      parameters:
-      - name: workspace
-        in: path
-        required: true
-        schema:
-          type: string
-          title: Workspace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ScanSshHostKeysRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScanSshHostKeysResponse'
-        '400':
-          description: The URL is not an SSH remote, or its host is not in the allowed
-            list
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  detail:
-                    type: string
-        '502':
-          description: The host could not be scanned
+          description: The host or repository could not be reached
           content:
             application/json:
               schema:
@@ -15219,7 +15167,8 @@ components:
         storage:
           allOf:
           - $ref: '#/components/schemas/GitStorageConfig'
-          description: The storage a git fileset would be created with
+          description: The storage a git fileset would be created with. Leave known_hosts
+            empty to get the host's keys.
         file_name:
           type: string
           minLength: 1
@@ -15234,10 +15183,20 @@ components:
       title: FindGitRepositoryFilesRequest
     FindGitRepositoryFilesResponse:
       properties:
+        host_keys:
+          items:
+            $ref: '#/components/schemas/SshHostKey'
+          type: array
+          title: Host Keys
+          description: 'Set when the storage had no known_hosts: the keys the host
+            presents, ed25519 first. Each was fetched over its own unverified connection,
+            so confirm one key''s fingerprint and repeat the request with only that
+            key''s known_hosts_line. The repository is not read.'
         revision:
-          type: string
           title: Revision
-          description: The commit SHA the storage's revision resolved to
+          description: The commit SHA the storage's revision resolved to. Unset when
+            host_keys is set.
+          type: string
         paths:
           items:
             type: string
@@ -15246,9 +15205,6 @@ components:
           description: Paths of every file with that name, relative to the storage
             path
       type: object
-      required:
-      - revision
-      - paths
       title: FindGitRepositoryFilesResponse
     FinetuningType:
       type: string
@@ -15728,12 +15684,13 @@ components:
           description: known_hosts lines for the remote host, e.g. the output of `ssh-keyscan
             host` once its fingerprint has been checked against one obtained through
             a trusted channel. The host key is verified against these and nothing
-            else.
+            else. Required to read the repository; leave it empty only to have find-files
+            return the host's keys.
+          default: ''
       type: object
       required:
       - url
       - ssh_key_secret
-      - known_hosts
       title: GitStorageConfig
     GithubStorageConfig:
       properties:
@@ -21691,32 +21648,6 @@ components:
       required:
       - bucket
       title: S3StorageConfig
-    ScanSshHostKeysRequest:
-      properties:
-        url:
-          type: string
-          title: Url
-          description: SSH remote whose host is scanned, e.g. 'git@gitlab.example.com:org/repo.git'
-      type: object
-      required:
-      - url
-      title: ScanSshHostKeysRequest
-    ScanSshHostKeysResponse:
-      properties:
-        host:
-          type: string
-          title: Host
-          description: The scanned host, with its port when it is not 22
-        keys:
-          items:
-            $ref: '#/components/schemas/SshHostKey'
-          type: array
-          title: Keys
-      type: object
-      required:
-      - host
-      - keys
-      title: ScanSshHostKeysResponse
     SecretRef:
       type: string
       pattern: ^[a-z0-9_-]+(/[a-z0-9_-]+)?$
