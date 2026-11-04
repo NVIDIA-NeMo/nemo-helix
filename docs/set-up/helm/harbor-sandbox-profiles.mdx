@@ -96,7 +96,7 @@ How the profile combines with the network mode in the task's `task.toml`:
 
 | Key | Default | What it does |
 | --- | --- | --- |
-| `max_cpus` | none | Ceiling on CPUs per sandbox. A request above it (`--cpus`, `execution.sandbox.cpus`) returns a 422. A task whose `task.toml` asks for more, for its agent sandbox or a separate verifier sandbox, or whose compose services declare more, fails the whole submit with a 422: `<task>: resources_exceed_policy: agent sandbox cpus=16 (task.toml) exceeds sandbox profile 'harbor-standard''s max_cpus=8`. |
+| `max_cpus` | none | Ceiling on CPUs per sandbox. A request above it (`--cpus`, `execution.sandbox.cpus`) returns a 422. A task whose `task.toml` asks for more, for its agent sandbox or a separate verifier sandbox, or whose compose services declare more, fails the whole submit with a 422: `tasks without images: <task>: resources_exceed_policy: agent sandbox cpus=16 (task.toml) exceeds sandbox profile 'harbor-standard''s max_cpus=8`. |
 | `max_memory_mb` | none | Same as `max_cpus`, for memory. A compose service's `shm_size` counts as memory. Also caps the 2048 MB fallback |
 | `max_storage_mb` | none | Same as `max_cpus`, for disk, except that compose services aren't checked. Checked before the `max_disk_mb` clamp |
 | `enforce_disk_limit` | `true` | Sets each sandbox pod's `ephemeral-storage` limit to the task's `storage_mb`. Kubernetes evicts a pod that goes over. Turn it off only on a runtime that doesn't enforce the limit |
