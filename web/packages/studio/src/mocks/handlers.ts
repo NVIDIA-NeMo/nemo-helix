@@ -13,6 +13,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { agentDeploymentCapabilitiesHandlers } from '@studio/mocks/handlers/agentDeploymentCapabilities';
+import { agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { agentOptimizeJobsHandlers } from '@studio/mocks/handlers/agentOptimizeJobs';
 import { customizerHandlers } from '@studio/mocks/handlers/customizer';
 import { deploymentsHandlers } from '@studio/mocks/handlers/deployments';
@@ -725,44 +726,35 @@ export const handlers = [
     HttpResponse.json({ data: [], total: 0 })
   ),
   ...agentDeploymentCapabilitiesHandlers,
-  http.get(
-    `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`,
-    ({ request }) => {
-      const agent = new URL(request.url).searchParams.get('filter[agent]');
-      const deployments = [
-        {
-          name: 'rag-agent-prod',
-          workspace: 'default',
-          agent: 'react-agent',
-          status: 'running',
-          endpoint: 'https://rag-agent-prod.example.com',
-          port: 8080,
-          error: '',
-        },
-        {
-          name: 'sql-agent-dev',
-          workspace: 'default',
-          agent: 'react-agent',
-          status: 'stopped',
-          endpoint: 'https://sql-agent-dev.example.com',
-          port: 8081,
-          error: '',
-        },
-        {
-          name: 'chat-agent-staging',
-          workspace: 'default',
-          agent: 'react-agent2',
-          status: 'error',
-          endpoint: 'https://chat-agent-staging.example.com',
-          port: 8082,
-          error: 'Connection timeout',
-        },
-      ];
-      return HttpResponse.json({
-        data: agent ? deployments.filter((deployment) => deployment.agent === agent) : deployments,
-      });
-    }
-  ),
+  agentDeploymentsHandler([
+    {
+      name: 'rag-agent-prod',
+      workspace: 'default',
+      agent: 'react-agent',
+      status: 'running',
+      endpoint: 'https://rag-agent-prod.example.com',
+      port: 8080,
+      error: '',
+    },
+    {
+      name: 'sql-agent-dev',
+      workspace: 'default',
+      agent: 'react-agent',
+      status: 'stopped',
+      endpoint: 'https://sql-agent-dev.example.com',
+      port: 8081,
+      error: '',
+    },
+    {
+      name: 'chat-agent-staging',
+      workspace: 'default',
+      agent: 'react-agent2',
+      status: 'error',
+      endpoint: 'https://chat-agent-staging.example.com',
+      port: 8082,
+      error: 'Connection timeout',
+    },
+  ]),
   // Agent evaluation jobs — exposed at the same prefix as the other agents-v2
   // routes so the AgentPanel's "Recent Evaluations" section and the
   // /agents/evaluations route can both render against an empty list in tests.

@@ -25,6 +25,7 @@ import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 
+// The fixture filesets hold no eval config, so the real check would report every run as unusable.
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@studio/components/evaluation/experimentEvalConfig')>()),
   evaluationConfigError: vi.fn(),

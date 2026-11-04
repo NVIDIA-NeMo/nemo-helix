@@ -238,7 +238,7 @@ export const AgentDetailRoute: FC = () => {
     selectedDeployment?.status === 'running' ? selectedDeployment.name : undefined;
   const runEvaluation = () => {
     if (agentName) {
-      navigate(getAgentRunEvaluationRoute(workspace, agentName, undefined, contextDeployment));
+      navigate(getAgentRunEvaluationRoute(workspace, agentName, { deployment: contextDeployment }));
     }
   };
 
@@ -250,8 +250,14 @@ export const AgentDetailRoute: FC = () => {
     if (!actionFromUrl || isAgentPending) return;
     // Only the evaluation link depends on deployments; an optimize link must not wait on them.
     if (actionFromUrl === 'run-evaluation' && isDeploymentsPending) return;
-    if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
-      navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
+    // Opens even without a running deployment: the wizard says why it cannot run.
+    if (actionFromUrl === 'run-evaluation' && canDeploy && agentName) {
+      navigate(
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: contextDeployment }),
+        {
+          replace: true,
+        }
+      );
       return;
     }
     const optimizeRequested =
@@ -275,7 +281,8 @@ export const AgentDetailRoute: FC = () => {
     isDeploymentsPending,
     agent,
     setSearchParams,
-    canRunEvaluation,
+    canDeploy,
+    contextDeployment,
     agentName,
     workspace,
     navigate,

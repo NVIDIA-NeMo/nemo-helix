@@ -364,7 +364,13 @@ export const EvaluationsTable: FC<EvaluationsTableProps> = ({
                       children: 'New evaluation from this configuration',
                       onSelect: () =>
                         navigate(
-                          getAgentRunEvaluationRoute(workspace, rerunAgent, evaluation.name)
+                          getAgentRunEvaluationRoute(workspace, rerunAgent, {
+                            source: evaluation.name,
+                            deployment:
+                              job?.deployment?.kind === 'deployment'
+                                ? job.deployment.name
+                                : undefined,
+                          })
                         ),
                     },
                   ]

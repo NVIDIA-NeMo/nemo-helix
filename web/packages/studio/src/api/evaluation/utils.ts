@@ -7,7 +7,7 @@ import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
 } from '@studio/routes/utils';
-import { isPlainObject } from '@studio/util/functions';
+import { isPlainObject, safeDecodeURIComponent } from '@studio/util/functions';
 
 export type EvalJobKind = 'task' | 'dataset';
 
@@ -60,14 +60,6 @@ export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
 
 const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/(deployments|agents)\/([^/]+)\/-\//;
 
-const decodeSegment = (segment: string): string => {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-};
-
 export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
   const target = asRecord(asRecord(spec)?.target);
   const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
@@ -79,7 +71,11 @@ export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null =
   }
   const [, workspace, route, name] = match;
   return route === 'deployments'
-    ? { kind: 'deployment', workspace: decodeSegment(workspace), name: decodeSegment(name) }
+    ? {
+        kind: 'deployment',
+        workspace: safeDecodeURIComponent(workspace),
+        name: safeDecodeURIComponent(name),
+      }
     : { kind: 'default' };
 };
 

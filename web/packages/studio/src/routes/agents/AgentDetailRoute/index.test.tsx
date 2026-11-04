@@ -262,7 +262,7 @@ describe('AgentDetailRoute', () => {
 
     await waitFor(() =>
       expect(currentLocation()).toBe(
-        getAgentRunEvaluationRoute(workspace, agentName, undefined, 'rag-agent-prod')
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: 'rag-agent-prod' })
       )
     );
   });
@@ -307,7 +307,7 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByText("Couldn't load this agent's deployments.")).toBeInTheDocument();
   });
 
-  it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {
+  const renderRunEvaluationLink = () =>
     renderRoute(undefined, {
       history: `${getAgentEvaluationsTabRoute(workspace, agentName)}&action=run-evaluation`,
       routes: [
@@ -315,6 +315,24 @@ describe('AgentDetailRoute', () => {
         { path: ROUTES.workspace.agentEvaluationNew, element: <LocationDisplay /> },
       ],
     });
+
+  it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {
+    renderRunEvaluationLink();
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: 'rag-agent-prod' })
+      )
+    );
+  });
+
+  it('opens the wizard from an old ?action=run-evaluation link without a running deployment', async () => {
+    server.use(
+      agentDeploymentsHandler([
+        agentDeployment(agentName, `${agentName}-down`, { status: 'failed' }),
+      ])
+    );
+    renderRunEvaluationLink();
 
     await waitFor(() =>
       expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))

@@ -25,7 +25,9 @@ export const agentDeployment = (
   ...overrides,
 });
 
-export const agentDeploymentsHandler = (deployments: MockAgentDeployment[]) =>
+export const agentDeploymentsHandler = <T extends Pick<AgentDeployment, 'agent'>>(
+  deployments: T[]
+) =>
   http.get(AGENT_DEPLOYMENTS_URL, ({ request }) => {
     const agent = new URL(request.url).searchParams.get('filter[agent]');
     return HttpResponse.json({

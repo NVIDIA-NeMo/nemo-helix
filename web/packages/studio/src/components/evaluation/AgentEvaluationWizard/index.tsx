@@ -496,16 +496,22 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     deployments: agentDeployments,
     isLoading: isDeploymentsLoading,
     isUnavailable: isDeploymentsUnavailable,
+    refetch: refetchDeployments,
   } = useAgentDeployments({
     workspace,
     agent: selectedAgent ? bareName(selectedAgent) : undefined,
-    refetchInterval: step === 'start' || step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
+    refetchInterval: step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
   });
+  // Turning the poll on does not fetch, so the list the field opens on would be as old as the
+  // steps before it.
+  useEffect(() => {
+    if (step === 'evaluation') void refetchDeployments({ cancelRefetch: false });
+  }, [step, refetchDeployments]);
   const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
   // Fixed the first time it is shown, so a poll cannot swap the deployment the user saw.
   const [shownDefault, setShownDefault] = useState<string>();
   const firstRunning = runningDeployments[0]?.name;
-  if (!shownDefault && firstRunning) setShownDefault(firstRunning);
+  if (step === 'evaluation' && !shownDefault && firstRunning) setShownDefault(firstRunning);
   const selectedDeployment = deployment || shownDefault || '';
 
   const deploymentIssue = (() => {
@@ -873,10 +879,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   // fields — otherwise step one would refuse to advance over a field two steps away.
   const stepBlocker = (): StepBlocker | undefined => {
     if (step === 'start') {
-      if (!selectedAgent) {
-        return blockedWith('Pick an agent to evaluate.');
-      }
-      return undefined;
+      return selectedAgent ? undefined : blockedWith('Pick an agent to evaluate.');
     }
     if (step === 'experiment') {
       if (!experimentPreview) {
