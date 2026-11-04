@@ -3,7 +3,8 @@
 
 import { useInnerDataViewContext } from '@nemo/common/src/components/DataView/internal/context';
 import type { IntentionalAny } from '@nemo/common/src/components/DataView/internal/types';
-import { downloadFile, generateCSV } from '@nemo/common/src/components/DataView/internal/utils/csv';
+import { generateCSV } from '@nemo/common/src/components/DataView/internal/utils/csv';
+import { triggerDownload } from '@nemo/common/src/utils/file';
 import { Download } from '@nemo/icons/icons';
 import { Button, type ButtonProps } from '@nvidia/foundations-react-core';
 import type { Column, Row, Table } from '@tanstack/react-table';
@@ -63,7 +64,7 @@ export function DownloadButton({
     const columns = table.getVisibleLeafColumns();
     const { content, mimeType } = prepareDownload({ table, rows, columns });
     onClick?.({ rows, content });
-    downloadFile(content, filename, mimeType);
+    triggerDownload(new Blob([content], { type: mimeType }), filename);
   };
   return (
     <Button aria-label="Download data" kind="tertiary" onClick={handleClick} {...props}>

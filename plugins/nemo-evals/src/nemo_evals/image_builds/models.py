@@ -51,6 +51,13 @@ class BuildImage(BaseModel):
     dockerfile: str | None = Field(
         default=None, description="Dockerfile path relative to `context_path`, for a `dockerfile` image."
     )
+    context_digest: str | None = Field(
+        default=None,
+        description=(
+            "Digest of every file in the build context, for a `dockerfile` image. Tasks whose contexts digest the "
+            "same share one build."
+        ),
+    )
     image: str | None = Field(default=None, description="The image the task names, for a `prebuilt` image.")
     platform: str | None = Field(
         default=None,
@@ -91,6 +98,13 @@ class TaskImageBuildEntity(EntityBase):
     job: str = Field(description="Name of the task-builder Job that runs this attempt.")
     allowed_registries: list[str] = Field(default_factory=list)
     platform: str | None = Field(default=None, description="The platform the request asked for, if any.")
+    rebuild: bool = Field(
+        default=False,
+        description=(
+            "The request asked to rebuild: each image goes to Builder again instead of using a ready build of the "
+            "same contents, which may be for the default platform before it changed."
+        ),
+    )
     images: list[BuildImage] = Field(default_factory=list)
     error: str | None = None
 

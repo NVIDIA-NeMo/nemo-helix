@@ -94,7 +94,10 @@ checkout — note it vendors `x86_64` wheels today:
 
 `prepare_math_with_judge.py` builds Gym rollout rows from DAPO-Math-17k (train) plus a holdout
 or AIME24 (validation), adding the `agent_ref` every platform row needs and the
-`expected_answer` field `math_with_judge` scores against. `--no-project` keeps this off the project `.venv`:
+`expected_answer` field `math_with_judge` scores against. Every row asks for the answer inside
+`\boxed{}`, the only answer `math_with_judge` grades. DAPO-Math-17k's own prompts ask for a final
+`Answer: $Answer` line instead, so the script replaces them; a response in that format would score 0.
+`--no-project` keeps this off the project `.venv`:
 
 ```bash
 uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judge.py \

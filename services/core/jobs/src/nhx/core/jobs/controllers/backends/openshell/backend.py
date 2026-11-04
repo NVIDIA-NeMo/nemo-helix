@@ -16,16 +16,22 @@ OpenShell backend, so the jobs service does not depend on that plugin.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import logging
 import os
 import uuid
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from nemo_helix_plugin.auth import AuthContext as PluginAuthContext
+from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.jobs.constants import OPENSHELL_JOB_TASK_IMAGE
 from nemo_helix_plugin.jobs.execution_profiles import (
     OpenShellJobEgressConfig,
@@ -35,6 +41,8 @@ from nemo_helix_plugin.jobs.execution_profiles import (
 )
 from nemo_helix_plugin.jobs.image import get_qualified_image
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
+from nemo_helix_plugin.openshell.types import GatewayWorkload, ProviderAccessRevoked
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth import AuthContext
 from nhx.common.config import get_platform_config, nhx_user_data_dir
 from nhx.common.jobs.constants import (
@@ -82,11 +90,17 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
     load_policy_dict,
 )
 
-if TYPE_CHECKING:
+_OPENSHELL_IMPORT_ERROR: ImportError | None = None
+try:
     import grpc
+    from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
     from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
     from openshell import SandboxError, TlsConfig
-    from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
+    from openshell._proto import openshell_pb2 as pb
+
+    from .provisioning import JobProviderProvisioner
+except ImportError as exc:
+    _OPENSHELL_IMPORT_ERROR = exc
 
 logger = logging.getLogger(__name__)
 
@@ -168,31 +182,15 @@ def _resolve_jobs_controller_instance_id() -> str:
 
 
 def _ensure_openshell() -> None:
-    """Import grpc + the openshell proto stubs, binding them as module globals.
-
-    Deferred so importing this backend (and the registry that eagerly imports it)
-    does not require the optional ``openshell`` package. Only ``TYPE_CHECKING``
-    imports the names, so the type checker sees pure modules; the runtime binding
-    lives in ``globals()``.
-    """
-    if globals().get("pb") is not None:
-        return
-    try:
-        import grpc
-        from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
-        from openshell import SandboxError, TlsConfig
-        from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
-    except ImportError as exc:
-        raise CapabilityUnavailableError(_OPENSHELL_INSTALL_HINT) from exc
-    globals().update(
-        grpc=grpc, pb=pb, SandboxError=SandboxError, TlsConfig=TlsConfig, JobsSandboxClient=JobsSandboxClient
-    )
+    """Report missing optional dependencies when this backend is selected."""
+    if _OPENSHELL_IMPORT_ERROR is not None:
+        raise CapabilityUnavailableError(_OPENSHELL_INSTALL_HINT) from _OPENSHELL_IMPORT_ERROR
 
 
 # Sandbox phase -> job step status. The canonical main process result is the
 # workload result: ``Completed`` is a successful run (exit 0), ``Error`` a failed
 # run (nonzero exit). The lifecycle phases in between are scheduling states.
-# Keyed by enum name because the proto module is imported lazily.
+# Keyed by enum name so the table also loads without the optional SDK.
 _PHASE_TO_STATUS: dict[str, HelixJobStatus] = {
     "SANDBOX_PHASE_UNSPECIFIED": HelixJobStatus.PENDING,
     "SANDBOX_PHASE_PROVISIONING": HelixJobStatus.PENDING,
@@ -310,6 +308,13 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         step: HelixJobStepWithContext,
     ) -> JobUpdate:
         step_spec = self._require_step_spec(step)
+        if any(item.from_secret is not None for item in step_spec.environment or []):
+            return JobUpdate(
+                status=HelixJobStatus.ERROR,
+                status_details={
+                    "message": "OpenShell secrets require gateway provider bindings; process-env injection is not supported."
+                },
+            )
         platform_config = get_platform_config()
 
         env = dict(self._execution_profile_config.env)
@@ -400,6 +405,48 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         template = pb.SandboxTemplate(image=image, environment=env)
         spec = pb.SandboxSpec(template=template, environment=env, policy=self._policy, command=sandbox_command)
 
+        if step_spec.gateway_providers:
+            try:
+                if (
+                    self._executor_config.gateway_credentials is None
+                    or egress is None
+                    or (platform_auth_enabled() and step.auth_context is None)
+                ):
+                    raise ValueError(
+                        "Gateway providers require gateway_credentials, platform egress and creator identity."
+                    )
+                secret_env = {
+                    item.name: item.from_secret.name
+                    for item in step_spec.environment or []
+                    if item.from_secret is not None
+                }
+                validate_provider_environment(
+                    step_spec.gateway_providers,
+                    workspace=step.workspace,
+                    secret_env=secret_env,
+                    env_names=set(env),
+                )
+                policy = restricted_platform_policy(
+                    self._policy,
+                    host=egress.host,
+                    port=egress.port,
+                    workspace=step.workspace,
+                    binaries=list(dict.fromkeys((launcher, *(egress.binaries or DEFAULT_EGRESS_BINARIES)))),
+                    job=step.job,
+                    attempt=step.attempt_id,
+                    step=step.name,
+                    fileset=step.fileset,
+                    secret_env=secret_env,
+                    read_filesets=step_spec.gateway_read_filesets,
+                )
+                spec.policy.CopyFrom(policy)
+                spec.providers.extend(asyncio.run(self._prepare_providers(step, sandbox_name)))
+            except Exception:
+                logger.warning("Gateway provider provisioning failed for job step %s", step.id)
+                return JobUpdate(
+                    status=HelixJobStatus.ERROR, status_details={"message": "Gateway provider provisioning failed."}
+                )
+
         try:
             self._client.create(workspace=self._workspace, spec=spec, name=sandbox_name, labels=labels)
         except grpc.RpcError as exc:
@@ -430,6 +477,11 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
                 if step_status == HelixJobStatus.CANCELLING:
+                    if not self._cleanup_step_providers(step, sandbox_name):
+                        return JobUpdate(
+                            status=HelixJobStatus.CANCELLING,
+                            status_details={"message": "Provider cleanup will be retried."},
+                        )
                     return JobUpdate(status=HelixJobStatus.CANCELLED, status_details={"message": "Sandbox deleted"})
                 return JobUpdate(
                     status=HelixJobStatus.ERROR,
@@ -447,7 +499,7 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         # A cancel request stops the sandbox so the main process dies. A sandbox that
         # already finished is cancelled as-is: CANCELLING cannot move to COMPLETED.
         if step_status == HelixJobStatus.CANCELLING:
-            if terminal:
+            if terminal and not (step.step_spec and step.step_spec.gateway_providers):
                 return JobUpdate(
                     status=HelixJobStatus.CANCELLED,
                     status_details={"message": f"Sandbox already finished ({_phase_name(phase)})"},
@@ -463,6 +515,10 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 return JobUpdate(
                     status=HelixJobStatus.CANCELLING,
                     status_details={"message": f"Sandbox delete failed, retrying: {_rpc_detail(exc)}"},
+                )
+            if not self._cleanup_step_providers(step, sandbox_name):
+                return JobUpdate(
+                    status=HelixJobStatus.CANCELLING, status_details={"message": "Provider cleanup will be retried."}
                 )
             return JobUpdate(status=HelixJobStatus.CANCELLED, status_details={"message": "Sandbox deleted"})
 
@@ -505,6 +561,32 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         # An ACTIVE step never moves back to PENDING (e.g. a STOPPING sandbox).
         if status == HelixJobStatus.PENDING and step_status == HelixJobStatus.ACTIVE:
             status = HelixJobStatus.ACTIVE
+        credentials = self._executor_config.gateway_credentials
+        if (
+            credentials is not None
+            and credentials.renewal_mode == "helix"
+            and step.step_spec is not None
+            and step.step_spec.gateway_providers
+            and step_status in (HelixJobStatus.PENDING, HelixJobStatus.ACTIVE)
+            and phase in (pb.SANDBOX_PHASE_PROVISIONING, pb.SANDBOX_PHASE_READY)
+        ):
+            try:
+                asyncio.run(self._prepare_providers(step, sandbox_name, renew=True))
+            except ProviderAccessRevoked:
+                return JobUpdate(
+                    status=status,
+                    status_details={
+                        "message": "Gateway provider access was removed. Start a new workload to restore access."
+                    },
+                )
+            except Exception:
+                # RPC errors can contain registration tickets. Keep public status
+                # and logs generic; the next reconcile retries without extending expiry.
+                logger.warning("Gateway credential renewal failed for job step %s; retrying.", step.id)
+                return JobUpdate(
+                    status=status,
+                    status_details={"message": "Gateway credential renewal failed; retrying. Credentials may expire."},
+                )
         return JobUpdate(status=status, status_details={"message": f"Sandbox phase {phase_name}"})
 
     def _sync_ttl_exceeded(self, step: HelixJobStepWithContext, step_status: HelixJobStatus, phase: int) -> int | None:
@@ -524,6 +606,11 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
         return None
 
     def cleanup_steps(self) -> None:
+        if self._executor_config.gateway_credentials is not None:
+            try:
+                asyncio.run(self._cleanup_unused_providers())
+            except Exception:
+                logger.warning("Gateway provider cleanup will retry on the next sweep.")
         try:
             sandboxes = self._client.list_all(workspace=self._workspace, label_selector=self._cleanup_label_selector())
         except (grpc.RpcError, SandboxError):
@@ -584,6 +671,84 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
                 self._delete_sandbox_best_effort(sandbox.name)
 
     # --- helpers ---
+
+    def _cleanup_step_providers(self, step: HelixJobStepWithContext, sandbox_name: str) -> bool:
+        if step.step_spec is None or not step.step_spec.gateway_providers:
+            return True
+        try:
+            asyncio.run(self._cleanup_providers(step.workspace, sandbox_name))
+        except Exception:
+            logger.warning("Provider cleanup failed for job step %s; retrying.", step.id)
+            return False
+        return True
+
+    async def _cleanup_providers(self, workspace: str, sandbox_name: str) -> None:
+        async with self._provider_provisioner() as provisioner:
+            await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
+
+    async def _cleanup_unused_providers(self) -> None:
+        async with self._provider_provisioner() as provisioner:
+            await provisioner.cleanup_unused()
+
+    @asynccontextmanager
+    async def _provider_provisioner(self) -> AsyncGenerator[JobProviderProvisioner]:
+        config = self._executor_config.gateway_credentials
+        if config is None:
+            raise ValueError("Gateway credentials are not configured.")
+        target = self._executor_config.grpc_target()
+        if self._executor_config.use_insecure():
+            channel = grpc.aio.insecure_channel(target)
+        else:
+            tls = self._executor_config.tls
+            credentials = grpc.ssl_channel_credentials(
+                root_certificates=Path(tls.ca_cert_path).read_bytes() if tls and tls.ca_cert_path else None,
+                private_key=Path(tls.client_key_path).read_bytes() if tls and tls.client_key_path else None,
+                certificate_chain=Path(tls.client_cert_path).read_bytes() if tls and tls.client_cert_path else None,
+            )
+            channel = grpc.aio.secure_channel(target, credentials)
+        # Jobs invokes provider operations with asyncio.run; never retain a
+        # channel across those event loops or create it on the controller thread.
+        async with channel:
+            yield JobProviderProvisioner(
+                config, self._workspace, channel, timeout=self._executor_config.request_timeout_seconds
+            )
+
+    async def _prepare_providers(
+        self, step: HelixJobStepWithContext, sandbox_name: str, *, renew: bool = False
+    ) -> list[str]:
+        if (
+            (platform_auth_enabled() and step.auth_context is None)
+            or step.step_spec is None
+            or self._executor_config.platform_egress is None
+        ):
+            raise ValueError("Incomplete provider workload context.")
+        context = PluginAuthContext.model_validate(step.auth_context.model_dump()) if step.auth_context else None
+        async with (
+            get_async_nemo_client(
+                as_service="jobs",
+                internal=True,
+                on_behalf_of=context.to_principal() if platform_auth_enabled() and context else None,
+            ) as client,
+            self._provider_provisioner() as provisioner,
+        ):
+            return await provisioner.prepare(
+                step.step_spec.gateway_providers,
+                workload_workspace=step.workspace,
+                workload_id=sandbox_name,
+                workload=GatewayWorkload(
+                    kind="job",
+                    workspace=step.workspace,
+                    name=step.job,
+                    id=step.id,
+                    attempt_id=step.attempt_id,
+                    step_name=step.name,
+                ),
+                auth_context=context,
+                auth_enabled=platform_auth_enabled(),
+                secrets_client=AsyncSecretsClient.from_client(client),
+                platform_host=self._executor_config.platform_egress.host,
+                renew=renew,
+            )
 
     def _base_controller_labels(self) -> dict[str, str]:
         return {

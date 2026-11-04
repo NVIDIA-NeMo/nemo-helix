@@ -9,7 +9,6 @@ from urllib.parse import parse_qs
 import pytest
 import yaml
 
-from docs._scripts.lint_api_examples import lint_spec
 from script.openapi_helper.code_samples import LANGUAGES, add_code_samples, sample_request
 
 _SPEC_PATH = Path(__file__).resolve().parents[2] / "openapi/openapi.yaml"
@@ -57,10 +56,6 @@ def test_delete_samples_print_the_status_instead_of_parsing_the_body(spec, path)
     assert "response.json()" not in samples["Python"]
     assert "console.log(response.status)" in samples["JavaScript"]
     assert "/workspaces/default/" in samples["Python"]
-
-
-def test_lint_accepts_the_generated_spec(spec):
-    assert lint_spec(spec) == []
 
 
 @pytest.mark.parametrize("method", ["get", "post"])

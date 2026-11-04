@@ -441,7 +441,7 @@ async def test_check_passes_net_admin_on_main_with_a_notice(clients, sandbox_pol
 @pytest.mark.parametrize(
     ("compose", "expected"),
     [
-        ("services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n", "compose_reserved_port"),
+        ("services:\n  odoo:\n    image: odoo:17\n    expose: ['44772']\n", "compose_reserved_port"),
         ("services:\n  db:\n    image: redis\n    privileged: true\n", "compose_unsupported"),
     ],
 )

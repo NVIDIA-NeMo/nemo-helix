@@ -50,6 +50,9 @@ navigation:
           - page: Run Mini-SWE-Agent
             slug: mini-swe-agent
             path: ../../agents/mini-swe-agent.mdx
+          - page: Web Search with Tavily
+            slug: web-search-tavily
+            path: ../../agents/web-search-tavily.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:
@@ -63,6 +66,8 @@ navigation:
                 path: ../../agents/traces-and-insights/collect-agent-traces.mdx
               - page: Insights from Traces
                 path: ../../agents/traces-and-insights/insights-from-traces.mdx
+              - page: Evaluate Agent Candidates
+                path: ../../agents/traces-and-insights/evaluate-agent-candidates.mdx
           - page: Optimize Agents
             path: ../../agents/optimize-agents.mdx
           - section: Agent Governance

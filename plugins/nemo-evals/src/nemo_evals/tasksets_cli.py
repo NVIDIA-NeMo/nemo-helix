@@ -178,6 +178,9 @@ def _print_status(builds: dict[str, ImageBuild | None], now: datetime | None = N
             detail = f"  {build.error or 'its Job ended'}"
         else:
             changed = build.updated_at or build.created_at
+            # The entity store returns its timestamps without a zone; they are UTC.
+            if changed is not None and changed.utcoffset() is None:
+                changed = changed.replace(tzinfo=UTC)
             detail = f"  (no change for {_duration((now - changed).total_seconds())})" if changed else ""
         typer.echo(f"  {state:<13} {ref}{detail}")
     if any(state in ("failed", "not requested") for state in states.values()):

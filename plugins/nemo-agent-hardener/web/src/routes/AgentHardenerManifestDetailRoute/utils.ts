@@ -3,13 +3,8 @@
 
 import type { SuiteRow } from '@agent-hardener/components/hitlTypes';
 import { CSV_FIELDS } from '@agent-hardener/routes/AgentHardenerManifestDetailRoute/constants';
+import { toCsv } from '@nemo/common';
 
-const escapeCsv = (value: string): string =>
-  /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-
-export const toRequestsCsv = (rows: SuiteRow[]): string => {
-  const body = rows.map((row) =>
-    CSV_FIELDS.map((field) => escapeCsv(String(row[field] ?? ''))).join(',')
-  );
-  return [CSV_FIELDS.join(','), ...body].join('\n');
-};
+/** The suite as a requests.csv. It is re-uploaded as a benign suite, so cells are written verbatim. */
+export const toRequestsCsv = (rows: SuiteRow[]): string =>
+  toCsv(rows, { columns: CSV_FIELDS, formulaSafe: false });

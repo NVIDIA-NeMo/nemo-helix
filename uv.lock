@@ -169,6 +169,12 @@ overrides = [
     { name = "xgrammar", specifier = ">=0.1.32" },
 ]
 
+[[manifest.dependency-metadata]]
+name = "nemo-helix-tavily-plugin"
+version = "0.2.0"
+requires-dist = ["httpx>=0.27.0,<1", "pydantic>=2.0.0"]
+requires-python = ">=3.12, <3.15"
+
 [[package]]
 name = "absl-py"
 version = "2.5.0"
@@ -5756,6 +5762,7 @@ nhx-customization-common = [
     { name = "httpx" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "tenacity" },
@@ -6751,6 +6758,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'entities-service'", specifier = ">=2.9.10" },
     { name = "psycopg2-binary", marker = "extra == 'services'", specifier = ">=2.9.10" },
     { name = "pyarrow", marker = "extra == 'harbor'", specifier = ">=19.0.1" },
+    { name = "pyarrow", marker = "extra == 'nhx-customization-common'", specifier = ">=19.0.1" },
     { name = "pyarrow", marker = "extra == 'nhx-evals-sdk'", specifier = ">=19.0.1" },
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'all'", specifier = ">=2.9.2,<3.0.0" },
@@ -7167,6 +7175,19 @@ requires-dist = [
     { name = "typer", marker = "extra == 'nemo-helix-ext'", specifier = ">=0.20.0" },
 ]
 provides-extras = ["filesets", "nemo-helix-ext", "nhx-evals-sdk"]
+
+[[package]]
+name = "nemo-helix-tavily-plugin"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6c/25/25a0176e33ad7c257b8dfde9b5d2bdfffc99de243f0b1c2357ec0bebe845/nemo_helix_tavily_plugin-0.2.0.tar.gz", hash = "sha256:42e8514242461f2d36d5c5927c24e29721b9a4c38d561cb8571d740551bb660b", size = 29961, upload-time = "2026-11-03T21:53:47.364Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/46/8c74b36c573456db2fe491a8714f0e966869ceb00c23eb62baa758406c6a/nemo_helix_tavily_plugin-0.2.0-py3-none-any.whl", hash = "sha256:0852c9ff0e04ba178f98d96ac9efab318aba079699476eaf08962e56f556a770", size = 24157, upload-time = "2026-11-03T21:53:45.968Z" },
+]
 
 [[package]]
 name = "nemo-helix-tools"
@@ -7708,6 +7729,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-guardrails-plugin" },
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7756,6 +7778,7 @@ core-services = [
     { name = "nemo-guardrails-plugin" },
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7865,6 +7888,7 @@ enabled-plugins = [
     { name = "nemo-evals-plugin" },
     { name = "nemo-garak-plugin" },
     { name = "nemo-guardrails-plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7887,6 +7911,7 @@ functional-services = [
     { name = "nemo-guardrails-plugin" },
     { name = "nemo-helix", extra = ["services"] },
     { name = "nemo-helix-plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin" },
     { name = "nemo-rl-plugin" },
     { name = "nemo-safe-synthesizer-plugin" },
@@ -7929,6 +7954,9 @@ nhx-task-runtime = [
 scaled-evals = [
     { name = "nemo-scaled-evals-plugin" },
     { name = "opensandbox-server" },
+]
+tavily = [
+    { name = "nemo-helix-tavily-plugin" },
 ]
 typecheck = [
     { name = "transformers" },
@@ -7990,6 +8018,7 @@ agents-deepagents-e2e-services = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8036,6 +8065,7 @@ core-services = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8148,6 +8178,7 @@ enabled-plugins = [
     { name = "nemo-evals-plugin", editable = "plugins/nemo-evals" },
     { name = "nemo-garak-plugin", editable = "plugins/nemo-garak" },
     { name = "nemo-guardrails-plugin", editable = "plugins/nemo-guardrails" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8171,6 +8202,7 @@ functional-services = [
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix", extras = ["services"], editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
+    { name = "nemo-helix-tavily-plugin" },
     { name = "nemo-optimization-plugin", editable = "plugins/nemo-optimization" },
     { name = "nemo-rl-plugin", editable = "plugins/nemo-rl" },
     { name = "nemo-safe-synthesizer-plugin", editable = "plugins/nemo-safe-synthesizer" },
@@ -8211,6 +8243,7 @@ scaled-evals = [
     { name = "nemo-scaled-evals-plugin", editable = "plugins/_temporary-scaled-evals" },
     { name = "opensandbox-server", specifier = "==0.2.1" },
 ]
+tavily = [{ name = "nemo-helix-tavily-plugin" }]
 typecheck = [{ name = "transformers", specifier = ">=5.5.0,<5.9.0" }]
 
 [[package]]
@@ -8482,6 +8515,7 @@ dependencies = [
     { name = "httpx" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-common" },
+    { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "tenacity" },
@@ -8490,7 +8524,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
@@ -8501,6 +8534,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
     { name = "nhx-common", editable = "packages/nhx_common" },
+    { name = "pyarrow", specifier = ">=19.0.1" },
     { name = "pydantic", specifier = ">=2.10.6" },
     { name = "pydantic-settings", specifier = ">=2.6.1" },
     { name = "tenacity", specifier = ">=8.5.0" },
@@ -8509,7 +8543,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pandas" },
-    { name = "pyarrow" },
     { name = "pytest", specifier = ">=8.3.4" },
     { name = "pytest-asyncio", specifier = ">=0.25.3" },
 ]
