@@ -1425,46 +1425,16 @@ jobs:
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
-      # Host one per auth mode with the harness's config, then run only that file against them: the shared
-      # fixtures read the same variables as the port to start their own platform on. Every test has to run
-      # here, and a skip fails the step.
+      # The script hosts one per auth mode at the URLs below and runs only that file against them; every
+      # test has to run here, and a skip fails the step.
       - name: Run taskset-run controller integration
         id: controller-integration
         if: ${{ !cancelled() }}
         timeout-minutes: 20
-        run: |
-          logs="$RUNNER_TEMP/controller-platforms"
-          mkdir -p "$logs"
-          launcher=plugins/nemo-evals/tests/integration/launch_test_platform.py
-          uv run python "$launcher" --port 18090 --work-dir "$logs/auth-off" > "$logs/auth-off.log" 2>&1 &
-          auth_off=$!
-          uv run python "$launcher" --port 18092 --auth --work-dir "$logs/auth-on" > "$logs/auth-on.log" 2>&1 &
-          auth_on=$!
-          # Stop both platforms however the step ends, a readiness failure included.
-          trap 'kill "$auth_off" "$auth_on" 2>/dev/null || true' EXIT
-          deadline=$((SECONDS + 300))
-          for port in 18090 18092; do
-            until curl -sf "http://localhost:$port/health/ready" > /dev/null; do
-              # A platform that exited never becomes ready: fail now, not at the deadline.
-              if ! { kill -0 "$auth_off" && kill -0 "$auth_on"; } 2>/dev/null || [ "$SECONDS" -ge "$deadline" ]; then
-                echo "::error::platform on port $port is not ready: a platform exited, or 300s passed"
-                tail -n 200 "$logs"/*.log
-                exit 1
-              fi
-              sleep 2
-            done
-          done
-          status=0
-          NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
-            uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py \
-            -m integration -n 0 -v -rs --junitxml="$logs/junit.xml" || status=$?
-          if [ "$status" -eq 0 ] && ! grep -q ' skipped="0"' "$logs/junit.xml"; then
-            echo "::error::taskset-run controller tests skipped instead of running against both platforms"
-            status=1
-          fi
-          if [ "$status" -ne 0 ]; then tail -n 200 "$logs"/*.log; fi
-          exit "$status"
+        run: bash .github/scripts/run-taskset-run-controller-integration.sh
         env:
+          NHX_AGENT_BASE_URL: http://localhost:18090
+          NHX_AGENT_AUTH_BASE_URL: http://localhost:18092
           UV_FROZEN: "1"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       - name: Upload taskset-run controller diagnostics

@@ -189,6 +189,7 @@ runs:
             - 'pyproject.toml'
             - 'uv.lock'
             - '.github/workflows/ci.yaml'  # the job definition itself
+            - '.github/scripts/run-taskset-run-controller-integration.sh'  # the job's controller step
             - '.github/actions/changes/action.yaml'  # this filter (self-coverage)
           evaluator-sdk-closure:
             # Paths that can change what `import ...harbor.runtime` loads or how the smoke job runs.
