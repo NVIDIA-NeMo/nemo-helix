@@ -397,6 +397,12 @@ class AgentDeployment(EntityMetadata):
 class AgentSession(EntityMetadata):
     """A durable logical conversation associated with an AgentDeployment."""
 
+    session_uuid: str = Field(
+        default="",
+        description="Unique identifier for the session. Can be used to group and retrieve the session’s traces in Intake.",
+        json_schema_extra={"readOnly": True},
+    )
+
     deployment_id: str = Field(
         min_length=1,
         description="Immutable ID of the AgentDeployment this session belongs to.",
