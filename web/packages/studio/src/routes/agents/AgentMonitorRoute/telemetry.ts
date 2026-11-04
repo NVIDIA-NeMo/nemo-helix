@@ -64,11 +64,13 @@ const NON_TOOL_FUNCTIONS = new Set(['root', '<workflow>']);
 
 /** Parses a spans JSONL body, skipping malformed lines and tagging each span with its source. */
 export const parseSpans = (text: string, agent?: string, runId?: string): TelemetrySpan[] =>
-  parseJsonl<TelemetrySpan>(text, { skipInvalid: true }).map((span) => {
-    if (agent) span.__agent = agent;
-    if (runId) span.__runId = runId;
-    return span;
-  });
+  parseJsonl(text, { skipInvalid: true })
+    .filter((span): span is TelemetrySpan => span !== null && typeof span === 'object')
+    .map((span) => {
+      if (agent) span.__agent = agent;
+      if (runId) span.__runId = runId;
+      return span;
+    });
 
 export const agentFromPath = (path: string): string | undefined => {
   const slash = path.indexOf('/');
