@@ -313,7 +313,8 @@ def test_skill_manifest_has_discovery_metadata() -> None:
 
     assert manifest["description"] == (
         "Evaluate models, datasets, and agents with the NeMo Helix Evals plugin. "
-        "Use for metric selection, SDK checks, platform jobs, and result retrieval."
+        "Use for metric selection, SDK checks, platform jobs, result retrieval, "
+        "and Harbor taskset runs on Kubernetes (`nemo evals runs`)."
     )
     assert manifest["license"] == "Apache-2.0"
     assert manifest["metadata"] == {
