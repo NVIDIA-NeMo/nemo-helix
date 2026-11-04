@@ -96,6 +96,8 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 
 4. Copy `assets/specs/harbor_taskset_run_openhands.json` and set `source.model.ref` to the closed-book model in
    your workspace, `<WS>/nemotron-super-closed-book` (the file says `default/…`; JSON doesn't expand `$WS`).
+   `agent_kwargs.temperature` and `top_p` set sampling; without them openhands uses 0.0 and 1.0 (greedy). For
+   another model, ask the user for its provider's recommended values.
    Create the Experiment, then submit. The task source flag supplies `spec.tasks`:
 
    ```bash

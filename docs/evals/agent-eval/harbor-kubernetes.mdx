@@ -300,7 +300,10 @@ Save as `openhands-run.json`:
 ```
 
 - `model.ref`: evals sets openhands' base URL (`LLM_BASE_URL`) and model name to the gateway route for this model. Don't set them yourself.
-- `agent_kwargs`: `version` pins the `openhands-ai` release. Use 1.6.0: later releases drop the `openhands.core.main` module that Harbor's `openhands` agent runs, so the agent install fails. `temperature` and `top_p` are the model's recommended sampling; `disable_vision` sends text only.
+- `agent_kwargs`:
+  - `version` pins the `openhands-ai` release. Use 1.6.0: later releases drop the `openhands.core.main` module that Harbor's `openhands` agent runs, so the agent install fails.
+  - `temperature` and `top_p` set the model's sampling. Without them, openhands uses `0.0` and `1.0`, which is greedy decoding. Set the values your model's provider recommends.
+  - `disable_vision` sends text only.
 - `env_secrets`: maps an environment variable to a secret name. openhands reads its key from `LLM_API_KEY`. Never put a key value in this file.
 - `max_retries: 1`: a trial that errors, such as a failed agent install, reruns once in a new sandbox. Agent or verifier timeouts, auth errors and unknown models aren't retried.
 - `execution` is required. `{}` uses the deployment's defaults.
