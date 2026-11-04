@@ -389,6 +389,49 @@ async def test_check_rejects_what_kubernetes_runs_cannot_take(clients, archive, 
     assert rejected is not None and rejected.code == code
 
 
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"environment": {"gpus": 1}},  # any GPU type
+        {"environment": {"gpus": 2, "gpu_types": ["H100", "a100"]}},  # types match whatever their case
+        {"environment": {"gpus": 0}, "verifier": {"environment_mode": "separate", "environment": {"gpus": 1}}},
+    ],
+    ids=["any-type", "listed-type", "verifier"],
+)
+async def test_a_gpu_profile_takes_gpu_tasks(clients, archive, sandbox_policy, config):
+    """A profile with GPUs accepts tasks within its count and types, the agent's or a separate verifier's."""
+    policy = sandbox_policy.model_copy(update={"max_gpus": 2, "gpu_types": ("A100",)})
+    assert await check(clients, policy, config) is None
+
+
+@pytest.mark.parametrize(
+    ("config", "code", "detail"),
+    [
+        ({"environment": {"gpus": 4}}, "gpu_request_exceeds_policy", "agent sandbox gpus=4 exceeds"),
+        (
+            {"environment": {"gpus": 0}, "verifier": {"environment_mode": "separate", "environment": {"gpus": 4}}},
+            "gpu_request_exceeds_policy",
+            "verifier sandbox gpus=4 exceeds",
+        ),
+        # Running an H100 task on an A100 would change what it measures, so it isn't run at all.
+        ({"environment": {"gpus": 1, "gpu_types": ["H100"]}}, "unsupported_gpu_type", "accepts GPU types H100"),
+    ],
+    ids=["count", "verifier-count", "type"],
+)
+async def test_a_gpu_profile_refuses_what_it_cannot_give(clients, archive, sandbox_policy, config, code, detail):
+    policy = sandbox_policy.model_copy(update={"max_gpus": 2, "gpu_types": ("A100",)})
+    rejected = await check(clients, policy, config)
+    assert rejected is not None and rejected.code == code and detail in rejected.detail
+
+
+async def test_a_gpu_profile_without_types_refuses_a_task_that_names_one(clients, archive, sandbox_policy):
+    """Without its types, the profile can't tell whether the task's GPU is one it accepts."""
+    rejected = await check(
+        clients, sandbox_policy.model_copy(update={"max_gpus": 1}), {"environment": {"gpus": 1, "gpu_types": ["A100"]}}
+    )
+    assert rejected is not None and rejected.code == "unsupported_gpu_type" and "none listed" in rejected.detail
+
+
 @pytest.fixture
 def compose_task(archive, tmp_path):
     """Give the task a compose file, read as ``read_task_archive`` reads it: parsed, or an ``ImagePlanError``."""

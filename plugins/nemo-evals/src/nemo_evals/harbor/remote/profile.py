@@ -101,6 +101,8 @@ class ResolvedHarborSandboxPolicy(BaseModel):
     max_storage_mb: int | None = None
     enforce_disk_limit: bool = Field(description="Cap each sandbox's ephemeral storage at its storage_mb.")
     max_disk_mb: int | None = Field(description="Clamp on that disk limit; None applies storage_mb as given.")
+    max_gpus: int = Field(default=0, ge=0, description="Most GPUs a sandbox may request; 0 refuses GPU tasks.")
+    gpu_types: tuple[str, ...] = Field(default=(), description="GPU types the profile's sandboxes get.")
     egress_verification: Literal["default_action", "strict"]
     max_sandbox_lifetime_s: int = Field(ge=1)
     scoring_reserve_s: int = Field(ge=0)
