@@ -75,8 +75,7 @@ export const AssistantMessage = ({
           </ThreadPrimitive.If>
         </MessagePrimitive.If>
       ) : null}
-      {/* A failed reply's Retry and Copy error live in its banner. */}
-      {!hideAssistantMessageActions && !failed ? (
+      {!hideAssistantMessageActions ? (
         <div className="flex h-5 items-center" data-testid="assistant-chat-message-actions">
           <ActionBarPrimitive.Root hideWhenRunning className={MESSAGE_ACTIONS_CLASS}>
             <CopyAction />

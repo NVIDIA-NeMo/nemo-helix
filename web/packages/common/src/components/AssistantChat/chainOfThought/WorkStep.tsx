@@ -28,7 +28,7 @@ interface WorkAccordionProps {
   readonly contentClassName?: string;
   readonly 'data-testid'?: string;
   readonly defaultOpen?: boolean;
-  readonly icon: ReactNode;
+  readonly icon?: ReactNode;
   /** Controlled open state; pair with `onOpenChange`. Uncontrolled (`defaultOpen`) when omitted. */
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
@@ -64,7 +64,7 @@ export const WorkAccordion = ({
         className={WORK_ACCORDION_CLASS.trigger}
       >
         <Flex align="center" gap="inherit" className="min-w-0">
-          <span className="flex shrink-0 items-center">{icon}</span>
+          {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
           <span className="min-w-0 truncate" data-testid={titleTestId}>
             {title}
           </span>

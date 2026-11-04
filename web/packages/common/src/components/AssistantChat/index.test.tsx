@@ -825,11 +825,11 @@ describe('AssistantChat', () => {
 
       const banner = await screen.findByTestId('assistant-chat-error-banner');
       expect(banner).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
-      expect(within(banner).getByText('Show details')).toBeInTheDocument();
-      expect(within(banner).getByText(/APIStatusError: Error code: 410/)).not.toBeVisible();
-      expect(within(banner).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+      const details = screen.getByTestId('assistant-chat-error-details');
+      expect(banner).not.toContainElement(details);
+      expect(within(details).getByText('Show details')).toBeInTheDocument();
+      expect(within(banner).queryByRole('button')).not.toBeInTheDocument();
       expect(screen.queryByTestId('assistant-chat-message-surface')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('assistant-chat-message-actions')).not.toBeInTheDocument();
       expect(
         screen.queryByText('There was an error generating a response.')
       ).not.toBeInTheDocument();
@@ -849,25 +849,28 @@ describe('AssistantChat', () => {
 
       const banner = await screen.findByTestId('assistant-chat-error-banner');
       expect(banner).toHaveTextContent('There was an error generating a response.');
-      expect(within(banner).getByText('Something nobody mapped')).toBeInTheDocument();
+      expect(screen.getByTestId('assistant-chat-error-details')).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
 
   it(
-    'copies the raw error, not the explanation, from a failed reply',
+    'offers Regenerate response on a failed reply instead of a retry button in the banner',
     async () => {
       const user = userEvent.setup({ delay: null });
-      const raw = 'RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited';
-      mocks.createChatCompletion.mockRejectedValueOnce(new Error(raw));
+      mocks.createChatCompletion.mockRejectedValueOnce(
+        new Error('RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited')
+      );
 
       renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      await user.click(await screen.findByRole('button', { name: 'Copy error' }));
-
-      await expect(navigator.clipboard.readText()).resolves.toBe(raw);
+      await screen.findByTestId('assistant-chat-error-banner');
+      const actions = screen.getByTestId('assistant-chat-message-actions');
+      expect(
+        within(actions).getByRole('button', { name: /Regenerate response/i })
+      ).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
@@ -886,7 +889,7 @@ describe('AssistantChat', () => {
 
       const banner = await screen.findByTestId('assistant-chat-error-banner');
       expect(banner).toHaveTextContent('There was an error generating a response.');
-      expect(within(banner).getByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      expect(banner).not.toHaveTextContent(/APIStatusError: Error code: 410/);
     },
     interactionTimeoutMs
   );

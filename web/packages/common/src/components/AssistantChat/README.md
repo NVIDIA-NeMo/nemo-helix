@@ -70,10 +70,9 @@ Pass `toolCallPartComponent` to render tool calls your own way inside the group;
 When a request fails for a non-cancel reason the assistant message is marked `incomplete`/`error` and renders as one inline error banner (successful replies render directly on the canvas without a bubble):
 
 - the banner message is the reply's text, which holds the human-readable explanation;
-- a "Show details" toggle reveals the **raw** error, with the status code and provider detail;
-- a "Retry" action reruns the reply, and a "Copy error" action copies the raw error. If the browser blocks clipboard access (for example a page served over plain `http` outside `localhost`) the tooltip says so instead of showing the check mark.
+- a "Show details" row under the banner expands to the **raw** error, with the status code and provider detail, in a code snippet that can be copied.
 
-A failed reply hides the hover action row, since its actions live in the banner.
+The banner has no actions of its own: the reply's hover action row stays available, and its "Regenerate response" action reruns the request.
 
 The explanation is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line above the raw error.
 

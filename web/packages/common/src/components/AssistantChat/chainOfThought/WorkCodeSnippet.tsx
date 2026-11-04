@@ -16,6 +16,8 @@ interface WorkCodeSnippetProps {
   readonly language: CodeSnippetLanguage;
   readonly tone?: 'default' | 'danger';
   readonly value: string;
+  /** Wraps long lines instead of scrolling, so the block never widens its container. */
+  readonly wrap?: boolean;
 }
 
 /** A code block with its label (a file path, "Arguments", "Result") in the header bar. */
@@ -24,6 +26,7 @@ export const WorkCodeSnippet = ({
   language,
   tone = 'default',
   value,
+  wrap = false,
 }: WorkCodeSnippetProps) => (
   <CodeSnippetRoot kind="block" rows={12}>
     <CodeSnippetActions>
@@ -36,6 +39,10 @@ export const WorkCodeSnippet = ({
       </Text>
       <CodeSnippetCopyButton value={value} />
     </CodeSnippetActions>
-    <CodeSnippetCode value={value} language={language} />
+    <CodeSnippetCode
+      value={value}
+      language={language}
+      className={cn(wrap && '[&_pre]:whitespace-pre-wrap [&_pre]:break-all')}
+    />
   </CodeSnippetRoot>
 );
