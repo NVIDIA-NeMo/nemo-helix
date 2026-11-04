@@ -25,9 +25,9 @@ RUN apt-get update && \
 # Claude and Codex Relay integration launches this external CLI. Authenticate
 # the immutable installer before root execution; it separately verifies the
 # pinned release binary before placing it on the global runtime PATH.
-RUN curl -fsSL https://raw.githubusercontent.com/NVIDIA/NeMo-Relay/40c5990361afc26ae8b901ff1f49c2b03ddd9ede/install.sh -o /tmp/install-nemo-relay.sh && \
-    echo "ba2585a32e568643819992fa66b750004328351fce422b979d8c11cfc8bbfadb  /tmp/install-nemo-relay.sh" | sha256sum -c - && \
-    NEMO_RELAY_VERSION=0.9.3 sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \
+RUN curl -fsSL https://raw.githubusercontent.com/NVIDIA/NeMo-Relay/538d116c2bb016d1dc454569bb2ef1568a645eab/install.sh -o /tmp/install-nemo-relay.sh && \
+    echo "466ca46b54d90db30c5084fd73d441ac8e92ade50a67a73e231e6044f526630f  /tmp/install-nemo-relay.sh" | sha256sum -c - && \
+    NEMO_RELAY_VERSION=0.10.4 sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \
     rm /tmp/install-nemo-relay.sh && \
     nemo-relay --version
 
