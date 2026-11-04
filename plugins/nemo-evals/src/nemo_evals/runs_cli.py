@@ -841,7 +841,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
 
 def _is_stream(path: Path) -> bool:
     """A path that's gone once this command exits: ``/dev/stdin`` (even redirected from a file), ``<(…)``, a pipe."""
-    return path.parts[:2] in {("/", "dev"), ("/", "proc")} or not path.is_file()
+    parts = path.parts
+    return (
+        parts[:3] in {("/", "dev", "stdin"), ("/", "dev", "fd")}
+        or (parts[:2] == ("/", "proc") and parts[3:4] == ("fd",))  # /proc/<pid or self>/fd/<n>
+        or not path.is_file()
+    )
 
 
 def _load_spec(spec_file: Path) -> dict[str, Any]:

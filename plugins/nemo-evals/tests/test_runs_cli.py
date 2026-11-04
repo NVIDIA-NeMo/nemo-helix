@@ -1681,3 +1681,9 @@ def test_a_regular_spec_file_is_not_a_stream(tmp_path):
     spec = tmp_path / "spec.json"
     spec.write_text("{}")
     assert not runs_cli._is_stream(spec)
+
+
+@pytest.mark.parametrize("path", ["/dev/shm/run.json", "/proc/self/cwd/spec.json"])
+def test_a_regular_file_under_dev_or_proc_is_not_a_stream(monkeypatch, path):
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    assert not runs_cli._is_stream(Path(path))
