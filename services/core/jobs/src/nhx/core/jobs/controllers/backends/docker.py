@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from abc import abstractmethod
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar
@@ -2142,7 +2143,7 @@ chmod -R 777 {job_vol}/{storage_subpath}
 
         return container_args
 
-    def cleanup_steps(self):
+    def cleanup_steps(self, on_progress: Callable[[], None] | None = None):
         containers = self._client.containers.list(
             all=True,
             filters=self._cleanup_container_filters(),
