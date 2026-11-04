@@ -86,8 +86,11 @@ How the profile combines with the network mode in the task's `task.toml`:
 
 - `public` (Harbor's default) → the sandbox reaches `egress_allow` only.
 - `allowlist` → the sandbox reaches the task's `allowed_hosts` plus `agent_channel`.
-  - Every `allowed_hosts` entry must also be an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`.
-  - Entries match exactly, after lowercasing and IP normalization: a profile's `*.wikipedia.org` doesn't admit a task's `en.wikipedia.org`, and `10.0.0.0/8` doesn't admit `10.1.2.3`.
+  - Every `allowed_hosts` entry must be covered by an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`. A profile entry covers:
+    - the same host, after lowercasing and IP normalization;
+    - for `*.wikipedia.org`: its subdomains at any depth, such as `en.wikipedia.org`, but not `wikipedia.org` itself;
+    - for a CIDR such as `10.0.0.0/8`: the addresses and ranges inside it, in the same IP family, such as `10.1.2.3` or `10.1.0.0/16`.
+  - A task host covered only by a `*.` wildcard is allowed by name. If it resolves to a private or link-local address, the sandbox still can't reach that address. To allow one, list the address itself, in `egress_allow` (or a CIDR around it) and in the task's `allowed_hosts`.
 - `no-network` → the sandbox reaches `agent_channel` only.
 - With a model-calling agent, the task Job fails with `gateway_unreachable` before any sandbox starts when:
   - `no-network`: the profile's `agent_channel` doesn't include the API host.
@@ -228,7 +231,7 @@ platformConfig:
 ```
 
 - The API host in `egress_allow` and `agent_channel` keeps model-calling agents reaching the gateway.
-- `*.wikipedia.org` opens every Wikipedia host to `public` tasks. A Harbor task in `allowlist` mode must list `*.wikipedia.org` in its own `allowed_hosts`.
+- `*.wikipedia.org` opens every Wikipedia host to `public` tasks. A Harbor task in `allowlist` mode lists the Wikipedia hosts it needs in its own `allowed_hosts`, such as `en.wikipedia.org`.
 
 ### Set ceilings on a profile
 
