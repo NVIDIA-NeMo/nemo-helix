@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from nemoguardrails.exceptions import InvalidRailsConfigurationError, LLMCallException
+from nemoguardrails.guardrails.model_engine import ModelEngineError
 from nemoguardrails.rails.llm.llmrails import ModelInitializationError
 from nhx.guardrails.app.common.utils import clean_llm_call_error, clean_model_initialization_error
 from openai import APIError, AuthenticationError, RateLimitError
@@ -99,6 +100,20 @@ async def llm_call_exception_handler(request: Request, exc: LLMCallException):
     return JSONResponse(
         status_code=500,
         content={"detail": error_message},
+    )
+
+
+async def model_engine_error_handler(request: Request, exc: ModelEngineError):
+    """Map a failed IORails model call to an HTTP status, as ``llm_call_exception_handler`` does for LLMRails.
+
+    The upstream status when there is one; otherwise 502, because the model was unreachable.
+    """
+    logger.error(f"ModelEngineError occurred: {exc}", exc_info=True)
+    upstream_status = exc.status
+    status_code = upstream_status if upstream_status is not None and 400 <= upstream_status < 600 else 502
+    return JSONResponse(
+        status_code=status_code,
+        content={"detail": f"{exc.model_name}: {clean_llm_call_error(str(exc))}"},
     )
 
 

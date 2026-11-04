@@ -16,7 +16,7 @@ class TestRailsRegistry(unittest.IsolatedAsyncioTestCase):
         self.registry = RailsRegistry()
 
         # Mock LLMRails
-        self.llm_rails_patcher = patch("nhx.guardrails.app.services.rails.registry.LLMRails")
+        self.llm_rails_patcher = patch("nhx.guardrails.app.services.rails.registry.RailsEngine")
         self.mock_llm_rails_class = self.llm_rails_patcher.start()
         self.mock_llm_rails_class.side_effect = self.create_mock_llm_rails
 
@@ -171,3 +171,33 @@ class TestRailsRegistry(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_replacing_and_deleting_entries_retire_the_old_engines() -> None:
+    from unittest.mock import MagicMock, patch
+
+    registry = RailsRegistry()
+    old, new = MagicMock(events_history_cache={}), MagicMock(events_history_cache={})
+
+    with patch("nhx.guardrails.app.services.rails.registry.retire_rails_engine") as retire:
+        registry.add(["retire-cfg"], "nim", "m", None, old)
+        retire.assert_not_called()
+        registry.add(["retire-cfg"], "nim", "m", None, new)
+        retire.assert_called_once_with(old)
+        registry.delete(["retire-cfg"])
+        retire.assert_called_with(new)
+
+
+def test_set_cache_retires_only_the_engines_it_drops() -> None:
+    from unittest.mock import MagicMock, patch
+
+    registry = RailsRegistry()
+    kept, dropped, added = (MagicMock(events_history_cache={}) for _ in range(3))
+
+    with patch("nhx.guardrails.app.services.rails.registry.retire_rails_engine") as retire:
+        registry.add(["set-cache-cfg"], "nim", "kept", None, kept)
+        registry.add(["set-cache-cfg"], "nim", "dropped", None, dropped)
+
+        registry.set_cache(["set-cache-cfg"], {"nim_kept": kept, "nim_added": added})
+
+        retire.assert_called_once_with(dropped)
