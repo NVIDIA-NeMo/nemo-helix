@@ -173,6 +173,7 @@ runs:
             - 'packages/nhx_evals_sdk/**'
             - 'packages/nemo_helix_plugin/**'
             - 'packages/nhx_common/**'  # shared contracts every service above is built on
+            - 'packages/nhx_testing/src/nhx/testing/**'  # test helpers the suite imports, supplied_platform among them
             - 'services/core/entities/**'
             - 'services/core/jobs/**'
             - 'services/core/files/**'
