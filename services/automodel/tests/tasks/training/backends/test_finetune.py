@@ -37,6 +37,7 @@ _STUBBED_MODULES = (
     "nemo_automodel.recipes.llm.train_ft",
     "nemo_automodel.recipes.retrieval.train_bi_encoder",
     "nemo_automodel.recipes.retrieval.train_cross_encoder",
+    "nemo_automodel.recipes.vlm.finetune",
 )
 _FINETUNE = "nhx.automodel.tasks.training.backends.finetune"
 
@@ -104,6 +105,15 @@ def test_a_causal_checkpoint_still_uses_the_compiled_cross_encoder_recipe(finetu
     finetune.create_automodel_recipe(cfg)
 
     finetune.TrainCrossEncoderRecipe.assert_called_once_with(cfg)
+    finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
+
+
+def test_the_compiled_vlm_recipe_selects_the_vision_recipe(finetune: ModuleType) -> None:
+    cfg = {"_recipe": "vlm_sft"}
+
+    finetune.create_automodel_recipe(cfg)
+
+    finetune.FinetuneRecipeForVLM.assert_called_once_with(cfg)
     finetune.TrainFinetuneRecipeForNextTokenPrediction.assert_not_called()
 
 
