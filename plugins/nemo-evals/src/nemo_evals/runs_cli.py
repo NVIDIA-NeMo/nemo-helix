@@ -50,6 +50,8 @@ from nemo_helix_plugin.jobs.types import HelixJobResponse
 RETRY_ATTEMPTS = 5
 # The run POST alone: it answers once the run is accepted, which can take minutes while many submits share the API.
 SUBMIT_TIMEOUT_SECONDS = 300.0
+#: Connecting is quick or not happening: a stalled connect must not hold every retry for the full read timeout.
+SUBMIT_CONNECT_TIMEOUT_SECONDS = 10.0
 _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
@@ -498,16 +500,33 @@ def submit_run(
 ) -> dict[str, Any]:
     """POST the run, retrying a 503 (an outage before the run was accepted) with the same idempotency key.
 
-    A POST that gets no answer is not resent: the server may still be accepting it, and a second POST would redo
-    that work while the API is at its slowest. The error names the key, so a rerun replays the run instead of
-    starting another.
+    A POST that never connected is retried too: nothing reached the server. A POST that gets no answer is not
+    resent: the server may still be accepting it, and a second POST would redo that work while the API is at its
+    slowest. The error names the key, so a rerun replays the run instead of starting another.
     """
     url = f"{client.base_url.rstrip('/')}/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
+    timeout = httpx.Timeout(SUBMIT_TIMEOUT_SECONDS, connect=SUBMIT_CONNECT_TIMEOUT_SECONDS)
+    answered = False
     for attempt in range(1, RETRY_ATTEMPTS + 1):
         try:
             response = client.http_client.post(
-                url, json=body, headers=client.request_headers(None, url=url), timeout=SUBMIT_TIMEOUT_SECONDS
+                url, json=body, headers=client.request_headers(None, url=url), timeout=timeout
             )
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            if attempt == RETRY_ATTEMPTS:
+                # An earlier attempt that got a 503 reached the server, which may have accepted the run after all.
+                sent = (
+                    "the last attempt was not sent, but an earlier one reached the platform and may have created the run"
+                    if answered
+                    else "nothing was sent"
+                )
+                raise RuntimeError(
+                    f"could not reach the platform to submit ({type(exc).__name__}: {exc}); {sent}. "
+                    f"Rerun the same command with --idempotency-key {body.get('idempotency_key')}"
+                ) from exc
+            echo(f"could not reach the platform ({type(exc).__name__}); retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
+            sleep(2**attempt)
+            continue
         except httpx.TransportError as exc:
             reason = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
             raise RuntimeError(
@@ -515,6 +534,7 @@ def submit_run(
                 f"accepted. To check or finish it without starting a second run, rerun the same command with "
                 f"--idempotency-key {body.get('idempotency_key')}"
             ) from exc
+        answered = True
         if response.status_code == 503 and attempt < RETRY_ATTEMPTS:
             echo(f"{response.json().get('detail')}; retrying ({attempt}/{RETRY_ATTEMPTS - 1})")
             sleep(2**attempt)

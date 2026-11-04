@@ -17,6 +17,7 @@ network policy is never widened, so nothing a task declares can reach those host
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import shlex
 from collections.abc import AsyncGenerator
@@ -28,6 +29,13 @@ from harbor.models.task.config import NetworkMode
 from harbor.models.trial.config import ResourceMode
 from nemo_evals.harbor.remote.resources import effective_resources
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
+from nemo_evals.harbor.setup_egress_readiness import (
+    RESOLVE_ATTEMPTS,
+    RESOLVE_HOSTS_SCRIPT,
+    RESOLVE_RETRY_DELAY_SEC,
+    RESOLVE_TIMEOUT_SEC,
+    resolvable_hosts,
+)
 from nhx_sandbox.egress import EgressPolicy, EgressRule, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment, sandbox_role
 from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_egress_target, verify_applied_egress
@@ -73,6 +81,10 @@ def network_rules(rules: list[EgressRule]) -> list[Any]:
     from opensandbox.models.sandboxes import NetworkRule  # ty: ignore[unresolved-import]  # Harbor runner venvs only
 
     return [NetworkRule(action=rule.action, target=rule.target) for rule in rules]
+
+
+#: How much longer than the check's own bound to wait for its exec before giving up on it here.
+_RESOLVE_TIMEOUT_SLACK_SEC = 10
 
 
 class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
@@ -174,6 +186,9 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
     async def agent_setup_egress(self) -> AsyncGenerator[None, None]:
         """Let the sandbox reach ``agent_setup_hosts`` for the duration of the block, then close them again.
 
+        Once the rules are applied, the block waits for each setup hostname to resolve from inside the sandbox; one
+        that never does is logged and the block runs anyway, since this agent's setup may not need it.
+
         The egress sidecar keeps established connections across a rule change, so closing also kills every
         process started since entry that still holds a connection outside the sandbox. Until closing has finished, the sandbox refuses every other command:
         a close that was cancelled or failed must not leave task commands running with the hosts open.
@@ -192,6 +207,7 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         try:
             await self._switch_egress(sandbox, closed, opened, f"{label} (agent setup)")
             self._setup_egress_state = "open"
+            await self._wait_for_setup_hosts(label)
             self.logger.info("Opened agent setup egress for %s", label)
             yield
         finally:
@@ -226,6 +242,41 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         await self._verify_no_longer_allowed(sandbox, removed, label)
         return removed
 
+    async def _wait_for_setup_hosts(self, label: str) -> None:
+        """Wait up to :data:`RESOLVE_TIMEOUT_SEC` for each setup host to resolve; never stops setup from running."""
+        hosts = resolvable_hosts(self._agent_setup_hosts)
+        if not hosts:
+            return
+        try:
+            # Bounded in the sandbox, and here too in case the exec doesn't come back when told to stop.
+            result = await asyncio.wait_for(
+                self._exec_cleanup(
+                    RESOLVE_HOSTS_SCRIPT,
+                    timeout_sec=RESOLVE_TIMEOUT_SEC,
+                    HOSTS=" ".join(hosts),
+                    ATTEMPTS=str(RESOLVE_ATTEMPTS),
+                    DELAY=str(RESOLVE_RETRY_DELAY_SEC),
+                ),
+                timeout=RESOLVE_TIMEOUT_SEC + _RESOLVE_TIMEOUT_SLACK_SEC,
+            )
+        except Exception as exc:  # cancellation isn't an Exception, so it still stops the trial
+            self.logger.warning(
+                "Couldn't check that %s resolve from inside %s (%s); running agent setup anyway",
+                ", ".join(hosts),
+                label,
+                type(exc).__name__ if isinstance(exc, TimeoutError) else exc,
+            )
+            return
+        if result.return_code != 0:
+            unresolved = (result.stdout or "").split() or list(hosts)
+            # The hosts serve every agent on the profile; a setup that needs one fails on the network.
+            self.logger.warning(
+                "%s did not resolve from inside %s after %d attempts; running agent setup anyway",
+                ", ".join(unresolved),
+                label,
+                RESOLVE_ATTEMPTS,
+            )
+
     @override
     async def exec(
         self,
@@ -254,10 +305,15 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                 f"could not stop processes left by agent setup (exit {result.return_code}): {result.stderr}"
             )
 
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         """Runs while every other command is refused, so it goes straight to the parent's ``exec``."""
         return await NemoOpenSandboxEnvironment.exec(
-            self, f"{SHELL} -c {shlex.quote(script)}", cwd="/", env={"PATH": SYSTEM_PATH, **env}, user="root"
+            self,
+            f"{SHELL} -c {shlex.quote(script)}",
+            cwd="/",
+            env={"PATH": SYSTEM_PATH, **env},
+            timeout_sec=timeout_sec,
+            user="root",
         )
 
     @staticmethod

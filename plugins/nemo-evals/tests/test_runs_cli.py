@@ -20,6 +20,7 @@ from nemo_evals.api.schemas import AgentEvalResult
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
+    SUBMIT_CONNECT_TIMEOUT_SECONDS,
     SUBMIT_TIMEOUT_SECONDS,
     BundleJobView,
     Candidate,
@@ -539,6 +540,35 @@ def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
 
 
+def test_a_submit_that_stops_connecting_after_a_503_says_an_earlier_attempt_may_have_landed():
+    answers = iter([httpx.Response(503, json={"detail": "busy"})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (response := next(answers, None)) is not None:
+            return response
+        raise httpx.ConnectError("Connection refused")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="an earlier one reached the platform.*--idempotency-key k-1$"):
+        submit_run(client, {"idempotency_key": "k-1"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
+def test_a_submit_connects_with_a_short_timeout_and_reads_with_the_long_one():
+    seen: list[dict[str, float | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    submit_run(client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+    assert seen[0]["connect"] == SUBMIT_CONNECT_TIMEOUT_SECONDS and seen[0]["read"] == SUBMIT_TIMEOUT_SECONDS
+
+
 @pytest.mark.parametrize("error", [httpx.ReadTimeout(""), httpx.RemoteProtocolError("Server disconnected")])
 def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(error):
     timeouts = []
@@ -553,6 +583,36 @@ def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(
     with pytest.raises(RuntimeError, match="the run may still be accepted.*--idempotency-key k-123$"):
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
     assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectError("Connection refused"), httpx.ConnectTimeout("")])
+def test_a_submit_that_never_connected_is_resent_with_the_same_body(error):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        if len(bodies) == 1:
+            raise error
+        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    status = submit_run(
+        client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
+    )
+    assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
+
+
+def test_a_submit_that_never_connects_names_its_key():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="nothing was sent.*--idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
 
 
 @pytest.fixture

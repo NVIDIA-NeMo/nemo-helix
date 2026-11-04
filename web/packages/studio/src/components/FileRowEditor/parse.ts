@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toCsv, toJsonl } from '@nemo/common/src/utils/download';
 import { ROW_ID_KEY, type DataFileRow } from '@studio/components/FileRowEditor/types';
 
 /** Data file formats recognized by {@link formatFromFileName}. */
@@ -177,42 +178,20 @@ const stripRowId = (row: DataFileRow): DataFileRow => {
   return rest;
 };
 
-/** RFC-4180-escapes a single CSV cell, quoting when it contains a comma, quote, or newline. */
-const serializeCsvCell = (value: unknown): string => {
-  const str =
-    value === null || value === undefined
-      ? ''
-      : typeof value === 'object'
-        ? JSON.stringify(value)
-        : String(value);
-  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-};
-
 /**
- * Serializes rows back into data-file text content — the counterpart to {@link parseDataFile}
- * used by the in-browser Download action. The synthetic {@link ROW_ID_KEY} is stripped. JSONL
- * emits one compact object per line; CSV derives its header from the union of row keys (in
- * first-seen order) and escapes every cell; all other formats fall back to a pretty JSON array.
+ * Serializes rows back into data-file text content — the counterpart to {@link parseDataFile}.
+ * The synthetic {@link ROW_ID_KEY} is stripped, and CSV cells are written verbatim (no formula
+ * guard) so the file round-trips unchanged. Formats other than JSONL and CSV become a pretty JSON
+ * array.
  */
 export const serializeDataFile = (rows: DataFileRow[], format: DataFileFormat): string => {
   const clean = rows.map(stripRowId);
 
   switch (format) {
     case 'jsonl':
-      return clean.map((row) => JSON.stringify(row)).join('\n');
-    case 'csv': {
-      const keys: string[] = [];
-      for (const row of clean) {
-        for (const key of Object.keys(row)) {
-          if (!keys.includes(key)) {
-            keys.push(key);
-          }
-        }
-      }
-      const header = keys.map(serializeCsvCell).join(',');
-      const body = clean.map((row) => keys.map((key) => serializeCsvCell(row[key])).join(','));
-      return [header, ...body].join('\n');
-    }
+      return toJsonl(clean);
+    case 'csv':
+      return toCsv(clean, { formulaSafe: false });
     default:
       return JSON.stringify(clean, null, 2);
   }
