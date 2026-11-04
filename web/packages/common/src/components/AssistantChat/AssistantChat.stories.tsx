@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
-import { TooltipProvider } from '@nvidia/foundations-react-core';
+import { Anchor, TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { http, HttpResponse } from 'msw';
 import type { ChatCompletionChunk } from 'openai/resources/index.mjs';
@@ -178,6 +178,92 @@ export const IndexedExampleResponses: Story = {
   parameters: {
     msw: {
       handlers: [makeIndexedExampleResponseHandler()],
+    },
+  },
+};
+
+const RICH_RESPONSE = `# Fine-tuning plan for your support agent
+
+Here's how I'd improve the agent's answers about **billing disputes**. The short version: the base model is fine, but it needs *domain examples* and a ***stricter refusal policy*** for account changes.
+
+## 1. Prepare the dataset
+
+Collect around **2,000** resolved tickets and convert them to chat format. Keep these fields:
+
+- \`messages\`: the full conversation, with the agent's final reply as the last turn
+- \`category\`: one of \`billing\`, \`refund\`, or \`account\`
+- \`resolved\`: *only keep tickets marked* **true**
+  - Drop tickets that were escalated to a human
+  - Drop tickets shorter than two turns
+
+See the [dataset format guide](https://docs.nvidia.com/nemo/microservices/latest/fine-tune/format-training-dataset.html) for the full schema.
+
+## 2. Launch the job
+
+1. Upload the dataset to a fileset.
+2. Start a LoRA job with a low learning rate.
+3. Evaluate against the held-out set before deploying.
+
+\`\`\`bash
+nemo files upload ./tickets.jsonl --fileset support-tickets
+nemo customization jobs create --config lora.yaml --dataset support-tickets
+\`\`\`
+
+The config only needs a few overrides:
+
+\`\`\`python
+config = {
+    "model": "nvidia/nemotron-3-super",
+    "training": {"type": "lora", "epochs": 3, "learning_rate": 1e-4},
+    "dataset": {"fileset": "support-tickets", "validation_split": 0.1},
+}
+\`\`\`
+
+### What to watch
+
+> If validation loss rises after the first epoch, stop early. The agent will start repeating ticket boilerplate.
+
+Compare the tuned agent against the baseline on **accuracy**, *tone*, and refusal rate. You can read more about evaluation metrics in the [NeMo Evaluator docs](https://docs.nvidia.com/nemo/evaluator/latest/), or ask me to set up the comparison for you.
+
+---
+
+Want me to draft \`lora.yaml\` next?`;
+
+const richResponseMessages: readonly ThreadMessageLike[] = [
+  {
+    role: 'user',
+    content: [
+      { type: 'text', text: 'How should I fine-tune my support agent for billing questions?' },
+    ],
+  },
+  {
+    role: 'assistant',
+    content: [{ type: 'text', text: RICH_RESPONSE }],
+    status: { type: 'complete', reason: 'stop' },
+  },
+];
+
+/**
+ * A long reply with headings, nested and numbered lists, inline and fenced code, bold and
+ * italic text, a blockquote, and links. Chat keeps model-written links inert by default, so
+ * links render as plain text here.
+ */
+export const RichFormatting: Story = {
+  args: {
+    initialMessages: richResponseMessages,
+  },
+};
+
+/** The same reply when the surface passes a link renderer, so links open in a new tab. */
+export const RichFormattingWithLinks: Story = {
+  args: {
+    initialMessages: richResponseMessages,
+    messageContentProps: {
+      markdownLinkComponent: ({ href, children }) => (
+        <Anchor href={href} external>
+          {children}
+        </Anchor>
+      ),
     },
   },
 };
