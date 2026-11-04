@@ -358,6 +358,57 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
     assert reward["mean"] == pytest.approx(0.45)
 
 
+def test_evaluation_rollups_count_a_multi_turn_session_once_across_all_its_turns(client: TestClient) -> None:
+    evaluation_id = "rollup-multi-turn-exp"
+    group_id = _ensure_group(client)
+    created = client.post(
+        EVALUATIONS,
+        json={
+            "name": evaluation_id,
+            "experiment_group_id": group_id,
+            "dataset_name": "rollup-dataset",
+            "dataset_version": "v1",
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    attempts = [
+        ("case-chat", "turn-1", None, 0.05, 1000, 0),
+        ("case-chat", "turn-2", 1.0, 0.10, 2000, 5),
+        ("case-single", None, 0.5, 0.30, 3000, 20),
+    ]
+    for test_case_id, trajectory_id, score, cost_usd, latency_ms, offset_seconds in attempts:
+        response = client.post(
+            ATIF_INGEST,
+            json=_atif_body(
+                started_at=started_at,
+                evaluation_id=evaluation_id,
+                run_id="run-1",
+                test_case_id=test_case_id,
+                score=score,
+                cost_usd=cost_usd,
+                latency_ms=latency_ms,
+                offset_seconds=offset_seconds,
+                trajectory_id=trajectory_id,
+            ),
+        )
+        assert response.status_code == 201, response.text
+
+    evaluation = client.get(f"{EVALUATIONS}/{evaluation_id}").json()
+    assert evaluation["run_count"] == 2
+    assert evaluation["test_case_count"] == 2
+
+    assert evaluation["aggregate_scores"]["reward"]["mean"] == pytest.approx(0.75)
+    assert evaluation["aggregate_scores"]["reward"]["count"] == 2
+
+    assert evaluation["latency_ms"]["sum"] == pytest.approx(10000.0)
+    assert evaluation["latency_ms"]["count"] == 2
+    assert evaluation["cost_usd"]["sum"] == pytest.approx(0.45)
+    assert evaluation["tokens"]["sum"] == pytest.approx(330.0)
+    assert evaluation["tokens"]["count"] == 2
+
+
 def _atif_body(
     *,
     started_at: datetime,
@@ -369,6 +420,7 @@ def _atif_body(
     latency_ms: int,
     offset_seconds: int,
     errored: bool = False,
+    trajectory_id: str | None = None,
 ) -> dict[str, Any]:
     """Build an ATIF ingest body. ``score=None`` records no evaluator reward (an unscored run);
     ``errored=True`` marks the trajectory as failed so the root span status is ``error``."""
@@ -401,7 +453,7 @@ def _atif_body(
     }
     if score is not None:
         extra["verifier_result"] = {"rewards": {"reward": score}}
-    return {
+    body: dict[str, Any] = {
         "schema_version": "ATIF-v1.7",
         "session_id": session_id,
         "evaluation_context": {
@@ -416,6 +468,9 @@ def _atif_body(
         },
         "steps": [step],
     }
+    if trajectory_id is not None:
+        body["trajectory_id"] = trajectory_id
+    return body
 
 
 def _iso(value: datetime) -> str:
