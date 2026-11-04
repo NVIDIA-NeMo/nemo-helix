@@ -657,7 +657,7 @@ test-markers: ## List all available pytest markers
 
 .PHONY: test-policy
 test-policy: ## Run the shared Rego policy corpus with the embedded evaluator
-	$(UV) run --frozen pytest services/core/auth/tests/test_regopy_compatibility.py -v
+	$(UV) run --frozen pytest services/core/auth/tests/test_regorus_compatibility.py -v
 
 .PHONY: test-policy-opa
 test-policy-opa: ## Run the shared Rego policy corpus with OPA as a compatibility oracle

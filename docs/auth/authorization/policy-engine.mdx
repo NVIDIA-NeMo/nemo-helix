@@ -23,7 +23,7 @@ For each request, the authorization middleware:
 
 ## Embedded PDP (Default)
 
-The embedded PDP evaluates Rego sources with regopy inside the auth service. No external OPA sidecar or policy build step is required.
+The embedded PDP evaluates Rego sources with Regorus inside the auth service. No external OPA sidecar or policy build step is required.
 
 ### How It Works
 
@@ -43,8 +43,8 @@ auth:
 
 ### Runtime and Resource Boundaries
 
-regopy evaluates policy in native C++ inside the auth service process, without
-the former WASM sandbox's memory or fuel limits. The removed
+Regorus evaluates policy in native Rust through Python bindings inside the auth
+service process, without the former WASM sandbox's memory or fuel limits. The removed
 `embedded_pdp_cpu_limit`, `embedded_pdp_memory_limit_mb`, and
 `embedded_pdp_auto_build_wasm` settings no longer apply. Use external OPA in a
 separate container with resource limits when policy evaluation needs an

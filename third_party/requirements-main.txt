@@ -3383,23 +3383,8 @@ regex==2026.3.32 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or
     #   tiktoken
     #   transformers
     #   unsloth-zoo
-regopy==1.5.2 ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
-    --hash=sha256:1b4b1594e0a0cdad004e6b27eae214d3ccd166cc59874d2c26a5bfe9679ca9c9 \
-    --hash=sha256:213075bee128a6dfc142fe70b2ec76457fb31bc89e6ee6e02ac50ef28b2c6b6e \
-    --hash=sha256:2138ee26a253dcbf8fb2d0df4e05cf8677b28cc4676c560bc04563098c9a6721 \
-    --hash=sha256:2411206da3cc98520dfc61ae44e333c44c5f95dd6935a3b6af0a0b6ba311c39c \
-    --hash=sha256:420124cf0b34e1ae154eb505b2ed33a83729f44fb26be700a4b447e154235a66 \
-    --hash=sha256:42d557ea696bc113566b75e474134a314e609bbb602a1974783701326dbcea5e \
-    --hash=sha256:5b7ec337b338631c6d3fa56215932a6aa4b233bbf5e78c278d14ab40e8d53124 \
-    --hash=sha256:6389be1200a4bbd52a93d7368b43932793ea928887b7b8a66af15ef05c26fa5f \
-    --hash=sha256:6cd2c16f0165e5b2dc5c3797ccb0e7321c92d137094f64860e76aa262fbdae39 \
-    --hash=sha256:7e2c6226b1891d0907c4cd34f394a46b5a959023ebbbb7eeb550d0bb658fd0e7 \
-    --hash=sha256:886016ce3064efbfcb5bf0fd8cb737629928be2c8dbd13621edf8ef9e23ca022 \
-    --hash=sha256:af07e0ec772532ee2e5546b752d81548e4a945514e5ca145ab411a5d4a547f10 \
-    --hash=sha256:b7e06cb8ba4afb306fb5057a1b84b34deb190252d2f7dae6b1ac2d30213d1a26 \
-    --hash=sha256:e1b3ca26b33b6e7e1fe91404ce247c1d7ba5aca0cc2e7e12f81b3a4726fc4970 \
-    --hash=sha256:e61a8e3cd2bb12b022d73692b62f4f47983470cad16b5ba6d2424be8c5d226f2 \
-    --hash=sha256:f75a0d45ca1ad2cd776822d325b6fe7e3172d58cb4349b84d53dc58b9d00e6da
+regorus @ https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz#subdirectory=bindings/python ; (platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux') \
+    --hash=sha256:b54be1eb3d9e670ffea690115ac541aa1b07d486789cb5cce992315f4fb576ae
     # via
     #   nemo-helix
     #   nhx-auth

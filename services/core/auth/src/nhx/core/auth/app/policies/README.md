@@ -3,7 +3,7 @@
 
 # Shared Rego Authorization Policies
 
-The embedded PDP interprets these sources with regopy; the external PDP evaluates
+The embedded PDP interprets these sources with Regorus; the external PDP evaluates
 these same sources with OPA. No compiled policy artifact or OPA build is needed
 for the embedded runtime.
 
@@ -98,16 +98,15 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ## Testing
 
 ```bash
-make test-policy      # regopy: shared corpus plus test-runner safety checks
+make test-policy      # Regorus: embedded-evaluator compatibility tests
 make test-policy-opa  # OPA compatibility oracle (requires the opa executable)
 ```
 
-The shared Rego tests use `with` to install request and authorization-data
-fixtures. regopy 1.5.2 cannot compile transitive calls under native `with`, so
-`script/test_regopy_policies.py` installs those input/base-data overrides in fresh
-interpreters and evaluates the original Rego assertions. The test-only runner
-supports a bounded grammar and rejects unsupported constructs rather than
-skipping tests. Production policies are loaded unchanged and do not use `with`.
+The shared Rego tests use native `with` modifiers to install request and
+authorization-data fixtures. The embedded compatibility tests in
+`services/core/auth/tests/test_regorus_compatibility.py` evaluate the shared
+Rego test rules directly with Regorus, without a custom lowering runner.
+Production policies and the OPA compatibility oracle use the same Rego sources.
 
 When adding or changing policy behavior, run both evaluators. A passing native
 OPA test alone does not verify the embedded evaluator's behavior.

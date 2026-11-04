@@ -424,6 +424,9 @@ explicit = true
 [tool.uv.sources]
 # Pin the official OpenShell release artifact.
 openshell = { url = "https://github.com/NVIDIA/OpenShell/releases/download/v0.1.6/openshell-0.1.6-py3-none-any.whl" }
+# Regorus 0.14.1 Python binding from its immutable upstream release commit.
+# Published wheel installs need an approved distribution of this dependency.
+regorus = { url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" }
 data-designer-retrieval-sdg = { index = "data-designer-plugins" }
 nhx-auth = { workspace = true }
 nemo-anonymizer-plugin = { workspace = true }

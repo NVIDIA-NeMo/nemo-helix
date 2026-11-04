@@ -5113,7 +5113,7 @@ all = [
     { name = "python-on-whales" },
     { name = "pyyaml" },
     { name = "referencing" },
-    { name = "regopy" },
+    { name = "regorus" },
     { name = "requests" },
     { name = "rich" },
     { name = "sqlalchemy" },
@@ -5135,7 +5135,7 @@ auth-service = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "regopy" },
+    { name = "regorus" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 automodel-service = [
@@ -5179,7 +5179,7 @@ core-service = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "regopy" },
+    { name = "regorus" },
     { name = "sqlalchemy" },
     { name = "sqlmodel" },
     { name = "streaming-form-data" },
@@ -5952,7 +5952,7 @@ services = [
     { name = "python-on-whales" },
     { name = "pyyaml" },
     { name = "referencing" },
-    { name = "regopy" },
+    { name = "regorus" },
     { name = "requests" },
     { name = "rich" },
     { name = "sqlalchemy" },
@@ -6860,10 +6860,10 @@ requires-dist = [
     { name = "referencing", marker = "extra == 'nemo-agents-plugin-nooa'", specifier = ">=0.28.4" },
     { name = "referencing", marker = "extra == 'plugins'", specifier = ">=0.28.4" },
     { name = "referencing", marker = "extra == 'services'", specifier = ">=0.28.4" },
-    { name = "regopy", marker = "extra == 'all'", specifier = "==1.5.2" },
-    { name = "regopy", marker = "extra == 'auth-service'", specifier = "==1.5.2" },
-    { name = "regopy", marker = "extra == 'core-service'", specifier = "==1.5.2" },
-    { name = "regopy", marker = "extra == 'services'", specifier = "==1.5.2" },
+    { name = "regorus", marker = "extra == 'all'", url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" },
+    { name = "regorus", marker = "extra == 'auth-service'", url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" },
+    { name = "regorus", marker = "extra == 'core-service'", url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" },
+    { name = "regorus", marker = "extra == 'services'", url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" },
     { name = "requests", marker = "extra == 'all'", specifier = ">=2.31.0" },
     { name = "requests", marker = "extra == 'garak-service'", specifier = ">=2.32.3,<3.0.0" },
     { name = "requests", marker = "extra == 'guardrails-service'", specifier = ">=2.31.0" },
@@ -8244,7 +8244,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
-    { name = "regopy" },
+    { name = "regorus" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -8268,7 +8268,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.3" },
     { name = "pydantic-settings", specifier = ">=2.6.1" },
     { name = "pyyaml", specifier = ">=6.0.0" },
-    { name = "regopy", specifier = "==1.5.2" },
+    { name = "regorus", url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.12.0" },
 ]
 
@@ -11640,27 +11640,10 @@ wheels = [
 ]
 
 [[package]]
-name = "regopy"
-version = "1.5.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/67/c7/966b5a8138bcd93d6a0a5ffd42235bbaeb743a7adb6cfa8d6ac45f433f21/regopy-1.5.2.tar.gz", hash = "sha256:886016ce3064efbfcb5bf0fd8cb737629928be2c8dbd13621edf8ef9e23ca022", size = 4863735, upload-time = "2026-07-06T10:57:33.239Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/9a/888e62f114831b9565f163cc18e9906acbbb9f0acc49d4824cc61f74932b/regopy-1.5.2-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:af07e0ec772532ee2e5546b752d81548e4a945514e5ca145ab411a5d4a547f10", size = 7159775, upload-time = "2026-07-06T10:56:59.113Z" },
-    { url = "https://files.pythonhosted.org/packages/e6/22/0328ef8f07f1a57d85b986018798a3f7061584f1f75d97082f630b5816a1/regopy-1.5.2-cp312-cp312-manylinux_2_34_aarch64.whl", hash = "sha256:5b7ec337b338631c6d3fa56215932a6aa4b233bbf5e78c278d14ab40e8d53124", size = 7328374, upload-time = "2026-07-06T10:57:02.828Z" },
-    { url = "https://files.pythonhosted.org/packages/d7/d0/76c649a70844091ceac6e728d6fb47373cbdc064c5e2bb29d40fe987ac0d/regopy-1.5.2-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:42d557ea696bc113566b75e474134a314e609bbb602a1974783701326dbcea5e", size = 7771429, upload-time = "2026-07-06T10:57:04.5Z" },
-    { url = "https://files.pythonhosted.org/packages/94/b0/9b48c4ddd67cdcba426d249cf131191d2be764ff836e4c063b313612c3e3/regopy-1.5.2-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:7e2c6226b1891d0907c4cd34f394a46b5a959023ebbbb7eeb550d0bb658fd0e7", size = 8032982, upload-time = "2026-07-06T10:57:06.108Z" },
-    { url = "https://files.pythonhosted.org/packages/3a/6c/568dabbd9d5da42f72368242f0575ada35d335004fbfc1417235faccc8ec/regopy-1.5.2-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:b7e06cb8ba4afb306fb5057a1b84b34deb190252d2f7dae6b1ac2d30213d1a26", size = 7947693, upload-time = "2026-07-06T10:57:08.135Z" },
-    { url = "https://files.pythonhosted.org/packages/81/9f/b8d448b6bf0721330d995aacfd431c08c0123368cb1f77258dd113450996/regopy-1.5.2-cp313-cp313-macosx_15_0_arm64.whl", hash = "sha256:e1b3ca26b33b6e7e1fe91404ce247c1d7ba5aca0cc2e7e12f81b3a4726fc4970", size = 7161140, upload-time = "2026-07-06T10:57:10.781Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/57/15ed878f93710e2ddf006e9df04f49d2acd1b08fe6ed209d1f2abb1fda48/regopy-1.5.2-cp313-cp313-manylinux_2_34_aarch64.whl", hash = "sha256:1b4b1594e0a0cdad004e6b27eae214d3ccd166cc59874d2c26a5bfe9679ca9c9", size = 7328374, upload-time = "2026-07-06T10:57:13.903Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/fb/a9f6684b702be298c33cd0b4ca11fca7bb5523a9dfd098334d95b09e8810/regopy-1.5.2-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:213075bee128a6dfc142fe70b2ec76457fb31bc89e6ee6e02ac50ef28b2c6b6e", size = 7771430, upload-time = "2026-07-06T10:57:15.831Z" },
-    { url = "https://files.pythonhosted.org/packages/07/af/edfa59f3776ec6cc56a772322a2bf8f171bf29be5a5d6412ef885c8afb1a/regopy-1.5.2-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:6389be1200a4bbd52a93d7368b43932793ea928887b7b8a66af15ef05c26fa5f", size = 8032988, upload-time = "2026-07-06T10:57:17.417Z" },
-    { url = "https://files.pythonhosted.org/packages/78/76/34ae52497031392aa1accba879b6260e443387371baf8297aa0b4d8a0cd7/regopy-1.5.2-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:420124cf0b34e1ae154eb505b2ed33a83729f44fb26be700a4b447e154235a66", size = 7947698, upload-time = "2026-07-06T10:57:19.039Z" },
-    { url = "https://files.pythonhosted.org/packages/51/96/8e81871b803e89caec67c1a3ac395f40a11947e6b6f16a6c75c8759b26ac/regopy-1.5.2-cp314-cp314-macosx_15_0_arm64.whl", hash = "sha256:6cd2c16f0165e5b2dc5c3797ccb0e7321c92d137094f64860e76aa262fbdae39", size = 7159773, upload-time = "2026-07-06T10:57:22.515Z" },
-    { url = "https://files.pythonhosted.org/packages/9f/32/1fa4238635ef6b99af56e9306f0f90aeccc313b807851d63b11b209ff793/regopy-1.5.2-cp314-cp314-manylinux_2_34_aarch64.whl", hash = "sha256:2411206da3cc98520dfc61ae44e333c44c5f95dd6935a3b6af0a0b6ba311c39c", size = 7328373, upload-time = "2026-07-06T10:57:25.906Z" },
-    { url = "https://files.pythonhosted.org/packages/f6/69/8af29632a7e5f3d2dec050d76d6779d1a2781ca4cc8d5df8c1627996c487/regopy-1.5.2-cp314-cp314-manylinux_2_34_x86_64.whl", hash = "sha256:e61a8e3cd2bb12b022d73692b62f4f47983470cad16b5ba6d2424be8c5d226f2", size = 7771425, upload-time = "2026-07-06T10:57:27.509Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/2f/fe7502d0884e738e58fd2dbf332e257da0c8f3bc14789618d5607a740326/regopy-1.5.2-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:f75a0d45ca1ad2cd776822d325b6fe7e3172d58cb4349b84d53dc58b9d00e6da", size = 8032985, upload-time = "2026-07-06T10:57:28.953Z" },
-    { url = "https://files.pythonhosted.org/packages/6f/6d/b8877b02bcfad7ef0269bcc983c3e7b99362a6856837022829efa18b2c68/regopy-1.5.2-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:2138ee26a253dcbf8fb2d0df4e05cf8677b28cc4676c560bc04563098c9a6721", size = 7947700, upload-time = "2026-07-06T10:57:30.505Z" },
-]
+name = "regorus"
+version = "0.14.1"
+source = { url = "https://github.com/microsoft/regorus/archive/0236aa71d6863289dd2a250f3e4fdb855b2aa32c.tar.gz", subdirectory = "bindings/python" }
+sdist = { hash = "sha256:b54be1eb3d9e670ffea690115ac541aa1b07d486789cb5cce992315f4fb576ae" }
 
 [[package]]
 name = "requests"

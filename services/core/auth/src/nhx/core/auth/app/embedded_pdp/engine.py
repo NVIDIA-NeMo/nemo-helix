@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Embedded Rego policy evaluation with thread-local regopy interpreters."""
+"""Embedded Rego policy evaluation with thread-local Regorus interpreters."""
 
 import threading
 from typing import Any, cast

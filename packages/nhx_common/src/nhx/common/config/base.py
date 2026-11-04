@@ -467,7 +467,7 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
         default="embedded",
         description=(
             "Policy Decision Point provider: "
-            "'embedded' for auth service's built-in Rego interpreter (regopy), "
+            "'embedded' for auth service's built-in Rego interpreter (Regorus), "
             "'opa' for external OPA sidecar."
         ),
     )

@@ -55,7 +55,7 @@ The PDP can run in two modes. For technical details, see [Policy Engine](/docume
 ### Embedded (default)
 
 - **Provider**: `policy_decision_point_provider: "embedded"`.
-- The auth service runs a built-in regopy policy engine. No OPA sidecar is required.
+- The auth service runs a built-in Regorus policy engine. No OPA sidecar is required.
 - Policy data (role bindings, scopes, etc.) is loaded from the entity store and refreshed on an interval (`policy_data_refresh_interval`).
 
 Use embedded for new deployments and when you do not already have an OPA fleet.
@@ -317,9 +317,9 @@ auth:
 ```
 
 The embedded PDP evaluates the Rego sources shipped in the auth package's
-`app/policies` directory using regopy. No OPA binary, policy build step, or
-network download is required. Restart the auth service after changing policy
-sources. OPA is only needed for the external PDP or `make test-policy`.
+`app/policies` directory using Regorus. No OPA binary, policy build step, or
+network download is required at runtime. Restart the auth service after changing
+policy sources. OPA is only needed for the external PDP or `make test-policy-opa`.
 
 ### Production with embedded PDP
 

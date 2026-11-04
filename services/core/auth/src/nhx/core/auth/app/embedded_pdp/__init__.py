@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Embedded Policy Decision Point interpreting the shared Rego source with regopy."""
+"""Embedded Policy Decision Point interpreting the shared Rego source with Regorus."""
 
 from .data import apply_embedded_policy_document, load_policy_data
 from .engine import (

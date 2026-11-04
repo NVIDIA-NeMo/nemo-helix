@@ -176,7 +176,7 @@ Every authorized request is evaluated by the PDP, which checks role bindings and
 when the token carries platform API scopes, scopes. The PDP runs in one of two
 modes:
 
-- **Embedded** (default): A regopy-based Rego policy engine built into the auth service. No external dependencies.
+- **Embedded** (default): A Regorus-based Rego policy engine built into the auth service. No external policy service required.
 - **External OPA**: An Open Policy Agent instance (sidecar or standalone service) fetches policy bundles from the auth service.
 
 For technical details on the policy engine, see [Policy Engine](/documentation/access-control/authorization/policy-engine). For configuration, see [Auth Configuration](/documentation/access-control/deployment).

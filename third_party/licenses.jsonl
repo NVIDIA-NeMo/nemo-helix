@@ -70,7 +70,6 @@
 {"name": "docker", "license": "APACHE-2.0", "compatible": true}
 {"name": "docstring-parser", "license": "MIT", "compatible": true}
 {"name": "duckdb", "license": "MIT", "compatible": true}
-{"name": "dulwich", "license": "APACHE-2.0", "compatible": true}
 {"name": "durationpy", "license": "MIT", "compatible": true}
 {"name": "email-validator", "license": "UNLICENSE", "compatible": true}
 {"name": "exceptiongroup", "license": "MIT", "compatible": true}
@@ -363,7 +362,7 @@
 {"name": "realtime", "license": "MIT", "compatible": true}
 {"name": "referencing", "license": "MIT", "compatible": true}
 {"name": "regex", "license": "APACHE-2.0 AND CNRI-PYTHON", "compatible": true}
-{"name": "regopy", "license": "MIT", "compatible": true}
+{"name": "regorus", "license": "MIT AND APACHE-2.0 AND BSD-3-CLAUSE", "compatible": true}
 {"name": "requests", "license": "APACHE-2.0", "compatible": true}
 {"name": "requests-oauthlib", "license": "ISC", "compatible": true}
 {"name": "requests-toolbelt", "license": "APACHE-2.0", "compatible": true}

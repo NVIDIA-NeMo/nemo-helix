@@ -202,7 +202,7 @@ Type checking runs automatically in CI via the `lint:uv` job.
 
 **OPA Policy:**
 - Test the shared Rego policy with OPA: `make test-policy`
-- Embedded authorization evaluates the packaged Rego sources with regopy; no policy build step is required.
+- Embedded authorization evaluates the packaged Rego sources with Regorus; no policy build step is required.
 
 Linting runs automatically in CI via GitHub Actions in `.github/workflows/ci.yaml`; Studio web linting is covered by `.github/workflows/studio-ci.yaml`.
 

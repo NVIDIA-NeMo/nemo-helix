@@ -132,7 +132,9 @@ class TestPolicyLoading:
 
         def load_policy_in_thread():
             try:
-                policies.put(get_policy())
+                policy = get_policy()
+                # Native runtimes must also be destroyed on their owning thread.
+                policies.put((id(policy), policy._owner_thread_id))
             except BaseException as exc:
                 errors.put(exc)
 
@@ -141,9 +143,9 @@ class TestPolicyLoading:
         thread.join()
 
         assert errors.empty(), errors.get()
-        worker_policy = policies.get_nowait()
-        assert worker_policy is not main_policy
-        assert worker_policy._owner_thread_id != main_policy._owner_thread_id
+        worker_policy_id, worker_thread_id = policies.get_nowait()
+        assert worker_policy_id != id(main_policy)
+        assert worker_thread_id != main_policy._owner_thread_id
 
     def test_policy_runtime_rejects_cross_thread_use(self):
         policy = get_policy()
@@ -256,22 +258,49 @@ class TestPolicyLifecycle:
         with pytest.raises(PolicyEngineError):
             policy.evaluate(request, 2)
 
-    def test_failed_native_evaluation_is_not_formatted(self, minimal_authz_data, monkeypatch):
-        import nhx.core.auth.app.embedded_pdp.rego_engine as pe
+    @pytest.mark.parametrize(
+        "output",
+        [
+            "",
+            "undefined",
+            "{invalid json",
+            "null",
+            "false",
+            "[]",
+            "1",
+            '"allowed"',
+            "{}",
+            '{"allowed": 1}',
+            '{"allowed": "true"}',
+        ],
+    )
+    def test_invalid_native_decision_fails_closed(self, minimal_authz_data, output, monkeypatch):
+        class InvalidDecisionEngine:
+            def set_input_json(self, document):
+                assert json.loads(document) == {"path": "/health/live", "method": "GET"}
 
-        class UnsafeErrorOutput:
-            def ok(self):
-                return False
-
-            def __str__(self):
-                raise AssertionError("Unsuccessful native output must never be formatted")
-
-            def __repr__(self):
-                raise AssertionError("Unsuccessful native output must never be inspected")
+            def eval_rule_as_json(self, _rule):
+                return output
 
         policy = RegoPolicy()
         policy.set_data(minimal_authz_data)
-        monkeypatch.setattr(pe.Interpreter, "query_bundle_entrypoint", lambda *_args: UnsafeErrorOutput())
+        monkeypatch.setattr(policy, "_engine", InvalidDecisionEngine())
+        with pytest.raises(PolicyEngineError):
+            policy.evaluate({"path": "/health/live", "method": "GET"})
+
+    @pytest.mark.parametrize("failed_operation", ["set_input_json", "eval_rule_as_json"])
+    def test_native_exception_fails_closed(self, minimal_authz_data, failed_operation, monkeypatch):
+        class FailingEngine:
+            def set_input_json(self, _document):
+                if failed_operation == "set_input_json":
+                    raise RuntimeError("native input failure")
+
+            def eval_rule_as_json(self, _rule):
+                raise RuntimeError("native evaluation failure")
+
+        policy = RegoPolicy()
+        policy.set_data(minimal_authz_data)
+        monkeypatch.setattr(policy, "_engine", FailingEngine())
         with pytest.raises(PolicyEngineError):
             policy.evaluate({"path": "/health/live", "method": "GET"})
 

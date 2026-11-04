@@ -275,7 +275,8 @@ overrides:
   greenlet: MIT AND PSF-2.0
   narwhals: MIT
   regex: Apache-2.0 AND CNRI-Python
-  regopy: MIT
+  # Upstream bindings/python/Cargo.toml at Regorus 0.14.1.
+  regorus: MIT AND Apache-2.0 AND BSD-3-Clause
   rpds-py: MIT
   sqlite-vec: Apache-2.0 OR MIT # https://pypi.org/project/sqlite-vec/
   tqdm: MIT AND MPL-2.0

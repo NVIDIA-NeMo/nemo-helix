@@ -109,7 +109,7 @@ python-on-whales==0.81.0
 pytrec-eval-terrier==0.5.10
 pyyaml==6.0.3
 ragas==0.4.3
-regopy==1.5.2
+regorus==0.14.1
 requests==2.34.2
 rich==14.3.4
 rouge-score==0.1.2

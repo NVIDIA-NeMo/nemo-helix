@@ -1,15 +1,15 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Interpret the shared Rego source without an OPA executable or WASM artifact."""
+"""Interpret shared Rego sources with the native Regorus Python binding."""
 
 import json
 import threading
 from pathlib import Path
 from typing import Any
 
-from regopy import Bundle, Interpreter
-from regopy.rego_shared import rego_get_error
+# Upstream re-exports its PyO3 extension dynamically and ships no Engine stub.
+from regorus import Engine  # ty: ignore[unresolved-import]
 
 POLICY_DIRECTORY = Path(__file__).parent.parent / "policies"
 ENTRYPOINTS = ("allow", "has_permissions", "has_role")
@@ -19,23 +19,12 @@ class PolicyEngineError(Exception):
     """Error loading or evaluating an embedded policy."""
 
 
-def _native_error(interpreter: Interpreter) -> str:
-    """Read diagnostics without formatting a potentially null native Output.
-
-    regopy 1.5.2 checks pointers against 0 rather than None in several wrappers.
-    A compiler failure can therefore yield an invalid Bundle/Output instead of
-    raising RegoError. Formatting such an Output dereferences NULL in native code.
-    Keep this version-specific diagnostic access confined to this helper.
-    """
-    return rego_get_error(interpreter._impl) or "native Rego evaluation failed"
-
-
 class RegoPolicy:
-    """Thread-confined Rego interpreter with compiled, replaceable data snapshots.
+    """Thread-confined native interpreter with replaceable authorization data.
 
-    Compilation happens in memory at initialization and data refresh, never as a
-    repository build step. Source and data are shared with the external OPA PDP.
-    There are no WASM fuel or linear-memory limits in this backend.
+    Policies are parsed/prepared in memory, not compiled to a repository artifact.
+    External OPA evaluates the same source and data. This uses Regorus's Engine
+    API, not its separate RVM bytecode API or an embedded WASM runtime.
     """
 
     def __init__(self) -> None:
@@ -44,34 +33,34 @@ class RegoPolicy:
         if not self._modules:
             raise PolicyEngineError(f"No Rego policies found in {POLICY_DIRECTORY}")
         self._data_loaded = False
-        # Validate the shipped source at startup, but refuse authorization until
-        # real policy data has been explicitly loaded (including an empty document).
-        self._interpreter, self._bundle = self._compile({})
+        self._engine = self._compile({})
 
     def _assert_owner_thread(self) -> None:
         if threading.get_ident() != self._owner_thread_id:
             raise RuntimeError("RegoPolicy used from a different thread")
 
-    def _compile(self, data: dict[str, Any]) -> tuple[Interpreter, Bundle]:
-        interpreter = Interpreter()
+    def _compile(self, data: dict[str, Any]) -> Engine:
+        engine = Engine()
         for name, source in self._modules.items():
-            interpreter.add_module(name, source)
-        interpreter.add_data(data)
-        bundle = interpreter.build(None, [f"authz/{name}" for name in ENTRYPOINTS])
-        if not bundle.ok():
-            raise PolicyEngineError(f"Rego compilation failed: {_native_error(interpreter)}")
-        return interpreter, bundle
+            engine.add_policy(name, source)
+        # JSON avoids Python binding numeric coercions and preserves complete
+        # strings/object keys, including embedded NUL and non-ASCII characters.
+        engine.add_data_json(json.dumps(data, allow_nan=False))
+        engine.set_input_json('{"method":"GET","path":"/health/live"}')
+        # Regorus prepares rules lazily. Validate the source during initialization
+        # or refresh, before publishing a runtime with an unprepared policy.
+        engine.eval_rule_as_json("data.authz.allow")
+        return engine
 
     def set_data(self, data: dict[str, Any]) -> None:
-        """Replace data, rather than merging revoked grants into the previous data."""
+        """Replace the runtime so removed grants cannot survive a data refresh."""
         self._assert_owner_thread()
-        # A failed refresh must not leave this runtime authorizing with stale grants.
         self._data_loaded = False
         try:
-            interpreter, bundle = self._compile(data)
+            engine = self._compile(data)
         except Exception as exc:
             raise PolicyEngineError(f"Unable to load Rego policy data: {exc}") from exc
-        self._interpreter, self._bundle = interpreter, bundle
+        self._engine = engine
         self._data_loaded = True
 
     def evaluate(self, input_data: dict[str, Any], entrypoint: int = 0) -> list[dict[str, Any]]:
@@ -81,20 +70,14 @@ class RegoPolicy:
             raise PolicyEngineError("Policy data not loaded — refusing to evaluate (fail-closed)")
         if entrypoint not in range(len(ENTRYPOINTS)):
             raise PolicyEngineError(f"Invalid entrypoint: {entrypoint}")
-        # Input(dict) passes individual strings through a NUL-terminated C ABI,
-        # truncating identities, scopes, and object keys containing U+0000.
-        # Escaped JSON terms preserve the complete request at that boundary.
-        self._interpreter.set_input_term(json.dumps(input_data, allow_nan=False))
-        output = self._interpreter.query_bundle_entrypoint(self._bundle, f"authz/{ENTRYPOINTS[entrypoint]}")
-        if not output.ok():
-            raise PolicyEngineError(f"Rego evaluation failed: {_native_error(self._interpreter)}")
-        # Output.results already owns decoded Python values. Avoid retaining native
-        # Node objects across queries, or dereferencing an unsuccessful Output.
-        if len(output) == 1 and not output[0].expressions:
-            return []
-        if len(output) != 1 or len(output[0].expressions) != 1:
-            raise PolicyEngineError("Unexpected Rego result shape")
-        result = output[0].expressions[0]
+        try:
+            self._engine.set_input_json(json.dumps(input_data, allow_nan=False))
+            result = json.loads(self._engine.eval_rule_as_json(f"data.authz.{ENTRYPOINTS[entrypoint]}"))
+        except Exception as exc:
+            raise PolicyEngineError(f"Rego evaluation failed: {exc}") from exc
         if not isinstance(result, dict):
             raise PolicyEngineError("Rego entrypoint returned a non-object decision")
+        verdict = "has_role" if ENTRYPOINTS[entrypoint] == "has_role" else "allowed"
+        if type(result.get(verdict)) is not bool:
+            raise PolicyEngineError(f"Rego entrypoint returned an invalid '{verdict}' decision")
         return [{"result": result}]

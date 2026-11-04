@@ -16,7 +16,8 @@ dependencies = [
     "pyyaml>=6.0.0",
     "nhx-common",
     "nhx-entities",
-    "regopy==1.5.2",
+    # Regorus 0.14.1 Python bindings, pinned to the upstream release commit.
+    "regorus==0.14.1",
 ]
 version = "0.0.0"
 

@@ -79,6 +79,23 @@ For the wrapper specifically, `make vendor` also creates aggregate extras from `
 
 Hand-written extras (e.g. the wrapper's `all` alias, or a plugin's `test` group) live directly in the pyproject's `[project.optional-dependencies]` table without the generator marker. The vendor tool will preserve them on every run; only extras with the `# Generated from [tool.bundle-package]; do not edit by hand.` marker are touched by `make vendor`.
 
+## Regorus dependency (draft release blocker)
+
+The embedded PDP uses Microsoft's Regorus 0.14.1 Python binding. The root
+`[tool.uv.sources]` pins the upstream release commit
+`0236aa71d6863289dd2a250f3e4fdb855b2aa32c` and its `bindings/python` subdirectory;
+`uv.lock` also records the source archive checksum. Checkout installation builds
+the native binding with Rust/maturin. This is not the older `lakera-regorus`
+package on PyPI, and it does not require compiling the Rego policy to WASM.
+
+The published wrapper metadata intentionally remains `regorus==0.14.1`, not a
+direct GitHub dependency. Workspace source overrides do not configure an end
+user's package installer. **Do not release this cutover until approved Regorus
+wheels are available to wheel-install consumers on the supported platforms.**
+A successful source-checkout test or wrapper-wheel build does not satisfy that
+installation gate. Do not enable Hatch direct-reference metadata merely to hide
+this missing-distribution prerequisite.
+
 ## Dependency groups
 
 The wrapper's `[project.dependencies]` is hand-written with the true workspace dependencies for the base install:
