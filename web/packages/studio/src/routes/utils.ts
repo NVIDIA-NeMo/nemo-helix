@@ -651,7 +651,6 @@ export const getModelChatRoute = (model: NamedEntityRef) => {
   return generatePath(ROUTES.models.modelChat, { modelNamespace, modelName });
 };
 
-/** Search param on the agents list that opens the register modal on the named tab. */
 export const REGISTER_AGENT_SEARCH_PARAM = 'register';
 
 export const getAgentsListRoute = (workspace: string, options?: { register?: NewAgentTab }) => {

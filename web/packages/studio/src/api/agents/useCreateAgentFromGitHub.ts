@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { filesCreateFileset, filesDownloadFile } from '@nemo/sdk/generated/platform/files';
@@ -19,6 +20,7 @@ import {
   parseAgentConfig,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
+import { AxiosError } from 'axios';
 
 export interface CreateAgentFromGitHubParams {
   workspace: string;
@@ -77,13 +79,20 @@ const readAgentConfig = async (
     const blob = await filesDownloadFile(workspace, filesetName, AGENT_CONFIG_FILENAME);
     return await blob.text();
   } catch (error) {
+    const hint = isAccessDenial(error)
+      ? `Check the branch and directory. ${accessHint(secretName)}`
+      : getErrorMessage(error as Error);
     throw new Error(
-      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ` +
-        `Check the branch and directory. ${accessHint(secretName)}`,
+      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ${hint}`,
       { cause: error }
     );
   }
 };
+
+const ACCESS_DENIAL_STATUSES = new Set([401, 403, 404]);
+
+const isAccessDenial = (error: unknown): boolean =>
+  error instanceof AxiosError && ACCESS_DENIAL_STATUSES.has(error.response?.status ?? 0);
 
 const accessHint = (secretName: string | undefined): string => {
   if (secretName) {

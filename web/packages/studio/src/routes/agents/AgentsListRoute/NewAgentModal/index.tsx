@@ -39,13 +39,14 @@ import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { agentIntegrationPrompt } from '@studio/routes/agents/AgentDetailRoute/overview/codingAgentPrompts';
 import {
   AGENT_CONFIG_FILENAME,
-  GITHUB_TOKEN_SECRET_DEFAULTS,
+  isNewAgentTab,
   UPLOAD_AGENT_FORM_DEFAULTS,
   uploadAgentFormSchema,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
   type GitHubAgentSource,
   agentNameFromSource,
+  githubTokenSecretDefaults,
   parseGitHubSource,
 } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/github';
 import type {
@@ -102,6 +103,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
   const [selectionError, setSelectionError] = useState<string | undefined>(undefined);
   const [replaceArmedFor, setReplaceArmedFor] = useState<string | null>(null);
   const [tab, setTab] = useState<NewAgentTab>(initialTab);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) {
+      setTab(initialTab);
+    }
+  }
   const [isSecretModalOpen, setSecretModalOpen] = useState(false);
   const [repoBlurred, setRepoBlurred] = useState(false);
   const [tracedAgent, setTracedAgent] = useState('');
@@ -202,7 +210,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     setSelectionError(undefined);
     setReplaceArmedFor(null);
     setRepoBlurred(false);
-    setTab(initialTab);
     setTracedAgent('');
     onClose();
   };
@@ -413,7 +420,14 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           )
         }
       >
-        <TabsRoot value={tab} onValueChange={(value) => setTab(value as NewAgentTab)}>
+        <TabsRoot
+          value={tab}
+          onValueChange={(value) => {
+            if (isNewAgentTab(value)) {
+              setTab(value);
+            }
+          }}
+        >
           <TabsList aria-label="Ways to register an agent">
             <TabsTrigger value="upload">Register with code upload</TabsTrigger>
             <TabsTrigger value="github">Register from GitHub</TabsTrigger>
@@ -571,7 +585,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         <CreateSecretModal
           workspace={workspace}
           instruction="Store a GitHub personal access token so NeMo Helix can read the repository. A fine-grained token limited to that repository, with Contents set to read-only, is enough."
-          initialValues={GITHUB_TOKEN_SECRET_DEFAULTS}
+          initialValues={githubTokenSecretDefaults(repoSource)}
           valueHelp={
             <Anchor
               href={LINK_GITHUB_NEW_FINE_GRAINED_TOKEN}

@@ -16,40 +16,40 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CloneAgentModal } from '@studio/routes/agents/AgentsListRoute/CloneAgentModal';
 import { CreateDeploymentModal } from '@studio/routes/agents/AgentsListRoute/CreateDeploymentModal';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
-import { NEW_AGENT_TABS } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import { isNewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
-import {
-  getAgentDetailRoute,
-  getAgentsListRoute,
-  REGISTER_AGENT_SEARCH_PARAM,
-} from '@studio/routes/utils';
+import { getAgentDetailRoute, REGISTER_AGENT_SEARCH_PARAM } from '@studio/routes/utils';
 import { type FC, useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
-
-const isNewAgentTab = (value: string | null): value is NewAgentTab =>
-  NEW_AGENT_TABS.some((tab) => tab === value);
+import { useSearchParams } from 'react-router';
 
 export const AgentsListRoute: FC = () => {
   const pluginsLoaded = usePluginsLoaded();
   const pluginsError = usePluginsError();
   const agentsInstalled = usePluginInstalled('agents');
   const workspace = useWorkspaceFromPath();
-  const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const openRow = useRowNavigation();
   const [createDeploymentAgent, setCreateDeploymentAgent] = useState<string | null>(null);
-  const [newAgentTab, setNewAgentTab] = useState<NewAgentTab | null>(() => {
-    const requested = searchParams.get(REGISTER_AGENT_SEARCH_PARAM);
-    return isNewAgentTab(requested) ? requested : null;
-  });
+  const [newAgentTab, setNewAgentTab] = useState<NewAgentTab | null>(null);
   const [cloneSource, setCloneSource] = useState<AgentTableRow | null>(null);
 
-  const hasRegisterParam = searchParams.has(REGISTER_AGENT_SEARCH_PARAM);
+  const requestedTab = searchParams.get(REGISTER_AGENT_SEARCH_PARAM);
   useEffect(() => {
-    if (hasRegisterParam) {
-      navigate(getAgentsListRoute(workspace), { replace: true });
+    if (requestedTab === null) {
+      return;
     }
-  }, [hasRegisterParam, navigate, workspace]);
+    if (isNewAgentTab(requestedTab)) {
+      setNewAgentTab(requestedTab);
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete(REGISTER_AGENT_SEARCH_PARAM);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [requestedTab, setSearchParams]);
 
   useBreadcrumbs({
     items: [{ slotLabel: 'Agents' }],
@@ -95,13 +95,11 @@ export const AgentsListRoute: FC = () => {
           onCloneAgent={setCloneSource}
         />
       </Stack>
-      {/* Keyed so a deep-linked tab does not outlive the open it was requested for. */}
       <NewAgentModal
-        key={newAgentTab ?? 'upload'}
         open={newAgentTab !== null}
         onClose={() => setNewAgentTab(null)}
         workspace={workspace}
-        initialTab={newAgentTab ?? undefined}
+        initialTab={newAgentTab ?? 'upload'}
       />
       <CloneAgentModal
         open={cloneSource !== null}

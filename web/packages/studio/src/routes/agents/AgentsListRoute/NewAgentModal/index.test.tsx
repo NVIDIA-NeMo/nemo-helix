@@ -606,7 +606,9 @@ describe('NewAgentModal GitHub import', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'New Secret' }));
 
     const secretDialog = await screen.findByRole('dialog', { name: 'Create Secret' });
-    expect(within(secretDialog).getByRole('textbox', { name: 'Name' })).toHaveValue('github-token');
+    expect(within(secretDialog).getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'github-owner-repo'
+    );
     expect(
       within(secretDialog).getByRole('link', { name: 'Create a token on GitHub' })
     ).toHaveAttribute('href', LINK_GITHUB_NEW_FINE_GRAINED_TOKEN);
@@ -620,12 +622,29 @@ describe('NewAgentModal GitHub import', () => {
       expect(screen.queryByRole('dialog', { name: 'Create Secret' })).not.toBeInTheDocument()
     );
     expect(secrets).toEqual([
-      expect.objectContaining({ name: 'github-token', value: 'github_pat_abc' }),
+      expect.objectContaining({ name: 'github-owner-repo', value: 'github_pat_abc' }),
     ]);
     await submit(dialog, user);
 
     await waitFor(() => expect(filesets).toHaveLength(1));
-    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'github-token' });
+    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'github-owner-repo' });
+  });
+
+  it('does not blame access when the repository read fails for another reason', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'unavailable' }, { status: 503 }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
   });
 
   it('says which secret could not read the repository', async () => {

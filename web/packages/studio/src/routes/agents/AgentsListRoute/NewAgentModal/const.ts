@@ -3,6 +3,7 @@
 
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { deployOnCreateFormSchema } from '@studio/api/agents/useDeployOnCreate';
+import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
@@ -14,10 +15,8 @@ export const NEW_AGENT_TABS = [
   'coding-agent-prompt',
 ] as const;
 
-export const GITHUB_TOKEN_SECRET_DEFAULTS = {
-  name: 'github-token',
-  description: 'GitHub personal access token with read access to repository contents',
-};
+export const isNewAgentTab = (value: string | null): value is NewAgentTab =>
+  NEW_AGENT_TABS.some((tab) => tab === value);
 
 export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
 
