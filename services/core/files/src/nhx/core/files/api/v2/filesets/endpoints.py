@@ -30,7 +30,7 @@ from nhx.common.entities.client import (
     EntityNotFoundError,
     EntityStoreError,
 )
-from nhx.common.files.storage_config import LocalStorageConfig, S3StorageConfig
+from nhx.common.files.storage_config import GitStorageConfig, LocalStorageConfig, S3StorageConfig
 from nhx.common.observability import BaseContext, scoped_app_ctx
 from nhx.common.secrets.exceptions import SecretAccessDeniedError, SecretNotFoundError
 from nhx.common.service.dependencies import (
@@ -231,6 +231,14 @@ def _validate_user_storage_config(storage: StorageConfig, config: FilesConfig) -
             detail=(
                 "use_sdk_auth=True is not allowed for user-provided S3 storage. "
                 "Provide explicit credentials via access_key_id_secret and secret_access_key_secret."
+            ),
+        )
+    if isinstance(storage, GitStorageConfig) and not storage.known_hosts.strip():
+        raise HTTPException(
+            status_code=HTTP_400_BAD_REQUEST,
+            detail=(
+                "known_hosts is required for git storage. Get the host's keys from "
+                "git-repositories/find-files and pass the line of the key whose fingerprint you confirmed."
             ),
         )
 
