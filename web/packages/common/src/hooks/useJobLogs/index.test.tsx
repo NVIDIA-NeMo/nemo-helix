@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useJobLogs } from '@nemo/common/src/hooks/useJobLogs/index';
 import { jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import {
   HelixJobStatus,
@@ -10,8 +11,6 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-
-import { useJobLogs } from './index';
 
 vi.mock('@nemo/sdk/generated/platform/jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/jobs')>();

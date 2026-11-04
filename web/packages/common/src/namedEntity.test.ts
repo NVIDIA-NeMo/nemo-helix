@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DEFAULT_WORKSPACE } from './models/constants';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
 import {
   getEntityReference,
   getURNFromNamedEntityRef,
   type NamedEntity,
   type NamedEntityRef,
-} from './namedEntity';
+} from '@nemo/common/src/namedEntity';
 
 describe('getEntityFullName', () => {
   it('should return empty string for undefined input', () => {

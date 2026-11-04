@@ -1,9 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { HyperparameterFieldMetadata } from '@nemo/common/src/components/TrainingParameterSlider/types';
 import z from 'zod';
-
-import type { HyperparameterFieldMetadata } from '../components/TrainingParameterSlider/types';
 
 export const MAX_TOKENS_MIN = 1;
 export const MAX_TOKENS_MAX = 4096;

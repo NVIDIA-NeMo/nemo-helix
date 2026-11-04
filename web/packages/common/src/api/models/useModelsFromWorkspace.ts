@@ -1,11 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  buildWorkspaceGroup,
+  ModelWorkspaceGroup,
+  useModelsInfinite,
+} from '@nemo/common/src/api/models/useModels';
 import { ModelsListModelsParams, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { UseQueryOptions } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
-
-import { buildWorkspaceGroup, ModelWorkspaceGroup, useModelsInfinite } from './useModels';
 
 export interface UseModelsFromWorkspaceOptions {
   queryOptions?: Omit<UseQueryOptions<ModelEntitysPage, Error>, 'queryFn' | 'queryKey'>;

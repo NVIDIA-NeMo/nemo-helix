@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { TraceQueue, TraceData } from './TraceQueue';
+import { TraceQueue, TraceData } from '@nemo/common/src/utils/TraceQueue';
 
 describe('TraceQueue', () => {
   let traceQueue: TraceQueue;
