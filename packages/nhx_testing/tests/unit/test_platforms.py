@@ -59,6 +59,11 @@ def test_a_suitable_platform_is_used(httpserver: HTTPServer, monkeypatch: pytest
         pytest.param(
             {"/status": (200, {"controllers": {"status": None}})}, "is not a ready platform", id="no-controller-list"
         ),
+        pytest.param(
+            {"/status": (200, {"controllers": {"status": ["jobs"]}})},
+            "is not a ready platform",
+            id="controller-status-a-list",
+        ),
     ],
 )
 def test_an_unsuitable_platform_fails(

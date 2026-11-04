@@ -26,6 +26,10 @@ def supplied_platform(
 
     Serving them takes a platform that answers ``/health/ready``, has auth on exactly when ``auth_enabled`` is set,
     and runs none of ``forbidden_controllers``. ``start_hint`` ends a failure, to say how to start one that does.
+
+    ``forbidden_controllers`` is for a suite that stands in for a controller by writing that controller's records
+    itself. If the real controller ran on the same platform, it would act on those records mid-test (the taskset-run
+    controller fails runs whose plans don't exist) and fail tests at random; naming it here fails setup instead.
     """
     mode = "auth-on" if auth_enabled else "auth-off"
     base_url = os.environ.get(env_var, "").strip().rstrip("/")
@@ -36,6 +40,8 @@ def supplied_platform(
             http.get("/health/ready").raise_for_status()
             platform_auth = http.get("/apis/auth/discovery").raise_for_status().json()["auth_enabled"]
             running = http.get("/status").raise_for_status().json()["controllers"]["status"]
+            if not isinstance(running, dict):  # a list or a string would let a forbidden controller pass unseen
+                raise TypeError(f"/status controllers.status is a {type(running).__name__}, not an object")
             forbidden_running = [name for name in forbidden_controllers if name in running]
     # ValueError: a body that is not JSON. KeyError, TypeError: JSON that is not shaped like a platform's.
     except (httpx.HTTPError, httpx.InvalidURL, ValueError, KeyError, TypeError) as error:
