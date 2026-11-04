@@ -180,7 +180,7 @@ class S3StorageImpl(StorageImpl):
         objects of the neighboring ``foo-bar`` fileset. The path filter itself
         is a raw S3 prefix match within the fileset:
         - path="dir" matches "dir/file.txt", "dir/subdir/file.txt", etc.
-        - path="file.txt" matches "file.txt" (exact match)
+        - path="file.txt" matches "file.txt", "file.txt/a.txt", and "file.txt.bak"
 
         Note: We don't add a trailing slash to the path filter because that
         would prevent matching files (e.g., "file.txt/" won't match "file.txt").

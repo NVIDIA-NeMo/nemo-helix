@@ -673,7 +673,7 @@ class TestS3StorageImplDeleteAllPrefixIsolation:
         assert set(self._deleted_keys(mock_client)) == owned
         mock_paginator.paginate.assert_called_once_with(Bucket="test-bucket", Prefix=prefix)
 
-    @pytest.mark.parametrize("prefix", ["foo", "foo.txt"])
+    @pytest.mark.parametrize("prefix", ["foo", "foo.txt", "foo/", "foo.txt/"])
     async def test_delete_all_skips_page_of_only_neighbors(self, prefix):
         """A page holding only neighbor keys must not call delete_objects."""
         impl = self._make_impl(prefix)
@@ -694,7 +694,7 @@ class TestS3StorageImplDeleteAllPrefixIsolation:
         assert mock_client.delete_objects.call_count == 1
         assert set(self._deleted_keys(mock_client)) == owned
 
-    @pytest.mark.parametrize("prefix", ["foo", "foo.txt"])
+    @pytest.mark.parametrize("prefix", ["foo", "foo.txt", "foo/", "foo.txt/"])
     async def test_delete_all_one_call_per_owned_page(self, prefix):
         """One delete_objects call per page that still has owned keys."""
         impl = self._make_impl(prefix)
