@@ -40,17 +40,14 @@ CLICKHOUSE_XDIST_GROUP = "nhx_intake_clickhouse"
 CLICKHOUSE_XDIST_FIXTURE = "_clickhouse"
 
 #: Base URL (and therefore port) for the agent-eval subprocess-backend platform. Distinct from
-#: other integration platforms so both can run in the same session without a port clash. Its
-#: override is not ``NHX_AGENT_BASE_URL``: that names a platform someone else already runs, for
-#: ``test_taskset_run_controller.py``, so a fixture starting its own there would find the port taken.
-AGENT_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_SUBPROCESS_BASE_URL", "http://localhost:8090")
+#: other integration platforms so both can run in the same session without a port clash.
+AGENT_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_BASE_URL", "http://localhost:8090")
 
 #: Base URL for the docker-backend platform — its own port so it can coexist with the subprocess one.
 AGENT_DOCKER_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_DOCKER_BASE_URL", "http://localhost:8091")
 
-#: Base URL for the auth-enabled subprocess platform (own port, coexists with the others). Not
-#: overridden by ``NHX_AGENT_AUTH_BASE_URL``, for the same reason.
-AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_AUTH_SUBPROCESS_BASE_URL", "http://localhost:8092")
+#: Base URL for the auth-enabled subprocess platform (own port, coexists with the others).
+AGENT_AUTH_PLATFORM_BASE_URL = os.environ.get("NHX_AGENT_AUTH_BASE_URL", "http://localhost:8092")
 
 #: Base URL for the platform whose cloudpickle opt-in is toggled across restarts (own port).
 CLOUDPICKLE_TOGGLE_PLATFORM_BASE_URL = os.environ.get("NHX_CLOUDPICKLE_TOGGLE_BASE_URL", "http://localhost:8093")

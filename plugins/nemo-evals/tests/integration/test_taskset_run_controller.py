@@ -14,6 +14,9 @@ running the Run Controller itself. ``launch_test_platform.py`` starts one with t
     NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \\
         uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py -m integration
 
+Run this file on its own when the variables are set: the shared ``subprocess_platform`` fixtures read the same
+variables as the port to start their own platform on, and would find it taken.
+
 The controller itself is not started: these tests drive the real
 ``TasksetRunStore`` and ``JobsServiceRunJobs`` through clients that carry exactly the headers the controller's
 ``_service_client`` builds (the platform's own client provider makes them; only the base URL differs).

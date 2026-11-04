@@ -17,8 +17,8 @@ dispatch. Without RUN_AGENT_EVAL_INTEGRATION=1 it skips before starting any
 fixtures. Once opted in, missing Harbor or unavailable Docker FAILS rather than skips.
 
 The shared fixture starts an isolated platform on port 8090 (override with
-NHX_AGENT_SUBPROCESS_BASE_URL); the port must be free. Database, files, and job
-storage are temporary. Plugin allowlists exclude unrelated plugins while keeping core
+NHX_AGENT_BASE_URL); the port must be free. Database, files, and job storage are
+temporary. Plugin allowlists exclude unrelated plugins while keeping core
 services/controllers. UV_NO_SYNC preserves the Harbor extra in child processes.
 The deterministic agent needs no API key or OpenAI calls; Docker image builds
 may need network access.

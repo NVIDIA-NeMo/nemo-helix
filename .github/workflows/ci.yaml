@@ -1425,8 +1425,9 @@ jobs:
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
       # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
-      # Host one per auth mode with the harness's config, then run that file against them: here every
-      # test has to run, and a skip fails the step.
+      # Host one per auth mode with the harness's config, then run only that file against them: the shared
+      # fixtures read the same variables as the port to start their own platform on. Every test has to run
+      # here, and a skip fails the step.
       - name: Run taskset-run controller integration
         id: controller-integration
         if: ${{ !cancelled() }}
