@@ -93,6 +93,7 @@ export const ENTITY_ICONS = {
   // System
   jobs: ListCheckmark,
   recentJobs: ListCheckmark,
+  insightJobs: ListCheckmark,
   secrets: LockClosed,
   members: ProfileGroup,
 } as const satisfies Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>>;

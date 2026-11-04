@@ -65,7 +65,7 @@ export const mockAnalysisRunWithJob = (
     fast_model: mockAnalysisConfig.fast_model,
   });
   return {
-    run: { ...response.run, name, created_at },
+    run: { ...response.run, id: name, entity_id: name, name, created_at },
     job: status ? { ...response.job, name, status } : undefined,
   };
 };
@@ -126,6 +126,38 @@ export const analysisRunCreateHandler = (
       return HttpResponse.json(response);
     }
   );
+
+/** Answers the analysis-config enable/disable calls with the resulting config and records each call. */
+export const analysisConfigWriteHandlers = (
+  onWrite: (call: { action: 'enable' | 'disable'; agent: string; body?: unknown }) => void
+) => [
+  http.post<{ workspace: string; agent: string }>(
+    `${ANALYSIS_CONFIG_URL}/enable`,
+    async ({ params, request }) => {
+      const body = (await request.json()) as { default_model: string; fast_model?: string };
+      onWrite({ action: 'enable', agent: params.agent, body });
+      return HttpResponse.json({
+        ...mockAnalysisConfig,
+        name: params.agent,
+        agent: params.agent,
+        enabled: true,
+        ...body,
+      });
+    }
+  ),
+  http.post<{ workspace: string; agent: string }>(
+    `${ANALYSIS_CONFIG_URL}/disable`,
+    ({ params }) => {
+      onWrite({ action: 'disable', agent: params.agent });
+      return HttpResponse.json({
+        ...mockAnalysisConfig,
+        name: params.agent,
+        agent: params.agent,
+        enabled: false,
+      });
+    }
+  ),
+];
 
 /** Intake evaluations named `names` that recorded traces for `agent`. */
 export const agentEvaluationsHandler = (agent: string, names: string[]) =>
