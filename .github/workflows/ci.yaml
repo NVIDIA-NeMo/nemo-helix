@@ -1096,6 +1096,15 @@ jobs:
             coverage.xml
             coverage.json
             coverage-html/
+      - name: Upload worker crash dumps
+        # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
   # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
@@ -1355,10 +1364,6 @@ jobs:
           NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
-          # xdist never forwards. See conftest.py.
-          PYTEST_CRASH_DUMP_DIR: crash-dumps
-          PYTEST_EXTRA: -p no:faulthandler
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
