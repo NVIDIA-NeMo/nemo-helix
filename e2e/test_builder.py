@@ -247,7 +247,7 @@ def _wait_ready(builder: BuilderClient, workspace: str, names: Sequence[str]) ->
         time.sleep(10)
 
 
-# First in the module, so it runs while the images are most likely still queued or pending.
+# The builder refuses a caller before it looks at the image's status, so this holds whether or not the build is done.
 @pytest.mark.builder_auth_e2e
 @pytest.mark.feature("builder", "auth")
 def test_complete_refuses_callers_not_acting_for_the_submitter(client: NemoClient, build: Build) -> None:
