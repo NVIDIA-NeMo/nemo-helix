@@ -602,6 +602,8 @@ class GitStorageImpl(StorageImpl):
         key = self.secrets.get("ssh_key", "")
         if not key.strip():
             raise GitConfigError(f"The SSH key secret for {self.config.url} is empty")
+        if not self.config.known_hosts.strip():
+            raise GitConfigError(f"known_hosts is required to connect to {self.config.remote.authority}")
 
         with tempfile.TemporaryDirectory(prefix="nhx-git-ssh-") as tmp:
             key_path = Path(tmp) / "id"

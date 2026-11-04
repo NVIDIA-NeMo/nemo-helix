@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tests for the git repository lookup endpoints."""
+"""Tests for the git repository lookup endpoint."""
 
 from collections.abc import Iterator
 from unittest.mock import AsyncMock, patch
@@ -9,15 +9,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.files.types import FindGitRepositoryFilesRequest, ScanSshHostKeysRequest, SshHostKey
+from nemo_helix_plugin.files.types import FindGitRepositoryFilesRequest, SshHostKey
 from nhx.common.api.common import SecretRef
 from nhx.common.auth import get_auth_client
 from nhx.common.service.dependencies import get_nemo_client
-from nhx.core.files.api.v2.git_repositories.endpoints import (
-    find_git_repository_files,
-    router,
-    scan_ssh_host_keys,
-)
+from nhx.core.files.api.v2.git_repositories.endpoints import find_git_repository_files, router
 from nhx.core.files.app.backends.base import FileInfo
 from nhx.core.files.app.backends.git import (
     GitAccessError,
@@ -30,60 +26,20 @@ from nhx.core.files.config import FilesConfig
 from pydantic import ValidationError
 
 KEY = SshHostKey(key_type="ssh-ed25519", fingerprint="SHA256:abc", known_hosts_line="[h]:2222 ssh-ed25519 AAAA")
+SCAN = "nhx.core.files.app.backends.git.scan_host_keys"
+MODULE = "nhx.core.files.api.v2.git_repositories.endpoints"
+STORAGE = GitStorageConfig(
+    url="ssh://git@gitlab.example.com:2222/org/repo.git",
+    ssh_key_secret=SecretRef("key"),
+    known_hosts="[gitlab.example.com]:2222 ssh-ed25519 AAAA",
+)
+UNTRUSTED = STORAGE.model_copy(update={"known_hosts": ""})
 
 
 @pytest.fixture
 def config(monkeypatch: pytest.MonkeyPatch) -> FilesConfig:
     monkeypatch.delenv("NHX_FILES_ALLOWED_EXTERNAL_HOSTS", raising=False)
     return FilesConfig(allowed_external_hosts="ssh://gitlab.example.com:2222")
-
-
-SCAN = "nhx.core.files.app.backends.git.scan_host_keys"
-
-
-async def test_returns_keys_for_an_allowed_host(config):
-    with patch(SCAN, AsyncMock(return_value=[KEY])) as scan:
-        response = await scan_ssh_host_keys(
-            "default", ScanSshHostKeysRequest(url="ssh://git@gitlab.example.com:2222/org/repo.git"), config
-        )
-    assert response.host == "gitlab.example.com:2222"
-    assert response.keys == [KEY]
-    assert scan.await_args is not None
-    assert scan.await_args.args[0].port == 2222
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "git@other.example.com:org/repo.git",
-        "git@gitlab.example.com:org/repo.git",
-        "https://gitlab.example.com/org/repo",
-    ],
-)
-async def test_refuses_to_scan_anything_not_allowlisted(url, config):
-    with patch(SCAN, AsyncMock()) as scan, pytest.raises(HTTPException) as raised:
-        await scan_ssh_host_keys("default", ScanSshHostKeysRequest(url=url), config)
-    assert raised.value.status_code == 400
-    scan.assert_not_awaited()
-
-
-async def test_unreachable_host_is_a_bad_gateway(config):
-    with (
-        patch(SCAN, AsyncMock(side_effect=GitUnavailableError("no keys"))),
-        pytest.raises(HTTPException) as raised,
-    ):
-        await scan_ssh_host_keys(
-            "default", ScanSshHostKeysRequest(url="ssh://gitlab.example.com:2222/org/repo.git"), config
-        )
-    assert raised.value.status_code == 502
-
-
-STORAGE = GitStorageConfig(
-    url="ssh://git@gitlab.example.com:2222/org/repo.git",
-    ssh_key_secret=SecretRef("key"),
-    known_hosts="[gitlab.example.com]:2222 ssh-ed25519 AAAA",
-)
-MODULE = "nhx.core.files.api.v2.git_repositories.endpoints"
 
 
 class _FakeGit:
@@ -104,7 +60,12 @@ class _FakeGit:
         return self.files
 
 
-async def _find(files: list[FileInfo] | None = None, error: Exception | None = None):
+async def _find(
+    config: FilesConfig,
+    storage: GitStorageConfig = STORAGE,
+    files: list[FileInfo] | None = None,
+    error: Exception | None = None,
+):
     fake = type("Fake", (_FakeGit,), {"files": files or [], "error": error})
     with (
         patch(f"{MODULE}.resolve_storage_secrets_for_user", AsyncMock(return_value={"ssh_key": "k"})),
@@ -112,24 +73,27 @@ async def _find(files: list[FileInfo] | None = None, error: Exception | None = N
     ):
         return await find_git_repository_files(
             "default",
-            FindGitRepositoryFilesRequest(storage=STORAGE, file_name="agent.yaml"),
+            FindGitRepositoryFilesRequest(storage=storage, file_name="agent.yaml"),
             client=AsyncMock(),
             auth_client=AsyncMock(),
+            config=config,
         )
 
 
-async def test_find_files_returns_the_resolved_commit_and_matching_paths():
+async def test_find_files_returns_the_resolved_commit_and_matching_paths(config):
     response = await _find(
-        [
+        config,
+        files=[
             FileInfo(path="agents/b/agent.yaml", size=1),
             FileInfo(path="README.md", size=1),
             FileInfo(path="agent.yaml", size=1),
             FileInfo(path="agents/a/agent.yaml", size=1),
             FileInfo(path="agents/c/not-agent.yaml", size=1),
-        ]
+        ],
     )
     assert response.revision == "a" * 40
     assert response.paths == ["agent.yaml", "agents/a/agent.yaml", "agents/b/agent.yaml"]
+    assert response.host_keys == []
 
 
 @pytest.mark.parametrize(
@@ -140,9 +104,9 @@ async def test_find_files_returns_the_resolved_commit_and_matching_paths():
         (GitUnavailableError("unreachable"), 502),
     ],
 )
-async def test_find_files_reports_failures_like_create(error, status):
+async def test_find_files_reports_failures_like_create(config, error, status):
     with pytest.raises(HTTPException) as raised:
-        await _find(error=error)
+        await _find(config, error=error)
     assert raised.value.status_code == status
 
 
@@ -152,9 +116,47 @@ def test_find_files_takes_a_bare_file_name(file_name):
         FindGitRepositoryFilesRequest(storage=STORAGE, file_name=file_name)
 
 
-async def test_find_files_leaves_a_server_fault_to_the_server_error_handler():
+async def test_find_files_leaves_a_server_fault_to_the_server_error_handler(config):
     with pytest.raises(GitServerFault):
-        await _find(error=GitServerFault("git is not installed in the files service"))
+        await _find(config, error=GitServerFault("git is not installed in the files service"))
+
+
+async def test_without_known_hosts_returns_the_host_keys_and_reads_nothing(config):
+    with patch(SCAN, AsyncMock(return_value=[KEY])) as scan:
+        response = await _find(config, storage=UNTRUSTED, error=AssertionError("the repository was read"))
+    assert response.host_keys == [KEY]
+    assert response.revision is None
+    assert response.paths == []
+    assert scan.await_args is not None
+    assert scan.await_args.args[0].port == 2222
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["git@other.example.com:org/repo.git", "git@gitlab.example.com:org/repo.git"],
+)
+async def test_refuses_to_scan_a_host_not_allowlisted(config, url):
+    with patch(SCAN, AsyncMock()) as scan, pytest.raises(HTTPException) as raised:
+        await _find(config, storage=UNTRUSTED.model_copy(update={"url": url}))
+    assert raised.value.status_code == 400
+    scan.assert_not_awaited()
+
+
+async def test_a_host_that_cannot_be_scanned_is_a_bad_gateway(config):
+    with (
+        patch(SCAN, AsyncMock(side_effect=GitUnavailableError("no keys"))),
+        pytest.raises(HTTPException) as raised,
+    ):
+        await _find(config, storage=UNTRUSTED)
+    assert raised.value.status_code == 502
+
+
+async def test_scan_leaves_a_server_fault_to_the_server_error_handler(config):
+    with (
+        patch(SCAN, AsyncMock(side_effect=GitServerFault("ssh-keyscan is not installed in the files service"))),
+        pytest.raises(GitServerFault),
+    ):
+        await _find(config, storage=UNTRUSTED)
 
 
 @pytest.fixture
@@ -168,13 +170,21 @@ def http(config: FilesConfig) -> Iterator[TestClient]:
         yield client
 
 
-def test_scan_is_routed_under_the_workspace(http):
+def _post_find(http: TestClient, known_hosts: str | None):
+    storage = {"type": "git", "url": STORAGE.url, "ssh_key_secret": "key"}
+    if known_hosts is not None:
+        storage["known_hosts"] = known_hosts
+    return http.post(
+        "/v2/workspaces/default/git-repositories/find-files",
+        json={"storage": storage, "file_name": "agent.yaml"},
+    )
+
+
+def test_find_files_without_known_hosts_is_routed_to_the_scan(http):
     with patch(SCAN, AsyncMock(return_value=[KEY])):
-        response = http.post(
-            "/v2/workspaces/default/ssh-host-keys/scan", json={"url": "ssh://gitlab.example.com:2222/org/repo.git"}
-        )
+        response = _post_find(http, known_hosts=None)
     assert response.status_code == 200
-    assert response.json()["keys"][0]["fingerprint"] == KEY.fingerprint
+    assert response.json()["host_keys"][0]["fingerprint"] == KEY.fingerprint
 
 
 def test_find_files_is_routed_under_the_workspace(http):
@@ -183,27 +193,6 @@ def test_find_files_is_routed_under_the_workspace(http):
         patch(f"{MODULE}.resolve_storage_secrets_for_user", AsyncMock(return_value={"ssh_key": "k"})),
         patch("nhx.core.files.app.backends.git.GitStorageImpl", fake),
     ):
-        response = http.post(
-            "/v2/workspaces/default/git-repositories/find-files",
-            json={
-                "storage": {
-                    "type": "git",
-                    "url": STORAGE.url,
-                    "ssh_key_secret": "key",
-                    "known_hosts": STORAGE.known_hosts,
-                },
-                "file_name": "agent.yaml",
-            },
-        )
+        response = _post_find(http, known_hosts=STORAGE.known_hosts)
     assert response.status_code == 200
     assert response.json()["paths"] == ["a/agent.yaml"]
-
-
-async def test_scan_leaves_a_server_fault_to_the_server_error_handler(config):
-    with (
-        patch(SCAN, AsyncMock(side_effect=GitServerFault("ssh-keyscan is not installed in the files service"))),
-        pytest.raises(GitServerFault),
-    ):
-        await scan_ssh_host_keys(
-            "default", ScanSshHostKeysRequest(url="ssh://gitlab.example.com:2222/org/repo.git"), config
-        )
