@@ -25,6 +25,16 @@ import YAML from 'yaml';
  */
 export const agentSpecFilesetName = (agentName: string): string => `${agentName}-ethos`;
 
+const AGENT_CONFIG_SUFFIX = `/${AGENT_CONFIG_FILENAME}`;
+
+/** The directory holding the agent.yaml at *path* (`''` for the root), or undefined if it is another file. */
+export const agentDirectoryOf = (path: string): string | undefined => {
+  if (path === AGENT_CONFIG_FILENAME) return '';
+  return path.endsWith(AGENT_CONFIG_SUFFIX)
+    ? path.slice(0, -AGENT_CONFIG_SUFFIX.length)
+    : undefined;
+};
+
 export const tooManyPickedFiles = (pickedCount: number): string | undefined =>
   pickedCount > MAX_PICKED_FILES
     ? `That selection holds ${pickedCount.toLocaleString()} files, far more than an agent should. Select the agent's own files, or the directory holding them.`

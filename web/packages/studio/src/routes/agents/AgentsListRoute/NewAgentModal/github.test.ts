@@ -124,16 +124,14 @@ describe('githubStorageConfig', () => {
 
 describe('agentNameFromSource', () => {
   it('uses the repository when no directory is given', () => {
-    expect(agentNameFromSource({ owner: 'acme', repo: 'Calc-Agent', path: '' })).toBe('calc-agent');
+    expect(agentNameFromSource({ repo: 'Calc-Agent', path: '' })).toBe('calc-agent');
   });
 
   it('prefers the directory holding agent.yaml', () => {
-    expect(agentNameFromSource({ owner: 'acme', repo: 'agents', path: 'agents/Calc_Bot' })).toBe(
-      'calc-bot'
-    );
+    expect(agentNameFromSource({ repo: 'agents', path: 'agents/Calc_Bot' })).toBe('calc-bot');
   });
 
   it('produces a name the form schema accepts', () => {
-    expect(agentNameFromSource({ owner: 'acme', repo: '__weird__', path: '' })).toBe('weird');
+    expect(agentNameFromSource({ repo: '__weird__', path: '' })).toBe('weird');
   });
 });
