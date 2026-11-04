@@ -140,6 +140,14 @@ def test_denied_cidrs_carve_out_a_resolvable_hostname(monkeypatch):
     assert _is_denied("10.0.0.52", denied)
 
 
+def test_name_only_targets_are_allowed_but_not_carved_out(monkeypatch):
+    """A name-only host is allowed by name, as a wildcard is, but its private answer stays denied."""
+    monkeypatch.setattr(egress, "_resolve_host", lambda target: (ipaddress.ip_network("10.0.0.51"),))
+    policy = build_egress_policy(EgressAllowlist(name_only_targets=("internal.example.com",), resolver_addresses=()))
+    assert "internal.example.com" in {rule.target for rule in policy.rules if rule.action == "allow"}
+    assert _is_denied("10.0.0.51", [rule.target for rule in policy.rules if rule.action == "deny"])
+
+
 def test_denied_cidrs_do_not_depend_on_resolution_order(monkeypatch):
     """DNS round-robin reorders a host's addresses; the deny list must come out the same."""
     answers = [

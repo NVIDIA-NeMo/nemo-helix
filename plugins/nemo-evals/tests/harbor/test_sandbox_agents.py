@@ -65,6 +65,36 @@ def test_allowlist_without_channel_keeps_the_task_hosts():
     assert allowed & {IGW, "pypi.org"} == {"pypi.org"}
 
 
+def _is_denied(policy: Any, address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return any(
+        ip in network
+        for network in (ipaddress.ip_network(rule.target) for rule in policy.rules if rule.action == "deny")
+        if network.version == ip.version
+    )
+
+
+@pytest.mark.parametrize("address", ["10.0.0.51", "169.254.169.254"])
+def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(monkeypatch, address):
+    """The task's host is allowed by name only; the operator's channel host still gets its carve-out."""
+    answers = {"internal.attacker.com": address, IGW: "10.0.0.60"}
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
+    environment = _environment(NetworkMode.ALLOWLIST, (IGW,), trusted=("*.com",), allowed=("internal.attacker.com",))
+    environment._agent_setup_hosts = ("registry.npmjs.org",)
+
+    policy = environment.egress_policy()
+    opened = opensandbox_environment.build_egress_policy(
+        environment._egress_allowlist((*_allowed(policy), *environment._agent_setup_hosts))
+    )
+
+    for built in (policy, opened):
+        assert "internal.attacker.com" in _allowed(built)
+        assert _is_denied(built, address)
+        assert not _is_denied(built, "10.0.0.60")
+
+
 def test_public_tasks_keep_the_profile_allowlist():
     policy = _environment(NetworkMode.PUBLIC, (IGW,), trusted=(IGW, "pypi.org")).egress_policy()
     assert {IGW, "pypi.org"} <= _allowed(policy)
