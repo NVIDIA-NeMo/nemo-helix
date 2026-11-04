@@ -89,6 +89,26 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* && \
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
 
+# Preinstall the Codex CLI so Gym's codex_agent finds `codex` on PATH and skips its runtime
+# Node.js + npm download, which sandbox egress policies usually block.
+ARG TARGETARCH
+ARG CODEX_VERSION=0.160.1
+ARG CODEX_SHA256_AMD64=9226581be592d18f7e7f740a352fdb63aa61e45e39f7eb9b09d3888c84bba33f
+ARG CODEX_SHA256_ARM64=f54dc5852042445bf41da3aa31156f3cb02f52c5a1a04074de73dc5598f7e1f7
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+      amd64) triple=x86_64-unknown-linux-musl; sha256="${CODEX_SHA256_AMD64}" ;; \
+      arm64) triple=aarch64-unknown-linux-musl; sha256="${CODEX_SHA256_ARM64}" ;; \
+      *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/codex.tar.gz \
+      "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-${triple}.tar.gz"; \
+    echo "${sha256}  /tmp/codex.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/codex.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/codex-${triple}" /usr/local/bin/codex; \
+    rm -f /tmp/codex.tar.gz "/tmp/codex-${triple}"; \
+    codex --version
+
 # Copy uv because Gym uses it to launch component environments.
 COPY --from=builder /bin/uv /bin/uv
 COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
@@ -118,6 +138,7 @@ CMD ["python", "-m", "sandboxed_gym.runtime.gym_host_runtime"]
 
 FROM runtime AS smoke-test
 RUN gym --help >/dev/null \
+    && codex --version \
     && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
         -path '*/mlflow-*.dist-info/METADATA' -print -quit)" \
     && test -z "$(find /opt/gym-host-venv /opt/gym_venvs /home/ubuntu/.cache/uv \
