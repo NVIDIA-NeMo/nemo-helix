@@ -5064,7 +5064,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.3.5" },
     { name = "nemo-helix", editable = "packages/nemo_helix" },
     { name = "nemo-helix-plugin", editable = "packages/nemo_helix_plugin" },
-    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.24.1" },
     { name = "pyyaml", marker = "extra == 'bench'", specifier = ">=6.0" },
 ]
 provides-extras = ["bench"]
@@ -6594,11 +6594,11 @@ requires-dist = [
     { name = "nemo-switchyard", marker = "extra == 'nemo-switchyard'", specifier = "==0.3.0" },
     { name = "nemo-switchyard", marker = "extra == 'plugins'", specifier = "==0.3.0" },
     { name = "nemo-switchyard", marker = "extra == 'services'", specifier = "==0.3.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'plugins'", specifier = "==0.23.0" },
-    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'services'", specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'all'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'guardrails-service'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'nemo-guardrails-plugin'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'plugins'", specifier = "==0.24.1" },
+    { name = "nemoguardrails", extras = ["tracing"], marker = "extra == 'services'", specifier = "==0.24.1" },
     { name = "ngcsdk", marker = "extra == 'all'", specifier = ">=4.9.10" },
     { name = "ngcsdk", marker = "extra == 'core-service'", specifier = ">=4.9.10" },
     { name = "ngcsdk", marker = "extra == 'files-service'", specifier = ">=4.9.10" },
@@ -7689,20 +7689,20 @@ dev = [
 
 [[package]]
 name = "nemoguardrails"
-version = "0.23.0"
+version = "0.24.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "aiohttp-retry" },
     { name = "dataclasses-json" },
-    { name = "fastembed", marker = "python_full_version < '3.14'" },
+    { name = "fastembed" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "lark" },
     { name = "nest-asyncio" },
+    { name = "numpy" },
     { name = "onnxruntime" },
-    { name = "pandas" },
     { name = "prompt-toolkit" },
     { name = "protobuf" },
     { name = "pydantic" },
@@ -7712,7 +7712,7 @@ dependencies = [
     { name = "typer" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/ec/02ea37d5bea9178b192540fb9dfcfc1d7a080fb20a6465612b888e896306/nemoguardrails-0.23.0-py3-none-any.whl", hash = "sha256:91106c9718748fd760e873dd872915c6ed15d15c80300d538c8a1f4024eff92a", size = 891405, upload-time = "2026-07-01T16:24:54.322Z" },
+    { url = "https://files.pythonhosted.org/packages/59/5c/e44694350e4867436bc897365b8e0d6383b9e990fa18b56fb4bf9fe35939/nemoguardrails-0.24.1-py3-none-any.whl", hash = "sha256:4fcfc9d9456cdcbcc939fbd4ba884e9fc89b7f200bd9d8ed77836298bf31680f", size = 1060573, upload-time = "2026-09-16T17:17:10.794Z" },
 ]
 
 [package.optional-dependencies]
@@ -8876,7 +8876,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27.2" },
     { name = "langchain-nvidia-ai-endpoints", specifier = ">=1.4.3,<2.0.0" },
     { name = "langchain-openai", specifier = ">=1.3.5,<2.0.0" },
-    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.23.0" },
+    { name = "nemoguardrails", extras = ["tracing"], specifier = "==0.24.1" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "openai", specifier = ">=1.61.0" },
     { name = "opentelemetry-distro", specifier = ">=0.64b0" },
