@@ -6,7 +6,7 @@ name = "nhx-gym-host"
 version = "0.0.0"
 requires-python = ">=3.13.14,<3.14"
 dependencies = [
-    "nemo-gym==0.5.0",
+    "nemo-gym==0.7.0",
     "nemo-sandboxed-gym[runtime]",
     "tiktoken==0.13.0",
 ]
@@ -25,7 +25,7 @@ nemo-sandboxed-gym = ["nhx-build-tools"]
 constraint-dependencies = [
     "certifi>=2026.10.19",
     "pip>=26.2.2",
-    "mlflow-skinny>=3.15.0,<3.16.0",
+    "mlflow-skinny>=3.15.0,<3.17.0",
     "sqlparse>=0.6.0,<0.7",
     "wandb>=0.30.0",
     "virtualenv>=21.14.13", # GHSA-cx6f-vjhg-g3cc and GHSA-4f8h-vr72-p32c
