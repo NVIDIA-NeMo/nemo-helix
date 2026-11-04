@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { MIME_TYPES, toJsonl } from '@nemo/common/src/utils/download';
 import { filesUploadFile } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
@@ -68,9 +69,7 @@ export const useDatasetFileTransform = ({ onError, onSuccess }: Props) => {
           : row;
         return renderTemplate(template, input).row;
       });
-      const blob = new Blob([transformed.map((row) => JSON.stringify(row)).join('\n')], {
-        type: 'application/json',
-      });
+      const blob = new Blob([toJsonl(transformed)], { type: MIME_TYPES.jsonl });
 
       return filesUploadFile(workspace, datasetName, filepath, blob);
     },

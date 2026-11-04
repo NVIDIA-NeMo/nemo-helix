@@ -13,10 +13,11 @@ Fern generates its request snippets from the operation alone. Three shapes come 
   embedding bearer placeholders. Their auth requirement comes from native OpenAPI metadata.
 
 For these operations this module writes explicit Python and JavaScript samples and
-an SDK override for Fern's default cURL tab. Binary downloads use bytes rather than a JSON decoder;
-raw uploads have representative nonempty content. ATIF's empty 201 response is handled explicitly.
-Operations that already carry ``x-codeSamples`` (authored on the route) are left alone, and
-the output depends only on the spec, so regeneration is idempotent.
+SDK overrides for Fern's default Python, JavaScript, and cURL tabs. Binary downloads
+use bytes rather than a JSON decoder; raw uploads have representative nonempty content.
+Empty 201 responses are handled explicitly. Existing route-authored ``x-codeSamples``
+are preserved and mirrored into SDK overrides too. The output depends only on the
+spec, so regeneration is idempotent.
 """
 
 from __future__ import annotations
@@ -31,7 +32,13 @@ from urllib.parse import urlencode
 BASE_URL = "http://localhost:8080"
 LANGUAGES = ("Python", "JavaScript")
 _BODYLESS_STATUSES = {"204", "205"}
-_METHODS = ("get", "put", "post", "delete", "patch")
+_METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
+
+_CURRENT_TIMESTAMP = "__NHX_CURRENT_TIMESTAMP__"
+
+# ExportTraceServiceRequest -> ResourceSpans -> ScopeSpans -> Span, with nonzero
+# 16/8-byte IDs. Omitted optional timestamps use the server's ingest time.
+_OTLP_TRACES_BASE64 = "CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw=="
 
 _OTLP_LOGS_BODY: dict[str, Any] = {
     "resourceLogs": [
@@ -71,6 +78,8 @@ class SampleRequest:
     reads_body: bool = True
     binary_response: bool = False
     requires_bearer_token: bool = False
+    body_is_base64: bool = False
+    body_uses_current_timestamp: bool = False
 
     def __post_init__(self) -> None:
         if self.requires_bearer_token and any(key.lower() == "authorization" for key in self.headers):
@@ -92,6 +101,36 @@ _EXPLICIT: dict[tuple[str, str], dict[str, Any]] = {
             }
         ),
         "reads_body": False,
+    },
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/spans"): {
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(
+            {
+                "source": "my-agent",
+                "spans": [
+                    {
+                        "trace_id": "my-trace",
+                        "span_id": "my-span",
+                        "name": "Agent request",
+                        "started_at": _CURRENT_TIMESTAMP,
+                        "input": "Hello!",
+                        "output": "Hello from Helix!",
+                    }
+                ],
+            }
+        ),
+        "body_uses_current_timestamp": True,
+        "reads_body": False,
+    },
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces"): {
+        "headers": {"Content-Type": "application/x-protobuf"},
+        "body": _OTLP_TRACES_BASE64,
+        "body_is_base64": True,
+    },
+    ("patch", "/apis/intake/v2/workspaces/{workspace}/evaluations/{name}"): {
+        "headers": {"Content-Type": "application/json"},
+        # Change a mutable field without replacing membership or immutable fields.
+        "body": json.dumps({"description": "Reviewed evaluation results"}),
     },
     ("post", "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"): {
         "headers": {"Content-Type": "application/json"},
@@ -219,7 +258,15 @@ def _python(r: SampleRequest) -> str:
         lines.append("headers = {" + ", ".join(headers) + "}")
         args.append("headers=headers")
     if r.body is not None:
-        lines.append(f"payload = {_q(r.body)}")
+        if r.body_is_base64:
+            lines += ["import base64", f"payload = base64.b64decode({_q(r.body)})"]
+        else:
+            lines.append(f"payload = {_q(r.body)}")
+            if r.body_uses_current_timestamp:
+                lines += [
+                    "from datetime import datetime, timezone",
+                    f"payload = payload.replace({_q(_CURRENT_TIMESTAMP)}, datetime.now(timezone.utc).isoformat())",
+                ]
         args.append("data=payload")
     lines += ["", f"response = requests.request({_q(r.method)}, {', '.join(args)})", "response.raise_for_status()"]
     if r.binary_response:
@@ -238,11 +285,20 @@ def _javascript(r: SampleRequest) -> str:
             "// Do not embed a real token in frontend source or build-time environment variables.",
         ]
         headers.append('"Authorization": `Bearer ${token}`')
+    if r.body_uses_current_timestamp:
+        lines.append(f"const payload = {_q(r.body)}.replace({_q(_CURRENT_TIMESTAMP)}, new Date().toISOString());")
     lines += [f"const response = await fetch({_q(r.url)}, {{", f"  method: {_q(r.method)},"]
     if headers:
         lines.append("  headers: {" + ", ".join(headers) + "},")
     if r.body is not None:
-        lines.append(f"  body: {_q(r.body)},")
+        body = (
+            f"Uint8Array.from(atob({_q(r.body)}), c => c.charCodeAt(0))"
+            if r.body_is_base64
+            else "payload"
+            if r.body_uses_current_timestamp
+            else _q(r.body)
+        )
+        lines.append(f"  body: {body},")
     lines += ["});", "if (!response.ok) throw new Error(`HTTP ${response.status}`);"]
     lines.append(
         "console.log(await response.arrayBuffer());"
@@ -265,7 +321,14 @@ def _curl(r: SampleRequest) -> str:
         guidance = ': "${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}"\n'
         args.append('--header "Authorization: Bearer ${NHX_ACCESS_TOKEN}"')
     if r.body is not None:
-        args.append("--data-binary " + shlex.quote(r.body))
+        if r.body_is_base64:
+            guidance += f"printf %s {shlex.quote(r.body)} | base64 -d | "
+            args.append("--data-binary @-")
+        elif r.body_uses_current_timestamp:
+            guidance += "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n"
+            args.append("--data-binary " + shlex.quote(r.body).replace(_CURRENT_TIMESTAMP, "'\"${timestamp}\"'"))
+        else:
+            args.append("--data-binary " + shlex.quote(r.body))
     if r.binary_response:
         args.append("--output example.txt")
     return guidance + " \\\n  ".join(args) + "\n"
@@ -285,14 +348,24 @@ def add_code_samples(spec: dict) -> dict:
             request = sample_request(spec, path, method, operation)
             if request is not None:
                 operation["x-codeSamples"] = render_samples(request)
-                # Redocly x-codeSamples creates custom tabs. Only an SDK sample overrides
-                # Fern's default cURL tab; another custom `curl` tab does not replace it.
-                sdk_samples = [{"sdk": "curl", "code": _curl(request)}]
-                if request.requires_bearer_token:
-                    # With native auth, Fern's HTTP fallback can replace custom
-                    # language tabs. SDK overrides preserve these runtime bindings.
-                    sdk_samples += [
-                        {"sdk": language.lower(), "code": _RENDERERS[language](request)} for language in LANGUAGES
-                    ]
-                operation.setdefault("x-fern-examples", []).append({"code-samples": sdk_samples})
+            # settings.http-snippets enables Fern's generated tabs, which take precedence
+            # over Redocly x-codeSamples. Override the SDK tabs for *all* custom samples,
+            # including route-authored ones and HEAD, not just bearer-auth operations.
+            overrides = {
+                sample["lang"].lower(): sample["source"]
+                for sample in operation.get("x-codeSamples", [])
+                if sample["lang"] in LANGUAGES
+            }
+            if request is not None:
+                overrides = {"curl": _curl(request), **overrides}
+            if overrides:
+                examples = operation.setdefault("x-fern-examples", [])
+                if not examples:
+                    examples.append({})
+                # Preserve request/response examples and unrelated SDKs. Every example
+                # must carry the override, otherwise selecting one revives the fallback.
+                for example in examples:
+                    samples = example.setdefault("code-samples", [])
+                    samples[:] = [sample for sample in samples if sample.get("sdk") not in overrides]
+                    samples.extend({"sdk": sdk, "code": code} for sdk, code in overrides.items())
     return spec

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { escapeCSV } from '@nemo/common/src/components/DataView/internal/utils/csv';
 import { triggerDownload } from '@nemo/common/src/utils/file';
 
 export type DownloadFormat = 'json' | 'jsonl' | 'csv';
@@ -16,24 +15,44 @@ export interface DownloadPayload {
   csv: CsvRow[];
 }
 
-const MIME_TYPES: Record<DownloadFormat, string> = {
+export const MIME_TYPES: Record<DownloadFormat, string> = {
   json: 'application/json',
   jsonl: 'application/jsonl',
   csv: 'text/csv',
 };
 
-const toCell = (value: unknown): string => {
+/** Parquet INT64 columns decode as BigInt, which JSON.stringify rejects by default. */
+const jsonReplacer = (_key: string, value: unknown): unknown =>
+  typeof value === 'bigint' ? value.toString() : value;
+
+export interface CsvOptions {
+  /** Column order; defaults to the union of every row's keys, in first-seen order. */
+  columns?: readonly string[];
+  /** Prefixes strings a spreadsheet would run as a formula with `'`. Disable for data files that
+   *  must round-trip unchanged. @defaultValue true */
+  formulaSafe?: boolean;
+}
+
+/** Formats one CSV cell: nested values as JSON, quoted when it holds a comma, quote, or newline. */
+export const toCsvCell = (value: unknown, { formulaSafe = true }: CsvOptions = {}): string => {
   if (value == null) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  const text = typeof value === 'object' ? JSON.stringify(value, jsonReplacer) : String(value);
+  // Only strings: a negative number is not a formula.
+  const safe =
+    formulaSafe && typeof value === 'string' && /^[=+\-@]/.test(text.trimStart())
+      ? `'${text}`
+      : text;
+  return /[,"\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 
-/** Serializes rows to CSV. Columns are the union of every row's keys, in first-seen order; nested
- *  values are written as JSON so no data is lost. */
-export const toCsv = (rows: readonly CsvRow[]): string => {
-  const columns = [...new Set(rows.flatMap(Object.keys))];
-  return [columns, ...rows.map((row) => columns.map((column) => toCell(row[column])))]
-    .map((cells) => cells.map(escapeCSV).join(','))
+/** Serializes rows to CSV, writing nested values as JSON so no data is lost. */
+export const toCsv = <T extends object>(rows: readonly T[], options: CsvOptions = {}): string => {
+  const columns = options.columns ?? [...new Set(rows.flatMap(Object.keys))];
+  return [
+    columns.map((column) => toCsvCell(column, options)),
+    ...rows.map((row) => columns.map((column) => toCsvCell((row as CsvRow)[column], options))),
+  ]
+    .map((cells) => cells.join(','))
     .join('\n');
 };
 
@@ -41,7 +60,7 @@ export const toCsv = (rows: readonly CsvRow[]): string => {
 export const toFileName = (name: string): string => name.replace(/[^\w.-]+/g, '_');
 
 export const toJsonl = (rows: readonly unknown[]): string =>
-  rows.map((row) => JSON.stringify(row)).join('\n');
+  rows.map((row) => JSON.stringify(row, jsonReplacer)).join('\n');
 
 const SERIALIZERS: Record<DownloadFormat, (payload: DownloadPayload) => string> = {
   json: (payload) => JSON.stringify(payload.json, null, 2),

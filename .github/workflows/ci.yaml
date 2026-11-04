@@ -134,7 +134,7 @@ jobs:
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
   uv-lock:
-    name: Check uv lock
+    name: Dependency checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -143,6 +143,7 @@ jobs:
           persist-credentials: false
 
       - name: Install platform uv
+        id: uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
@@ -155,26 +156,8 @@ jobs:
       - name: Check lock with platform uv
         run: bash script/uv-lock.sh --check
 
-  uv-compatibility:
-    name: Check configured uv compatibility
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Install configured uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: false
-          python-version: "3.13"
-
-      - name: Show uv version
-        run: uv --version
-
       - name: Check sync with configured uv
+        if: ${{ !cancelled() && steps.uv.outcome == 'success' }}
         run: uv sync --frozen --all-packages
 
   docker-bake-graph:
@@ -498,63 +481,6 @@ jobs:
         shell: bash
         run: make docker-build TARGET=docker-gpu
 
-  kind-cpu-smoke:
-    name: Kind CPU smoke test
-    needs: [changes, build-cpu-smoke-images]
-    if: >
-      !cancelled() &&
-      needs.build-cpu-smoke-images.result == 'success' &&
-      needs.build-cpu-smoke-images.outputs.publish_images == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      packages: read
-    env:
-      KIND_CLUSTER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}-kind-smoke
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - name: Setup Kind cluster with NeMo Helix
-        uses: ./.github/actions/setup-kind-cluster
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          image-registry: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          image-tag: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-          kind-image-pull-token: ${{ github.token }}
-          kind-image-pull-user: ${{ github.actor }}
-
-      - name: Run CPU job e2e smoke test
-        shell: bash
-        env:
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          E2E_SERVICES_LOG_DIR: ${{ runner.temp }}/e2e-services-logs
-          NGC_API_KEY: not-used-for-ghcr-cpu-smoke
-          NHX_E2E_IMAGE_REGISTRY: ${{ needs.build-cpu-smoke-images.outputs.image_registry }}
-          NHX_E2E_IMAGE_TAG: ${{ needs.build-cpu-smoke-images.outputs.image_tag }}
-        run: |
-          test -n "${NHX_E2E_CLUSTER_URL}"
-          export NHX_BASE_URL="${NHX_E2E_CLUSTER_URL}"
-          uv run --frozen pytest \
-            e2e/test_jobs.py::test_job_using_secret_environment_variable \
-            e2e/test_models_deployments_plugin.py::test_generic_model_deployment_lifecycle \
-            -v \
-            --run-e2e \
-            --no-cov \
-            --junitxml=report-kubernetes-smoke.xml
-
-      - name: Finalize Kind e2e
-        if: always()
-        uses: ./.github/actions/finalize-kind-e2e
-        with:
-          kind-cluster-name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact-name: kind-smoke-kubernetes-artifacts
-          junit-report: report-kubernetes-smoke.xml
-          services-log-dir: ${{ runner.temp }}/e2e-services-logs
-
   kind-cpu-e2e:
     name: Kind CPU e2e
     needs: [changes, build-cpu-smoke-images]
@@ -595,7 +521,9 @@ jobs:
           e2e/k8s/scripts/prepull_kind_images.sh \
             "${NHX_E2E_IMAGE_REGISTRY}/nhx-agents-deepagents-e2e:${NHX_E2E_IMAGE_TAG}"
 
-      - name: Run jobs and data-designer e2e tests
+      # Includes the job-secret and generic-model lifecycle smoke tests; do not
+      # provision a second identical cluster just to execute those tests again.
+      - name: Run CPU e2e tests (including smoke tests)
         shell: bash
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -702,7 +630,7 @@ jobs:
           artifact-name: kind-gym-e2e-kubernetes-artifacts
           junit-report: report-kubernetes-gym-*.xml
           services-log-dir: ${{ runner.temp }}/e2e-services-logs
-  
+
   kind-customizer-auth-e2e:
     name: Kind customizer auth e2e
     needs: [changes, build-cpu-smoke-images]
@@ -1057,19 +985,34 @@ jobs:
             diff.txt
 
   policy-wasm:
-    name: Build OPA policy WASM
+    name: OPA policy build and tests
     runs-on: ubuntu-latest
+    outputs:
+      # Preserve the raw outcome: continue-on-error makes the conclusion success.
+      policy-test-outcome: ${{ steps.policy-test.outcome }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - uses: ./.github/actions/build-policy-wasm
+        id: build
       - name: Upload policy WASM
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: policy-wasm
           retention-days: 1
           path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+      - name: Test OPA policy
+        id: policy-test
+        # Test failures must fail CI status, not block consumers of a valid WASM.
+        continue-on-error: true
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
+        with:
+          dir: ./tools/open-policy-agent
+          command: |
+            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
 
   python-unit-test-tools:
     name: Python unit tests (tools)
@@ -1153,6 +1096,15 @@ jobs:
             coverage.xml
             coverage.json
             coverage-html/
+      - name: Upload worker crash dumps
+        # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-unit-crash-dumps-py${{ matrix.python-version }}
+          retention-days: 30
+          if-no-files-found: ignore
+          path: crash-dumps/
 
   # The `main-and-release-checks` ruleset requires a check named exactly "Python unit tests".
   # Now that the job is a matrix, its legs report "Python unit tests (py3.12)" and friends, and
@@ -1412,10 +1364,6 @@ jobs:
           NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          # Per-worker crash dumps; pytest's own faulthandler would point them at stderr, which
-          # xdist never forwards. See conftest.py.
-          PYTEST_CRASH_DUMP_DIR: crash-dumps
-          PYTEST_EXTRA: -p no:faulthandler
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1593,7 +1541,13 @@ jobs:
 
   python-auth-idp-e2e-test:
     name: Python auth-idp ${{ matrix.runtime }} tests
-    needs: [changes, policy-wasm, build-cpu-smoke-images, python-auth-idp-static-test]
+    needs:
+      [
+        changes,
+        policy-wasm,
+        build-cpu-smoke-images,
+        python-auth-idp-static-test,
+      ]
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
@@ -1745,20 +1699,18 @@ jobs:
           docker rm -f "cloud-provider-kind-${AUTH_IDP_K8S_CLUSTER_NAME}" || true
           kind delete cluster --name "${AUTH_IDP_K8S_CLUSTER_NAME}" || true
 
-  # Build wheels for all packages × python versions. Downstream jobs
-  # (wheel-test, python-e2e-test) download these artifacts instead
-  # of rebuilding.
+  # Keep interpreter coverage parallel, but share setup/build/install work for
+  # both packages and both CLI install methods within each interpreter's job.
   wheel-build:
-    name: ${{ matrix.package }} wheel build (py${{ matrix.python-version }})
+    name: Wheel build and install tests (py${{ matrix.python-version }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        package: [nemo-helix, nemo-helix-plugin]
         python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout code
@@ -1766,143 +1718,67 @@ jobs:
         with:
           persist-credentials: false
       - name: Download policy WASM
-        if: matrix.package == 'nemo-helix'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: policy-wasm
           path: services/core/auth/src/nhx/core/auth/assets
-      - name: Build ${{ matrix.package }} wheel
-        id: build
+      - name: Build nemo-helix wheel
+        id: helix
         uses: ./.github/actions/build-nemo-helix-wheel
         with:
-          package: ${{ matrix.package }}
-          out-dir: ${{ github.workspace }}/dist
+          package: nemo-helix
+          out-dir: ${{ github.workspace }}/dist/nemo-helix
           cadence: rc
           # Sentinel epoch — the wheel version is meaningless for a CI test
           # build, but stamp_sdk_version.py requires \d{14}.
           rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
-      - name: Upload wheel
+      - name: Upload nemo-helix wheel
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.package }}-wheel-py${{ matrix.python-version }}
-          path: ${{ steps.build.outputs.wheel-path }}
+          name: nemo-helix-wheel-py${{ matrix.python-version }}
+          path: ${{ steps.helix.outputs.wheel-path }}
           retention-days: 7
           if-no-files-found: error
-
-  # Test each wheel: install from the artifact and run basic CLI /
-  # import checks.
-  wheel-test:
-    name: ${{ matrix.package }} wheel build + test (py${{ matrix.python-version }}, ${{ matrix.install-method }})
-    needs: [wheel-build]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: [nemo-helix, nemo-helix-plugin]
-        python-version: ["3.12", "3.13", "3.14"]
-        # `uv tool install` is the documented front door for the CLI; `venv`
-        # covers installs into an environment the user owns. The plugin is a
-        # library with no CLI entry point, so it only gets the venv leg.
-        install-method: [venv, tool]
-        exclude:
-          - package: nemo-helix-plugin
-            install-method: tool
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Build nemo-helix-plugin wheel
+        id: plugin
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/build-nemo-helix-wheel
         with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
+          package: nemo-helix-plugin
+          out-dir: ${{ github.workspace }}/dist/nemo-helix-plugin
+          cadence: rc
+          rc-timestamp: "19700101000000"
           python-version: ${{ matrix.python-version }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Download wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - name: Upload nemo-helix-plugin wheel
+        if: ${{ !cancelled() && steps.plugin.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.package }}-wheel-py${{ matrix.python-version }}
-          path: ${{ runner.temp }}/wheelcheck
-
-      - name: Install + test nemo-helix CLI
-        if: matrix.package == 'nemo-helix'
-        shell: bash
+          name: nemo-helix-plugin-wheel-py${{ matrix.python-version }}
+          path: ${{ steps.plugin.outputs.wheel-path }}
+          retention-days: 7
+          if-no-files-found: error
+      # Independent steps preserve all install results even if an earlier method fails.
+      # The helper isolates venvs, uv tool state, and CLI data from the build workspace.
+      - name: Install and test CLI (venv)
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-          INSTALL_METHOD: ${{ matrix.install-method }}
-          NHX_DATA_DIR: ${{ runner.temp }}/nemo-data
-          NHX_AUTH_ENABLED: "false"
-          _TYPER_FORCE_DISABLE_TERMINAL: "1"
-          UV_TOOL_BIN_DIR: ${{ runner.temp }}/wheelcheck/tool-bin
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          wheels=("${RUNNER_TEMP}"/wheelcheck/*.whl)
-          if [[ "${#wheels[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one wheel, found ${#wheels[@]}"
-            exit 1
-          fi
-          WHEEL="${wheels[0]}"
-          # Supply-chain: partial-pin the wheel's direct external deps to a committed constraints
-          # file. Regenerate with tools/wheel-constraints/compile-wheel-constraints.sh.
-          CONSTRAINTS="${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-services.txt"
-          # --no-config: this step runs inside the checkout, so uv would otherwise apply the
-          # repo's [tool.uv] override-dependencies and resolve a dependency set no user can get.
-          if [[ "${INSTALL_METHOD}" == "tool" ]]; then
-            uv tool install --no-config --python "${PYTHON_VERSION}" \
-              --constraints "${CONSTRAINTS}" \
-              "${WHEEL}[services]"
-            BIN_DIR="${UV_TOOL_BIN_DIR}"
-          else
-            VENV="${RUNNER_TEMP}/wheelcheck/.venv"
-            uv venv "${VENV}" --python "${PYTHON_VERSION}"
-            uv pip install --no-config --python "${VENV}/bin/python" \
-              --constraint "${CONSTRAINTS}" \
-              "${WHEEL}[services]"
-            BIN_DIR="${VENV}/bin"
-          fi
-          cd "${RUNNER_TEMP}/wheelcheck"
-          unset PYTHONPATH VIRTUAL_ENV
-          export PATH="${BIN_DIR}:${PATH}"
-          bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
-
-      - name: Install + test nemo-helix-plugin
-        if: matrix.package == 'nemo-helix-plugin'
-        shell: bash
+          WHEEL: ${{ steps.helix.outputs.wheel-path }}
+        run: bash .github/scripts/test-wheel-install.sh nemo-helix venv
+      - name: Install and test CLI (tool)
+        if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          wheels=("${RUNNER_TEMP}"/wheelcheck/*.whl)
-          if [[ "${#wheels[@]}" -ne 1 ]]; then
-            echo "::error::Expected exactly one wheel, found ${#wheels[@]}"
-            exit 1
-          fi
-          WHEEL="${wheels[0]}"
-          # Supply-chain: partial-pin direct external deps via a committed constraints file
-          # (see the nemo-helix CLI step above).
-          cd "${RUNNER_TEMP}/wheelcheck"
-          uv venv .venv --python "${PYTHON_VERSION}"
-          uv pip install --no-config --python .venv/bin/python \
-            --constraint "${GITHUB_WORKSPACE}/tools/wheel-constraints/nemo-helix-plugin.txt" \
-            "${WHEEL}"
-          unset PYTHONPATH VIRTUAL_ENV
-          # Import the package + a couple of representative submodules
-          # (cli, commands). These are the surfaces a plugin author would
-          # touch first; if any of them fail to import, the wheel is
-          # broken in a way that surfaces immediately on day one.
-          .venv/bin/python -c "
-          import nemo_helix_plugin
-          import nemo_helix_plugin.cli
-          import nemo_helix_plugin.commands
-          print('nemo_helix_plugin', getattr(nemo_helix_plugin, '__version__', '<no __version__>'))
-          "
+          WHEEL: ${{ steps.helix.outputs.wheel-path }}
+        run: bash .github/scripts/test-wheel-install.sh nemo-helix tool
+      - name: Install and test plugin (venv)
+        if: ${{ !cancelled() && steps.plugin.outcome == 'success' }}
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+          WHEEL: ${{ steps.plugin.outputs.wheel-path }}
+        run: bash .github/scripts/test-wheel-install.sh nemo-helix-plugin venv
 
   # E2E tests: start services from the workspace venv and run the e2e
   # suite against the real process.
@@ -2058,7 +1934,7 @@ jobs:
         run: web/node_modules/.bin/prettier --check .github/scripts
 
   web-typecheck:
-    name: Web typecheck
+    name: Web type and SDK checks
     needs: [changes]
     if: >
       !cancelled() && (
@@ -2081,7 +1957,9 @@ jobs:
       - name: Install pnpm via corepack
         run: npm i -g corepack@0.31.0 && corepack enable pnpm
       - name: Install dependencies
+        id: deps
         run: pnpm install --frozen-lockfile
+      # Check the committed sources before generation can modify them.
       - name: Typecheck web packages
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ needs.changes.outputs.openapi }}" != "true" ]; then
@@ -2090,6 +1968,16 @@ jobs:
           else
             pnpm run --recursive --parallel --if-present typecheck
           fi
+      - name: Generate SDK from OpenAPI specs
+        id: sdk
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: pnpm --filter @nemo/sdk gen:all-force
+      - name: Typecheck SDK generated output
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: pnpm --filter @nemo/sdk typecheck
+      - name: Typecheck web packages against regenerated SDK
+        if: ${{ !cancelled() && steps.sdk.outcome == 'success' }}
+        run: pnpm run --recursive --parallel --if-present typecheck
 
   web-test:
     name: Web tests
@@ -2130,8 +2018,8 @@ jobs:
             pnpm run --recursive --parallel --if-present test:ci
           fi
 
-  web-format:
-    name: Web format check
+  web-static:
+    name: Web static checks
     needs: [changes]
     if: >
       !cancelled() && (
@@ -2153,127 +2041,22 @@ jobs:
       - name: Install pnpm via corepack
         run: npm i -g corepack@0.31.0 && corepack enable pnpm
       - name: Install dependencies
+        id: deps
         run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm format
-
-  web-lint:
-    name: Web lint
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Lint
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm lint
-
-  web-sdk-gen:
-    name: Web SDK generation check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.openapi == 'true' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Generate SDK from OpenAPI specs
-        run: pnpm --filter @nemo/sdk gen:all-force
-      - name: Typecheck SDK generated output
-        run: pnpm --filter @nemo/sdk typecheck
-      - name: Typecheck web packages against regenerated SDK
-        run: pnpm run --recursive --parallel --if-present typecheck
-
-  web-plugin-types:
-    name: Web plugin surface types check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Regenerate the plugin surface types
-        run: pnpm --filter @nemo/common types:plugin
-      # Out-of-tree plugins vendor this file, so a stale copy types them against
-      # a surface that no longer exists — and still compiles, which is the whole
-      # problem. Fail the change that moved the surface, not the plugin later.
-      - name: Check the committed artifact is up to date
-        run: git diff --exit-code -- packages/common/plugin-types
-
-  web-studio-deps:
-    name: Web studio deps check
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.web-studio == 'true'
-      )
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: web
-        shell: bash
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
-      - name: Install pnpm via corepack
-        run: npm i -g corepack@0.31.0 && corepack enable pnpm
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Check studio deps
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         run: pnpm deps:studio
+      - name: Regenerate and check plugin surface types
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          pnpm --filter @nemo/common types:plugin
+          # Out-of-tree plugins vendor this artifact; it must stay current.
+          git diff --exit-code -- packages/common/plugin-types
 
   web-studio-e2e:
     name: Studio UI E2E tests
@@ -2457,18 +2240,19 @@ jobs:
           ADAPTER_PYTHON: ${{ github.workspace }}/.venv-hermes/bin/python
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
-  deployments-openshell-tests:
-    # Path-filtered job that runs only the OpenShell deployment backend tests.
-    name: Deployments OpenShell backend tests
+  openshell-tests:
+    # Share setup between backend suites while retaining each suite's path filter.
+    name: OpenShell backend tests
     needs: [changes]
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.deps == 'true' ||
-        needs.changes.outputs.deployments-openshell == 'true'
+        needs.changes.outputs.deployments-openshell == 'true' ||
+        needs.changes.outputs.jobs-openshell == 'true'
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -2477,6 +2261,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install uv
+        id: uv
         # No python-version pin: uv resolves the interpreter from the workspace
         # requires-python (>=3.12), so this job can never fall back to an
         # unsupported version.
@@ -2485,36 +2270,24 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
           cache-dependency-glob: uv.lock
-      - name: Run OpenShell backend unit tests
+      - name: Run OpenShell deployment backend tests
+        if: >-
+          !cancelled() && steps.uv.outcome == 'success' && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.deployments-openshell == 'true'
+          )
         run: make test-deployments-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
 
-  jobs-openshell-tests:
-    name: Jobs OpenShell backend tests
-    needs: [changes]
-    if: >
-      !cancelled() && (
-        github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.deps == 'true' ||
-        needs.changes.outputs.jobs-openshell == 'true'
-      )
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
-        with:
-          version: ${{ env.UV_VERSION }}
-          enable-cache: true
-          cache-dependency-glob: uv.lock
-      - name: Run OpenShell job backend unit tests
+      - name: Run OpenShell job backend tests
+        if: >-
+          !cancelled() && steps.uv.outcome == 'success' && (
+            github.event_name == 'workflow_dispatch' ||
+            needs.changes.outputs.deps == 'true' ||
+            needs.changes.outputs.jobs-openshell == 'true'
+          )
         run: make test-jobs-openshell
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
@@ -2699,25 +2472,6 @@ jobs:
           header: coverage-report
           path: summary.md
 
-  opa-policy-test:
-    name: Test OPA Policy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install Deps
-        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
-        with:
-          disable-metrics: "true"
-      - name: Policy Test
-        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
-        with:
-          dir: ./tools/open-policy-agent
-          command: |
-            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
-
   # Required-check pin: branch protection should require this final aggregate.
   # Skipped jobs count as pass so conditional jobs can remain optional.
   ci-status:
@@ -2726,10 +2480,9 @@ jobs:
       - changes
       - actionlint
       - uv-lock
-      - uv-compatibility
       - docker-bake-graph
       - build-cpu-smoke-images
-      - kind-cpu-smoke
+      - kind-cpu-e2e
       - kind-gym-e2e
       - kind-customizer-auth-e2e
       - kind-network-policy-smoke
@@ -2753,18 +2506,13 @@ jobs:
       # Enable if you want this required
       # - python-integration-test
       - wheel-build
-      - wheel-test
       - python-e2e-test
       - github-scripts
       - web-typecheck
       - web-test
-      - web-format
-      - web-lint
-      - web-sdk-gen
-      - web-plugin-types
-      - web-studio-deps
+      - web-static
       - web-studio-e2e
-      - opa-policy-test
+      - openshell-tests
       - guardrails-benchmark
       - guardrails-benchmark-analyze
     if: always()
@@ -2790,3 +2538,12 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+      - name: Check OPA policy test outcome
+        if: always()
+        shell: bash
+        env:
+          POLICY_TEST_OUTCOME: ${{ needs.policy-wasm.outputs.policy-test-outcome }}
+        run: |
+          printf 'OPA policy tests: %s\n' "${POLICY_TEST_OUTCOME:-missing}"
+          test "${POLICY_TEST_OUTCOME}" = success
