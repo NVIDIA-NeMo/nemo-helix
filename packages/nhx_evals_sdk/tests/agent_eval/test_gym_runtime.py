@@ -16,6 +16,7 @@ import json
 import logging
 import shutil
 from collections import Counter, deque
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,7 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     _TOKEN_USAGE_KEYS,
     AGENT_NEVER_RAN_ERROR_TYPE,
     GYM_FAILURE_RECORD,
+    NG_TRAJECTORY_EVIDENCE,
     _agent_never_ran,
     _aggregate_metrics_path_for,
     _usage_measurements,
@@ -62,9 +64,16 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     require_full_coverage,
     trials_from_rollouts,
 )
-from nhx_evals_sdk.agent_eval.trials import UNKNOWN_ERROR_TYPE, AgentEvalTrialStatus, TrialError, TrialMeasurements
+from nhx_evals_sdk.agent_eval.trials import (
+    UNKNOWN_ERROR_TYPE,
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.metrics.protocol import CandidateOutput, DatasetRow, MetricInput
 from nhx_evals_sdk.values import SecretRef
+from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from pydantic import ValidationError
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -624,6 +633,185 @@ async def test_a_rollout_carries_an_otlp_trace_the_sdk_can_read(tmp_path: Path) 
         if attribute.key == "openinference.span.kind"
     ]
     assert kinds == ["AGENT", "LLM", "TOOL"]
+
+
+def _fabric_result(*artifacts: dict[str, Any]) -> dict[str, Any]:
+    """A Fabric ``RunResult.to_mapping()`` JSON declaring ``artifacts`` (name/kind/path entries)."""
+    return {"status": "succeeded", "artifacts": {"artifacts": list(artifacts)}}
+
+
+def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[str, Any]]) -> AgentEvalTrial:
+    """One COMPLETED rollout whose ``fabric_result`` declares ``artifacts``, read back as a trial.
+
+    The rollouts file sits in ``tmp_path``, so ``rollouts_path.parent`` — the run directory the
+    declared paths are contained against — is ``tmp_path``. A model-call capture is written too, so
+    the trial carries the ``ng_trajectory`` descriptor alongside whichever trace wins.
+    """
+    tasks = discover_gym_tasks(EXAMPLE)
+    _ordered, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    bundle.write_text(
+        json.dumps(
+            {
+                NG_TASK_INDEX: 0,
+                NG_ROLLOUT_INDEX: 0,
+                "reward": 1.0,
+                "response": {"usage": {"input_tokens": 4, "output_tokens": 1}},
+                "fabric_result": _fabric_result(*artifacts),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    capture_dir = model_call_capture_dir(tmp_path)
+    capture_dir.mkdir(parents=True)
+    (capture_dir / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=capture_dir)
+    return trial
+
+
+def _assert_shared_descriptors(trial: AgentEvalTrial, rollouts: Path) -> None:
+    """The rollouts file and the model-call capture stay reachable in every evidence shape."""
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors["rollouts"].ref == str(rollouts)
+    assert trial.evidence.descriptors[NG_TRAJECTORY_EVIDENCE].ref == str(
+        model_call_capture_dir(rollouts.parent) / "0-0.capture.jsonl"
+    )
+
+
+def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: Path) -> None:
+    # Fabric 0.6 declares the Relay OpenTelemetry file as a RunResult artifact of kind `otlp`. When
+    # exactly one such artifact sits inside the run directory and holds spans, that file — not a
+    # projection built from the rollout record — is the trial's trace.
+    trace = tmp_path / "traces" / "relay.jsonl"
+    trace.parent.mkdir()
+    trace.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+
+    trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
+
+    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert trial.evidence is not None
+    otlp = trial.evidence.descriptors[EVIDENCE_TRACE]
+    assert otlp == trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"]
+    assert otlp.ref == str(trace)
+    assert otlp.data is None  # the declared file, not an inline projection
+    assert EVIDENCE_FORMAT_ATIF not in {d.format for d in trial.evidence.descriptors.values()}
+
+
+def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: Path) -> None:
+    # A declared ATIF stays reachable under its format-qualified key, with the OTLP file primary —
+    # the same publication rule the Fabric runtime applies to its own trials.
+    trace = tmp_path / "traces" / "relay.jsonl"
+    trace.parent.mkdir()
+    trace.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    atif = tmp_path / "relay" / "trajectory-session.atif.json"
+
+    trial = _trial_declaring_fabric_artifacts(
+        tmp_path,
+        [
+            {"name": "trace", "kind": "otlp", "path": str(trace)},
+            {"name": "trajectory", "kind": "atif", "path": str(atif)},
+        ],
+    )
+
+    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref == str(trace)
+    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"].ref == str(trace)
+    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"].ref == str(atif)
+
+
+@pytest.mark.parametrize(
+    "artifacts",
+    [
+        pytest.param([], id="no-fabric-artifacts"),
+        pytest.param([{"name": "trajectory", "kind": "atif", "path": "relay/trajectory.atif.json"}], id="atif-alone"),
+        pytest.param(
+            [
+                {"name": "trace-a", "kind": "otlp", "path": "traces/relay-a.jsonl"},
+                {"name": "trace-b", "kind": "otlp", "path": "traces/relay-b.jsonl"},
+            ],
+            id="two-otlp-files",
+        ),
+    ],
+)
+def test_trials_without_a_single_declared_trace_keep_the_projection(
+    tmp_path: Path, artifacts: list[dict[str, Any]]
+) -> None:
+    # No declared OTLP file, one that is ambiguous, or none at all: the projection always works, so
+    # it — not a guess about which declaration to trust — remains the trial's trace.
+    (tmp_path / "traces").mkdir()
+    for name in ("relay-a.jsonl", "relay-b.jsonl"):
+        (tmp_path / "traces" / name).write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    (tmp_path / "relay").mkdir()
+    declared = [{**artifact, "path": str(tmp_path / artifact["path"])} for artifact in artifacts]
+
+    trial = _trial_declaring_fabric_artifacts(tmp_path, declared)
+
+    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert trial.evidence is not None
+    projection = trial.evidence.descriptors[EVIDENCE_TRACE]
+    assert projection == trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"]
+    assert projection.data is not None  # the inline projection, ref-less
+    assert projection.ref is None
+
+
+def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path) -> None:
+    # ``fabric_result`` is whatever the registered agent put on the record; only a mapping is a
+    # Fabric result, so anything else means there is no declaration to read and the projection stays.
+    tasks = discover_gym_tasks(EXAMPLE)
+    _ordered, index_map = _index_map(tasks, tmp_path)
+    bundle = tmp_path / "rollouts.jsonl"
+    record = {
+        NG_TASK_INDEX: 0,
+        NG_ROLLOUT_INDEX: 0,
+        "reward": 1.0,
+        "response": {"usage": {"input_tokens": 4, "output_tokens": 1}},
+        "fabric_result": "not-a-mapping",
+    }
+    bundle.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    captures = model_call_capture_dir(tmp_path)
+    captures.mkdir(parents=True)
+    (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
+    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+
+    _assert_shared_descriptors(trial, bundle)
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
+
+
+def test_declared_trace_outside_the_run_directory_keeps_the_projection(tmp_path: Path) -> None:
+    # A declared path is agent-supplied data: one resolving outside the run directory (a symlink or
+    # a ``..`` traversal) must not become an evidence ref, exactly as the sandbox download rules.
+    outside = tmp_path.parent / "outside-relay.jsonl"
+    outside.write_text('{"resourceSpans": []}\n', encoding="utf-8")
+    try:
+        declared = str(Path("..") / outside.name)
+
+        trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": declared}])
+    finally:
+        outside.unlink(missing_ok=True)
+
+    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
+
+
+def test_empty_declared_trace_keeps_the_projection(tmp_path: Path) -> None:
+    # An empty file means Relay never flushed, the same admission rule `register_trace_evidence`
+    # applies to a trace folded on this side: it is not a trace, so the projection stays.
+    trace = tmp_path / "traces" / "relay.jsonl"
+    trace.parent.mkdir()
+    trace.write_text("", encoding="utf-8")
+
+    trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
+
+    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert trial.evidence is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
+    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
 
 
 def test_success_records_without_rollout_index_get_distinct_ids(tmp_path: Path) -> None:

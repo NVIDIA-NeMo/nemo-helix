@@ -18,6 +18,12 @@ from pathlib import Path
 from typing import Any
 
 from google.protobuf.json_format import MessageToDict
+from nhx_evals_sdk.agent_eval.runtimes.fabric._common import (
+    ATIF_ARTIFACT_KIND,
+    OTLP_ARTIFACT_KIND,
+    ResultView,
+)
+from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import register_trace_evidence
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, model_call_capture_dir
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
@@ -281,6 +287,50 @@ def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: s
     )
 
 
+def _within_run_dir(candidate: str, run_dir: Path) -> bool:
+    """True when ``candidate`` resolves to ``run_dir`` itself or a descendant of it.
+
+    A declared artifact path is agent-supplied data, so a symlink or ``..`` traversal resolving
+    outside the run directory must not become an evidence ref. Same rule as the sandbox download
+    (``_downloaded_path``): resolve, then require the resolved path to be the root or under it.
+    """
+    try:
+        resolved = Path(candidate).resolve()
+    except OSError:
+        return False
+    root = run_dir.resolve()
+    return resolved == root or root in resolved.parents
+
+
+def _declared_fabric_trace(record: Mapping[str, Any], *, run_dir: Path) -> tuple[Path | None, Path | None]:
+    """The Relay trace a Fabric result declared inside ``run_dir``, as ``(otlp, atif)`` paths.
+
+    Fabric 0.6+ declares the Relay OpenTelemetry file sink as a ``RunResult`` artifact of kind
+    ``otlp``. It is admitted only when exactly one such artifact resolves inside the run directory
+    and the file is non-empty — the same admission rule ``register_trace_evidence`` applies to a
+    trace folded on this side, because an empty file means Relay never flushed. Any other shape
+    (no Fabric result, no OTLP, two of them, a path outside, an empty file) returns ``(None, None)``
+    so the caller keeps the model-call projection, which always works. A declared ATIF is passed
+    along only when exactly one is contained, mirroring what the Fabric runtime publishes.
+    """
+    fabric_result = record.get("fabric_result")
+    if not isinstance(fabric_result, Mapping):
+        return None, None
+    contained = [
+        artifact
+        for artifact in ResultView.from_mapping(fabric_result).artifacts
+        if _within_run_dir(artifact.path, run_dir)
+    ]
+    otlp = [artifact for artifact in contained if artifact.kind == OTLP_ARTIFACT_KIND]
+    if len(otlp) != 1:
+        return None, None
+    trace = Path(otlp[0].path)
+    if not trace.is_file() or trace.stat().st_size == 0:
+        return None, None
+    atif = [artifact for artifact in contained if artifact.kind == ATIF_ARTIFACT_KIND]
+    return trace, Path(atif[0].path) if len(atif) == 1 else None
+
+
 def _rollout_evidence(
     record: Mapping[str, Any],
     *,
@@ -291,15 +341,28 @@ def _rollout_evidence(
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
 
-    The trace is derived from the record rather than captured, so it is carried inline rather than
-    written beside the rollouts file. It is registered under the format-qualified key as well as the
-    plain one, so a metric asking for ``format="otlp"`` and one asking for whatever is primary reach
-    the same handle.
+    A Fabric-backed rollout carries the Relay trace Fabric declared as a run artifact; that file —
+    the captured trace itself — wins over the projection below, which is built from the record and
+    the model-call capture and is what every rollout without a usable declared trace gets instead.
+    A trace is registered under the format-qualified key as well as the plain one, so a metric asking
+    for ``format="otlp"`` and one asking for whatever is primary reach the same handle.
     """
     descriptors: dict[str, EvidenceDescriptor] = {
         "rollouts": EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     }
     capture_path = _capture_path(record, capture_dir)
+    if capture_path is not None:
+        # Kept as its own evidence, by reference: the OTLP view below is a projection of it, and a
+        # projection is not a reason to lose what it was projected from. A declared trace does not
+        # consume it, but the capture stays reachable for a metric that wants the per-call source.
+        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
+            kind="filesystem", format="file", ref=str(capture_path)
+        )
+    otlp, atif = _declared_fabric_trace(record, run_dir=rollouts_path.parent)
+    if otlp is not None:
+        # Fabric declared the trace Relay captured, so publish that file rather than project one.
+        register_trace_evidence(descriptors, atif=atif, otlp=otlp)
+        return CandidateEvidence(descriptors=descriptors)
     if capture_dir is not None and capture_path is None:
         # Capture is switched on by the runner, so an absent one is Gym not doing what it was
         # asked. The trial still scores; its trace just loses the timing capture exists to provide.
@@ -309,12 +372,6 @@ def _rollout_evidence(
             capture_dir,
         )
     model_calls = _read_model_calls(capture_path, trial_id=trial_id)
-    if capture_path is not None:
-        # Kept as its own evidence, by reference: the OTLP view below is a projection of it, and a
-        # projection is not a reason to lose what it was projected from.
-        descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
-            kind="filesystem", format="file", ref=str(capture_path)
-        )
     resource_spans = _rollout_resource_spans(record, task_id=task_id, trial_id=trial_id, model_calls=model_calls)
     if resource_spans is not None:
         # Rendered to JSON here and only here, because an ``EvidenceDescriptor`` holds JSON.
