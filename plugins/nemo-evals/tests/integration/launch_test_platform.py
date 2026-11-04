@@ -29,6 +29,7 @@ def _harness() -> ModuleType:
 
 
 def main() -> None:
+    """Write this harness's config for ``--port`` and ``--auth``, then replace this process with the platform."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, required=True, help="port to serve on, on localhost")
     parser.add_argument("--auth", action="store_true", help="enable auth (the PDP); off by default")
