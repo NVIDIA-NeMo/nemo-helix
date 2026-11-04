@@ -102,7 +102,7 @@ def _supplied_platform(env_var: str, *, auth_enabled: bool) -> str:
             problem = f"runs the {RUN_CONTROLLER} controller, which would act on these tests' runs"
         else:
             return base_url
-    pytest.fail(f"{env_var}={base_url} {problem}. launch_test_platform.py starts one that fits.", pytrace=False)
+    pytest.fail(f"{env_var}={base_url} {problem}. launch_test_platform.py starts a suitable one.", pytrace=False)
 
 
 @pytest.fixture(scope="session")
@@ -482,8 +482,8 @@ async def test_submit_dependency_delegates_group_only_caller(auth_controller_pla
 
 # The fixtures' own contract, against a stub: no platform needed, so these run wherever this file does.
 
-#: What a platform that fits the auth-off tests answers to the probes ``_supplied_platform`` makes.
-FITTING_AUTH_OFF_PLATFORM: dict[str, tuple[int, object]] = {
+#: What a platform suitable for the auth-off tests answers to the probes ``_supplied_platform`` makes.
+SUITABLE_AUTH_OFF_PLATFORM: dict[str, tuple[int, object]] = {
     "/health/ready": (200, {"status": "ready"}),
     "/apis/auth/discovery": (200, {"auth_enabled": False}),
     "/status": (200, {"controllers": {"healthy": True, "status": {"entities": True, "jobs": True, "models": True}}}),
@@ -522,8 +522,8 @@ def test_an_unset_url_skips(monkeypatch: pytest.MonkeyPatch) -> None:
         _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
 
 
-def test_a_platform_that_fits_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _stub_platform(FITTING_AUTH_OFF_PLATFORM) as base_url:
+def test_a_suitable_platform_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _stub_platform(SUITABLE_AUTH_OFF_PLATFORM) as base_url:
         monkeypatch.setenv(AUTH_OFF_URL_ENV, f"{base_url}/")
         assert _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False) == base_url
 
@@ -540,10 +540,10 @@ def test_a_platform_that_fits_is_used(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
     ],
 )
-def test_a_platform_that_does_not_fit_fails(
+def test_an_unsuitable_platform_fails(
     monkeypatch: pytest.MonkeyPatch, overrides: dict[str, tuple[int, object]], problem: str
 ) -> None:
-    with _stub_platform({**FITTING_AUTH_OFF_PLATFORM, **overrides}) as base_url:
+    with _stub_platform({**SUITABLE_AUTH_OFF_PLATFORM, **overrides}) as base_url:
         monkeypatch.setenv(AUTH_OFF_URL_ENV, base_url)
         with pytest.raises(pytest.fail.Exception, match=problem):
             _supplied_platform(AUTH_OFF_URL_ENV, auth_enabled=False)
