@@ -8,6 +8,7 @@ from nemo_helix_plugin.client.errors import NemoTransportError
 from nhx.common.auth.models import AuthContext
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.api.v2.jobs.schemas import HelixJobStepWithContext
+from nhx.core.jobs.controllers.backends import JobUpdate
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.concurrency_admission import ConcurrencyAdmission, round_robin_by_user
 from nhx.core.jobs.controllers.scheduler import JobScheduler
@@ -189,13 +190,18 @@ def test_scheduler_shares_scarce_capacity_across_users(
     # First call lists the schedulable queue; second lists in-flight work (none).
     mock_jobs_client.list_steps.side_effect = [paginated_response(alice + bob), paginated_response([])]
 
-    with patch.object(scheduler, "schedule_step") as schedule_step:
+    with patch.object(
+        scheduler, "schedule_step", return_value=JobUpdate(status=HelixJobStatus.PENDING)
+    ) as schedule_step:
         scheduler.step()
 
     assert [c.args[0].name for c in schedule_step.call_args_list] == ["a1", "b1"]
-    queued = [
-        c
-        for c in mock_jobs_client.update_job_step_status.call_args_list
-        if c.kwargs["body"].status == HelixJobStatus.QUEUED
-    ]
-    assert len(queued) == 2  # a2 and a3 wait for capacity
+    statuses = {
+        c.kwargs["name"]: c.kwargs["body"].status for c in mock_jobs_client.update_job_step_status.call_args_list
+    }
+    assert statuses == {
+        "a1": HelixJobStatus.PENDING,
+        "b1": HelixJobStatus.PENDING,
+        "a2": HelixJobStatus.QUEUED,
+        "a3": HelixJobStatus.QUEUED,
+    }
