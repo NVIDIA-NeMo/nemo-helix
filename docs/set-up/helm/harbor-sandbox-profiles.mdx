@@ -130,12 +130,29 @@ These keys sit beside `harbor` under `platformConfig.evals.runs` and apply to ev
 | `controller.max_concurrent_task_jobs_per_creator` | none | Task Jobs at once across all of one user's runs. Must be ≤ `max_cluster_concurrent_jobs`. With auth off every run belongs to one user, so it acts as a second cluster cap |
 | `controller.default_max_concurrent_task_jobs` | `20` | Task Jobs at once for one run. A request's `max_concurrent_task_jobs` may lower it, never raise it. `null`: only the request's value applies |
 
-How the controller hands out task Job slots each cycle:
+A task Job starts only when all three caps have room:
 
-- A run's cap → the smaller of its request's `max_concurrent_task_jobs` and `default_max_concurrent_task_jobs`. Neither set → no per-run cap.
-- A free slot → goes to the user holding the fewest task Jobs, then to that user's oldest run under its cap.
-- No slot under the cluster cap or the user's cap → the task waits for a later cycle.
-- At most `max_creates_per_cycle` task Jobs are created per cycle, so a large run ramps up over a few cycles.
+```text
+cluster       max_cluster_concurrent_jobs
+└─ user       max_concurrent_task_jobs_per_creator
+   └─ run     the smaller of default_max_concurrent_task_jobs and the request's max_concurrent_task_jobs
+```
+
+- When several users wait, a free slot goes to the user running the fewest task Jobs.
+- Example with the defaults:
+  - One user submits 3 runs of 100 tasks.
+  - At most 50 task Jobs run at once: 20 + 20 + 10, oldest run first.
+
+### Controller timing
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `controller.interval_seconds` | `20` | Time between controller cycles. The controller reports itself unhealthy after 3 intervals without a cycle |
+| `controller.create_grace_seconds` | `600` | How long a task Job create with an unknown outcome stays unknown before a missing Job counts as not created. At least 60 |
+| `controller.settle_concurrency` | `8` | Open runs whose task Jobs are read and settled at once in a cycle. Takes no slot. Higher settles many open runs faster but sends more requests to the Jobs service at once |
+| `controller.max_creates_per_cycle` | `10` | Task Job creates per cycle, new ones and retries alike. At least 2 |
+
+- Leave these as they are unless the controller falls behind: raise `max_creates_per_cycle` or `settle_concurrency` when many runs are open, and `create_grace_seconds` when the Jobs API is slow to save.
 
 ### Run time limits
 
@@ -147,17 +164,6 @@ How the controller hands out task Job slots each cycle:
 | `finalization_grace_seconds` | `1800` | Time after the budget runs out to stop the run's task Jobs and bundle the tasks that finished (30 min) |
 
 - The budget starts when the run's first task gets a slot, before its task Job is created, so scheduling and Job startup count against it.
-
-### Controller timing
-
-| Key | Default | What it does |
-| --- | --- | --- |
-| `controller.interval_seconds` | `20` | Time between controller cycles. The controller reports itself unhealthy after 3 intervals without a cycle |
-| `controller.create_grace_seconds` | `600` | How long a task Job create with an unknown outcome stays unknown before a missing Job counts as not created. At least 60 |
-| `controller.settle_concurrency` | `8` | Open runs whose task Jobs are read and settled at once in a cycle. Takes no slot |
-| `controller.max_creates_per_cycle` | `10` | Task Job creates per cycle, new ones and retries alike. At least 2 |
-
-- Leave these as they are unless the controller falls behind: raise `max_creates_per_cycle` or `settle_concurrency` when many runs are open, and `create_grace_seconds` when the Jobs API is slow to save.
 
 ### Which key to change
 
