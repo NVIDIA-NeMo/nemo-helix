@@ -40,6 +40,8 @@ class NemoJobScheduler:
         http_client: httpx.Client | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
+        dry_run: bool = False,
+        dry_run_full: bool = False,
     ) -> dict:
         """POST the job to the plugin service's per-job submit route.
 
@@ -64,6 +66,10 @@ class NemoJobScheduler:
             headers: Optional per-request headers (e.g. ``Authorization`` from
                 the CLI). Merged on each POST; not inferred from *http_client*.
             timeout: Request timeout in seconds.
+            dry_run: Check the job as submit would and create nothing (``?dry_run=true``).
+                A failed check is a 422 whose ``detail`` lists every check.
+            dry_run_full: With *dry_run*, run the checks in full (``?dry_run_full=true``), such as
+                every dataset row rather than the first few.
 
         Returns:
             The decoded JSON response from the plugin service.
@@ -73,6 +79,8 @@ class NemoJobScheduler:
             httpx.HTTPStatusError: On 4xx / 5xx responses.
         """
         url = self._build_submit_url(job_cls, base_url=base_url, workspace=workspace)
+        if dry_run:
+            url += "?dry_run=true&dry_run_full=true" if dry_run_full else "?dry_run=true"
         body = self._build_submit_body(spec, profile=profile, options=options, metadata=metadata)
         return self._post_submit(url, body, http_client=http_client, headers=headers, timeout=timeout)
 
@@ -220,8 +228,8 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
     Jobs register under the ``nemo.jobs`` entry-point group keyed as
     ``<plugin>.<job>``, and the platform mounts their routes under that
     ``<plugin>`` segment. The authoritative source of truth is therefore
-    the entry-point key — not the Python module path. We resolve it via
-    :func:`~nemo_helix_plugin.discovery.discover_jobs` so a plugin registered
+    the entry-point key — not the Python module path. We resolve it from the
+    ``nemo.jobs`` entry points so a plugin registered
     as ``agents.evaluate`` correctly maps to ``/apis/agents/...``, even
     though its package directory is ``nemo_agents_plugin/`` (which the
     module-name heuristic would have collapsed to ``agents-plugin`` and
@@ -234,16 +242,33 @@ def _api_segment_for(job_cls: type["NemoJob"]) -> str:
     The fallback does *not* strip a trailing ``_plugin``: a plugin whose
     actual key happens to be ``my-plugin`` would be silently rewritten
     to ``my``.
-    """
-    from nemo_helix_plugin.discovery import discover_jobs
 
+    The lookup reads entry-point metadata and does not import other plugins' jobs: loading every
+    ``nemo.jobs`` entry costs seconds per process, and this runs on every submit. An entry whose
+    value is *job_cls*'s ``module:qualname`` matches without loading. Failing that (a class
+    registered through a re-export), entries are loaded and compared by identity, those whose key
+    ends in ``job_cls.name`` (the convention :func:`discover_jobs` enforces) first. Only a class
+    that no entry point registers pays for loading every entry, as every lookup did before.
+    """
+    from nemo_helix_plugin.discovery import discover_entry_points
+
+    target = f"{job_cls.__module__}:{job_cls.__qualname__}"
     try:
-        registered = discover_jobs()
+        entries = {key: ep for key, ep in discover_entry_points("nemo.jobs").items() if "." in key}
     except Exception:
-        registered = {}
-    for key, registered_cls in registered.items():
-        if registered_cls is job_cls and "." in key:
+        entries = {}
+    for key, entry_point in entries.items():
+        if entry_point.value == target:
             return key.split(".", 1)[0]
+    # Same-named candidates first, then everything else: a class registered through a re-export
+    # under a key that breaks the naming convention is still found by identity, as before.
+    same_named = [key for key in entries if key.split(".", 1)[1] == job_cls.name]
+    for key in [*same_named, *(key for key in entries if key not in same_named)]:
+        try:
+            if entries[key].load() is job_cls:
+                return key.split(".", 1)[0]
+        except Exception:
+            continue
 
     module = job_cls.__module__.split(".")[0]
     if module.startswith("nemo_"):

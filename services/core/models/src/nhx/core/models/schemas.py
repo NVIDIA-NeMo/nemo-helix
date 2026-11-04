@@ -1,14 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import re
 from abc import ABC
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Annotated, Any, Dict, List, Literal, Optional, Self, Union
 from urllib.parse import urlparse
 
-from jinja2 import Environment
-from jinja2 import nodes as jinja_nodes
 from nemo_helix_plugin.inference_middleware import BackendFormat
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.auth import AuthContext
@@ -367,46 +366,41 @@ class ModelEntityBaseModel(BaseModel, ABC):
 # ============================================================================
 
 _AUTH_HEADER_FORMAT_DESCRIPTION = (
-    "Jinja2 template string controlling how the API key secret is sent to the upstream. "
-    "Must contain exactly one variable named `auth_secret`, which is substituted with the "
-    "resolved secret value at request time. "
-    "Example: `'X-Api-Key: {{ auth_secret }}'`. "
-    "If not set, defaults to `'Authorization: Bearer {{ auth_secret }}'`."
+    "Literal header format controlling how the API key secret is sent to the upstream. "
+    "Must contain exactly one `<auth_secret>` placeholder, which is replaced with the "
+    "resolved secret value at request time. It is plain text, not a template: no `{` or `}` "
+    "characters or line breaks are allowed. The legacy `{{ auth_secret }}` spelling is still accepted. "
+    "Example: `'X-Api-Key: <auth_secret>'`. "
+    "If not set, defaults to `'Authorization: Bearer <auth_secret>'`."
 )
 
 
+# ``auth_header_format`` is NOT a template engine input. It must be literal text around exactly one
+# ``<auth_secret>`` placeholder (the legacy ``{{ auth_secret }}`` spelling is still accepted for
+# providers stored before ``<auth_secret>`` existed); no other ``{``/``}`` characters (and no CR/LF)
+# are allowed. The header is built by plain string substitution, so user input is never evaluated.
+_AUTH_SECRET_PLACEHOLDER_RE = re.compile(r"<auth_secret>|\{\{[ \t]*auth_secret[ \t]*\}\}")
+_AUTH_HEADER_FORBIDDEN_CHARS = frozenset("{}\r\n")
+
+
 def _validate_auth_header_format(v: str | None) -> str | None:
-    """Validate that an auth_header_format value is a well-formed Jinja2 template
-    containing exactly one ``{{ auth_secret }}`` substitution and that it renders
-    to a ``<Header-Name>: <Header-Value>`` shape the IGW proxy can split on
-    ``": "``.
+    """Validate an ``auth_header_format`` value.
 
-    Two checks beyond Jinja2 syntax:
-
-    1. **Exactly one** ``auth_secret`` substitution. A duplicate placeholder
-       would leak the resolved secret into the rendered header twice, which is
-       never intended and a security concern.
-    2. **Renderable to ``<Header-Name>: <Header-Value>``.** A dry-run render
-       with a sentinel value must produce a string that ``str.partition(": ")``
-       splits into two non-empty parts. Otherwise the runtime proxy silently
-       sends an empty header value to the upstream.
+    The value is literal text with exactly one ``<auth_secret>`` placeholder (or the legacy
+    ``{{ auth_secret }}``, with optional whitespace inside the braces) and no other template syntax. It is never evaluated by a template
+    engine; the proxy substitutes the secret with plain string concatenation. The result must also
+    have the ``<Header-Name>: <Header-Value>`` shape the IGW proxy splits on ``": "``.
     """
     if v is None:
         return v
-    # Validates an auth-header template (rendered to HTTP, not HTML).
-    # Autoescape would corrupt secrets containing `&`, `<`, `>`, or quotes.
-    env = Environment(autoescape=False)  # noqa: S701  # nosec B701
-    try:
-        ast = env.parse(v)
-    except Exception as exc:
-        raise ValueError(f"Invalid Jinja2 template: {exc}") from exc
-    variable_names = [node.name for node in ast.find_all(jinja_nodes.Name)]
-    if set(variable_names) != {"auth_secret"} or len(variable_names) != 1:
-        found = ", ".join(sorted(set(variable_names))) if variable_names else "none"
+    # Splitting on the placeholder yields [prefix, suffix] iff it appears exactly once.
+    parts = _AUTH_SECRET_PLACEHOLDER_RE.split(v)
+    if len(parts) != 2 or any(_AUTH_HEADER_FORBIDDEN_CHARS.intersection(part) for part in parts):
         raise ValueError(
-            f"auth_header_format must contain exactly one Jinja2 variable named 'auth_secret' (found: {found})"
+            "auth_header_format must contain exactly one placeholder: '<auth_secret>' "
+            "(or the legacy '{{ auth_secret }}'), and no '{' or '}' characters or line breaks otherwise"
         )
-    rendered = env.from_string(v).render(auth_secret="__AUTH_SECRET__")
+    rendered = parts[0] + "__AUTH_SECRET__" + parts[1]
     header_name, sep, header_value = rendered.partition(": ")
     if not sep or not header_name.strip() or not header_value.strip():
         raise ValueError("auth_header_format must render to '<Header-Name>: <Header-Value>'")
@@ -528,11 +522,18 @@ class ModelProvider(ModelEntityBaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
-
-    @field_validator("auth_header_format")
-    @classmethod
-    def validate_auth_header_format(cls, v: str | None) -> str | None:
-        return _validate_auth_header_format(v)
+    # Deliberately no ``auth_header_format`` validator on this response model: providers stored before
+    # the format was restricted must still load for get/list. The request models validate on write and
+    # the gateway re-validates at use time.
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
 
 class ModelProviderSort(StrEnum):
@@ -615,6 +616,15 @@ class CreateModelProviderRequest(BaseModel):
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
     )
+    calls_back_as_caller: bool = Field(
+        default=False,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused."
+        ),
+    )
 
     @field_validator("auth_header_format")
     @classmethod
@@ -689,6 +699,15 @@ class UpsertModelProviderRequest(BaseModel):
         default=None,
         description=_AUTH_HEADER_FORMAT_DESCRIPTION,
         max_length=1024,
+    )
+    calls_back_as_caller: Optional[bool] = Field(
+        default=None,
+        description=(
+            "For a router that calls models back through the gateway on its caller's behalf. The gateway sends it this "
+            "provider's stored key and a caller context, the caller's credential sealed so only the gateway can read it, "
+            "and acts as the caller on each call back that returns the context. A call back with the stored key and no "
+            "context is refused. Left unset, an update keeps the provider's current setting."
+        ),
     )
 
     @field_validator("auth_header_format")

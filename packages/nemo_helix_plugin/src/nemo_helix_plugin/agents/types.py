@@ -17,6 +17,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
 from pydantic import (
@@ -244,9 +245,11 @@ class EnvironmentSpecInline(BaseModel):
     the injected process environment.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     description: str = Field(default="", description="Human-readable description.")
     env: StringMap = Field(default_factory=dict, description="Plaintext, non-secret env vars.")
-    secrets: StringMap = Field(default_factory=dict, description="ENV_VAR_NAME -> Secrets-service/plugin ref.")
+    secrets: StringMap = Field(default_factory=dict, description="Secret alias -> Secrets-service/plugin ref.")
     model_provider_override: ModelProviderOverride | None = Field(
         default=None,
         description="Set only to point at a non-IGW external model provider.",
@@ -368,6 +371,13 @@ class AgentDeployment(EntityMetadata):
         description="Resolved compute snapshot from the referenced environment.",
     )
     secrets: StringMap = Field(default_factory=dict, description="Resolved secret env references.")
+    providers: dict[str, GatewayProviderBinding] = Field(
+        default_factory=dict, description="Resolved gateway credential bindings."
+    )
+    source_fileset: FilesetRef | None = Field(
+        default=None,
+        description="Agent source fileset snapshotted at creation. When absent, stages <agent>-ethos.",
+    )
     status: DeploymentStatus = Field(default="pending", description="Deployment lifecycle status.")
     deployment_mode: DeploymentMode = Field(default="subprocess", description="Runtime backend.")
     endpoint: str = Field(default="", description="Subprocess loopback endpoint.")
@@ -506,7 +516,10 @@ class CreateDeploymentRequest(BaseModel):
     )
     image: str = Field(
         default="",
-        description="Container image for docker/k8s/openshell modes. Ignored for subprocess.",
+        description=(
+            "Container image for docker/k8s/openshell modes. When omitted, uses the agent's "
+            "reference.container_image, then deployments.default_image. Ignored for subprocess."
+        ),
     )
     use_image_entrypoint: bool = Field(
         default=False,

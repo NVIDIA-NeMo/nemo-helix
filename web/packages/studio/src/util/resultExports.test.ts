@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentEvaluateJob } from '@nemo/sdk/generated/evals/schema';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
+import type { AgentEvalResult } from '@studio/api/evaluation/agent-evaluations';
 import {
   agentEvalExport,
   customizationMetricsExport,
@@ -37,10 +39,28 @@ describe('datasetEvalExport', () => {
 });
 
 describe('agentEvalExport', () => {
-  it('writes one row per task with its scores', () => {
-    const { csv } = agentEvalExport({ name: 'job', agent: 'bot' }, scores, [
+  const job = {
+    name: 'job',
+    workspace: 'ws',
+    status: 'completed',
+    spec: { target: { kind: 'agent', agent: { name: 'ws/bot' } } },
+  } as unknown as AgentEvaluateJob;
+  const result = { bundle_ref: 'ws/fs#run', summary: { tasks: 1 } } as unknown as AgentEvalResult;
+
+  it('keeps the full job and result records in JSON', () => {
+    expect(agentEvalExport(job, result, scores, []).json).toEqual({
+      job,
+      agent: 'bot',
+      result,
+      trials: [],
+    });
+  });
+
+  it('writes one row per trial with its scores', () => {
+    const { csv } = agentEvalExport(job, result, scores, [
       {
         taskId: 't1',
+        trialId: 'tr1',
         intent: 'classify',
         instruction: 'email',
         reference: { label: 'phishing' },
@@ -53,6 +73,7 @@ describe('agentEvalExport', () => {
     expect(csv).toEqual([
       {
         task_id: 't1',
+        trial_id: 'tr1',
         intent: 'classify',
         instruction: 'email',
         reference: { label: 'phishing' },

@@ -36,6 +36,8 @@
 /usr/local/lib/python3.12/dist-packages/jupyter_server-*.dist-info
 /usr/local/lib/python3.12/dist-packages/jupyterlab
 /usr/local/lib/python3.12/dist-packages/jupyterlab-*.dist-info
+/usr/local/lib/python3.12/dist-packages/notebook
+/usr/local/lib/python3.12/dist-packages/notebook-*.dist-info
 /usr/local/lib/python3.12/dist-packages/nvidia/dali
 /usr/local/lib/python3.12/dist-packages/nvidia_dali_cuda130-*.dist-info
 /usr/local/lib/python3.12/dist-packages/nvidia_dali_cuda130*.data

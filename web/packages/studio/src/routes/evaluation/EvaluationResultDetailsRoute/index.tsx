@@ -104,6 +104,10 @@ export const EvaluationResultDetailsRoute: FC = () => {
               hasFailed ||
               isLoadingScores ||
               isLoadingRows ||
+              // A failed load would otherwise export a partial file, e.g. aggregate scores in
+              // place of rows, with nothing to show that anything is missing.
+              !!scoresError ||
+              !!rowsError ||
               (scores.length === 0 && rows.length === 0)
             }
             getData={() => datasetEvalExport(job, scores, rows)}

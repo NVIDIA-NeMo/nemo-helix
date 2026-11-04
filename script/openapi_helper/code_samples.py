@@ -8,27 +8,37 @@ Fern generates its request snippets from the operation alone. Three shapes come 
 - A bodyless success response (204/205): every tab parses or prints the empty body, so a
   successful call raises (``response.json()`` on Python, ``await response.json()`` in JavaScript).
 - A required form body: the snippet sends an empty form (``payload = ""``).
-- Credentials or bodies the route reads from the raw request, which FastAPI cannot describe:
-  ``/apis/auth/authenticate`` needs an ``Authorization`` header and the OTLP logs upload needs a
-  JSON body, but neither appears in the spec, so the snippets send neither.
+- Raw-request bodies not described by FastAPI, such as OTLP logs uploads.
+- Explicit authenticate examples that demonstrate runtime token variables rather than
+  embedding bearer placeholders. Their auth requirement comes from native OpenAPI metadata.
 
-For these operations this module writes explicit samples in all eight languages the API reference
-shows. Operations that already carry ``x-codeSamples`` (authored on the route) are left alone, and
-the output depends only on the spec, so regeneration is idempotent.
+For these operations this module writes explicit Python and JavaScript samples and
+SDK overrides for Fern's default Python, JavaScript, and cURL tabs. Binary downloads
+use bytes rather than a JSON decoder; raw uploads have representative nonempty content.
+Empty 201 responses are handled explicitly. Existing route-authored ``x-codeSamples``
+are preserved and mirrored into SDK overrides too. The output depends only on the
+spec, so regeneration is idempotent.
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
 BASE_URL = "http://localhost:8080"
-LANGUAGES = ("Python", "JavaScript", "Go", "Ruby", "PHP", "Java", "C#", "Swift")
+LANGUAGES = ("Python", "JavaScript")
 _BODYLESS_STATUSES = {"204", "205"}
-_METHODS = ("get", "put", "post", "delete", "patch")
+_METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
+
+_CURRENT_TIMESTAMP = "__NHX_CURRENT_TIMESTAMP__"
+
+# ExportTraceServiceRequest -> ResourceSpans -> ScopeSpans -> Span, with nonzero
+# 16/8-byte IDs. Omitted optional timestamps use the server's ingest time.
+_OTLP_TRACES_BASE64 = "CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw=="
 
 _OTLP_LOGS_BODY: dict[str, Any] = {
     "resourceLogs": [
@@ -66,12 +76,62 @@ class SampleRequest:
     headers: dict[str, str] = field(default_factory=dict)
     body: str | None = None
     reads_body: bool = True
+    binary_response: bool = False
+    requires_bearer_token: bool = False
+    body_is_base64: bool = False
+    body_uses_current_timestamp: bool = False
+
+    def __post_init__(self) -> None:
+        if self.requires_bearer_token and any(key.lower() == "authorization" for key in self.headers):
+            raise ValueError("Use bearer-token semantics instead of a literal Authorization header")
 
 
-# Requests whose headers or body the spec cannot express (see the module docstring).
+# Requests needing a custom body or runtime-credential demonstration (see the module docstring).
 _EXPLICIT: dict[tuple[str, str], dict[str, Any]] = {
-    ("get", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
-    ("post", "/apis/auth/authenticate"): {"headers": {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}},
+    ("get", "/apis/auth/authenticate"): {},
+    ("post", "/apis/auth/authenticate"): {},
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/atif"): {
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(
+            {
+                "schema_version": "ATIF-v1.7",
+                "agent": {"name": "my-agent", "version": "1.0"},
+                # Omitting the optional timestamp uses ingest time, not a stale literal.
+                "steps": [{"step_id": 1, "source": "user", "message": "Hello!"}],
+            }
+        ),
+        "reads_body": False,
+    },
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/spans"): {
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(
+            {
+                "source": "my-agent",
+                "spans": [
+                    {
+                        "trace_id": "my-trace",
+                        "span_id": "my-span",
+                        "name": "Agent request",
+                        "started_at": _CURRENT_TIMESTAMP,
+                        "input": "Hello!",
+                        "output": "Hello from Helix!",
+                    }
+                ],
+            }
+        ),
+        "body_uses_current_timestamp": True,
+        "reads_body": False,
+    },
+    ("post", "/apis/intake/v2/workspaces/{workspace}/ingest/otlp/v1/traces"): {
+        "headers": {"Content-Type": "application/x-protobuf"},
+        "body": _OTLP_TRACES_BASE64,
+        "body_is_base64": True,
+    },
+    ("patch", "/apis/intake/v2/workspaces/{workspace}/evaluations/{name}"): {
+        "headers": {"Content-Type": "application/json"},
+        # Change a mutable field without replacing membership or immutable fields.
+        "body": json.dumps({"description": "Reviewed evaluation results"}),
+    },
     ("post", "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"): {
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps(_OTLP_LOGS_BODY, separators=(",", ":")),
@@ -92,6 +152,8 @@ def _path_value(path: str, param: str) -> str:
     """A readable placeholder for a path parameter, named after the collection it indexes."""
     if param == "workspace":
         return "default"
+    if param in {"path", "path:path"}:
+        return "example.txt"
     segments = path.split("/")
     index = segments.index("{" + param + "}")
     collection = segments[index - 1] if index > 0 else param
@@ -124,13 +186,44 @@ def _required_form_body(spec: dict, operation: dict) -> str | None:
     return urlencode(fields)
 
 
+def _requires_bearer_token(spec: dict, operation: dict) -> bool:
+    """Require bearer credentials only when every documented auth alternative does."""
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    requirements = operation.get("security", [])
+    return bool(requirements) and all(
+        any(
+            schemes.get(name, {}).get("type") == "http" and schemes[name].get("scheme", "").lower() == "bearer"
+            for name in requirement
+        )
+        for requirement in requirements
+    )
+
+
 def sample_request(spec: dict, path: str, method: str, operation: dict) -> SampleRequest | None:
     """The request to document for one operation, or None when Fern's own samples are correct."""
     if operation.get("x-codeSamples"):
         return None
+    bearer = _requires_bearer_token(spec, operation)
     explicit = _EXPLICIT.get((method, path))
     if explicit is not None:
-        return SampleRequest(method.upper(), _url(path), reads_body=not _is_bodyless(operation), **explicit)
+        return SampleRequest(
+            method.upper(),
+            _url(path),
+            requires_bearer_token=bearer,
+            **{"reads_body": not _is_bodyless(operation), **explicit},
+        )
+    content = _resolve(spec, operation.get("requestBody", {})).get("content", {})
+    if "application/octet-stream" in content:
+        return SampleRequest(
+            method.upper(),
+            _url(path),
+            headers={"Content-Type": "application/octet-stream"},
+            body="Hello, Helix!\n",
+            requires_bearer_token=bearer,
+        )
+    responses = [v for k, v in operation.get("responses", {}).items() if str(k).startswith("2")]
+    if responses and all("application/octet-stream" in v.get("content", {}) for v in responses):
+        return SampleRequest(method.upper(), _url(path), binary_response=True, requires_bearer_token=bearer)
     form = _required_form_body(spec, operation)
     if form is not None:
         return SampleRequest(
@@ -139,9 +232,10 @@ def sample_request(spec: dict, path: str, method: str, operation: dict) -> Sampl
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             body=form,
             reads_body=not _is_bodyless(operation),
+            requires_bearer_token=bearer,
         )
     if _is_bodyless(operation):
-        return SampleRequest(method.upper(), _url(path), reads_body=False)
+        return SampleRequest(method.upper(), _url(path), reads_body=False, requires_bearer_token=bearer)
     return None
 
 
@@ -151,183 +245,93 @@ def _q(value: str) -> str:
 
 
 def _python(r: SampleRequest) -> str:
-    lines = ["import requests", "", f"url = {_q(r.url)}"]
+    lines = (["import os"] if r.requires_bearer_token else []) + ["import requests", "", f"url = {_q(r.url)}"]
     args = ["url"]
-    if r.headers:
-        lines.append("headers = {" + ", ".join(f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()) + "}")
+    headers = [f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()]
+    if r.requires_bearer_token:
+        lines += [
+            "# Set NHX_ACCESS_TOKEN to a raw access token before running.",
+            'token = os.environ["NHX_ACCESS_TOKEN"]',
+        ]
+        headers.append('"Authorization": f"Bearer {token}"')
+    if headers:
+        lines.append("headers = {" + ", ".join(headers) + "}")
         args.append("headers=headers")
     if r.body is not None:
-        lines.append(f"payload = {_q(r.body)}")
+        if r.body_is_base64:
+            lines += ["import base64", f"payload = base64.b64decode({_q(r.body)})"]
+        else:
+            lines.append(f"payload = {_q(r.body)}")
+            if r.body_uses_current_timestamp:
+                lines += [
+                    "from datetime import datetime, timezone",
+                    f"payload = payload.replace({_q(_CURRENT_TIMESTAMP)}, datetime.now(timezone.utc).isoformat())",
+                ]
         args.append("data=payload")
     lines += ["", f"response = requests.request({_q(r.method)}, {', '.join(args)})", "response.raise_for_status()"]
-    lines.append("print(response.json())" if r.reads_body else "print(response.status_code)  # no response body")
+    if r.binary_response:
+        lines.append("print(response.content)  # raw file bytes, not JSON")
+    else:
+        lines.append("print(response.json())" if r.reads_body else "print(response.status_code)  # no response body")
     return "\n".join(lines) + "\n"
 
 
 def _javascript(r: SampleRequest) -> str:
-    lines = [f"const response = await fetch({_q(r.url)}, {{", f"  method: {_q(r.method)},"]
-    if r.headers:
-        lines.append("  headers: {" + ", ".join(f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()) + "},")
+    lines = []
+    headers = [f"{_q(k)}: {_q(v)}" for k, v in r.headers.items()]
+    if r.requires_bearer_token:
+        lines += [
+            "// Supply `token` from your application's authentication flow before running.",
+            "// Do not embed a real token in frontend source or build-time environment variables.",
+        ]
+        headers.append('"Authorization": `Bearer ${token}`')
+    if r.body_uses_current_timestamp:
+        lines.append(f"const payload = {_q(r.body)}.replace({_q(_CURRENT_TIMESTAMP)}, new Date().toISOString());")
+    lines += [f"const response = await fetch({_q(r.url)}, {{", f"  method: {_q(r.method)},"]
+    if headers:
+        lines.append("  headers: {" + ", ".join(headers) + "},")
     if r.body is not None:
-        lines.append(f"  body: {_q(r.body)},")
+        body = (
+            f"Uint8Array.from(atob({_q(r.body)}), c => c.charCodeAt(0))"
+            if r.body_is_base64
+            else "payload"
+            if r.body_uses_current_timestamp
+            else _q(r.body)
+        )
+        lines.append(f"  body: {body},")
     lines += ["});", "if (!response.ok) throw new Error(`HTTP ${response.status}`);"]
     lines.append(
-        "console.log(await response.json());" if r.reads_body else "console.log(response.status); // no response body"
+        "console.log(await response.arrayBuffer());"
+        if r.binary_response
+        else "console.log(await response.json());"
+        if r.reads_body
+        else "console.log(response.status); // no response body"
     )
     return "\n".join(lines) + "\n"
 
 
-def _go(r: SampleRequest) -> str:
-    imports = ['"fmt"', '"net/http"'] + (['"io"'] if r.reads_body else []) + (['"strings"'] if r.body else [])
-    body = f"strings.NewReader({_q(r.body)})" if r.body is not None else "nil"
-    lines = ["package main", "", "import ("] + [f"\t{i}" for i in sorted(imports)] + [")", "", "func main() {"]
-    lines += [
-        f"\treq, err := http.NewRequest({_q(r.method)}, {_q(r.url)}, {body})",
-        "\tif err != nil {",
-        "\t\tpanic(err)",
-        "\t}",
-    ]
-    lines += [f"\treq.Header.Set({_q(k)}, {_q(v)})" for k, v in r.headers.items()]
-    lines += [
-        "\tres, err := http.DefaultClient.Do(req)",
-        "\tif err != nil {",
-        "\t\tpanic(err)",
-        "\t}",
-        "\tdefer res.Body.Close()",
-        "\tfmt.Println(res.Status)",
-    ]
-    if r.reads_body:
-        lines += [
-            "\tdata, err := io.ReadAll(res.Body)",
-            "\tif err != nil {",
-            "\t\tpanic(err)",
-            "\t}",
-            "\tfmt.Println(string(data))",
-        ]
-    return "\n".join(lines + ["}"]) + "\n"
+_RENDERERS = {"Python": _python, "JavaScript": _javascript}
 
 
-def _ruby(r: SampleRequest) -> str:
-    cls = r.method.capitalize()
-    lines = ['require "net/http"', "", f"uri = URI({_q(r.url)})", f"request = Net::HTTP::{cls}.new(uri)"]
-    lines += [f"request[{_q(k)}] = {_q(v)}" for k, v in r.headers.items()]
+def _curl(r: SampleRequest) -> str:
+    args = ["curl --fail-with-body", "--request " + shlex.quote(r.method), shlex.quote(r.url)]
+    args += ["--header " + shlex.quote(f"{k}: {v}") for k, v in r.headers.items()]
+    guidance = ""
+    if r.requires_bearer_token:
+        guidance = ': "${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}"\n'
+        args.append('--header "Authorization: Bearer ${NHX_ACCESS_TOKEN}"')
     if r.body is not None:
-        lines.append(f"request.body = {_q(r.body)}")
-    lines += [
-        'response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") do |http|',
-        "  http.request(request)",
-        "end",
-        "",
-        "puts response.code",
-    ]
-    if r.reads_body:
-        lines.append("puts response.body")
-    return "\n".join(lines) + "\n"
-
-
-def _php(r: SampleRequest) -> str:
-    lines = ["<?php", f"$ch = curl_init({_q(r.url)});", f"curl_setopt($ch, CURLOPT_CUSTOMREQUEST, {_q(r.method)});"]
-    if r.headers:
-        headers = ", ".join(_q(f"{k}: {v}") for k, v in r.headers.items())
-        lines.append(f"curl_setopt($ch, CURLOPT_HTTPHEADER, [{headers}]);")
-    if r.body is not None:
-        lines.append(f"curl_setopt($ch, CURLOPT_POSTFIELDS, {_q(r.body)});")
-    lines.append("curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);")
-    lines.append("$body = curl_exec($ch);" if r.reads_body else "curl_exec($ch);")
-    lines += ["$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);", "curl_close($ch);", "", "echo $status, PHP_EOL;"]
-    if r.reads_body:
-        lines.append("echo $body, PHP_EOL;")
-    return "\n".join(lines) + "\n"
-
-
-def _java(r: SampleRequest) -> str:
-    publisher = (
-        f"HttpRequest.BodyPublishers.ofString({_q(r.body)})"
-        if r.body is not None
-        else "HttpRequest.BodyPublishers.noBody()"
-    )
-    handler, kind = ("ofString()", "String") if r.reads_body else ("discarding()", "Void")
-    lines = [
-        "import java.net.URI;",
-        "import java.net.http.HttpClient;",
-        "import java.net.http.HttpRequest;",
-        "import java.net.http.HttpResponse;",
-        "",
-        "public class Example {",
-        "  public static void main(String[] args) throws Exception {",
-        f"    HttpRequest request = HttpRequest.newBuilder(URI.create({_q(r.url)}))",
-    ]
-    lines += [f"        .header({_q(k)}, {_q(v)})" for k, v in r.headers.items()]
-    lines += [
-        f"        .method({_q(r.method)}, {publisher})",
-        "        .build();",
-        f"    HttpResponse<{kind}> response = HttpClient.newHttpClient()",
-        f"        .send(request, HttpResponse.BodyHandlers.{handler});",
-        "    System.out.println(response.statusCode());",
-    ]
-    if r.reads_body:
-        lines.append("    System.out.println(response.body());")
-    return "\n".join(lines + ["  }", "}"]) + "\n"
-
-
-def _csharp(r: SampleRequest) -> str:
-    lines = [
-        "using System;",
-        "using System.Net.Http;",
-        "using System.Text;",
-        "",
-        "using var client = new HttpClient();",
-        f"using var request = new HttpRequestMessage(new HttpMethod({_q(r.method)}), {_q(r.url)});",
-    ]
-    content_type = r.headers.get("Content-Type")
-    lines += [f"request.Headers.Add({_q(k)}, {_q(v)});" for k, v in r.headers.items() if k != "Content-Type"]
-    if r.body is not None:
-        lines.append(
-            f"request.Content = new StringContent({_q(r.body)}, Encoding.UTF8, {_q(content_type or 'text/plain')});"
-        )
-    lines += ["using var response = await client.SendAsync(request);", "Console.WriteLine((int)response.StatusCode);"]
-    if r.reads_body:
-        lines.append("Console.WriteLine(await response.Content.ReadAsStringAsync());")
-    return "\n".join(lines) + "\n"
-
-
-def _swift(r: SampleRequest) -> str:
-    lines = [
-        "import Foundation",
-        "#if canImport(FoundationNetworking)",
-        "import FoundationNetworking",
-        "#endif",
-        "",
-        f"var request = URLRequest(url: URL(string: {_q(r.url)})!)",
-        f"request.httpMethod = {_q(r.method)}",
-    ]
-    lines += [f"request.setValue({_q(v)}, forHTTPHeaderField: {_q(k)})" for k, v in r.headers.items()]
-    if r.body is not None:
-        lines.append(f"request.httpBody = Data({_q(r.body)}.utf8)")
-    data = "data" if r.reads_body else "_"
-    lines += [
-        "let done = DispatchSemaphore(value: 0)",
-        f"URLSession.shared.dataTask(with: request) {{ {data}, response, error in",
-        "  defer { done.signal() }",
-        "  if let error = error { print(error); return }",
-        "  print((response as! HTTPURLResponse).statusCode)",
-    ]
-    if r.reads_body:
-        lines.append("  if let data = data { print(String(decoding: data, as: UTF8.self)) }")
-    lines += ["}.resume()", "done.wait()"]
-    return "\n".join(lines) + "\n"
-
-
-_RENDERERS = {
-    "Python": _python,
-    "JavaScript": _javascript,
-    "Go": _go,
-    "Ruby": _ruby,
-    "PHP": _php,
-    "Java": _java,
-    "C#": _csharp,
-    "Swift": _swift,
-}
+        if r.body_is_base64:
+            guidance += f"printf %s {shlex.quote(r.body)} | base64 -d | "
+            args.append("--data-binary @-")
+        elif r.body_uses_current_timestamp:
+            guidance += "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)\n"
+            args.append("--data-binary " + shlex.quote(r.body).replace(_CURRENT_TIMESTAMP, "'\"${timestamp}\"'"))
+        else:
+            args.append("--data-binary " + shlex.quote(r.body))
+    if r.binary_response:
+        args.append("--output example.txt")
+    return guidance + " \\\n  ".join(args) + "\n"
 
 
 def render_samples(request: SampleRequest) -> list[dict[str, str]]:
@@ -344,4 +348,24 @@ def add_code_samples(spec: dict) -> dict:
             request = sample_request(spec, path, method, operation)
             if request is not None:
                 operation["x-codeSamples"] = render_samples(request)
+            # settings.http-snippets enables Fern's generated tabs, which take precedence
+            # over Redocly x-codeSamples. Override the SDK tabs for *all* custom samples,
+            # including route-authored ones and HEAD, not just bearer-auth operations.
+            overrides = {
+                sample["lang"].lower(): sample["source"]
+                for sample in operation.get("x-codeSamples", [])
+                if sample["lang"] in LANGUAGES
+            }
+            if request is not None:
+                overrides = {"curl": _curl(request), **overrides}
+            if overrides:
+                examples = operation.setdefault("x-fern-examples", [])
+                if not examples:
+                    examples.append({})
+                # Preserve request/response examples and unrelated SDKs. Every example
+                # must carry the override, otherwise selecting one revives the fallback.
+                for example in examples:
+                    samples = example.setdefault("code-samples", [])
+                    samples[:] = [sample for sample in samples if sample.get("sdk") not in overrides]
+                    samples.extend({"sdk": sdk, "code": code} for sdk, code in overrides.items())
     return spec

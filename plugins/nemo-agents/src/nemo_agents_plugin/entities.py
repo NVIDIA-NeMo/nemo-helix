@@ -61,7 +61,7 @@ from nemo_helix_plugin.agents.types import (
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.refs import FilesetRef
-from pydantic import BaseModel, Field, PrivateAttr, computed_field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, computed_field
 
 
 class SessionStatus(StrEnum):
@@ -232,6 +232,8 @@ class AgentEnvironmentSpec(NemoEntity, EnvironmentSpecInline, entity_type="agent
     Referenced by an AgentEnvironment's ``environment_spec`` (by name or inline).
     """
 
+    model_config = ConfigDict(extra="ignore")
+
 
 class AgentEnvironment(NemoEntity, AgentEnvironmentInline, entity_type="agent_environment"):
     """A composition of an environment spec and a compute spec.
@@ -345,6 +347,10 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
             "ENV_VAR_NAME -> 'workspace/secret-name'. Compiled into secret-backed container env "
             "vars (never plaintext) for docker/k8s modes; ignored for subprocess."
         ),
+    )
+    source_fileset: FilesetRef | None = Field(
+        default=None,
+        description="Agent source fileset snapshotted at creation. When absent, stages <agent>-ethos.",
     )
     spec_revision: str = Field(
         default="",

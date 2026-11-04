@@ -10,15 +10,16 @@ import {
   type RunJobsPage,
 } from '@nemo/sdk/generated/anonymizer/schema';
 import { AnonymizerJobsDataView } from '@studio/components/dataViews/AnonymizerJobsDataView';
+import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { getWorkspaceAnonymizerRoute } from '@studio/routes/utils';
 import { XL_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
-import { renderRoute, screen } from '@studio/tests/util/render';
-import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
+import { delay, http, HttpResponse } from 'msw';
 
 vi.mock('use-debounce', () => ({
   useDebounce: (value: unknown) => [value, { cancel: () => {}, flush: () => {} }],
@@ -176,5 +177,96 @@ describe('AnonymizerJobsDataView', () => {
       })
     ).toBeInTheDocument();
     expect(screen.queryByTestId('error-panel')).not.toBeInTheDocument();
+  });
+
+  describe('cancel confirmation', () => {
+    const CANCEL_URL = `${PLATFORM_BASE_URL}/apis/anonymizer/v2/workspaces/:workspace/jobs/run/:name/cancel`;
+    const JOB = 'cancel-me';
+
+    const setup = async (status: HelixJobStatus = HelixJobStatus.pending) => {
+      let posts = 0;
+      const handler = (respond: (n: number) => Response | Promise<Response>) =>
+        http.post(CANCEL_URL, () => {
+          posts += 1;
+          return respond(posts);
+        });
+      server.use(
+        http.get(LIST_URL, () => HttpResponse.json(makePage([{ ...makeJob(JOB), status }])))
+      );
+      const user = userEvent.setup();
+      renderComponent();
+      await screen.findByText(JOB, undefined, { timeout: XL_SELECTOR_TIMEOUT });
+      await user.click(screen.getByRole('button', { name: 'Open quick actions menu' }));
+      return { user, handler, getPosts: () => posts };
+    };
+
+    const selectCancel = async (user: UserEvent) => {
+      await user.click(await screen.findByRole('menuitem', { name: 'Cancel' }));
+      return screen.findByRole('dialog');
+    };
+
+    it('opens the confirmation dialog without sending a POST', async () => {
+      const { user, handler, getPosts } = await setup();
+      server.use(handler(() => HttpResponse.json({})));
+
+      const dialog = await selectCancel(user);
+
+      expect(within(dialog).getByText(`Cancel ${JOB}`)).toBeInTheDocument();
+      expect(getPosts()).toBe(0);
+    });
+
+    it('dismissing sends no POST', async () => {
+      const { user, handler, getPosts } = await setup();
+      server.use(handler(() => HttpResponse.json({})));
+      const dialog = await selectCancel(user);
+
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(getPosts()).toBe(0);
+    });
+
+    it('sends exactly one POST when confirm is double-clicked, then closes', async () => {
+      const { user, handler, getPosts } = await setup();
+      server.use(
+        handler(async () => {
+          await delay(50);
+          return HttpResponse.json({ name: JOB, status: HelixJobStatus.cancelled });
+        })
+      );
+      const dialog = await selectCancel(user);
+
+      await user.dblClick(within(dialog).getByRole('button', { name: 'Cancel Job' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(getPosts()).toBe(1);
+    });
+
+    it('shows a 409 detail in the open dialog and closes after a successful retry', async () => {
+      const { user, handler, getPosts } = await setup();
+      server.use(
+        handler((n) =>
+          n === 1
+            ? HttpResponse.json({ detail: 'Job is already finishing' }, { status: 409 })
+            : HttpResponse.json({ name: JOB, status: HelixJobStatus.cancelled })
+        )
+      );
+      const dialog = await selectCancel(user);
+
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel Job' }));
+
+      expect(await within(dialog).findByText('Job is already finishing')).toBeInTheDocument();
+      await user.click(within(dialog).getByRole('button', { name: 'Cancel Job' }));
+
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(getPosts()).toBe(2);
+    });
+
+    it('shows no Cancel item for a completed job (guard)', async () => {
+      await setup(HelixJobStatus.completed);
+
+      expect(await screen.findByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Cancel' })).not.toBeInTheDocument();
+    });
   });
 });

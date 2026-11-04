@@ -1,14 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""GPU e2e: nemo-rl DPO on HelpSteer3, with a deterministic uplift proxy."""
+"""GPU e2e: nemo-rl DPO on HelpSteer3, scored on held-out preference accuracy.
 
+DPO trains the policy to rank the chosen response above the rejected one relative to the
+reference policy. The job validates on the held-out pairs before and after training and records
+``val_accuracy`` (the share of pairs whose chosen response gets the higher implicit reward) and
+the mean implicit rewards of the chosen and rejected responses. The test requires the tuned
+policy to rank the held-out pairs better than chance and to give chosen responses the higher
+mean reward.
+"""
+
+import json
 import logging
+from pathlib import Path
 
 import pytest
 from nemo_helix_plugin.client.client import NemoClient
 
-from e2e.customizer import customizer_eval as ceval
 from e2e.customizer import customizer_jobs as jobs
 from e2e.customizer.customization_helpers import unique_name
 
@@ -19,46 +28,32 @@ pytestmark = [pytest.mark.platform("kubernetes"), pytest.mark.feature("gpu", "rl
 RlJobInput = pytest.importorskip("nemo_rl_plugin.schema").RlJobInput
 
 
-def _deploy_and_score(
-    client: NemoClient,
-    workspace: str,
-    base_url: str,
-    entity: str,
-    rows: list[dict],
-) -> float:
-    deployment, config = jobs.deploy_vllm_model(client, workspace, entity, lora_enabled=False)
-    try:
-        model_id = ceval.base_model_field(workspace, entity)
-        jobs.wait_until_entity_routable(client, workspace, model_id)
-        return ceval.score_rows(
-            rows,
-            base_url,
-            workspace,
-            model_id,
-            metric="f1",
-        )
-    finally:
-        jobs.delete_deployment(client, workspace, deployment, config)
+def _tie_fraction(validation_path: Path) -> float:
+    """Share of HelpSteer3 pairs with ``overall_preference == 0``.
+
+    NeMo-RL trains a tie as chosen == rejected, so its two rewards are always equal and the
+    strict ``chosen > rejected`` accuracy can never count it. Accuracy is judged on the rest.
+    """
+    preferences = [json.loads(line)["overall_preference"] for line in validation_path.read_text().splitlines() if line]
+    assert preferences, f"no validation pairs in {validation_path}"
+    return sum(1 for preference in preferences if preference == 0) / len(preferences)
 
 
 def test_rl_dpo_uplift(
     client: NemoClient,
     customizer_workspace: str,
-    platform_base_url: str,
     helpsteer_dpo_fileset: str,
-    dpo_eval_rows: list[dict],
+    dpo_cache: Path,
     rl_base_entity: str,
-    require_uplift: bool,
 ) -> None:
     jobs.require_kubernetes_backend(client)
 
     ws = customizer_workspace
-    base_entity = rl_base_entity
     output_name = unique_name("qwen3-dpo")
 
     spec = RlJobInput.model_validate(
         {
-            "model": f"{ws}/{base_entity}",
+            "model": f"{ws}/{rl_base_entity}",
             "dataset": f"{ws}/{helpsteer_dpo_fileset}",
             "training": {
                 "type": "dpo",
@@ -76,11 +71,27 @@ def test_rl_dpo_uplift(
     job_name, final = jobs.submit_and_wait_customization_job(client, "rl", spec, ws)
     assert final.status == "completed", jobs.get_job_failure_details(client, job_name, ws)
 
-    assert dpo_eval_rows, "no non-tie preference rows available for DPO eval"
+    metrics = jobs.training_metrics(client, ws, job_name)
+    accuracy = jobs.require_metric(metrics, "val_accuracy", job_name)
+    chosen = jobs.require_metric(metrics, "val_rewards_chosen_mean", job_name)
+    rejected = jobs.require_metric(metrics, "val_rewards_rejected_mean", job_name)
+    assert len(accuracy) >= 2, f"expected validation before and after training, got val_accuracy={accuracy}"
 
-    base_score = _deploy_and_score(client, ws, platform_base_url, base_entity, dpo_eval_rows)
-    tuned_score = _deploy_and_score(client, ws, platform_base_url, output_name, dpo_eval_rows)
-
-    result = ceval.UpliftResult(metric="f1", base_score=base_score, tuned_score=tuned_score, tuned_label="dpo")
-    logger.info("rl dpo: base=%.4f tuned=%.4f uplift=%.4f", base_score, tuned_score, result.uplift)
-    result.assert_ok(require_uplift=require_uplift)
+    non_tie = 1 - _tie_fraction(dpo_cache / "validation.jsonl")
+    pair_accuracy = accuracy[-1] / non_tie
+    margin = chosen[-1] - rejected[-1]
+    logger.info(
+        "rl dpo: val_accuracy %.4f -> %.4f (%.4f on the %.0f%% of pairs with a preference); "
+        "reward margin chosen - rejected %.4f -> %.4f",
+        accuracy[0],
+        accuracy[-1],
+        pair_accuracy,
+        non_tie * 100,
+        chosen[0] - rejected[0],
+        margin,
+    )
+    assert margin > 0, f"held-out chosen reward did not exceed rejected: chosen={chosen[-1]} rejected={rejected[-1]}"
+    assert pair_accuracy > 0.5, (
+        f"held-out preference accuracy {pair_accuracy:.4f} on pairs with a preference is not above chance "
+        f"(val_accuracy={accuracy}, non-tie share={non_tie:.4f})"
+    )

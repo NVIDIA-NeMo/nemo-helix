@@ -34,6 +34,7 @@ from nemo_evals.jobs.agent_spec import (
     RegisteredAgentSource,
 )
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
+from nemo_evals.jobs.gateway_models import GATEWAY_URL_OVERRIDE_ENVVAR
 from nemo_evals.jobs.harbor_task_dispatch import (
     DISPATCH_COMMAND,
     OPENSANDBOX_ENVIRONMENT,
@@ -132,6 +133,16 @@ async def test_compiled_job_has_one_dispatch_step_without_sandbox_credentials(ta
     names = {variable.name for variable in step.environment or []}
     assert not {name for name in names if "SANDBOX" in name}
     assert not {name for name in names if "API_KEY" in name}
+
+
+async def test_the_task_job_carries_the_gateway_url_override(task_spec):
+    (step,) = (
+        await HarborTaskDispatchJob.compile(
+            spec=task_spec, profile="k8s-cpu", gateway_url_override="https://envoy.ns.svc:8080"
+        )
+    ).steps
+
+    assert {v.name: v.value for v in step.environment or []}[GATEWAY_URL_OVERRIDE_ENVVAR] == "https://envoy.ns.svc:8080"
 
 
 async def test_registered_agent_files_are_staged_first_on_the_dispatcher_image(task_spec, harbor_config):
@@ -626,7 +637,7 @@ def test_a_compose_file_the_pod_cannot_run_fails_the_job_with_the_parsers_messag
     task = write_task(tmp_path / "t", "[environment]\n")
     (task / "environment" / "Dockerfile").write_text("FROM python:3.12-slim\n")
     (task / "environment" / "docker-compose.yaml").write_text(
-        "services:\n  odoo:\n    image: odoo:17\n    expose: ['18080']\n"
+        "services:\n  odoo:\n    image: odoo:17\n    expose: ['44772']\n"
     )
     with pytest.raises(ComposeError, match="compose_reserved_port"):
         prepared_compose_services(task, COMPOSE_ENVIRONMENT)

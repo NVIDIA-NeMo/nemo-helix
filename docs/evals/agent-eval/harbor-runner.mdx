@@ -771,26 +771,55 @@ An agent that declares no model connection, or a provider the gateway doesn't se
   reaches: `host.docker.internal` for a local Docker run, the in-cluster address for a taskset run on
   Kubernetes. On Kubernetes the agent gets the address by the name the sandbox profile's
   `agent_channel` lists for it, such as `nemo-helix-api.<namespace>.svc.cluster.local`, because the
-  sandbox resolves only the names it allows. A run with no-network tasks is refused when no
-  `agent_channel` entry names the platform. Don't set the base URL variable yourself; a target that
+  sandbox resolves only the names it allows. No-network and allowlist tasks reach the platform only
+  through `agent_channel`, so a run with such tasks is refused when no `agent_channel` entry names
+  the platform. Don't set the base URL variable yourself; a target that
   does is refused.
+- On Kubernetes, `agents.deployments.gateway_url_override` replaces the in-cluster address, as it
+  does for deployed agents. Set it to an HTTPS gateway, such as the platform's Envoy, to keep the
+  agent's key off plain HTTP. A run uses the override set when it was submitted. Give an HTTPS
+  override the name `agent_channel` lists, with a certificate for that name: a run that would reach it
+  by another name is refused. When the job trusts a private CA for the platform
+  (`NHX_CLIENT_SSL_CERT_FILE`, else `SSL_CERT_FILE`), each sandbox trusts it too. `SSL_CERT_FILE`,
+  `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `NODE_EXTRA_CA_CERTS` keep the certificates they named
+  before, a file or a directory, or the image's CA bundle, and add that CA. The files are under
+  `/tmp/nemo-helix-tls`, so images that run as a non-root user work too.
 - The gateway holds the provider's key, so the agent needs none. With platform authentication
   disabled, evals sets a placeholder key, unless another secret in the job, such as a judge's,
   already uses the key variable's name; that job is refused rather than handing the agent the other
   secret. With platform authentication enabled, put a Helix access key scoped to `inference` in
   `env_secrets` under the key variable; a target without one is refused.
-- With platform authentication enabled, `claude-code` can't call the gateway yet, so its target is
-  refused: it sends its key as `x-api-key`, and the gateway accepts only bearer tokens.
+- Each trial calls the gateway with its own trial token, which names the trial and the models it
+  may call; the gateway refuses the trial's calls to any other model. With platform
+  authentication disabled, it is an unsigned token. With it enabled, it is a key minted for the trial
+  from yours, scoped to `inference`, signed by the platform with the trial's details, and revoked once
+  Harbor won't run the trial again. The job fails if a key can't be minted. A virtual model that
+  runs the `nemo-evals-trial-recording` middleware reads the token to record the trial's model calls
+  in Intake; see
+  [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials)
+  and [Hold Trials to Their Models](/documentation/models-and-inference/virtual-models#hold-trials-to-their-models).
+- With platform authentication enabled, `claude-code` sends its access key as `x-api-key`, which
+  the gateway accepts on model routes like a bearer token.
 
 Every model call then reaches the provider without hosted tools. A model or provider that cannot be
 served closed-book fails the call with `403`.
 
-A taskset run on Kubernetes enforces this for tasks whose agent runs with `network_mode = "no-network"`,
-whether set under `[environment]`, `[agent]` or one of the task's steps. Their sandbox still reaches
-the agent's model route, so the run is refused at submit, naming those tasks, unless the agent's
-`model` is a `ref` to a virtual model whose `request_middleware` ends with `nemo-evals-closed-book`,
-and you can read that virtual model. Agents that call no model, `oracle` and `nop`, are exempt. A
-built-in agent with a model by `name`, an imported agent, and a registered agent are refused for such
+Label the run closed-book with `closed_book: true` on the target (`HarborRunnerTarget(closed_book=True, ...)`).
+Each trial's token is then closed: the gateway holds the trial to closed-book capable virtual models,
+and closed-book middleware set to `apply: closed_credential` applies to its calls. The job fails
+before any trial runs unless every virtual model the agent can reach, including the ones a router's
+virtual model lists in `routes_to`, ends its `request_middleware` with `nemo-evals-closed-book`.
+Without the label, the same virtual models serve the run open.
+
+A taskset run on Kubernetes labels the run closed-book itself for tasks whose agent runs with
+`network_mode = "no-network"`, whether set under `[environment]`, `[agent]` or one of the task's
+steps. Their sandbox still reaches the agent's model route, so a closed-book run, labelled or not, is
+refused at submit, naming those tasks, unless every model the agent calls through the gateway, and
+each virtual model those list in `routes_to`, is a virtual model whose `request_middleware` ends with
+`nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
+`model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
+is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a
+model by `name`, an imported agent, and a registered agent with no gateway model are refused for such
 tasks, since evals can't check where their model calls go.
 
 ## How scoring works
@@ -890,6 +919,39 @@ The error changes `a2`'s status and error rollup; it does not discard or replace
 
 - **`n_attempts`** — desired attempts per task. On resume, Harbor runs only the missing attempts.
 - **`n_concurrent_trials`** — maximum trials Harbor runs concurrently.
+- **`NHX_HARBOR_MAX_CONCURRENT_SETUPS`** (environment variable, default `4`) — the maximum number of local Docker trials, across every run of one user on the machine, that can start their container and set up their agent at once. Setups that overlap slow each other down until they pass the agent setup timeout. A trial waiting for a slot starts its timers only once it has one. Set the variable to `0` to turn the cap off. Give every run the same value. Each user has their own slots, and the cap doesn't apply on Windows or to trials in OpenSandbox or other remote environments. If the slot directory, `/tmp/nemo-harbor-setup-slots-<uid>`, belongs to another user, others can write to it, or something other than a directory is at its path, the run logs a warning and sets up without the cap; remove the directory to restore it.
+
+## Agent install reuse
+
+A local Docker trial normally installs its agent from scratch during setup. Instead, the runtime installs each agent once per task environment and reuses that install in every later trial of the environment. This covers Harbor's `codex` and `claude-code` agents and registered Fabric agents. Harbor's other installed agents reinstall in every trial, so they get no layer.
+
+1. The first trial that needs the install builds an *agent layer*. It starts a container from the task's environment image, runs the agent's setup in it as the task's agent user, and saves the result as the image `nemo-agent-layer:<key>`.
+2. Every later trial with the same environment, agent version, agent user and Harbor version starts from that image, in this run and in later runs on the same machine. Its setup only confirms the install, which takes seconds.
+3. Trials that need a layer another trial is still building wait for it, rather than building their own.
+
+The key leaves out the model, prompts and turn limits, so changing those reuses the same layer. It includes the proxy, package-index and certificate variables of the agent's environment, such as `HTTPS_PROXY` and `PIP_INDEX_URL`. These are the only variables a layer's build runs with, so API keys never reach a layer. A Fabric agent's config bundle isn't part of its layer either: every trial's setup uploads its own.
+
+A layer's install reaches the same network as the trial's setup. When a task's `[environment]` network is `no-network` or an allowlist, the build runs behind Harbor's egress sidecar with that policy, as the trial would. The policy is part of the key, so a trial never starts from a layer installed with more network than its own setup gets.
+
+An agent without a pinned `version` installs the newest release. Its layer is reused for one UTC day, then built again.
+
+If a layer can't be built, the trial installs its agent during setup, as it would without layers. For the next 10 minutes, other trials that need the same layer don't try to build it again; they install the agent during setup straight away.
+
+Layers apply only to Harbor's default local Docker environment, and not to tasks that bring their own `docker-compose.yaml`.
+
+To turn layers off, set `NHX_HARBOR_AGENT_LAYERS=0`.
+
+To list layers:
+
+```bash
+docker images --filter label=nemo.agent-layer
+```
+
+To remove them:
+
+```bash
+docker image prune --all --filter label=nemo.agent-layer
+```
 
 ## Retries
 

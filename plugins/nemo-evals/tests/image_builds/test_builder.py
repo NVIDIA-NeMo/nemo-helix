@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import httpx
@@ -14,6 +16,7 @@ from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.image_builds.builder import (
     HttpImageBuilder,
+    adopt_or_build,
     archive_source,
     builder_name,
     copy_builder_name,
@@ -121,25 +124,61 @@ async def test_ensure_build_moves_past_a_revision_builder_holds_for_another_requ
     assert submitted.job == "builder-harbor-env-0123456789ab-2"
 
 
-def test_builder_name_depends_on_every_build_input() -> None:
-    base = {
-        "archive": "default/harbor-tasks#sort/abc/task_archive",
-        "archive_digest": "a" * 64,
-        "context_path": "sort/environment",
-        "dockerfile": "Dockerfile",
-    }
+def test_builder_name_depends_on_the_contexts_contents_and_dockerfile() -> None:
+    base = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
     name = builder_name(**base)
 
     assert name == builder_name(**base)
     assert name.startswith("harbor-env-") and len(name) == len("harbor-env-") + 12
-    for field, other in [
-        # Builder fingerprints the source location too: one name for two locations would conflict there.
-        ("archive", "team/harbor-tasks#sort/abc/task_archive"),
-        ("archive_digest", "b" * 64),
-        ("context_path", "sort/tests"),
-        ("dockerfile", "D2"),
-    ]:
+    for field, other in [("context_digest", "b" * 64), ("dockerfile", "D2")]:
         assert builder_name(**{**base, field: other}) != name
+
+
+@pytest.mark.parametrize(
+    ("existing", "submitted", "revision"),
+    [
+        ([], [1], 1),
+        (["pending"], [], 1),
+        (["ready"], [], 1),
+        (["failed"], [2], 2),
+        (["failed", "ready"], [], 2),
+        (["ready", "failed"], [3], 3),
+    ],
+    ids=["none", "pending", "ready", "failed", "failed-then-ready", "newest-failed"],
+)
+async def test_adopt_or_build_uses_a_usable_build_and_submits_only_without_one(
+    existing: list[Literal["pending", "ready", "failed"]], submitted: list[int], revision: int
+) -> None:
+    builder = _Builder(existing)
+
+    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == submitted
+    assert image.name == f"harbor-env-0123456789ab-{revision}"
+
+
+async def test_adopt_or_build_resubmits_a_pending_build_whose_job_ended() -> None:
+    builder = _Builder(["pending"], job="error")
+
+    await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [2]
+
+
+async def test_adopt_or_build_uses_the_build_of_a_request_that_won_the_race() -> None:
+    """Another task submitted the same content first: Builder refuses ours, and theirs is read and used."""
+    builder = _Builder([], conflicting=frozenset({1}))
+
+    async def race(name: str) -> ContainerImage | None:
+        # The winner's revision appears once our submit has lost to it.
+        revision = int(name.rsplit("-", 1)[1])
+        return _container_image(name, "pending") if revision == 1 and builder.submitted else None
+
+    builder.get_image = race  # ty: ignore[invalid-assignment]
+    image = await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == [1]
+    assert image.name == "harbor-env-0123456789ab-1"
 
 
 def test_archive_source_splits_a_fileset_reference() -> None:
@@ -274,15 +313,92 @@ async def test_a_pending_revision_whose_job_ended_or_never_ran_is_replaced(job: 
 
 def test_a_platform_is_its_own_builder_build_set() -> None:
     """Builder refuses one revision of a set for two requests, so each platform needs its own name."""
-    built = {
-        "archive": "default/harbor-tasks#sort/abc/task_archive",
-        "archive_digest": "a" * 64,
-        "context_path": "sort/environment",
-        "dockerfile": "Dockerfile",
-    }
+    built = {"context_digest": "a" * 64, "dockerfile": "Dockerfile"}
 
     assert builder_name(**built, platform="linux/arm64") != builder_name(**built)
     assert builder_name(**built, platform="linux/arm64") != builder_name(**built, platform="linux/amd64")
     assert copy_builder_name("docker.io/library/ubuntu:24.04", "linux/arm64") != copy_builder_name(
         "docker.io/library/ubuntu:24.04"
     )
+
+
+class _RacingBuilder:
+    """Builder's submit as it runs: the row is created atomically, then the job, with a pause in between.
+
+    A request for an existing ``(name, revision)`` with another source is refused (409), as Builder refuses another
+    request's revision; the same request rejoins it. A job exists once its submit has created it.
+    """
+
+    def __init__(self) -> None:
+        self.rows: dict[str, tuple[str, ContainerImage]] = {}
+        self.jobs: set[str] = set()
+        self.builds: list[str] = []
+
+    async def get_image(self, name: str) -> ContainerImage | None:
+        row = self.rows.get(name)
+        return row[1] if row is not None else None
+
+    async def job_status(self, job: str) -> str | None:
+        return "active" if job in self.jobs else None
+
+    async def submit(
+        self,
+        *,
+        name: str,
+        revision: int,
+        source: FileSetSource | ImageSource,
+        dockerfile: str | None,
+        platform: str | None,
+    ) -> SubmitBuildResponse:
+        image_name, request = f"{name}-{revision}", source.model_dump_json()
+        if image_name in self.rows:
+            if self.rows[image_name][0] != request:
+                raise ConflictError(httpx.Response(409, json={"detail": "belongs to a different request"}))
+        else:
+            row = _container_image(image_name, "pending")
+            row._created_at = datetime.now(timezone.utc)
+            self.rows[image_name] = (request, row)
+            self.builds.append(image_name)
+            await asyncio.sleep(0.01)  # the job is created after the row: concurrent readers see no job yet
+        self.jobs.add(f"builder-{image_name}")
+        return SubmitBuildResponse(job=f"builder-{image_name}", images=[self.rows[image_name][1]])
+
+    async def image_platforms(self, image: str) -> list[str]:
+        return []
+
+
+async def test_a_hundred_tasks_sharing_one_context_submitted_at_once_make_one_build() -> None:
+    """Every task's archive is a different source, so all but one submit are refused; each uses the one build."""
+    builder = _RacingBuilder()
+    sources = [
+        FileSetSource(fileset="default/harbor-tasks", archive=f"task-{i}/abc/task_archive", context_path="env")
+        for i in range(100)
+    ]
+
+    images = await asyncio.gather(
+        *(adopt_or_build(builder, name="harbor-env-0123456789ab", source=s, dockerfile="Dockerfile") for s in sources)
+    )
+
+    assert builder.builds == ["harbor-env-0123456789ab-1"]
+    assert {image.name for image in images} == {"harbor-env-0123456789ab-1"}
+
+
+@pytest.mark.parametrize(("age", "submitted"), [(timedelta(seconds=5), []), (timedelta(minutes=10), [2])])
+async def test_a_pending_build_without_a_job_yet_is_used_until_its_job_is_overdue(
+    age: timedelta, submitted: list[int]
+) -> None:
+    """Builder creates the job after the row: a young row without one is another submit in flight, not abandoned."""
+    builder = _Builder(["pending"], job=None)
+    created = datetime.now(timezone.utc) - age
+
+    async def row(name: str) -> ContainerImage | None:
+        if name.endswith("-1"):
+            image = _container_image(name, "pending")
+            image._created_at = created
+            return image
+        return None
+
+    builder.get_image = row  # ty: ignore[invalid-assignment]
+    await adopt_or_build(builder, name="harbor-env-0123456789ab", source=_SOURCE, dockerfile="Dockerfile")
+
+    assert builder.submitted == submitted

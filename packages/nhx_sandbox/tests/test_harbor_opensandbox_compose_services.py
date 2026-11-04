@@ -380,6 +380,69 @@ async def test_an_extension_without_main_settings_is_refused_before_any_sandbox(
     assert server.creates == []
 
 
+# A service on 18080, as intrastat-meldung's odoo; the spec builder moved the egress policy API out of its way.
+ON_18080: dict[str, Any] = {
+    "services": [{"name": "odoo", "image": "docker.io/library/odoo:17", "ports": [18080]}],
+    "egress_api_port": 18081,
+}
+
+
+async def test_a_service_on_18080_gets_the_egress_api_moved_and_reached_there(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    extension.features = ["compose-services", "agent-bundle", "egress-port"]
+    environment = _environment(_task(tmp_path), server, compose_services=ON_18080)
+
+    sandbox = await environment._create_sandbox()
+
+    assert ComposeServices.model_validate_json(server.creates[-1]["extensions"][EXTENSION_KEY]).egress_api_port == 18081
+    # Left on 18080, the egress calls would reach odoo, carrying the egress token.
+    assert sandbox._egress_service.endpoint.port == 18081
+
+
+async def test_an_extension_that_cant_move_the_egress_api_is_refused_before_any_sandbox(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=ON_18080)
+
+    with pytest.raises(RuntimeError, match="move the egress policy API off port 18080"):
+        await environment._create_sandbox()
+
+    assert server.creates == []
+
+
+# A compose file that restricts `main`, as the read-only, no-capability tasks do.
+RESTRICTED_MAIN: dict[str, Any] = {
+    "services": COMPOSE_SERVICES["services"],
+    "main": {
+        "security": {"run_as_user": 1000, "read_only_root_filesystem": True, "drop_capabilities": ["ALL"]},
+        "tmpfs": [{"mount_path": "/tmp", "size_limit": "32Mi"}],
+    },
+}
+
+
+async def test_main_s_restrictions_reach_the_extension(tmp_path: Path, server: Server, extension: _Extension) -> None:
+    extension.features = ["compose-services", "agent-bundle", "compose-security"]
+    environment = _environment(_task(tmp_path), server, compose_services=RESTRICTED_MAIN)
+
+    await environment._create_sandbox()
+
+    main = ComposeServices.model_validate_json(server.creates[-1]["extensions"][EXTENSION_KEY]).main
+    assert main.security is not None and main.security.read_only_root_filesystem
+    assert [mount.mount_path for mount in main.tmpfs] == ["/tmp"]
+
+
+async def test_an_extension_without_security_settings_is_refused_before_any_sandbox(
+    tmp_path: Path, server: Server, extension: _Extension
+) -> None:
+    environment = _environment(_task(tmp_path), server, compose_services=RESTRICTED_MAIN)
+
+    with pytest.raises(RuntimeError, match="read_only, cap_drop, security_opt or tmpfs"):
+        await environment._create_sandbox()
+
+    assert server.creates == []
+
+
 async def test_commands_run_in_main_s_working_dir_unless_the_task_names_one(
     tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:

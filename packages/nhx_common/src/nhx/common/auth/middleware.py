@@ -4,6 +4,7 @@
 """Authorization middleware for NeMo Helix services."""
 
 import logging
+import re
 from collections.abc import Mapping
 from typing import Any, Callable, NamedTuple, Optional
 
@@ -26,6 +27,7 @@ from .dependencies import auth_client_context
 from .exceptions import InvalidPrincipalHeader, InvalidScopeFormatError
 from .headers import TRUSTED_IDENTITY_HEADERS
 from .models import Principal
+from .permissions import ALL_WORKSPACES
 from .principal_identifier import InvalidPrincipalIdentifier, is_service_principal, parse_principal_identifier
 from .token_resolver import ExtraBearerTokenResolver, ResolvedBearerToken, resolve_bearer_token
 from .workload_tokens import resolve_workload_access_token, resolve_workload_subject_token
@@ -35,6 +37,36 @@ logger = logging.getLogger(__name__)
 
 class PrincipalExtractionError(RuntimeError):
     """Raised when principal extraction returns an impossible success state."""
+
+
+_ENTITY_ROUTE = re.compile(
+    r"/apis/entities/v2/workspaces/(?P<workspace>[A-Za-z0-9@.+_-]+)/entities/[^/]+(?P<item>/[^/]+)?/?"
+)
+# Keyed by (HTTP method, whether the path names a single entity). Collection paths
+# (/entities/<type>) create or list; item paths (/entities/<type>/<name>) read, update or delete.
+_ENTITY_ACTIONS = {
+    ("POST", False): "create",
+    ("GET", False): "list",
+    ("GET", True): "read",
+    ("PUT", True): "update",
+    ("DELETE", True): "delete",
+}
+
+
+def _forbidden_detail(method: str, path: str) -> str:
+    """Return the 403 detail for a PDP denial.
+
+    Generic entities routes name the denied action and workspace so end users see the same detail
+    as the entities handler gives delegated callers. Both come from the request the caller sent,
+    so nothing about the denied workspace is disclosed. Every other route keeps the bare detail.
+    """
+    match = _ENTITY_ROUTE.fullmatch(path)
+    action = _ENTITY_ACTIONS.get((method.upper(), bool(match and match["item"]))) if match else None
+    if match is None or action is None:
+        return "Forbidden"
+    if match["workspace"] == ALL_WORKSPACES:
+        return f"Not allowed to {action} entities in the requested workspace."
+    return f"Not allowed to {action} entities in workspace '{match['workspace']}'"
 
 
 def _require_principal(principal: Principal | None) -> Principal:
@@ -479,10 +511,8 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             self.service_name or "unknown",
             result.reason,
         )
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": "Unauthorized" if status_code == 401 else "Forbidden"},
-        )
+        detail = "Unauthorized" if status_code == 401 else _forbidden_detail(request.method, request.url.path)
+        return JSONResponse(status_code=status_code, content={"detail": detail})
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Main entry point - routes requests through the appropriate authorization flow.
@@ -536,7 +566,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Unauthorized" if status_code == 401 else "Forbidden"},
             )
 
-        # HF-compatible endpoints: restricted to service principals via Bearer token (HF_TOKEN).
+        # HF-compatible endpoints: huggingface-hub clients authenticate with a Bearer token (HF_TOKEN).
         if path.startswith("/apis/files/v2/hf/"):
             return await self._handle_hf_compatible_request(request, call_next, headers_dict)
 
@@ -564,10 +594,13 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         """Handle requests to HuggingFace-compatible endpoints.
 
-        These endpoints are restricted to service principals only. Auth is provided
-        via Bearer token (HF_TOKEN) containing a service principal identifier like
-        "service:nim". This allows huggingface-hub clients to authenticate by setting
-        HF_TOKEN=service:<name>.
+        huggingface-hub clients can only send a Bearer token (HF_TOKEN). When auth is
+        disabled, a bare "service:<name>" token is accepted as that service principal
+        so local setups keep working. When auth is enabled the raw token string is
+        never trusted as an identity: the request must carry a credential that
+        verifies (workload access token, access key or OIDC JWT) or trusted principal
+        headers set by an in-platform caller (the edge strips those from external
+        traffic).
 
         Args:
             request: The incoming HTTP request
@@ -575,15 +608,23 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             headers_dict: Pre-extracted request headers dictionary
 
         Returns:
-            Response from downstream handlers, or 401 if not a valid service principal
+            Response from downstream handlers, or 401 if no valid credential was provided
         """
         try:
             bearer_token = parse_bearer_authorization_header(headers_dict.get("authorization"))
         except MalformedBearerTokenError:
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-        if bearer_token is not None and is_service_principal(bearer_token):
-            headers_dict["x-nhx-principal-id"] = bearer_token
+
+        if not self.config.enabled:
+            if bearer_token is not None and is_service_principal(bearer_token):
+                headers_dict["x-nhx-principal-id"] = bearer_token
+                return await self._handle_principal_headers_request(request, call_next, headers_dict)
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+        if headers_dict.get("x-nhx-principal-id"):
             return await self._handle_principal_headers_request(request, call_next, headers_dict)
+        if bearer_token is not None:
+            return await self._handle_bearer_token_request(request, call_next, bearer_token)
 
         return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
 
@@ -682,7 +723,7 @@ class AuthorizationMiddleware(BaseHTTPMiddleware):
             return await self._call_next_with_auth_client(request, call_next, auth_client)
 
         # Auth enabled - perform PDP check with the parsed principal headers. The HF-compatible
-        # flow synthesizes these from its Bearer service token without mutating request.headers.
+        # flow synthesizes the header from a bare service token only when auth is disabled.
         return await self._handle_auth_check(request, call_next, headers_dict)
 
     async def _handle_bearer_token_request(self, request: Request, call_next: Callable, token: str) -> Response:

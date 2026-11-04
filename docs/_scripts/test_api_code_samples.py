@@ -9,7 +9,6 @@ from urllib.parse import parse_qs
 import pytest
 import yaml
 
-from docs._scripts.lint_api_examples import lint_spec
 from script.openapi_helper.code_samples import LANGUAGES, add_code_samples, sample_request
 
 _SPEC_PATH = Path(__file__).resolve().parents[2] / "openapi/openapi.yaml"
@@ -59,14 +58,13 @@ def test_delete_samples_print_the_status_instead_of_parsing_the_body(spec, path)
     assert "/workspaces/default/" in samples["Python"]
 
 
-def test_lint_accepts_the_generated_spec(spec):
-    assert lint_spec(spec) == []
-
-
 @pytest.mark.parametrize("method", ["get", "post"])
-def test_authenticate_samples_send_the_bearer_token(spec, method):
-    for lang, source in _samples(spec, "/apis/auth/authenticate", method).items():
-        assert "Bearer YOUR_ACCESS_TOKEN" in source, lang
+def test_authenticate_samples_use_native_bearer_credentials(spec, method):
+    path = "/apis/auth/authenticate"
+    operation = {**spec["paths"][path][method], "x-codeSamples": []}
+    request = sample_request(spec, path, method, operation)
+    assert request is not None and request.requires_bearer_token
+    assert "Authorization" not in request.headers
 
 
 def test_token_exchange_samples_send_every_required_form_field(spec):

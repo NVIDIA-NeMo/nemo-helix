@@ -6,10 +6,14 @@
 from __future__ import annotations
 
 import datetime
+import subprocess
+import sys
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -17,6 +21,8 @@ pytest.importorskip("openshell")
 
 import grpc
 from nemo_helix_plugin.jobs.execution_profiles import OpenShellJobTLSConfig
+from nemo_helix_plugin.jobs.types import AuthContext
+from nemo_helix_plugin.openshell.types import GatewayCredentialConfig, GatewayProviderBinding, ProviderAccessRevoked
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.core.jobs.controllers.backends.openshell import (
     OpenShellJobBackend,
@@ -32,7 +38,12 @@ from nhx.core.jobs.controllers.backends.openshell.backend import (
 )
 from nhx.core.jobs.controllers.backends.registry import BackendKey, backend_registry
 from openshell import SandboxRef, SandboxStatusRef, TlsConfig
-from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
+from openshell._proto import openshell_pb2 as pb
+
+
+@asynccontextmanager
+async def _provisioner_context[T](provisioner: T) -> AsyncGenerator[T]:
+    yield provisioner
 
 
 def _backend(mock_nemo_client, mock_platform_config, **config_overrides) -> OpenShellJobBackend:
@@ -168,6 +179,101 @@ class TestSandboxName:
 
 
 class TestSchedule:
+    @pytest.mark.parametrize("with_provider", [False, True])
+    def test_rejects_env_secret_before_sandbox_creation(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, with_provider
+    ):
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        payload = step.step_spec.model_dump()
+        payload["environment"] = [{"name": "TOKEN", "from_secret": {"name": "default/token"}}]
+        if with_provider:
+            payload["gateway_providers"] = {
+                "service": {"profile": "service-read", "credentials": {"API_TOKEN": "default/another-token"}}
+            }
+        step.step_spec = type(step.step_spec).model_validate(payload)
+        result = backend.schedule(step.step_spec.executor, step)
+        assert result.status == HelixJobStatus.ERROR
+        assert "gateway provider bindings" in result.status_details["message"]
+        backend._client.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("auth_enabled", [True, False])
+    async def test_provider_preparation_uses_platform_auth_mode(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, auth_enabled
+    ):
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        step.auth_context = AuthContext(principal_id="user-1") if auth_enabled else None
+        provisioner = MagicMock(prepare=AsyncMock(return_value=["owned-provider"]))
+        requester = MagicMock(__aenter__=AsyncMock(return_value=MagicMock()), __aexit__=AsyncMock(return_value=False))
+        with (
+            patch.object(backend_module, "platform_auth_enabled", return_value=auth_enabled),
+            patch.object(backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)),
+            patch.object(backend_module, "get_async_nemo_client", return_value=requester) as client,
+            patch.object(backend_module.AsyncSecretsClient, "from_client"),
+        ):
+            assert await backend._prepare_providers(step, "sandbox", renew=True) == ["owned-provider"]
+        assert provisioner.prepare.call_args.kwargs["auth_enabled"] is auth_enabled
+        assert provisioner.prepare.call_args.kwargs["renew"] is True
+        principal = client.call_args.kwargs["on_behalf_of"]
+        assert (principal.id if principal else None) == ("user-1" if auth_enabled else None)
+
+    @pytest.mark.parametrize("auth_enabled", [True, False])
+    @pytest.mark.parametrize("profile_env_collision", [True, False])
+    def test_provider_attachment_uses_restricted_policy(
+        self, mock_nemo_client, mock_platform_config, test_step_pending, auth_enabled, profile_env_collision
+    ):
+        backend = _backend(
+            mock_nemo_client,
+            mock_platform_config,
+            launcher_tool_path="/app/bin/custom-jobs-launcher",
+            env={"API_TOKEN": "plaintext-collision"} if profile_env_collision else {},
+            gateway_credentials={
+                "gateway_id": "gateway",
+                "registration_key_file": "/run/key",
+                "credential_refresh_verified": True,
+                "profiles": {"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+            },
+        )
+        step = test_step_pending
+        step.auth_context = AuthContext(principal_id="user-1") if auth_enabled else None
+        step.step_spec.gateway_providers = {
+            "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "default/token"})
+        }
+        backend._prepare_providers = AsyncMock(return_value=["owned-provider"])
+        with patch.object(backend_module, "platform_auth_enabled", return_value=auth_enabled):
+            result = backend.schedule(step.step_spec.executor, step)
+        if profile_env_collision:
+            assert result.status == HelixJobStatus.ERROR
+            backend._prepare_providers.assert_not_awaited()
+            backend._client.create.assert_not_called()
+            return
+        assert result.status == HelixJobStatus.PENDING
+        spec = _create_request(backend).spec
+        assert list(spec.providers) == ["owned-provider"]
+        assert set(spec.policy.network_policies) == {"nemo_workload"}
+        rules = spec.policy.network_policies["nemo_workload"].endpoints[0].rules
+        assert (
+            "PATCH",
+            f"/apis/jobs/v2/workspaces/{step.workspace}/jobs/{step.job}/attempts/{step.attempt_id}/status-details",
+        ) in {(rule.allow.method, rule.allow.path) for rule in rules}
+        assert "/app/bin/custom-jobs-launcher" in {
+            binary.path for binary in spec.policy.network_policies["nemo_workload"].binaries
+        }
+        assert "API_TOKEN" not in spec.environment
+        assert "token" not in spec.environment["NEMO_JOB_SECRETS"]
+
+    def test_provider_failure_never_creates_sandbox(self, mock_nemo_client, mock_platform_config, test_step_pending):
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_pending
+        step.step_spec.gateway_providers = {
+            "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+        }
+        result = backend.schedule(step.step_spec.executor, step)
+        assert result.status == HelixJobStatus.ERROR
+        backend._client.create.assert_not_called()
+
     def test_creates_sandbox_with_launcher_command(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
@@ -301,9 +407,12 @@ class TestSchedule:
     def test_platform_urls_unchanged_without_egress(
         self, mock_nemo_client, mock_platform_config, test_step_pending
     ) -> None:
+        # Keep the assertion independent of the host's Docker loopback override.
+        mock_platform_config.loopback_address = "localhost"
         backend = _backend(mock_nemo_client, mock_platform_config, platform_egress=None)
 
-        backend.schedule(_no_container_executor(), test_step_pending)
+        with patch.object(backend_module, "get_platform_config", return_value=mock_platform_config):
+            backend.schedule(_no_container_executor(), test_step_pending)
 
         request = _create_request(backend)
         env = dict(request.spec.environment)
@@ -374,6 +483,21 @@ def _sandbox(
 
 
 class TestSync:
+    def test_cancel_retries_provider_cleanup_after_sandbox_disappears(
+        self, mock_nemo_client, mock_platform_config, test_step_cancelling
+    ):
+        backend = _backend(mock_nemo_client, mock_platform_config)
+        step = test_step_cancelling
+        step.step_spec.gateway_providers = {
+            "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+        }
+        backend._client.get_sandbox.side_effect = _rpc_error(grpc.StatusCode.NOT_FOUND)
+        provisioner = SimpleNamespace(cleanup=AsyncMock(side_effect=[RuntimeError("offline"), None]))
+        with patch.object(backend, "_provider_provisioner", side_effect=lambda: _provisioner_context(provisioner)):
+            assert backend.sync(step).status == HelixJobStatus.CANCELLING
+            assert backend.sync(step).status == HelixJobStatus.CANCELLED
+        assert provisioner.cleanup.await_count == 2
+
     def test_completed_zero_exit(self, mock_nemo_client, mock_platform_config, test_step_pending) -> None:
         backend = _backend(mock_nemo_client, mock_platform_config)
         backend._client.get_sandbox.return_value = _sandbox(pb.SANDBOX_PHASE_COMPLETED, exit_code=0)
@@ -659,7 +783,6 @@ class TestCleanup:
 
     def test_terminal_transition_time_is_tz_aware(self, mock_nemo_client, mock_platform_config) -> None:
         """The TTL comparison must not raise on naive vs aware datetimes."""
-        import datetime
 
         from google.protobuf.timestamp_pb2 import Timestamp
 
@@ -676,7 +799,6 @@ class TestCleanup:
 
     def test_terminal_transition_time_skips_unset_timestamps(self, mock_nemo_client, mock_platform_config) -> None:
         """An unset transition_time must not read as the epoch; fall back to the last real one."""
-        import datetime
 
         backend = _backend(mock_nemo_client, mock_platform_config)
         sandbox = _sandbox(pb.SANDBOX_PHASE_ERROR, exit_code=1)
@@ -688,6 +810,57 @@ class TestCleanup:
 
         assert finished_at is not None
         assert abs((finished_at - recent).total_seconds()) < 1
+
+
+@pytest.mark.parametrize(
+    "phase,mode,renew,error",
+    [
+        (pb.SANDBOX_PHASE_READY, "helix", True, RuntimeError),
+        (pb.SANDBOX_PHASE_READY, "helix", True, ProviderAccessRevoked),
+        (pb.SANDBOX_PHASE_PROVISIONING, "helix", True, RuntimeError),
+        (pb.SANDBOX_PHASE_PROVISIONING, "helix", True, ProviderAccessRevoked),
+        (pb.SANDBOX_PHASE_READY, "gateway", False, RuntimeError),
+        (pb.SANDBOX_PHASE_STOPPING, "helix", False, RuntimeError),
+        (pb.SANDBOX_PHASE_COMPLETED, "helix", False, RuntimeError),
+        (pb.SANDBOX_PHASE_ERROR, "helix", False, RuntimeError),
+    ],
+)
+def test_sync_renews_only_active_provider_workloads(
+    mock_nemo_client, mock_platform_config, test_step_active, phase, mode, renew, error
+):
+    backend = _backend(
+        mock_nemo_client,
+        mock_platform_config,
+        gateway_credentials={
+            "gateway_id": "gateway",
+            "registration_key_file": "/run/key",
+            "credential_refresh_verified": True,
+            "renewal_mode": mode,
+            "profiles": {"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+        },
+    )
+    step = test_step_active
+    step.step_spec.gateway_providers = {
+        "service": GatewayProviderBinding(profile="service-read", credentials={"API_TOKEN": "token"})
+    }
+    backend._client.get_sandbox.return_value = _sandbox(phase)
+    backend._prepare_providers = AsyncMock(side_effect=[error("sensitive RPC detail"), []])
+    first = backend.sync(step)
+    assert backend._prepare_providers.await_count == int(renew)
+    if renew:
+        assert first.status == HelixJobStatus.ACTIVE
+        assert ("access was removed" if error is ProviderAccessRevoked else "retrying") in first.status_details[
+            "message"
+        ]
+        assert "sensitive" not in str(first)
+        second = backend.sync(step)
+        assert "renewal failed" not in second.status_details["message"]
+        assert backend._prepare_providers.call_args.kwargs == {"renew": True}
+    step.status = HelixJobStatus.CANCELLING
+    backend._cleanup_step_providers = MagicMock(return_value=True)
+    backend._prepare_providers.reset_mock()
+    backend.sync(step)
+    backend._prepare_providers.assert_not_awaited()
 
 
 class TestPolicy:
@@ -766,3 +939,100 @@ class TestPolicy:
         # null keeps the generated section rather than dropping confinement.
         assert policy.landlock.compatibility == "best_effort"
         assert set(policy.network_policies) == {"custom", "nemo_helix"}
+
+
+def test_backend_import_without_optional_openshell_sdk():
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+sys.modules["openshell"] = None
+from nhx.core.jobs.controllers.backends.openshell.backend import _ensure_openshell, CapabilityUnavailableError
+try:
+    _ensure_openshell()
+except CapabilityUnavailableError:
+    pass
+else:
+    raise AssertionError("Selecting OpenShell must report the missing optional SDK")
+""",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("transport", ["plaintext", "system-roots", "mtls"])
+async def test_provider_revocation_uses_async_transport_and_timeout(
+    mock_nemo_client, mock_platform_config, tmp_path, transport
+):
+    key = tmp_path / "key"
+    key.touch(mode=0o600)
+    key.write_bytes(b"k" * 32)
+    for name in ("ca", "cert", "tls-key"):
+        (tmp_path / name).write_bytes(name.encode())
+    backend = _backend(
+        mock_nemo_client,
+        mock_platform_config,
+        gateway_endpoint="http://localhost:17670" if transport == "plaintext" else "https://localhost:17670",
+        request_timeout_seconds=7,
+        tls=OpenShellJobTLSConfig(
+            ca_cert_path=str(tmp_path / "ca"),
+            client_cert_path=str(tmp_path / "cert"),
+            client_key_path=str(tmp_path / "tls-key"),
+        )
+        if transport == "mtls"
+        else None,
+    )
+    backend._executor_config.gateway_credentials = GatewayCredentialConfig(
+        gateway_id="gateway",
+        registration_key_file=key,
+        profiles={"service-read": {"workspaces": ["default"], "credential_keys": ["API_TOKEN"]}},
+    )
+    stub = MagicMock(GetSandbox=AsyncMock(), DetachSandboxProvider=AsyncMock(), DeleteProvider=AsyncMock())
+    stub.GetSandbox.return_value = pb.SandboxResponse(
+        sandbox=pb.Sandbox(
+            metadata={"resource_version": 12},
+            spec={"providers": ["provider-1"]},
+        )
+    )
+    channel = MagicMock()
+    channel.__aenter__.return_value = channel
+    with (
+        patch("grpc.aio.insecure_channel", return_value=channel) as insecure,
+        patch("grpc.aio.secure_channel", return_value=channel) as secure,
+        patch("grpc.ssl_channel_credentials") as credentials,
+        patch("nemo_helix_plugin.openshell.provider_client.OpenShellStub", return_value=stub),
+    ):
+        async with backend._provider_provisioner() as provisioner:
+            await provisioner._finish_revocation("provider-1", "sandbox-1")
+    channel.__aexit__.assert_awaited_once()
+    if transport == "plaintext":
+        insecure.assert_called_once_with("localhost:17670")
+        secure.assert_not_called()
+    else:
+        insecure.assert_not_called()
+        secure.assert_called_once_with("localhost:17670", credentials.return_value)
+        credentials.assert_called_once_with(
+            root_certificates=b"ca" if transport == "mtls" else None,
+            private_key=b"tls-key" if transport == "mtls" else None,
+            certificate_chain=b"cert" if transport == "mtls" else None,
+        )
+    stub.DetachSandboxProvider.assert_awaited_once_with(
+        pb.DetachSandboxProviderRequest(
+            workspace_scope={"workspace": backend._workspace},
+            sandbox="sandbox-1",
+            provider="provider-1",
+            expected_resource_version=12,
+        ),
+        timeout=7,
+    )
+    stub.DeleteProvider.assert_awaited_once_with(
+        pb.DeleteProviderRequest(
+            workspace_scope={"workspace": backend._workspace}, name="provider-1", allow_missing=True
+        ),
+        timeout=7,
+    )

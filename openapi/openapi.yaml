@@ -29,14 +29,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      security:
+      - HelixBearer: []
       x-codeSamples:
       - lang: Python
-        source: 'import requests
+        source: 'import os
+
+          import requests
 
 
           url = "http://localhost:8080/apis/auth/authenticate"
 
-          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
 
 
           response = requests.request("GET", url, headers=headers)
@@ -47,88 +55,47 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
-          , {\n  method: \"GET\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
-          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
-          console.log(await response.json());\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\
-          \nfunc main() {\n\treq, err := http.NewRequest(\"GET\", \"http://localhost:8080/apis/auth/authenticate\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\"\
-          , \"Bearer YOUR_ACCESS_TOKEN\")\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
-          \t}\n\tfmt.Println(string(data))\n}\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/authenticate\"\
-          )\nrequest = Net::HTTP::Get.new(uri)\nrequest[\"Authorization\"] = \"Bearer\
-          \ YOUR_ACCESS_TOKEN\"\nresponse = Net::HTTP.start(uri.hostname, uri.port,\
-          \ use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\nputs response.body\n"
-      - lang: PHP
-        source: '<?php
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"GET\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+          \ response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/auth/authenticate\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
 
-          $ch = curl_init("http://localhost:8080/apis/auth/authenticate");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "GET");
-
-          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer YOUR_ACCESS_TOKEN"]);
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          $body = curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+            import requests
 
 
-          echo $status, PHP_EOL;
+            url = "http://localhost:8080/apis/auth/authenticate"
 
-          echo $body, PHP_EOL;
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
 
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/authenticate\"\
-          ))\n        .header(\"Authorization\", \"Bearer YOUR_ACCESS_TOKEN\")\n \
-          \       .method(\"GET\", HttpRequest.BodyPublishers.noBody())\n        .build();\n\
-          \    HttpResponse<String> response = HttpClient.newHttpClient()\n      \
-          \  .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
-          \    System.out.println(response.body());\n  }\n}\n"
-      - lang: C#
-        source: 'using System;
+            token = os.environ["NHX_ACCESS_TOKEN"]
 
-          using System.Net.Http;
-
-          using System.Text;
+            headers = {"Authorization": f"Bearer {token}"}
 
 
-          using var client = new HttpClient();
+            response = requests.request("GET", url, headers=headers)
 
-          using var request = new HttpRequestMessage(new HttpMethod("GET"), "http://localhost:8080/apis/auth/authenticate");
+            response.raise_for_status()
 
-          request.Headers.Add("Authorization", "Bearer YOUR_ACCESS_TOKEN");
+            print(response.json())
 
-          using var response = await client.SendAsync(request);
-
-          Console.WriteLine((int)response.StatusCode);
-
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/authenticate\"\
-          )!)\nrequest.httpMethod = \"GET\"\nrequest.setValue(\"Bearer YOUR_ACCESS_TOKEN\"\
-          , forHTTPHeaderField: \"Authorization\")\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { data, response, error\
-          \ in\n  defer { done.signal() }\n  if let error = error { print(error);\
-          \ return }\n  print((response as! HTTPURLResponse).statusCode)\n  if let\
-          \ data = data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\n\
-          done.wait()\n"
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+            , {\n  method: \"GET\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
     post:
       tags:
       - Authentication
@@ -153,14 +120,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthenticateErrorResponse'
+      security:
+      - HelixBearer: []
       x-codeSamples:
       - lang: Python
-        source: 'import requests
+        source: 'import os
+
+          import requests
 
 
           url = "http://localhost:8080/apis/auth/authenticate"
 
-          headers = {"Authorization": "Bearer YOUR_ACCESS_TOKEN"}
+          # Set NHX_ACCESS_TOKEN to a raw access token before running.
+
+          token = os.environ["NHX_ACCESS_TOKEN"]
+
+          headers = {"Authorization": f"Bearer {token}"}
 
 
           response = requests.request("POST", url, headers=headers)
@@ -171,88 +146,47 @@ paths:
 
           '
       - lang: JavaScript
-        source: "const response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
-          , {\n  method: \"POST\",\n  headers: {\"Authorization\": \"Bearer YOUR_ACCESS_TOKEN\"\
-          },\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
-          console.log(await response.json());\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n)\n\
-          \nfunc main() {\n\treq, err := http.NewRequest(\"POST\", \"http://localhost:8080/apis/auth/authenticate\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Authorization\"\
-          , \"Bearer YOUR_ACCESS_TOKEN\")\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
-          \t}\n\tfmt.Println(string(data))\n}\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/authenticate\"\
-          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Authorization\"] = \"Bearer\
-          \ YOUR_ACCESS_TOKEN\"\nresponse = Net::HTTP.start(uri.hostname, uri.port,\
-          \ use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\nputs response.body\n"
-      - lang: PHP
-        source: '<?php
+        source: "// Supply `token` from your application's authentication flow before\
+          \ running.\n// Do not embed a real token in frontend source or build-time\
+          \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+          , {\n  method: \"POST\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+          });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+          \ response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: ": \"${NHX_ACCESS_TOKEN:?Set NHX_ACCESS_TOKEN to a raw access token}\"\
+            \ncurl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/auth/authenticate\
+            \ \\\n  --header \"Authorization: Bearer ${NHX_ACCESS_TOKEN}\"\n"
+        - sdk: python
+          code: 'import os
 
-          $ch = curl_init("http://localhost:8080/apis/auth/authenticate");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
-
-          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Authorization: Bearer YOUR_ACCESS_TOKEN"]);
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          $body = curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+            import requests
 
 
-          echo $status, PHP_EOL;
+            url = "http://localhost:8080/apis/auth/authenticate"
 
-          echo $body, PHP_EOL;
+            # Set NHX_ACCESS_TOKEN to a raw access token before running.
 
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/authenticate\"\
-          ))\n        .header(\"Authorization\", \"Bearer YOUR_ACCESS_TOKEN\")\n \
-          \       .method(\"POST\", HttpRequest.BodyPublishers.noBody())\n       \
-          \ .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
-          \    System.out.println(response.body());\n  }\n}\n"
-      - lang: C#
-        source: 'using System;
+            token = os.environ["NHX_ACCESS_TOKEN"]
 
-          using System.Net.Http;
-
-          using System.Text;
+            headers = {"Authorization": f"Bearer {token}"}
 
 
-          using var client = new HttpClient();
+            response = requests.request("POST", url, headers=headers)
 
-          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/auth/authenticate");
+            response.raise_for_status()
 
-          request.Headers.Add("Authorization", "Bearer YOUR_ACCESS_TOKEN");
+            print(response.json())
 
-          using var response = await client.SendAsync(request);
-
-          Console.WriteLine((int)response.StatusCode);
-
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/authenticate\"\
-          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"Bearer YOUR_ACCESS_TOKEN\"\
-          , forHTTPHeaderField: \"Authorization\")\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { data, response, error\
-          \ in\n  defer { done.signal() }\n  if let error = error { print(error);\
-          \ return }\n  print((response as! HTTPURLResponse).statusCode)\n  if let\
-          \ data = data { print(String(decoding: data, as: UTF8.self)) }\n}.resume()\n\
-          done.wait()\n"
+            '
+        - sdk: javascript
+          code: "// Supply `token` from your application's authentication flow before\
+            \ running.\n// Do not embed a real token in frontend source or build-time\
+            \ environment variables.\nconst response = await fetch(\"http://localhost:8080/apis/auth/authenticate\"\
+            , {\n  method: \"POST\",\n  headers: {\"Authorization\": `Bearer ${token}`},\n\
+            });\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
   /apis/auth/discovery:
     get:
       tags:
@@ -400,89 +334,36 @@ paths:
           },\n  body: \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
           ,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
           console.log(await response.json());\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\
-          \"strings\"\n)\n\nfunc main() {\n\treq, err := http.NewRequest(\"POST\"\
-          , \"http://localhost:8080/apis/auth/token\", strings.NewReader(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
-          ))\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Content-Type\"\
-          , \"application/x-www-form-urlencoded\")\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          \tdata, err := io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\
-          \t}\n\tfmt.Println(string(data))\n}\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/auth/token\"\
-          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Content-Type\"] = \"application/x-www-form-urlencoded\"\
-          \nrequest.body = \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
-          \nresponse = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme\
-          \ == \"https\") do |http|\n  http.request(request)\nend\n\nputs response.code\n\
-          puts response.body\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/auth/token");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
-
-          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/x-www-form-urlencoded"]);
-
-          curl_setopt($ch, CURLOPT_POSTFIELDS, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          $body = curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/auth/token\
+            \ \\\n  --header 'Content-Type: application/x-www-form-urlencoded' \\\n\
+            \  --data-binary 'grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt'\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
+            url = "http://localhost:8080/apis/auth/token"
 
-          echo $body, PHP_EOL;
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/auth/token\"\
-          ))\n        .header(\"Content-Type\", \"application/x-www-form-urlencoded\"\
-          )\n        .method(\"POST\", HttpRequest.BodyPublishers.ofString(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
-          ))\n        .build();\n    HttpResponse<String> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.ofString());\n    System.out.println(response.statusCode());\n\
-          \    System.out.println(response.body());\n  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            payload = "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt"
 
 
-          using var client = new HttpClient();
+            response = requests.request("POST", url, headers=headers, data=payload)
 
-          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/auth/token");
+            response.raise_for_status()
 
-          request.Content = new StringContent("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt",
-          Encoding.UTF8, "application/x-www-form-urlencoded");
+            print(response.json())
 
-          using var response = await client.SendAsync(request);
-
-          Console.WriteLine((int)response.StatusCode);
-
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/auth/token\"\
-          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"application/x-www-form-urlencoded\"\
-          , forHTTPHeaderField: \"Content-Type\")\nrequest.httpBody = Data(\"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
-          .utf8)\nlet done = DispatchSemaphore(value: 0)\nURLSession.shared.dataTask(with:\
-          \ request) { data, response, error in\n  defer { done.signal() }\n  if let\
-          \ error = error { print(error); return }\n  print((response as! HTTPURLResponse).statusCode)\n\
-          \  if let data = data { print(String(decoding: data, as: UTF8.self)) }\n\
-          }.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/auth/token\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-www-form-urlencoded\"\
+            },\n  body: \"grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Atoken-exchange&client_id=YOUR_CLIENT_ID&subject_token=YOUR_SUBJECT_TOKEN&subject_token_type=urn%3Aietf%3Aparams%3Aoauth%3Atoken-type%3Ajwt\"\
+            ,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(await response.json());\n"
   /apis/auth/v2/access-keys:
     post:
       tags:
@@ -539,6 +420,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
     get:
       tags:
       - Scoped Access Keys
@@ -591,6 +474,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}:
     delete:
       tags:
@@ -638,6 +523,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/rotate:
     post:
       tags:
@@ -698,6 +585,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/suspend:
     post:
       tags:
@@ -745,6 +634,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/access-keys/{jti}/unsuspend:
     post:
       tags:
@@ -792,6 +683,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HelixBearer: []
   /apis/auth/v2/authorize:
     post:
       tags:
@@ -1128,6 +1021,19 @@ paths:
           \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
           \ failed: ${response.status}`);\nconsole.log(response.status); // 204: no\
           \ response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: python
+          code: "import requests\n\nresponse = requests.post(\n    \"http://localhost:8080/apis/auth/v2/logout\"\
+            ,\n    headers={\"X-Source\": \"NeMo Studio\"},\n    cookies={\"nhx_session\"\
+            : \"YOUR_SESSION_COOKIE\"},\n)\nresponse.raise_for_status()\nprint(response.status_code)\
+            \  # 204: no response body\n"
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/auth/v2/logout\"\
+            , {\n  method: \"POST\",\n  headers: {\"X-Source\": \"NeMo Studio\"},\n\
+            \  credentials: \"include\",\n});\nif (!response.ok) throw new Error(`Logout\
+            \ failed: ${response.status}`);\nconsole.log(response.status); // 204:\
+            \ no response body\n"
   /apis/auth/v2/session:
     get:
       tags:
@@ -2718,34 +2624,25 @@ paths:
         source: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
           ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
           \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
-      - lang: Go
-        source: "package main\n\nimport (\n  \"fmt\"\n  \"net/http\"\n)\n\nfunc main()\
-          \ {\n  req, err := http.NewRequest(\"HEAD\", \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
-          , nil)\n  if err != nil {\n    panic(err)\n  }\n  res, err := http.DefaultClient.Do(req)\n\
-          \  if err != nil {\n    panic(err)\n  }\n  defer res.Body.Close()\n\n  fmt.Println(res.Status)\n\
-          \  fmt.Println(res.Header)\n}"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
-          )\nresponse = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme ==\
-          \ \"https\") do |http|\n  http.request(Net::HTTP::Head.new(uri))\nend\n\n\
-          puts response.code\nputs response.to_hash"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
-
-          curl_setopt($ch, CURLOPT_NOBODY, true);
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status;'
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt"
+
+            response = requests.head(url)
+
+            response.raise_for_status()
+
+            print(response.status_code)
+
+            print(response.headers)'
+        - sdk: javascript
+          code: "const response = await fetch(\n  \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt\"\
+            ,\n  { method: \"HEAD\" },\n);\n\nif (!response.ok) {\n  throw new Error(`HTTP\
+            \ ${response.status}`);\n}\nconsole.log(response.status);\nconsole.log(Object.fromEntries(response.headers));"
     get:
       tags:
       - Files
@@ -2793,6 +2690,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+
+          response = requests.request("GET", url)
+
+          response.raise_for_status()
+
+          print(response.content)  # raw file bytes, not JSON
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+          , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.arrayBuffer());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
+            \ \\\n  --output example.txt\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+
+            response = requests.request("GET", url)
+
+            response.raise_for_status()
+
+            print(response.content)  # raw file bytes, not JSON
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+            , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.arrayBuffer());\n"
     put:
       tags:
       - Files
@@ -2840,6 +2779,59 @@ paths:
               description: Raw binary file content
         required: true
         description: Upload the file either as a raw octet stream.
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+          headers = {"Content-Type": "application/octet-stream"}
+
+          payload = "Hello, Helix!\n"
+
+
+          response = requests.request("PUT", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+          , {\n  method: \"PUT\",\n  headers: {\"Content-Type\": \"application/octet-stream\"\
+          },\n  body: \"Hello, Helix!\\n\",\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(await response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request PUT \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\
+            \ \\\n  --header 'Content-Type: application/octet-stream' \\\n  --data-binary\
+            \ 'Hello, Helix!\n'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt"
+
+            headers = {"Content-Type": "application/octet-stream"}
+
+            payload = "Hello, Helix!\n"
+
+
+            response = requests.request("PUT", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/example.txt\"\
+            , {\n  method: \"PUT\",\n  headers: {\"Content-Type\": \"application/octet-stream\"\
+            },\n  body: \"Hello, Helix!\\n\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.json());\n"
     delete:
       tags:
       - Files
@@ -3036,120 +3028,50 @@ paths:
           \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
           \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\",\n});\nif (!response.ok)\
           \ throw new Error(`HTTP ${response.status}`);\nconsole.log(await response.json());\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\
-          \"strings\"\n)\n\nfunc main() {\n\treq, err := http.NewRequest(\"POST\"\
-          , \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
-          , strings.NewReader(\"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
-          \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
-          \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\"\
-          :\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
-          \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
-          \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
-          \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
-          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\"))\n\tif err !=\
-          \ nil {\n\t\tpanic(err)\n\t}\n\treq.Header.Set(\"Content-Type\", \"application/json\"\
-          )\n\tres, err := http.DefaultClient.Do(req)\n\tif err != nil {\n\t\tpanic(err)\n\
-          \t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\tdata, err :=\
-          \ io.ReadAll(res.Body)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tfmt.Println(string(data))\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
-          )\nrequest = Net::HTTP::Post.new(uri)\nrequest[\"Content-Type\"] = \"application/json\"\
-          \nrequest.body = \"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
-          \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
-          \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\"\
-          :\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
-          \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
-          \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
-          \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
-          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\"\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\nputs response.body\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "POST");
-
-          curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
-
-          curl_setopt($ch, CURLOPT_POSTFIELDS, "{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
-          started\"}}]}]}]}");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          $body = curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\"\
+            ,\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\"\
+            :{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\"\
+            :\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"\
+            scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\"\
+            ,\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training started\"\
+            }}]}]}]}'\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
+            url = "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs"
 
-          echo $body, PHP_EOL;
+            headers = {"Content-Type": "application/json"}
 
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
-          ))\n        .header(\"Content-Type\", \"application/json\")\n        .method(\"\
-          POST\", HttpRequest.BodyPublishers.ofString(\"{\\\"resourceLogs\\\":[{\\\
-          \"resource\\\":{\\\"attributes\\\":[{\\\"key\\\":\\\"job\\\",\\\"value\\\
-          \":{\\\"stringValue\\\":\\\"my-job\\\"}},{\\\"key\\\":\\\"job_attempt\\\"\
-          ,\\\"value\\\":{\\\"stringValue\\\":\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\
-          \",\\\"value\\\":{\\\"stringValue\\\":\\\"train\\\"}},{\\\"key\\\":\\\"\
-          job_task\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"0\\\"}}]},\\\"scopeLogs\\\
-          \":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\":\\\"1767225600000000000\\\
-          \",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\":{\\\"stringValue\\\":\\\
-          \"Training started\\\"}}]}]}]}\"))\n        .build();\n    HttpResponse<String>\
-          \ response = HttpClient.newHttpClient()\n        .send(request, HttpResponse.BodyHandlers.ofString());\n\
-          \    System.out.println(response.statusCode());\n    System.out.println(response.body());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            payload = "{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
+            started\"}}]}]}]}"
 
 
-          using var client = new HttpClient();
+            response = requests.request("POST", url, headers=headers, data=payload)
 
-          using var request = new HttpRequestMessage(new HttpMethod("POST"), "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs");
+            response.raise_for_status()
 
-          request.Content = new StringContent("{\"resourceLogs\":[{\"resource\":{\"attributes\":[{\"key\":\"job\",\"value\":{\"stringValue\":\"my-job\"}},{\"key\":\"job_attempt\",\"value\":{\"stringValue\":\"1\"}},{\"key\":\"job_step\",\"value\":{\"stringValue\":\"train\"}},{\"key\":\"job_task\",\"value\":{\"stringValue\":\"0\"}}]},\"scopeLogs\":[{\"logRecords\":[{\"timeUnixNano\":\"1767225600000000000\",\"severityText\":\"INFO\",\"body\":{\"stringValue\":\"Training
-          started\"}}]}]}]}", Encoding.UTF8, "application/json");
+            print(response.json())
 
-          using var response = await client.SendAsync(request);
-
-          Console.WriteLine((int)response.StatusCode);
-
-          Console.WriteLine(await response.Content.ReadAsStringAsync());
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
-          )!)\nrequest.httpMethod = \"POST\"\nrequest.setValue(\"application/json\"\
-          , forHTTPHeaderField: \"Content-Type\")\nrequest.httpBody = Data(\"{\\\"\
-          resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\":[{\\\"key\\\":\\\
-          \"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\"}},{\\\"key\\\
-          \":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"1\\\"}},{\\\
-          \"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"train\\\
-          \"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\":\\\
-          \"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\"\
-          :\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"body\\\
-          \":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\".utf8)\nlet done\
-          \ = DispatchSemaphore(value: 0)\nURLSession.shared.dataTask(with: request)\
-          \ { data, response, error in\n  defer { done.signal() }\n  if let error\
-          \ = error { print(error); return }\n  print((response as! HTTPURLResponse).statusCode)\n\
-          \  if let data = data { print(String(decoding: data, as: UTF8.self)) }\n\
-          }.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/otlp/v1/logs\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"resourceLogs\\\":[{\\\"resource\\\":{\\\"attributes\\\
+            \":[{\\\"key\\\":\\\"job\\\",\\\"value\\\":{\\\"stringValue\\\":\\\"my-job\\\
+            \"}},{\\\"key\\\":\\\"job_attempt\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"1\\\"}},{\\\"key\\\":\\\"job_step\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"train\\\"}},{\\\"key\\\":\\\"job_task\\\",\\\"value\\\":{\\\"stringValue\\\
+            \":\\\"0\\\"}}]},\\\"scopeLogs\\\":[{\\\"logRecords\\\":[{\\\"timeUnixNano\\\
+            \":\\\"1767225600000000000\\\",\\\"severityText\\\":\\\"INFO\\\",\\\"\
+            body\\\":{\\\"stringValue\\\":\\\"Training started\\\"}}]}]}]}\",\n});\n\
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);\nconsole.log(await\
+            \ response.json());\n"
   /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
     post:
       tags:
@@ -3298,6 +3220,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/GuardrailCheckRequest'
+            examples:
+              check:
+                value:
+                  model: YOUR_MODEL_NAME
+                  messages:
+                  - role: user
+                    content: Hello!
       responses:
         '200':
           description: Successful Response
@@ -3552,6 +3481,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3573,6 +3504,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     delete:
       tags:
@@ -3613,6 +3549,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3665,6 +3603,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3686,6 +3626,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     post:
       tags:
@@ -3726,6 +3671,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3747,6 +3694,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     get:
       tags:
@@ -3787,6 +3739,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3919,6 +3873,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -3940,6 +3896,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     delete:
       tags:
@@ -3974,19 +3935,35 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
           description: Proxy DELETE request to OpenAI-compatible endpoint
           content:
             application/json:
-              schema: {}
+              schema:
+                type: object
+                additionalProperties: true
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
+        required: false
     put:
       tags:
       - Inference Gateway
@@ -4020,6 +3997,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4041,6 +4020,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     post:
       tags:
@@ -4075,6 +4059,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4096,6 +4082,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     get:
       tags:
@@ -4130,6 +4121,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4168,6 +4161,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4189,6 +4184,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     delete:
       tags:
@@ -4214,6 +4214,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4251,6 +4253,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4272,6 +4276,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     post:
       tags:
@@ -4297,6 +4306,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4318,6 +4329,11 @@ paths:
             schema:
               type: object
               additionalProperties: true
+            example:
+              model: YOUR_MODEL_NAME
+              messages:
+              - role: user
+                content: Hello!
         required: false
     get:
       tags:
@@ -4343,6 +4359,8 @@ paths:
         required: true
         schema:
           type: string
+          examples:
+          - v1/chat/completions
           title: Trailing Uri
       responses:
         '200':
@@ -4657,69 +4675,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/inference-gateway/v2/workspaces/default/virtual-models/my-virtual-model\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/annotations:
     post:
       tags:
@@ -4903,69 +4881,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/annotations/my-annotation\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations:
     post:
       tags:
@@ -5217,6 +5155,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"description\": \"Reviewed evaluation results\"}"
+
+
+          response = requests.request("PATCH", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+          , {\n  method: \"PATCH\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: \"{\\\"description\\\": \\\"Reviewed evaluation results\\\"\
+          }\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request PATCH \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"description\": \"Reviewed evaluation results\"}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"description\": \"Reviewed evaluation results\"}"
+
+
+            response = requests.request("PATCH", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+            , {\n  method: \"PATCH\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"description\\\": \\\"Reviewed evaluation results\\\"\
+            }\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(await response.json());\n"
     delete:
       tags:
       - Evaluations
@@ -5267,69 +5260,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/evaluations/my-evaluation\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/evaluations/{name}/pin:
     post:
       tags:
@@ -5875,69 +5828,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/experiments/my-experiment\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/atif:
     post:
       tags:
@@ -5966,6 +5879,72 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"schema_version\": \"ATIF-v1.7\", \"agent\": {\"name\": \"my-agent\",
+          \"version\": \"1.0\"}, \"steps\": [{\"step_id\": 1, \"source\": \"user\",
+          \"message\": \"Hello!\"}]}"
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: \"{\\\"schema_version\\\": \\\"ATIF-v1.7\\\", \\\"agent\\\"\
+          : {\\\"name\\\": \\\"my-agent\\\", \\\"version\\\": \\\"1.0\\\"}, \\\"steps\\\
+          \": [{\\\"step_id\\\": 1, \\\"source\\\": \\\"user\\\", \\\"message\\\"\
+          : \\\"Hello!\\\"}]}\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"schema_version\": \"ATIF-v1.7\", \"agent\": {\"name\": \"my-agent\"\
+            , \"version\": \"1.0\"}, \"steps\": [{\"step_id\": 1, \"source\": \"user\"\
+            , \"message\": \"Hello!\"}]}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"schema_version\": \"ATIF-v1.7\", \"agent\": {\"name\": \"my-agent\",
+            \"version\": \"1.0\"}, \"steps\": [{\"step_id\": 1, \"source\": \"user\",
+            \"message\": \"Hello!\"}]}"
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/atif\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: \"{\\\"schema_version\\\": \\\"ATIF-v1.7\\\", \\\"agent\\\"\
+            : {\\\"name\\\": \\\"my-agent\\\", \\\"version\\\": \\\"1.0\\\"}, \\\"\
+            steps\\\": [{\\\"step_id\\\": 1, \\\"source\\\": \\\"user\\\", \\\"message\\\
+            \": \\\"Hello!\\\"}]}\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/chat-completions:
     post:
       tags:
@@ -6038,6 +6017,66 @@ paths:
               format: binary
               description: Serialized OTLP ExportTraceServiceRequest protobuf
         required: true
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+
+          headers = {"Content-Type": "application/x-protobuf"}
+
+          import base64
+
+          payload = base64.b64decode("CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==")
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.json())
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-protobuf\"\
+          },\n  body: Uint8Array.from(atob(\"CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\"\
+          ), c => c.charCodeAt(0)),\n});\nif (!response.ok) throw new Error(`HTTP\
+          \ ${response.status}`);\nconsole.log(await response.json());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "printf %s CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\
+            \ | base64 -d | curl --fail-with-body \\\n  --request POST \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\
+            \ \\\n  --header 'Content-Type: application/x-protobuf' \\\n  --data-binary\
+            \ @-\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces"
+
+            headers = {"Content-Type": "application/x-protobuf"}
+
+            import base64
+
+            payload = base64.b64decode("CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==")
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.json())
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/otlp/v1/traces\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/x-protobuf\"\
+            },\n  body: Uint8Array.from(atob(\"CiYSJBIiChAwMTIzNDU2Nzg5YWJjZGVmEggwMTIzNDU2NyoEZGVtbw==\"\
+            ), c => c.charCodeAt(0)),\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.json());\n"
   /apis/intake/v2/workspaces/{workspace}/ingest/spans:
     post:
       tags:
@@ -6066,6 +6105,86 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans"
+
+          headers = {"Content-Type": "application/json"}
+
+          payload = "{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\",
+          \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\": \"__NHX_CURRENT_TIMESTAMP__\",
+          \"input\": \"Hello!\", \"output\": \"Hello from Helix!\"}]}"
+
+          from datetime import datetime, timezone
+
+          payload = payload.replace("__NHX_CURRENT_TIMESTAMP__", datetime.now(timezone.utc).isoformat())
+
+
+          response = requests.request("POST", url, headers=headers, data=payload)
+
+          response.raise_for_status()
+
+          print(response.status_code)  # no response body
+
+          '
+      - lang: JavaScript
+        source: "const payload = \"{\\\"source\\\": \\\"my-agent\\\", \\\"spans\\\"\
+          : [{\\\"trace_id\\\": \\\"my-trace\\\", \\\"span_id\\\": \\\"my-span\\\"\
+          , \\\"name\\\": \\\"Agent request\\\", \\\"started_at\\\": \\\"__NHX_CURRENT_TIMESTAMP__\\\
+          \", \\\"input\\\": \\\"Hello!\\\", \\\"output\\\": \\\"Hello from Helix!\\\
+          \"}]}\".replace(\"__NHX_CURRENT_TIMESTAMP__\", new Date().toISOString());\n\
+          const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\"\
+          , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+          },\n  body: payload,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(response.status); // no response body\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)\ncurl --fail-with-body \\\
+            \n  --request POST \\\n  http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\
+            \ \\\n  --header 'Content-Type: application/json' \\\n  --data-binary\
+            \ '{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\"\
+            , \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\"\
+            : \"'\"${timestamp}\"'\", \"input\": \"Hello!\", \"output\": \"Hello from\
+            \ Helix!\"}]}'\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans"
+
+            headers = {"Content-Type": "application/json"}
+
+            payload = "{\"source\": \"my-agent\", \"spans\": [{\"trace_id\": \"my-trace\",
+            \"span_id\": \"my-span\", \"name\": \"Agent request\", \"started_at\":
+            \"__NHX_CURRENT_TIMESTAMP__\", \"input\": \"Hello!\", \"output\": \"Hello
+            from Helix!\"}]}"
+
+            from datetime import datetime, timezone
+
+            payload = payload.replace("__NHX_CURRENT_TIMESTAMP__", datetime.now(timezone.utc).isoformat())
+
+
+            response = requests.request("POST", url, headers=headers, data=payload)
+
+            response.raise_for_status()
+
+            print(response.status_code)  # no response body
+
+            '
+        - sdk: javascript
+          code: "const payload = \"{\\\"source\\\": \\\"my-agent\\\", \\\"spans\\\"\
+            : [{\\\"trace_id\\\": \\\"my-trace\\\", \\\"span_id\\\": \\\"my-span\\\
+            \", \\\"name\\\": \\\"Agent request\\\", \\\"started_at\\\": \\\"__NHX_CURRENT_TIMESTAMP__\\\
+            \", \\\"input\\\": \\\"Hello!\\\", \\\"output\\\": \\\"Hello from Helix!\\\
+            \"}]}\".replace(\"__NHX_CURRENT_TIMESTAMP__\", new Date().toISOString());\n\
+            const response = await fetch(\"http://localhost:8080/apis/intake/v2/workspaces/default/ingest/spans\"\
+            , {\n  method: \"POST\",\n  headers: {\"Content-Type\": \"application/json\"\
+            },\n  body: payload,\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+            console.log(response.status); // no response body\n"
   /apis/intake/v2/workspaces/{workspace}/sessions/{id}:
     get:
       tags:
@@ -6201,6 +6320,8 @@ paths:
         schema:
           type: string
           description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
+          examples:
+          - trace_id
           title: By
         description: Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.
       - name: page
@@ -7369,6 +7490,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+      x-codeSamples:
+      - lang: Python
+        source: 'import requests
+
+
+          url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download"
+
+
+          response = requests.request("GET", url)
+
+          response.raise_for_status()
+
+          print(response.content)  # raw file bytes, not JSON
+
+          '
+      - lang: JavaScript
+        source: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\"\
+          , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP ${response.status}`);\n\
+          console.log(await response.arrayBuffer());\n"
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request GET \\\n  http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\
+            \ \\\n  --output example.txt\n"
+        - sdk: python
+          code: 'import requests
+
+
+            url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download"
+
+
+            response = requests.request("GET", url)
+
+            response.raise_for_status()
+
+            print(response.content)  # raw file bytes, not JSON
+
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job/results/my-result/download\"\
+            , {\n  method: \"GET\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(await response.arrayBuffer());\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/steps/{name}:
     get:
       tags:
@@ -7607,6 +7770,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateHelixJobRequest'
+            examples:
+              description:
+                value:
+                  description: Updated job description
       responses:
         '200':
           description: Successful Response
@@ -7672,69 +7839,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/jobs/v2/workspaces/default/jobs/my-job\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/jobs/v2/workspaces/{workspace}/jobs/{name}/cancel:
     post:
       tags:
@@ -8324,69 +8451,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/adapters/my-adapter\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
     patch:
       tags:
       - Adapters
@@ -8639,69 +8726,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config/versions/my-version\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}:
     get:
       tags:
@@ -8847,69 +8894,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/deployment-configs/my-deployment-config\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/deployment-configs/{name}/versions:
     get:
       tags:
@@ -9644,69 +9651,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model/adapters/my-adapter\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
     patch:
       tags:
       - Models
@@ -9908,69 +9875,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/models/my-model");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/models/my-model");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/models/my-model\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/prompts:
     get:
       tags:
@@ -10195,69 +10122,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/prompts/my-prompt\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/providers:
     get:
       tags:
@@ -10327,7 +10214,10 @@ paths:
       tags:
       - ModelProviders
       summary: Create ModelProvider
-      description: Create a new model provider.
+      description: 'Create a new model provider.
+
+
+        The NVIDIA API example requires the named API-key secret to exist first.'
       operationId: create_provider_apis_models_v2_workspaces__workspace__providers_post
       parameters:
       - name: workspace
@@ -10342,6 +10232,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateModelProviderRequest'
+            examples:
+              provider:
+                summary: NVIDIA API provider (create the API-key secret first)
+                value:
+                  name: my-provider
+                  host_url: https://integrate.api.nvidia.com/v1
+                  api_key_secret_name: my-provider-api-key
       responses:
         '201':
           description: Create a new model provider
@@ -10360,7 +10257,16 @@ paths:
       tags:
       - ModelProviders
       summary: Upsert ModelProvider
-      description: Create or update a model provider.
+      description: 'Create or replace a model provider.
+
+
+        PUT replaces the configuration, including optional fields. For an existing
+
+        provider, first read its current configuration and preserve all fields you
+
+        intend to keep, especially api_key_secret_name. The NVIDIA API example requires
+
+        the named API-key secret to exist before this request.'
       operationId: upsert_provider_apis_models_v2_workspaces__workspace__providers__name__put
       parameters:
       - name: workspace
@@ -10380,7 +10286,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpsertModelProviderRequest'
+              allOf:
+              - $ref: '#/components/schemas/UpsertModelProviderRequest'
+              description: PUT replaces the provider configuration. When updating,
+                first read the existing provider and preserve every configuration
+                field you intend to keep, including its API-key secret reference.
+                The example assumes the named API-key secret already exists.
+            examples:
+              provider:
+                value:
+                  host_url: https://integrate.api.nvidia.com/v1
+                  api_key_secret_name: my-provider-api-key
+                  description: NVIDIA API provider
       responses:
         '200':
           description: Create or update a model provider
@@ -10479,69 +10396,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/models/v2/workspaces/default/providers/my-provider\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/models/v2/workspaces/{workspace}/providers/{name}/status:
     put:
       tags:
@@ -10819,69 +10696,29 @@ paths:
         source: "const response = await fetch(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
           , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
           \ ${response.status}`);\nconsole.log(response.status); // no response body\n"
-      - lang: Go
-        source: "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc main()\
-          \ {\n\treq, err := http.NewRequest(\"DELETE\", \"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
-          , nil)\n\tif err != nil {\n\t\tpanic(err)\n\t}\n\tres, err := http.DefaultClient.Do(req)\n\
-          \tif err != nil {\n\t\tpanic(err)\n\t}\n\tdefer res.Body.Close()\n\tfmt.Println(res.Status)\n\
-          }\n"
-      - lang: Ruby
-        source: "require \"net/http\"\n\nuri = URI(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
-          )\nrequest = Net::HTTP::Delete.new(uri)\nresponse = Net::HTTP.start(uri.hostname,\
-          \ uri.port, use_ssl: uri.scheme == \"https\") do |http|\n  http.request(request)\n\
-          end\n\nputs response.code\n"
-      - lang: PHP
-        source: '<?php
-
-          $ch = curl_init("http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret");
-
-          curl_setopt($ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-          curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-          curl_exec($ch);
-
-          $status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-
-          curl_close($ch);
+      x-fern-examples:
+      - code-samples:
+        - sdk: curl
+          code: "curl --fail-with-body \\\n  --request DELETE \\\n  http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\n"
+        - sdk: python
+          code: 'import requests
 
 
-          echo $status, PHP_EOL;
-
-          '
-      - lang: Java
-        source: "import java.net.URI;\nimport java.net.http.HttpClient;\nimport java.net.http.HttpRequest;\n\
-          import java.net.http.HttpResponse;\n\npublic class Example {\n  public static\
-          \ void main(String[] args) throws Exception {\n    HttpRequest request =\
-          \ HttpRequest.newBuilder(URI.create(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
-          ))\n        .method(\"DELETE\", HttpRequest.BodyPublishers.noBody())\n \
-          \       .build();\n    HttpResponse<Void> response = HttpClient.newHttpClient()\n\
-          \        .send(request, HttpResponse.BodyHandlers.discarding());\n    System.out.println(response.statusCode());\n\
-          \  }\n}\n"
-      - lang: C#
-        source: 'using System;
-
-          using System.Net.Http;
-
-          using System.Text;
+            url = "http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret"
 
 
-          using var client = new HttpClient();
+            response = requests.request("DELETE", url)
 
-          using var request = new HttpRequestMessage(new HttpMethod("DELETE"), "http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret");
+            response.raise_for_status()
 
-          using var response = await client.SendAsync(request);
+            print(response.status_code)  # no response body
 
-          Console.WriteLine((int)response.StatusCode);
-
-          '
-      - lang: Swift
-        source: "import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n\
-          #endif\n\nvar request = URLRequest(url: URL(string: \"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
-          )!)\nrequest.httpMethod = \"DELETE\"\nlet done = DispatchSemaphore(value:\
-          \ 0)\nURLSession.shared.dataTask(with: request) { _, response, error in\n\
-          \  defer { done.signal() }\n  if let error = error { print(error); return\
-          \ }\n  print((response as! HTTPURLResponse).statusCode)\n}.resume()\ndone.wait()\n"
+            '
+        - sdk: javascript
+          code: "const response = await fetch(\"http://localhost:8080/apis/secrets/v2/workspaces/default/secrets/my-secret\"\
+            , {\n  method: \"DELETE\",\n});\nif (!response.ok) throw new Error(`HTTP\
+            \ ${response.status}`);\nconsole.log(response.status); // no response\
+            \ body\n"
   /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access:
     get:
       tags:
@@ -13264,6 +13101,7 @@ components:
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
           - $ref: '#/components/schemas/GithubStorageConfig'
+          - $ref: '#/components/schemas/GitStorageConfig'
           title: Storage
           description: The storage configuration for the fileset. If not provided,
             uses default storage.
@@ -13677,13 +13515,24 @@ components:
           maxLength: 1000
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
+        calls_back_as_caller:
+          type: boolean
+          title: Calls Back As Caller
+          description: For a router that calls models back through the gateway on
+            its caller's behalf. The gateway sends it this provider's stored key and
+            a caller context, the caller's credential sealed so only the gateway can
+            read it, and acts as the caller on each call back that returns the context.
+            A call back with the stored key and no context is refused.
+          default: false
       type: object
       required:
       - name
@@ -14707,6 +14556,11 @@ components:
       - dataset_name
       title: EvaluationRequest
       description: Request body for creating an Evaluation.
+      examples:
+      - dataset_name: my-dataset
+        experiment_ids:
+        - YOUR_EXPERIMENT_ID
+        name: my-evaluation
     EvaluationResponse:
       properties:
         id:
@@ -15783,6 +15637,7 @@ components:
           - $ref: '#/components/schemas/HuggingfaceStorageConfig'
           - $ref: '#/components/schemas/S3StorageConfig'
           - $ref: '#/components/schemas/GithubStorageConfig'
+          - $ref: '#/components/schemas/GitStorageConfig'
           title: Storage
         metadata:
           $ref: '#/components/schemas/FilesetMetadata'
@@ -16068,6 +15923,103 @@ components:
         Provides configuration for running jobs on GPU resources with
 
         resource requests and limits.'
+    GatewayCredentialConfig:
+      properties:
+        gateway_id:
+          type: string
+          minLength: 1
+          title: Gateway Id
+        registration_key_file:
+          type: string
+          format: path
+          title: Registration Key File
+        profiles:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayInjectionProfile'
+          type: object
+          minProperties: 1
+          title: Profiles
+        renewal_mode:
+          type: string
+          enum:
+          - gateway
+          - helix
+          title: Renewal Mode
+          description: Use gateway-managed renewal, or Helix controller updates for
+            active sandboxes, including idle ones.
+          default: gateway
+        renewal_interval_seconds:
+          type: integer
+          maximum: 15.0
+          minimum: 1.0
+          title: Renewal Interval Seconds
+          description: Minimum time between Helix provider updates; allow controller
+            polling and propagation within the configured driver cache lifetime.
+          default: 10
+        credential_refresh_verified:
+          type: boolean
+          title: Credential Refresh Verified
+          description: Operator attestation that the selected renewal mode refreshes
+            expiring external credentials and preserves running placeholders on this
+            gateway build.
+          default: false
+      additionalProperties: false
+      type: object
+      required:
+      - gateway_id
+      - registration_key_file
+      - profiles
+      title: GatewayCredentialConfig
+      description: 'Configure backend provider registration: gateway identity, signing
+        key and profiles.'
+    GatewayInjectionProfile:
+      properties:
+        workspaces:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Workspaces
+        credential_keys:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          uniqueItems: true
+          title: Credential Keys
+        profile_workspace:
+          type: string
+          title: Profile Workspace
+          default: ''
+      additionalProperties: false
+      type: object
+      required:
+      - workspaces
+      - credential_keys
+      title: GatewayInjectionProfile
+      description: Limit a provider profile to approved Helix workspaces and credential
+        slots.
+    GatewayProviderBinding:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          title: Profile
+        credentials:
+          additionalProperties:
+            type: string
+          type: object
+          minProperties: 1
+          title: Credentials
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     GenerationLog:
       properties:
         activated_rails:
@@ -16289,6 +16241,58 @@ components:
         with ``-`` for
 
         descending order.'
+    GitStorageConfig:
+      properties:
+        read_chunk_size:
+          type: integer
+          title: Read Chunk Size
+          description: 'Chunk size in bytes for reading/streaming files. Larger chunks
+            reduce async overhead but increase memory per concurrent download. Default:
+            1MB.'
+          default: 1048576
+        type:
+          type: string
+          const: git
+          title: Type
+          default: git
+        url:
+          type: string
+          title: Url
+          description: SSH remote, e.g. 'git@gitlab.example.com:org/repo.git' or 'ssh://host:2222/org/repo.git'
+        revision:
+          type: string
+          title: Revision
+          description: Branch, tag, or commit SHA. 'HEAD' resolves to the remote's
+            default branch.
+          default: HEAD
+        original_revision:
+          title: Original Revision
+          description: The original revision requested by the user before resolution
+            (e.g., 'main'). The 'revision' field contains the resolved commit SHA.
+          type: string
+        path:
+          type: string
+          title: Path
+          description: Optional directory within the repository. All paths are relative
+            to it.
+          default: ''
+        ssh_key_secret:
+          allOf:
+          - $ref: '#/components/schemas/SecretRef'
+          description: Secret holding an unencrypted SSH private key with read access
+        known_hosts:
+          type: string
+          title: Known Hosts
+          description: known_hosts lines for the remote host, e.g. the output of `ssh-keyscan
+            host` once its fingerprint has been checked against one obtained through
+            a trusted channel. The host key is verified against these and nothing
+            else.
+      type: object
+      required:
+      - url
+      - ssh_key_secret
+      - known_hosts
+      title: GitStorageConfig
     GithubStorageConfig:
       properties:
         read_chunk_size:
@@ -17503,6 +17507,18 @@ components:
           type: object
           title: Config
           description: Configuration for the step
+        gateway_providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Gateway Providers
+        gateway_read_filesets:
+          items:
+            type: string
+          type: array
+          title: Gateway Read Filesets
+          description: Input filesets readable by a provider-bearing sandbox; authorized
+            at job creation.
         lifecycle:
           allOf:
           - $ref: '#/components/schemas/StepLifecycle'
@@ -20235,13 +20251,24 @@ components:
           description: Auth context captured at provider creation.
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
+        calls_back_as_caller:
+          type: boolean
+          title: Calls Back As Caller
+          description: For a router that calls models back through the gateway on
+            its caller's behalf. The gateway sends it this provider's stored key and
+            a caller context, the caller's credential sealed so only the gateway can
+            read it, and acts as the caller on each call back that returns the context.
+            A call back with the stored key and no context is refused.
+          default: false
       type: object
       required:
       - name
@@ -20913,6 +20940,8 @@ components:
           description: Optional env vars applied to all jobs (e.g. HOME=/tmp). Keys
             must not conflict with platform-reserved names. Job steps may override
             these variables.
+        gateway_credentials:
+          $ref: '#/components/schemas/GatewayCredentialConfig'
         gateway_endpoint:
           type: string
           title: Gateway Endpoint
@@ -22840,6 +22869,7 @@ components:
       - huggingface
       - s3
       - github
+      - git
       title: StorageConfigType
       type: string
     StringFilter:
@@ -23919,13 +23949,24 @@ components:
           maxLength: 1000
         auth_header_format:
           title: Auth Header Format
-          description: 'Jinja2 template string controlling how the API key secret
-            is sent to the upstream. Must contain exactly one variable named `auth_secret`,
-            which is substituted with the resolved secret value at request time. Example:
-            `''X-Api-Key: {{ auth_secret }}''`. If not set, defaults to `''Authorization:
-            Bearer {{ auth_secret }}''`.'
+          description: 'Literal header format controlling how the API key secret is
+            sent to the upstream. Must contain exactly one `<auth_secret>` placeholder,
+            which is replaced with the resolved secret value at request time. It is
+            plain text, not a template: no `{` or `}` characters or line breaks are
+            allowed. The legacy `{{ auth_secret }}` spelling is still accepted. Example:
+            `''X-Api-Key: <auth_secret>''`. If not set, defaults to `''Authorization:
+            Bearer <auth_secret>''`.'
           type: string
           maxLength: 1024
+        calls_back_as_caller:
+          title: Calls Back As Caller
+          description: For a router that calls models back through the gateway on
+            its caller's behalf. The gateway sends it this provider's stored key and
+            a caller context, the caller's credential sealed so only the gateway can
+            read it, and acts as the caller on each call back that returns the context.
+            A call back with the stored key and no context is refused. Left unset,
+            an update keeps the provider's current setting.
+          type: boolean
       type: object
       required:
       - host_url
@@ -24683,3 +24724,13 @@ components:
       required:
       - data
       title: WorkspacesPage
+  securitySchemes:
+    HelixBearer:
+      type: http
+      scheme: bearer
+      description: Supply a raw Helix access token. The Authorization header's Bearer
+        prefix is added automatically.
+      x-fern-bearer:
+        name: accessToken
+        env: NHX_ACCESS_TOKEN
+        placeholder: YOUR_ACCESS_TOKEN

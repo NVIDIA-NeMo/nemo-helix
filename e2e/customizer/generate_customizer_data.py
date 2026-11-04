@@ -11,7 +11,7 @@ All dataset sources, sizes, and output paths are defined in the manifest. Run vi
 Produces, under the manifest ``generation.output_dir``:
   - prompt_completion/{training,validation}.jsonl   (SQuAD, from squad.outputs)
   - chat_format/{training,validation}.jsonl         (SQuAD, from squad.outputs)
-  - dpo/{training,validation,eval}.jsonl            (HelpSteer3, from helpsteer3.outputs)
+  - dpo/{training,validation}.jsonl                 (HelpSteer3, from helpsteer3.outputs)
 
 CI never pulls these from Hugging Face; it syncs the generated files from S3.
 """
@@ -57,22 +57,6 @@ def convert_to_dpo_helpsteer(example: dict) -> dict:
         "response2": example["response2"],
         "overall_preference": example["overall_preference"],
     }
-
-
-def _as_messages(context: Any) -> list[dict[str, str]]:
-    if isinstance(context, str):
-        return [{"role": "user", "content": context}]
-    return [{"role": msg["role"], "content": msg["content"]} for msg in context]
-
-
-def convert_dpo_to_eval_chat(example: dict) -> dict | None:
-    preference = example.get("overall_preference", 0)
-    if preference == 0:
-        return None
-    preferred = example["response1"] if preference < 0 else example["response2"]
-    messages = _as_messages(example["context"])
-    messages.append({"role": "assistant", "content": preferred})
-    return {"messages": messages}
 
 
 def write_jsonl(data: list[dict], path: Path) -> None:
@@ -142,9 +126,6 @@ def _generate_helpsteer3(output_dir: Path, spec: dict[str, Any], n_train: int, n
         [convert_to_dpo_helpsteer(ex) for ex in dpo_val_examples],
         dpo_dir / "validation.jsonl",
     )
-
-    eval_rows = [row for ex in dpo_val_examples if (row := convert_dpo_to_eval_chat(ex)) is not None]
-    write_jsonl(eval_rows, dpo_dir / "eval.jsonl")
 
 
 def main() -> None:

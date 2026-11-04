@@ -32,10 +32,7 @@ export const CollapsedNavItem: FC<CollapsedNavItemProps> = ({ item, isActive }) 
           slotStart={icon}
           {...item.attributes?.VerticalNavItem}
         >
-          <NavLink
-            to={href}
-            aria-label={typeof item.slotLabel === 'string' ? item.slotLabel : undefined}
-          />
+          <NavLink to={href}>{item.slotLabel}</NavLink>
         </StudioNavItem>
       </Tooltip>
     </VerticalNavListItem>

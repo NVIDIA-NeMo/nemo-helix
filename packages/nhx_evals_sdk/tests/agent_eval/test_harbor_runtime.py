@@ -38,6 +38,7 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import (
     discover_harbor_tasks,
     scoped_harbor_agent_import,
 )
+from nhx_evals_sdk.agent_eval.runtimes.harbor.setup_slots import MAX_CONCURRENT_SETUPS_ENV
 from nhx_evals_sdk.agent_eval.runtimes.harbor.trial_adapter import (
     HARBOR_SPLIT_MARKER,
     _rewards_mapping,
@@ -1097,7 +1098,7 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
     """
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1238,7 +1239,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -1265,6 +1266,43 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         assert agent_config.name == "oracle"
     else:
         assert agent_config.import_path is not None and agent_config.import_path.endswith(":WrappedAgent")
+
+
+@pytest.mark.asyncio
+async def test_the_job_scope_holds_each_planned_job_while_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller can change a planned job's trials before any runs, and clean up after the last."""
+    import contextlib
+
+    import harbor.job
+
+    events: list[str] = []
+
+    class FakeJob(_HookableJob):
+        @classmethod
+        async def create(cls, job_config: Any) -> "FakeJob":
+            events.append("create")
+            return cls()
+
+        async def run(self) -> None:
+            events.append("run")
+
+    @contextlib.asynccontextmanager
+    async def scope(job: Any) -> Any:
+        assert isinstance(job, FakeJob)
+        events.append("enter")
+        yield
+        events.append("exit")
+
+    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="scoped")
+    _, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="scoped", env_templates={}, job_scope=scope
+    )
+    await run_job()
+
+    assert events == ["create", "enter", "run", "exit"]
 
 
 @pytest.mark.asyncio
@@ -1620,7 +1658,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -1945,6 +1983,18 @@ class _DriftConfig(BaseModel):
     quiet: bool = True
 
 
+class _HookableJob:
+    """Harbor ``Job``'s hook registration, which the runtime calls for the setup slots; records nothing."""
+
+    def on_environment_started(self, callback: object) -> None: ...
+
+    def on_agent_started(self, callback: object) -> None: ...
+
+    def on_trial_ended(self, callback: object) -> None: ...
+
+    def on_trial_cancelled(self, callback: object) -> None: ...
+
+
 def _stub_harbor(
     monkeypatch: pytest.MonkeyPatch,
     job_create: Callable[[object], Awaitable[object]],
@@ -1973,7 +2023,7 @@ def _stub_harbor(
             verifier_calls.append(kwargs)
         return object()
 
-    class _Job:
+    class _Job(_HookableJob):
         create = staticmethod(job_create)
 
     _module("harbor")
@@ -1994,9 +2044,54 @@ def _stub_harbor(
     )
 
 
-class _FakeJob:
+class _FakeJob(_HookableJob):
     async def run(self) -> None:
         return None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="no flock on Windows, so no setup slots")
+@pytest.mark.asyncio
+async def test_each_harbor_job_takes_setup_slots_for_its_trials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Local Docker setups that overlap time out, so every job the runtime creates registers the slot hooks."""
+    monkeypatch.setenv(MAX_CONCURRENT_SETUPS_ENV, "4")
+    registered: list[str] = []
+
+    class _RecordingJob(_FakeJob):
+        def on_environment_started(self, callback: object) -> None:
+            registered.append("environment-start")
+
+        def on_agent_started(self, callback: object) -> None:
+            registered.append("agent-start")
+
+    async def create(_config: object) -> _RecordingJob:
+        return _RecordingJob()
+
+    _stub_harbor(monkeypatch, create)
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="slots")
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="slots", force_rerun=True, env_templates={}
+    )
+    await run_job()
+    assert registered == ["environment-start", "agent-start"]
+
+
+@pytest.mark.asyncio
+async def test_a_bad_slot_count_refuses_the_run_before_force_rerun_deletes_its_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(MAX_CONCURRENT_SETUPS_ENV, "four")
+    config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="kept")
+    result = tmp_path / "jobs" / "kept" / "result.json"
+    result.parent.mkdir(parents=True)
+    result.write_text("{}")
+    _built, run_job = _build_native_job(
+        config, tmp_path / "dataset", None, job_name="kept", force_rerun=True, env_templates={}
+    )
+    with pytest.raises(ValueError, match=MAX_CONCURRENT_SETUPS_ENV):
+        await run_job()
+    assert result.exists()
 
 
 @pytest.mark.asyncio
@@ -2100,7 +2195,7 @@ async def test_unrelated_file_exists_error_mid_run_leaves_the_job_dir_alone(
     (job_dir / "finished-trial").mkdir(parents=True)
     attempts: list[int] = []
 
-    class _ExplodingJob:
+    class _ExplodingJob(_HookableJob):
         async def run(self) -> None:
             attempts.append(1)
             raise FileExistsError(17, "File exists", str(tmp_path / "scratch" / "artifact.tar"))
@@ -3309,7 +3404,7 @@ def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mappi
     """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
         captured.append(dict(env_templates))
 
         async def run_job() -> None:
@@ -3476,7 +3571,7 @@ async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -3514,7 +3609,7 @@ async def _created_jobs(
 
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)
@@ -3740,7 +3835,7 @@ async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypa
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", env_vars={"DOCKER_HOST": "tcp://agent-only:2375"})
     created: list[Any] = []
 
-    class FakeJob:
+    class FakeJob(_HookableJob):
         @classmethod
         async def create(cls, job_config: Any) -> "FakeJob":
             created.append(job_config)

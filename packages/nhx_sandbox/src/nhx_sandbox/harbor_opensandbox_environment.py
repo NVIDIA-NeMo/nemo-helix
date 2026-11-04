@@ -63,7 +63,9 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from nhx_sandbox.backends.opensandbox.termination import OpenSandboxTerminationDiagnostics
 from nhx_sandbox.compose_env import expand_env
+from nhx_sandbox.core.termination import check_termination, write_termination
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, build_egress_policy
 from nhx_sandbox.harbor_opensandbox_cleanup import applied_egress_filename
 from nhx_sandbox.harbor_opensandbox_driver import (
@@ -78,6 +80,8 @@ from nhx_sandbox.harbor_opensandbox_services import (
     AGENT_BUNDLE_FEATURE,
     COMPOSE_FILENAMES,
     COMPOSE_MAIN_FEATURE,
+    COMPOSE_SECURITY_FEATURE,
+    EGRESS_PORT_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -151,8 +155,14 @@ PROVISIONING_STATUS_BUDGET_SEC = 30
 EXECD_PORT = 44772
 # The pod IP is optional, so its lookup gives up after this long in all, retries included.
 SANDBOX_IP_LOOKUP_BUDGET_SEC = 15
+# The server-reported expiry is optional too, so its lookup gives up after this long.
+EXPIRY_LOOKUP_BUDGET_SEC = 15
 # How long each command that activates the agent bundle may take: reading PATH, then ``--version``.
 AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
+# ``stop`` asks the server whether the sandbox stopped early; the check gives up after this long in all.
+TERMINATION_CHECK_BUDGET_SEC = 10
+# After a command was cut off, how often stop asks again until the server reports the sandbox stopped.
+TERMINATION_POLL_INTERVAL_SEC = 1.0
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -206,7 +216,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         resolver_addresses: Nameservers to keep reachable. ``None`` uses the runner's own
             ``/etc/resolv.conf``, which in-cluster is the resolver sandboxes share.
         egress_verification: How strictly to compare the applied policy with the requested one;
-            see ``verify_applied_egress``. Readback itself is always required.
+            see ``verify_applied_egress``. Readback itself is always required. ``strict`` by default;
+            ``default_action`` is for a deployment whose sidecar adds allow rules of its own.
         enforce_disk_limit: Cap each sandbox's ephemeral storage at the task's ``storage_mb``. Turn
             this off only on a runtime that doesn't enforce the limit.
         max_disk_mb: Ceiling on the limit, so a task asking for far more than any node holds can't
@@ -252,7 +263,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         metadata: dict[str, str] | None = None,
         trusted_allowed_hosts: list[str] | None = None,
         resolver_addresses: list[str] | None = None,
-        egress_verification: EgressVerificationMode = "default_action",
+        egress_verification: EgressVerificationMode = "strict",
         enforce_disk_limit: bool = True,
         max_disk_mb: int | None = None,
         compose_services: dict[str, Any] | None = None,
@@ -300,6 +311,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._max_disk_mb = max_disk_mb
         self._disk_limit_mb: int | None = None
         self._sandbox: Any | None = None
+        # When the server said it will delete the sandbox, read after create; None if it didn't say.
+        self._server_expires_at: datetime | None = None
         self._record: dict[str, Any] | None = None
         self._record_path: Path | None = None
         self._image_uid: int | None = None
@@ -483,6 +496,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=[self._as_written(argument) for argument in entrypoint] if entrypoint is not None else None,
+                egress_api_port=self._services.egress_api_port if self._services is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
@@ -500,6 +514,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 require_readback=True,
             )
             ip = await self._sandbox_ip(recorded_id) if recorded_id else None
+            self._server_expires_at = await self._expiry(sandbox)
         except BaseException as exc:
             await self._driver.safe_kill(sandbox)
             if isinstance(exc, EgressVerificationError):
@@ -545,6 +560,24 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             )
             return None
         return str(ip)
+
+    async def _expiry(self, sandbox: Any) -> datetime | None:
+        """When the server will delete the sandbox, as it reports it, or ``None`` if it can't say.
+
+        Read from the server rather than computed: a retried create starts the lifetime of the
+        sandbox that succeeded after the attempts before it, and stop tells a sandbox whose lifetime
+        ran out from one deleted early by this time.
+        """
+        try:
+            async with asyncio.timeout(EXPIRY_LOOKUP_BUDGET_SEC):
+                return await self._driver.expires_at(sandbox)
+        except Exception:
+            self.logger.warning(
+                "Could not read sandbox %s's expiry; if it is gone at stop, its cause is recorded as unknown",
+                sandbox_id(sandbox),
+                exc_info=True,
+            )
+            return None
 
     def _record_applied_egress(
         self, recorded_id: str | None, policy: EgressPolicy, *, ip: str | None, started_at: datetime
@@ -704,23 +737,40 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if response.status_code != 200:
             raise RuntimeError(
                 "The OpenSandbox server does not run the NeMo compose services extension; "
-                f"GET /v1/nemo-ext/health returned {response.status_code}. See "
-                "k8s/helm/examples/opensandbox/README.md, 'Compose services'."
+                f"GET /v1/nemo-ext/health returned {response.status_code}."
             )
 
         features = response.json().get("features") or []
         # An extension from before agent bundles answers the health check too, but would drop the bundle.
         if self._agent_bundle is not None and AGENT_BUNDLE_FEATURE not in features:
             raise RuntimeError(
-                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles; upgrade it to "
-                "the version in plugins/_temporary-scaled-evals/opensandbox_ext."
+                "The OpenSandbox server's NeMo compose services extension doesn't support agent bundles."
             )
         # An extension from before them would refuse a spec with no services, or main's command or working directory.
         if self._services is not None and self._services.uses_main_settings() and COMPOSE_MAIN_FEATURE not in features:
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
-                "change main, or main's command and working directory; upgrade it to the version in "
-                "plugins/_temporary-scaled-evals/opensandbox_ext."
+                "change main, or main's command and working directory."
+            )
+        # An older extension would leave the egress API on 18080, so the service that needs that port couldn't start.
+        if (
+            self._services is not None
+            and self._services.egress_api_port is not None
+            and EGRESS_PORT_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension is too old to move the egress policy API "
+                "off port 18080, which one of this task's containers needs."
+            )
+        # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
+        if (
+            self._services is not None
+            and self._services.uses_security_settings()
+            and COMPOSE_SECURITY_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension doesn't support a compose file's user, "
+                "read_only, cap_drop, security_opt or tmpfs."
             )
 
     async def _services_status(self, sandbox_id: str, deadline: float) -> dict[str, Any]:
@@ -847,18 +897,60 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
 
     @override
     async def stop(self, delete: bool) -> None:
-        """Kill the sandbox when ``delete`` is set, and always release the client."""
+        """Record why the sandbox stopped if it already had, kill it when ``delete`` is set, and always release the client.
+
+        Harbor calls ``stop`` for every sandbox it started, whether the trial passed, failed or was
+        cancelled, and before it writes the trial's ``result.json``. So this one check sees every
+        sandbox that died under its trial, whichever operation hit it first.
+        """
         if not self._sandbox:
             return
-        self._record_stopped()
         try:
-            if delete:
-                await self._sandbox.kill()
+            await self._record_termination(self._sandbox)
         finally:
+            # In the finally, so a check cancelled mid-wait still kills and releases the sandbox;
+            # otherwise it would run until its server-side lifetime ends.
+            self._record_stopped()
             try:
-                await self._sandbox.close()
+                if delete:
+                    await self._driver.kill(self._sandbox)
             finally:
-                self._sandbox = None
+                try:
+                    await self._sandbox.close()
+                finally:
+                    self._sandbox = None
+
+    async def _record_termination(self, sandbox: Any) -> None:
+        """Write why ``sandbox`` stopped into the trial directory, if it had.
+
+        Never raises: Harbor records an error from ``stop`` as the trial's own, so a failed check
+        would fail a trial that finished.
+        """
+        try:
+            diagnostics = OpenSandboxTerminationDiagnostics(self._server())
+        except Exception:
+            self.logger.warning("Could not check whether sandbox %s stopped early", sandbox_id(sandbox), exc_info=True)
+            return
+        termination = await check_termination(
+            diagnostics,
+            str(sandbox_id(sandbox)),
+            expires_at=self._server_expires_at,
+            role=sandbox_role(self.session_id, self.trial_paths.trial_dir.name),
+            budget_sec=TERMINATION_CHECK_BUDGET_SEC,
+            logger=self.logger,
+            # The server's status lags a dead sandbox by seconds, and stop runs right after the failure reaches Harbor.
+            wait_for_stop=self._driver.sandbox_may_have_died,
+            poll_interval_sec=TERMINATION_POLL_INTERVAL_SEC,
+        )
+        if termination is None:
+            return
+        self.logger.warning(
+            "Sandbox %s stopped before the trial finished with it: %s", termination.sandbox_id, termination.detail
+        )
+        try:
+            write_termination(self.trial_paths.trial_dir, termination)
+        except OSError:
+            self.logger.warning("Could not record why sandbox %s stopped", termination.sandbox_id, exc_info=True)
 
     def _require_sandbox(self) -> Any:
         """The live sandbox; raises if ``start`` hasn't created one or ``stop`` already released it."""
@@ -948,8 +1040,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Run a command; explicit ``cwd``, then the task's workdir, then ``main``'s compose ``working_dir``, then the image's WORKDIR."""
         sandbox = self._require_sandbox()
         requested_uid = self._numeric_uid(self._resolve_user(user))
-        # Learn the image's uid before the first root command, so it can be mapped below.
-        if not self._image_uid_probed and requested_uid == 0:
+        # Learn the sandbox's own uid before the first command that names one, so `_uid_for` can compare them.
+        if not self._image_uid_probed and requested_uid is not None:
             await self._probe_image_uid()
         result = await self._driver.run(
             sandbox,
@@ -982,8 +1074,17 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         return None
 
     def _uid_for(self, uid: int | None) -> int | None:
-        """The uid to send for a requested one: unchanged, except that root on a non-root image runs as the image's user."""
-        if uid != 0 or self._image_uid in (None, 0):
+        """The uid to send for a requested one; None runs the command as the sandbox's own user.
+
+        * The sandbox's own uid isn't sent. execd switches identity whenever it gets a uid, even to the one it already
+          runs as, and the switch needs ``CAP_SETGID``: on a sandbox that drops every capability, root commands on a
+          root image would all fail before they start.
+        * Root on a non-root image runs as the image's user, since execd can't switch to root there.
+        * Any other uid is sent as is.
+        """
+        if uid is None or uid == self._image_uid:
+            return None
+        if uid != 0 or self._image_uid is None:
             return uid
         if not self._warned_root_unavailable:
             self._warned_root_unavailable = True

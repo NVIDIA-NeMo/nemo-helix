@@ -57,7 +57,11 @@ spec:
       {{- end }}
       containers:
         - name: clickhouse
-          image: {{ printf "%s:%s" .Values.clickhouse.image.repository .Values.clickhouse.image.tag | quote }}
+          {{- $clickhouseImage := printf "%s:%s" .Values.clickhouse.image.repository .Values.clickhouse.image.tag }}
+          {{- with .Values.clickhouse.image.digest }}
+          {{- $clickhouseImage = printf "%s@%s" $clickhouseImage . }}
+          {{- end }}
+          image: {{ $clickhouseImage | quote }}
           imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
           securityContext:
             {{- include "nemo-common.securityContext" (dict "global" .Values.securityContext "local" .Values.clickhouse.securityContext) | nindent 12 }}

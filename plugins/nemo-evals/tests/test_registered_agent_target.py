@@ -982,3 +982,17 @@ def test_unstaged_agent_files_fail_before_the_run(tmp_path: Path) -> None:
     ctx = _job_context(tmp_path)
     with pytest.raises(ValueError, match="were not staged"):
         AgentEvalJob._resolve_target(_fabric_target_with_files(), ctx)
+
+
+async def test_registered_agent_rejects_unsupported_provider_bindings(mocker: MockerFixture) -> None:
+    _platform(mocker, _agent(_calculator_config()))
+    environment = EnvironmentSpecInline(
+        secrets={"SERVICE_TOKEN": "dev/token"},
+        settings={
+            "openshell": {
+                "providers": {"service": {"profile": "service-read", "credentials": {"API_TOKEN": "SERVICE_TOKEN"}}}
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Provider fulfillments require a configured OpenShell"):
+        await _resolve(_by_agent(environment=environment))

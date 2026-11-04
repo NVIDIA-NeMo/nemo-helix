@@ -1,11 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import {
   type QuickActionItem,
   QuickActionsMenuRoot,
 } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
+import { useAnnounceCancellation } from '@nemo/common/src/hooks/useAnnounceCancellation';
 import {
   getAnonymizerListRunJobsQueryKey,
   useAnonymizerCancelRunJob,
@@ -22,30 +24,27 @@ interface AnonymizerJobActionsMenuProps {
   job: AnonymizerJob;
   includeViewDetails?: boolean;
   onDeleted?: () => void;
-  onCancelError?: (message: string | undefined) => void;
 }
 
 export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
   job,
   includeViewDetails = false,
   onDeleted,
-  onCancelError,
 }) => {
   const navigate = useNavigate();
   const workspace = useWorkspaceFromPath();
   const queryClient = useQueryClient();
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const announceCancellation = useAnnounceCancellation();
 
   const cancelJobMutation = useAnonymizerCancelRunJob({
     mutation: {
-      onSuccess: () => {
+      onSuccess: (job, variables) => {
         queryClient.resetQueries({
           queryKey: getAnonymizerListRunJobsQueryKey(workspace),
         });
-        onCancelError?.(undefined);
-      },
-      onError: (error) => {
-        onCancelError?.(error instanceof Error ? error.message : 'Failed to cancel job');
+        announceCancellation(variables.workspace, { name: variables.name, status: job.status });
       },
     },
   });
@@ -54,13 +53,8 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
 
   const handleCancel = useCallback(async () => {
     if (!job.workspace || !job.name) return;
-    try {
-      onCancelError?.(undefined);
-      await cancelJob({ workspace: job.workspace, name: job.name });
-    } catch {
-      // Error is surfaced via the mutation's onError callback.
-    }
-  }, [job.workspace, job.name, cancelJob, onCancelError]);
+    await cancelJob({ workspace: job.workspace, name: job.name });
+  }, [job.workspace, job.name, cancelJob]);
 
   const isCancellable = job.status != null && CJobCancellableStatuses.includes(job.status);
 
@@ -82,7 +76,7 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
         ? [
             {
               label: 'Cancel',
-              onSelect: handleCancel,
+              onSelect: () => setShowCancelModal(true),
             },
           ]
         : []),
@@ -92,12 +86,20 @@ export const AnonymizerJobActionsMenu: FC<AnonymizerJobActionsMenuProps> = ({
         danger: true,
       },
     ],
-    [includeViewDetails, isCancellable, handleCancel, navigate, workspace, job.name]
+    [includeViewDetails, isCancellable, navigate, workspace, job.name]
   );
 
   return (
     <>
       <QuickActionsMenuRoot actions={actions} />
+      {showCancelModal && (
+        <CancelJobModal
+          open
+          jobName={job.name ?? ''}
+          onClose={() => setShowCancelModal(false)}
+          onConfirm={handleCancel}
+        />
+      )}
       {showDeleteModal && (
         <DeleteJobModal
           jobs={[job]}

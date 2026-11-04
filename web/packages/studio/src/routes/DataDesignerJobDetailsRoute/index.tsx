@@ -7,7 +7,6 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { HelixJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { ArrowLeft } from '@nemo/icons/icons';
 import {
-  Banner,
   Button,
   Flex,
   Stack,
@@ -51,7 +50,6 @@ export const DataDesignerJobDetailsRoute: FC = () => {
   const [isConfigPanelOpen, setIsConfigPanelOpen] = useState(false);
   const [isSplitModalOpen, setIsSplitModalOpen] = useState(false);
   const [isTransformModalOpen, setIsTransformModalOpen] = useState(false);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
   const [selectedTab, setSelectedTab] = useState<JobDetailsTab | undefined>(undefined);
 
   const defaultTabRef = useRef<JobDetailsTab | undefined>(undefined);
@@ -140,15 +138,9 @@ export const DataDesignerJobDetailsRoute: FC = () => {
                 ]}
                 onViewConfig={() => setIsConfigPanelOpen(true)}
                 onDeleted={() => navigate(getDataDesignerJobListRoute(workspace))}
-                onCancelError={setCancelError}
               />
             </Flex>
           </Flex>
-          {cancelError && (
-            <Banner kind="inline" status="error">
-              {cancelError}
-            </Banner>
-          )}
           {job.description && (
             <Text kind="body/regular/md" className="text-muted">
               {job.description}

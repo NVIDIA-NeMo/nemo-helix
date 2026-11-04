@@ -162,6 +162,22 @@ describe('AgentDetailRoute', () => {
     expect(await screen.findByRole('textbox', { name: /Task prompt/i })).toBeInTheDocument();
   });
 
+  it('refreshes deployments when the chat tab opens', async () => {
+    let requests = 0;
+    server.use(
+      http.get(`${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`, () => {
+        requests++;
+      })
+    );
+    const user = userEvent.setup();
+    renderDetail();
+    await waitFor(() => expect(requests).toBe(1));
+
+    await user.click(await screen.findByRole('tab', { name: 'Chat' }));
+
+    await waitFor(() => expect(requests).toBe(2));
+  });
+
   it("offers this agent's built image to a deployment when asked for it", async () => {
     mockPreviouslyPackagedAgent();
     renderDetail();

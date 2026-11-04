@@ -22,7 +22,7 @@ from nemo_evals.runs_cli import (
     wait_for_builds,
 )
 from nemo_evals.sdk.resources import Evaluator
-from nemo_evals.tasksets_cli import STATUS_BUILDING, add_tasksets_commands
+from nemo_evals.tasksets_cli import STATUS_BUILDING, _print_status, add_tasksets_commands
 from nemo_helix_plugin.client.errors import NemoTransportError
 from typer.testing import CliRunner
 
@@ -272,6 +272,13 @@ def test_status_reads_the_default_platform_build_and_names_tasks_never_requested
     result = cli(builds, "build-images", "default/suite", "--status")
     assert result.exit_code == 1  # b has no build
     assert result.output.splitlines()[0] == "Image builds for 2 tasks: 1 ready, 0 building, 0 failed, 1 not requested."
+
+
+def test_status_reads_build_times_without_a_zone_as_utc(capsys):
+    """The entity store returns timestamps without a zone, which can't be subtracted from an aware now."""
+    build = _build("a", "1", "running").model_copy(update={"updated_at": T0.replace(tzinfo=None)})
+    assert _print_status({"default/a#" + DIGEST: build}, now=T0 + timedelta(minutes=5)) == STATUS_BUILDING
+    assert "(no change for 5m" in capsys.readouterr().out
 
 
 def test_wait_and_status_do_not_combine(cli):

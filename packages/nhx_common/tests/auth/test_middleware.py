@@ -23,6 +23,7 @@ from nhx.common.auth.jwt import UnsignedJWTRejectedError
 from nhx.common.auth.middleware import (
     PUBLIC_GET_PATHS,
     AuthorizationMiddleware,
+    _forbidden_detail,
     is_auth_middleware_excluded_path,
 )
 from nhx.common.auth.models import Principal
@@ -1645,22 +1646,101 @@ class TestCompatibilityAuth:
             ("invalid-token", 401),
         ],
     )
-    def test_hf_endpoint_bearer_token(self, auth_config_enabled, token, expected_status):
-        """HF endpoints accept service:* Bearer tokens, reject invalid tokens."""
-        app = create_test_app(auth_config_enabled)
+    def test_hf_endpoint_bearer_token_auth_disabled(self, auth_config_disabled, token, expected_status):
+        """With auth disabled, HF endpoints keep accepting service:* Bearer tokens for local setups."""
+        app = FastAPI()
+
+        @app.get("/apis/files/v2/hf/{workspace}/{name}/resolve/{revision}/{path:path}")
+        async def hf_download(auth_client: AuthClient = Depends(get_auth_client)):
+            return {"principal": auth_client.principal.id}
+
+        Configuration.set_override(auth_config_disabled)
+        app.add_middleware(AuthorizationMiddleware, service_name="test-service")
         client = TestClient(app, raise_server_exceptions=False)
 
-        with patch("nhx.common.auth.client.AuthClient.authorize_request") as mock_authorize:
-            mock_authorize.return_value = MagicMock(allowed=expected_status == 200)
+        response = client.get(
+            "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
+        assert response.status_code == expected_status
+        if expected_status == 200:
+            assert response.json() == {"principal": token}
+
+    @pytest.mark.parametrize("token", ["service:nim", "service:jobs", "service:not-a-real-service", "invalid-token"])
+    @pytest.mark.parametrize("config_fixture", ["auth_config_enabled", "auth_config_token_exchange"])
+    def test_hf_endpoint_rejects_unverified_bearer_when_auth_enabled(
+        self, request: pytest.FixtureRequest, config_fixture: str, token: str
+    ):
+        """A bare service:<name> string is not a credential: it must not reach the PDP as that service."""
+        app = create_test_app(request.getfixturevalue(config_fixture))
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with (
+            patch("nhx.common.auth.middleware.resolve_bearer_token", new=AsyncMock(return_value=None)),
+            patch("nhx.common.auth.middleware.resolve_workload_access_token", new=AsyncMock(return_value=None)),
+            patch("nhx.common.auth.middleware.resolve_workload_subject_token", new=AsyncMock(return_value=None)),
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
             response = client.get(
                 "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
                 headers={"Authorization": f"Bearer {token}"},
             )
 
-            assert response.status_code == expected_status
-            if expected_status == 200:
-                mock_authorize.assert_called_once()
+        assert response.status_code == 401
+        mock_authorize.assert_not_called()
+
+    def test_hf_endpoint_rejects_missing_credentials_when_auth_enabled(self, auth_config_enabled):
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            response = client.get("/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin")
+
+        assert response.status_code == 401
+        mock_authorize.assert_not_called()
+
+    def test_hf_endpoint_authorizes_verified_service_bearer(self, auth_config_token_exchange):
+        """A verified workload token for a service is authorized by the PDP as that service."""
+        app = create_test_app(auth_config_token_exchange)
+        client = TestClient(app, raise_server_exceptions=False)
+        resolved = ResolvedBearerToken(
+            claims=TokenClaims(subject="service:models", email=None, groups=[], scopes=[], raw_claims={}),
+            token_kind="workload_access_token",
+        )
+
+        with (
+            patch(
+                "nhx.common.auth.middleware.resolve_workload_access_token",
+                new=AsyncMock(return_value=resolved),
+            ) as access_resolver,
+            patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize,
+        ):
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = client.get(
+                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+                headers={"Authorization": "Bearer signed-workload-token"},
+            )
+
+        assert response.status_code == 200
+        access_resolver.assert_awaited_once_with(auth_config_token_exchange, "signed-workload-token")
+        auth_client = mock_authorize.call_args.args[0]
+        assert auth_client.principal.id == "service:models"
+
+    def test_hf_endpoint_ignores_bearer_service_string_when_principal_header_present(self, auth_config_enabled):
+        """In-platform callers using trusted headers are authorized from the header, not the bearer string."""
+        app = create_test_app(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
+            mock_authorize.return_value = MagicMock(allowed=True)
+            response = client.get(
+                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
+                headers={"Authorization": "Bearer service:jobs", "X-NHX-Principal-Id": "service:models"},
+            )
+
+        assert response.status_code == 200
+        assert mock_authorize.call_args.args[0].principal.id == "service:models"
 
     @pytest.mark.parametrize("token", ["service:", "service:has spaces", "service:/path", "service:*"])
     def test_hf_endpoint_rejects_malformed_service_bearer_token(self, auth_config_enabled, token: str):
@@ -1675,23 +1755,6 @@ class TestCompatibilityAuth:
 
         assert response.status_code == 401
         mock_authorize.assert_not_called()
-
-    def test_hf_endpoint_authorizes_as_bearer_service_principal(self, auth_config_enabled):
-        """The PDP receives the service principal synthesized from the HF Bearer token."""
-        app = create_test_app(auth_config_enabled)
-        client = TestClient(app, raise_server_exceptions=False)
-
-        with patch.object(AuthClient, "authorize_request", autospec=True) as mock_authorize:
-            mock_authorize.return_value = MagicMock(allowed=True)
-
-            response = client.get(
-                "/apis/files/v2/hf/my-workspace/my-fileset/resolve/main/model.bin",
-                headers={"Authorization": "Bearer service:models"},
-            )
-
-        assert response.status_code == 200
-        auth_client = mock_authorize.call_args.args[0]
-        assert auth_client.principal.id == "service:models"
 
     def test_files_otlp_logs_upload_accepts_service_principal_header(self, auth_config_enabled):
         """Job log uploads accept the launcher fallback service principal header."""
@@ -1857,3 +1920,66 @@ class TestServicePrincipalDelegationMiddleware:
             )
 
         assert response.status_code == 403
+
+
+class TestForbiddenDetail:
+    """The 403 for a PDP denial names the action and workspace on generic entities routes."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "expected"),
+        [
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model", "create"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model", "list"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "read"),
+            ("PUT", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "update"),
+            ("DELETE", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model", "delete"),
+        ],
+    )
+    def test_entities_routes_name_action_and_workspace(self, method, path, expected):
+        assert _forbidden_detail(method, path) == f"Not allowed to {expected} entities in workspace 'ws-b'"
+
+    def test_all_workspaces_selector_uses_documented_wording(self):
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/-/entities/model")
+        assert detail == "Not allowed to list entities in the requested workspace."
+
+    def test_workspace_with_decoded_special_characters(self):
+        # request.url.path is percent-decoded, so team%40acme arrives as team@acme.
+        detail = _forbidden_detail("GET", "/apis/entities/v2/workspaces/team@acme+qa/entities/model")
+        assert detail == "Not allowed to list entities in workspace 'team@acme+qa'"
+
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/apis/models/v2/workspaces/ws-b/models"),
+            ("PATCH", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("POST", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model"),
+            ("GET", "/apis/entities/v2/workspaces/ws%20b/entities/model"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b/entities/model/qa-model/extra"),
+            ("GET", "/apis/entities/v2/workspaces/ws-b\n/entities/model"),
+        ],
+    )
+    def test_other_routes_keep_bare_forbidden(self, method, path):
+        assert _forbidden_detail(method, path) == "Forbidden"
+
+    def test_middleware_denial_names_action_and_workspace(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get(
+                "/apis/entities/v2/workspaces/ws-b/entities/model",
+                headers={"x-nhx-principal-id": "user@example.com"},
+            )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not allowed to list entities in workspace 'ws-b'"}
+
+    def test_middleware_denial_on_other_route_stays_bare(self, auth_config_enabled):
+        app = create_test_app_with_platform_routes(auth_config_enabled)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch.object(AuthClient, "authorize_request", AsyncMock(return_value=MagicMock(allowed=False))):
+            response = client.get("/test", headers={"x-nhx-principal-id": "user@example.com"})
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Forbidden"}

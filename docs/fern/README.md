@@ -91,6 +91,27 @@ The REST API reference is generated natively by Fern from the OpenAPI spec — n
 
 `openapi/openapi.yaml` is a symlink to the repo-root `openapi/openapi.yaml` (the generated source of truth). Regenerate the root spec with `make refresh-openapi` from the repo root, then run `npm run check`.
 
+`openapi/overrides.yml` supplies a documentation-only local server URL so default cURL samples
+include a host, without changing generated client connection defaults. Replace that URL with your
+deployment URL when using the examples. Resource names, experiment IDs, model names, credentials,
+and enabled services remain deployment prerequisites. Proxy examples show a chat request body;
+PUT/PATCH/DELETE success still depends on the upstream provider supporting the selected method/path.
+
+API reference code samples are limited to Python, JavaScript, and cURL. The
+`settings.http-snippets` allowlist in `docs.yml` controls Fern's HTTP fallbacks;
+`script/openapi_helper/code_samples.py` supplies SDK overrides for **all three default
+tabs**. `x-codeSamples` alone does not override the Python/JavaScript HTTP fallbacks,
+even when it is present in the rendered page's serialized data. Route-authored samples
+are also mirrored into SDK overrides, including HEAD operations. Authored route samples
+must follow the same language policy.
+
+After changing API samples, manually inspect the **visible Python and JavaScript tabs**
+on a Fern preview, not just the OpenAPI extensions or serialized page data. Check file
+upload/download, ATIF, direct spans, OTLP traces, evaluation PATCH, and bodyless DELETE
+(jobs, virtual models, evaluations). Repeat after publishing. Release versions use their
+release branch's spec, so a fix on main alone does not update `/v0.9/`; backport and
+regenerate there too.
+
 Fern groups endpoints by their OpenAPI tag in the sidebar (Customizer, Evaluator, Guardrails, …), which replaces the old per-service filter chips. Link to it from other pages with the nav URL `/documentation/reference/api-reference`.
 
 ## Release versioning

@@ -130,5 +130,35 @@ describe('EvaluationResultDetailsRoute', () => {
 
     expect(await screen.findByText('exact-match')).toBeInTheDocument();
     expect(screen.queryByLabelText('Loading row results...')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download results' })).toBeEnabled();
   });
+
+  // The hook retries each request 3 times with backoff, so a failure takes ~7s to surface.
+  it.each([
+    ['rows', rowsMetadataUrl, 'Row results could not be loaded.'],
+    ['scores', scoresUrl, 'Scores could not be loaded.'],
+  ])(
+    'disables download when the %s fail to load and the rest succeeds',
+    async (_, failedUrl, errorText) => {
+      const rowsFileUrl = 'http://localhost/row-scores.jsonl';
+      // MSW uses the first matching handler, so the failure must precede the success handlers.
+      server.use(
+        http.get(failedUrl, () => HttpResponse.json({ detail: 'boom' }, { status: 500 })),
+        http.get(jobUrl, () => HttpResponse.json(completedJob)),
+        http.get(scoresUrl, () =>
+          HttpResponse.json({
+            scores: { scores: [{ name: 'exact-match', score_type: 'scalar', value: 0.75 }] },
+          })
+        ),
+        http.get(rowsMetadataUrl, () => HttpResponse.json({ download_url: rowsFileUrl })),
+        http.get(rowsFileUrl, () => HttpResponse.text('{"row_index":0}\n'))
+      );
+
+      renderDetail();
+
+      expect(await screen.findByText(errorText, {}, { timeout: 15_000 })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download results' })).toBeDisabled();
+    },
+    20_000
+  );
 });

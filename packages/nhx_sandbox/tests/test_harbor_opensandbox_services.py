@@ -8,7 +8,12 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from nhx_sandbox.harbor_opensandbox_services import ComposeServices, keep_alive_entrypoint, parse_compose_services
+from nhx_sandbox.harbor_opensandbox_services import (
+    ComposeServices,
+    egress_api_port_for,
+    keep_alive_entrypoint,
+    parse_compose_services,
+)
 from pydantic import ValidationError
 
 
@@ -53,7 +58,7 @@ def test_services_timeout_is_a_whole_number_of_seconds_up_to_an_hour(value: Any)
     [
         (_spec({"name": "main", "image": "docker.io/x:1"}), "service name 'main' is reserved"),
         (_spec({"name": "egress", "image": "docker.io/x:1"}), "service name 'egress' is reserved"),
-        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}), r"ports \[18080\] are used"),
+        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [44772]}), r"ports \[44772\] are used"),
         (_spec({"name": "db", "image": "postgres:16"}), "String should match pattern"),
         (
             _spec({"name": "seed", "image": "docker.io/x:1", "role": "run_once", "readiness": {"exec": ["true"]}}),
@@ -98,6 +103,20 @@ def test_rejects_duplicate_mount_paths_within_a_container() -> None:
     }
     with pytest.raises(ValidationError, match="db: mount_path '/dev/shm' is used by more than one"):
         parse_compose_services(_spec(service, volumes=["a"]))
+
+
+@pytest.mark.parametrize(
+    ("path", "cleaned"),
+    [("/tmp/", "/tmp"), ("//installed-agent", "/installed-agent"), ("/a/../b/./c", "/b/c"), ("/", "/")],
+)
+def test_mount_paths_are_cleaned(path: str, cleaned: str) -> None:
+    services = parse_compose_services(_spec(main={"tmpfs": [{"mount_path": path}]}))
+    assert services.main.tmpfs[0].mount_path == cleaned
+
+
+def test_rejects_two_spellings_of_one_mount_path() -> None:
+    with pytest.raises(ValidationError, match="main: mount_path '/tmp' is used by more than one"):
+        parse_compose_services(_spec(main={"tmpfs": [{"mount_path": "/tmp"}, {"mount_path": "/tmp/"}]}))
 
 
 def test_allows_the_same_mount_path_in_different_containers() -> None:
@@ -192,3 +211,138 @@ def test_a_spec_may_have_no_services_and_then_needs_the_main_settings_feature() 
 def test_main_s_working_dir_must_be_absolute() -> None:
     with pytest.raises(ValidationError):
         parse_compose_services(_spec(main={"working_dir": "app"}))
+
+
+@pytest.mark.parametrize(
+    ("ports", "moved_to"),
+    [
+        ([5432], None),
+        ([18080], 18081),
+        # The API can't land on a port another service already holds.
+        ([18080, 18081, 18082], 18083),
+    ],
+)
+def test_egress_api_moves_only_for_a_service_on_its_port(ports: list[int], moved_to: int | None) -> None:
+    assert egress_api_port_for(ports) == moved_to
+
+
+def test_egress_api_with_nowhere_to_move_is_refused() -> None:
+    with pytest.raises(ValueError, match="every port the egress policy API could move to"):
+        egress_api_port_for([18080, *range(18081, 18100)])
+
+
+@pytest.mark.parametrize(
+    ("raw", "message"),
+    [
+        # A spec that left the API on 18080 would make the service fail to bind it.
+        (_spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}), "set egress_api_port"),
+        (
+            _spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080, 18081]}, egress_api_port=18081),
+            "a service uses port 18081",
+        ),
+        (_spec(egress_api_port=44772), "already used by the sandbox pod"),
+        (_spec(egress_api_port=18080), "already used by the sandbox pod"),
+    ],
+)
+def test_egress_api_port_must_be_free(raw: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        ComposeServices.model_validate(raw)
+
+
+def test_a_service_on_18080_runs_with_the_egress_api_moved() -> None:
+    spec = ComposeServices.model_validate(
+        _spec({"name": "odoo", "image": "docker.io/x:1", "ports": [18080]}, egress_api_port=18081)
+    )
+    assert spec.egress_port() == 18081
+    assert ComposeServices.model_validate(_spec()).egress_port() == 18080
+
+
+def test_security_and_tmpfs_round_trip_and_need_the_security_feature() -> None:
+    security = {
+        "run_as_user": 1000,
+        "run_as_group": 1000,
+        "read_only_root_filesystem": True,
+        "drop_capabilities": ["ALL"],
+        "no_new_privileges": True,
+    }
+    spec = parse_compose_services(
+        _spec(
+            {
+                "name": "db",
+                "image": "docker.io/library/postgres:16",
+                "security": {"drop_capabilities": ["NET_RAW"]},
+                "tmpfs": [{"mount_path": "/run"}],
+            },
+            main={"security": security, "tmpfs": [{"mount_path": "/tmp", "size_limit": "32Mi"}]},
+        )
+    )
+
+    assert ComposeServices.model_validate_json(spec.to_json()) == spec
+    assert spec.uses_security_settings()
+    assert not parse_compose_services(_spec()).uses_security_settings()
+
+
+@pytest.mark.parametrize(
+    ("main", "message"),
+    [
+        ({"security": {"run_as_group": 1000}}, "run_as_group needs run_as_user"),
+        ({"security": {"run_as_user": -1}}, "greater than or equal to 0"),
+        ({"security": {"drop_capabilities": ["net_raw"]}}, "String should match pattern"),
+        ({"tmpfs": [{"mount_path": f"/t{index}"} for index in range(11)]}, "at most 10 tmpfs mounts"),
+        ({"tmpfs": [{"mount_path": "tmp"}]}, "String should match pattern"),
+        (
+            {"tmpfs": [{"mount_path": "/data"}], "volume_mounts": [{"name": "shared", "mount_path": "/data"}]},
+            "'/data' is used by more than one mount",
+        ),
+    ],
+)
+def test_invalid_security_and_tmpfs_are_rejected(main: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+READ_ONLY = {"read_only_root_filesystem": True}
+
+
+@pytest.mark.parametrize(
+    "main",
+    [
+        {"security": READ_ONLY, "tmpfs": [{"mount_path": "/tmp"}]},
+        {"security": READ_ONLY, "volume_mounts": [{"name": "shared", "mount_path": "/tmp"}]},
+        # A writable mount over a parent of the temp folder covers it too.
+        {"security": READ_ONLY, "env": {"TMPDIR": "/scratch/tmp"}, "tmpfs": [{"mount_path": "/scratch"}]},
+    ],
+)
+def test_a_read_only_main_with_a_writable_temp_folder_is_accepted(main: dict[str, Any]) -> None:
+    parse_compose_services(_spec(volumes=["shared"], main=main))
+
+
+@pytest.mark.parametrize(
+    ("main", "temp_dir"),
+    [
+        ({"security": READ_ONLY}, "/tmp"),
+        ({"security": READ_ONLY, "tmpfs": [{"mount_path": "/scratch"}]}, "/tmp"),
+        # execd uses TMPDIR when it's set, so /tmp alone doesn't help.
+        ({"security": READ_ONLY, "env": {"TMPDIR": "/scratch"}, "tmpfs": [{"mount_path": "/tmp"}]}, "/scratch"),
+        (
+            {
+                "security": READ_ONLY,
+                "volume_mounts": [{"name": "shared", "mount_path": "/tmp", "read_only": True}],
+            },
+            "/tmp",
+        ),
+        # The read-only mount is the closer one, so the writable tmpfs above it doesn't count.
+        (
+            {
+                "security": READ_ONLY,
+                "env": {"TMPDIR": "/scratch/tmp"},
+                "tmpfs": [{"mount_path": "/scratch"}],
+                "volume_mounts": [{"name": "shared", "mount_path": "/scratch/tmp", "read_only": True}],
+            },
+            "/scratch/tmp",
+        ),
+    ],
+)
+def test_a_read_only_main_needs_a_writable_temp_folder(main: dict[str, Any], temp_dir: str) -> None:
+    with pytest.raises(ValidationError, match=f"needs a writable tmpfs or volume at {temp_dir},"):
+        parse_compose_services(_spec(volumes=["shared"], main=main))
