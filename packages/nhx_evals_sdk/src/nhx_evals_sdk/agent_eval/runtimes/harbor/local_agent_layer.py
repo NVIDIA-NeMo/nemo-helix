@@ -12,6 +12,11 @@ builds it:
   trial (no healthcheck, task files, skills or credentials);
 - ``docker commit`` the result, restoring the image's ``ENTRYPOINT`` and ``CMD``.
 
+The install reaches the network the trial's setup would. When the task's ``[environment]`` network isn't public,
+the throwaway container shares the network of a container of Harbor's own egress sidecar, started with that
+policy, as the trial's container does; and the policy is part of the layer's key, so a layer installed with more
+network than a trial's setup gets is never what that trial starts from.
+
 Trials of the same key across runs on the machine wait for that build (an exclusive ``flock`` per key) and reuse
 it. A layer that can't be built leaves the trial on its environment image, where setup installs as before.
 
@@ -34,13 +39,14 @@ import tempfile
 import time
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast, override
 
 from harbor.agents.factory import AgentFactory
 from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.environments.docker.docker import DockerEnvironment, _sanitize_docker_compose_project_name
-from harbor.models.task.config import TaskConfig
+from harbor.models.task.config import NetworkMode, NetworkPolicy, TaskConfig
 from harbor.models.trial.config import AgentConfig
 from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import AgentInstall, agent_install
 
@@ -58,6 +64,10 @@ FAILED_BUILD_COOLDOWN_SEC = 600
 #: The kwarg holding a Fabric agent's config bundle, a directory its setup uploads; never part of a layer.
 FABRIC_CONFIG_BUNDLE_KWARG = "fabric_config_bundle"
 _COMPOSE_LABEL_PREFIX = "com.docker.compose."
+#: Where Harbor's egress sidecar marks itself ready; Harbor's compose healthcheck reads the same file.
+EGRESS_SIDECAR_READY_FILE = "/tmp/harbor-docker-egress-control-sidecar.ready"
+EGRESS_SIDECAR_ENTRYPOINT = "/opt/egress-sidecar/entrypoint.sh"
+EGRESS_SIDECAR_READY_TIMEOUT_SEC = 30.0
 
 
 class AgentLayerDockerEnvironment(DockerEnvironment):
@@ -117,6 +127,14 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
             return None
         try:
             user = _agent_user(self.environment_dir)
+            # What the trial's setup runs under: the [environment] baseline, before any phase policy.
+            egress = SetupEgress.of(self.network_policy)
+            if egress is not None:
+                await self._ensure_egress_control_sidecar_image_built()
+                sidecar = self._env_vars.egress_control_sidecar_image_name
+                if sidecar is None:
+                    raise RuntimeError("Harbor named no egress sidecar image")
+                egress = replace(egress, sidecar_image=sidecar)
             return await ensure_agent_layer(
                 image_name,
                 install,
@@ -130,6 +148,7 @@ class AgentLayerDockerEnvironment(DockerEnvironment):
                 user=user,
                 lock_dir=default_lock_dir(),
                 base_key=base_key,
+                egress=egress,
             )
         except AgentLayerBuildFailedError as exc:
             logger.info("%s; the trial installs its agent in setup", exc)
@@ -176,6 +195,27 @@ def _agent_user(environment_dir: Path) -> str | int | None:
     return TaskConfig.model_validate_toml(task_toml.read_text()).agent.user
 
 
+@dataclass(frozen=True)
+class SetupEgress:
+    """The restricted network a trial's agent setup runs under, which its layer's install must run under too."""
+
+    mode: NetworkMode
+    hosts: tuple[str, ...] = ()
+    #: Harbor's egress sidecar image, which enforces it.
+    sidecar_image: str = ""
+
+    @classmethod
+    def of(cls, policy: NetworkPolicy) -> SetupEgress | None:
+        """``policy``'s restriction, or None for a public network."""
+        if policy.network_mode == NetworkMode.PUBLIC:
+            return None
+        return cls(mode=policy.network_mode, hosts=tuple(sorted(policy.allowed_hosts)))
+
+    @property
+    def key(self) -> str:
+        return f"{self.mode.value}:{','.join(self.hosts)}"
+
+
 async def ensure_agent_layer(
     image: str,
     install: AgentInstall,
@@ -184,15 +224,18 @@ async def ensure_agent_layer(
     user: str | int | None,
     lock_dir: Path,
     base_key: str | None = None,
+    egress: SetupEgress | None = None,
 ) -> str:
     """The tag of ``install``'s layer on ``image``, building it unless this machine already has it.
 
-    The layer is keyed by ``base_key`` when given (what the image was built from), else by ``image``'s ID.
+    The layer is keyed by ``base_key`` when given (what the image was built from), else by ``image``'s ID, and by
+    ``egress``, the restricted network its install runs under; None is a public network.
     """
     if not await _image_exists(image):
         await _docker("pull", image)  # a task's prebuilt image, which compose would otherwise pull on `up`
     base = base_key if base_key is not None else await _image_id(image)
-    key = install.layer_key(f"{base}|user={user}")
+    restriction = f"|egress={egress.key}" if egress is not None else ""
+    key = install.layer_key(f"{base}|user={user}{restriction}")
     tag = f"{LAYER_REPOSITORY}:{key}"
     if await _image_exists(tag):
         return tag
@@ -208,7 +251,7 @@ async def ensure_agent_layer(
                 f"agent layer {tag} failed to build in the last {FAILED_BUILD_COOLDOWN_SEC} s"
             )
         try:
-            await build_agent_layer(image, tag, install, agent, user=user)
+            await build_agent_layer(image, tag, install, agent, user=user, egress=egress)
         except BaseException:  # a build cancelled by the trial's timeout counts too: the next one would take as long
             failed.touch()
             raise
@@ -243,38 +286,111 @@ async def _lock(lock: Any, key: str) -> None:
 
 
 async def build_agent_layer(
-    image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: str | int | None
+    image: str,
+    tag: str,
+    install: AgentInstall,
+    agent: AgentConfig,
+    *,
+    user: str | int | None,
+    egress: SetupEgress | None = None,
 ) -> None:
-    """Install ``agent`` in a throwaway container from ``image`` and commit it as ``tag``."""
+    """Install ``agent`` in a throwaway container from ``image`` and commit it as ``tag``.
+
+    With ``egress``, the container shares the network of an egress sidecar enforcing it, as a trial's does.
+    """
     # Unique: a failed build's container may still be on its way out when the next trial tries.
     container = f"nemo-agent-layer-build-{tag.rpartition(':')[2]}-{uuid.uuid4().hex[:8]}"
     config = json.loads(await _docker("image", "inspect", "--format", "{{json .Config}}", image))
     logger.info("Building agent layer %s (%s) on %s", tag, install.agent, image)
-    # The image's ENTRYPOINT is overridden too: a task's entrypoint may initialize state each trial must make for
-    # itself, which a layer would otherwise share.
-    await _docker("run", "--detach", "--rm", "--name", container, "--entrypoint", "sh", image, "-c", "sleep infinity")
+    sidecar: str | None = None
     try:
-        with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
-            harbor_agent = AgentFactory.create_agent_from_config(agent, logs_dir=Path(logs))
-            # Agents' setup() uses only exec, upload_file/upload_dir and default_user, which is all a bare
-            # container offers: no trial, task directory or lifecycle to build a real BaseEnvironment from.
-            environment = cast(
-                BaseEnvironment, ContainerExecEnvironment(container, default_user=user, env=dict(agent.env or {}))
-            )
-            await harbor_agent.setup(environment=environment)
-        labels = {LAYER_LABEL: tag.rpartition(":")[2], f"{LAYER_LABEL}.agent": install.agent, **_input_labels(install)}
-        # A compose-built image carries its trial's project label, and `down --rmi local` deletes every image that
-        # names its project: blank those, or that trial's teardown would delete the shared layer.
-        compose = {name: "" for name in config.get("Labels") or {} if name.startswith(_COMPOSE_LABEL_PREFIX)}
-        changes = [
-            f"ENTRYPOINT {json.dumps(config.get('Entrypoint') or [])}",
-            f"CMD {json.dumps(config.get('Cmd') or [])}",
-        ]
-        changes += [f"LABEL {json.dumps(name)}={json.dumps(value)}" for name, value in {**compose, **labels}.items()]
-        await _docker("commit", *[arg for change in changes for arg in ("--change", change)], container, tag)
+        network: list[str] = []
+        if egress is not None:
+            sidecar = f"{container}-egress"
+            await _start_egress_sidecar(sidecar, egress)
+            network = ["--network", f"container:{sidecar}"]
+        # The image's ENTRYPOINT is overridden too: a task's entrypoint may initialize state each trial must make
+        # for itself, which a layer would otherwise share.
+        await _docker(
+            "run",
+            "--detach",
+            "--rm",
+            "--name",
+            container,
+            *network,
+            "--entrypoint",
+            "sh",
+            image,
+            "-c",
+            "sleep infinity",
+        )
+        await _install_and_commit(container, tag, install, agent, config, user=user)
     finally:
         await _docker("stop", "--time", "1", container, check=False)
+        if sidecar is not None:
+            await _docker("stop", "--time", "1", sidecar, check=False)
     logger.info("Built agent layer %s", tag)
+
+
+async def _start_egress_sidecar(name: str, egress: SetupEgress) -> None:
+    """Start Harbor's egress sidecar as ``name``, enforcing ``egress``, and wait until its rules are in place.
+
+    Started as Harbor's compose starts it (``docker-compose-egress-control.yaml``).
+    """
+    await _docker(
+        "run",
+        "--detach",
+        "--rm",
+        "--name",
+        name,
+        "--init",
+        "--cap-add",
+        "NET_ADMIN",
+        "--cap-add",
+        "NET_RAW",
+        "--env",
+        f"EGRESS_CONTROL_INITIAL_NETWORK_MODE={egress.mode.value}",
+        "--env",
+        f"EGRESS_CONTROL_INITIAL_ALLOWED_HOSTS={' '.join(egress.hosts)}",
+        "--entrypoint",
+        EGRESS_SIDECAR_ENTRYPOINT,
+        egress.sidecar_image,
+    )
+    deadline = time.monotonic() + EGRESS_SIDECAR_READY_TIMEOUT_SEC
+    while (await _docker_status("exec", name, "test", "-f", EGRESS_SIDECAR_READY_FILE)) != 0:
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"egress sidecar {name} wasn't ready in {EGRESS_SIDECAR_READY_TIMEOUT_SEC:.0f} s")
+        await asyncio.sleep(LOCK_POLL_INTERVAL_SEC)
+
+
+async def _install_and_commit(
+    container: str,
+    tag: str,
+    install: AgentInstall,
+    agent: AgentConfig,
+    config: dict[str, Any],
+    *,
+    user: str | int | None,
+) -> None:
+    """Run the agent's own ``setup()`` in ``container``, then commit it as ``tag`` with ``config``'s start."""
+    with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
+        harbor_agent = AgentFactory.create_agent_from_config(agent, logs_dir=Path(logs))
+        # Agents' setup() uses only exec, upload_file/upload_dir and default_user, which is all a bare
+        # container offers: no trial, task directory or lifecycle to build a real BaseEnvironment from.
+        environment = cast(
+            BaseEnvironment, ContainerExecEnvironment(container, default_user=user, env=dict(agent.env or {}))
+        )
+        await harbor_agent.setup(environment=environment)
+    labels = {LAYER_LABEL: tag.rpartition(":")[2], f"{LAYER_LABEL}.agent": install.agent, **_input_labels(install)}
+    # A compose-built image carries its trial's project label, and `down --rmi local` deletes every image that
+    # names its project: blank those, or that trial's teardown would delete the shared layer.
+    compose = {name: "" for name in config.get("Labels") or {} if name.startswith(_COMPOSE_LABEL_PREFIX)}
+    changes = [
+        f"ENTRYPOINT {json.dumps(config.get('Entrypoint') or [])}",
+        f"CMD {json.dumps(config.get('Cmd') or [])}",
+    ]
+    changes += [f"LABEL {json.dumps(name)}={json.dumps(value)}" for name, value in {**compose, **labels}.items()]
+    await _docker("commit", *[arg for change in changes for arg in ("--change", change)], container, tag)
 
 
 def _input_labels(install: AgentInstall) -> dict[str, str]:
@@ -341,6 +457,14 @@ async def _image_exists(image: str) -> bool:
         "docker", "image", "inspect", image, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
     )
     return await process.wait() == 0
+
+
+async def _docker_status(*args: str) -> int:
+    """The exit status of ``docker *args``, its output discarded."""
+    process = await asyncio.create_subprocess_exec(
+        "docker", *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+    )
+    return await process.wait()
 
 
 async def _docker(*args: str, check: bool = True) -> str:

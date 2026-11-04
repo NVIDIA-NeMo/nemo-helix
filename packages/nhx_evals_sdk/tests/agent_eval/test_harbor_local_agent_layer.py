@@ -13,6 +13,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ import pytest
 pytest.importorskip("harbor", reason="local agent layers build on Harbor's Docker environment")
 
 from harbor.environments.docker.compose_env import ComposeInfraEnvVars
+from harbor.models.task.config import NetworkMode, NetworkPolicy
 from harbor.models.trial.config import AgentConfig, EnvironmentConfig
 from nhx_evals_sdk.agent_eval.runtimes.harbor import local_agent_layer
 from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
@@ -31,10 +33,12 @@ from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import (
     AgentInstall,
 )
 from nhx_evals_sdk.agent_eval.runtimes.harbor.local_agent_layer import (
+    EGRESS_SIDECAR_READY_FILE,
     LAYER_LABEL,
     AgentLayerBuildFailedError,
     AgentLayerDockerEnvironment,
     ContainerExecEnvironment,
+    SetupEgress,
     build_agent_layer,
     ensure_agent_layer,
     environment_digest,
@@ -53,6 +57,7 @@ class _Docker:
     def __init__(self, images: set[str] | None = None) -> None:
         self.images = images if images is not None else {"task-image"}
         self.builds: list[str] = []
+        self.egress: list[Any] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         async def exists(image: str) -> bool:
@@ -61,9 +66,12 @@ class _Docker:
         async def image_id(image: str) -> str:
             return f"sha256:id-of-{image}"
 
-        async def build(image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: Any) -> None:
+        async def build(
+            image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: Any, egress: Any = None
+        ) -> None:
             await asyncio.sleep(0.05)  # long enough for a concurrent trial to start waiting
             self.builds.append(tag)
+            self.egress.append(egress)
             self.images.add(tag)
 
         monkeypatch.setattr(local_agent_layer, "_image_exists", exists)
@@ -72,8 +80,12 @@ class _Docker:
         monkeypatch.setattr(local_agent_layer, "LOCK_POLL_INTERVAL_SEC", 0.01)
 
 
-async def _ensure(tmp_path: Path, *, user: str | None = None, install: AgentInstall = _INSTALL) -> str:
-    return await ensure_agent_layer("task-image", install, _AGENT, user=user, lock_dir=tmp_path / "locks")
+async def _ensure(
+    tmp_path: Path, *, user: str | None = None, install: AgentInstall = _INSTALL, egress: SetupEgress | None = None
+) -> str:
+    return await ensure_agent_layer(
+        "task-image", install, _AGENT, user=user, lock_dir=tmp_path / "locks", egress=egress
+    )
 
 
 async def test_the_first_trial_builds_the_layer_and_later_ones_reuse_it(tmp_path, monkeypatch) -> None:
@@ -153,7 +165,9 @@ async def test_a_failed_build_sends_trials_waiting_on_it_to_install_in_setup(tmp
     docker.install(monkeypatch)
     attempts: list[str] = []
 
-    async def failing(image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: Any) -> None:
+    async def failing(
+        image: str, tag: str, install: AgentInstall, agent: AgentConfig, *, user: Any, egress: Any = None
+    ) -> None:
         attempts.append(tag)
         await asyncio.sleep(0.05)
         raise RuntimeError("npm ERR! No matching version found for @openai/codex@0.0.0")
@@ -342,19 +356,35 @@ def _environment(tmp_path: Path, agent: dict[str, Any], *, compose: bool = False
     environment._use_prebuilt = False
     environment._before_layer = None
     environment.session_id = "Hello-World__abc"
+    environment._network_policy = NetworkPolicy()
     return environment
 
 
-async def _validated(environment: AgentLayerDockerEnvironment, monkeypatch, layer: str | Exception) -> list[Any]:
+async def _validated(
+    environment: AgentLayerDockerEnvironment,
+    monkeypatch,
+    layer: str | Exception,
+    environment_egress: list[SetupEgress | None] | None = None,
+) -> list[Any]:
     asked: list[Any] = []
+    if environment_egress is None:
+        environment_egress = []
 
     async def parent_validate(self: Any, image_name: str) -> None:
         return None
 
     async def ensure(
-        image: str, install: AgentInstall, agent: AgentConfig, *, user: Any, lock_dir: Path, base_key: str | None
+        image: str,
+        install: AgentInstall,
+        agent: AgentConfig,
+        *,
+        user: Any,
+        lock_dir: Path,
+        base_key: str | None,
+        egress: SetupEgress | None = None,
     ) -> str:
         asked.append((image, install.agent, user, base_key))
+        environment_egress.append(egress)
         if isinstance(layer, Exception):
             raise layer
         return layer
@@ -513,3 +543,130 @@ def test_the_environment_digest_sees_modes_and_symlinks(tmp_path: Path) -> None:
 
     assert len({before, executable, environment_digest(tmp_path)}) == 3
     assert environment_digest(tmp_path) == environment_digest(tmp_path)
+
+
+_ALLOWLIST = SetupEgress(mode=NetworkMode.ALLOWLIST, hosts=("pypi.org", "registry.npmjs.org"), sidecar_image="sidecar")
+
+
+def test_a_public_network_is_no_restriction_and_an_allowlists_hosts_are_sorted() -> None:
+    assert SetupEgress.of(NetworkPolicy()) is None
+    assert SetupEgress.of(NetworkPolicy(network_mode=NetworkMode.NO_NETWORK)) == SetupEgress(
+        mode=NetworkMode.NO_NETWORK
+    )
+    allowlist = NetworkPolicy(network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["registry.npmjs.org", "pypi.org"])
+    assert SetupEgress.of(allowlist) == replace(_ALLOWLIST, sidecar_image="")
+
+
+async def test_a_layer_installed_under_another_network_is_another_layer(tmp_path, monkeypatch) -> None:
+    """A layer installed with more network than a trial's setup gets must never be the one that trial starts from."""
+    docker = _Docker()
+    docker.install(monkeypatch)
+
+    public = await _ensure(tmp_path)
+    allowlisted = await _ensure(tmp_path, egress=_ALLOWLIST)
+    closed = await _ensure(tmp_path, egress=SetupEgress(mode=NetworkMode.NO_NETWORK, sidecar_image="sidecar"))
+    other_hosts = await _ensure(tmp_path, egress=replace(_ALLOWLIST, hosts=("pypi.org",)))
+    # The sidecar image enforces the policy; it isn't part of what the layer holds.
+    same = await _ensure(tmp_path, egress=replace(_ALLOWLIST, sidecar_image="another-sidecar"))
+
+    assert len({public, allowlisted, closed, other_hosts}) == 4 and same == allowlisted
+    assert docker.egress == [
+        None,
+        _ALLOWLIST,
+        SetupEgress(mode=NetworkMode.NO_NETWORK, sidecar_image="sidecar"),
+        replace(_ALLOWLIST, hosts=("pypi.org",)),
+    ]
+
+
+def _fake_build_docker(monkeypatch, *, ready_after: int) -> list[tuple[str, ...]]:
+    """Every docker call of a layer build; the sidecar reports ready on its ``ready_after``-th check."""
+    calls: list[tuple[str, ...]] = []
+    checks: list[int] = []
+
+    async def fake_docker(*args: str, check: bool = True) -> str:
+        calls.append(args)
+        if args[:2] == ("image", "inspect"):
+            return json.dumps({"Cmd": ["bash"], "Entrypoint": None, "Labels": {}})
+        return ""
+
+    async def fake_status(*args: str) -> int:
+        calls.append(args)
+        checks.append(1)
+        return 0 if len(checks) >= ready_after else 1
+
+    class _Agent:
+        async def setup(self, environment: Any) -> None:
+            calls.append(("setup",))
+
+    monkeypatch.setattr(local_agent_layer, "_docker", fake_docker)
+    monkeypatch.setattr(local_agent_layer, "_docker_status", fake_status)
+    monkeypatch.setattr(local_agent_layer, "LOCK_POLL_INTERVAL_SEC", 0.001)
+    monkeypatch.setattr(local_agent_layer.AgentFactory, "create_agent_from_config", lambda *a, **k: _Agent())
+    return calls
+
+
+async def test_a_restricted_install_runs_behind_harbors_egress_sidecar(monkeypatch) -> None:
+    calls = _fake_build_docker(monkeypatch, ready_after=3)
+
+    await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user="agent", egress=_ALLOWLIST)
+
+    runs = [call for call in calls if call[0] == "run"]
+    sidecar_run, build_run = runs
+    sidecar = sidecar_run[sidecar_run.index("--name") + 1]
+    # Started as Harbor's compose starts it, with the trial's setup policy.
+    assert {"--init", "NET_ADMIN", "NET_RAW", "/opt/egress-sidecar/entrypoint.sh"} <= set(sidecar_run)
+    assert "EGRESS_CONTROL_INITIAL_NETWORK_MODE=allowlist" in sidecar_run
+    assert "EGRESS_CONTROL_INITIAL_ALLOWED_HOSTS=pypi.org registry.npmjs.org" in sidecar_run
+    assert sidecar_run[-1] == "sidecar"
+    # The install waits until the sidecar's rules are in, then runs on the sidecar's network.
+    checks = [i for i, call in enumerate(calls) if call == ("exec", sidecar, "test", "-f", EGRESS_SIDECAR_READY_FILE)]
+    assert len(checks) == 3 and checks[-1] < calls.index(build_run) < calls.index(("setup",))
+    assert build_run[build_run.index("--network") + 1] == f"container:{sidecar}"
+    stops = [call[-1] for call in calls if call[0] == "stop"]
+    assert stops == [build_run[build_run.index("--name") + 1], sidecar]
+
+
+async def test_a_public_install_runs_without_a_sidecar(monkeypatch) -> None:
+    calls = _fake_build_docker(monkeypatch, ready_after=1)
+
+    await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user="agent")
+
+    (run,) = [call for call in calls if call[0] == "run"]
+    assert "--network" not in run and len([call for call in calls if call[0] == "stop"]) == 1
+
+
+async def test_a_sidecar_that_never_gets_ready_fails_the_build_and_is_stopped(monkeypatch) -> None:
+    calls = _fake_build_docker(monkeypatch, ready_after=10**9)
+    monkeypatch.setattr(local_agent_layer, "EGRESS_SIDECAR_READY_TIMEOUT_SEC", 0.01)
+
+    with pytest.raises(RuntimeError, match="wasn't ready"):
+        await build_agent_layer("task-image", "nemo-agent-layer:abc", _INSTALL, _AGENT, user="agent", egress=_ALLOWLIST)
+
+    (sidecar_run,) = [call for call in calls if call[0] == "run"]
+    sidecar = sidecar_run[sidecar_run.index("--name") + 1]
+    assert ("setup",) not in calls and [call[-1] for call in calls if call[0] == "stop"][-1] == sidecar
+
+
+async def test_a_trial_on_a_restricted_network_asks_for_a_layer_behind_harbors_sidecar(tmp_path, monkeypatch) -> None:
+    environment = _environment(tmp_path, _CODEX)
+    environment._network_policy = NetworkPolicy(
+        network_mode=NetworkMode.ALLOWLIST, allowed_hosts=["registry.npmjs.org"]
+    )
+
+    async def sidecar_built(self: Any) -> None:
+        self._env_vars.egress_control_sidecar_image_name = "harbor-prebuilt:harbor-docker-egress-control-sidecar"
+
+    monkeypatch.setattr(
+        local_agent_layer.DockerEnvironment, "_ensure_egress_control_sidecar_image_built", sidecar_built
+    )
+    egress: list[SetupEgress | None] = []
+
+    await _validated(environment, monkeypatch, "nemo-agent-layer:abc", egress)
+
+    assert egress == [
+        SetupEgress(
+            mode=NetworkMode.ALLOWLIST,
+            hosts=("registry.npmjs.org",),
+            sidecar_image="harbor-prebuilt:harbor-docker-egress-control-sidecar",
+        )
+    ]
