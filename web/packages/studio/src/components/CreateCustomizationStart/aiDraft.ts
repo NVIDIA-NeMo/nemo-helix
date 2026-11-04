@@ -30,7 +30,13 @@ import {
   stripNulls,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { AUTOMODEL_SEED, rlSeed, UNSLOTH_SEED } from '@studio/util/forms/specDefaults';
+import {
+  AUTOMODEL_SEED,
+  hasLearningRate,
+  rlSeed,
+  UNSLOTH_SEED,
+  withoutLearningRate,
+} from '@studio/util/forms/specDefaults';
 import { isPlainObject } from '@studio/util/functions';
 import { z } from 'zod';
 
@@ -353,7 +359,11 @@ export const validateDraft = (args: string, inputs: DraftInputs): DraftValidatio
     };
   }
 
-  const values = jobToFormFields({ spec, backend });
+  // Drop the learning rate the parse defaulted in unless the draft set one.
+  const values = jobToFormFields({
+    spec: hasLearningRate(backend, job) ? spec : withoutLearningRate(backend, spec),
+    backend,
+  });
   const method = resolveTrainingType(
     values.backend,
     values.automodel.training.training_type,

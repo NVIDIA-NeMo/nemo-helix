@@ -8,9 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
 from nhx.rl.schemas import DPOTraining, GRPOTraining, OutputResponse, ParallelismParams, RlJobOutput
+from nhx.rl.schemas.job import GRPO_LEARNING_RATE_DEFAULTS
 
 
 def _make_output(name: str = "out", out_type: OutputNameType = OutputNameType.MODEL) -> OutputResponse:
@@ -169,6 +171,10 @@ def test_grpo_lora_default_rate_is_checked_against_min_learning_rate() -> None:
     """The LoRA default must be in place before the min-vs-peak check runs."""
     t = GRPOTraining.model_validate({"type": "grpo", "finetuning_type": "lora", "min_learning_rate": 9e-6})
     assert t.learning_rate == 1e-5
+
+
+def test_grpo_schema_publishes_learning_rate_defaults() -> None:
+    assert GRPOTraining.model_json_schema()[LEARNING_RATE_DEFAULTS_KEY] == GRPO_LEARNING_RATE_DEFAULTS
 
 
 def test_grpo_advanced_knobs_default_to_current_behaviour() -> None:
