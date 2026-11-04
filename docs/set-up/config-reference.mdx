@@ -255,6 +255,8 @@ inference_gateway:
   refresh_model_cache_interval_sec: 3
   # Time-to-live (in seconds) for cached secrets before they expire and need refreshing. If set to 0, we will refresh this each time the model providers are refreshed. | default: 0
   secrets_ttl_sec: 0
+  # Base64-encoded 32-byte key the gateway seals a caller's credential with when it calls a model provider that calls models back as its caller. Every gateway process must share it. When unset, each process uses a key of its own, which works only while a router's calls back reach the process that called it.
+  caller_context_key:
 ```
 
 ### `jobs`

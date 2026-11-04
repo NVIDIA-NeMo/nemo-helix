@@ -63,6 +63,8 @@ navigation:
                 path: ../../agents/traces-and-insights/collect-agent-traces.mdx
               - page: Insights from Traces
                 path: ../../agents/traces-and-insights/insights-from-traces.mdx
+              - page: Evaluate Agent Candidates
+                path: ../../agents/traces-and-insights/evaluate-agent-candidates.mdx
           - page: Optimize Agents
             path: ../../agents/optimize-agents.mdx
           - section: Agent Governance

@@ -233,6 +233,7 @@ export const fetchAgentEvalBundle = async (
 /** A per-task row joining the task, its trial (response), and its score(s). */
 export interface AgentEvalTaskDetail {
   taskId: string;
+  trialId?: string;
   intent?: string;
   instruction?: string | null;
   reference?: Record<string, unknown>;
@@ -252,36 +253,56 @@ const metricOutputValue = (value: number | string | null | undefined): number | 
   return null;
 };
 
-/** Join a bundle's tasks/trials/scores into one per-task row list. */
+const groupByTask = <T extends { task_id: string }>(rows: T[]): Map<string, T[]> => {
+  const byTask = new Map<string, T[]>();
+  for (const row of rows) byTask.set(row.task_id, [...(byTask.get(row.task_id) ?? []), row]);
+  return byTask;
+};
+
+/** One task's row for a trial. Scores/diagnostics come from that same trial only, so they always
+ *  match the responseText beside them. */
+const taskDetail = (
+  task: AgentEvalTaskRow,
+  trial: AgentEvalTrialRow | undefined,
+  scores: AgentEvalScoreRow[]
+): AgentEvalTaskDetail => {
+  const trialScores = scores.filter((s) => s.trial_id === trial?.id);
+  return {
+    taskId: task.id,
+    trialId: trial?.id,
+    intent: task.intent,
+    instruction: task.inputs?.instruction ?? null,
+    reference: task.reference,
+    metadata: task.metadata,
+    status: trial?.status ?? 'unknown',
+    responseText: trial?.output?.output_text ?? null,
+    scores: trialScores.flatMap((s) =>
+      (s.outputs ?? []).map((o) => ({
+        name: `${s.metric_type}.${o.name}`,
+        value: metricOutputValue(o.value),
+      }))
+    ),
+    diagnostics: trialScores.flatMap((s) => s.diagnostics ?? []),
+  };
+};
+
+/** Join a bundle's tasks/trials/scores into one row per trial; a task with no trials keeps one row. */
+export const joinBundleByTrial = (bundle: AgentEvalBundle | null): AgentEvalTaskDetail[] => {
+  if (!bundle) return [];
+  const trialsByTask = groupByTask(bundle.trials);
+  const scoresByTask = groupByTask(bundle.scores);
+  return bundle.tasks.flatMap((task) => {
+    const trials = trialsByTask.get(task.id) ?? [undefined];
+    return trials.map((trial) => taskDetail(task, trial, scoresByTask.get(task.id) ?? []));
+  });
+};
+
+/** Join a bundle's tasks/trials/scores into one row per task, showing each task's last trial. */
 export const joinBundleByTask = (bundle: AgentEvalBundle | null): AgentEvalTaskDetail[] => {
   if (!bundle) return [];
-  const trialByTask = new Map(bundle.trials.map((t) => [t.task_id, t]));
-  const scoresByTask = new Map<string, AgentEvalScoreRow[]>();
-  for (const s of bundle.scores) {
-    const list = scoresByTask.get(s.task_id) ?? [];
-    list.push(s);
-    scoresByTask.set(s.task_id, list);
-  }
-  return bundle.tasks.map((task) => {
-    const trial = trialByTask.get(task.id);
-    // Keep only the selected trial's scores: with multiple trials per task, scores/diagnostics
-    // must come from the same trial as the displayed responseText, not every trial's.
-    const taskScores = (scoresByTask.get(task.id) ?? []).filter((s) => s.trial_id === trial?.id);
-    return {
-      taskId: task.id,
-      intent: task.intent,
-      instruction: task.inputs?.instruction ?? null,
-      reference: task.reference,
-      metadata: task.metadata,
-      status: trial?.status ?? 'unknown',
-      responseText: trial?.output?.output_text ?? null,
-      scores: taskScores.flatMap((s) =>
-        (s.outputs ?? []).map((o) => ({
-          name: `${s.metric_type}.${o.name}`,
-          value: metricOutputValue(o.value),
-        }))
-      ),
-      diagnostics: taskScores.flatMap((s) => s.diagnostics ?? []),
-    };
-  });
+  const trialsByTask = groupByTask(bundle.trials);
+  const scoresByTask = groupByTask(bundle.scores);
+  return bundle.tasks.map((task) =>
+    taskDetail(task, trialsByTask.get(task.id)?.at(-1), scoresByTask.get(task.id) ?? [])
+  );
 };

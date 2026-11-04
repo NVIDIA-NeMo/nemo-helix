@@ -127,6 +127,7 @@ async def _load_registered_agent(
             agent_name=agent_name,
         )
         merged = merge_environment_spec_into_agent_config(resolved, environment)
+        merged.require_runtime_support()
         fabric_config = translate_agent_config(AgentConfig.model_validate(merged.config))
     except (EnvironmentResolutionError, AgentConfigFormatError, FabricTranslationError) as exc:
         raise ValueError(

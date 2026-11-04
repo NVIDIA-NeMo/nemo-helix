@@ -353,10 +353,37 @@ def test_root_span_id_is_the_span_without_a_parent() -> None:
     assert root_span_id(request) == _HEX_SPAN_ID
 
 
+def test_root_span_id_skips_childless_roots_beside_the_run() -> None:
+    request = _parsed(
+        {"traceId": "f" * 32, "spanId": "1" * 16, "name": "mark:session.start"},
+        {"traceId": _HEX_TRACE_ID, "spanId": _HEX_SPAN_ID, "name": "turn"},
+        {"traceId": _HEX_TRACE_ID, "spanId": "aabbccddeeff0011", "parentSpanId": _HEX_SPAN_ID, "name": "llm"},
+    )
+
+    assert root_span_id(request) == _HEX_SPAN_ID
+
+
 @pytest.mark.parametrize(
     "spans",
     [
         pytest.param([], id="no spans"),
+        pytest.param(
+            [
+                {"traceId": _HEX_TRACE_ID, "spanId": _HEX_SPAN_ID, "name": "a"},
+                {"traceId": _HEX_TRACE_ID, "spanId": "aabbccddeeff0011", "name": "b"},
+                {"traceId": _HEX_TRACE_ID, "spanId": "1" * 16, "parentSpanId": _HEX_SPAN_ID, "name": "a child"},
+                {"traceId": _HEX_TRACE_ID, "spanId": "2" * 16, "parentSpanId": "aabbccddeeff0011", "name": "b child"},
+            ],
+            id="two roots with children",
+        ),
+        pytest.param(
+            [
+                {"traceId": _HEX_TRACE_ID, "spanId": _HEX_SPAN_ID, "name": "a"},
+                {"traceId": "f" * 32, "spanId": "1" * 16, "parentSpanId": _HEX_SPAN_ID, "name": "other trace"},
+                {"traceId": _HEX_TRACE_ID, "spanId": "aabbccddeeff0011", "name": "b"},
+            ],
+            id="child in another trace",
+        ),
         pytest.param(
             [
                 {"traceId": _HEX_TRACE_ID, "spanId": _HEX_SPAN_ID, "name": "a"},

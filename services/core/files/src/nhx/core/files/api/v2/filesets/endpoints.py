@@ -122,54 +122,6 @@ if (!response.ok) {
 console.log(response.status);
 console.log(Object.fromEntries(response.headers));""",
     },
-    {
-        "lang": "Go",
-        "source": """package main
-
-import (
-  "fmt"
-  "net/http"
-)
-
-func main() {
-  req, err := http.NewRequest("HEAD", "http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt", nil)
-  if err != nil {
-    panic(err)
-  }
-  res, err := http.DefaultClient.Do(req)
-  if err != nil {
-    panic(err)
-  }
-  defer res.Body.Close()
-
-  fmt.Println(res.Status)
-  fmt.Println(res.Header)
-}""",
-    },
-    {
-        "lang": "Ruby",
-        "source": """require "net/http"
-
-uri = URI("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt")
-response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") do |http|
-  http.request(Net::HTTP::Head.new(uri))
-end
-
-puts response.code
-puts response.to_hash""",
-    },
-    {
-        "lang": "PHP",
-        "source": """<?php
-$ch = curl_init("http://localhost:8080/apis/files/v2/workspaces/default/filesets/my-fileset/-/path/to/file.txt");
-curl_setopt($ch, CURLOPT_NOBODY, true);
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_exec($ch);
-$status = curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-curl_close($ch);
-
-echo $status;""",
-    },
 ]
 
 router = APIRouter()

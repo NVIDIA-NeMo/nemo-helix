@@ -36,6 +36,7 @@ import {
   fetchAgentEvalJob,
   fetchAgentEvalResult,
   joinBundleByTask,
+  joinBundleByTrial,
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
@@ -212,19 +213,16 @@ export const AgentEvaluationDetailRoute: FC = () => {
           slotActions={
             <DownloadMenu
               fileName={`${jobName}-results`}
+              // A referenced bundle that has not loaded yet (still polling, or 404 so far) would
+              // otherwise export the aggregate scores in place of the per-trial rows.
               disabled={
                 !isJobTerminal ||
                 isLoadingResult ||
-                isLoadingBundle ||
+                (!!result?.bundle_ref && !bundle) ||
                 (allScores.length === 0 && taskDetails.length === 0)
               }
               getData={() =>
-                agentEvalExport(
-                  { name: job.name, status: job.status, agent: agentNameForJob(job) },
-                  allScores,
-                  taskDetails,
-                  result?.summary
-                )
+                agentEvalExport(job, result, allScores, joinBundleByTrial(bundle ?? null))
               }
             />
           }

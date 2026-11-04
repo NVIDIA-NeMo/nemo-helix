@@ -3,9 +3,9 @@
 
 """The OpenSandbox environment task Jobs run trials in: nhx-sandbox's environment plus an agent channel.
 
-A no-network task (``allow_internet = false``) normally gets a deny-all sandbox. An agent that runs
-inside the sandbox (codex, hermes, ...) then can't reach its model. ``agent_channel_hosts`` keeps
-those hosts (the inference gateway) reachable for such tasks; the internet stays closed.
+A no-network task (``allow_internet = false``) normally gets a deny-all sandbox, and an allowlist task only
+the hosts it declares. An agent that runs inside the sandbox (codex, hermes, ...) then can't reach its model.
+``agent_channel_hosts`` keeps those hosts (the inference gateway) reachable for such tasks; nothing else opens.
 
 It also sizes each sandbox as submit checked it: ``agent_resource_overrides`` in the agent sandbox only,
 then task.toml, then ``sandbox_resource_defaults``.
@@ -25,6 +25,7 @@ from typing import Any, Literal, override
 
 from harbor.environments.base import ExecResult
 from harbor.models.task.config import NetworkMode
+from harbor.models.trial.config import ResourceMode
 from nemo_evals.harbor.remote.resources import effective_resources
 from nemo_evals.harbor.setup_cleanup import KILL_CONNECTION_HOLDERS_SCRIPT, LIST_PROCESSES_SCRIPT, SHELL, SYSTEM_PATH
 from nhx_sandbox.egress import EgressAllowlist, EgressPolicy, EgressRule, build_egress_policy
@@ -32,6 +33,39 @@ from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironmen
 from nhx_sandbox.opensandbox_policy import EgressVerificationError, canonical_egress_target, verify_applied_egress
 
 logger = logging.getLogger(__name__)
+
+# Under /tmp because a non-root image's commands can't write /etc, even when asked to run as root.
+TLS_DIR = "/tmp/nemo-helix-tls"
+GATEWAY_CA = f"{TLS_DIR}/gateway-ca.pem"
+CA_BUNDLE = f"{TLS_DIR}/ca-bundle.pem"
+REQUESTS_CA_BUNDLE = f"{TLS_DIR}/requests-ca-bundle.pem"
+CURL_CA_BUNDLE = f"{TLS_DIR}/curl-ca-bundle.pem"
+NODE_EXTRA_CA_CERTS = f"{TLS_DIR}/node-extra-ca-certs.pem"
+# Each variable keeps what it named already, a file or a directory of certificates, and adds the gateway CA. Requests
+# falls back to CURL_CA_BUNDLE, as it does without REQUESTS_CA_BUNDLE. With no SSL_CERT_FILE the base is the first
+# system bundle: Debian/Ubuntu/Alpine, RHEL/Fedora, SUSE, the OpenSSL default some minimal images keep, and last
+# Python's certifi, the bundle Python uses when SSL_CERT_FILE is unset.
+TRUST_GATEWAY_CA_SCRIPT = """\
+set -e
+first() { for candidate in "$@"; do if [ -s "$candidate" ]; then printf %s "$candidate"; return; fi; done; }
+with_gateway_ca() {
+  {
+    if [ -d "$1" ]; then for cert in "$1"/*; do if [ -f "$cert" ]; then cat "$cert"; echo; fi; done
+    elif [ -n "$1" ]; then cat "$1"; echo; fi
+    cat "$GATEWAY_CA"
+  } > "$2"
+}
+certifi=$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null || true)
+system=$(first "${SSL_CERT_FILE:-}" /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt \
+/etc/ssl/ca-bundle.pem /etc/ssl/cert.pem "$certifi")
+with_gateway_ca "$system" "$CA_BUNDLE"
+with_gateway_ca "$(first "${REQUESTS_CA_BUNDLE:-}" "${CURL_CA_BUNDLE:-}" "$system")" "$REQUESTS_CA_BUNDLE_OUT"
+with_gateway_ca "$(first "${CURL_CA_BUNDLE:-}" "$system")" "$CURL_CA_BUNDLE_OUT"
+with_gateway_ca "$(first "${NODE_EXTRA_CA_CERTS:-}")" "$NODE_EXTRA_CA_CERTS_OUT"
+chmod 755 "${CA_BUNDLE%/*}"
+chmod 644 "$GATEWAY_CA" "$CA_BUNDLE" "$REQUESTS_CA_BUNDLE_OUT" "$CURL_CA_BUNDLE_OUT" "$NODE_EXTRA_CA_CERTS_OUT"
+printf %s "$system"
+"""
 
 
 def network_rules(rules: list[EgressRule]) -> list[Any]:
@@ -42,7 +76,7 @@ def network_rules(rules: list[EgressRule]) -> list[Any]:
 
 
 class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
-    """``NemoOpenSandboxEnvironment`` whose no-network sandboxes may still reach ``agent_channel_hosts``."""
+    """``NemoOpenSandboxEnvironment`` whose no-network and allowlist sandboxes may also reach ``agent_channel_hosts``."""
 
     _setup_egress_state: Literal["closed", "open", "closing"] = "closed"
 
@@ -53,11 +87,14 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
         agent_resource_overrides: dict[str, int] | None = None,
         sandbox_resource_defaults: dict[str, int] | None = None,
         agent_setup_hosts: list[str] | None = None,
+        gateway_ca_file: str | None = None,
         **kwargs: Any,
     ) -> None:
         # BaseEnvironment.__init__ may validate against the policy, so set the channel first.
         self._agent_channel_hosts = tuple(agent_channel_hosts or ())
         self._agent_setup_hosts = tuple(agent_setup_hosts or ())
+        self._gateway_ca_file = gateway_ca_file
+
         if agent_resource_overrides or sandbox_resource_defaults:
             # Harbor's factory passes these as keywords. A copy: the task's own config must keep task.toml's
             # values, since an inherited separate verifier's config is a copy of it, made after this one.
@@ -77,13 +114,59 @@ class AgentChannelOpenSandboxEnvironment(NemoOpenSandboxEnvironment):
                 )
         super().__init__(*args, **kwargs)
 
+        # Kubernetes caps the sandbox's CPU time but not the CPU count programs see, which is the whole
+        # node's: PyTorch, NumPy's BLAS and `nproc` then start a thread per node CPU and are throttled to a
+        # crawl. OpenMP's thread count is the one setting all of them read. A task's own value wins.
+        cpus = self._resource_limit_value("cpu", auto_mode=ResourceMode.LIMIT)
+        if cpus is not None:
+            self._persistent_env.setdefault("OMP_NUM_THREADS", str(cpus))
+
+    @override
+    async def start(self, force_build: bool) -> None:
+        await super().start(force_build)
+        if self._gateway_ca_file is not None:
+            await self._trust_gateway_ca(self._gateway_ca_file)
+
+    async def _trust_gateway_ca(self, ca_file: str) -> None:
+        """Make every later command trust ``ca_file`` alongside the roots it trusted already."""
+        await self.upload_file(ca_file, GATEWAY_CA)
+        result = await self._exec_cleanup(
+            TRUST_GATEWAY_CA_SCRIPT,
+            GATEWAY_CA=GATEWAY_CA,
+            CA_BUNDLE=CA_BUNDLE,
+            REQUESTS_CA_BUNDLE_OUT=REQUESTS_CA_BUNDLE,
+            CURL_CA_BUNDLE_OUT=CURL_CA_BUNDLE,
+            NODE_EXTRA_CA_CERTS_OUT=NODE_EXTRA_CA_CERTS,
+        )
+        if result.return_code != 0:
+            raise RuntimeError(
+                f"Could not install the gateway CA in {self.session_id}'s sandbox (exit {result.return_code}): "
+                f"{(result.stderr or result.stdout or '').strip()[-2000:]}"
+            )
+        if not (result.stdout or "").strip():
+            self.logger.warning(
+                "%s's sandbox image has no CA bundle, so it trusts only the gateway CA. Install ca-certificates in "
+                "the image so it can reach other HTTPS hosts.",
+                self.session_id,
+            )
+        self._persistent_env.update(
+            SSL_CERT_FILE=CA_BUNDLE,
+            REQUESTS_CA_BUNDLE=REQUESTS_CA_BUNDLE,
+            CURL_CA_BUNDLE=CURL_CA_BUNDLE,
+            NODE_EXTRA_CA_CERTS=NODE_EXTRA_CA_CERTS,
+        )
+
     @override
     def egress_policy(self) -> EgressPolicy:
-        """No-network tasks get the agent channel only (empty channel: deny all); other modes are unchanged."""
-        if self._network_policy.network_mode != NetworkMode.NO_NETWORK or not self._agent_channel_hosts:
+        """No-network and allowlist tasks also get the agent channel (empty channel: unchanged); public is unchanged."""
+        mode = self._network_policy.network_mode
+        if mode == NetworkMode.PUBLIC or not self._agent_channel_hosts:
             return super().egress_policy()
+        task_hosts = tuple(self._network_policy.allowed_hosts) if mode == NetworkMode.ALLOWLIST else ()
         return build_egress_policy(
-            EgressAllowlist(targets=self._agent_channel_hosts, resolver_addresses=self._resolver_addresses)
+            EgressAllowlist(
+                targets=(*task_hosts, *self._agent_channel_hosts), resolver_addresses=self._resolver_addresses
+            )
         )
 
     @asynccontextmanager

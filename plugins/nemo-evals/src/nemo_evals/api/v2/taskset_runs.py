@@ -28,6 +28,7 @@ from nemo_evals.api.taskset_run_schemas import (
 from nemo_evals.authz import scope
 from nemo_evals.harbor.remote.preparation import ImagePreparationUnavailableError
 from nemo_evals.taskset_runs.entities import MemberPhase
+from nemo_evals.taskset_runs.plan_storage import PlanStoragePermissionDeniedError
 from nemo_evals.taskset_runs.store import (
     CancelContended,
     RunAlreadyFinished,
@@ -37,6 +38,7 @@ from nemo_evals.taskset_runs.store import (
 )
 from nemo_evals.taskset_runs.submission import TimeoutAboveMaximumError
 from nemo_helix_plugin.authz import CallerKind, PermissionSet, path_rule, perm
+from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.schema import Page
@@ -64,6 +66,7 @@ router = APIRouter()
     responses={
         200: {"model": TasksetRunSubmitResponse, "description": "Replay an identical existing run."},
         201: {"description": "Accept a new run with frozen taskset and agent inputs."},
+        403: {"description": "Caller lacks permission to access a source or run resource."},
         409: {
             "description": (
                 "The idempotency key already belongs to a different request, or the run's Intake Evaluation "
@@ -161,6 +164,10 @@ async def submit_taskset_run(
         # Nothing was accepted, but Intake may have created the Evaluation. The run ID is derived from
         # (workspace, caller, idempotency_key), so a retry with the same key adopts that Evaluation.
         raise _server_error(503, str(exc), key, generated=generated) from exc
+    except PlanStoragePermissionDeniedError as exc:
+        raise _submission_forbidden(exc.permission_error, workspace, key, generated=generated) from exc
+    except PermissionDeniedError as exc:
+        raise _submission_forbidden(exc, workspace, key, generated=generated) from exc
     except HTTPException:
         raise
     except Exception:
@@ -168,6 +175,22 @@ async def submit_taskset_run(
         raise _server_error(500, "Internal server error", key, generated=generated) from None
     response.status_code = status.HTTP_201_CREATED if outcome.created else status.HTTP_200_OK
     return outcome.status
+
+
+def _submission_forbidden(exc: PermissionDeniedError, workspace: str, key: str, *, generated: bool) -> HTTPException:
+    """Sanitize a downstream denial while retaining the key needed to replay a possibly accepted run."""
+    logger.warning(
+        "Downstream permission denied while attempting to submit taskset run in workspace %s (status=%s, request_id=%s)",
+        sanitize_for_log(workspace),
+        exc.status_code,
+        sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+    )
+    headers = {"x-should-retry": "false"}
+    detail = "Forbidden"
+    if generated:
+        headers["x-idempotency-key"] = key
+        detail += f"; once access is restored, resubmit the same request with idempotency_key={key}"
+    return HTTPException(status_code=403, detail=detail, headers=headers)
 
 
 def _server_error(status_code: int, detail: str, key: str, *, generated: bool) -> HTTPException:
@@ -188,6 +211,7 @@ def _server_error(status_code: int, detail: str, key: str, *, generated: bool) -
 @router.get(
     "/agent-evaluate/runs",
     summary="List Taskset Runs",
+    responses={403: {"description": "Caller lacks permission to read run resources."}},
     response_model=Page[TasksetRunStatus],
     response_model_exclude_none=True,
 )
@@ -217,7 +241,7 @@ async def list_taskset_runs(
         Stored statuses and filtered pagination counts, excluding null optionals.
 
     Raises:
-        HTTPException: Unexpected storage or projection failure, sanitized to 500.
+        HTTPException: Permission denied (403), or unexpected storage or projection failure (500).
     """
     try:
         return await service.list_runs(
@@ -228,6 +252,14 @@ async def list_taskset_runs(
             page=page,
             page_size=page_size,
         )
+    except PermissionDeniedError as exc:
+        logger.warning(
+            "Downstream permission denied while attempting to list taskset runs in workspace %s (status=%s, request_id=%s)",
+            sanitize_for_log(workspace),
+            exc.status_code,
+            sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+        )
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
     except Exception:
         logger.exception("Failed to list taskset runs in workspace %s", sanitize_for_log(workspace))
         raise HTTPException(status_code=500, detail="Internal server error") from None
@@ -238,7 +270,10 @@ async def list_taskset_runs(
     summary="Get Taskset Run",
     response_model=TasksetRunStatus,
     response_model_exclude_none=True,
-    responses={404: {"description": "Run not found in this workspace."}},
+    responses={
+        403: {"description": "Caller lacks permission to read run resources."},
+        404: {"description": "Run not found in this workspace."},
+    },
 )
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
@@ -259,11 +294,20 @@ async def get_taskset_run(
         optionals and internal metadata.
 
     Raises:
-        HTTPException: The record is absent (404), or an unexpected storage or
-            projection failure occurs (sanitized 500).
+        HTTPException: Permission denied (403), the record is absent (404), or an unexpected
+            storage or projection failure occurs (sanitized 500).
     """
     try:
         result = await service.get(workspace, run_id)
+    except PermissionDeniedError as exc:
+        logger.warning(
+            "Downstream permission denied while attempting to get taskset run %s/%s (status=%s, request_id=%s)",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            exc.status_code,
+            sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+        )
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
     except Exception:
         logger.exception("Failed to get taskset run %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id))
         raise HTTPException(status_code=500, detail="Internal server error") from None
@@ -328,7 +372,10 @@ async def cancel_taskset_run(
     summary="List Taskset Run Tasks",
     response_model=Page[TasksetRunTask],
     response_model_exclude_none=True,
-    responses={404: {"description": "Run not found in this workspace."}},
+    responses={
+        403: {"description": "Caller lacks permission to read run resources."},
+        404: {"description": "Run not found in this workspace."},
+    },
 )
 @scope.read
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
@@ -355,11 +402,20 @@ async def list_taskset_run_tasks(
         an empty page. Null Job, Job status and error details are omitted.
 
     Raises:
-        HTTPException: The parent run is absent (404), or unexpected storage or
-            projection failure occurs (sanitized 500).
+        HTTPException: Permission denied (403), the parent run is absent (404), or an unexpected
+            storage or projection failure occurs (sanitized 500).
     """
     try:
         result = await service.list_tasks(workspace, run_id, phase=phase, page=page, page_size=page_size)
+    except PermissionDeniedError as exc:
+        logger.warning(
+            "Downstream permission denied while attempting to list taskset run tasks %s/%s (status=%s, request_id=%s)",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            exc.status_code,
+            sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+        )
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
     except Exception:
         logger.exception(
             "Failed to list taskset run tasks %s/%s", sanitize_for_log(workspace), sanitize_for_log(run_id)

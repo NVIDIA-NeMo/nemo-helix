@@ -17,15 +17,18 @@ Tests replace that mapping with mocks.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import math
 import time
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
+
+from nhx_sandbox.core.errors import ExecInterrupted
 
 LOGGER = logging.getLogger(__name__)
 
@@ -130,6 +133,8 @@ class CreateRequest:
     entrypoint: Sequence[str] | None = None
     # No sandbox outlives this; each create gets ``sandbox_timeout_sec`` cut to the time left. None: no cut.
     expires_at: datetime | None = None
+    # The port the egress policy API was moved to because a compose service needs 18080. None means it's on 18080.
+    egress_api_port: int | None = None
 
     def lifetime_sec(self) -> float:
         """``sandbox_timeout_sec``, cut to the seconds left before ``expires_at`` now (at least 1 while any is left).
@@ -182,6 +187,8 @@ class OpenSandboxDriver:
         self._sdk = dict(sdk) if sdk is not None else None
         self._logger = logger or LOGGER
         self._retry_wait = retry_wait or harbor_backoff_sec
+        # Set once an operation on the sandbox fails as one on a dead sandbox does; see _watch_for_death.
+        self.sandbox_may_have_died = False
 
     @property
     def sdk(self) -> dict[str, Any]:
@@ -278,12 +285,59 @@ class OpenSandboxDriver:
         )
         self._logger.debug("OpenSandbox sandbox created sandbox_id=%s", sandbox_id(sandbox))
         try:
+            # Point the SDK at the moved egress API before anything checks the sandbox's policy.
+            if request.egress_api_port is not None:
+                await self._point_egress_at(sandbox, request.egress_api_port)
+
             await self._wait_until_ready(sandbox, request, failure_check)
         except BaseException:
             # We hold the handle here, so kill this sandbox directly rather than by label.
             await self.safe_kill(sandbox)
             raise
         return sandbox
+
+    async def _point_egress_at(self, sandbox: Any, port: int) -> None:
+        """Make the SDK talk to this sandbox's egress policy API on ``port`` instead of 18080.
+
+        The SDK always talks to the egress API on 18080. On this sandbox a compose service listens there instead, so
+        without this our policy checks would reach that service and hand it the egress auth token. The SDK has no
+        public option for the port, so we replace its private egress client. If a future SDK stores that client
+        somewhere else, we fail the create rather than quietly fall back to 18080.
+
+        Raises:
+            RuntimeError: This SDK version doesn't keep its egress client where we expect.
+        """
+        sandbox_service = getattr(sandbox, "_sandbox_service", None)
+        connection_config = getattr(sandbox, "_connection_config", None)
+        if sandbox_service is None or connection_config is None or not hasattr(sandbox, "_egress_service"):
+            raise RuntimeError("this OpenSandbox SDK version doesn't let us move the egress policy API off 18080")
+
+        # Ask the server how to reach the moved port, then build an egress client for it the way the SDK would.
+        endpoint = await sandbox_service.get_sandbox_endpoint(
+            sandbox_id(sandbox), port, connection_config.use_server_proxy
+        )
+        adapter_factory = self._adapter_factory()(connection_config)
+        sandbox._egress_service = adapter_factory.create_egress_service(endpoint)
+
+    def _adapter_factory(self) -> Any:
+        """The SDK's internal ``AdapterFactory``, imported only when a sandbox's egress API has moved.
+
+        It isn't part of the SDK's public API. Importing it here, rather than in ``load_sdk``, means an SDK that
+        moves it only breaks sandboxes that need it, instead of every sandbox create.
+
+        Raises:
+            RuntimeError: This SDK version has no ``AdapterFactory`` where we expect it.
+        """
+        if "AdapterFactory" not in self.sdk:
+            try:
+                from opensandbox.adapters.factory import AdapterFactory  # ty: ignore[unresolved-import]
+            except ImportError as error:
+                raise RuntimeError(
+                    "this OpenSandbox SDK version doesn't let us move the egress policy API off 18080"
+                ) from error
+            self.sdk["AdapterFactory"] = AdapterFactory
+
+        return self.sdk["AdapterFactory"]
 
     async def _wait_until_ready(self, sandbox: Any, request: CreateRequest, failure_check: FailureCheck | None) -> None:
         """Poll until the sandbox is healthy; fail at once on a terminal state, or at the deadline."""
@@ -325,6 +379,25 @@ class OpenSandboxDriver:
             message = getattr(status, "message", "") or "(no message)"
             return f"OpenSandbox sandbox {sandbox_id(sandbox)} entered {state} before becoming ready: {message}"
         return None
+
+    async def expires_at(self, sandbox: Any) -> datetime | None:
+        """When the server will delete the sandbox, as it reports it; ``None`` when it doesn't say."""
+        info = await sandbox.get_info()
+        return getattr(info, "expires_at", None)
+
+    async def kill(self, sandbox: Any) -> None:
+        """Kill the sandbox; one the server no longer has counts as killed, since nothing is left to stop.
+
+        A sandbox can be gone by the time its caller releases it: its lifetime ended, or something
+        deleted it. Raising then would turn a trial that finished into a failed one.
+        """
+        try:
+            await sandbox.kill()
+        except Exception as exc:
+            # The SDK's API error carries the server's HTTP status.
+            if getattr(exc, "status_code", None) != 404:
+                raise
+            self._logger.info("OpenSandbox sandbox %s was already gone; nothing to kill", sandbox_id(sandbox))
 
     async def safe_kill(self, sandbox: Any) -> None:
         """Best-effort kill and close; never raises, so it can't mask the error that led here."""
@@ -424,32 +497,64 @@ class OpenSandboxDriver:
         # Leave uid out entirely rather than send None, so the SDK uses the image's default user.
         if uid is not None:
             opts["uid"] = uid
-        execution = await sandbox.commands.run(command, opts=self.sdk["RunCommandOpts"](**opts))
+        with self._watch_for_death():
+            execution = await sandbox.commands.run(command, opts=self.sdk["RunCommandOpts"](**opts))
 
         # The SDK infers the exit code of a foreground command. ``error.value`` is free text, so
         # only fall back to a generic failure when the SDK found no code at all.
         exit_code = execution.exit_code
+        if exit_code is None and execution.error is None:
+            # The SDK reports 0 only once execd confirms the command completed, so neither a code
+            # nor an error means the output stream ended first, as it does when the sandbox's
+            # container is killed under the command. Its outcome is unknown, not success.
+            self.sandbox_may_have_died = True
+            raise ExecInterrupted(
+                f"OpenSandbox sandbox {sandbox_id(sandbox)}: the command's output ended before it reported an "
+                "exit code; the sandbox may have stopped"
+            )
         if exit_code is None:
-            exit_code = 1 if execution.error is not None else 0
+            exit_code = 1
         return CommandResult(
             stdout=join_output(execution.logs.stdout),
             stderr=join_output(execution.logs.stderr),
             exit_code=exit_code,
         )
 
+    @contextlib.contextmanager
+    def _watch_for_death(self) -> Generator[None]:
+        """Set ``sandbox_may_have_died`` when the operation fails as one on a dead sandbox does, then re-raise.
+
+        On a dead sandbox every operation fails with the server's 502 (it can't reach execd) or a
+        lost connection, while on a live one a missing file or path is a 4xx. Telling them apart
+        matters: Harbor routinely reads files that may not exist, and the status check in ``stop``
+        waits only after a likely death.
+        """
+        try:
+            yield
+        except Exception as exc:
+            status = getattr(exc, "status_code", None)
+            if status is None or status >= 500:
+                self.sandbox_may_have_died = True
+            raise
+
     async def create_directories(self, sandbox: Any, paths: Sequence[str], *, mode: int = 755) -> None:
         """Create directories, parents included. ``mode`` is octal written as decimal, as the SDK expects."""
         write_entry = self.sdk["WriteEntry"]
-        await sandbox.files.create_directories([write_entry(path=path, mode=mode) for path in paths])
+        with self._watch_for_death():
+            await sandbox.files.create_directories([write_entry(path=path, mode=mode) for path in paths])
 
     async def write_files(self, sandbox: Any, files: Sequence[tuple[str, bytes, int]]) -> None:
         """Write ``(path, data, mode)`` files; parent directories must already exist."""
         write_entry = self.sdk["WriteEntry"]
-        await sandbox.files.write_files([write_entry(path=path, data=data, mode=mode) for path, data, mode in files])
+        with self._watch_for_death():
+            await sandbox.files.write_files(
+                [write_entry(path=path, data=data, mode=mode) for path, data, mode in files]
+            )
 
     async def read_bytes(self, sandbox: Any, path: str) -> bytes:
         """Read one file."""
-        return await sandbox.files.read_bytes(path)
+        with self._watch_for_death():
+            return await sandbox.files.read_bytes(path)
 
     async def list_tree(self, sandbox: Any, root: str) -> list[tuple[PurePosixPath, str, str]]:
         """Every entry under ``root`` as ``(relative path, absolute path, entry type)``.
@@ -457,7 +562,8 @@ class OpenSandboxDriver:
         The type is the SDK's ``entry_type`` lower-cased, or ``""`` when the SDK left it unset.
         """
         # One recursive search rather than a listing per directory.
-        matches = await sandbox.files.search(self.sdk["SearchEntry"](path=root, pattern="**"))
+        with self._watch_for_death():
+            matches = await sandbox.files.search(self.sdk["SearchEntry"](path=root, pattern="**"))
         base = PurePosixPath(root)
         return [
             (

@@ -14,6 +14,7 @@ from nemo_helix_plugin.client.errors import PermissionDeniedError as ClientPermi
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.refs import parse_entity_ref
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
@@ -288,6 +289,18 @@ class JobDispatcher:
     async def validate_job_secrets(self, job_spec: HelixJobSpec, job_workspace: str) -> None:
         # Ensure that any referenced secrets in steps exist and the user has access (user-scoped client).
         for step in job_spec.steps:
+            if step.gateway_providers:
+                try:
+                    await authorize_provider_references(
+                        step.gateway_providers, workspace=job_workspace, secrets_client=self.secrets
+                    )
+                    for ref in step.gateway_read_filesets:
+                        parsed = parse_entity_ref(ref, default_workspace=job_workspace)
+                        await self.files.get_fileset(workspace=parsed.workspace, name=parsed.name)
+                except (ClientNotFoundError, ClientPermissionDeniedError) as exc:
+                    raise JobSecretValidationError(
+                        "A gateway credential or input fileset is not accessible to the caller."
+                    ) from exc
             if not step.environment:
                 continue
             for env_var in step.environment:
@@ -1312,6 +1325,23 @@ class JobDispatcher:
         step_spec_name = get_step_spec_name(saved_step.config, saved_step.name) or saved_step.name
 
         if (
+            saved_step.status == HelixJobStatus.QUEUED
+            and attempt.status == HelixJobStatus.CREATED
+            and step_spec_name == attempt.platform_spec.steps[0].name
+        ):
+            # Only the first step queues the attempt. A later step waiting for capacity must not
+            # move an attempt that is already pending, active, or otherwise past created.
+            new_attempt_status = HelixJobStatus.QUEUED
+            logger.info(
+                "Job is queued",
+                extra={
+                    "job": attempt.job,
+                    "attempt": attempt.id,
+                    "step": saved_step.id,
+                    "workspace": attempt.workspace,
+                },
+            )
+        elif (
             saved_step.status == HelixJobStatus.PENDING
             and attempt.status != HelixJobStatus.PENDING
             and step_spec_name == attempt.platform_spec.steps[0].name

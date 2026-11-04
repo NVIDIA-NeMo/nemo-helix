@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from nemo_deployments_plugin.docker_network_policy import validate_client_docker_network
 from nemo_deployments_plugin.entities import (
     AccessMode,
     ConfigFile,
@@ -115,6 +116,13 @@ class CreateDeploymentConfigRequest(BaseModel):
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_docker_network(self) -> CreateDeploymentConfigRequest:
+        # Persisted entities remain readable for status, migration, and deletion.
+        if self.backend_config.docker is not None:
+            validate_client_docker_network(self.backend_config.docker.network)
+        return self
 
 
 class CreateDeploymentRequest(BaseModel):

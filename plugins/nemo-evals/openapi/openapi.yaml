@@ -780,6 +780,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunSubmitResponse'
+        '403':
+          description: Caller lacks permission to access a source or run resource.
         '409':
           description: The idempotency key already belongs to a different request,
             or the run's Intake Evaluation exists with different dataset metadata.
@@ -801,8 +803,8 @@ paths:
         \    caller: Effective principal supplied by the platform dependency.\n  \
         \  service: Shared request-scoped run service.\n\nReturns:\n    Stored statuses\
         \ and filtered pagination counts, excluding null optionals.\n\nRaises:\n \
-        \   HTTPException: Unexpected storage or projection failure, sanitized to\
-        \ 500."
+        \   HTTPException: Permission denied (403), or unexpected storage or projection\
+        \ failure (500)."
       operationId: list_taskset_runs_apis_evals_v2_workspaces__workspace__agent_evaluate_runs_get
       parameters:
       - name: workspace
@@ -857,6 +859,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatussPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '422':
           description: Validation Error
           content:
@@ -874,8 +878,8 @@ paths:
         \    service: Shared request-scoped run service.\n\nReturns:\n    Current\
         \ stored status with ``progress`` (omitted while the run has no members),\
         \ excluding null\n    optionals and internal metadata.\n\nRaises:\n    HTTPException:\
-        \ The record is absent (404), or an unexpected storage or\n        projection\
-        \ failure occurs (sanitized 500)."
+        \ Permission denied (403), the record is absent (404), or an unexpected\n\
+        \        storage or projection failure occurs (sanitized 500)."
       operationId: get_taskset_run_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__get
       parameters:
       - name: workspace
@@ -897,6 +901,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunStatus'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
@@ -968,8 +974,9 @@ paths:
         \ to 1000.\n    service: Shared request-scoped run service.\n\nReturns:\n\
         \    Stored task page and filtered counts; existing runs with no members return\n\
         \    an empty page. Null Job, Job status and error details are omitted.\n\n\
-        Raises:\n    HTTPException: The parent run is absent (404), or unexpected\
-        \ storage or\n        projection failure occurs (sanitized 500)."
+        Raises:\n    HTTPException: Permission denied (403), the parent run is absent\
+        \ (404), or an unexpected\n        storage or projection failure occurs (sanitized\
+        \ 500)."
       operationId: list_taskset_run_tasks_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks_get
       parameters:
       - name: workspace
@@ -1021,6 +1028,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TasksetRunTasksPage'
+        '403':
+          description: Caller lacks permission to read run resources.
         '404':
           description: Run not found in this workspace.
         '422':
@@ -4788,7 +4797,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4836,6 +4845,7 @@ components:
           title: Mcp
           description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
             MCP dependency.
+      additionalProperties: false
       type: object
       title: EnvironmentSpecInline
       description: 'Inline environment spec - the dependencies and configuration an
@@ -6059,6 +6069,16 @@ components:
           title: Reward Key
           description: Key read from Harbor's per-trial rewards mapping to score against.
           default: reward
+        closed_book:
+          type: boolean
+          title: Closed Book
+          description: Run the trials closed-book. Each trial's gateway calls are
+            held to closed-book capable VirtualModels (ones whose request_middleware
+            ends with nemo-evals-closed-book), and the closed-book middleware applies
+            to them. Every VirtualModel the agent can reach, a router's routes_to
+            included, must be closed-book capable. Taskset runs set it for tasks whose
+            agent runs with no network.
+          default: false
         agent_setup_timeout_multiplier:
           title: Agent Setup Timeout Multiplier
           description: Harbor agent-setup timeout multiplier. An agent that installs
