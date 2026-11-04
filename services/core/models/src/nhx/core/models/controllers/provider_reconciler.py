@@ -335,6 +335,18 @@ def _resolve_base_backend_model_id(
     """
     if config and config.model_entity_id:
         model_workspace, model_name, _revision = parse_model_name_revision(model_name=config.model_entity_id)
+        if not model_workspace:
+            # Explicit relative IDs are preserved by the config API, but deployment
+            # backends advertise namespace/name. Resolve the namespace before comparing
+            # discovery IDs or the provider silently serves nothing (and gets no VirtualModel).
+            if base_model_entity is not None:
+                model_workspace = base_model_entity.workspace
+            elif config.model_spec is not None:
+                model_workspace, _, _ = parse_model_name_revision(
+                    model_namespace=config.model_spec.model_namespace,
+                    model_name=config.model_spec.model_name,
+                    model_revision=config.model_spec.model_revision,
+                )
         if model_workspace and model_name:
             return f"{model_workspace}/{model_name}"
         return config.model_entity_id
@@ -1215,9 +1227,9 @@ class ModelProviderReconciler:
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=served_model_name))
                 continue
 
-            # Prompt-tuned: parent is null, root equals base, id != base (the
-            # ``mid == base_id`` case was already handled by the base branch above).
-            if parent is None and root == base_id:
+            # Prompt-tuned: parent is null, root equals the qualified or bare base id,
+            # id != base (handled by the base branch above). Keep base_id qualified.
+            if parent is None and root in (base_id, base_id.rsplit("/", 1)[-1]):
                 model_entity_id = f"{workspace}/{mid.removeprefix(f'{workspace}/')}"
                 served.append(ServedModelMapping(model_entity_id=model_entity_id, served_model_name=mid))
                 continue

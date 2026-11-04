@@ -87,20 +87,101 @@ class TestSubmitRemoteURL:
             scheduler._build_submit_url(_NamespacedJob, base_url=None, workspace="ws")
 
 
+class _FakeEntryPoint:
+    """Stands in for ``importlib.metadata.EntryPoint``: a ``value`` string and a ``load`` hook."""
+
+    def __init__(self, value: str, loaded: object = None, *, error: Exception | None = None) -> None:
+        self.value = value
+        self._loaded = loaded
+        self._error = error
+        self.loads = 0
+
+    def load(self) -> object:
+        self.loads += 1
+        if self._error is not None:
+            raise self._error
+        return self._loaded
+
+
+def _not_loadable(value: str) -> _FakeEntryPoint:
+    return _FakeEntryPoint(value, error=AssertionError(f"{value} must not be imported"))
+
+
 class TestApiSegmentFor:
     """Cover ``_api_segment_for``, which builds the ``{api}`` portion of submit URLs."""
 
-    def test_uses_registered_entry_point_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @staticmethod
+    def _install(monkeypatch: pytest.MonkeyPatch, entries: dict[str, _FakeEntryPoint]) -> None:
+        monkeypatch.setattr("nemo_helix_plugin.discovery.discover_entry_points", lambda group: entries)
+
+    def test_matches_entry_point_value_without_loading_any_job(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from nemo_helix_plugin.scheduler import _api_segment_for
 
         class _J(NemoJob):
             name = "evaluate"
 
         _J.__module__ = "nemo_agents_plugin.jobs.evaluate_agent"
-        monkeypatch.setattr(
-            "nemo_helix_plugin.discovery.discover_jobs",
-            lambda: {"agents.evaluate": _J},
-        )
+        target = f"{_J.__module__}:{_J.__qualname__}"
+        entries = {
+            "anonymizer.run": _not_loadable("nemo_anonymizer_plugin.jobs.run:RunJob"),
+            "agents.evaluate": _not_loadable(target),
+            "evals.evaluate": _not_loadable("nemo_evals.jobs.evaluate:EvaluateJob"),
+        }
+        self._install(monkeypatch, entries)
+
+        assert _api_segment_for(_J) == "agents"
+        assert all(entry.loads == 0 for entry in entries.values())
+
+    def test_loads_only_same_named_candidates_for_a_reexported_class(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.scheduler import _api_segment_for
+
+        class _J(NemoJob):
+            name = "evaluate"
+
+        _J.__module__ = "nemo_agents_plugin.jobs._impl"
+        other = _FakeEntryPoint("nemo_evals.jobs.evaluate:EvaluateJob", loaded=object())
+        reexport = _FakeEntryPoint("nemo_agents_plugin.jobs:EvaluateAgentJob", loaded=_J)
+        unrelated = _not_loadable("nemo_anonymizer_plugin.jobs.run:RunJob")
+        self._install(monkeypatch, {"anonymizer.run": unrelated, "agents.evaluate": reexport, "evals.evaluate": other})
+
+        assert _api_segment_for(_J) == "agents"
+        assert unrelated.loads == 0
+
+    def test_matches_value_even_when_name_breaks_the_key_convention(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.scheduler import _api_segment_for
+
+        class _J(NemoJob):
+            name = "not-the-key-suffix"
+
+        _J.__module__ = "nemo_agents_plugin.jobs.evaluate_agent"
+        self._install(monkeypatch, {"agents.evaluate": _not_loadable(f"{_J.__module__}:{_J.__qualname__}")})
+
+        assert _api_segment_for(_J) == "agents"
+
+    def test_finds_a_reexport_whose_name_breaks_the_key_convention(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.scheduler import _api_segment_for
+
+        class _J(NemoJob):
+            name = "not-the-key-suffix"
+
+        _J.__module__ = "nemo_agents_plugin.jobs._impl"
+        reexport = _FakeEntryPoint("nemo_agents_plugin.jobs:EvaluateAgentJob", loaded=_J)
+        other = _FakeEntryPoint("nemo_evals.jobs.evaluate:EvaluateJob", loaded=object())
+        self._install(monkeypatch, {"agents.evaluate": reexport, "evals.evaluate": other})
+
+        assert _api_segment_for(_J) == "agents"
+
+    def test_skips_a_candidate_that_fails_to_load(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nemo_helix_plugin.scheduler import _api_segment_for
+
+        class _J(NemoJob):
+            name = "evaluate"
+
+        _J.__module__ = "nemo_agents_plugin.jobs._impl"
+        broken = _FakeEntryPoint("nemo_broken.jobs:EvaluateJob", error=ImportError("boom"))
+        reexport = _FakeEntryPoint("nemo_agents_plugin.jobs:EvaluateAgentJob", loaded=_J)
+        self._install(monkeypatch, {"broken.evaluate": broken, "agents.evaluate": reexport})
+
         assert _api_segment_for(_J) == "agents"
 
     def test_falls_back_to_module_when_not_registered(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -110,7 +191,8 @@ class TestApiSegmentFor:
             name = "say-hello"
 
         _J.__module__ = "nemo_example_plugin.jobs.say_hello"
-        monkeypatch.setattr("nemo_helix_plugin.discovery.discover_jobs", lambda: {})
+        unrelated = _FakeEntryPoint("nemo_anonymizer_plugin.jobs.run:RunJob", loaded=object())
+        self._install(monkeypatch, {"anonymizer.run": unrelated})
         assert _api_segment_for(_J) == "example-plugin"
 
     def test_fallback_strips_nemo_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,7 +202,7 @@ class TestApiSegmentFor:
             name = "evaluate"
 
         _J.__module__ = "nemo_evals.jobs.evaluate"
-        monkeypatch.setattr("nemo_helix_plugin.discovery.discover_jobs", lambda: {})
+        self._install(monkeypatch, {})
         assert _api_segment_for(_J) == "evals"
 
     def test_handles_missing_nemo_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,7 +212,7 @@ class TestApiSegmentFor:
             name = "x"
 
         _J.__module__ = "tests.fixtures.things"
-        monkeypatch.setattr("nemo_helix_plugin.discovery.discover_jobs", lambda: {})
+        self._install(monkeypatch, {})
         assert _api_segment_for(_J) == "tests"
 
 

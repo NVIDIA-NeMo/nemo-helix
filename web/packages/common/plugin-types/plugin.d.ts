@@ -11060,6 +11060,23 @@ export declare const getSortParamWithWhitelist: <S extends string = string>(sort
  */
 export declare const triggerDownload: (data: BlobPart, filename: string) => void;
 //#endregion
+//#region src/utils/download.d.ts
+type DownloadFormat = 'json' | 'jsonl' | 'csv';
+type CsvRow = Record<string, unknown>;
+export declare const MIME_TYPES: Record<DownloadFormat, string>;
+interface CsvOptions {
+  /** Column order; defaults to the union of every row's keys, in first-seen order. */
+  columns?: readonly string[];
+  /** Prefixes strings a spreadsheet would run as a formula with `'`. Disable for data files that
+   *  must round-trip unchanged. @defaultValue true */
+  formulaSafe?: boolean;
+}
+/** Formats one CSV cell: nested values as JSON, quoted when it holds a comma, quote, or newline. */
+export declare const toCsvCell: (value: unknown, { formulaSafe }?: CsvOptions) => string;
+/** Serializes rows to CSV, writing nested values as JSON so no data is lost. */
+export declare const toCsv: <T extends object>(rows: readonly T[], options?: CsvOptions) => string;
+export declare const toJsonl: (rows: readonly unknown[]) => string;
+//#endregion
 //#region src/utils/entityName.d.ts
 export declare const ENTITY_NAME_HELP = "Must start with a lowercase letter and be 2–63 characters. Lowercase letters, numbers, and - _ . @ + only. No consecutive or trailing hyphens.";
 /** Zod string schema enforcing `ENTITY_NAME_REGEXP` with per-rule error messages. */
@@ -11123,4 +11140,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, index_d_exports as DataView, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };

@@ -50,6 +50,9 @@ navigation:
           - page: Run Mini-SWE-Agent
             slug: mini-swe-agent
             path: ../../agents/mini-swe-agent.mdx
+          - page: Web Search with Tavily
+            slug: web-search-tavily
+            path: ../../agents/web-search-tavily.mdx
           - section: Deploy Agents
             path: ../../agents/deploy-agents.mdx
             contents:

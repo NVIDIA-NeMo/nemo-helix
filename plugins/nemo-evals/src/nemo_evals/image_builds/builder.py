@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from filesets import parse_fileset_ref
@@ -27,6 +28,10 @@ _BUILDER_NAME_PREFIX = "harbor-env-"
 _COPY_NAME_PREFIX = "harbor-img-"
 #: Builder job statuses after which the job writes nothing more to its images.
 ENDED_JOB_STATUSES = frozenset({"completed", "error", "cancelled"})
+#: How long a pending image may have no job before it counts as abandoned. Builder writes an image's row first and
+#: creates its job after, so a request that reads the row in between (any of many tasks sharing one build) sees no
+#: job yet. Longer than any submit takes; short enough that a submit that died between the two is retried soon.
+JOB_GRACE = timedelta(minutes=2)
 
 
 class ImageBuilder(Protocol):
@@ -57,16 +62,14 @@ class ImageBuilder(Protocol):
         ...
 
 
-def builder_name(
-    *, archive: str, archive_digest: str, context_path: str, dockerfile: str, platform: str | None = None
-) -> str:
-    """Builder build-set name for one image of the task archive at ``archive``, a fileset reference, for one platform.
+def builder_name(*, context_digest: str, dockerfile: str, platform: str | None = None) -> str:
+    """Builder build-set name for an image built from a context holding ``context_digest``'s files, for one platform.
 
-    Builder fingerprints the whole request, archive location included, so one name for the same archive at two
-    locations would conflict there. A build for the deployment's default platform leaves ``platform`` out of the
-    key, as names did before a build could name one.
+    Keyed by content, not by which task archive holds it: tasks whose build contexts hold the same files share
+    one build (see :func:`adopt_or_build`). A build for the deployment's default platform leaves ``platform``
+    out of the key.
     """
-    key = {"v": 2, "location": archive, "archive": archive_digest, "context": context_path, "dockerfile": dockerfile}
+    key = {"v": 3, "context": context_digest, "dockerfile": dockerfile}
     return f"{_BUILDER_NAME_PREFIX}{_key_hash(key, platform)}"
 
 
@@ -116,11 +119,61 @@ async def ensure_build(
     return await builder.submit(name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform)
 
 
+#: Submits that may each lose a race for the next revision before :func:`adopt_or_build` gives up.
+_ADOPT_ATTEMPTS = 3
+
+
+async def adopt_or_build(
+    builder: ImageBuilder,
+    *,
+    name: str,
+    source: FileSetSource | ImageSource,
+    dockerfile: str | None,
+    platform: str | None = None,
+) -> ContainerImage:
+    """The newest usable build of ``name``, submitting one only when there is none.
+
+    ``name`` is keyed by content (:func:`builder_name`), so another task, run or user may already have built it:
+    a ready build, or a pending one whose job still runs, is used as it is. A failed or abandoned one gets the next
+    revision. Builder refuses a revision another request holds, so a submit that loses that race reads the
+    winner's build instead.
+    """
+    for _ in range(_ADOPT_ATTEMPTS):
+        newest: ContainerImage | None = None
+        revision = 1
+        while (image := await builder.get_image(f"{name}-{revision}")) is not None:
+            newest = image
+            revision += 1
+        if newest is not None and not await _abandoned(builder, newest):
+            return newest
+        try:
+            submitted = await builder.submit(
+                name=name, revision=revision, source=source, dockerfile=dockerfile, platform=platform
+            )
+        except ConflictError:
+            logger.info("Another request submitted %s-%d first; using its build", name, revision)
+            continue
+        return submitted.images[0]
+    raise RuntimeError(f"Builder build {name} kept being submitted by other requests; try again")
+
+
 async def _abandoned(builder: ImageBuilder, image: ContainerImage) -> bool:
     if image.status != "pending":
         return image.status == "failed"
+    return await job_gone(builder, image)
+
+
+async def job_gone(builder: ImageBuilder, image: ContainerImage, *, now: datetime | None = None) -> bool:
+    """Whether a pending image's job has ended, or never appeared within :data:`JOB_GRACE` of its row."""
     status = await builder.job_status(image.provenance.job.rpartition("/")[2])
-    return status is None or status in ENDED_JOB_STATUSES
+    if status is not None:
+        return status in ENDED_JOB_STATUSES
+    created = image.created_at
+    if created is None:
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return (now or datetime.now(timezone.utc)) - created > JOB_GRACE
 
 
 class HttpImageBuilder:

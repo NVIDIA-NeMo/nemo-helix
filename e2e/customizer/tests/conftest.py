@@ -211,14 +211,6 @@ def helpsteer_dpo_fileset(client: NemoClient, customizer_workspace: str, dpo_cac
 
 
 @pytest.fixture(scope="module")
-def dpo_eval_rows(dpo_cache: Path) -> list[dict]:
-    path = dpo_cache / "eval.jsonl"
-    if not path.is_file():
-        pytest.fail(f"DPO eval rows missing after S3 sync: {path}")
-    return ceval.load_chat_jsonl(path)
-
-
-@pytest.fixture(scope="module")
 def nvdocs_embedding_fileset(client: NemoClient, customizer_workspace: str, embedding_nvdocs_cache: Path) -> str:
     """One fileset serves as both automodel ``dataset.training`` and the retrieve-eval ``dataset``."""
     return stage_assets.stage_dataset_fileset(
