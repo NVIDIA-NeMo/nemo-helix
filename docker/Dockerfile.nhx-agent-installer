@@ -19,6 +19,9 @@ FROM ${NHX_PYTHON_BASE} AS builder
 ARG PYTHON_VERSION=3.12
 ARG HARBOR_VERSION=0.24.0
 ARG NEMO_FABRIC_VERSION=0.5.0
+# The SDK goes in without its dependencies: these are the ones its Fabric agent imports that Harbor and Fabric don't bring.
+ARG OPENTELEMETRY_PROTO_VERSION=1.43.0
+ARG PROTOBUF_VERSION=6.33.6
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 ENV INSTALLER=/opt/nhx-agent-installer
@@ -28,7 +31,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv --relocatable --python "$(ls -d "${INSTALLER}/python/cpython-${PYTHON_VERSION}".*-*/bin/python3)" "${INSTALLER}/venv" && \
     printf 'harbor==%s\n' "${HARBOR_VERSION}" > /tmp/overrides.txt && \
     uv pip install --python "${INSTALLER}/venv/bin/python" --override /tmp/overrides.txt \
-        "harbor==${HARBOR_VERSION}" "nemo-fabric[harbor]==${NEMO_FABRIC_VERSION}" && \
+        "harbor==${HARBOR_VERSION}" "nemo-fabric[harbor]==${NEMO_FABRIC_VERSION}" \
+        "opentelemetry-proto==${OPENTELEMETRY_PROTO_VERSION}" "protobuf==${PROTOBUF_VERSION}" && \
     uv pip install --python "${INSTALLER}/venv/bin/python" --no-deps /src/nhx_evals_sdk
 # The installer's entry point, and the agents it installs, import without the SDK's other dependencies.
 RUN "${INSTALLER}/venv/bin/python" -c 'import nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer_install, \

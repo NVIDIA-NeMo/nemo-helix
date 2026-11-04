@@ -20,7 +20,13 @@ def _locked(package: str) -> str:
 
 
 @pytest.mark.parametrize(
-    ("argument", "package"), [("HARBOR_VERSION", "harbor"), ("NEMO_FABRIC_VERSION", "nemo-fabric")]
+    ("argument", "package"),
+    [
+        ("HARBOR_VERSION", "harbor"),
+        ("NEMO_FABRIC_VERSION", "nemo-fabric"),
+        ("OPENTELEMETRY_PROTO_VERSION", "opentelemetry-proto"),
+        ("PROTOBUF_VERSION", "protobuf"),
+    ],
 )
 def test_the_installer_pins_what_uv_lock_locks(argument: str, package: str) -> None:
     match = re.search(rf"^ARG {argument}=(\S+)$", _DOCKERFILE.read_text(encoding="utf-8"), re.MULTILINE)
