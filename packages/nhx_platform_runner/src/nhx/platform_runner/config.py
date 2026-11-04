@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import MutableMapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from importlib.resources import files
 from pathlib import Path
@@ -155,7 +155,7 @@ class ResolvedRunConfiguration:
     port: int
     config_path: str
     socket_path: str | None = None
-    available_services: dict[str, str | Service] = field(default_factory=dict)
+    available_services: Mapping[str, str | Service] = field(default_factory=dict)
     available_controllers: dict[str, str | ControllerRunFunc] = field(default_factory=dict)
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS
 
@@ -233,6 +233,15 @@ def resolve_run_configuration(
         available = ", ".join(sorted(available_sidecars))
         requested = ", ".join(sorted(invalid_sidecars))
         raise ValueError(f"Unknown sidecars: {requested}. Available sidecars: {available}")
+
+    # Plugin services load on lookup, so a broken plugin only shows up here, once it is selected.
+    # Treat it as unavailable, as eager discovery did: dropped from a group, an error when named.
+    unloadable = {name for name in selected_services if available_services.get(name) is None}
+    if unloadable_named := unloadable & set(config.services or []):
+        available = ", ".join(sorted(available_services))
+        requested = ", ".join(sorted(unloadable_named))
+        raise ValueError(f"Unknown services: {requested}. Available services: {available}")
+    selected_services -= unloadable
 
     resolved_socket_path = _resolve_socket_path(config.socket_path)
 

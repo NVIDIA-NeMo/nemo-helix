@@ -6,10 +6,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator, Mapping
 from functools import cache
+from importlib.metadata import EntryPoint
 
-from nemo_helix_plugin.discovery import discover_controllers, discover_services
+from nemo_helix_plugin.discovery import discover_controllers, discover_entry_points
 from nhx.common.service import Service
 from nhx.platform_runner.loader import ControllerRunFunc
 from nhx.platform_runner.plugin_adapter import NemoServiceAdapter, make_controller_run_func
@@ -146,28 +147,81 @@ def get_default_controllers(
     return get_controllers_for_group(controller_groups, "all")
 
 
+class AvailableServices(Mapping[str, "str | Service"]):
+    """Every service this run can start, by name; plugin services load only when looked up.
+
+    Names come from ``nemo.services`` entry-point metadata, so checking, listing or grouping them
+    imports no plugin code. Importing every installed plugin costs seconds per process, and most
+    runs start a few services. Looking a plugin up imports, instantiates and wraps it once. A
+    plugin that fails to load is logged and then treated as absent (``KeyError``, and it drops
+    out of iteration), matching the eager discovery this replaces. A plugin overrides a built-in
+    service of the same name.
+    """
+
+    def __init__(self, core: Mapping[str, str], plugins: Mapping[str, EntryPoint]) -> None:
+        self._core = dict(core)
+        self._plugins = dict(plugins)
+        self._loaded: dict[str, Service] = {}
+        self._failed: set[str] = set()
+
+    def __getitem__(self, name: str) -> str | Service:
+        if name in self._loaded:
+            return self._loaded[name]
+        if name in self._plugins and name not in self._failed:
+            service = _load_plugin_service(name, self._plugins[name])
+            if service is not None:
+                self._loaded[name] = service
+                return service
+            self._failed.add(name)
+        return self._core[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._core or (name in self._plugins and name not in self._failed)
+
+    def __iter__(self) -> Iterator[str]:
+        names = dict.fromkeys([*self._core, *self._plugins])
+        return iter([name for name in names if name in self])
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+def _load_plugin_service(name: str, entry_point: EntryPoint) -> Service | None:
+    try:
+        service_cls = entry_point.load()
+    except Exception:
+        logger.warning("Failed to load %r from 'nemo.services' (%s) — skipping", name, entry_point.value)
+        logger.debug("Traceback for failed load of %r from 'nemo.services':", name, exc_info=True)
+        return None
+    cls_name = getattr(service_cls, "name", None)
+    if cls_name != name:
+        logger.warning(
+            "nemo.services entry %r: class %s declares name=%r — name must match the pyproject.toml entry-point key",
+            name,
+            getattr(service_cls, "__qualname__", service_cls),
+            cls_name,
+        )
+    try:
+        return NemoServiceAdapter(service_cls())
+    except Exception:
+        logger.warning(
+            "Failed to instantiate plugin service %r from %s.%s",
+            name,
+            service_cls.__module__,
+            service_cls.__qualname__,
+            exc_info=True,
+        )
+        return None
+
+
 @cache
-def get_available_services() -> dict[str, str | Service]:
-    """Return all available services for the current run."""
-    services: dict[str, str | Service] = dict(AVAILABLE_SERVICES)
-
-    for name, service_cls in discover_services().items():
-        try:
-            services[name] = NemoServiceAdapter(service_cls())
-        except Exception:
-            logger.warning(
-                "Failed to instantiate plugin service %r from %s.%s",
-                name,
-                service_cls.__module__,
-                service_cls.__qualname__,
-                exc_info=True,
-            )
-
-    return services
+def get_available_services() -> AvailableServices:
+    """Return all available services for the current run, loading plugin services on lookup."""
+    return AvailableServices(AVAILABLE_SERVICES, discover_entry_points("nemo.services"))
 
 
 def get_service_groups(
-    available_services: dict[str, str | Service] | None = None,
+    available_services: Mapping[str, str | Service] | None = None,
 ) -> dict[str, list[str]]:
     """Return dynamic service groups for the current run."""
     available_services = available_services or get_available_services()
@@ -190,7 +244,7 @@ def get_services_for_group(service_groups: dict[str, list[str]], group: str) -> 
     return service_groups[group]
 
 
-def get_openapi_service_names(available_services: dict[str, str | Service] | None = None) -> list[str]:
+def get_openapi_service_names(available_services: Mapping[str, str | Service] | None = None) -> list[str]:
     """Return the intentionally included services for platform OpenAPI generation."""
     available_services = available_services or get_available_services()
     return [service_name for service_name in OPENAPI_SERVICES if service_name in available_services]
