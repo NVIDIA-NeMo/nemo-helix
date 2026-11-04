@@ -28,8 +28,9 @@ A sandbox profile is a named set of rules for every OpenSandbox sandbox in a Har
 
   ```bash
   NHX_NAMESPACE=nemo-helix
-  helm list -n "$NHX_NAMESPACE"   # the NAME column is the release
+  helm list -n "$NHX_NAMESPACE"   # NAME is the release, CHART is nemo-helix-<chart version>
   RELEASE=nemo-helix
+  NHX_HELM_CHART_VERSION=<chart-version>   # e.g. 0.9.0 or 0.9.1-rc-20261026010203
   FULLNAME=$(kubectl get configmap -n "$NHX_NAMESPACE" \
     -l app.kubernetes.io/instance="$RELEASE" -o name \
     | sed -n 's|^configmap/\(.*\)-config$|\1|p')
@@ -280,7 +281,10 @@ An invalid `evals` config doesn't stop the rollout. The API starts without the e
 
 </Warning>
 
-1. Validate the rendered `evals` config. Pass the chart version and values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment (`pip install 'nemo-helix[nemo-evals-plugin]==<chart appVersion>'`): another version may accept different keys.
+1. Validate the rendered `evals` config. Pass the chart version and values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment, since another version may accept different keys:
+
+   - Stable chart `0.9.0` → `pip install 'nemo-helix[nemo-evals-plugin]==0.9.0'`
+   - RC chart `0.9.1-rc-<timestamp>` → `pip install --extra-index-url https://pypi.nvidia.com 'nemo-helix[nemo-evals-plugin]==0.9.1.dev<timestamp>'`
 
    ```bash
    helm template <release> <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml \
