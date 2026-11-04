@@ -60,8 +60,7 @@ The chart merges `platformConfig` over its own defaults:
 | --- | --- | --- |
 | `sandbox_profiles` | chart: `harbor-standard` | Map of profile name → profile. At least one is required |
 | `default_sandbox_profile` | `harbor-standard` | The profile a run gets when it names none. Must be a `sandbox_profiles` key |
-| `dispatcher_profiles` | `[default]` | Jobs execution profiles a run's task Jobs may use (`execution.dispatcher_profile`). A run that names none uses the first |
-| `dispatcher_image` | unset | The task Job image. Unset → `nhx-tasks:<platform.image_tag>`, by tag, so `image_tag` must be immutable: a release tag, never re-pushed. Set → must be pinned `@sha256:`. Set it only to test a patched image |
+| `dispatcher_image` | unset | The task Job image. If unset, defaults to `nhx-tasks:<platform.image_tag>` |
 
 ## Profile properties
 
@@ -82,8 +81,10 @@ How the profile combines with the network mode in the task's `task.toml`:
 
 - `public` (Harbor's default) → the sandbox reaches `egress_allow` only.
 - `allowlist` → the sandbox reaches the task's `allowed_hosts` plus `agent_channel`.
-  - Every `allowed_hosts` entry must also be an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`.
-  - Entries match exactly, after lowercasing and IP normalization: a profile's `*.wikipedia.org` doesn't admit a task's `en.wikipedia.org`, and `10.0.0.0/8` doesn't admit `10.1.2.3`.
+  - Every `allowed_hosts` entry must be covered by an `egress_allow` entry, otherwise the trial fails with `Tasks may narrow the trusted allowlist but not extend it`. A profile entry covers:
+    - the same host, ignoring case and a trailing `.`;
+    - for `*.wikipedia.org`: its subdomains at any depth, such as `en.wikipedia.org` or `*.en.wikipedia.org`, but not `wikipedia.org` itself;
+    - for a CIDR such as `10.0.0.0/8`: the addresses and ranges inside it, such as `10.1.2.3` or `10.1.0.0/16`.
 - `no-network` → the sandbox reaches `agent_channel` only.
 - With a model-calling agent, the task Job fails with `gateway_unreachable` before any sandbox starts when:
   - `no-network`: the profile's `agent_channel` doesn't include the API host.
