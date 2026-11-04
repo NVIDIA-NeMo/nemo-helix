@@ -242,7 +242,7 @@ def test_checks_a_stdio_mcp_server_launched_directly_from_a_bundle_url(tmp_path:
         "servers": {
             "bundled": {"transport": "stdio", "url": "mcps/server.py"},
             # Commands on PATH and absolute host executables are not bundle files and are left alone.
-            "on_path": {"transport": "stdio", "url": "email-phishing-analyzer-mcp"},
+            "on_path": {"transport": "stdio", "url": "analyzer-mcp"},
             "host": {"transport": "stdio", "url": "/opt/analyzer/bin/analyzer-mcp"},
         }
     }

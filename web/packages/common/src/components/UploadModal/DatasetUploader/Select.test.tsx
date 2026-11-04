@@ -175,7 +175,7 @@ describe('DatasetSelect', () => {
 
   it('auto-selects the first root-level accepted file when autoSelectFirstAcceptable is set', async () => {
     vi.mocked(filesListFilesetFiles).mockResolvedValueOnce({
-      data: [filesetFile('smaller_test.csv'), filesetFile('email_phishing_analyzer-eval.yml')],
+      data: [filesetFile('smaller_test.csv'), filesetFile('sample-eval.yml')],
     } as Awaited<ReturnType<typeof filesListFilesetFiles>>);
 
     let contextState: UploadModalState | undefined;
@@ -194,7 +194,7 @@ describe('DatasetSelect', () => {
       expect(contextState?.selectedFiles).toHaveLength(1);
     });
     expect((contextState?.selectedFiles[0]?.file as { path?: string }).path).toBe(
-      'email_phishing_analyzer-eval.yml'
+      'sample-eval.yml'
     );
   });
 

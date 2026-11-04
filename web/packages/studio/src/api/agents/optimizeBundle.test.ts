@@ -107,18 +107,14 @@ mcp:
     analyzer:
       transport: stdio
       url: python3
-      args: ["-u", "phishing_analyzer_mcp/server.py"]
+      args: ["-u", "mcps/server.py"]
 `;
     expect(problemsFor(text)).toEqual([
       expect.stringContaining('mcp.servers.analyzer.args[1] points at'),
     ]);
-    expect(
-      problemsFor(text, [
-        'optimize.yaml',
-        'dataset-chatonly.json',
-        'phishing_analyzer_mcp/server.py',
-      ])
-    ).toEqual([]);
+    expect(problemsFor(text, ['optimize.yaml', 'dataset-chatonly.json', 'mcps/server.py'])).toEqual(
+      []
+    );
   });
 
   it('only requires output directories to be relative', () => {

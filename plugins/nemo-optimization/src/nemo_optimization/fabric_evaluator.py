@@ -204,7 +204,7 @@ def build_agent_eval_tasks(payload: Mapping[str, Any]) -> list[AgentEvalTask]:
 def _row_instruction(row: Mapping[str, Any], row_id: str) -> str:
     """Build the agent prompt for one dataset row.
 
-    Prefer explicit instruction fields. Otherwise match the phishing-agent eval
+    Prefer explicit instruction fields. Otherwise match the common eval
     convention of ``subject\\n\\nbody`` when both are present.
     """
     for key in ("instruction", "question", "prompt"):

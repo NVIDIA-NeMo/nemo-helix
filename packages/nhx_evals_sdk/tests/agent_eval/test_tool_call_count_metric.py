@@ -37,45 +37,39 @@ def test_output_spec_declares_a_count_and_a_match() -> None:
 
 async def test_counts_the_name_exactly_as_the_harness_records_it() -> None:
     """Hermes records MCP tools as ``mcp__<server>__<tool>`` (seen live); the config names that form."""
-    recorded = "mcp__email_phishing_analyzer__email_phishing_analyzer"
+    recorded = "mcp__lookup_tool__lookup_tool"
     sample = {"evidence": _evidence(_atif(recorded, recorded))}
     scores = await _score(ToolCallCountMetric(tool_name=recorded, expected_calls=2), sample)
     assert scores == {"tool_call_count": 2, "tool_call_count_matches": True}
 
 
 async def test_a_different_tool_is_not_counted() -> None:
-    sample = {"evidence": _evidence(_atif("read_file", "email_phishing_analyzer_v2"))}
-    scores = await _score(ToolCallCountMetric(tool_name="email_phishing_analyzer"), sample)
+    sample = {"evidence": _evidence(_atif("read_file", "lookup_tool_v2"))}
+    scores = await _score(ToolCallCountMetric(tool_name="lookup_tool"), sample)
     assert scores == {"tool_call_count": 0, "tool_call_count_matches": False}
 
 
 async def test_a_shared_suffix_or_prefix_is_a_different_tool() -> None:
     """No fuzzy matching: ``backup_<tool>`` is not ``<tool>``, and a bare name does not match a prefixed record."""
-    sample = {
-        "evidence": _evidence(
-            _atif("backup_email_phishing_analyzer", "mcp__email_phishing_analyzer__email_phishing_analyzer")
-        )
-    }
-    scores = await _score(ToolCallCountMetric(tool_name="email_phishing_analyzer"), sample)
+    sample = {"evidence": _evidence(_atif("backup_lookup_tool", "mcp__lookup_tool__lookup_tool"))}
+    scores = await _score(ToolCallCountMetric(tool_name="lookup_tool"), sample)
     assert scores == {"tool_call_count": 0, "tool_call_count_matches": False}
 
 
 async def test_repeat_calls_fail_an_exactly_once_expectation() -> None:
-    sample = {"evidence": _evidence(_atif("email_phishing_analyzer", "email_phishing_analyzer"))}
-    scores = await _score(ToolCallCountMetric(tool_name="email_phishing_analyzer", expected_calls=1), sample)
+    sample = {"evidence": _evidence(_atif("lookup_tool", "lookup_tool"))}
+    scores = await _score(ToolCallCountMetric(tool_name="lookup_tool", expected_calls=1), sample)
     assert scores == {"tool_call_count": 2, "tool_call_count_matches": False}
 
 
 async def test_no_trace_scores_zero_calls() -> None:
-    scores = await _score(ToolCallCountMetric(tool_name="email_phishing_analyzer"), {})
+    scores = await _score(ToolCallCountMetric(tool_name="lookup_tool"), {})
     assert scores == {"tool_call_count": 0, "tool_call_count_matches": False}
 
 
 async def test_an_unreadable_trace_scores_zero_rather_than_raising() -> None:
     broken = _evidence({"schema_version": "ATIF-v1.7", "steps": "not-a-list"})
-    scores = await _score(
-        ToolCallCountMetric(tool_name="email_phishing_analyzer", expected_calls=0), {"evidence": broken}
-    )
+    scores = await _score(ToolCallCountMetric(tool_name="lookup_tool", expected_calls=0), {"evidence": broken})
     assert scores["tool_call_count"] == 0
     # Zero calls do satisfy an expectation of zero; the metric reports what it can read.
     assert scores["tool_call_count_matches"] is True
