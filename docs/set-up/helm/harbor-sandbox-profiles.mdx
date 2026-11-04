@@ -106,6 +106,8 @@ How the profile combines with the network mode in the task's `task.toml`:
 | `max_storage_mb` | none | Same as `max_cpus`, for disk, except that compose services aren't checked. Checked before the `max_disk_mb` clamp |
 | `enforce_disk_limit` | `true` | Sets each sandbox pod's `ephemeral-storage` limit to the task's `storage_mb`. Kubernetes evicts a pod that goes over. Turn it off only on a runtime that doesn't enforce the limit |
 | `max_disk_mb` | `131072` | While `enforce_disk_limit` is on: a `task.toml` `storage_mb` above it is lowered to it; a request above it returns a 422. `null`: each task's value is used as given |
+| `max_gpus` | `0` | Most GPUs per sandbox (`task.toml` `gpus`). `0` refuses every GPU task with `gpu_unsupported`; a task asking for more fails with `gpu_request_exceeds_policy`. Sandboxes get them as `nvidia.com/gpu`, so the cluster needs GPU nodes they can schedule on |
+| `gpu_types` | `[]` | GPU types the profile's sandboxes get, as tasks name them in `gpu_types` (for example `A100`). A task that accepts only other types fails with `unsupported_gpu_type`; a task that names none accepts any. Sandboxes aren't pinned to a type: list only types every GPU node they can land on has |
 
 - Without a ceiling, users can request any number of CPUs and any memory. Storage stays capped by `max_disk_mb` while `enforce_disk_limit` is on.
 - Ceilings are per profile. Set them on every profile users may select.
