@@ -987,6 +987,9 @@ jobs:
   policy-wasm:
     name: OPA policy build and tests
     runs-on: ubuntu-latest
+    outputs:
+      # Preserve the raw outcome: continue-on-error makes the conclusion success.
+      policy-test-outcome: ${{ steps.policy-test.outcome }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -1001,6 +1004,9 @@ jobs:
           retention-days: 1
           path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
       - name: Test OPA policy
+        id: policy-test
+        # Test failures must fail CI status, not block consumers of a valid WASM.
+        continue-on-error: true
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
         with:
@@ -2498,3 +2504,12 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
+
+      - name: Check OPA policy test outcome
+        if: always()
+        shell: bash
+        env:
+          POLICY_TEST_OUTCOME: ${{ needs.policy-wasm.outputs.policy-test-outcome }}
+        run: |
+          printf 'OPA policy tests: %s\n' "${POLICY_TEST_OUTCOME:-missing}"
+          test "${POLICY_TEST_OUTCOME}" = success
