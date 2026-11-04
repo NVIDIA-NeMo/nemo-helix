@@ -15410,6 +15410,52 @@ components:
       - name
       title: ExperimentUpdateRequest
       description: Request body for updating an Experiment.
+    F5GuardrailsRailConfig:
+      properties:
+        api_url:
+          type: string
+          title: Api Url
+          description: Base URL for the F5 Guardrails API.
+          default: https://us1.calypsoai.app
+        fail_open:
+          type: boolean
+          title: Fail Open
+          description: If True, allow content through when the F5 Guardrails API is
+            unreachable or returns an error. This changes the security posture of
+            the rail and should be reviewed as part of the guardrails config.
+          default: false
+        max_retries:
+          type: integer
+          minimum: 0.0
+          title: Max Retries
+          description: Number of additional attempts after receiving HTTP 429 from
+            the F5 Guardrails API. Total attempts equal max_retries + 1. Set to 0
+            to disable rate-limit retries.
+          default: 2
+        max_retry_after_seconds:
+          type: number
+          minimum: 0.0
+          title: Max Retry After Seconds
+          description: Upper bound (in seconds) on how long to honor a Retry-After
+            header returned by the F5 Guardrails API. Larger values are clamped to
+            this cap to prevent unbounded waits.
+          default: 30.0
+        retry_backoff_seconds:
+          type: number
+          minimum: 0.0
+          title: Retry Backoff Seconds
+          description: Base delay (in seconds) used with exponential backoff when
+            a 429 response has no usable Retry-After header. The delay for attempt
+            N (zero-indexed) is retry_backoff_seconds * 2**N, still clamped to max_retry_after_seconds.
+          default: 1.0
+      type: object
+      title: F5GuardrailsRailConfig
+      description: 'Configuration for the F5 Guardrails integration.
+
+
+        Note: The API key is intentionally not part of this config. It is a secret
+
+        and must be provided via the F5_GUARDRAILS_API_KEY environment variable.'
     FactCheckingRailConfig:
       properties:
         parameters:
@@ -15847,6 +15893,8 @@ components:
           type: string
         threshold:
           type: number
+          maximum: 1.0
+          minimum: 0.0
           title: Threshold
           description: Confidence threshold for entity detection (0.0 to 1.0).
           default: 0.5
@@ -16166,6 +16214,28 @@ components:
           type: boolean
           title: Dialog
           description: Whether the dialog rails are enabled or not.
+          default: true
+        tool_output:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+            type: array
+          title: Tool Output
+          description: Whether the tool output rails are enabled or not. If a list
+            of names is specified, then only the specified tool output rails will
+            be applied.
+          default: true
+        tool_input:
+          anyOf:
+          - type: boolean
+          - items:
+              type: string
+            type: array
+          title: Tool Input
+          description: Whether the tool input rails are enabled or not. If a list
+            of names is specified, then only the specified tool input rails will be
+            applied.
           default: true
       type: object
       title: GenerationRailsOptions
@@ -18869,6 +18939,22 @@ components:
           description: The name of the model use for the LLM call.
           default: unknown
           type: string
+        request_id:
+          title: Request Id
+          description: The unique identifier assigned to the request by the downstream
+            model inference service.
+          type: string
+        llm_provider_name:
+          title: Llm Provider Name
+          description: The provider of the model used for the LLM call, e.g. 'openai',
+            'nvidia'.
+          default: unknown
+          type: string
+        from_cache:
+          type: boolean
+          title: From Cache
+          description: Whether this response was retrieved from cache.
+          default: false
       type: object
       title: LLMCallInfo
     LabelAnnotation:
@@ -21902,6 +21988,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/ClavataRailConfig'
           description: Configuration for Clavata.
+        f5:
+          allOf:
+          - $ref: '#/components/schemas/F5GuardrailsRailConfig'
+          description: Configuration for F5 Guardrails.
         crowdstrike_aidr:
           allOf:
           - $ref: '#/components/schemas/CrowdStrikeAIDRRailConfig'

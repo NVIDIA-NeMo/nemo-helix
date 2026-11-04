@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { jsonlLines, parseJsonl } from '@nemo/common/src/utils/parseRecords';
+
 /** The Intake ingest endpoints a picked file can be sent to. */
 export type TraceFormat = 'atif' | 'spans' | 'chat-completions' | 'otlp-protobuf';
 
@@ -45,18 +47,12 @@ const looksSpan = (value: unknown): boolean =>
 
 /** Reads a JSONL body as one array, or null when any line is not a JSON value of its own. */
 const parseJsonLines = (text: string): unknown[] | null => {
-  const lines = text.split('\n').filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return null;
-
-  const records: unknown[] = [];
-  for (const line of lines) {
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      return null;
-    }
+  if (jsonlLines(text).length < 2) return null;
+  try {
+    return parseJsonl(text);
+  } catch {
+    return null;
   }
-  return records;
 };
 
 const looksChatCompletion = (value: Record<string, unknown>): boolean =>

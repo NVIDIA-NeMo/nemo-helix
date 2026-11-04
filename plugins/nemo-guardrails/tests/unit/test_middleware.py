@@ -1928,6 +1928,41 @@ class TestStreamingLeaseLifecycle:
         assert observed_active == [True, True]
         assert active is False
 
+    async def test_streaming_runs_on_iorails_without_leasing_llmrails(self, middleware: GuardrailsMiddleware) -> None:
+        """A supported config guards the stream on IORails; the LLMRails lease path is never entered."""
+        observed: list[Any] = []
+
+        def _on_iorails(runtime: Any, stable: Any, *_args: Any, **_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+            async def _inner() -> AsyncIterator[dict[str, Any]]:
+                observed.append((runtime, stable))
+                yield {"choices": [{"delta": {"content": "checked on iorails"}}]}
+
+            return _inner()
+
+        runtime, stable = MagicMock(close=AsyncMock()), MagicMock()
+        middleware._iorails_runtime = runtime
+        lease = AsyncMock(side_effect=AssertionError("LLMRails lease must not be used"))
+
+        with patch.object(middleware, "_stable_config_for_iorails", return_value=stable):
+            with patch.object(middleware, "_prepare_lease", new=lease):
+                with patch(
+                    "nemo_guardrails_plugin.middleware.handle_streaming_output_check_on_iorails", new=_on_iorails
+                ):
+                    result = await _process_response(
+                        middleware,
+                        self._stream_one_chunk(),
+                        self._streaming_request(),
+                        {},
+                        {},
+                        _entity_source(output_flows=["self check output"]),
+                    )
+                    assert is_streaming_response_result(result)
+                    chunks = [chunk async for chunk in result]
+
+        assert chunks == [{"choices": [{"delta": {"content": "checked on iorails"}}]}]
+        assert observed == [(runtime, stable)]
+        lease.assert_not_awaited()
+
     async def test_streaming_uses_request_scoped_client_headers(self, middleware: GuardrailsMiddleware) -> None:
         request_body = self._streaming_request()
         request_headers = {

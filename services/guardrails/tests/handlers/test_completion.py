@@ -180,7 +180,7 @@ async def test_handle_streaming_with_exception(handler):
 
 
 @pytest.mark.asyncio
-@patch("nhx.guardrails.app.handlers.completion.LLMRails")
+@patch("nhx.guardrails.app.handlers.completion.create_rails_engine")
 @patch("nhx.guardrails.app.handlers.completion.set_main_model_into_context")
 async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context,
@@ -217,3 +217,65 @@ async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context.assert_called_once()
     called_model = mock_set_main_model_into_context.call_args[0][0]
     assert called_model.type == "main"
+
+
+def _inline_config_handler(mock_request, *, stream: bool = False) -> CompletionRequestHandler:
+    request_body = GuardrailChatCompletionRequest(
+        model="default/my-model",
+        messages=[{"role": "user", "content": "test"}],
+        stream=stream,
+        guardrails={"config": {"models": [{"type": "main", "engine": "nim", "model": "default/my-model"}]}},
+    )
+    return CompletionRequestHandler(
+        rails_service=MagicMock(),
+        request=mock_request,
+        request_body=request_body,
+        normal_response_model=GuardrailChatCompletionResponse,
+        streaming_response_model=GuardrailChatCompletionStreamResponse,
+        workspace="test-workspace",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+@patch("nhx.guardrails.app.handlers.completion.retire_rails_engine")
+@patch("nhx.guardrails.app.handlers.completion.create_rails_engine")
+async def test_inline_config_engine_is_retired_after_a_non_streaming_request(
+    mock_create_engine, mock_retire, fails, mock_request
+):
+    """Each inline-config request builds its own engine; leaving it running would leak its workers."""
+    handler = _inline_config_handler(mock_request)
+    handler._handle_non_streaming = AsyncMock(side_effect=RuntimeError("boom")) if fails else AsyncMock()
+    handler._post_process_response = MagicMock()
+
+    if fails:
+        with pytest.raises(RuntimeError):
+            await handler.handle_request()
+    else:
+        await handler.handle_request()
+
+    mock_retire.assert_called_once_with(mock_create_engine.return_value)
+
+
+@pytest.mark.asyncio
+@patch("nhx.guardrails.app.handlers.completion.retire_rails_engine")
+@patch("nhx.guardrails.app.handlers.completion.create_rails_engine")
+async def test_inline_config_engine_is_retired_only_after_the_stream_ends(
+    mock_create_engine, mock_retire, mock_request
+):
+    """The stream keeps using the engine after ``handle_request`` returns, so it is retired when the stream ends."""
+
+    async def tokens():
+        yield "hello"
+
+    handler = _inline_config_handler(mock_request, stream=True)
+    handler._stream_async = lambda **_: tokens()
+
+    response = await handler.handle_request()
+
+    assert isinstance(response, StreamingResponse)
+    mock_retire.assert_not_called()
+
+    _ = [chunk async for chunk in response.body_iterator]
+
+    mock_retire.assert_called_once_with(mock_create_engine.return_value)

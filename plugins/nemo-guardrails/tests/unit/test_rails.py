@@ -24,6 +24,7 @@ from nemo_guardrails_plugin.llmrails_cache import (
     stabilize,
 )
 from nemo_guardrails_plugin.rails import (
+    IORailsGenerationResponse,
     build_generate_async_options,
     build_guardrails_data,
     build_main_llm,
@@ -323,6 +324,24 @@ class TestBuildGuardrailsData:
 
         assert result.log.internal_events == expected_internal_events
         assert result.log.colang_history == expected_colang_history
+
+    def test_iorails_response_leaves_requested_log_fields_unset(self) -> None:
+        """IORails reports only a verdict, so the fields are absent rather than empty or zero."""
+        iorails_response = IORailsGenerationResponse(
+            response=[{"role": "assistant", "content": "blocked"}],
+            log=GenerationLog(activated_rails=[_rail(stop=True)]),
+        )
+
+        result = build_guardrails_data(
+            config_id="ws/my-config",
+            user_log_options=GenerationLogOptionsParam(
+                activated_rails=True, llm_calls=True, internal_events=True, stats=True, colang_history=True
+            ),
+            input_generation_response=iorails_response,
+        )
+
+        assert result.log is not None
+        assert result.log.model_dump(exclude_none=True) == {}
 
     def test_input_only_generation_response_returns_guardrails_data_with_log(self) -> None:
         result = build_guardrails_data(

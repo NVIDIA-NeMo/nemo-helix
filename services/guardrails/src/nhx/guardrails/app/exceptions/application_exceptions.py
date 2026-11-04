@@ -3,7 +3,7 @@
 
 import logging
 
-from nemoguardrails.actions.llm.utils import LLMCallException
+from nemoguardrails.exceptions import LLMCallException
 
 logger = logging.getLogger(__name__)
 

@@ -90,6 +90,24 @@ For paths that involve both checks, list **two** `MiddlewareCall`s with the same
 
 Output rails require **`n`** not greater than **`1`** in the completion request when output flows are configured. Streaming with output rails requires `rails.output.streaming.enabled=true` when a streaming subsection is supplied (otherwise the plugin rejects the path with **`400`**).
 
+## IORails engine (opt-in)
+
+By default every guardrail check runs on the LLMRails engine. IORails is a lighter engine that calls rail
+models directly over HTTP. Set `NEMO_GUARDRAILS_IORAILS_ENGINE=true` (also `1` or `yes`)
+on the platform process to run supported checks on IORails, including streaming output rails in the plugin. This
+applies to both this plugin and the legacy Guardrails service.
+
+IORails is used only when it can serve the request; everything else stays on LLMRails, so enabling the
+variable never breaks a config that worked before. A request stays on LLMRails when:
+
+- the config uses rails IORails does not support (for example dialog rails or Colang 2.x flows), or
+- (service only) a model uses the text-completions engine.
+
+The plugin and the service each log a warning saying why a config stayed on LLMRails. To confirm IORails is on, look for `IORails engine enabled`
+at plugin startup and `Built IORails engine for config ...` the first time a config runs on it.
+
+IORails reports only a verdict, so the plugin ignores the log options a request sets (`activated_rails`, `llm_calls`, `internal_events`, `stats`, `colang_history`): the request still runs on IORails, those fields come back unset, and the plugin logs a warning once per option.
+
 ## Running tests
 
 ```bash

@@ -63,7 +63,7 @@ export const toJsonl = (rows: readonly unknown[]): string =>
   rows.map((row) => JSON.stringify(row, jsonReplacer)).join('\n');
 
 const SERIALIZERS: Record<DownloadFormat, (payload: DownloadPayload) => string> = {
-  json: (payload) => JSON.stringify(payload.json, null, 2),
+  json: (payload) => JSON.stringify(payload.json, jsonReplacer, 2),
   jsonl: (payload) => toJsonl(payload.jsonl),
   csv: (payload) => toCsv(payload.csv),
 };

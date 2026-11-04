@@ -30,11 +30,7 @@ vi.mock('@nemo/sdk/generated/fetchers/platform', () => ({
 }));
 
 vi.mock('hyparquet', () => ({
-  parquetRead: vi.fn(
-    async (options: { onComplete?: (rows: Record<string, unknown>[]) => void }) => {
-      options.onComplete?.([{ id: 9007199254740993n, label: 'large-int' }]);
-    }
-  ),
+  parquetReadObjects: vi.fn(async () => [{ id: 9007199254740993n, label: 'large-int' }]),
 }));
 
 describe('useDatasetFileContent gate', () => {

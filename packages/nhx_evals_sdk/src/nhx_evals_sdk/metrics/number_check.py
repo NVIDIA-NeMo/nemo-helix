@@ -5,8 +5,16 @@
 
 import math
 import re
+import sys
+from fractions import Fraction
 
-from nhx_evals_sdk.metrics.protocol import MetricInput, MetricOutput, MetricOutputSpec, MetricResult
+from nhx_evals_sdk.metrics.protocol import (
+    MetricDiagnostic,
+    MetricInput,
+    MetricOutput,
+    MetricOutputSpec,
+    MetricResult,
+)
 from nhx_evals_sdk.metrics.template_rendering import (
     TemplateSample,
     build_template_context,
@@ -14,23 +22,102 @@ from nhx_evals_sdk.metrics.template_rendering import (
     template_metric_repr,
 )
 from nhx_evals_sdk.values.metrics import NumberCheck, NumberCheckOperation
+from nhx_evals_sdk.values.protocol import OUTPUT_DETAIL, REASON_DETAIL
 
 __all__ = ["NumberCheckMetric", "NumberCheckOperation"]
 
+_OUT_OF_FLOAT_RANGE_REASON = "operand_out_of_float_range"
+
 
 def _parse_number_answer(answer: str) -> int | float:
-    """Parse the last numeric value from text; return ``NaN`` when parsing fails."""
-    numbers = re.findall(r"[+-]?[\.\d]*\d+", answer)
-    if not numbers:
+    """Parse the last numeric value from text; return ``NaN`` when parsing fails.
+
+    A last number written with a comma between digits (``1,000``) or in scientific notation (``6.02e23``) also
+    returns ``NaN``, since the pattern would otherwise read only its trailing ``000`` or ``23``.
+
+    An integer with more digits than ``sys.get_int_max_str_digits()`` allows becomes signed infinity rather
+    than ``NaN``, so it still compares correctly against in-range values instead of marking the row as
+    unparseable. ``int()`` counts leading zeros toward that limit, so they are stripped before the length
+    check to keep a zero-padded value exact. The pattern matches digits from every script, so the zeros
+    stripped are all matched characters whose value is 0, not only ASCII ``"0"``.
+    """
+    matches = list(re.finditer(r"[+-]?[\.\d]*\d+", answer))
+    if not matches:
         return float("nan")
 
-    last_number = numbers[-1]
+    last_match = matches[-1]
+    if re.fullmatch(r"\d,|[\d.][eE]", answer[max(0, last_match.start() - 2) : last_match.start()]):
+        return float("nan")
+
+    last_number = last_match.group()
     decimal = last_number.count(".")
     if decimal == 1:
         return float(last_number)
     if decimal == 0:
-        return int(last_number)
+        try:
+            return int(last_number)
+        except ValueError:
+            sign = last_number[0] if last_number[0] in "+-" else ""
+            digits = last_number[len(sign) :]
+            zero_chars = "".join(c for c in set(digits) if int(c) == 0)
+            unpadded_digits = digits.lstrip(zero_chars) or "0"
+            if len(unpadded_digits) <= sys.get_int_max_str_digits():
+                return int(sign + unpadded_digits)
+            return -math.inf if sign == "-" else math.inf
     return float("nan")
+
+
+def _parse_operand(value: object) -> int | float:
+    """Parse a rendered template value as a number.
+
+    A bare template can render a native integer that ``str()`` refuses under the same digit limit as
+    ``int()``; such a value becomes signed infinity.
+    """
+    try:
+        text = str(value)
+    except ValueError:
+        if isinstance(value, int):
+            return math.inf if value > 0 else -math.inf
+        raise
+    return _parse_number_answer(text)
+
+
+def _absolute_difference(left: int | float, right: int | float) -> int | float | Fraction:
+    """Return ``abs(left - right)``, including when an integer operand is too large to convert to float.
+
+    Subtracting a float and such an integer raises ``OverflowError``, so the difference is computed with
+    ``Fraction`` instead. ``Fraction`` cannot represent infinity, and ``math.isinf`` raises on such an integer.
+    """
+    try:
+        return abs(left - right)
+    except OverflowError:
+        if any(isinstance(value, float) and math.isinf(value) for value in (left, right)):
+            return math.inf
+        return abs(Fraction(left) - Fraction(right))
+
+
+def _out_of_range_diagnostics(output_name: str, left: int | float, right: int | float) -> list[MetricDiagnostic]:
+    """Describe each operand beyond float range without including its digits."""
+    diagnostics: list[MetricDiagnostic] = []
+    for side, value in (("left", left), ("right", right)):
+        if isinstance(value, float) and math.isinf(value):
+            representation, compared_as = "infinity", "signed infinity"
+        elif isinstance(value, int) and abs(value) > sys.float_info.max:
+            representation, compared_as = "exact_integer", "an exact integer"
+        else:
+            continue
+        diagnostics.append(
+            MetricDiagnostic(
+                message=f"The {side} operand is outside float range and was compared as {compared_as}.",
+                details={
+                    OUTPUT_DETAIL: output_name,
+                    REASON_DETAIL: _OUT_OF_FLOAT_RANGE_REASON,
+                    "operand": side,
+                    "representation": representation,
+                },
+            )
+        )
+    return diagnostics
 
 
 class NumberCheckMetric(NumberCheck):
@@ -63,14 +150,19 @@ class NumberCheckMetric(NumberCheck):
             metric_repr=metric_repr,
         )
 
-        left_number = _parse_number_answer(str(left_value))
-        right_number = _parse_number_answer(str(right_value))
+        left_number = _parse_operand(left_value)
+        right_number = _parse_operand(right_value)
+        diagnostics = _out_of_range_diagnostics(self.type.value, left_number, right_number)
         # Preserve the legacy behavior: if either side fails to parse as a
         # number, return NaN instead of raising.
-        if math.isnan(left_number):
-            return MetricResult(outputs=[MetricOutput(name=self.type.value, value=left_number)])
-        if math.isnan(right_number):
-            return MetricResult(outputs=[MetricOutput(name=self.type.value, value=right_number)])
+        if isinstance(left_number, float) and math.isnan(left_number):
+            return MetricResult(
+                outputs=[MetricOutput(name=self.type.value, value=left_number)], diagnostics=diagnostics
+            )
+        if isinstance(right_number, float) and math.isnan(right_number):
+            return MetricResult(
+                outputs=[MetricOutput(name=self.type.value, value=right_number)], diagnostics=diagnostics
+            )
 
         # Perform the requested numeric comparison on the parsed operands.
         if self.operation in ["equals", "=="]:
@@ -88,8 +180,10 @@ class NumberCheckMetric(NumberCheck):
         elif self.operation == "absolute difference":
             if self.epsilon is None:
                 raise ValueError("epsilon value is required with operation absolute difference")
-            score = abs(left_number - right_number) <= self.epsilon
+            score = _absolute_difference(left_number, right_number) <= self.epsilon
         else:
             raise ValueError(f"Unsupported operation: {self.operation}")
 
-        return MetricResult(outputs=[MetricOutput(name=self.type.value, value=1.0 if score else 0.0)])
+        return MetricResult(
+            outputs=[MetricOutput(name=self.type.value, value=1.0 if score else 0.0)], diagnostics=diagnostics
+        )
