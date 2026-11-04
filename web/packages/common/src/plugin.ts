@@ -76,6 +76,8 @@ export {
   getSortParamWithWhitelist,
 } from '@nemo/common/src/utils/query';
 export { triggerDownload } from '@nemo/common/src/utils/file';
+export { MIME_TYPES, toCsv, toCsvCell, toJsonl } from '@nemo/common/src/utils/download';
+export type { CsvOptions, CsvRow, DownloadFormat } from '@nemo/common/src/utils/download';
 
 export { ENTITY_NAME_HELP, entityNameSchema } from '@nemo/common/src/utils/entityName';
 

@@ -23,6 +23,19 @@ describe('toCsv', () => {
   it('returns an empty string for no rows', () => {
     expect(toCsv([])).toBe('');
   });
+
+  it('leaves negative numbers alone but guards strings that look like formulas', () => {
+    expect(toCsv([{ loss: -0.42, note: '-cmd' }])).toBe("loss,note\n-0.42,'-cmd");
+  });
+
+  it('writes formula-like strings unchanged when formulaSafe is off', () => {
+    expect(toCsv([{ note: '=A1' }], { formulaSafe: false })).toBe('note\n=A1');
+  });
+
+  it('uses the given columns, keeping the header when there are no rows', () => {
+    expect(toCsv([], { columns: ['a', 'b'] })).toBe('a,b');
+    expect(toCsv([{ b: 1, c: 2 }], { columns: ['a', 'b'] })).toBe('a,b\n,1');
+  });
 });
 
 describe('toFileName', () => {
@@ -34,6 +47,10 @@ describe('toFileName', () => {
 describe('toJsonl', () => {
   it('writes one compact JSON record per line', () => {
     expect(toJsonl([{ a: 1, b: { c: 'x' } }, { a: 2 }])).toBe('{"a":1,"b":{"c":"x"}}\n{"a":2}');
+  });
+
+  it('writes BigInt values as strings instead of throwing', () => {
+    expect(toJsonl([{ id: BigInt(7) }])).toBe('{"id":"7"}');
   });
 });
 
