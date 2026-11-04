@@ -231,7 +231,7 @@ platformConfig:
 ```
 
 - The API host in `egress_allow` and `agent_channel` keeps model-calling agents reaching the gateway.
-- `*.wikipedia.org` opens every Wikipedia host to `public` tasks. A Harbor task in `allowlist` mode lists the Wikipedia hosts it needs in its own `allowed_hosts`, such as `en.wikipedia.org`.
+- `*.wikipedia.org` opens Wikipedia's subdomains, such as `en.wikipedia.org`, to `public` tasks. Add `wikipedia.org` too if tasks need the bare domain. A Harbor task in `allowlist` mode lists the Wikipedia hosts it needs in its own `allowed_hosts`, such as `en.wikipedia.org`.
 
 ### Set ceilings on a profile
 
