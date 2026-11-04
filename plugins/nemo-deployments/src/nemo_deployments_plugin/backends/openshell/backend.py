@@ -27,9 +27,12 @@ import hashlib
 import logging
 import posixpath
 import shlex
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, cast
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
+from typing import Any, Literal, Protocol, cast
+from urllib.parse import urlsplit
 
+from nemo_deployments_plugin.auth_proxy import auth_proxy_port
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
@@ -61,18 +64,34 @@ from nemo_deployments_plugin.backends.workload_identity import (
     workload_identity_requested,
 )
 from nemo_deployments_plugin.constants import MANAGED_BY_LABEL
-from nemo_deployments_plugin.entities import ConfigFile, Container, DeploymentConfig, OpenShellDeploymentConfig
+from nemo_deployments_plugin.entities import (
+    ConfigFile,
+    Container,
+    Deployment,
+    DeploymentConfig,
+    OpenShellDeploymentConfig,
+)
 from nemo_deployments_plugin.secrets import SecretResolutionError, resolve_deployment_config_secrets
 from nemo_deployments_plugin.types import DeploymentStatus, Endpoint
-from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.auth import AuthContext, platform_auth_enabled
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding, GatewayWorkload
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
-if TYPE_CHECKING:
+_OPENSHELL_IMPORT_ERROR: ImportError | None = None
+try:
     import grpc
-    from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
-    from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
-    from openshell._proto import openshell_pb2_grpc as pb_grpc  # ty: ignore[unresolved-import]
+    from google.protobuf.message import Message
+    from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
+    from openshell._proto import datamodel_pb2 as dm
+    from openshell._proto import openshell_pb2 as pb
+    from openshell._proto import openshell_pb2_grpc as pb_grpc
+
+    from .provisioning import DeploymentProviderProvisioner
+except ImportError as exc:
+    _OPENSHELL_IMPORT_ERROR = exc
 
 logger = logging.getLogger(__name__)
 
@@ -160,25 +179,16 @@ _CURL_ABS = "/usr/bin/curl"
 _PHASE_TO_STATUS: dict[int, DeploymentStatus] | None = None
 
 
-def _ensure_openshell() -> None:
-    """Import grpc + the openshell proto stubs, binding them as module globals.
+class UnaryRpc[Request: Message, Response: Message](Protocol):
+    """The unary portion of a generated gRPC callable, preserving message types."""
 
-    Deferred so importing this backend (and the registry that eagerly imports it)
-    does not require the optional ``openshell`` package, matching the docker/k8s
-    backends. Only ``TYPE_CHECKING`` imports the names, so the type checker sees pure
-    modules (never ``None``); the runtime binding lives in ``globals()``. Constructing
-    the backend calls this and raises a clear error when the package is absent.
-    """
-    if globals().get("pb") is not None:
-        return
-    try:
-        import grpc
-        from openshell._proto import datamodel_pb2 as dm  # ty: ignore[unresolved-import]
-        from openshell._proto import openshell_pb2 as pb  # ty: ignore[unresolved-import]
-        from openshell._proto import openshell_pb2_grpc as pb_grpc  # ty: ignore[unresolved-import]
-    except ImportError as exc:
-        raise MissingBackendDependencyError(_OPENSHELL_INSTALL_HINT) from exc
-    globals().update(grpc=grpc, dm=dm, pb=pb, pb_grpc=pb_grpc)
+    def __call__(self, request: Request, *, timeout: float) -> Response: ...
+
+
+def _ensure_openshell() -> None:
+    """Report missing optional dependencies when this backend is selected."""
+    if _OPENSHELL_IMPORT_ERROR is not None:
+        raise MissingBackendDependencyError(_OPENSHELL_INSTALL_HINT) from _OPENSHELL_IMPORT_ERROR
 
 
 def _phase_to_status(phase: int) -> DeploymentStatus:
@@ -222,6 +232,8 @@ def _serve_launch_script(serve_command: list[str], workdir: str) -> str:
 
 class OpenShellDeploymentBackend(DeploymentBackend):
     """Manage deployments as OpenShell sandboxes via the gateway gRPC API."""
+
+    supports_gateway_providers = True
 
     def init(self) -> None:
         _ensure_openshell()
@@ -305,20 +317,22 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         target = self._executor_config.grpc_target()
         if self._executor_config.use_insecure():
             return grpc.insecure_channel(target)
+        return grpc.secure_channel(target, self._channel_credentials())
+
+    def _channel_credentials(self) -> grpc.ChannelCredentials:
         tls = self._executor_config.tls
         ca = client_cert = client_key = None
         if tls is not None:
             ca = _read_bytes(tls.ca_cert_path)
             client_cert = _read_bytes(tls.client_cert_path)
             client_key = _read_bytes(tls.client_key_path)
-        credentials = grpc.ssl_channel_credentials(
+        return grpc.ssl_channel_credentials(
             root_certificates=ca,
             private_key=client_key,
             certificate_chain=client_cert,
         )
-        return grpc.secure_channel(target, credentials)
 
-    def _workspace_scope(self) -> Any:
+    def _workspace_scope(self) -> dm.WorkspaceSelector:
         return dm.WorkspaceSelector(workspace=self._executor_config.workspace)
 
     def shutdown(self) -> None:
@@ -345,6 +359,18 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         existing = await self._try_get_sandbox(sandbox_name)
         if existing is not None:
             if _sandbox_matches(existing, workspace, name):
+                if self._executor_config.gateway_credentials is not None:
+                    config = await self._load_deployment_config(workspace, config_name)
+                    if config.gateway_providers:
+                        deployment = await self._entities.get(Deployment, name, workspace=workspace)
+                        if (
+                            existing.metadata.labels.get("nemo-helix/workload-id") != deployment.id
+                            or existing.metadata.labels.get(CONFIG_NAME_LABEL) != config_name
+                        ):
+                            return BackendStatusUpdate(
+                                status="FAILED",
+                                status_message="Existing sandbox belongs to another provider workload generation.",
+                            )
                 # Drift recovery lands here: restart a stopped sandbox in place, keeping its state.
                 if existing.status.phase == pb.SANDBOX_PHASE_STOPPED:
                     return await self._start_stopped_sandbox(sandbox_name)
@@ -356,6 +382,27 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
         try:
             config = await self._load_deployment_config(workspace, config_name)
+            if any(var.secret_ref is not None for container in config.containers for var in container.env):
+                raise ValueError(
+                    "OpenShell secrets require gateway provider bindings; process-env injection is not supported."
+                )
+            provider_bindings = config.gateway_providers
+            if provider_bindings:
+                if self._executor_config.gateway_credentials is None:
+                    raise ValueError("This OpenShell executor has no gateway_credentials configuration.")
+                if platform_auth_enabled() and config.auth_proxy_sidecar and not config.auth_proxy_sidecar_on_behalf_of:
+                    raise ValueError("Provider deployments require a delegated creator identity for platform access.")
+                validate_provider_environment(
+                    provider_bindings,
+                    workspace=workspace,
+                    secret_env={
+                        var.name: f"{var.secret_ref.workspace}/{var.secret_ref.name}"
+                        for container in config.containers
+                        for var in container.env
+                        if var.secret_ref is not None
+                    },
+                    env_names={var.name for container in config.containers for var in container.env},
+                )
             config = await resolve_deployment_config_secrets(self._nemo_client, config)
         except NemoEntityNotFoundError:
             return BackendStatusUpdate(
@@ -394,6 +441,12 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 ),
             )
 
+        if provider_bindings and config.auth_proxy_sidecar:
+            try:
+                self._platform_proxy_upstream(config)
+            except ValueError as exc:
+                return BackendStatusUpdate(status="FAILED", status_message=str(exc))
+
         env: dict[str, str] = {}
         unresolved: list[str] = []
         for var in container.env:
@@ -414,7 +467,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             env["PATH"] = self._executor_config.serve_path
         if "VIRTUAL_ENV" not in env and self._executor_config.serve_virtual_env:
             env["VIRTUAL_ENV"] = self._executor_config.serve_virtual_env
-        all_labels = {
+        all_labels: dict[str, str] = {
             **labels,
             **config.labels,
             **deployment_identity_labels(
@@ -427,11 +480,51 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         }
 
         policy = self._build_deployment_policy(openshell_cfg.policy_path)
+        provider_names: list[str] = []
+        if provider_bindings:
+            egress = self._executor_config.platform_egress
+            if egress is None:
+                return BackendStatusUpdate(
+                    status="FAILED", status_message="Provider deployments require platform egress."
+                )
+            try:
+                deployment = await self._entities.get(Deployment, name, workspace=workspace)
+                all_labels["nemo-helix/workload-id"] = deployment.id
+                if platform_auth_enabled() and auth_context is None:
+                    raise ValueError("Provider deployments require creator auth context.")
+                policy = restricted_platform_policy(
+                    policy,
+                    host=egress.host,
+                    port=egress.port,
+                    workspace=workspace,
+                    binaries=list(egress.binaries or DEFAULT_EGRESS_BINARIES),
+                )
+                async with get_async_nemo_client(
+                    as_service="deployments",
+                    internal=True,
+                    on_behalf_of=auth_context.to_principal() if platform_auth_enabled() and auth_context else None,
+                ) as requester:
+                    async with self._provider_provisioner() as provisioner:
+                        provider_names = await provisioner.prepare(
+                            provider_bindings,
+                            workload_workspace=workspace,
+                            workload_id=sandbox_name,
+                            workload=GatewayWorkload(
+                                kind="deployment", workspace=workspace, name=name, id=deployment.id
+                            ),
+                            auth_context=auth_context,
+                            auth_enabled=platform_auth_enabled(),
+                            secrets_client=AsyncSecretsClient.from_client(requester),
+                            platform_host=egress.host,
+                        )
+            except Exception:
+                logger.warning("Provider provisioning failed for deployment %s/%s", workspace, name)
+                return BackendStatusUpdate(status="FAILED", status_message="Gateway provider provisioning failed.")
         # Identity labels go on the sandbox record only. The driver copies template labels
         # onto the workload container/pod, where the docker and k8s backends' orphan sweeps
         # would claim them as their own deployments and delete them.
         template = pb.SandboxTemplate(image=container.image, environment=env)
-        spec = pb.SandboxSpec(template=template, environment=env, policy=policy)
+        spec = pb.SandboxSpec(template=template, environment=env, policy=policy, providers=provider_names)
         request = pb.CreateSandboxRequest(
             workspace_scope=self._workspace_scope(), spec=spec, name=sandbox_name, labels=all_labels
         )
@@ -439,9 +532,11 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         try:
             await self._unary(self._stub.CreateSandbox, request)
         except grpc.RpcError as exc:
+            # The request may have succeeded remotely; preserve cleanup intent.
             return BackendStatusUpdate(
-                status="FAILED",
+                status="DELETING" if provider_names else "FAILED",
                 status_message=f"CreateSandbox failed: {_rpc_detail(exc)}",
+                error_details={"reason": "provider_cleanup_pending"} if provider_names else None,
             )
 
         # Return as soon as the sandbox is created. Provisioning (wait for READY, launch
@@ -452,10 +547,41 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             status_message=f"Sandbox {sandbox_name} created; awaiting READY",
         )
 
+    async def renew_gateway_credentials(
+        self,
+        *,
+        workload: GatewayWorkload,
+        bindings: dict[str, GatewayProviderBinding],
+        auth_context: AuthContext | None,
+    ) -> None:
+        config = self._executor_config.gateway_credentials
+        if config is None or config.renewal_mode != "helix":
+            return
+        egress = self._executor_config.platform_egress
+        if (platform_auth_enabled() and auth_context is None) or egress is None:
+            raise ValueError("Incomplete provider workload context.")
+        async with get_async_nemo_client(
+            as_service="deployments",
+            internal=True,
+            on_behalf_of=auth_context.to_principal() if platform_auth_enabled() and auth_context else None,
+        ) as requester:
+            async with self._provider_provisioner() as provisioner:
+                await provisioner.prepare(
+                    bindings,
+                    workload_workspace=workload.workspace,
+                    workload_id=_sandbox_name(workload.workspace, workload.name),
+                    workload=workload,
+                    auth_context=auth_context,
+                    auth_enabled=platform_auth_enabled(),
+                    secrets_client=AsyncSecretsClient.from_client(requester),
+                    platform_host=egress.host,
+                    renew=True,
+                )
+
     async def read_status(self, *, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)
         try:
-            response = await self._unary(
+            response: pb.SandboxResponse = await self._unary(
                 self._stub.GetSandbox, pb.GetSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name)
             )
         except grpc.RpcError as exc:
@@ -492,6 +618,15 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
     async def delete_deployment(self, workspace: str, name: str) -> BackendStatusUpdate:
         sandbox_name = _sandbox_name(workspace, name)
+        needs_provider_cleanup = self._executor_config.gateway_credentials is not None
+        if needs_provider_cleanup:
+            try:
+                deployment = await self._entities.get(Deployment, name, workspace=workspace)
+                config = await self._load_deployment_config(workspace, deployment.deployment_config)
+            except NemoEntityNotFoundError:
+                pass
+            else:
+                needs_provider_cleanup = bool(config.gateway_providers)
         try:
             await self._unary(
                 self._stub.DeleteSandbox,
@@ -499,17 +634,51 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             )
         except grpc.RpcError as exc:
             if _rpc_code(exc) == grpc.StatusCode.NOT_FOUND:
+                pass
+            else:
                 return BackendStatusUpdate(
-                    status="SUCCEEDED",
-                    status_message=f"Sandbox {sandbox_name} already gone",
+                    status="DELETING" if needs_provider_cleanup else "FAILED",
+                    status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}",
+                    error_details={"reason": "provider_cleanup_pending"} if needs_provider_cleanup else None,
                 )
-            return BackendStatusUpdate(
-                status="FAILED",
-                status_message=f"DeleteSandbox failed: {_rpc_detail(exc)}",
-            )
+        if needs_provider_cleanup:
+            try:
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
+            except Exception:
+                return BackendStatusUpdate(
+                    status="DELETING",
+                    status_message="Sandbox deleted; retrying gateway provider cleanup.",
+                    error_details={"reason": "provider_cleanup_pending"},
+                )
         return BackendStatusUpdate(status="SUCCEEDED", status_message=f"Sandbox {sandbox_name} deleted")
 
+    @asynccontextmanager
+    async def _provider_provisioner(self) -> AsyncGenerator[DeploymentProviderProvisioner]:
+        config = self._executor_config.gateway_credentials
+        if config is None:
+            raise ValueError("Gateway credentials are not configured.")
+        target = self._executor_config.grpc_target()
+        channel = (
+            grpc.aio.insecure_channel(target)
+            if self._executor_config.use_insecure()
+            else grpc.aio.secure_channel(target, self._channel_credentials())
+        )
+        async with channel:
+            yield DeploymentProviderProvisioner(
+                config,
+                self._executor_config.workspace,
+                channel,
+                timeout=self._executor_config.request_timeout_seconds,
+            )
+
     async def list_managed_deployment_names(self) -> list[str]:
+        if self._executor_config.gateway_credentials is not None:
+            try:
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup_unused()
+            except Exception:
+                logger.warning("Gateway provider cleanup will be retried.")
         try:
             sandboxes = await self._list_all(
                 self._stub.ListSandboxes,
@@ -549,7 +718,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             if exit_code == 0:
                 lines = output.splitlines()
                 return LogResult(lines=lines, truncated=len(lines) >= tail)
-            response = await self._unary(
+            response: pb.GetSandboxLogsResponse = await self._unary(
                 self._stub.GetSandboxLogs,
                 pb.GetSandboxLogsRequest(workspace_scope=self._workspace_scope(), sandbox=sandbox_name, lines=tail),
             )
@@ -600,10 +769,14 @@ class OpenShellDeploymentBackend(DeploymentBackend):
 
     # --- helpers ---
 
-    async def _unary(self, method: Any, request: Any) -> Any:
+    async def _unary[Request: Message, Response: Message](
+        self, method: UnaryRpc[Request, Response], request: Request
+    ) -> Response:
         return await asyncio.to_thread(method, request, timeout=self._executor_config.request_timeout_seconds)
 
-    async def _advance_provisioning(self, sandbox: Any, sandbox_name: str, workspace: str) -> BackendStatusUpdate:
+    async def _advance_provisioning(
+        self, sandbox: pb.Sandbox, sandbox_name: str, workspace: str
+    ) -> BackendStatusUpdate:
         """Advance a READY sandbox toward a serving deployment, idempotently.
 
         Called from read_status on each poll once the sandbox is READY: launch the
@@ -639,12 +812,37 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         if not await self._marker_exists(sandbox_name, _LAUNCH_MARKER):
             failure = await self._deliver_config_files(sandbox_name, config.config_files)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name)
-                return failure
-            failure = await self._launch_serve(sandbox_name, list(container.command) + list(container.args))
+                return await self._cleanup_provisioning_failure(sandbox_name, workspace, config, failure)
+            command = list(container.command) + list(container.args)
+            if config.gateway_providers and config.auth_proxy_sidecar:
+                try:
+                    upstream = self._platform_proxy_upstream(config)
+                except ValueError as exc:
+                    return await self._cleanup_provisioning_failure(
+                        sandbox_name, workspace, config, BackendStatusUpdate(status="FAILED", status_message=str(exc))
+                    )
+                virtual_env = next(
+                    (var.value for var in container.env if var.name == "VIRTUAL_ENV"),
+                    self._executor_config.serve_virtual_env,
+                )
+                command = [
+                    posixpath.join(virtual_env, "bin/python") if virtual_env else "python",
+                    "-m",
+                    "nemo_helix_plugin.openshell.launch",
+                    "--upstream",
+                    upstream,
+                    "--principal",
+                    config.auth_proxy_sidecar_identity or "",
+                    "--on-behalf-of",
+                    config.auth_proxy_sidecar_on_behalf_of or "",
+                    "--port",
+                    str(auth_proxy_port()),
+                    "--",
+                    *command,
+                ]
+            failure = await self._launch_serve(sandbox_name, command)
             if failure is not None:
-                await self._delete_sandbox_best_effort(sandbox_name)
-                return failure
+                return await self._cleanup_provisioning_failure(sandbox_name, workspace, config, failure)
             return BackendStatusUpdate(status="STARTING", status_message="Serve command launched")
 
         # Never expose a port to a workload that is not demonstrably running. The launch
@@ -673,8 +871,12 @@ class OpenShellDeploymentBackend(DeploymentBackend):
         try:
             endpoints = await self._expose_ports(sandbox_name, container)
         except grpc.RpcError as exc:
-            await self._delete_sandbox_best_effort(sandbox_name)
-            return BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}")
+            return await self._cleanup_provisioning_failure(
+                sandbox_name,
+                workspace,
+                config,
+                BackendStatusUpdate(status="FAILED", status_message=f"ExposeService failed: {_rpc_detail(exc)}"),
+            )
         if not endpoints:
             return BackendStatusUpdate(status="STARTING", status_message="Serve launched; awaiting endpoints")
         return BackendStatusUpdate(status="READY", status_message="Sandbox serving", endpoints=endpoints)
@@ -761,23 +963,42 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             return BackendStatusUpdate(status="LOST", status_message=f"StartSandbox failed: {_rpc_detail(exc)}")
         return BackendStatusUpdate(status="STARTING", status_message=f"Sandbox {sandbox_name} was stopped; restarting")
 
-    async def _delete_sandbox_best_effort(self, sandbox_name: str) -> None:
-        """Best-effort DeleteSandbox to avoid leaking a partially-provisioned sandbox.
+    def _platform_proxy_upstream(self, config: DeploymentConfig) -> str:
+        upstream = next((var.value for var in config.containers[0].env if var.name == "NHX_BASE_URL"), None)
+        egress = self._executor_config.platform_egress
+        if not upstream or egress is None or urlsplit(upstream).hostname != egress.host:
+            raise ValueError("Platform proxy upstream must match the executor egress host.")
+        return upstream
 
-        Swallows all errors (including a NOT_FOUND, which makes this idempotent) so a
-        cleanup failure never masks the original provisioning failure.
-        """
+    async def _cleanup_provisioning_failure(
+        self, sandbox_name: str, workspace: str, config: DeploymentConfig, failure: BackendStatusUpdate
+    ) -> BackendStatusUpdate:
+        """Delete failed resources, retaining cleanup intent when provider cleanup is incomplete."""
         try:
-            await self._unary(
-                self._stub.DeleteSandbox,
-                pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
-            )
+            try:
+                await self._unary(
+                    self._stub.DeleteSandbox,
+                    pb.DeleteSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name),
+                )
+            except grpc.RpcError as exc:
+                if _rpc_code(exc) != grpc.StatusCode.NOT_FOUND:
+                    raise
+            if config.gateway_providers:
+                async with self._provider_provisioner() as provisioner:
+                    await provisioner.cleanup(workload_workspace=workspace, workload_id=sandbox_name)
         except Exception:
             logger.warning("Failed to clean up sandbox %s after provisioning failure", sandbox_name, exc_info=True)
+            if config.gateway_providers:
+                return BackendStatusUpdate(
+                    status="DELETING",
+                    status_message=f"{failure.status_message} Retrying sandbox and provider cleanup.",
+                    error_details={"reason": "provider_cleanup_pending"},
+                )
+        return failure
 
-    async def _try_get_sandbox(self, sandbox_name: str) -> Any | None:
+    async def _try_get_sandbox(self, sandbox_name: str) -> pb.Sandbox | None:
         try:
-            response = await self._unary(
+            response: pb.SandboxResponse = await self._unary(
                 self._stub.GetSandbox, pb.GetSandboxRequest(workspace_scope=self._workspace_scope(), name=sandbox_name)
             )
         except grpc.RpcError as exc:
@@ -935,7 +1156,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
                 name=service,
                 target_port=port.container_port,
             )
-            response = await self._unary(self._stub.ExposeService, request)
+            response: pb.ServiceEndpointResponse = await self._unary(self._stub.ExposeService, request)
             endpoints.append(Endpoint(name=service, url=response.url, protocol="http"))
         return endpoints
 
