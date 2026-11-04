@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Tier-4 tests for the Evaluator Run Controller: the real services answer what the unit-test fakes assume.
+r"""Tier-4 tests for the Evaluator Run Controller: the real services answer what the unit-test fakes assume.
 
 Each test talks to a real ``nemo services run`` platform that is already running, with auth off
 (``NHX_AGENT_BASE_URL``) and on (``NHX_AGENT_AUTH_BASE_URL``). Nothing here starts, binds or stops a platform: a
@@ -11,7 +11,7 @@ running the Run Controller itself. ``launch_test_platform.py`` starts one with t
     uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18090 &
     uv run python plugins/nemo-evals/tests/integration/launch_test_platform.py --port 18092 --auth &
     until curl -sf localhost:18090/health/ready && curl -sf localhost:18092/health/ready; do sleep 2; done
-    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \\
+    NHX_AGENT_BASE_URL=http://localhost:18090 NHX_AGENT_AUTH_BASE_URL=http://localhost:18092 \
         uv run pytest plugins/nemo-evals/tests/integration/test_taskset_run_controller.py -m integration
 
 Run this file on its own when the variables are set: the shared ``subprocess_platform`` fixtures read the same
