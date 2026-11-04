@@ -15,7 +15,7 @@ Select it with ``agent_import_path`` and hand it the agent through ``agent_kwarg
         agent_import_path="nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_installed_agent:FabricInstalledAgent",
         agent_kwargs={
             "fabric_config": {...},  # a Fabric agent.yaml as a mapping; see NemoFabricAgent
-            "fabric_package": "nemo-fabric[deepagents,relay]==0.5.0",
+            "fabric_package": "nemo-fabric[deepagents,relay]==0.6.0",
         },
         env_secrets={"NVIDIA_API_KEY": SecretRef("NVIDIA_API_KEY")},
     )
@@ -24,7 +24,7 @@ It accepts every :class:`NemoFabricAgent` keyword -- ``fabric_config`` plus Fabr
 keywords -- and this class's ``fabric_python_version`` and ``fabric_uv_version``. ``fabric_package`` is
 required: the harness extra to install cannot be derived from the config. It is split like a shell
 command line, so a caller can pin a harness's own dependencies next to the Fabric distribution
-(``"nemo-fabric[deepagents,relay]==0.5.0 mcp==1.29.0"``); a specifier that contains spaces, such as
+(``"nemo-fabric[deepagents,relay]==0.6.0 mcp==1.29.0"``); a specifier that contains spaces, such as
 one with an environment marker, must be quoted (``"'pkg==1.0; python_version<\"3.13\"'"``).
 
 Three things the task image must still provide: bash, a supported package manager (apt-get, dnf,
@@ -32,7 +32,7 @@ yum, or apk) when it has no curl, and glibc. Bash because Harbor's ``BaseInstall
 prefixes ``set -o pipefail`` onto every command it runs for every installed agent, so a ``/bin/sh``
 backend cannot run any of them; Docker and Daytona execute through bash, Harbor's HF sandbox does
 not. glibc because ``nemo-fabric-runtime`` publishes no musllinux wheels, so Alpine-based tasks fail
-at the final ``uv pip install`` with an unsatisfiable resolution -- 0.5.0 publishes macOS arm64, Windows, and
+at the final ``uv pip install`` with an unsatisfiable resolution -- 0.6.0 publishes macOS arm64 and
 manylinux wheels only, and this is not something the agent can work around.
 """
 
@@ -75,7 +75,7 @@ DEFAULT_UV_VERSION = "0.12.17"
 _UV_INSTALLER_URL_TEMPLATE = "https://astral.sh/uv/{version}/install.sh"
 _FABRIC_PACKAGE_REQUIRED = (
     "fabric_package is required: name the Fabric distribution and harness extra to "
-    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.5.0"'
+    'install into the task container, e.g. "nemo-fabric[deepagents,relay]==0.6.0"'
 )
 #: Versions this class resolves itself; everything else in ``agent_kwargs`` is the wrapped agent's.
 _VERSION_KWARGS = ("fabric_python_version", "fabric_uv_version")

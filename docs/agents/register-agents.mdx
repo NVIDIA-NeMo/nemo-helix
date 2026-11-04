@@ -13,7 +13,7 @@ description: "Register an agent on NeMo Helix from code, a container image, a re
 There is no compatibility alias; the legacy command fails with
 `No such command 'create'`. Update scripts and CI to use `register` with the same
 arguments, and Python callers from `AgentsResource.create` to
-`AgentsResource.register`. See [Fabric 0.5 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
+`AgentsResource.register`. See [Fabric 0.6 Upgrade and Adapter Support](/documentation/agents/fabric-upgrade)
 for the version, preflight and telemetry migration checklist.
 </Warning>
 
@@ -149,7 +149,7 @@ shared capabilities.
 
 The built-in harnesses build the agent from `agent.yaml`. To run agent code you wrote yourself, such
 as your own LangGraph or Deep Agents graph, wrap it in a
-[Fabric adapter](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.5.0/docs/adapter-contract): a Python
+[Fabric adapter](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.6.0/docs/adapter-contract): a Python
 runtime that Fabric starts, plus a descriptor that registers it. NeMo Helix then registers, deploys,
 and invokes the agent like any other.
 
@@ -219,14 +219,14 @@ the runtime applies; Fabric rejects a config that sets anything else. NeMo Helix
 descriptor is installed there. The `shared-data` table below puts it there when the wheel is
 installed. Install the package into the environment itself; an overlay such as `uv run --with` hides
 the descriptor. See Fabric's
-[registration and discovery guide](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.5.0/docs/adapter-contract/tutorials/registration-and-discovery.md)
+[registration and discovery guide](https://github.com/NVIDIA/NeMo-Fabric/blob/v0.6.0/docs/adapter-contract/tutorials/registration-and-discovery.md)
 for details.
 
 ```toml
 [project]
 name = "acme-agent"
 version = "0.1.0"
-dependencies = ["nemo-fabric-adapters-common>=0.5.0,<0.6.0"]
+dependencies = ["nemo-fabric-adapters-common>=0.6.0,<0.7.0"]
 
 [build-system]
 requires = ["hatchling"]
@@ -265,7 +265,7 @@ execute job, names an `image`, the platform can't see which adapters that image 
 this check at create time and the agent checks its `kind` inside the image when it starts.
 
 Automatic trace export and streaming depend on what the descriptor declares; see the
-[adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.5.0/docs/adapter-contract). The
+[adapter contract](https://github.com/NVIDIA/NeMo-Fabric/tree/v0.6.0/docs/adapter-contract). The
 Compass plugin's
 [`nvidia.helix.compass.analyst`](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-compass)
 adapter is a complete example.

@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from nemo_agents_plugin.agent_config import AgentConfig, load_agent_config
+from nemo_agents_plugin.agent_config_formats import validate_agent_config
 from nemo_agents_plugin.fabric.gateway_credentials import PLATFORM_IGW_API_KEY_ENV, PLATFORM_IGW_API_KEY_PLACEHOLDER
 from nemo_agents_plugin.fabric.translator import (
     FabricTranslationError,
@@ -81,6 +82,39 @@ def _example_yaml_config() -> dict[str, Any]:
 
 
 class TestTranslateAgentConfig:
+    @pytest.mark.parametrize("hosts", [None, [], ["collector.observability.svc.cluster.local", "10.0.0.8"]])
+    def test_http_allowlist_survives_registration_and_intake(self, hosts: list[str] | None) -> None:
+        payload = _example_yaml_config()
+        payload["default_harness"] = "codex"
+        payload["telemetry"]["enabled"] = True
+        if hosts is not None:
+            payload["telemetry"]["insecure_http_hosts"] = hosts
+        payload = validate_agent_config(payload["config_format"], payload)
+        assert configure_intake_atif_export(payload, workspace="team-a", base_url="http://127.0.0.1:54321")
+        payload = AgentConfig.model_validate(payload).model_dump()
+
+        translated = translate_agent_config(AgentConfig.model_validate(payload))
+
+        assert translated.relay is not None
+        assert translated.relay.observability is not None
+        observability = translated.relay.observability.model_dump()
+        if hosts is None:
+            assert "insecure_http_hosts" not in observability
+        else:
+            assert observability["insecure_http_hosts"] == hosts
+
+    @pytest.mark.parametrize("hosts", [[], ["collector.example.com"]])
+    def test_hermes_rejects_explicit_http_allowlist_only_with_telemetry(self, hosts: list[str]) -> None:
+        payload = _example_yaml_config()
+        payload["telemetry"].update(enabled=True, insecure_http_hosts=hosts)
+        config = AgentConfig.model_validate(payload)
+        with pytest.raises(FabricTranslationError, match="Hermes harness uses Relay 0.10"):
+            translate_agent_config(config)
+        # The restriction follows the selected harness, including overrides.
+        assert translate_agent_config(config, harness_name="codex").relay is not None
+        config.telemetry.enabled = False
+        assert translate_agent_config(config).relay is None
+
     @pytest.mark.parametrize("kind", ["remote-agent", "nvidia.fabric.remote-agent"])
     @pytest.mark.parametrize("api_type", ["openai-responses", "openai-completions", "anthropic-messages"])
     def test_remote_agent_keeps_endpoint_in_harness_settings(self, kind: str, api_type: str) -> None:
