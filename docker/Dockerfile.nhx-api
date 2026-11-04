@@ -40,6 +40,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Native routing requires the extension and the IGW adapter in the same image.
 RUN /app/.venv/bin/python -c 'import switchyard_rust; import nemo_switchyard.middleware'
 
+# Verify the credential-driver entrypoint and its OpenShell dependencies.
+RUN /app/.venv/bin/python -m nemo_deployments_plugin.backends.openshell.credential_driver.sidecar --help
+
 # Fail the build if pip is broken or duplicated (regression guard).
 RUN /app/.venv/bin/pip --version && \
     test "$(ls -d /app/.venv/lib/python3.13/site-packages/pip-*.dist-info | wc -l)" -eq 1

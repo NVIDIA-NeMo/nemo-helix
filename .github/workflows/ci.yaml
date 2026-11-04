@@ -63,6 +63,7 @@ jobs:
       cpu-smoke: ${{ steps.changes.outputs.cpu-smoke }}
       guardrails-benchmark: ${{ steps.changes.outputs.guardrails-benchmark }}
       deployments-openshell: ${{ steps.changes.outputs.deployments-openshell }}
+      credential-driver-sidecar: ${{ steps.changes.outputs.credential-driver-sidecar }}
       jobs-openshell: ${{ steps.changes.outputs.jobs-openshell }}
       ngc-metadata: ${{ steps.changes.outputs.ngc-metadata }}
       auth-idp: ${{ steps.changes.outputs.auth-idp }}
@@ -194,6 +195,7 @@ jobs:
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
+        needs.changes.outputs.credential-driver-sidecar == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
         needs.changes.outputs.customization-auth == 'true'
       )
@@ -295,8 +297,7 @@ jobs:
           path: ${{ runner.temp }}/fastembed-cache
           key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
-      - name: Install uv for fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+      - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           version: ${{ env.UV_VERSION }}
@@ -314,6 +315,14 @@ jobs:
             --format quiet
           find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
             -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
+
+      - name: Save fastembed model cache
+        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
       - name: Log in to GHCR
         if: env.PUBLISH_IMAGES == 'true'
@@ -343,13 +352,24 @@ jobs:
         shell: bash
         run: make docker-push TARGET=docker-cpu-ci
 
-      - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
+      - name: Pull API image for credential-driver smoke test
+        if: >-
+          env.PUBLISH_IMAGES == 'true' &&
+          (github.event_name == 'workflow_dispatch' || needs.changes.outputs.credential-driver-sidecar == 'true')
+        run: docker pull "${IMAGE_REGISTRY}/nhx-api:${BAKE_TAG}"
+
+      - name: Test credential-driver sidecar
+        if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.credential-driver-sidecar == 'true'
+        timeout-minutes: 10
+        env:
+          RUN_CREDENTIAL_DRIVER_COMPOSE_TEST: "1"
+          NEMO_HELIX_IMAGE: ${{ env.IMAGE_REGISTRY }}/nhx-api:${{ env.BAKE_TAG }}
+        # The host orchestrates Compose; Helix code runs inside the built image.
+        run: >-
+          uv run --no-project --python 3.13 --with 'pytest==9.0.3'
+          pytest -c /dev/null
+          --confcutdir=plugins/nemo-deployments/tests/integration/backends/openshell
+          plugins/nemo-deployments/tests/integration/backends/openshell/test_credential_driver_sidecar.py -q
 
   build-garak-test-image:
     name: Build garak test image
