@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import re
+import shlex
 import shutil
 import subprocess
 import tarfile
@@ -295,7 +296,7 @@ def create_taskset(
             prefix, total = harbor_dir.resolve().name, len(all_dirs)
         refs = publish_tasks(evaluator, task_dirs, prefix=prefix, workspace=workspace, echo=echo)
     ref = publish_taskset(evaluator, refs, name=entity_name(f"{prefix}-{selection_suffix(refs)}"), workspace=workspace)
-    echo(f"Published taskset {ref.partition('#')[0]} ({len(refs)} of {total} tasks)")
+    echo(f"Published taskset {ref} ({len(refs)} of {total} tasks)")
     return CreatedTaskset(ref, refs, total, dataset)
 
 
@@ -307,13 +308,13 @@ def publish_taskset(evaluator: Evaluator, refs: Sequence[str], *, name: str, wor
 
 
 def dataset_flag(dataset: tuple[str, str | None]) -> str:
-    """``--dataset`` as ``runs submit --taskset`` takes it: ``name@version``, or the bare name."""
+    """``--intake-dataset`` as ``runs submit --taskset`` takes it: ``name@version``, or the bare name."""
     name, version = dataset
     return f"{name}@{version}" if version else name
 
 
 def parse_dataset(value: str) -> tuple[str, str | None]:
-    """``--dataset NAME[@VERSION]``: the version is everything after the last ``@`` (``sha256:…`` or a commit)."""
+    """``--intake-dataset NAME[@VERSION]``: the version is everything after the last ``@`` (``sha256:…`` or a commit)."""
     name, at, version = value.rpartition("@")
     return (name, version or None) if at and name else (value, None)
 
@@ -532,7 +533,7 @@ def submit_run(
             raise RuntimeError(
                 f"the submit got no answer ({reason}); the run may still be "
                 f"accepted. To check or finish it without starting a second run, rerun the same command with "
-                f"--idempotency-key {body.get('idempotency_key')}"
+                f"--idempotency-key {shlex.quote(str(body.get('idempotency_key')))}"
             ) from exc
         answered = True
         if response.status_code == 503 and attempt < RETRY_ATTEMPTS:
@@ -543,9 +544,7 @@ def submit_run(
             message = f"submit failed ({response.status_code}): {_detail(response)}"
             if response.status_code >= 500 and body.get("idempotency_key"):
                 # The run may already be accepted: only the same key finishes it instead of starting another.
-                message += (
-                    f"; to finish this run, rerun the same command with --idempotency-key {body['idempotency_key']}"
-                )
+                message += f"; to finish this run, rerun the same command with --idempotency-key {shlex.quote(body['idempotency_key'])}"
             raise RuntimeError(message)
         return response.json()
     raise AssertionError("unreachable")
@@ -568,8 +567,11 @@ def run_request(
     experiment: str | None = None,
     dataset: tuple[str, str | None] | None = None,
     idempotency_key: str | None = None,
+    spec: dict[str, Any] | None = None,
 ) -> TasksetRunInput:
     """The run request: ``--spec-file``'s with its tasks replaced, or ``--agent`` with default execution.
+
+    ``spec`` is ``spec_file`` already read by ``_load_spec``, so a stream such as ``/dev/stdin`` is read once.
 
     ``--experiment`` sets ``publication.intake``, replacing the spec file's.
     ``dataset`` is the Harbor Hub dataset or git repo the tasks came from, as ``(name, version or commit)``:
@@ -585,9 +587,7 @@ def run_request(
             publication["intake"] |= {"dataset_name": name} | ({"dataset_version": version} if version else {})
     if spec_file is not None:
         # The selected taskset replaces spec.tasks before validation: with a dataset the file may leave it out.
-        raw = json.loads(spec_file.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict) or not isinstance(raw.get("spec") or {}, dict):
-            raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+        raw = dict(spec) if spec is not None else _load_spec(spec_file)
         raw["spec"] = {**(raw.get("spec") or {}), "tasks": taskset_ref}
         if publication is not None:
             raw["publication"] = publication  # --experiment replaces the file's, before it's validated
@@ -638,11 +638,12 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             help="TasksetRunInput JSON: its target and execution, and its taskset unless --taskset, --harbor-dir, "
             "--harbor-hub or --harbor-git supplies the tasks.",
         ),
-        dataset: str | None = typer.Option(
+        intake_dataset: str | None = typer.Option(
             None,
-            "--dataset",
-            help="Intake dataset, NAME[@VERSION], for the run's Evaluation (with --taskset and --experiment); "
-            "`tasksets create` prints it. --harbor-hub and --harbor-git set it themselves.",
+            "--intake-dataset",
+            help="Intake label, NAME[@VERSION], shown as the dataset of the run's Evaluation; doesn't select tasks. "
+            "With --taskset and --experiment only; `tasksets create` prints it. --harbor-hub and --harbor-git set "
+            "it themselves.",
         ),
         tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
@@ -698,8 +699,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             raise typer.BadParameter(f"--taskset names the tasks already; drop {sources[0]}")
         if not sources and spec_file is None and taskset is None:
             raise typer.BadParameter("pass --taskset, --harbor-dir, --harbor-hub, --harbor-git or --spec-file")
-        if dataset is not None and (taskset is None or experiment is None):
-            raise typer.BadParameter("--dataset applies with --taskset and --experiment only")
+        if intake_dataset is not None and (taskset is None or experiment is None):
+            raise typer.BadParameter("--intake-dataset applies with --taskset and --experiment only")
         if harbor_git is not None:
             try:
                 check_git_source(harbor_git)
@@ -718,6 +719,29 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         workspace = client.resolve_workspace(workspace)
         stored_ref = qualify_ref(taskset, workspace) if taskset is not None else None
         flag = _workspace_flag(workspace, client.resolve_workspace())
+        taskset_ref: str | None = None
+        waiting_for_builds = False
+        submitting_key: str | None = None
+        spec: dict[str, Any] | None = None
+        source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
+
+        def rerun(ref: str) -> str:
+            """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay."""
+            kept: list[tuple[str, object]] = [
+                # A stream (/dev/stdin, <(…)) is gone once this command exits
+                ("--spec-file", spec_file if spec_file is None or spec_file.is_file() else "<spec file>"),
+                ("--agent", None if spec_file is not None or agent == "oracle" else agent),
+                ("--sandbox-profile", sandbox_profile),
+                ("--cpus", cpus),
+                ("--memory-mb", memory_mb),
+                ("--storage-mb", storage_mb),
+                ("--dispatcher-profile", dispatcher_profile),
+                ("--experiment", experiment),
+                ("--intake-dataset", "@".join(p for p in source if p) if experiment and source else None),
+            ]
+            options = "".join(f" {name} {shlex.quote(str(value))}" for name, value in kept if value is not None)
+            return f"nemo evals runs submit --taskset {shlex.quote(ref)}{options}{flag}"
+
         try:
             if list_tasks:
                 _print_tasks(
@@ -731,16 +755,16 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 )
                 return
             evaluator = Evaluator.from_client(client)
-            source: tuple[str, str | None] | None = parse_dataset(dataset) if dataset is not None else None
+            spec = _load_spec(spec_file) if spec_file is not None else None
             if stored_ref is not None and tasks is None:
                 refs, taskset_ref = taskset_members(evaluator, stored_ref), stored_ref
             elif from_stored:
-                base = stored_ref or _spec_taskset(spec_file)
+                base = stored_ref or _spec_taskset(spec_file, spec)
                 refs, total, prefix = select_from_taskset(evaluator, base, tasks, workspace)
                 taskset_ref = publish_taskset(
                     evaluator, refs, name=entity_name(f"{prefix}-sel-{selection_suffix(refs)}"), workspace=workspace
                 )
-                echo(f"Published taskset {taskset_ref.partition('#')[0]} ({len(refs)} of {total} tasks)")
+                echo(f"Published taskset {taskset_ref} ({len(refs)} of {total} tasks)")
             else:
                 created = create_taskset(
                     evaluator,
@@ -753,12 +777,14 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 )
                 refs, taskset_ref, source = created.refs, created.ref, created.dataset
                 if not no_build_images:
-                    echo(f"Submit later with: nemo evals runs submit --taskset {taskset_ref}{flag}")
+                    waiting_for_builds = True
                     builds = wait_for_builds(evaluator, refs, poll_seconds=poll_seconds, echo=echo)
+                    waiting_for_builds = False
                     if (failed := failed_builds(builds)) is not None:
                         raise RuntimeError(f"image builds failed: {failed}")
             request = run_request(
                 taskset_ref,
+                spec=spec,
                 spec_file=spec_file,
                 agent=agent,
                 dispatcher_profile=dispatcher_profile,
@@ -767,17 +793,31 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 dataset=source,
                 idempotency_key=idempotency_key,
             )
+            submitting_key = request.idempotency_key
             status = submit_run(
                 client, request.model_dump(mode="json", exclude_none=True), workspace=workspace, echo=echo
             )
         except KeyboardInterrupt:
-            echo("Stopped waiting; the image builds keep going.")
+            if submitting_key is not None:  # the run may already be accepted: only the same key avoids a second one
+                echo(
+                    "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
+                    f"a second run, rerun the same command with --idempotency-key {shlex.quote(submitting_key)}"
+                )
+                raise typer.Exit(code=130) from None
+            if waiting_for_builds and taskset_ref:  # --taskset doesn't wait: it rejects tasks still building
+                echo(
+                    "Stopped waiting; the image builds keep going. Check them with: "
+                    f"nemo evals tasksets build-images {shlex.quote(taskset_ref)} --status"  # the ref names the workspace
+                )
+                echo(f"Once they're ready, submit with: {rerun(taskset_ref)}")
+            else:
+                echo(f"Interrupted. Submit with: {rerun(taskset_ref)}" if taskset_ref else "Interrupted.")
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
             if stored_ref is not None and "without images" in str(exc):
                 # The ref names its workspace, and build-images takes no --workspace.
-                echo(f"Check with: nemo evals tasksets build-images {stored_ref} --status", err=True)
+                echo(f"Check with: nemo evals tasksets build-images {shlex.quote(stored_ref)} --status", err=True)
             raise typer.Exit(code=1) from exc
         if status.get("phase", "accepted") == "accepted":
             echo(
@@ -790,8 +830,20 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             )
         for line in status.get("warnings", []):
             echo(f"  {line}")
+        if taskset_ref != stored_ref:  # a new taskset: reruns can skip the upload and the builds
+            echo(f"Rerun these tasks: {rerun(taskset_ref)}")
+            if spec is not None and spec.get("idempotency_key"):  # that command falls back to the file's key
+                echo("  It uses the spec file's idempotency_key; pass a new --idempotency-key to start another run")
         echo("")
         echo(f"View evaluation run: nemo evals runs status {status['run_id']}{flag} --watch")
+
+
+def _load_spec(spec_file: Path) -> dict[str, Any]:
+    """``--spec-file``'s JSON object; read it once, since it may be a stream."""
+    raw = json.loads(spec_file.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not isinstance(raw.get("spec") or {}, dict):
+        raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
+    return raw
 
 
 def _sandbox_selection(
@@ -827,12 +879,12 @@ def _select_from_spec(
     return select_from_taskset(evaluator, _spec_taskset(spec_file), tokens, workspace)
 
 
-def _spec_taskset(spec_file: Path | None) -> str:
-    """The taskset ref ``--spec-file`` names in ``spec.tasks``."""
+def _spec_taskset(spec_file: Path | None, raw: dict[str, Any] | None = None) -> str:
+    """The taskset ref ``--spec-file`` names in ``spec.tasks``; ``raw`` is the file already read by ``_load_spec``."""
     assert spec_file is not None
     # Only spec.tasks matters here: run_request applies --experiment before the whole file is validated.
-    raw = json.loads(spec_file.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict) or not isinstance(raw.get("spec"), dict):
+    raw = raw if raw is not None else _load_spec(spec_file)
+    if not isinstance(raw.get("spec"), dict):
         raise ValueError(f"{spec_file}: expected a TasksetRunInput JSON object with an object 'spec'")
     spec = AgentEvalInputSpec.model_validate(raw["spec"])
     if not isinstance(spec.tasks, TasksetRef):

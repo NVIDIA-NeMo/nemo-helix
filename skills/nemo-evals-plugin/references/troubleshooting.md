@@ -46,6 +46,13 @@ nemo evals agent-evaluate explain
 | Gym environment FileSet is invalid | The FileSet has the wrong purpose, lacks a root `nemo-environment.yaml`, or violates the `native-v1` / `wheels-v1` layout | Use `purpose=environment`, upload the directory contents at the FileSet root, and fix the named manifest or package error |
 | A registered agent on a Gym target is refused with `wheels-v1` in the message | The `target.environment` FileSet is `native-v1`; the agent's harness can only be installed offline from a wheelhouse | Vendor the environment's dependencies as `wheels-v1`, or drop the FileSet |
 | Sandboxed Gym returns no rollout for the selected agent | The environment registers the agent under a different instance name | Set `GymRunnerTarget.source.instance` to the registered instance |
+| `nemo evals runs submit` 422 `unknown execution.sandbox.profile '…'` | The profile isn't defined on this deployment | Use a name the error lists, or omit the profile for the default |
+| `nemo evals runs submit` 422 `tasks without images: …` | A task's image build isn't `ready` | `nemo evals tasksets build-images <taskset> --wait`, then resubmit |
+| `nemo evals runs submit` 422 naming no-network tasks | A model-calling agent without a closed-book `model.ref` | Create a closed-book virtual model and reference it in the spec |
+| `platform auth is on, so the agent needs a key to call the Inference Gateway` | The spec has no gateway key in `env_secrets` | Store an inference-scoped access key in a secret and map it to the agent's key variable (`LLM_API_KEY` for openhands, `OPENAI_API_KEY` for codex) |
+| `nemo evals runs submit` returns HTTP 409 | The idempotency key was used for a different request | Use a new key, or resend the identical request |
+| Taskset run trials error during agent install | The sandbox profile blocks an install host | Ask the cluster admin to add the host to the profile's `agent_setup_egress` (https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#network) |
+| Taskset run is `completed` with result `failed`, or `failed` with result `none` | The merge didn't finish, or no task succeeded | Read per-task scores with `nemo evals runs results`; check failed tasks with `nemo evals runs tasks --phase failed` |
 
 ## Debug in the smallest scope
 
