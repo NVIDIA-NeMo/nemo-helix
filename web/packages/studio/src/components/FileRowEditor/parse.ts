@@ -53,7 +53,12 @@ const parseJsonl = (content: string): DataFileRow[] => parseJsonlValues(content)
  * fields may contain commas and newlines, and `""` is an escaped quote.
  */
 export const parseCsvGrid = (content: string): string[][] => {
-  const rows = Papa.parse<string[]>(content, { delimiter: ',' }).data;
+  // Papa Parse honors a single detected line ending; unify CR/CRLF to LF outside quoted
+  // fields so mixed endings still split rows, while quoted cell text stays verbatim.
+  const normalized = content.replace(/"(?:[^"]|"")*"|\r\n?/g, (match) =>
+    match.startsWith('"') ? match : '\n'
+  );
+  const rows = Papa.parse<string[]>(normalized, { delimiter: ',', newline: '\n' }).data;
   // Drop only blank trailing lines (a final newline yields a single empty cell). Interior
   // empty rows are preserved — for a single-column file they are legitimate empty values.
   while (rows.length > 0 && rows[rows.length - 1].length <= 1 && !rows[rows.length - 1][0]) {
