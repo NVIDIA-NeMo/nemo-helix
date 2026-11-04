@@ -18,6 +18,7 @@ from nemoguardrails import Guardrails, RailsConfig
 from nemoguardrails.guardrails.iorails import IORails
 from nemoguardrails.rails.llm.llmrails import LLMRails
 from nhx.guardrails.app.constants import NIM_LLM
+from nhx.guardrails.app.utils.context_utils import get_x_model_auth_token_from_context
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,30 @@ async def _shutdown_quietly(engine: Guardrails) -> None:
         logger.warning("Failed to stop a retired IORails engine", exc_info=True)
 
 
+def _with_caller_main_model_key(config: RailsConfig) -> RailsConfig:
+    """Send the caller's ``X-Model-Authorization`` key to the main model, as LLMRails does.
+
+    IORails reads an API key only from an environment variable, while LLMRails takes this one from the
+    request. The key goes in the main model's ``default_headers``, which IORails sends with every call.
+    The registry's cache key includes the key, so each caller gets its own engine. A model that already
+    sets ``Authorization`` (platform auth for Inference Gateway models) keeps it.
+    """
+    token = get_x_model_auth_token_from_context()
+    if not token:
+        return config
+
+    models = []
+    for model in config.models:
+        parameters = dict(model.parameters or {})
+        headers = dict(parameters.get("default_headers") or {})
+        if model.type == "main" and not any(name.lower() == "authorization" for name in headers):
+            parameters["default_headers"] = {**headers, "Authorization": f"Bearer {token}"}
+            model = model.model_copy(update={"parameters": parameters})
+        models.append(model)
+
+    return config.model_copy(update={"models": models})
+
+
 def create_rails_engine(config: RailsConfig) -> RailsEngine:
     """Build the rails engine for ``config``.
 
@@ -100,4 +125,4 @@ def create_rails_engine(config: RailsConfig) -> RailsEngine:
         return LLMRails(config)
 
     # IORails starts its HTTP clients lazily on the first request, so nothing to await here.
-    return Guardrails(config, require_iorails=True)
+    return Guardrails(_with_caller_main_model_key(config), require_iorails=True)

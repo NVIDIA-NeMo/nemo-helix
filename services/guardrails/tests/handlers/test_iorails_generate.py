@@ -21,6 +21,7 @@ from nhx.guardrails.app.schemas.utils.response_transformers import (
 )
 from nhx.guardrails.app.services.rails import engine as engine_module
 from nhx.guardrails.app.services.rails.engine import IORAILS_ENGINE_ENV, create_rails_engine, retire_rails_engine
+from nhx.guardrails.app.utils.context_utils import set_x_model_auth_token_into_context
 from nhx.guardrails.entities.enums import StatusEnum
 from pytest_httpserver import HTTPServer
 from werkzeug.wrappers import Request, Response
@@ -103,6 +104,48 @@ async def test_cached_iorails_engine_serves_consecutive_requests(
 
     assert first["content"] == "main model answer"
     assert second["content"] == "main model answer"
+
+
+def _headers_by_model(server: HTTPServer) -> dict[str, dict[str, str]]:
+    return {request.get_json()["model"]: dict(request.headers) for request, _ in server.log}
+
+
+async def test_request_credentials_reach_each_model_call(
+    model_server: HTTPServer, iorails_config: RailsConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each model's ``default_headers`` are sent, and the caller's key reaches the main model.
+
+    IORails reads an API key only from the environment, so the factory adds the caller's
+    ``X-Model-Authorization`` key itself. The judge stands in for a platform-routed model whose own
+    ``Authorization`` must win.
+    """
+    monkeypatch.setenv(IORAILS_ENGINE_ENV, "true")
+    set_x_model_auth_token_into_context("sk-caller-main-key")
+    for model, headers in (
+        ("main", {"x-trace": "t-1"}),
+        ("content_safety", {"x-trace": "t-1", "Authorization": "Bearer platform-token"}),
+    ):
+        entry = next(m for m in iorails_config.models if m.type == model)
+        entry.parameters = {**(entry.parameters or {}), "default_headers": headers}
+    engine = create_rails_engine(iorails_config)
+
+    await run_generate_async(engine, messages=[{"role": "user", "content": "hello"}])
+
+    received = _headers_by_model(model_server)
+    assert received["main-model"]["Authorization"] == "Bearer sk-caller-main-key"
+    assert received["safety-judge"]["Authorization"] == "Bearer platform-token"
+    assert received["main-model"]["X-Trace"] == received["safety-judge"]["X-Trace"] == "t-1"
+
+
+async def test_requests_without_credentials_are_sent_unchanged(
+    model_server: HTTPServer, iorails_config: RailsConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(IORAILS_ENGINE_ENV, "true")
+    engine = create_rails_engine(iorails_config)
+
+    await run_generate_async(engine, messages=[{"role": "user", "content": "hello"}])
+
+    assert all("Authorization" not in headers for headers in _headers_by_model(model_server).values())
 
 
 async def test_blocked_input_is_reported_as_blocked_check(
