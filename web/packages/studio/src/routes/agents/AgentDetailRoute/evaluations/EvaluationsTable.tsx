@@ -51,8 +51,11 @@ interface AgentEvalTableRow {
   job: EvalJobRow | null;
 }
 
-const deploymentSortKey = (deployment?: EvalJobDeployment | null): string | undefined =>
-  deployment?.kind === 'deployment' ? deployment.name : deployment?.kind;
+const deploymentSortKey = (deployment?: EvalJobDeployment | null): string | undefined => {
+  if (deployment?.kind === 'deployment') return deployment.name;
+  if (deployment?.kind === 'custom') return deployment.url;
+  return deployment?.kind;
+};
 
 const isTerminalJob = (job: EvalJobRow): boolean =>
   HelixJobTerminalStatuses.some((status) => status === job.status);

@@ -148,16 +148,21 @@ describe('deploymentForEvalSpec', () => {
 
   it('ignores a gateway route that only appears in the query or fragment', () => {
     const route = '/apis/agents/v2/workspaces/team/deployments/app/-/v1';
-    expect(
-      deploymentForEvalSpec({ target: { url: `https://other.example/?next=${route}` } })
-    ).toBeNull();
-    expect(
-      deploymentForEvalSpec({ target: { url: `https://other.example/#${route}` } })
-    ).toBeNull();
+    for (const url of [`https://other.example/?next=${route}`, `https://other.example/#${route}`]) {
+      expect(deploymentForEvalSpec({ target: { url } })).toEqual({ kind: 'custom', url });
+    }
   });
 
-  it('returns null for targets outside the Agents gateway', () => {
-    expect(deploymentForEvalSpec({ target: { url: 'http://127.0.0.1:8000/agent' } })).toBeNull();
+  it('reads an http(s) URL outside the Agents gateway as a custom endpoint', () => {
+    const url = 'https://agent.example.com/v1/chat/completions';
+    expect(deploymentForEvalSpec({ target: { kind: 'agent', agent: { url } } })).toEqual({
+      kind: 'custom',
+      url,
+    });
+  });
+
+  it('returns null for targets with no http(s) URL', () => {
+    expect(deploymentForEvalSpec({ target: { url: 'apis/agents/v2/whatever' } })).toBeNull();
     expect(
       deploymentForEvalSpec({ target: { kind: 'fabric', source: { agent: 'a' } } })
     ).toBeNull();

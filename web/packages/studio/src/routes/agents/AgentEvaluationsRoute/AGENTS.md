@@ -285,7 +285,13 @@ per-task bundle (trials, evidence, traces) lives in the fileset referenced by `b
 - **Dataset is inline.** The `agent-evaluate` spec takes inline `tasks[]`; there is no
   dataset/fileset/taskset reference yet (planned). Large datasets must be inlined for now.
 - **Agent must be deployed and running before submit** — a not-yet-ready agent connection
-  fails the job.
+  fails the job. The wizard blocks Run Evaluation until the picked deployment is running.
+  The gateway answers 503 for an agent with nothing running, and the evaluator still scores
+  the null responses, so an unblocked run publishes made-up scores.
+- **Custom endpoint** skips the gateway: the wizard sends the user's URL as `target.agent.url`
+  (an OpenAI-compatible chat-completions URL, called from inside the cluster) with an optional
+  `api_key_secret` sent as a bearer token. Read back, any http(s) URL outside the gateway is a
+  `custom` deployment shown by host.
 - **Use `/-/v1/chat/completions`, never `/generate`.** Only NAT serves `/generate`; a Fabric
   (`nemo-agents-spec-v1`) agent 404s on it, and Fabric is what `nemo-build-agent` and Studio's
   Create Example Agent produce. Chat completions is the one shape both formats serve.

@@ -13,7 +13,8 @@ export type EvalJobKind = 'task' | 'dataset';
 
 export type EvalJobDeployment =
   | { kind: 'deployment'; workspace: string; name: string }
-  | { kind: 'default' };
+  | { kind: 'default' }
+  | { kind: 'custom'; url: string };
 
 export interface EvalJobRow {
   id: string;
@@ -63,11 +64,11 @@ const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/(deployments|age
 export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
   const target = asRecord(asRecord(spec)?.target);
   const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
+  const url = asNonEmptyString(endpoint?.url);
   // Drop the query and fragment so a route that only appears there doesn't match.
-  const path = asNonEmptyString(endpoint?.url)?.split(/[?#]/, 1)[0];
-  const match = path?.match(GATEWAY_ROUTE);
+  const match = url?.split(/[?#]/, 1)[0].match(GATEWAY_ROUTE);
   if (!match) {
-    return null;
+    return url && /^https?:\/\//i.test(url) ? { kind: 'custom', url } : null;
   }
   const [, workspace, route, name] = match;
   return route === 'deployments'

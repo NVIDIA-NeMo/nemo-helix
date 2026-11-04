@@ -86,6 +86,29 @@ describe('buildAgentTarget', () => {
     expect(target.agent.url).not.toContain('/agents/support-bot/');
     expect(target.agent.name).toBe('support-bot');
   });
+
+  it('calls a custom endpoint with its API key secret instead of the gateway', () => {
+    const url = 'https://agent.example.com/v1/chat/completions';
+    const target = buildAgentTarget({
+      workspace: 'ws-a',
+      agent: 'support-bot',
+      endpoint: { url, apiKeySecret: 'support-bot-key' },
+    });
+    expect(target.agent).toMatchObject({
+      url,
+      api_key_secret: 'support-bot-key',
+      name: 'support-bot',
+    });
+  });
+
+  it('sends no API key secret to a custom endpoint without one', () => {
+    const target = buildAgentTarget({
+      workspace: 'ws-a',
+      agent: 'support-bot',
+      endpoint: { url: 'https://agent.example.com/v1/chat/completions' },
+    });
+    expect(target.agent).not.toHaveProperty('api_key_secret');
+  });
 });
 
 describe('buildDatasetAgentTarget', () => {
