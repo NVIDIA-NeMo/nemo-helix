@@ -9,15 +9,13 @@ import {
   SimpleImageAttachmentAdapter,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
+import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
 import {
   computeCompletionMetrics,
   getReasoningDelta,
   getUsageCompletionTokens,
 } from '@nemo/common/src/components/AssistantChat/completionMetrics';
-import {
-  appendCompletionDeltaParts,
-  getWorkDetailsMessageParts,
-} from '@nemo/common/src/components/AssistantChat/completionSections';
+import { appendCompletionDeltaParts } from '@nemo/common/src/components/AssistantChat/completionSections';
 import {
   getCompletionImages,
   getCompletionText,
@@ -37,7 +35,6 @@ import {
   getOpenAIMessages,
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
-import { groupConsecutiveAssistantSubtleToolCalls } from '@nemo/common/src/components/AssistantChat/toolParts';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -48,15 +45,11 @@ type ImagePart = { type: 'image'; image: string };
 
 const getMessageContent = (
   parts: readonly ThreadAssistantMessagePart[],
-  images: readonly ImagePart[],
-  status: MessageStatus
-): ThreadMessageLike['content'] => {
-  const content =
-    status.type === 'complete'
-      ? getWorkDetailsMessageParts(parts)
-      : groupConsecutiveAssistantSubtleToolCalls(parts);
-  return [...(content.length ? content : [{ type: 'text' as const, text: '' }]), ...images];
-};
+  images: readonly ImagePart[]
+): ThreadMessageLike['content'] => [
+  ...(parts.length ? parts : [{ type: 'text' as const, text: '' }]),
+  ...images,
+];
 
 type UseAssistantChatRuntimeOptions = Pick<
   AssistantChatProps,
@@ -110,12 +103,28 @@ export const useAssistantChatRuntime = ({
       assistantMessageId: string,
       parts: readonly ThreadAssistantMessagePart[],
       images: readonly ImagePart[],
-      status: MessageStatus
+      status: MessageStatus,
+      workDurationsMs?: readonly number[]
     ) => {
       setThreadMessages(
         messagesRef.current.map((message) =>
           message.id === assistantMessageId
-            ? { ...message, content: getMessageContent(parts, images, status), status }
+            ? {
+                ...message,
+                content: getMessageContent(parts, images),
+                status,
+                ...(workDurationsMs?.length
+                  ? {
+                      metadata: {
+                        ...message.metadata,
+                        custom: {
+                          ...message.metadata?.custom,
+                          [WORK_DURATIONS_METADATA_KEY]: [...workDurationsMs],
+                        },
+                      },
+                    }
+                  : {}),
+              }
             : message
         )
       );
@@ -150,6 +159,8 @@ export const useAssistantChatRuntime = ({
       let generatedChunkCount = 0;
       let reasoningChars = 0;
       let usageTokens: number | undefined;
+      const workDurationsMs: number[] = [];
+      let workStartedMs: number | undefined;
 
       try {
         const result = await createChatCompletion({
@@ -192,6 +203,16 @@ export const useAssistantChatRuntime = ({
             if (!reasoningDelta && !delta && !toolCalls.length && !images.length) continue;
 
             if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
+            // Time each run of reasoning and tool calls (one work group in the UI): it starts at
+            // the first such delta and ends when answer text arrives.
+            const nowMs = performance.now();
+            if ((reasoningDelta || toolCalls.length) && workStartedMs === undefined) {
+              workStartedMs = nowMs;
+            }
+            if (delta && workStartedMs !== undefined) {
+              workDurationsMs.push(Math.round(nowMs - workStartedMs));
+              workStartedMs = undefined;
+            }
             generatedChunkCount += 1;
             reasoningChars += reasoningDelta.length;
             if (delta || images.length > 0) {
@@ -209,14 +230,19 @@ export const useAssistantChatRuntime = ({
               assistantMessage.id!,
               responseParts,
               responseImages,
-              RUNNING_STATUS
+              RUNNING_STATUS,
+              workDurationsMs
             );
+          }
+          if (workStartedMs !== undefined) {
+            workDurationsMs.push(Math.round(performance.now() - workStartedMs));
           }
           updateAssistantMessage(
             assistantMessage.id!,
             responseParts,
             responseImages,
-            runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS
+            runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS,
+            workDurationsMs
           );
           if (!runController.signal.aborted && onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);

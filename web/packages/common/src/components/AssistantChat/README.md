@@ -55,6 +55,16 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 `AssistantChat` creates an assistant-ui `ExternalStoreRuntime` through `useAssistantChatRuntime`. Consumers pass props to `AssistantChat`; they do not need to instantiate the runtime directly. The runtime converts assistant-ui messages to OpenAI messages, calls `useChatCompletion`, streams deltas into the latest assistant message, and exposes edit, reload, cancel, and reset handlers to `AssistantChatThread`.
 
+### Thinking and tool calls
+
+Streamed reasoning (`reasoning_content` or `reasoning`) and `tool_calls` become reasoning and tool-call parts on the reply. Each run of adjacent reasoning and tool-call parts renders as one collapsed work group (`chainOfThought/`), built on `MessagePrimitive.GroupedParts`:
+
+- the group label reads "Thinking…" while the run is still streaming, then the tool-call count and how long the run took, for example "Ran 3 tool calls · 12s" or "Thought · 4s";
+- expanding it shows one row per step: a **Thought** with the reasoning text, a **Called {tool}** row with the arguments and result (or error), or an **Edited {file}** row with the written content for any tool whose arguments carry a file path and content;
+- the runtime times each run from its first reasoning or tool delta until answer text arrives and stores the durations in `message.metadata.custom.workDurationsMs`. Seeded messages without durations show the count only.
+
+Pass `toolCallPartComponent` to render tool calls your own way inside the group; the NeMo Assistant does this to unpack its synthetic thinking and grouped-tool parts. Job progress tool calls stay outside the group so their progress card remains visible. See the [Thinking and tools story](./AssistantChatThinkingAndTools.stories.tsx) for every state.
+
 ### Failed replies
 
 When a request fails for a non-cancel reason the assistant message is marked `incomplete`/`error` and renders as one inline error banner (successful replies render directly on the canvas without a bubble):

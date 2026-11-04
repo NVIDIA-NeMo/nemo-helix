@@ -2,120 +2,71 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
-import { CollapsedThinkingToolCall } from '@nemo/common/src/components/AssistantChat/toolCall/CollapsedThinkingToolCall';
-import { TOOL_LABELS } from '@nemo/common/src/components/AssistantChat/toolCall/constants';
-import { FileChangeToolCallCard } from '@nemo/common/src/components/AssistantChat/toolCall/FileChangeToolCallCard';
-import {
-  formatSubtleToolMessage,
-  getFileChangeSummary,
-  getStringArg,
-  getSubtleToolDetail,
-  getSubtleToolGroupActions,
-  getSubtleToolIcon,
-  getSubtleToolMessage,
-  getToolInvocation,
-  getToolSummary,
-} from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
-import { SubtleToolCallRow } from '@nemo/common/src/components/AssistantChat/toolCall/SubtleToolCallRow';
+import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
+import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
 import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
   ASSISTANT_THINKING_TOOL_NAME,
-  ASSISTANT_WORK_DETAILS_LABEL,
   isAssistantJobProgressToolName,
   toAssistantToolArgs,
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
-import { ChevronRight, IconClipboard } from '@nemo/icons/icons';
-import { Text } from '@nvidia/foundations-react-core';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
 
 interface AssistantToolCallPartContentProps {
   readonly args: AssistantToolArgs;
-  readonly argsText: string;
+  readonly argsText?: string;
+  readonly isError?: boolean;
+  readonly result?: unknown;
+  readonly running?: boolean;
   readonly toolName: string;
 }
 
-interface CollapsedStudioDetailsTextPart {
-  readonly text: string;
-  readonly type: 'text';
-}
-
-interface CollapsedStudioDetailsToolPart {
-  readonly args: AssistantToolArgs;
-  readonly argsText: string;
-  readonly toolCallId: string;
-  readonly toolName: string;
-  readonly type: 'tool-call';
-}
-
-interface CollapsedStudioDetailsReasoningPart {
-  readonly text: string;
-  readonly type: 'reasoning';
-}
-
-type CollapsedStudioDetailsPart =
-  | CollapsedStudioDetailsReasoningPart
-  | CollapsedStudioDetailsTextPart
-  | CollapsedStudioDetailsToolPart;
+type SerializedPart =
+  | { readonly type: 'reasoning' | 'text'; readonly text: string }
+  | {
+      readonly type: 'tool-call';
+      readonly args: AssistantToolArgs;
+      readonly argsText?: string;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const getCollapsedStudioDetailsParts = (
-  args: AssistantToolArgs
-): readonly CollapsedStudioDetailsPart[] => {
-  const parts = args.parts;
-  if (!Array.isArray(parts)) return [];
+// Collapsed details and subtle groups store their parts and calls serialized in their args.
+const getSerializedParts = (value: unknown): readonly SerializedPart[] =>
+  (Array.isArray(value) ? value : []).filter(isRecord).flatMap((part): SerializedPart[] => {
+    if ((part.type === 'text' || part.type === 'reasoning') && typeof part.text === 'string') {
+      return part.text.trim() ? [{ type: part.type, text: part.text }] : [];
+    }
+    if (typeof part.toolName !== 'string') return [];
+    return [
+      {
+        type: 'tool-call',
+        args: isRecord(part.args) ? toAssistantToolArgs(part.args) : {},
+        argsText: typeof part.argsText === 'string' ? part.argsText : undefined,
+        toolCallId: typeof part.toolCallId === 'string' ? part.toolCallId : part.toolName,
+        toolName: part.toolName,
+      },
+    ];
+  });
 
-  return parts
-    .map((part): CollapsedStudioDetailsPart | undefined => {
-      if (!isRecord(part)) return undefined;
-
-      if (
-        (part.type === 'text' || part.type === 'reasoning') &&
-        typeof part.text === 'string' &&
-        part.text.trim()
-      ) {
-        return { type: part.type, text: part.text };
-      }
-
-      if (
-        part.type === 'tool-call' &&
-        typeof part.toolName === 'string' &&
-        typeof part.toolCallId === 'string'
-      ) {
-        const toolArgs = isRecord(part.args) ? toAssistantToolArgs(part.args) : {};
-        return {
-          type: 'tool-call',
-          args: toolArgs,
-          argsText: typeof part.argsText === 'string' ? part.argsText : JSON.stringify(toolArgs),
-          toolCallId: part.toolCallId,
-          toolName: part.toolName,
-        };
-      }
-
-      return undefined;
-    })
-    .filter((part): part is CollapsedStudioDetailsPart => part !== undefined);
-};
-
-const CollapsedStudioDetailsText = ({ text }: { readonly text: string }) => (
-  <MessageContent content={text} markdownLinkComponent={AssistantStudioLink} />
-);
-
-const CollapsedStudioDetailsPartContent = ({
-  part,
-}: {
-  readonly part: CollapsedStudioDetailsPart;
-}) => {
-  if (part.type === 'text') return <CollapsedStudioDetailsText text={part.text} />;
-  if (part.type === 'reasoning')
-    return <CollapsedThinkingToolCall label="Thought process" text={part.text} />;
-
+const SerializedPartContent = ({ part }: { readonly part: SerializedPart }) => {
+  if (part.type !== 'tool-call') {
+    return part.type === 'reasoning' ? (
+      <ThoughtStep text={part.text} />
+    ) : (
+      <div className="px-density-md py-density-xs">
+        <MessageContent content={part.text} markdownLinkComponent={AssistantStudioLink} />
+      </div>
+    );
+  }
   return (
     <AssistantToolCallPartContent
       args={part.args}
@@ -125,126 +76,72 @@ const CollapsedStudioDetailsPartContent = ({
   );
 };
 
-const CollapsedStudioDetailsToolCall = ({ args }: { readonly args: AssistantToolArgs }) => {
-  const storedLabel = getStringArg(args, ['label']);
-  const label =
-    !storedLabel || storedLabel.toLowerCase() === 'worked for unknown'
-      ? ASSISTANT_WORK_DETAILS_LABEL
-      : storedLabel;
-  const parts = getCollapsedStudioDetailsParts(args);
-  const contextLabel = label === ASSISTANT_WORK_DETAILS_LABEL ? undefined : label;
-  if (!parts.length) return null;
-
-  return (
-    <Text asChild kind="body/regular/sm">
-      <details
-        className="group/studio-details my-density-xs max-w-full text-gray-500 dark:text-gray-400"
-        data-testid="assistant-collapsed-studio-details"
-      >
-        <summary className="inline-flex cursor-pointer list-none items-center gap-density-xs marker:hidden">
-          <ChevronRight
-            aria-hidden
-            className="size-3 shrink-0 transition-transform group-open/studio-details:rotate-90"
-          />
-          <IconClipboard aria-hidden className="size-3.5 shrink-0" />
-          <span>
-            <span className="font-medium text-primary">View work</span>
-            {contextLabel ? ` · ${contextLabel}` : null}
-          </span>
-        </summary>
-        <div
-          className="mt-density-xs space-y-density-xs border-l border-base pl-density-md text-secondary"
-          data-testid="assistant-collapsed-studio-details-content"
-        >
-          {parts.map((part, index) => (
-            <CollapsedStudioDetailsPartContent
-              key={`${part.type}-${part.type === 'tool-call' ? part.toolCallId : part.text.slice(0, 24)}-${index}`}
-              part={part}
-            />
-          ))}
-        </div>
-      </details>
-    </Text>
-  );
-};
-
 const AssistantToolCallPartContent = ({
   args,
   argsText,
+  isError,
+  result,
+  running,
   toolName,
 }: AssistantToolCallPartContentProps) => {
-  if (toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME) {
-    return <CollapsedStudioDetailsToolCall args={args} />;
+  if (
+    toolName === ASSISTANT_THINKING_TOOL_NAME ||
+    toolName === ASSISTANT_COLLAPSED_THINKING_TOOL_NAME
+  ) {
+    return typeof args.text === 'string' ? <ThoughtStep text={args.text} /> : null;
   }
 
-  if (toolName === ASSISTANT_COLLAPSED_THINKING_TOOL_NAME) {
-    const text = getStringArg(args, ['text']);
-    return text ? <CollapsedThinkingToolCall text={text} /> : null;
-  }
+  if (isAssistantJobProgressToolName(toolName)) return <JobProgressToolCall args={args} />;
 
-  if (toolName === ASSISTANT_THINKING_TOOL_NAME) {
-    const text = getStringArg(args, ['text']);
-    return text ? <CollapsedThinkingToolCall label="Thinking" text={text} /> : null;
-  }
-
-  if (isAssistantJobProgressToolName(toolName)) {
-    return <JobProgressToolCall args={args} />;
-  }
-
-  if (toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME) {
-    const subtleActions = getSubtleToolGroupActions(args);
-    return subtleActions.length ? <SubtleToolCallRow actions={subtleActions} /> : null;
-  }
-
-  const subtleMessage = getSubtleToolMessage(toolName, args);
-  if (subtleMessage) {
+  if (
+    toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME ||
+    toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME
+  ) {
+    const parts = getSerializedParts(
+      toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME ? args.actions : args.parts
+    );
     return (
-      <SubtleToolCallRow
-        actions={[
-          {
-            detail: getSubtleToolDetail(toolName, args, subtleMessage),
-            Icon: getSubtleToolIcon(toolName),
-            invocation: getToolInvocation(toolName, args),
-            message: subtleMessage,
-            toolCallId: toolName,
-            toolName,
-          },
-        ]}
-      />
+      <>
+        {parts.map((part, index) => (
+          <SerializedPartContent
+            key={`${part.type === 'tool-call' ? part.toolCallId : part.type}-${index}`}
+            part={part}
+          />
+        ))}
+      </>
     );
   }
 
-  if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
-    const fileChangeSummary = getFileChangeSummary(toolName, args, argsText);
-    if (fileChangeSummary) {
-      return <FileChangeToolCallCard summary={fileChangeSummary} />;
-    }
-  }
-
-  const label = TOOL_LABELS[toolName] ?? toolName;
-  const fallbackMessage = formatSubtleToolMessage(
-    `Used ${label}`,
-    getToolSummary(toolName, args),
-    `Used ${label}`
-  );
   return (
-    <SubtleToolCallRow
-      actions={[
-        {
-          detail: getSubtleToolDetail(toolName, args, fallbackMessage),
-          Icon: getSubtleToolIcon(toolName),
-          invocation: getToolInvocation(toolName, args),
-          message: fallbackMessage,
-          toolCallId: toolName,
-          toolName,
-        },
-      ]}
+    <ToolCallStep
+      args={args}
+      argsText={argsText}
+      isError={isError}
+      result={result}
+      running={running}
+      toolName={toolName}
     />
   );
 };
 
+/**
+ * Renders the NeMo Assistant's tool-call parts as rows in the chat's work group, unpacking the
+ * runtime's synthetic thinking, subtle-group, and collapsed-details parts into their steps.
+ */
 export const AssistantToolCallPart: ToolCallMessagePartComponent<AssistantToolArgs, unknown> = ({
   args,
   argsText,
+  isError,
+  result,
+  status,
   toolName,
-}) => <AssistantToolCallPartContent args={args} argsText={argsText} toolName={toolName} />;
+}) => (
+  <AssistantToolCallPartContent
+    args={args}
+    argsText={argsText}
+    isError={isError}
+    result={result}
+    running={status.type === 'running'}
+    toolName={toolName}
+  />
+);
