@@ -130,15 +130,11 @@ def get_default_controllers(
     return get_controllers_for_group(controller_groups, "all")
 
 
-class PluginRegistry[V](Mapping[str, "str | V"]):
-    """Built-in entries plus installed plugins, by name; a plugin loads only when looked up.
+class PluginRegistry[V](Mapping[str, str | V]):
+    """Built-in ``"module:object"`` import strings plus installed plugins, keyed by name.
 
-    Built-in entries are ``"module:object"`` import strings. Plugin names come from entry-point
-    metadata, so checking, listing or grouping them imports no plugin code: importing every
-    installed plugin costs seconds per process, and most runs start a few of them. Looking a
-    plugin up runs *load* once and caches the result. A plugin whose *load* returns ``None``
-    (it already logged why) is treated as absent: ``KeyError``, and it drops out of iteration,
-    matching the eager discovery this replaces. A plugin overrides a built-in of the same name.
+    A plugin is imported only when looked up: importing every installed plugin costs seconds per
+    process, and most runs start only a few of them.
     """
 
     def __init__(

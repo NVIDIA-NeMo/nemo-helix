@@ -237,18 +237,18 @@ def resolve_run_configuration(
     # Plugin services and controllers load on lookup, so a broken plugin only shows up here, once it
     # is selected. Treat it as unavailable, as eager discovery did: dropped from a group, an error
     # when named.
-    unloadable = {name for name in selected_services if available_services.get(name) is None}
-    if unloadable_named := unloadable & set(config.services or []):
+    unloadable_services = {name for name in selected_services if available_services.get(name) is None}
+    if unloadable_named := unloadable_services & set(config.services or []):
         available = ", ".join(sorted(available_services))
         requested = ", ".join(sorted(unloadable_named))
         raise ValueError(f"Unknown services: {requested}. Available services: {available}")
-    selected_services -= unloadable
-    unloadable = {name for name in selected_controllers if available_controllers.get(name) is None}
-    if unloadable_named := unloadable & set(config.controllers or []):
+    selected_services -= unloadable_services
+    unloadable_controllers = {name for name in selected_controllers if available_controllers.get(name) is None}
+    if unloadable_named := unloadable_controllers & set(config.controllers or []):
         available = ", ".join(sorted(available_controllers))
         requested = ", ".join(sorted(unloadable_named))
         raise ValueError(f"Unknown controllers: {requested}. Available controllers: {available}")
-    selected_controllers -= unloadable
+    selected_controllers -= unloadable_controllers
 
     resolved_socket_path = _resolve_socket_path(config.socket_path)
 
