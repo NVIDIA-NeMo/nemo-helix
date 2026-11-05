@@ -55,6 +55,8 @@ _NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 #: Files kind's createContainer hook copies to the root of every container, to bind-mount them over /sys's DMI files.
 #: They aren't mount points at the root, so kaniko's ignore list misses them: `--cleanup` fails deleting them
 #: (`unlinkat //product_uuid: device or resource busy`), and a snapshot would put the node's in the image.
+#: The script ignores only those the sandbox starts with: an ignored path is also kept out of every layer, so on any
+#: other runtime it would drop a file a `RUN` writes there. On kind, such a file is still dropped.
 _RUNTIME_ROOT_FILES = ("/product_uuid", "/product_name")
 
 
@@ -64,7 +66,15 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
     No ``set -e``, so one failure doesn't stop the rest; each marker line's ``$?`` must be kaniko's status.
     """
     view = WorkLayout(SANDBOX_ROOT)
-    lines = ["set -u"]
+    # Before the first build: kaniko builds in this container's own root, so after it a file there may be one of its
+    # `RUN`s'. Unquoted where it's used, to split into one flag a path; the paths hold no space or glob.
+    lines = [
+        "set -u",
+        "runtime_ignores=",
+        f"for path in {' '.join(shlex.quote(path) for path in _RUNTIME_ROOT_FILES)}; do",
+        '  if [ -e "$path" ]; then runtime_ignores="$runtime_ignores --ignore-path=$path"; fi',
+        "done",
+    ]
     for image in group.images:
         layout = view.output(image.image)
         # Empty the output first, or a failed build would leave an earlier attempt's layout for
@@ -84,10 +94,9 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
             # Not the google, ECR, ACR and GitLab lookups compiled into the executor: the sandbox holds no credential.
             "--credential-helpers=",
             "--cleanup",
-            *(f"--ignore-path={path}" for path in _RUNTIME_ROOT_FILES),
             "--verbosity=info",
         ]
-        lines.append(" ".join(shlex.quote(a) for a in args))
+        lines.append(" ".join(shlex.quote(a) for a in args) + " $runtime_ignores")
         # On a line of its own: kaniko passes a `RUN`'s output through as is, so it may not end in a newline.
         lines.append(f"printf '\\n%s %s %s\\n' {RESULT_MARKER} {shlex.quote(image.image)} \"$?\"")
     return "\n".join(lines)

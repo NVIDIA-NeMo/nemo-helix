@@ -211,28 +211,30 @@ class TestTheBuildScript:
         assert script.count("/kaniko/executor") == 3
         assert script.count("--cleanup") == 3
 
-    def test_leaves_the_files_kind_puts_at_the_root(self) -> None:
-        script = _build_script(_group(), _sandbox())
-        assert "--ignore-path=/product_uuid" in script
-        assert "--ignore-path=/product_name" in script
-
 
 class TestTheBuildScriptRuns:
     @staticmethod
     def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dockerfiles: list[str]) -> dict[str, int]:
         executor = tmp_path / "executor"
-        # Exits 3 for a "broken*" Dockerfile, else 0: not 1, so only kaniko's own status matches. For an
-        # "unterminated*" one, its output ends without a newline, as a `RUN printf done` does.
+        # Records its arguments, one invocation a line. Exits 3 for a "broken*" Dockerfile, else 0: not 1, so only
+        # kaniko's own status matches. For an "unterminated*" one, its output ends without a newline, as a
+        # `RUN printf done` does. A "writes-product-name*" one writes that root file, as a `RUN` there would.
         executor.write_text(
-            '#!/bin/sh\nfor arg in "$@"; do case "$arg" in\n'
+            f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{tmp_path / 'calls'}'\n"
+            'for arg in "$@"; do case "$arg" in\n'
             "  --dockerfile=broken*) exit 3;;\n"
             "  --dockerfile=unterminated*) printf done; exit 0;;\n"
+            f"  --dockerfile=writes-product-name*) : > '{tmp_path / 'product_name'}';;\n"
             "esac; done\nexit 0\n"
         )
         executor.chmod(0o755)
         monkeypatch.setattr(supervise, "KANIKO_EXECUTOR", str(executor))
         # The script empties each image's output directory; point it somewhere of the test's own.
         monkeypatch.setattr(supervise, "SANDBOX_ROOT", PurePosixPath(tmp_path))
+        # And it looks for the files kind puts at the root; look in the test's own directory instead.
+        monkeypatch.setattr(
+            supervise, "_RUNTIME_ROOT_FILES", (str(tmp_path / "product_uuid"), str(tmp_path / "product_name"))
+        )
 
         group = SandboxGroup(
             source=ContextSource(fileset="ws/fs-a"),
@@ -271,6 +273,34 @@ class TestTheBuildScriptRuns:
     ) -> None:
         results = self._run(tmp_path, monkeypatch, ["unterminated.Dockerfile", "unterminated.Dockerfile"])
         assert results == {"demo-1-0": 0, "demo-1-1": 0}
+
+    @staticmethod
+    def _ignored(tmp_path: Path) -> list[set[str]]:
+        """The paths each kaniko invocation was told to ignore, in order."""
+        calls = (tmp_path / "calls").read_text().splitlines()
+        return [
+            {arg.removeprefix("--ignore-path=") for arg in call.split() if arg.startswith("--ignore-path=")}
+            for call in calls
+        ]
+
+    def test_a_root_file_the_runtime_put_there_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # As kind's createContainer hook leaves it: there before the script starts.
+        (tmp_path / "product_uuid").write_text("the node's uuid")
+        results = self._run(tmp_path, monkeypatch, ["Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 0, "demo-1-1": 0}
+        assert self._ignored(tmp_path) == [{str(tmp_path / "product_uuid")}] * 2
+
+    def test_without_them_no_path_is_kept_out_of_the_image(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `--ignore-path` also keeps a path out of every layer, so here a file a `RUN` writes there must not be
+        # ignored: not even by the next build, after the first one wrote it.
+        results = self._run(tmp_path, monkeypatch, ["writes-product-name.Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 0, "demo-1-1": 0}
+        assert (tmp_path / "product_name").exists()
+        assert self._ignored(tmp_path) == [set(), set()]
 
 
 class _Api:
