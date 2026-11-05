@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
@@ -17,14 +17,14 @@ import {
 import { type DropdownEntry, Flex, Tag, Text } from '@nvidia/foundations-react-core';
 import { PURPOSE_LABELS, PURPOSE_TAG_COLORS } from '@studio/components/DatasetsTable/constants';
 import { getStorageBackend, getStoragePath } from '@studio/components/DatasetsTable/helpers';
-import {
-  type DatasetWithId,
-  type DatasetsTableProps,
-  type ModalOpenState,
+import type {
+  DatasetWithId,
+  DatasetsTableProps,
+  ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
-import { type ComponentProps, type Dispatch, type SetStateAction } from 'react';
+import type { ComponentProps, Dispatch, SetStateAction } from 'react';
 
 interface MakeDatasetsTableColumnsArgs {
   enableSelection: DatasetsTableProps['enableSelection'];

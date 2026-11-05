@@ -4,7 +4,7 @@
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { ConfigNameField } from '@studio/components/evaluation/ModelEvaluationWizard/ConfigNameField';
 import { DatasetPanel } from '@studio/components/evaluation/ModelEvaluationWizard/DatasetPanel';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * What the run is evaluated against: a name to save it under, the dataset, and

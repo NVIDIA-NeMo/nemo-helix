@@ -4,7 +4,7 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { CopyGeneric } from '@nemo/icons/icons';
 import { Button } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 interface Props extends ComponentProps<typeof Button> {
   text: string;

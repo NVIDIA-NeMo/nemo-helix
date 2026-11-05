@@ -5,7 +5,7 @@ import { type Span, SpanStatus, type Trace } from '@nemo/sdk/generated/platform/
 import { useGetSession } from '@nemo/sdk/generated/platform/sessions';
 import { useListSpans } from '@nemo/sdk/generated/platform/spans';
 import { useListTraces } from '@nemo/sdk/generated/platform/traces';
-import { type SessionExplorerData } from '@studio/components/IntakeDetail/TraceSpanAccordions';
+import type { SessionExplorerData } from '@studio/components/IntakeDetail/TraceSpanAccordions';
 import {
   buildSpanTree,
   compareSpansByStartedAt,

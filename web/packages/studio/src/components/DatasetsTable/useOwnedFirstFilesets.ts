@@ -6,10 +6,10 @@ import {
   filesListFilesets,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
-import {
-  type FilesetFilter,
-  type FilesetOutput,
-  type GenericSortField,
+import type {
+  FilesetFilter,
+  FilesetOutput,
+  GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 

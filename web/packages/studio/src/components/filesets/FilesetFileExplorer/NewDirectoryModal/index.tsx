@@ -3,14 +3,14 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import { useCreateDirectory } from '@studio/api/datasets/useCreateDirectory';
 import { getSiblingFolders } from '@studio/components/filesets/AddToFolderModal/utils';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
-import { FC } from 'react';
-import { SubmitHandler, useForm } from 'react-hook-form';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FC } from 'react';
+import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const formSchema = z.object({

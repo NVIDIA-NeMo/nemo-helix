@@ -8,7 +8,7 @@ import {
 } from '@nemo/common/src/utils/parseRecords';
 import Papa from 'papaparse';
 
-import { FileFormatType } from '../types';
+import type { FileFormatType } from '../types';
 
 /**
  * Searches through an object's keys (one layer deep) to find an array that contains

@@ -5,7 +5,7 @@ import { Cube } from '@nemo/icons/icons';
 import { CardIconBadge, SelectableCard } from '@studio/components/common/SelectableCard';
 import type { DagNodeData, DagNodeStatus } from '@studio/components/DagCanvas/types';
 import { Handle, type Node, type NodeProps, Position } from '@xyflow/react';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 /** Internal node data: the public {@link DagNodeData} plus the activation callback. */
 export interface CardNodeData extends DagNodeData {

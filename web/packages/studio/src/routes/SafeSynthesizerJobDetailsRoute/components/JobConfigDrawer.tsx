@@ -7,7 +7,7 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Cog } from '@nemo/icons/icons';
 import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { SidePanel, Stack } from '@nvidia/foundations-react-core';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import yaml from 'yaml';
 
 interface JobConfigDrawerProps {

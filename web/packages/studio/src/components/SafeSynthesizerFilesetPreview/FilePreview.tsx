@@ -15,7 +15,7 @@ import {
   Spinner,
   Text,
 } from '@nvidia/foundations-react-core';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface CSVPreviewProps {
   onClose: () => void;

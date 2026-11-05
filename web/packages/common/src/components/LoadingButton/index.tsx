@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Spinner } from '@nvidia/foundations-react-core';
-import { ComponentProps, FC, PropsWithChildren } from 'react';
+import type { ComponentProps, FC, PropsWithChildren } from 'react';
 
 interface Props extends ComponentProps<typeof Button> {
   loading?: boolean;

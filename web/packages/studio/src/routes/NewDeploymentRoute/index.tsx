@@ -46,8 +46,8 @@ import { useHuggingFaceNameDefault } from '@studio/routes/NewDeploymentRoute/use
 import { WorkspaceSourceFields } from '@studio/routes/NewDeploymentRoute/WorkspaceSourceFields';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
-import { FC, useCallback, useMemo, useState } from 'react';
-import { SubmitHandler, useForm } from 'react-hook-form';
+import { type FC, useCallback, useMemo, useState } from 'react';
+import { type SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate, useSearchParams } from 'react-router';
 
 /** Deep-link prefill: seeds the Workspace source with the given ref. */

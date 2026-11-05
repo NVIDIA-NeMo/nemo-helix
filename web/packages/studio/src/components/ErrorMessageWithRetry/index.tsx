@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ErrorMessage, ErrorMessageProps } from '@nemo/common/src/components/ErrorMessage';
+import { ErrorMessage, type ErrorMessageProps } from '@nemo/common/src/components/ErrorMessage';
 import { Button } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface ErrorMessageWithRetryProps extends Omit<ErrorMessageProps, 'renderAction'> {
   onRetry: () => void;

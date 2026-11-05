@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
-import { type Tag } from '@nvidia/foundations-react-core';
-import { type ComponentProps } from 'react';
+import type { Tag } from '@nvidia/foundations-react-core';
+import type { ComponentProps } from 'react';
 
 export const PURPOSE_LABELS: Record<FilesetPurpose, string> = {
   [FilesetPurpose.generic]: 'Generic',

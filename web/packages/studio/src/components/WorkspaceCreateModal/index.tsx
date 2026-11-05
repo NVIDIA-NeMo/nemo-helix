@@ -11,7 +11,7 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
@@ -24,8 +24,8 @@ import { FormField, Stack, TextArea, TextInput } from '@nvidia/foundations-react
 import { queryClient } from '@studio/api/queryClient';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
 import { AxiosError } from 'axios';
-import { FC } from 'react';
-import { SubmitHandler, useController, useForm } from 'react-hook-form';
+import type { FC } from 'react';
+import { type SubmitHandler, useController, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 import { z } from 'zod';
 
