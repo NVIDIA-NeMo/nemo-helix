@@ -3,7 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';

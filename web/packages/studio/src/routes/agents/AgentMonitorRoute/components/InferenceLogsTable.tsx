@@ -8,7 +8,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
 import type { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
-import { ComponentProps, FC, useEffect, useMemo } from 'react';
+import { type ComponentProps, type FC, useEffect, useMemo } from 'react';
 
 interface Props {
   runs: RunSummary[];

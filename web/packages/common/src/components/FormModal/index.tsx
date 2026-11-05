@@ -24,11 +24,11 @@ import {
 } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import {
-  ComponentProps,
-  ComponentPropsWithoutRef,
-  FC,
-  PropsWithChildren,
-  ReactNode,
+  type ComponentProps,
+  type ComponentPropsWithoutRef,
+  type FC,
+  type PropsWithChildren,
+  type ReactNode,
   useId,
 } from 'react';
 

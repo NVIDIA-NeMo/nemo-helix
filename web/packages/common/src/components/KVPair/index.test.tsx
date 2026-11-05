@@ -3,7 +3,7 @@
 
 import { KVPair } from '@nemo/common/src/components/KVPair/index';
 import { render, screen } from '@testing-library/react';
-import { ComponentProps } from 'react';
+import type { ComponentProps } from 'react';
 
 describe('KVPair', () => {
   it('should render a label and a value', () => {

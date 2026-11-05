@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { FilesetFileUploadError } from '@nemo/common/src/datasets/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { TextInput, TextArea, FormField, Stack } from '@nvidia/foundations-react-core';
 import { useDatasetCreate } from '@studio/api/datasets/useDatasetCreate';
 import { CustomizationFileTag } from '@studio/components/CustomizationFileTag';
@@ -27,8 +27,8 @@ import { datasetSchema } from '@studio/constants/zod';
 import { useCustomizationFilesPreview } from '@studio/hooks/useCustomizationFiles';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { renameFile } from '@studio/util/files';
-import { FC, useState } from 'react';
-import { Controller, SubmitHandler, useController, useForm } from 'react-hook-form';
+import { type FC, useState } from 'react';
+import { Controller, type SubmitHandler, useController, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const isValidFileExtension = (file?: File) => {

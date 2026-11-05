@@ -13,7 +13,7 @@ import {
 import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { useQueryClient } from '@tanstack/react-query';
-import { FC, MouseEvent, useState } from 'react';
+import { type FC, type MouseEvent, useState } from 'react';
 
 interface CancelJobButtonProps {
   workspace: string;

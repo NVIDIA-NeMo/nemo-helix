@@ -3,7 +3,7 @@
 
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { Navigate } from 'react-router';
 
 /**

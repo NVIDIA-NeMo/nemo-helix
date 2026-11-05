@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SliderWithTextInput } from '@nemo/common/src/components/SliderWithTextInput';
-import { UseControllerComponentProps } from '@nemo/common/src/types';
-import { ComponentProps } from 'react';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
+import type { ComponentProps } from 'react';
 import { useController } from 'react-hook-form';
 
 interface Props

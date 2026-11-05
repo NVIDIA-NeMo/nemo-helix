@@ -27,7 +27,7 @@ import {
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { AxiosError, AxiosHeaders } from 'axios';
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 vi.mock('@nemo/common/src/providers/toast/useToast');
 vi.mock('@nemo/sdk/generated/platform/files');

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NHX_BASE_URL } from '@e2e-tests/utils/environment';
-import { CreateModelEntityRequest, ModelEntity } from '@nemo/sdk/generated/platform/schema';
-import { APIRequestContext } from '@playwright/test';
+import type { CreateModelEntityRequest, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { APIRequestContext } from '@playwright/test';
 
 export class ModelsAPI {
   constructor(private request: APIRequestContext) {}

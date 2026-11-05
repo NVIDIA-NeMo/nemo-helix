@@ -12,7 +12,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
+import type { ModelDeployment } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DeploymentsDataView } from '@studio/components/dataViews/DeploymentsDataView';
 import { DocumentationButton } from '@studio/components/DocumentationButton';
@@ -27,7 +27,7 @@ import {
   getWorkspaceDeploymentsRoute,
   getWorkspaceNewDeploymentRoute,
 } from '@studio/routes/utils';
-import { FC, useCallback, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router';
 
 export const DeploymentsListRoute: FC = () => {

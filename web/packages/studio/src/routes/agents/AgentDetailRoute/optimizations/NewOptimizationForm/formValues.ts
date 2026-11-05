@@ -3,11 +3,11 @@
 
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { JOB_NAME_MAX_LENGTH } from '@studio/components/evaluation/submitEvaluationJob';
-import {
-  type BudgetId,
-  type IntentId,
-  type PromptModeId,
-  type SearchParameter,
+import type {
+  BudgetId,
+  IntentId,
+  PromptModeId,
+  SearchParameter,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
 import { z } from 'zod';
 

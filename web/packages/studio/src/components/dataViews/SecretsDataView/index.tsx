@@ -29,7 +29,7 @@ import {
 import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';
 import { EditSecretModal } from '@studio/routes/SecretsListRoute/EditSecretModal';
 import { keepPreviousData } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 
 export interface SecretsDataViewProps {
   workspace: string;

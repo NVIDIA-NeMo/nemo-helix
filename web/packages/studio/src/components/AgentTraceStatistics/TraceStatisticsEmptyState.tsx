@@ -3,7 +3,7 @@
 
 import { ChartPerformance, Play } from '@nemo/icons/icons';
 import { Button, Card, Flex, StatusMessage } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   /** Invoke the agent so it emits its first traces. */

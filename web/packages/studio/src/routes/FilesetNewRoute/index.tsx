@@ -14,13 +14,13 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { CustomFilesetForm } from '@studio/routes/FilesetNewRoute/CustomFilesetForm';
 import {
   DatasetCreateFilesetFormSchema,
-  DatasetFormFields,
+  type DatasetFormFields,
 } from '@studio/routes/FilesetNewRoute/types';
 import { useCreateFileset } from '@studio/routes/FilesetNewRoute/useCreateFileset';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { getWorkspaceFilesetsRoute } from '@studio/routes/utils';
 import { isHuggingFaceUrl, isNgcUrl } from '@studio/util/storageConfigFromUrl';
-import { FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 

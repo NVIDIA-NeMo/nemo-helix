@@ -13,7 +13,7 @@ import {
   ASSISTANT_HISTORY_OPEN_KEY,
   ASSISTANT_OPEN_FLOATING_PANEL_KEY,
 } from '@studio/util/localStorage';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 type OpenFloatingPanel = 'history' | 'skills';
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { extractFilePathsFromDirectory } from '@studio/components/filesets/FilesetFileExplorer/extractFilePathsFromDirectory';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { render } from '@studio/tests/util/render';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

@@ -16,7 +16,7 @@ import {
   getFilesListFilesetsQueryKey,
   useFilesCreateFileset,
 } from '@nemo/sdk/generated/platform/files';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { SegmentedControl, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   filesetCreateFormSchema,
@@ -40,7 +40,7 @@ import {
   storageConfigFromUrl,
 } from '@studio/util/storageConfigFromUrl';
 import { useQueryClient } from '@tanstack/react-query';
-import { FC, useCallback, useEffect, useMemo, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 

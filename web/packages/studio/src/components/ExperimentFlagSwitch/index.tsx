@@ -3,7 +3,7 @@
 
 import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Switch, Text } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * Presentation flags an Experiment carries, with the copy shown next to each toggle.

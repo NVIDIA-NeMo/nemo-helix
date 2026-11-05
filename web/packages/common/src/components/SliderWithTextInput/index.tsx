@@ -9,16 +9,16 @@ import {
   Button,
   Flex,
   FormField,
-  FormFieldProps,
+  type FormFieldProps,
   Slider,
   Stack,
   Text,
   TextInput,
-  TextInputProps,
+  type TextInputProps,
   Tooltip,
 } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode, useState } from 'react';
-import { FieldValues } from 'react-hook-form';
+import { type ComponentProps, type ReactNode, useState } from 'react';
+import type { FieldValues } from 'react-hook-form';
 
 type SliderProps = ComponentProps<typeof Slider>;
 

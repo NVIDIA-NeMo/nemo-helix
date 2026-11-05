@@ -9,7 +9,7 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
-import { UploadDataset, UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadDataset, UploadFile } from '@nemo/common/src/components/UploadModal/types';
 import { isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
 import { DATASET_NAME_REGEX } from '@nemo/common/src/datasets/constants';
 

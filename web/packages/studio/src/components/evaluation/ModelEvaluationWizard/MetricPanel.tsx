@@ -19,7 +19,7 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import { LINK_EVAL_DOCS_METRICS } from '@studio/constants/links';
-import { FC, ReactNode, useEffect } from 'react';
+import { type FC, type ReactNode, useEffect } from 'react';
 import { type FieldError, useFormContext, useWatch } from 'react-hook-form';
 
 const toItems = (operations: readonly string[]) =>

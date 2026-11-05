@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FileTag, FileTagStatus } from '@nemo/common/src/components/FileTag';
+import { FileTag, type FileTagStatus } from '@nemo/common/src/components/FileTag';
 import {
   getAcceptedFileExtensions,
   hadInvalidFileTypeError,
@@ -10,8 +10,20 @@ import {
 import { InputErrorText } from '@nemo/common/src/components/InputErrorText';
 import { DocumentNew, IconDocument } from '@nemo/icons/icons';
 import { Block, Flex, Label, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC, MouseEvent, MouseEventHandler, ReactNode, useCallback, useState } from 'react';
-import { DropEvent, DropzoneOptions, FileRejection, useDropzone } from 'react-dropzone';
+import {
+  type FC,
+  type MouseEvent,
+  type MouseEventHandler,
+  type ReactNode,
+  useCallback,
+  useState,
+} from 'react';
+import {
+  type DropEvent,
+  type DropzoneOptions,
+  type FileRejection,
+  useDropzone,
+} from 'react-dropzone';
 
 const defaultRenderFileTag: RenderFileTagFn = (file, disabled, onRemove) => {
   return (

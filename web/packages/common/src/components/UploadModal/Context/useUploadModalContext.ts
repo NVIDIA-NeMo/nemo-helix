@@ -9,11 +9,11 @@
  * without an express license agreement from NVIDIA CORPORATION or
  * its affiliates is strictly prohibited.
  */
-import {
+import type {
   UploadModalState,
   UploadModalAction,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
-import { createContext, Dispatch, useContext } from 'react';
+import { createContext, type Dispatch, useContext } from 'react';
 
 export type UploadModalContextType = [UploadModalState, Dispatch<UploadModalAction>];
 export const UploadModalContext = createContext<UploadModalContextType | null>(null);

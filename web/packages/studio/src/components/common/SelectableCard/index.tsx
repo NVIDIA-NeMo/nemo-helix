@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Badge, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 export interface CardIconBadgeProps {
   /** The icon (or other glyph) to center inside the badge. */
