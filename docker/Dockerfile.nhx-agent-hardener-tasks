@@ -63,7 +63,9 @@ COPY --from=builder /usr/local/bin/openshell /usr/local/bin/openshell
 ENV NEMO_AGENT_HARDENER_VENV_PATH=/opt/agent-hardener/venv \
     NEMO_AGENT_HARDENER_GARAK_VENV_PATH=/opt/agent-hardener/garak-venv
 # The base image's root build steps leave root-owned dirs under HOME; garak writes ~/.cache/garak on import.
-RUN mkdir -p /home/nvs/.cache && chown -R 1000:1000 /home/nvs
+# The OpenSSH client, which `openshell sandbox upload` runs, refuses to start for a uid with no passwd entry.
+RUN mkdir -p /home/nvs/.cache && chown -R 1000:1000 /home/nvs && \
+    (getent passwd 1000 >/dev/null || echo "nvs:x:1000:0:nvs:/home/nvs:/bin/sh" >> /etc/passwd)
 # agent-hardener keeps per-run state under <cwd>/.agent-hardener; /app is the root-owned venv.
 WORKDIR /home/nvs
 
@@ -71,7 +73,7 @@ FROM runtime AS smoke-test
 # The war-game fails minutes in, after the run record exists, when any of these is missing, so check
 # them at build time as the uid task pods run as: the task entrypoints import, both venvs run, the
 # openshell CLI accepts the plain and mTLS registrations the job makes (an unreachable endpoint only
-# warns), and the per-run state dir is writable.
+# warns), its ssh client can start (sandbox uploads run it), and the per-run state dir is writable.
 USER 1000
 RUN set -eux; \
     python -c "import nemo_agent_hardener_plugin.tasks.war_game.__main__, nemo_agent_hardener_plugin.tasks.synth_benign.__main__, nemo_agent_hardener_plugin.tasks.victim_context.__main__"; \
@@ -86,6 +88,7 @@ RUN set -eux; \
     XDG_CONFIG_HOME="${cfg}/mtls" openshell gateway add https://127.0.0.1:9 --name auto-defender --local; \
     test -f "${cfg}/mtls/openshell/gateways/auto-defender/metadata.json"; \
     rm -rf "${cfg}"; \
+    ssh -G sandbox >/dev/null; \
     echo ok > .w && rm .w
 
 FROM runtime
