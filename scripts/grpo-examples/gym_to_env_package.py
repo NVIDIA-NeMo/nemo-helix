@@ -28,8 +28,8 @@ to recreate ``.venv``, which blocks commits and uploads.
 Then validate and upload, still with that interpreter:
 
     .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
-    nemo files filesets create my-env -w default --purpose environment --exist-ok
-    nemo files upload /tmp/mwj-env/ my-env -w default
+    nemo files filesets create my-env --workspace default --purpose environment --exist-ok
+    nemo files upload /tmp/mwj-env/ my-env --workspace default
 
 `native-v1` ships no wheels and resolves the server's requirements from a package index when
 the job starts, so the cluster needs egress. `wheels-v1` vendors the closure and does not.
