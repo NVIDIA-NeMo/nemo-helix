@@ -35,6 +35,8 @@ RUN uv pip freeze --python ${VIRTUAL_ENV}/bin/python --exclude-editable > /tmp/b
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --overrides /app/docker/automodel/no_override_requirements.txt \
+    --reinstall-package fsspec \
+    "datasets==5.1.0" "fsspec==2026.7.0" "urllib3==2.8.0" \
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nemo_helix_ext \
@@ -46,13 +48,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-deps \
     -e /opt/Automodel
-
-# Re-apply floors after platform glue, including when CI supplies a prebuilt base.
-RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
-    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
-    python /tmp/patch-python-cve-deps.py \
-        --python ${VIRTUAL_ENV}/bin/python --overrides /tmp/python-cve-overrides.txt \
-        --overrides /app/docker/automodel/no_override_requirements.txt
 
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}

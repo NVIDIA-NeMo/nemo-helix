@@ -180,7 +180,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache \
     --reinstall-package wandb \
     --overrides /opt/docker/no_override_requirements.txt \
-
+    --reinstall-package fsspec \
+    "datasets==5.1.0" "fsspec==2026.7.0" "urllib3==2.8.0" \
     -e /app/packages/filesets \
     -e /app/packages/nemo_helix_plugin \
     -e /app/packages/nemo_helix_ext \
@@ -216,13 +217,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "GitPython>=3.1.60,<4" \
     "mlflow-skinny>=3.15.0,<3.16.0" \
     "sqlparse>=0.6.0,<0.7"
-
-# Patch fsspec together with Datasets, preserving the NGC torch stack.
-RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
-    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
-    python /tmp/patch-python-cve-deps.py \
-        --python ${VIRTUAL_ENV}/bin/python --overrides /tmp/python-cve-overrides.txt \
-        --overrides /opt/docker/no_override_requirements.txt
 
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/base/pytorch-ngc-common.txt,target=/tmp/common-file-removals.txt,readonly \

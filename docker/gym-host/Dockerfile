@@ -39,11 +39,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_CACHE_DIR=/root/.cache/uv UV_LINK_MODE=copy \
     uv pip install --python /opt/gym-host-venv/bin/python --no-deps "cryptography==50.0.0"
 
+# Apply the host lock's reviewed pins when Gym provisions component venvs,
+# including any created at runtime. Older Datasets releases cap fsspec below
+# the fixed version, so inherit its compatible locked version as well.
+RUN /opt/gym-host-venv/bin/python -c \
+    'from importlib.metadata import version; from pathlib import Path; Path("/opt/gym-host-overrides.txt").write_text("".join(f"{name}=={version(name)}\n" for name in ("urllib3", "fsspec", "datasets")))'
+
 # Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
 # resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
 # of on every container start.
 ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_OVERRIDE=/opt/gym-host-overrides.txt \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv
 RUN mkdir -p "${NEMO_GYM_VENV_DIR}" "${UV_CACHE_DIR}"
 RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/simple_agent/configs/simple_agent.yaml,responses_api_models/inference_provider/configs/inference_provider.yaml,resources_servers/mcqa/configs/mcqa.yaml]" \
@@ -54,16 +61,6 @@ RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/s
     else \
       echo "prefetch failed; venvs will be built at run time"; \
     fi
-
-# Component venvs are resolved by Gym, independently of the host lock. Patch
-# every nested venv and drop stale cached archives before copying the cache.
-# Prefetch uses UV_LINK_MODE=copy, so cache eviction cannot break those venvs.
-RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
-    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
-    python /tmp/patch-python-cve-deps.py \
-        --root /opt/gym-host-venv --root "${NEMO_GYM_VENV_DIR}" \
-        --overrides /tmp/python-cve-overrides.txt && \
-    uv cache clean urllib3 fsspec datasets
 
 # Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
 # Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
@@ -107,6 +104,7 @@ RUN --mount=type=bind,source=docker/scripts/update-python-trust.py,target=/tmp/u
 # Copy the locked host Python environment; this supplies Gym and sandboxed_gym.
 COPY --from=builder /usr/share/nemo-helix/source-distributions/rebuilt-wandb/ /usr/share/nemo-helix/source-distributions/rebuilt-wandb/
 COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
+COPY --from=builder /opt/gym-host-overrides.txt /opt/gym-host-overrides.txt
 # Copy Gym's prebuilt per-component environments to avoid runtime installation.
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs
 # Copy the matching uv cache used by those component environments.
@@ -116,6 +114,7 @@ ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/gym-host-venv \
     PYTHONUNBUFFERED=1 \
     NEMO_GYM_VENV_DIR=/opt/gym_venvs \
+    UV_OVERRIDE=/opt/gym-host-overrides.txt \
     UV_CACHE_DIR=/home/ubuntu/.cache/uv \
     NHX_RUNTIME_HTTP_PORT=8080
 
