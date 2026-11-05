@@ -132,6 +132,32 @@ describe('ActionMenu', () => {
     });
   });
 
+  describe('Copy to New Fileset', () => {
+    it('is hidden for local filesets', async () => {
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+
+      expect(screen.queryByText('Copy to New Fileset')).not.toBeInTheDocument();
+    });
+
+    it('opens the copy modal for external filesets', async () => {
+      const user = userEvent.setup();
+      const external = {
+        ...mockDataset,
+        storage: { type: 's3', bucket: 'b' },
+      } as Dataset;
+      render(<ActionMenu {...defaultProps} dataset={external} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
+
+      expect(screen.getByText(`Copy Fileset: ${mockDataset.name}`)).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /name/i })).toHaveValue('test-dataset-copy');
+    });
+  });
+
   describe('Dropdown Actions', () => {
     it('calls onNavigateToDetails when View is clicked', async () => {
       const user = userEvent.setup();

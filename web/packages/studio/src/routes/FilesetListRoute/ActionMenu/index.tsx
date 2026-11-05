@@ -18,6 +18,7 @@ import {
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
+import { CopyFilesetModal } from '@studio/components/filesets/CopyFilesetModal';
 import { type FC, useState } from 'react';
 
 interface ActionMenuProps {
@@ -33,7 +34,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   onDatasetUpdated,
   onDatasetDeleted,
 }) => {
-  const [modalOpen, setModalOpen] = useState<'edit' | 'delete' | undefined>(undefined);
+  const [modalOpen, setModalOpen] = useState<'edit' | 'copy' | 'delete' | undefined>(undefined);
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
     mutation: {
       onSuccess: (_data, variables) => {
@@ -81,6 +82,9 @@ export const ActionMenu: FC<ActionMenuProps> = ({
         <DropdownContent align="end" className="w-[180px]">
           <DropdownItem onClick={() => onNavigateToDetails(dataset)}>View</DropdownItem>
           <DropdownItem onClick={() => setModalOpen('edit')}>Edit</DropdownItem>
+          {dataset.storage.type !== 'local' && (
+            <DropdownItem onClick={() => setModalOpen('copy')}>Copy to New Fileset</DropdownItem>
+          )}
           <DropdownItem onClick={() => setModalOpen('delete')} danger>
             Delete
           </DropdownItem>
@@ -95,6 +99,14 @@ export const ActionMenu: FC<ActionMenuProps> = ({
           onClose={handleModalClose}
           onDatasetUpdated={handleDatasetUpdated}
           open={modalOpen === 'edit'}
+        />
+      )}
+
+      {modalOpen === 'copy' && (
+        <CopyFilesetModal
+          source={dataset}
+          onClose={handleModalClose}
+          onCopied={onNavigateToDetails}
         />
       )}
 
