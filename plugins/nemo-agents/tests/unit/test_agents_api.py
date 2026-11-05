@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -676,6 +676,32 @@ class TestDeleteAgent:
             name="calc",
             workspace="default",
         )
+
+    @pytest.mark.parametrize("remove_images", [True, False])
+    def test_delete_removes_unused_images_when_asked(
+        self, client: TestClient, mock_entity_client: AsyncMock, remove_images: bool
+    ) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+        store, internal = AsyncMock(), AsyncMock()
+        with (
+            patch("nemo_agents_plugin.api.v2.agents.image_access", AsyncMock(return_value=(store, internal))),
+            patch("nemo_agents_plugin.api.v2.agents.remove_unused_agent_images", AsyncMock()) as remove,
+        ):
+            resp = client.delete(f"/apis/agents/v2/workspaces/default/agents/calc?remove_images={remove_images}")
+
+        assert resp.status_code == 204
+        if remove_images:
+            remove.assert_awaited_once_with(store, internal, workspace="default", agent="calc")
+        else:
+            remove.assert_not_awaited()
+
+    def test_delete_succeeds_when_image_cleanup_fails(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
+        mock_entity_client.list = AsyncMock(return_value=_list_response([]))
+        with patch("nemo_agents_plugin.api.v2.agents.image_access", AsyncMock(side_effect=RuntimeError("boom"))):
+            resp = client.delete("/apis/agents/v2/workspaces/default/agents/calc?remove_images=true")
+
+        assert resp.status_code == 204
+        mock_entity_client.delete.assert_awaited_once()
 
     def test_delete_not_found_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.list = AsyncMock(return_value=_list_response([]))

@@ -375,6 +375,7 @@ class TestFabricBuilderValidationHook:
             },
             platforms=["linux/amd64"],
             push=True,
+            labels=None,
             on_progress=None,
         )
         assert not (tmp_path / "Dockerfile.generated").exists()
@@ -524,6 +525,7 @@ class TestFabricBuilderValidationHook:
             },
             platforms=["linux/amd64"],
             push=True,
+            labels=None,
             on_progress=None,
         )
         assert not (tmp_path / "Dockerfile.generated").exists()

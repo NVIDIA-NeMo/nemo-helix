@@ -53,6 +53,7 @@ def docker_build(
     build_args: dict[str, str] | None = None,
     platforms: list[str] | None = None,
     push: bool = False,
+    labels: dict[str, str] | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> str:
     """Build a Docker image and return the tag.
@@ -69,6 +70,7 @@ def docker_build(
             to one entry — multi-arch builds via buildx are not yet
             implemented and are rejected at the CLI layer.
         push: Push the image as part of the build (single round-trip).
+        labels: Extra image labels, on top of those the Dockerfile sets.
         on_progress: Sink for progress lines; defaults to the module logger.
 
     Returns:
@@ -99,6 +101,7 @@ def docker_build(
             build_args=build_args or {},
             platforms=platforms or None,
             push=push,
+            labels=labels or {},
         )
     except Exception as exc:
         raise ImageBuildError(f"Docker build failed: {exc}") from exc
@@ -371,6 +374,7 @@ def build_fabric_agent_image(
     push: bool = False,
     on_progress: ProgressCallback | None = None,
     wheel: Path | None = None,
+    labels: dict[str, str] | None = None,
 ) -> str:
     """Build a Fabric-backed NeMo agent image.
 
@@ -518,6 +522,7 @@ def build_fabric_agent_image(
                 build_args=build_args,
                 platforms=platforms,
                 push=push,
+                labels=labels,
                 on_progress=on_progress,
             )
 
@@ -582,6 +587,7 @@ def build_fabric_agent_image(
             build_args=build_args,
             platforms=platforms,
             push=push,
+            labels=labels,
             on_progress=on_progress,
         )
     finally:

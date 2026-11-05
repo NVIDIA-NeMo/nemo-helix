@@ -17,9 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
 from nemo_agents_plugin.api.v2._perms import AgentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
+from nemo_agents_plugin.api.v2.images import image_access
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.context_schema import check_context_schema
 from nemo_agents_plugin.entities import Agent, AgentDeployment
+from nemo_agents_plugin.images import remove_unused_agent_images
 from nemo_agents_plugin.jobs.post_run_actions import validate_post_run_action_kinds
 from nemo_agents_plugin.schema import (
     AgentFilter,
@@ -178,6 +180,13 @@ async def get_agent(
 async def delete_agent(
     workspace: str,
     name: str,
+    remove_images: bool = Query(
+        default=False,
+        description=(
+            "Also remove the images the platform built for this agent that no container or deployment uses. "
+            "Images still in use by deployments being torn down are removed with those deployments."
+        ),
+    ),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
     """Delete an agent by name.
@@ -222,6 +231,19 @@ async def delete_agent(
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc
+
+    if remove_images:
+        await _remove_agent_images(workspace=workspace, name=name)
+
+
+async def _remove_agent_images(*, workspace: str, name: str) -> None:
+    """Best effort: the agent is already gone, so a failure here is only logged."""
+    try:
+        access = await image_access()
+        if access is not None:
+            await remove_unused_agent_images(*access, workspace=workspace, agent=name)
+    except Exception:
+        logger.warning("Failed to remove images for deleted agent '%s'", name, exc_info=True)
 
 
 async def _resolve_agent_reference(

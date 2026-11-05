@@ -16,15 +16,47 @@ import logging
 from collections.abc import Iterable
 
 from nemo_agents_plugin.entities import AgentDeployment
-from nemo_deployments_plugin.backends.base import DeploymentBackend, ImageInUseError
+from nemo_deployments_plugin.backends.base import DeploymentBackend, ImageInfo, ImageInUseError
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 #: Docker tags are daemon-global but the auth boundary is the workspace, so every
 #: image is nested under ``{TAG_NAMESPACE}/{workspace}/``.
 TAG_NAMESPACE = "nemo-agents"
+IMAGE_WORKSPACE_LABEL = "com.nemo.agent.workspace"
+IMAGE_AGENT_LABEL = "com.nemo.agent.name"
+IMAGE_SPEC_REVISION_LABEL = "com.nemo.agent.spec-revision"
+#: Set by the Dockerfile template on every build, including images built before the labels above.
+_OCI_TITLE_LABEL = "org.opencontainers.image.title"
 _DEPLOYMENT_PAGE_SIZE = 100
+
+
+class AgentImage(BaseModel):
+    """A platform-built agent image on the deployment host."""
+
+    id: str = Field(description="Immutable image ID.")
+    tags: list[str] = Field(description="This workspace's tags for the image.")
+    agent: str | None = Field(default=None, description="Agent the image was built for, when known.")
+    spec_revision: str = Field(
+        default="",
+        description="Revision of the agent's spec fileset the image was built from. Empty when unknown.",
+    )
+    size: int = Field(default=0, description="Image size in bytes.")
+    created: str = Field(default="", description="When the image was built.")
+    in_use: bool = Field(description="A container or a deployment in any workspace still uses the image.")
+    deployments: list[str] = Field(
+        default_factory=list, description="Deployments in this workspace that reference the image."
+    )
+
+
+class AgentImageList(BaseModel):
+    data: list[AgentImage]
+
+
+def workspace_prefix(workspace: str) -> str:
+    return f"{TAG_NAMESPACE}/{workspace}/"
 
 
 def is_platform_built(reference: str, workspace: str) -> bool:
@@ -34,6 +66,20 @@ def is_platform_built(reference: str, workspace: str) -> bool:
 def _is_platform_tag(tag: str, workspace: str) -> bool:
     """The local build tag, or the ``{registry}/nemo-agents/{workspace}/...`` tag a push adds."""
     return is_platform_built(tag, workspace) or f"/{TAG_NAMESPACE}/{workspace}/" in tag
+
+
+def build_labels(*, workspace: str, agent: str, spec_revision: str = "") -> dict[str, str]:
+    labels = {IMAGE_WORKSPACE_LABEL: workspace, IMAGE_AGENT_LABEL: agent}
+    if spec_revision:
+        labels[IMAGE_SPEC_REVISION_LABEL] = spec_revision
+    return labels
+
+
+def image_agent(image: ImageInfo, workspace: str) -> str | None:
+    """The agent *image* was built for; older builds only carry the agent spec's name."""
+    if image.labels.get(IMAGE_WORKSPACE_LABEL) == workspace and image.labels.get(IMAGE_AGENT_LABEL):
+        return image.labels[IMAGE_AGENT_LABEL]
+    return image.labels.get(_OCI_TITLE_LABEL) or None
 
 
 async def list_all_deployments(entities: NemoEntitiesClient) -> list[AgentDeployment]:
@@ -52,6 +98,32 @@ def _referenced_images(deployments: Iterable[AgentDeployment]) -> set[str]:
     return {d.image for d in deployments if d.image and not (d.status == "deleting" and d.remove_image_on_delete)}
 
 
+def _to_agent_image(image: ImageInfo, workspace: str, deployments: list[AgentDeployment]) -> AgentImage:
+    owned = [t for t in image.tags if _is_platform_tag(t, workspace)]
+    tags = set(owned)
+    users = [d for d in deployments if d.image in tags]
+    return AgentImage(
+        id=image.id,
+        tags=owned,
+        agent=image_agent(image, workspace),
+        spec_revision=image.labels.get(IMAGE_SPEC_REVISION_LABEL, ""),
+        size=image.size,
+        created=image.created,
+        in_use=image.containers > 0 or bool(tags & _referenced_images(users)),
+        deployments=sorted(d.name for d in users if d.workspace == workspace),
+    )
+
+
+async def list_agent_images(
+    store: DeploymentBackend, entities: NemoEntitiesClient, *, workspace: str
+) -> list[AgentImage]:
+    images = await store.list_images(repository_prefix=workspace_prefix(workspace))
+    if not images:
+        return []
+    deployments = await list_all_deployments(entities)
+    return [_to_agent_image(image, workspace, deployments) for image in images]
+
+
 async def remove_tags(store: DeploymentBackend, tags: Iterable[str]) -> bool:
     """Untag each of *tags*; the last one removes the image. False when one is still in use."""
     for tag in tags:
@@ -60,6 +132,17 @@ async def remove_tags(store: DeploymentBackend, tags: Iterable[str]) -> bool:
         except ImageInUseError:
             return False
     return True
+
+
+async def remove_unused_agent_images(
+    store: DeploymentBackend, entities: NemoEntitiesClient, *, workspace: str, agent: str
+) -> int:
+    """Remove *agent*'s images that nothing uses; returns how many were removed."""
+    removed = 0
+    for image in await list_agent_images(store, entities, workspace=workspace):
+        if image.agent == agent and not image.in_use and await remove_tags(store, image.tags):
+            removed += 1
+    return removed
 
 
 async def remove_unused_image(

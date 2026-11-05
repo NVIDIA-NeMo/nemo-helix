@@ -80,6 +80,7 @@ class AgentsService(NemoService):
             deployments,
             environments,
             gateway,
+            images,
             post_run_actions,
             sample_agent,
             sessions,
@@ -114,6 +115,7 @@ class AgentsService(NemoService):
                 description="Per-deployment log retrieval",
                 prefix=_prefix,
             ),
+            RouterSpec(images.router, tag="Agent Images", description="Platform-built agent images", prefix=_prefix),
             RouterSpec(
                 gateway.router, tag="Agent Gateway", description="Proxy to running agent deployments", prefix=_prefix
             ),
