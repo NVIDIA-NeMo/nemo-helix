@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
 import httpx
+import nemo_builder_plugin.controller as controller_module
 import pytest
-from nemo_builder_plugin.controller import BuildQueueController
+from nemo_builder_plugin.controller import ORPHAN_CHECK_SECONDS, ORPHAN_GRACE, ORPHANED, BuildQueueController
 from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.entities import EntityNotFoundError
@@ -32,9 +34,14 @@ class FakeEntities:
     def __init__(self) -> None:
         self.entities: dict[str, Any] = {}
         self.fail_update: set[str] = set()
+        self.fail_list: set[type] = set()
 
-    async def list(self, entity_type, *, workspace, sort, page):
+    async def list(self, entity_type, *, workspace, sort, page, filter_obj=None):
+        if entity_type in self.fail_list:
+            raise RuntimeError("entity store down")
         found = [e for e in self.entities.values() if isinstance(e, entity_type)]
+        for field, value in (filter_obj or {}).items():
+            found = [e for e in found if getattr(e, field) == value]
         return SimpleNamespace(data=found, pagination=SimpleNamespace(total_pages=1))
 
     async def get(self, entity_type, *, name, workspace):
@@ -188,3 +195,78 @@ async def test_refused_builds_do_not_block_the_queue() -> None:
     jobs.jobs["good"].status = HelixJobStatus.COMPLETED
     await controller.reconcile()
     assert entities.entities["missing-secret.img"].status == "failed" and "missing-secret" not in entities.entities
+
+
+def _orphan(entities: FakeEntities, job: str, *, age: timedelta) -> str:
+    """A ``queued`` image of ``job``, written ``age`` ago, with no queued build: as a submit that stopped leaves."""
+    image = f"{job}.img"
+    row = ContainerImage(
+        name=image,
+        workspace="default",
+        status="queued",
+        registry="reg.example.com",
+        repository=f"team/{job}",
+        provenance=Provenance(build_set=job, revision=1, spec="img", job=f"default/{job}", request_digest=DIGEST),
+    )
+    row._created_at = datetime.now(UTC) - age
+    entities.entities[image] = row
+    return image
+
+
+def _held(entities: FakeEntities, job: str) -> BuildQueueController:
+    """A controller capped at 0, so ``job``'s queued build stays queued however old its image is."""
+    controller = BuildQueueController(cap=lambda: 0)
+    vars(controller).update(_entities=entities, _jobs=FakeJobs(), _jobs_as=lambda principal: nullcontext(None))
+    _queue(entities, job)
+    entities.entities[f"{job}.img"]._created_at = datetime.now(UTC) - ORPHAN_GRACE * 3
+    return controller
+
+
+@pytest.mark.asyncio
+async def test_queued_images_no_queued_build_holds_fail_once_old() -> None:
+    entities = FakeEntities()
+    controller = _held(entities, "waiting")
+    old = _orphan(entities, "stopped", age=ORPHAN_GRACE + timedelta(minutes=1))
+    young = _orphan(entities, "submitting", age=timedelta(seconds=5))
+
+    await controller.reconcile()
+    assert (entities.entities[old].status, entities.entities[old].status_detail) == ("failed", ORPHANED)
+    assert entities.entities[young].status == "queued"
+    assert entities.entities["waiting.img"].status == "queued" and "waiting" in entities.entities
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_whose_build_was_queued_since_is_kept() -> None:
+    entities = FakeEntities()
+    controller = _held(entities, "requeued")
+    # The pass read no queued build for it, but a submit of the same request has queued it since.
+    await controller._fail_orphans(set())
+    assert entities.entities["requeued.img"].status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_the_orphan_check_runs_every_ten_minutes_and_survives_a_failed_listing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entities = FakeEntities()
+    controller = BuildQueueController(cap=lambda: None)
+    vars(controller).update(_entities=entities, _jobs=FakeJobs(), _jobs_as=lambda principal: nullcontext(None))
+    clock = [1000.0]
+    monkeypatch.setattr(controller_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    await controller.reconcile()
+    image = _orphan(entities, "stopped", age=ORPHAN_GRACE * 2)
+    clock[0] += ORPHAN_CHECK_SECONDS / 2
+    await controller.reconcile()
+    assert entities.entities[image].status == "queued"
+
+    # A listing that fails is logged; the pass still finishes, and the next check catches up.
+    clock[0] += ORPHAN_CHECK_SECONDS
+    entities.fail_list.add(ContainerImage)
+    await controller.reconcile()
+    assert entities.entities[image].status == "queued"
+
+    entities.fail_list.clear()
+    clock[0] += ORPHAN_CHECK_SECONDS
+    await controller.reconcile()
+    assert entities.entities[image].status == "failed"

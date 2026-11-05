@@ -388,7 +388,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for `builder-queue` to create its job: until its next pass, or for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit or Jobs refuses the build, or by `builder-queue` once the image's job has ended without publishing it (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for `builder-queue` to create its job: until its next pass, or for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit or Jobs refuses the build, or by `builder-queue` once the image's job has ended without publishing it, or once a submit that stopped before queuing the build has left it `queued` for ten minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -625,6 +625,10 @@ Every platform image includes the builder, and the platform's chart deploys what
 - **With `sandboxClusterCapable`, a placeholder for the OpenSandbox key's Secret.** Jobs gives every
   job pod a reference to it, and no build step uses the key, so the build namespace never holds it.
 
+The chart refuses `builder.enabled` with a controller list or group that leaves out `builder-queue`, the
+controller that creates every build's job: `core.controller.controllers` must name it, or
+`core.controller.controllerGroup` be `all`, the default.
+
 The chart doesn't copy image pull secrets. Jobs gives the step pods the platform's `imagePullSecrets`
 and their profile's by name, and `build` gives its sandboxes the same ones as its own pod, so create
 them in the build namespace too, or have a cluster tool copy them there, on a label from
@@ -741,8 +745,9 @@ volume and `node_selector`, so the profiles must agree with each other:
   fails it on its next pass, with the reason in `status_detail`, and it fails a build's rows when Jobs
   refuses the build's job. So poll until a row is `ready` or `failed`, with a deadline longer than your
   builds take. The controller has to run: without it no build starts, and its rows stay `queued`. A
-  submit that dies between writing its rows and queuing the build leaves them `queued` too: submitting
-  the same request again queues it. Once a request's rows have failed, submit the next `revision`.
+  submit that dies between writing its rows and queuing the build leaves them `queued` too. Submitting the
+  same request again queues it; otherwise `builder-queue` fails them once they're ten minutes old,
+  checking every ten minutes. Once a request's rows have failed, submit the next `revision`.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
@@ -754,10 +759,10 @@ volume and `node_selector`, so the profiles must agree with each other:
   it stays until someone deletes it.
 - **A failed build's files stay on the work volume for hours.** Jobs deletes a job's directory as soon
   as its last step succeeds, when the push step's profile sets `cleanup_completed_jobs_immediately`,
-  as the chart's do. A failed job's directory goes once the platform's
+  as the chart's do. A failed job's directory is queued for deletion once the platform's
   `jobs.storage.failed_storage_ttl_seconds` has passed, four hours by default, and a cancelled job's on
-  Jobs' next retention pass. Until then its contexts and layouts take space on the volume every build
-  shares.
+  Jobs' next retention pass; a cleanup job then deletes it. Until then its contexts and layouts take
+  space on the volume every build shares.
 - **`fetch` reads each file of a fileset whole into memory.** A build context with very large files
   can exhaust the step's memory. An archive is streamed to the work volume instead.
 - **An archive unpacks to at most 4 GiB and 100,000 entries.** A larger one fails the whole set,
@@ -849,7 +854,7 @@ The tests need no cluster, registry or running platform.
 | `backends.py`, `execution.py` | The deployment's backend, and the `execution` backend |
 | `compile.py` | Turns a plan into the `HelixJobSpec`, fetch, build and push, as a pure function |
 | `submit.py` | The submit sequence: plan, secrets, rows, then the job |
-| `controller.py` | `builder-queue`: creates each build's job, under `max_concurrent_builds` if set, and fails the images its job leaves unpublished |
+| `controller.py` | `builder-queue`: creates each build's job, under `max_concurrent_builds` if set, and fails the images its job leaves unpublished, or a stopped submit leaves `queued` |
 | `completion.py` | Who may complete an image, and the one write that makes its row `ready` |
 | `signing.py` | What a signature says, cosign's format for storing it, and the key that makes it |
 | `registry.py` | The registry calls the push step makes to store a signature |

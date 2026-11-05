@@ -8,6 +8,9 @@ forgets the started builds whose jobs ended (failing any image they left unpubli
 or for all of them with no cap set, each as the user who submitted it, and moves that build's images from ``queued``
 to ``pending``.
 
+Every ten minutes it also fails the ``queued`` images no queued build holds, ten minutes after they were written: a
+submit stopped between writing them and queuing their build, and nothing else would ever start or fail them.
+
 Every step is safe to repeat: a job that already exists for the same request is adopted, so a pass that dies
 between creating a job and marking its build started just finishes the work on the next pass.
 """
@@ -15,8 +18,10 @@ between creating a job and marking its build started just finishes the work on t
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 
 from nemo_builder_plugin.config import BuilderConfig
@@ -39,6 +44,13 @@ logger = logging.getLogger(__name__)
 
 _ENDED = set(HelixJobStatus.terminals())
 ClientFactory = Callable[[str | RuntimePrincipal | None], AbstractAsyncContextManager[AsyncNemoClient]]
+
+ORPHANED = "not built: its submit stopped before queuing the build"
+#: How old a ``queued`` image with no queued build must be before it is failed: far longer than a submit takes between
+#: writing its rows and its queued build.
+ORPHAN_GRACE = timedelta(minutes=10)
+#: Orphans are rare, and finding them lists every queued image, so the check runs this seldom.
+ORPHAN_CHECK_SECONDS = 600.0
 
 
 @asynccontextmanager
@@ -67,6 +79,7 @@ class BuildQueueController(NemoController):
         self._context: AbstractAsyncContextManager[AsyncNemoClient] | None = None
         self._entities: EntityClient | None = None
         self._jobs: AsyncJobsClient | None = None
+        self._next_orphan_check = 0.0
 
     @property
     def interval_seconds(self) -> float:
@@ -90,12 +103,20 @@ class BuildQueueController(NemoController):
         raise NotImplementedError
 
     async def reconcile(self) -> None:
+        builds = await self._queue()
+        await self._advance(builds)
+        if time.monotonic() >= self._next_orphan_check:
+            self._next_orphan_check = time.monotonic() + ORPHAN_CHECK_SECONDS
+            await self._fail_orphans({(build.workspace, build.name) for build in builds})
+
+    async def _advance(self, builds: list[QueuedBuild]) -> None:
+        """Settle the builds whose jobs ended, then start the oldest queued ones while the cap allows."""
         # ponytail: one global FIFO, so a workspace that submits 100 builds holds every slot until they drain.
         # Per-workspace fairness would take turns across workspaces in this loop.
         cap = self._cap()
         running = 0
         waiting: list[QueuedBuild] = []
-        for build in await self._queue():
+        for build in builds:
             if build.state == "queued":
                 waiting.append(build)
             elif await self._still_running(build):
@@ -201,6 +222,48 @@ class BuildQueueController(NemoController):
         """Forget ``build``, whose job ended; any image it did not publish by then never will be, so fail it."""
         await self._settle(build, "not built: its build job ended without publishing it")
 
+    async def _fail_orphans(self, queued: set[tuple[str, str]]) -> None:
+        """Fail the ``queued`` images older than :data:`ORPHAN_GRACE` that no queued build holds.
+
+        ``queued`` names the builds this pass read. A build queued since then is looked up before its images are
+        failed, so a submit of the same request that just queued them again keeps them.
+        """
+        assert self._entities is not None
+        try:
+            rows = await self._queued_rows()
+        except Exception:
+            logger.exception("could not list the queued images; retrying next check")
+            return
+        now = datetime.now(UTC)
+        orphans: dict[tuple[str, str], list[ContainerImage]] = {}
+        for row in rows:
+            key = (row.workspace, row.provenance.job.partition("/")[2])
+            if key not in queued and _age(row, now) >= ORPHAN_GRACE:
+                orphans.setdefault(key, []).append(row)
+        for (workspace, job), images in orphans.items():
+            label = f"{sanitize_for_log(workspace)}/{sanitize_for_log(job)}"
+            try:
+                await self._entities.get(QueuedBuild, name=job, workspace=workspace)
+            except EntityNotFoundError:
+                logger.warning("failing %d queued image(s) of %s, which no queued build holds", len(images), label)
+                await fail_rows(self._entities, images, ORPHANED)
+            except Exception:
+                logger.exception("could not look up build %s; retrying next check", label)
+
+    async def _queued_rows(self) -> list[ContainerImage]:
+        """Every ``queued`` image in every workspace."""
+        assert self._entities is not None
+        rows: list[ContainerImage] = []
+        page = 1
+        while True:
+            result = await self._entities.list(
+                ContainerImage, workspace="-", filter_obj={"status": "queued"}, sort="created_at", page=page
+            )
+            rows.extend(result.data)
+            if not result.data or page >= result.pagination.total_pages:
+                return rows
+            page += 1
+
     async def _settle(self, build: QueuedBuild, detail: str) -> None:
         """Fail ``build``'s waiting images, then forget it; kept for the next pass if any image couldn't be failed."""
         assert self._entities is not None
@@ -227,3 +290,11 @@ class BuildQueueController(NemoController):
 
 def _label(build: QueuedBuild) -> str:
     return f"{sanitize_for_log(build.workspace)}/{sanitize_for_log(build.name)}"
+
+
+def _age(row: ContainerImage, now: datetime) -> timedelta:
+    """How long ago ``row`` was written; zero if the store didn't say, so an undated row is never taken for old."""
+    created = row.created_at
+    if created is None:
+        return timedelta(0)
+    return now - (created if created.tzinfo is not None else created.replace(tzinfo=UTC))

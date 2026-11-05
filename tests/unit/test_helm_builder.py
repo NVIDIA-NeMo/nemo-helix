@@ -218,9 +218,32 @@ class TestWithOpenSandboxOnTheCluster:
         pytest.param(
             ("--set", "builder.limitRange.enabled=false"), "builder.resourceQuota needs builder.limitRange", id="quota"
         ),
+        # Every build queues, so without builder-queue none ever starts.
+        pytest.param(
+            ("--set", "core.controller.controllers={jobs}"),
+            "needs the builder-queue controller",
+            id="controllers-without-the-queue",
+        ),
+        pytest.param(
+            ("--set", "core.controller.controllerGroup=core"),
+            "needs the builder-queue controller",
+            id="a-group-without-the-queue",
+        ),
     ],
 )
 def test_what_the_chart_refuses(args: tuple[str, ...], refusal: str) -> None:
     with pytest.raises(subprocess.CalledProcessError) as refused:
         _helm_template(*ENABLED, *args)
     assert refusal in refused.value.stderr
+
+
+def test_a_controller_list_with_the_queue_renders() -> None:
+    documents = _helm_template(*ENABLED, "--set", "core.controller.controllers={jobs,builder-queue}")
+    args = [
+        arg
+        for document in documents
+        if document.get("kind") == "Deployment"
+        for container in document["spec"]["template"]["spec"]["containers"]
+        for arg in container.get("args", [])
+    ]
+    assert "--controllers=jobs,builder-queue" in args

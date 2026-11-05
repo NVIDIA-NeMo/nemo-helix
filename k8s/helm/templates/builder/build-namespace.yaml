@@ -14,6 +14,13 @@ The build namespace: each build's job steps and sandboxes run here, apart from t
 {{- if and .Values.builder.resourceQuota.enabled (not .Values.builder.limitRange.enabled) }}
 {{- fail "builder.resourceQuota needs builder.limitRange: without its defaults, the quota refuses every build pod that sets no limits" }}
 {{- end }}
+{{- if not (include "nhx-core.hasControllerSelectionExtraArgs" .) }}
+{{- $controllers := .Values.core.controller.controllers | default list }}
+{{- $group := .Values.core.controller.controllerGroup | default "" | toString }}
+{{- if or (and $controllers (kindIs "slice" $controllers) (not (has "builder-queue" $controllers))) (and (not $controllers) $group (ne $group "all")) }}
+{{- fail "builder.enabled needs the builder-queue controller, which creates every build's job: add it to core.controller.controllers, or use core.controller.controllerGroup all" }}
+{{- end }}
+{{- end }}
 {{- /* Not `restricted`: the sandbox runs as root. The chart's own labels win over builder.namespaceLabels. */}}
 {{- $labels := mergeOverwrite (dict) (.Values.builder.namespaceLabels | default dict) (include "nemo-helix.labels" . | fromYaml) (dict "pod-security.kubernetes.io/enforce" "baseline") }}
 apiVersion: v1

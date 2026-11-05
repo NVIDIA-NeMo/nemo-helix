@@ -207,7 +207,7 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
     ) -> ContainerImage:
-        """Read one image. This is what a caller polls until `status` leaves `pending`."""
+        """Read one image. This is what a caller polls until `status` is `ready` or `failed`."""
         row = await _get_row(entity_client, workspace, name)
         refusal = read_refusal(row, caller)
         if refusal is not None:
