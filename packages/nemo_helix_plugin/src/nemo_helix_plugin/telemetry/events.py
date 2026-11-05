@@ -3,16 +3,17 @@
 """Shared anonymous telemetry event models for NeMo Helix clients.
 
 Field names and aliases follow the shared NeMo telemetry schema
-(aire/microservices/nemo-telemetry, schemas/anonymous_events.json, v1.10).
+(aire/microservices/nemo-telemetry, schemas/anonymous_events.json, v1.12).
 """
 
 from __future__ import annotations
 
 import os
 from enum import Enum
-from typing import ClassVar
+from typing import ClassVar, Literal
+from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import UUID4, BaseModel, ConfigDict, Field
 
 _CI_ENV_VARS = (
     "CI",
@@ -54,14 +55,82 @@ def _deployment_type() -> DeploymentTypeEnum:
         return DeploymentTypeEnum.UNDEFINED
 
 
+InvocationOrigin = Literal["human", "agent", "unknown"]
+ToolCategory = Literal[
+    "agents",
+    "agent-optimization",
+    "anonymizer",
+    "audit",
+    "customization",
+    "data-designer",
+    "evaluation",
+    "guardrails",
+    "inference",
+    "safe-synthesizer",
+    "other",
+    "unknown",
+]
+
+
+def invocation_origin() -> InvocationOrigin:
+    """Read an explicit caller declaration, never infer identity from the environment."""
+    value = os.getenv("NEMO_INVOCATION_ORIGIN", "").strip().lower()
+    if value == "human":
+        return "human"
+    if value == "agent":
+        return "agent"
+    return "unknown"
+
+
+# Exact operation labels only. Administrative commands are not workload use.
+_CLI_TOOL_CATEGORIES: dict[str, ToolCategory] = {
+    "chat": "inference",
+    "guardrail check": "guardrails",
+    "data-designer create": "data-designer",
+    "data-designer retrieval generate": "data-designer",
+    "safe-synthesizer generate": "safe-synthesizer",
+    "anonymizer run": "anonymizer",
+    "optimize run-strategy": "agent-optimization",
+}
+
+
+def command_tool_category(command: str) -> ToolCategory:
+    return _CLI_TOOL_CATEGORIES.get(command, "unknown")
+
+
+# Recognized job sources/plugin references, not arbitrary plugin or customer names.
+_JOB_TOOL_CATEGORIES: dict[str, ToolCategory] = {
+    "agent": "agents",
+    "agents": "agents",
+    "anonymizer": "anonymizer",
+    "audit": "audit",
+    "customization": "customization",
+    "data-designer": "data-designer",
+    "evaluation": "evaluation",
+    "evaluator": "evaluation",
+    "guardrails": "guardrails",
+    "safe-synthesizer": "safe-synthesizer",
+    "agent-optimization": "agent-optimization",
+    "agent-optimization-plugin-run-strategy": "agent-optimization",
+}
+
+
+def job_tool_category(source: str, plugins: list[str]) -> ToolCategory:
+    categories = {_JOB_TOOL_CATEGORIES[label] for label in [source, *plugins] if label in _JOB_TOOL_CATEGORIES}
+    # Do not arbitrarily attribute a composite workload to one of its tools.
+    return next(iter(categories)) if len(categories) == 1 else "unknown"
+
+
 class HelixTelemetryEvent(BaseModel):
     """Base for all platform events. extra="forbid" is a privacy guard."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     _event_name: ClassVar[str] = "undefined"
-    _schema_version: ClassVar[str] = "1.10"
+    _schema_version: ClassVar[str] = "1.12"
 
+    # Construct once per event. Handler retries retain the same event object/ID.
+    event_id: UUID4 = Field(default_factory=uuid4, serialization_alias="eventId")
     nemo_source: str = Field(default="platform", serialization_alias="nemoSource")
     task_status: TaskStatusEnum = Field(serialization_alias="taskStatus")
     deployment_type: DeploymentTypeEnum = Field(default_factory=_deployment_type, serialization_alias="deploymentType")
@@ -72,6 +141,7 @@ class OnboardingStepEvent(HelixTelemetryEvent):
     _event_name: ClassVar[str] = "onboarding_step"
 
     step: str
+    onboarding_attempt_id: UUID4 | None = Field(default=None, serialization_alias="onboardingAttemptId")
     provider_type: str = Field(default="undefined", serialization_alias="providerType")
     models_discovered_bucket: str = Field(default="undefined", serialization_alias="modelsDiscoveredBucket")
     skills_target: str = Field(default="undefined", serialization_alias="skillsTarget")
@@ -84,12 +154,18 @@ class CommandInvokedEvent(HelixTelemetryEvent):
     command: str
     duration_sec: float = Field(serialization_alias="durationSec")
     agent_mode: bool = Field(default=False, serialization_alias="agentMode")
+    invocation_origin: InvocationOrigin = Field(default="unknown", serialization_alias="invocationOrigin")
+    tool_category: ToolCategory = Field(default="unknown", serialization_alias="toolCategory")
 
 
 class JobRunEvent(HelixTelemetryEvent):
     _event_name: ClassVar[str] = "job_run"
 
     job_type: str = Field(serialization_alias="jobType")
+    tool_category: ToolCategory = Field(default="unknown", serialization_alias="toolCategory")
+    token_counts_source: Literal["job-summary", "unknown"] = Field(
+        default="unknown", serialization_alias="tokenCountsSource"
+    )
     duration_sec: float = Field(default=-1.0, serialization_alias="durationSec")
     plugins: list[str] = Field(default_factory=list)
     model: str = "undefined"
