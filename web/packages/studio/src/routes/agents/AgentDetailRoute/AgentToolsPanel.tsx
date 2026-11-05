@@ -57,9 +57,14 @@ const ServerGroup: FC<ServerGroupProps> = ({ server, state, toolCount, children 
     >
       <Stack gap="density-xs" className="bg-surface-sunken px-density-md py-density-sm">
         <Flex align="center" justify="between" gap="density-sm">
-          <Text kind="label/bold/md" className="truncate">
-            {server.name}
-          </Text>
+          <Flex align="center" gap="density-xs" className="min-w-0">
+            <Badge kind="outline" color="gray" size="small" className="shrink-0">
+              MCP
+            </Badge>
+            <Text kind="label/bold/md" className="truncate">
+              {server.name}
+            </Text>
+          </Flex>
           <Badge kind="solid" color={badge.color} size="small" className="shrink-0">
             {badge.label}
           </Badge>

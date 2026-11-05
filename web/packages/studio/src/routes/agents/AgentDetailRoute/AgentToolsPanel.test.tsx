@@ -105,6 +105,7 @@ describe('AgentToolsPanel', () => {
     expect(screen.getByText('Running')).toBeInTheDocument();
 
     const calc = within(screen.getByRole('group', { name: 'calc MCP server' }));
+    expect(calc.getByText('MCP')).toBeInTheDocument();
     expect(calc.getByText('stdio · 2 tools')).toBeInTheDocument();
     const tools = within(calc.getByRole('list', { name: 'calc tools' }));
     expect(tools.getAllByRole('listitem')).toHaveLength(2);
