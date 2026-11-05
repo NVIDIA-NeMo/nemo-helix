@@ -652,7 +652,7 @@ A deployment loads adapters up to a maximum rank and refuses adapters of a highe
 
 | Engine and Image | Default Maximum Rank | To Raise It |
 | ---------------- | -------------------- | ----------- |
-| vLLM | 16; 64 for [Nemotron 3.5 Super VL](#deploy-nemotron-super-vl) | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
+| vLLM | 32, set by the platform (vLLM's own default is 16). [Nemotron 3.5 Super VL](#deploy-nemotron-super-vl) recipe adapters are rank 64, so set `64` for them. | `executor_config.additional_args`: `["--max-lora-rank", "<rank>"]` |
 | Model-free NIM, vLLM | 16 | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Model-free NIM, SGLang | 16 if the server starts with no adapters; otherwise the highest rank among the adapters present when it starts | `executor_config.additional_envs`: `{"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM | 32 | `executor_config.additional_envs`: `{"NIM_MAX_LORA_RANK": "<rank>"}` |
@@ -688,7 +688,8 @@ nemo files filesets create "linear-algebra-lora" \
   }'
 
 # Deployment config with LoRA enabled.
-# Set --max-lora-rank to the highest adapter rank you intend to serve.
+# --max-lora-rank is only needed above the default of 32.
+# Set it to the highest adapter rank you intend to serve.
 nemo inference deployment-configs create "qwen3-lora-config" \
   --engine "vllm" \
   --model-spec '{
@@ -698,7 +699,7 @@ nemo inference deployment-configs create "qwen3-lora-config" \
   }' \
   --executor-config '{
     "gpu": 1,
-    "additional_args": ["--max-lora-rank", "16"]
+    "additional_args": ["--max-lora-rank", "64"]
   }'
 
 nemo inference deployments create "qwen3-lora-deployment" \
@@ -752,7 +753,8 @@ client.files.create_fileset(
 )
 
 # Deployment config with LoRA enabled.
-# Set --max-lora-rank to the highest adapter rank you intend to serve.
+# --max-lora-rank is only needed above the default of 32.
+# Set it to the highest adapter rank you intend to serve.
 config = client.models.create_deployment_config(
     body=CreateModelDeploymentConfigRequest(
         name="qwen3-lora-config",
@@ -762,7 +764,7 @@ config = client.models.create_deployment_config(
             model_name="qwen3-1-7b",
             lora_enabled=True,
         ),
-        executor_config=ContainerExecutorConfig(gpu=1, additional_args=["--max-lora-rank", "16"]),
+        executor_config=ContainerExecutorConfig(gpu=1, additional_args=["--max-lora-rank", "64"]),
     ),
 ).data()
 
@@ -817,7 +819,9 @@ The default vLLM image is configurable by the platform operator. To override the
 <a id="deploy-nemotron-super-vl"></a>
 ### Deploy Nemotron 3.5 Super VL
 
-Nemotron 3.5 Super VL is a vision-language model: 120B parameters with 12B active per token, on a hybrid Mamba and Transformer mixture-of-experts backbone. vLLM needs several model-specific flags to serve it. The platform sets the ones from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) for the model, the tested serving recipe from the model team, when the model entity is registered with `trust_remote_code` enabled. The checkpoint ships its own configuration code; without `trust_remote_code` the platform cannot read the checkpoint's configuration, so it sets none of these flags and cannot size tensor parallelism.
+Nemotron 3.5 Super VL is a vision-language model: 120B parameters with 12B active per token, on a hybrid Mamba and Transformer mixture-of-experts backbone. vLLM needs several model-specific flags to serve it. The platform does not add model-specific flags; set them in `executor_config.additional_args`. The flags below come from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) for the model, the tested serving recipe from the model team.
+
+Register the model entity with `trust_remote_code` enabled. The checkpoint ships its own configuration code; without `trust_remote_code` vLLM cannot load the checkpoint and the platform cannot read its configuration to size tensor parallelism.
 
 Two checkpoints are published:
 
@@ -826,34 +830,55 @@ Two checkpoints are published:
 | [`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16) | 249 GB | The base model, LoRA adapters, and models fine-tuned with Customizer. Training uses the BF16 weights, so adapters and fine-tuned models must be served on this checkpoint. | 4x 80 GB or more |
 | [`nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4`](https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4) | 75 GB | The base model only | 2x 80 GB or more |
 
-The platform adds these `vllm serve` flags:
+For a released base model without LoRA, set:
 
-| Flag | Value | When | Why |
-| ---- | ----- | ---- | --- |
-| `--max-model-len` | `114688` | Always | vLLM cannot fit a KV cache for the model's native 1M-token context and exits at startup. |
-| `--reasoning-parser` | `nemotron_v3` | Always | Returns the model's thinking in the response's `reasoning` field, separate from the answer in `content`. |
-| `--tool-call-parser` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
-| `--enable-auto-tool-choice` | (no value) | Same as `--tool-call-parser` | Lets the model decide when to call a tool. |
-| `--mamba-ssm-cache-dtype` | `float32` | Always | Precision of the state the Mamba layers carry between tokens. |
-| `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | Always | At most one image and one video per request. |
-| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model with an MTP layer, without LoRA | Faster generation; see below. |
-| `--max-lora-rank`, `--max-loras` | `64`, `2` | LoRA enabled | Recipe adapters are rank 64, and vLLM otherwise loads rank 16 and one adapter per batch. Two slots let one batch use two adapters; vLLM swaps any other adapter in when a request names it. vLLM reserves GPU memory for every expert in each slot at startup, so a higher `--max-loras` needs more GPU memory. |
+```json
+"additional_args": [
+  "--max-model-len", "114688",
+  "--reasoning-parser", "nemotron_v3",
+  "--tool-call-parser", "qwen3_coder",
+  "--enable-auto-tool-choice",
+  "--mamba-ssm-cache-dtype", "float32",
+  "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}",
+  "--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"
+]
+```
+
+With LoRA enabled (`model_spec.lora_enabled: true`), drop `--speculative-config` and raise the adapter limits:
+
+```json
+"additional_args": [
+  "--max-model-len", "114688",
+  "--reasoning-parser", "nemotron_v3",
+  "--tool-call-parser", "qwen3_coder",
+  "--enable-auto-tool-choice",
+  "--mamba-ssm-cache-dtype", "float32",
+  "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}",
+  "--max-lora-rank", "64",
+  "--max-loras", "2"
+]
+```
+
+For a fine-tuned checkpoint without LoRA, use the base model list without `--speculative-config` unless the checkpoint kept the MTP layer (see below).
+
+| Flag | Value | Why |
+| ---- | ----- | --- |
+| `--max-model-len` | `114688` | Without it, vLLM sizes the KV cache for the model's native 1M-token context, cannot fit it, and exits at startup. |
+| `--reasoning-parser` | `nemotron_v3` | Returns the model's thinking in the response's `reasoning` field, separate from the answer in `content`. |
+| `--tool-call-parser` | `qwen3_coder` | Turns the model's tool calls into OpenAI `tool_calls`. |
+| `--enable-auto-tool-choice` | (no value) | Lets the model decide when to call a tool. |
+| `--mamba-ssm-cache-dtype` | `float32` | Precision of the state the Mamba layers carry between tokens. |
+| `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | At most one image and one video per request. Raise it to accept more, for example `{"image": 8, "video": 1}` for up to 8 page images. |
+| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Faster generation with multi-token prediction; see below. Base model with an MTP layer, without LoRA. |
+| `--max-lora-rank`, `--max-loras` | `64`, `2` | Recipe adapters are rank 64, above the platform default of 32, and vLLM otherwise loads one adapter per batch. Two slots let one batch use two adapters; vLLM swaps any other adapter in when a request names it. vLLM reserves GPU memory for every expert in each slot at startup, so a higher `--max-loras` needs more GPU memory. |
 
 The speculative config turns on multi-token prediction (MTP). The released checkpoint includes an extra layer trained to predict the next few tokens. At each step vLLM uses that layer to guess the next 3 tokens, then runs the full model once to check all of them, and keeps every guess that matches what the full model would have generated. Responses are the same as without MTP; they arrive faster because one step can produce several tokens.
 
-The platform turns MTP on only for a released base model whose checkpoint has the MTP layer, with LoRA disabled:
+Add `--speculative-config` only for a checkpoint that has the MTP layer, with LoRA disabled:
 
-- Not every checkpoint with this architecture has the layer. The model's spec records the count the checkpoint declares (`num_nextn_predict_layers`); Nemotron 3.5 Bolt declares 0, so it is served without MTP. A model registered before the spec recorded this field gets MTP only after its model spec task runs again.
-- A fine-tuned checkpoint may not have the MTP layer. Automodel's Nemotron 3.5 Super VL recipes set `num_nextn_predict_layers: 0`, which builds the model without that layer, so a checkpoint saved from that training contains no MTP weights.
+- Not every checkpoint with this architecture has the layer. Nemotron 3.5 Bolt shares the architecture but has no MTP layer, so do not add `--speculative-config` for it.
+- A fine-tuned checkpoint may not have the MTP layer. Automodel's Nemotron 3.5 Super VL recipes set `num_nextn_predict_layers: 0`, which builds the model without that layer, so a checkpoint saved from that training contains no MTP weights. If your fine-tuned checkpoint kept the MTP layer, you can add `--speculative-config`.
 - With LoRA, the MTP layer comes from the base model and does not include the adapter's changes. NVIDIA's finance cookbook serves its adapters without MTP.
-
-If your fine-tuned checkpoint kept the MTP layer, turn MTP on by adding `--speculative-config` to `additional_args`.
-
-A flag you set in `executor_config.additional_args` replaces the platform's value, whether you spell it with `-` or `_`, or set one key of it (for example `--speculative-config.num_speculative_tokens 5`). For example, to accept up to 8 page images per request:
-
-```json
-"additional_args": ["--limit-mm-per-prompt", "{\"image\": 8, \"video\": 1}"]
-```
 
 These flags are off by default. Add one to `additional_args` when its tradeoff suits your deployment:
 
@@ -867,7 +892,7 @@ On Kubernetes, set `executor_config.disk_size` to fit the checkpoint, because th
 
 Send each image in the request in one of three forms:
 
-- A `data:` URL that carries the image bytes inline.
+- A `data:` URL that carries the image bytes inline: `data:image/png;base64,<base64-encoded bytes>` (or `image/jpeg`, `image/gif`, `image/webp`). The first example below builds one from a local file.
 - A fileset reference, `fileset://<workspace>/<fileset>#<path>`, or `fileset://<fileset>#<path>` for a fileset in the request's workspace. The gateway downloads the file with your permissions and replaces the reference with a `data:` URL before the request reaches middleware or the model. The file must be PNG, JPEG, GIF, or WebP, as named by its extension, and at most 25 MiB. Fileset references work on every gateway route: by model entity, through the OpenAI-compatible endpoint, and by provider.
 - An `http://` or `https://` URL. The model server downloads the image itself, so it needs network access to that host. To limit which hosts it downloads from, list them with `--allowed-media-domains`:
 
@@ -904,7 +929,16 @@ nemo inference deployment-configs create "super-vl-config" \
   }' \
   --executor-config '{
     "gpu": 4,
-    "disk_size": "300Gi"
+    "disk_size": "300Gi",
+    "additional_args": [
+      "--max-model-len", "114688",
+      "--reasoning-parser", "nemotron_v3",
+      "--tool-call-parser", "qwen3_coder",
+      "--enable-auto-tool-choice",
+      "--mamba-ssm-cache-dtype", "float32",
+      "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}",
+      "--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"
+    ]
   }'
 
 nemo inference deployments create "super-vl-deployment" \
@@ -944,7 +978,19 @@ client.models.create_deployment_config(
             model_namespace="default",
             model_name="super-vl-bf16",
         ),
-        executor_config=ContainerExecutorConfig(gpu=4, disk_size="300Gi"),
+        executor_config=ContainerExecutorConfig(
+            gpu=4,
+            disk_size="300Gi",
+            additional_args=[
+                "--max-model-len", "114688",
+                "--reasoning-parser", "nemotron_v3",
+                "--tool-call-parser", "qwen3_coder",
+                "--enable-auto-tool-choice",
+                "--mamba-ssm-cache-dtype", "float32",
+                "--limit-mm-per-prompt", '{"image": 1, "video": 1}',
+                "--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}',
+            ],
+        ),
     ),
 )
 

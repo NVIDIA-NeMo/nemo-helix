@@ -127,16 +127,22 @@ When comparing several adapters, for example different epoch counts, score each 
 
 | Engine / image | Default max rank | Raise it on the deployment config |
 |---|---|---|
-| vLLM (`engine: vllm`, the default) | **16**; **64** for Nemotron 3.5 Super VL with LoRA enabled | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
+| vLLM (`engine: vllm`, the default) | **32**, set by the platform (vLLM's own default is 16). Nemotron 3.5 Super VL recipe adapters are rank 64: set `--max-lora-rank 64` via `additional_args` | `executor_config.additional_args: ["--max-lora-rank", "<rank>"]` |
 | Model-free NIM, vLLM (`vllm-model-free-nim`; the default NIM image) | **16** | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Model-free NIM, SGLang (`sglang-model-free-nim`) | **16** if the server starts with no adapters; otherwise the highest rank among adapters present at start | `executor_config.additional_envs: {"NIM_PASSTHROUGH_ARGS": "--max-lora-rank <rank>"}` |
 | Multi-LLM NIM (`llm-nim`, NIM 1.x) | **32** | `executor_config.additional_envs: {"NIM_MAX_LORA_RANK": "<rank>"}` |
 
-vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above the default max rank (16, or 64 for Nemotron 3.5 Super VL) create a deployment config template with the flag and reference it by name. Before training above that rank, confirm the user will deploy with a raised limit.
+vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deployment_config` on the job cannot set `additional_args`, so for a vLLM adapter above the default max rank of 32 (including Nemotron 3.5 Super VL recipe adapters, rank 64) create a deployment config template with the flag and reference it by name. Before training above that rank, confirm the user will deploy with a raised limit.
 
 **Weights volume.** On Kubernetes the deployment downloads the model into a volume of `executor_config.disk_size`, default `50Gi`. When the model's files are larger, set `disk_size` above their size, in the job's inline `deployment_config` or in the deployment config; otherwise the download runs out of space and the deployment never becomes ready.
 
-**Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; without it the platform cannot read the checkpoint's config and sets none of the model's vLLM flags. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform sets the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) for the model (context length, reasoning and tool parsers, image limit, MTP on the base model only); flags in `additional_args` replace them. Two flags stay off unless the user opts in; describe the tradeoff and let the user choose:
+**Nemotron 3.5 Super VL.** Set `disk_size` to at least `300Gi` (BF16) or `100Gi` (NVFP4). Register the model entity with `trust_remote_code: true`; vLLM needs it to load the checkpoint, and the platform needs it to read the config and size tensor parallelism. Serve adapters and fine-tuned models on the BF16 checkpoint, which the training used. The platform adds no model-specific vLLM flags, so set the flags from NVIDIA's [vLLM cookbook](https://github.com/NVIDIA-NeMo/Nemotron/blob/main/usage-cookbook/Nemotron-3.5-Super-VL/vllm_cookbook.ipynb) yourself in `executor_config.additional_args` of a deployment config template (an inline `deployment_config` cannot set them):
+
+- Every deployment: `["--max-model-len", "114688", "--reasoning-parser", "nemotron_v3", "--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice", "--mamba-ssm-cache-dtype", "float32", "--limit-mm-per-prompt", "{\"image\": 1, \"video\": 1}"]`. Without `--max-model-len`, vLLM sizes the KV cache for the native 1M-token context and exits at startup.
+- Released base model, LoRA disabled: also `"--speculative-config", "{\"method\": \"mtp\", \"num_speculative_tokens\": 3}"` (MTP). Omit it for LoRA, for fine-tuned checkpoints (Automodel's Super VL recipes set `num_nextn_predict_layers: 0`, so they have no MTP layer), and for Nemotron 3.5 Bolt, which shares the architecture but has no MTP layer.
+- LoRA enabled: also `"--max-lora-rank", "64", "--max-loras", "2"`. vLLM reserves GPU memory for every expert in each LoRA slot, so more slots need more GPU memory.
+
+Two flags stay off unless the user opts in; describe the tradeoff and let the user choose:
 
 - `--enable-expert-parallel`: whole experts per GPU, for high-concurrency serving. NVIDIA's cookbook uses it only in text-only throughput setups.
 - `--skip-mm-profiling`: faster startup, but vLLM stops reserving vision-encoder memory, so large images under load can run out of GPU memory.

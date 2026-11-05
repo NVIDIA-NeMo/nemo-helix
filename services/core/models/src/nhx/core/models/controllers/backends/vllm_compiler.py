@@ -13,7 +13,6 @@ a ``docker run`` container; the k8s backend renders it into native Kubernetes
 objects. Keep this module free of backend-specific imports so both can reuse it.
 """
 
-import json
 from logging import getLogger
 from typing import Optional
 
@@ -31,9 +30,6 @@ VLLM_HF_ALTERNATE_PATH = f"{MODEL_STORE_PATH}/alternates/hf"
 VLLM_LORA_CACHE_DIR = "/scratch/loras"
 # vLLM's OpenAI-compatible server port (matches the NIM container port mapping).
 VLLM_SERVER_PORT = 8000
-# Top-level config.json architectures of the Nemotron 3.5 Super VL checkpoints (BF16 and NVFP4).
-# The spec's language-model fields alone look like a text NemotronH model.
-NEMOTRON_SUPER_VL_ARCHITECTURES = frozenset({"NemotronH_Omni_Reasoning_V3", "NemotronH_Super_Omni_Reasoning_V3"})
 
 
 def _served_model_name(view: DeploymentConfigView) -> str | None:
@@ -79,47 +75,6 @@ def _user_set_args(additional_args: list[str] | None) -> set[str]:
             flags.add(name)
             flags.add(name.split(".", 1)[0])
     return flags
-
-
-def _is_nemotron_super_vl(model_entity: Optional[ModelEntity]) -> bool:
-    architectures = getattr(getattr(model_entity, "spec", None), "architectures", None) or []
-    return any(arch in NEMOTRON_SUPER_VL_ARCHITECTURES for arch in architectures)
-
-
-def _declares_mtp(model_entity: Optional[ModelEntity]) -> bool:
-    layers = getattr(getattr(model_entity, "spec", None), "num_nextn_predict_layers", None)
-    return isinstance(layers, int) and layers > 0
-
-
-def _nemotron_super_vl_args(
-    view: DeploymentConfigView, model_entity: Optional[ModelEntity], user_flags: set[str]
-) -> list[str]:
-    """Nemotron 3.5 Super VL serving defaults, from NVIDIA's vLLM cookbook for the model."""
-    defaults = [
-        # Without a cap vLLM sizes the KV cache for the native 1M-token context and exits.
-        ("--max-model-len", "114688"),
-        ("--reasoning-parser", "nemotron_v3"),
-        ("--mamba-ssm-cache-dtype", "float32"),
-        ("--limit-mm-per-prompt", json.dumps({"image": 1, "video": 1})),
-    ]
-    if view.lora_enabled:
-        # Recipe adapters are rank 64; vLLM defaults to rank 16 and one adapter per batch.
-        # vLLM reserves GPU memory for every expert in each adapter slot at startup, so
-        # keep two slots: one batch can still mix two adapters.
-        defaults += [("--max-lora-rank", "64"), ("--max-loras", "2")]
-    elif _declares_mtp(model_entity) and not (
-        getattr(model_entity, "base_model", None) or getattr(model_entity, "finetuning_type", None)
-    ):
-        # Speculative decoding drafts with the checkpoint's MTP layer. Not every checkpoint has one
-        # (Nemotron 3.5 Bolt shares this architecture and declares none). A fine-tuned checkpoint may
-        # lack it (Automodel's Super VL recipes train with num_nextn_predict_layers: 0), and adapters
-        # are served without it, so only a released base model with the layer gets it.
-        defaults.append(("--speculative-config", json.dumps({"method": "mtp", "num_speculative_tokens": 3})))
-    args: list[str] = []
-    for flag, value in defaults:
-        if flag not in user_flags:
-            args.extend([flag, value])
-    return args
 
 
 def _divisors(n: int) -> list[int]:
@@ -188,6 +143,7 @@ def compile_vllm_args(
     model_entity: Optional[ModelEntity],
     *,
     tool_call_plugin_path: str | None = None,
+    max_lora_rank: int | None = None,
 ) -> list[str]:
     """Build the ``vllm serve`` argument vector for the container.
 
@@ -195,6 +151,8 @@ def compile_vllm_args(
     ``additional_args`` are appended verbatim, and any flag the user set there is
     not auto-injected by the compiler. ``tool_call_plugin_path`` is the backend's
     materialized in-container path, never the configured plugin fileset reference.
+    ``max_lora_rank`` is the ``--max-lora-rank`` a LoRA deployment gets when the user
+    did not set one.
     """
     user_flags = _user_set_args(view.additional_args)
     args: list[str] = [_model_path(model_entity)]
@@ -223,13 +181,6 @@ def compile_vllm_args(
         if view.tool_call_config.auto_tool_choice is not None:
             auto_tool_choice = view.tool_call_config.auto_tool_choice
 
-    super_vl = _is_nemotron_super_vl(model_entity)
-    if super_vl and tool_call_parser is None and tool_call_plugin is None:
-        # The tool-call format the model's chat template produces.
-        tool_call_parser = "qwen3_coder"
-        if auto_tool_choice is None:
-            auto_tool_choice = True
-
     if tool_call_plugin and not tool_call_plugin_path and "--tool-parser-plugin" not in user_flags:
         logger.warning(
             "vLLM tool-call plugin is configured but has no mounted path; skipping inferred parser and auto tool choice"
@@ -249,14 +200,14 @@ def compile_vllm_args(
 
     if view.lora_enabled and "--enable-lora" not in user_flags:
         args.append("--enable-lora")
+    if view.lora_enabled and max_lora_rank and "--max-lora-rank" not in user_flags:
+        # vLLM's own default is 16, below common training ranks.
+        args.extend(["--max-lora-rank", str(max_lora_rank)])
 
     # vLLM has no env var for trust-remote-code; it is a `vllm serve` CLI flag
     # (EngineArgs.trust_remote_code -> --trust-remote-code).
     if model_entity and getattr(model_entity, "trust_remote_code", False) and "--trust-remote-code" not in user_flags:
         args.append("--trust-remote-code")
-
-    if super_vl:
-        args.extend(_nemotron_super_vl_args(view, model_entity, user_flags))
 
     # User-supplied raw args appended verbatim (highest precedence; e.g. --max-lora-rank).
     args.extend(view.additional_args or [])

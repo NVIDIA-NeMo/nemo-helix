@@ -710,6 +710,9 @@ def test_lora_uses_native_sidecar_on_k8s_and_container_on_docker() -> None:
         docker = compile_model_deployment(_resolved("vllm", lora=True, runtime=Runtime.DOCKER), config)
 
     assert k8s.scratch_volume is not None
+    # The server accepts adapters up to the configured rank, not vLLM's default of 16.
+    server_args = k8s.server_config.containers[0].args
+    assert server_args[server_args.index("--max-lora-rank") + 1] == str(config.default_vllm_max_lora_rank) == "32"
     init = k8s.server_config.init_containers[0]
     assert init.name == "lora-cache-init"
     assert init.image == "docker.io/library/busybox:latest"

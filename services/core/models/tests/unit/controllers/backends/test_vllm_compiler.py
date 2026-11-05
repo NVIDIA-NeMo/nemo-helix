@@ -128,10 +128,23 @@ def test_compile_vllm_args_user_served_name_not_overridden():
     assert args[args.index("--served-model-name") + 1] == "custom"
 
 
-def test_compile_vllm_args_enable_lora():
-    view = _view(gpu=1, model_name="qwen", lora_enabled=True)
-    args = vllm_compiler.compile_vllm_args(view, model_entity=None)
-    assert "--enable-lora" in args
+@pytest.mark.parametrize(
+    ("lora_enabled", "additional_args", "expected_rank"),
+    [
+        (True, [], "32"),
+        # The user's value wins, in either spelling.
+        (True, ["--max-lora-rank", "64"], "64"),
+        (True, ["--max_lora_rank=64"], None),
+        (False, [], None),
+    ],
+)
+def test_compile_vllm_args_lora(lora_enabled: bool, additional_args: list[str], expected_rank: str | None):
+    view = _view(gpu=1, model_name="qwen", lora_enabled=lora_enabled, additional_args=additional_args)
+    args = vllm_compiler.compile_vllm_args(view, model_entity=None, max_lora_rank=32)
+    assert ("--enable-lora" in args) is lora_enabled
+    assert args.count("--max-lora-rank") == (1 if expected_rank else 0)
+    if expected_rank:
+        assert args[args.index("--max-lora-rank") + 1] == expected_rank
 
 
 def test_compile_vllm_args_chat_template():
@@ -331,139 +344,41 @@ def test_compile_vllm_args_cpu_only_no_tp():
     assert "--tensor-parallel-size" not in args
 
 
-@pytest.mark.parametrize("raw", [["--served_model_name", "custom"], ["--served_model_name=custom"]])
-def test_compile_vllm_args_underscore_spelling_counts_as_user_flag(raw: list[str]):
+_TP4 = ["--tensor-parallel-size", "4"]
+_HERMES = ["--tool-call-parser", "hermes"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "kept"),
+    [
+        (["--served_model_name", "custom"], [*_TP4, *_HERMES]),
+        (["--served_model_name=custom"], [*_TP4, *_HERMES]),
+        (["--tensor_parallel_size=2", "--tool_call_parser", "custom"], ["--served-model-name", "qwen"]),
+        # vLLM sets a JSON flag one key at a time; a dotted key counts as the whole flag.
+        (["--tool-call-parser.extra", "x"], ["--served-model-name", "qwen", *_TP4]),
+        # Flags the compiler never emits pass through alongside its own.
+        (
+            ["--max_model_len=32768", "--speculative-config.method", "ngram"],
+            ["--served-model-name", "qwen", *_TP4, *_HERMES],
+        ),
+    ],
+)
+def test_compile_vllm_args_underscore_and_dotted_spelling_count_as_user_flag(raw: list[str], kept: list[str]):
     # vLLM accepts underscores in flag names, so the compiler must not add a second one.
-    args = vllm_compiler.compile_vllm_args(_view(gpu=1, model_name="qwen", additional_args=raw), None)
-    assert args == ["/model-store", *raw]
+    model = _model_entity(spec=_spec(tool_call_config=ToolCallConfig(tool_call_parser="hermes")))
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, model_name="qwen", additional_args=raw), model)
+    assert args == ["/model-store", *kept, *raw]
 
 
-# ---------------------------------------------------------------------------
-# Nemotron 3.5 Super VL defaults
-# ---------------------------------------------------------------------------
-
-
-def _super_vl(
-    *,
-    base_model=None,
-    finetuning_type=None,
-    tool_call_config=None,
-    architecture="NemotronH_Omni_Reasoning_V3",
-    mtp_layers=1,
-) -> SimpleNamespace:
-    """The spec the model spec task records: language-model dims plus the top-level architecture."""
-    spec = _spec(
-        num_kv_heads=2,
-        architectures=[architecture],
-        tool_call_config=tool_call_config,
-        num_nextn_predict_layers=mtp_layers,
-    )
-    return _model_entity(spec=spec, trust_remote_code=True, base_model=base_model, finetuning_type=finetuning_type)
-
-
-_TP4 = ["/model-store", "--tensor-parallel-size", "4"]
-_QWEN3_CODER = ["--tool-call-parser", "qwen3_coder", "--enable-auto-tool-choice"]
-_SUPER_VL_DEFAULTS = [
-    "--max-model-len",
-    "114688",
-    "--reasoning-parser",
-    "nemotron_v3",
-    "--mamba-ssm-cache-dtype",
-    "float32",
-    "--limit-mm-per-prompt",
-    '{"image": 1, "video": 1}',
-]
-_MTP = ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}']
-
-
-@pytest.mark.parametrize(
-    ("view_kwargs", "model", "expected"),
-    [
-        pytest.param(
-            {},
-            _super_vl(architecture=architecture),
-            [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS, *_MTP],
-            id=f"base-{architecture}",
-        )
-        for architecture in sorted(vllm_compiler.NEMOTRON_SUPER_VL_ARCHITECTURES)
-    ]
-    + [
-        # Adapters are rank 64 and served without MTP.
-        pytest.param(
-            {"lora_enabled": True},
-            _super_vl(),
-            [*_TP4, *_QWEN3_CODER, "--enable-lora", "--trust-remote-code", *_SUPER_VL_DEFAULTS]
-            + ["--max-lora-rank", "64", "--max-loras", "2"],
-            id="lora",
-        ),
-        # A fine-tuned checkpoint may lack the MTP layer; the model API accepts finetuning_type
-        # without base_model.
-        pytest.param(
-            {},
-            _super_vl(base_model="default/super-vl-base"),
-            [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS],
-            id="fine-tuned-base-model",
-        ),
-        pytest.param(
-            {},
-            _super_vl(finetuning_type="all_weights"),
-            [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS],
-            id="fine-tuned-finetuning-type-only",
-        ),
-        # Nemotron 3.5 Bolt shares the architecture but has no MTP layer; a model registered
-        # before the spec recorded the layer count is treated the same way.
-        *(
-            pytest.param(
-                {},
-                _super_vl(mtp_layers=mtp_layers),
-                [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS],
-                id=f"no-mtp-layer-{mtp_layers}",
-            )
-            for mtp_layers in (0, None)
-        ),
-        pytest.param(
-            {},
-            _super_vl(tool_call_config=ToolCallConfig(tool_call_parser="hermes", auto_tool_choice=False)),
-            [*_TP4, "--tool-call-parser", "hermes", "--trust-remote-code", *_SUPER_VL_DEFAULTS, *_MTP],
-            id="configured-tool-parser-wins",
-        ),
-        # Same language-model dims, but a text checkpoint: no multimodal defaults.
-        pytest.param(
-            {},
-            _model_entity(spec=_spec(num_kv_heads=2, architectures=["NemotronHForCausalLM"])),
-            _TP4,
-            id="text-nemotron-h",
-        ),
-    ],
-)
-def test_super_vl_defaults(view_kwargs: dict, model: SimpleNamespace, expected: list[str]):
-    # TP 4 on 4 GPUs: vLLM copies Super VL's 2 KV heads across ranks.
-    assert vllm_compiler.compile_vllm_args(_view(gpu=4, **view_kwargs), model) == expected
-
-
-@pytest.mark.parametrize(
-    ("raw", "replaced"),
-    [
-        (
-            ["--max-model-len", "32768", "--speculative-config", '{"method": "ngram"}'],
-            {"--max-model-len", "--speculative-config"},
-        ),
-        (
-            ["--max_model_len=32768", "--speculative_config.method", "ngram"],
-            {"--max-model-len", "--speculative-config"},
-        ),
-        # Opt-in flags are off by default and keep every platform default alongside them.
-        (["--enable-expert-parallel"], set()),
-        (["--skip-mm-profiling"], set()),
-        (["--mm-encoder-attn-backend", "TORCH_SDPA"], set()),
-    ],
-)
-def test_super_vl_additional_args(raw: list[str], replaced: set[str]):
-    kept = vllm_compiler.compile_vllm_args(_view(gpu=4), _super_vl())
-    for flag in replaced:
-        index = kept.index(flag)
-        del kept[index : index + 2]
-    assert vllm_compiler.compile_vllm_args(_view(gpu=4, additional_args=raw), _super_vl()) == [*kept, *raw]
+@pytest.mark.parametrize("lora_enabled", [False, True])
+def test_compile_vllm_args_no_model_specific_flags(lora_enabled: bool):
+    # Nemotron 3.5 Super VL: vLLM copies its 2 KV heads across 4 ranks; model-specific flags
+    # (reasoning parser, MTP, LoRA rank, ...) come only from additional_args.
+    spec = _spec(num_kv_heads=2, architectures=["NemotronH_Omni_Reasoning_V3"], num_nextn_predict_layers=1)
+    model = _model_entity(spec=spec, trust_remote_code=True)
+    args = vllm_compiler.compile_vllm_args(_view(gpu=4, lora_enabled=lora_enabled), model)
+    lora = ["--enable-lora"] if lora_enabled else []
+    assert args == ["/model-store", *_TP4, *lora, "--trust-remote-code"]
 
 
 def test_compile_vllm_args_user_tp_not_overridden():
