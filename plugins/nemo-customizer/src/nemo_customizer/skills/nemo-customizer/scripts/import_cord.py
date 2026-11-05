@@ -10,9 +10,9 @@ each with its JSONL and ``images/``.
 
     uv run --no-project --with datasets --with pillow \
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_cord.py \
-      --output /tmp/cord-v2
+      --output /tmp/cord-v2 --fileset default/cord-v2
 
-Then upload that directory (a new fileset name, no ``--exist-ok``):
+Then upload that directory to the fileset ``--fileset`` names (a new fileset, no ``--exist-ok``):
 
     nemo files filesets create cord-v2 --workspace default --purpose dataset
     nemo files upload /tmp/cord-v2 cord-v2 --workspace default
@@ -24,8 +24,10 @@ Automodel selects training files from ``train/`` and validation files from
 frozen split, and the script does not write ``test.jsonl``. Do not reshuffle
 it between base and tuned runs.
 
-Image urls are fileset-relative (``train/images/00000.png``,
-``validation/images/00000.png``).
+Image urls are fileset references to that upload
+(``fileset://default/cord-v2#train/images/00000.png``), the form training and the
+inference gateway both resolve. Upload to a different fileset and the rows point
+at files that are not there.
 
 ``json2token`` matches the Automodel CORD loader. When a row has ``gt_parses``,
 the first parse is kept so a second run writes the same label.
@@ -40,6 +42,7 @@ from typing import Any, Iterable, Protocol, cast
 
 CORD_DATASET = "naver-clova-ix/cord-v2"
 CORD_PROMPT = "Describe this image."
+DEFAULT_FILESET = "default/cord-v2"
 
 
 class _Image(Protocol):
@@ -91,11 +94,17 @@ def cord_row(image_url: str, label: str) -> dict[str, Any]:
     }
 
 
-def write_split(examples: Iterable[dict[str, Any]], dest: Path, jsonl_name: str, url_prefix: str = "") -> int:
+def write_split(
+    examples: Iterable[dict[str, Any]],
+    dest: Path,
+    jsonl_name: str,
+    url_prefix: str = "",
+    fileset: str = DEFAULT_FILESET,
+) -> int:
     """Write ``jsonl_name`` and ``images/`` under ``dest``. Return the row count.
 
     ``url_prefix`` is the directory name under the fileset root, so the image
-    url is fileset-relative (``train/images/00000.png``).
+    url is ``fileset://<fileset>#train/images/00000.png``.
     """
     images = dest / "images"
     images.mkdir(parents=True, exist_ok=True)
@@ -106,7 +115,7 @@ def write_split(examples: Iterable[dict[str, Any]], dest: Path, jsonl_name: str,
             relative = f"{image_dir}/{index:05d}.png"
             image: _Image = example["image"]
             image.save(images / f"{index:05d}.png")
-            row = cord_row(relative, cord_label(example["ground_truth"]))
+            row = cord_row(f"fileset://{fileset}#{relative}", cord_label(example["ground_truth"]))
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
             count += 1
     return count
@@ -120,12 +129,12 @@ def load_split(split: str, limit: int | None) -> Any:
     return load_dataset(CORD_DATASET, split=spec)
 
 
-def write_filesets(output: Path, limit: int | None = None) -> dict[str, int]:
-    """Write ``output/train`` and ``output/validation`` for one fileset upload."""
+def write_filesets(output: Path, limit: int | None = None, fileset: str = DEFAULT_FILESET) -> dict[str, int]:
+    """Write ``output/train`` and ``output/validation`` for one upload to ``fileset``."""
     counts = {
-        "train": write_split(load_split("train", limit), output / "train", "train.jsonl", "train"),
+        "train": write_split(load_split("train", limit), output / "train", "train.jsonl", "train", fileset),
         "validation": write_split(
-            load_split("validation", limit), output / "validation", "validation.jsonl", "validation"
+            load_split("validation", limit), output / "validation", "validation.jsonl", "validation", fileset
         ),
     }
     return counts
@@ -135,8 +144,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True, help="Fileset directory: train/ and validation/")
     parser.add_argument("--limit", type=int, default=None, help="First N rows of each split")
+    parser.add_argument(
+        "--fileset",
+        default=DEFAULT_FILESET,
+        help="<workspace>/<name> of the fileset you upload --output to; image urls point into it",
+    )
     args = parser.parse_args()
-    counts = write_filesets(args.output, args.limit)
+    if args.fileset.count("/") != 1:
+        parser.error("--fileset must be <workspace>/<name>")
+    counts = write_filesets(args.output, args.limit, args.fileset)
     print(f"Wrote {counts['train']} train rows and {counts['validation']} validation rows to {args.output}")
 
 

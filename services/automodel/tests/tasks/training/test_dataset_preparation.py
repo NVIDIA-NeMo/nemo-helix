@@ -153,4 +153,4 @@ def test_prepared_embedding_rows_are_detected_as_retrieval_triplets(tmp_path: Pa
     rows = [{"query": f"q{i}", "pos_doc": "p", "neg_doc": ["n1", "n2"]} for i in range(10)]
 
     [train_file], _ = discover_dataset_files(_prepared(tmp_path, DatasetFormat.EMBEDDING, rows))
-    assert detect_dataset_schema(train_file) == (DatasetSchema.EMBEDDING, ("query", "pos_doc", "neg_doc"))
+    assert detect_dataset_schema(train_file) == (DatasetSchema.EMBEDDING, None)

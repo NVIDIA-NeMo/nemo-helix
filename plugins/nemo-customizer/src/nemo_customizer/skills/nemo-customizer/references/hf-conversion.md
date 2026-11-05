@@ -93,11 +93,11 @@ nemo files filesets create cord-v2 --workspace default --purpose dataset
 nemo files upload /tmp/cord-v2 cord-v2 --workspace default
 ```
 
-`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset-relative (`train/images/00000.png`, `validation/images/00000.png`). Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
+`cord-v2` contains `train/train.jsonl` and `validation/validation.jsonl`, each with `images/` beside the JSONL. Image urls are fileset references (`fileset://default/cord-v2#train/images/00000.png`); `--fileset <workspace>/<name>` (default `default/cord-v2`) must name the fileset you upload to. Automodel selects training files from `train/` and validation files from `validation/`. Job JSON names this one fileset. The Evaluator scores `validation/validation.jsonl` in it: that official validation file is CORD's frozen split, and the script does not write `test.jsonl`. That is an exception to the own-fileset test-split rule (`post-training-eval.md`): the scored file lives in the training fileset because CORD has no separate test split.
 
 `nemo customization automodel --upload-dataset /tmp/cord-v2` uploads that same directory.
 
-Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a relative `image_url`. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit. Each directory also holds `test.jsonl` next to `train.jsonl` and `validation.jsonl`, and the whole directory is one fileset. That is the other exception to the own-fileset rule: the trainer reads `train.jsonl` and `validation.jsonl` and does not train on `test.jsonl`.
+Finance (TAT-DQA and BizBench) uses `scripts/import_finance.py`. Upload `visual_ocr/`, `reasoning/`, and `code_generation/` separately. OCR rows have a `fileset://` `image_url` into the `visual_ocr` upload; `--ocr-fileset <workspace>/<name>` (default `default/finance-ocr`) must name that fileset. Reasoning and code rows are text. Each directory's `split_manifest.json` is the leakage audit. Each directory also holds `test.jsonl` next to `train.jsonl` and `validation.jsonl`, and the whole directory is one fileset. That is the other exception to the own-fileset rule: the trainer reads `train.jsonl` and `validation.jsonl` and does not train on `test.jsonl`.
 
 Unsloth stays on string `content` or pre-rendered `text`. Do not give it image parts.
 
@@ -118,7 +118,7 @@ def to_multimodal_chat(image_urls, user, assistant):
         ]
     }
 
-def image_row(ex, split, index, images_dir):
+def image_row(ex, split, index, images_dir, fileset):
     found = example_images(ex)
     chat = to_chat(ex)  # same user text and assistant label as a text row
     if not found:
@@ -128,7 +128,7 @@ def image_row(ex, split, index, images_dir):
     for image_index, image in enumerate(found):
         name = f"{split}_{index}_{image_index}.png"
         image.save(images_dir / name)
-        urls.append(f"images/{name}")
+        urls.append(f"fileset://{fileset}#images/{name}")
     return to_multimodal_chat(urls, user, assistant)
 
 # Freeze a test split from train, the same rule as the text script above.
@@ -144,20 +144,23 @@ test_images = Path("/tmp/test-data/images")
 train_images.mkdir(parents=True, exist_ok=True)
 test_images.mkdir(parents=True, exist_ok=True)
 
-def write_jsonl(path, examples, split, images_dir):
+def write_jsonl(path, examples, split, images_dir, fileset):
     with path.open("w") as f:
         for index, ex in enumerate(examples):
-            f.write(json.dumps(image_row(ex, split, index, images_dir)) + "\n")
+            f.write(json.dumps(image_row(ex, split, index, images_dir, fileset)) + "\n")
 
-write_jsonl(Path("/tmp/train-data/train.jsonl"), train_examples, "train", train_images)
-write_jsonl(Path("/tmp/test-data/test.jsonl"), held_out, "test", test_images)
+# The filesets each directory is uploaded to; the image urls point into them.
+train_fileset = "default/<DATASET_NAME>"
+test_fileset = "default/<DATASET_NAME>-test"
+write_jsonl(Path("/tmp/train-data/train.jsonl"), train_examples, "train", train_images, train_fileset)
+write_jsonl(Path("/tmp/test-data/test.jsonl"), held_out, "test", test_images, test_fileset)
 if "validation" in ds:
-    write_jsonl(Path("/tmp/train-data/validation.jsonl"), ds["validation"], "validation", train_images)
+    write_jsonl(Path("/tmp/train-data/validation.jsonl"), ds["validation"], "validation", train_images, train_fileset)
 ```
 
-Each `image_url.url` is that relative path, or a `data:` URL when the bytes stay inline. A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
+Each `image_url.url` is a `fileset://<workspace>/<fileset>#images/<name>` reference to the uploaded file, or a `data:` URL when the bytes stay inline (`dataset-formats.md` § **Image URLs**; `http(s)` URLs are rejected). A row with several images gets one `image_url` part per image, then the text part. Upload `/tmp/train-data/` to the dataset fileset and `/tmp/test-data/` to `<DATASET_NAME>-test`. Each directory holds its JSONL and `images/`. Validate with `nemo files list <DATASET_NAME> --workspace default`.
 
-A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
+A Gym row that needs an image uses Responses API parts on `responses_create_params.input[].content`: `{type: input_image, image_url: "<string>"}` followed by `{type: input_text, text}`, where the string is a base64 `data:` URL. A string `content` stays one text part. The automodel fileset stays `{type: image_url, image_url: {url}}`. See the **nemo-gym-environments** skill, `references/rollout-rows.md`.
 
 ## Mapping to job JSON
 

@@ -1093,9 +1093,17 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
                 {"role": "assistant", "content": "hi"},
             ]
         },
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "fileset://receipts#a.png"}}]},
+                {"role": "assistant", "content": "total 3"},
+            ]
+        },
     ]
     config = _vision_training_config(tmp_path, rows)
     config.model.chat_template = "vision-template"
+    config.dataset.fileset = "receipts"
+    (tmp_path / "data" / "a.png").write_bytes(b"png")
     compiled = _compile_vision(config, tmp_path)
 
     assert compiled["_recipe"] == "vlm_sft"
@@ -1130,6 +1138,11 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
     assert image_part == {"type": "image", "image": str(tmp_path / "data" / "receipt.png")}
     assert train_rows[0]["conversation"][0]["content"][1] == {"type": "text", "text": "read this"}
     assert train_rows[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
+    # A ref into the job's dataset fileset reads the copy the download step wrote.
+    assert train_rows[2]["conversation"][0]["content"][0] == {
+        "type": "image",
+        "image": str(tmp_path / "data" / "a.png"),
+    }
 
     loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
     assert "_injected_fake" not in loaded[0]

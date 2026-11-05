@@ -50,7 +50,7 @@ class DatasetFormatError(Exception):
 def detect_dataset_schema(
     file_path: Path,
     prompt_template: str | None = None,
-) -> tuple[DatasetSchema, tuple[str, ...] | None]:
+) -> tuple[DatasetSchema, tuple[str, str] | None]:
     """
     Detect dataset schema by sampling the first line.
 
@@ -66,8 +66,7 @@ def detect_dataset_schema(
 
     Returns:
         Tuple of (schema_type, column_keys) where:
-        - CHAT: column_keys is None
-        - EMBEDDING: column_keys is ("query", "pos_doc", "neg_doc")
+        - CHAT, EMBEDDING: column_keys is None (EMBEDDING always uses query/pos_doc/neg_doc)
         - SFT/CUSTOM: column_keys is (question_col, answer_col)
 
     Raises:
@@ -93,7 +92,7 @@ def detect_dataset_schema(
     if "query" in obj and "pos_doc" in obj and "neg_doc" in obj:
         if isinstance(obj["query"], str) and isinstance(obj["pos_doc"], str) and isinstance(obj["neg_doc"], list):
             logger.info(f"Detected embedding/retrieval dataset format in {file_path}")
-            return DatasetSchema.EMBEDDING, ("query", "pos_doc", "neg_doc")
+            return DatasetSchema.EMBEDDING, None
 
     # Check for custom prompt_template format
     if prompt_template:

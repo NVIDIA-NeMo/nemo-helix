@@ -275,6 +275,9 @@ class TrainingStepConfig(BaseModel):
 
     class DatasetConfig(BaseModel):
         path: str
+        # The dataset fileset ('workspace/name' or 'name'), so fileset:// image refs
+        # into it map onto the downloaded copy at ``path``.
+        fileset: Optional[str] = None
         prompt_template: Optional[str] = None
         add_bos: Optional[bool] = None
         add_eos: Optional[bool] = None

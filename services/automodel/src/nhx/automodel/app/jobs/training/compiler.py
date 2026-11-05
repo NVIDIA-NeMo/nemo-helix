@@ -205,6 +205,7 @@ def compile_training_step(
         ),
         dataset=TrainingStepConfig.DatasetConfig(
             path=DEFAULT_DATASET_PATH,
+            fileset=job_spec.dataset,
             shuffle=training.shuffle,
         ),
         training=_translate_training_config(training, me, teacher_me=teacher_me, recipe=training_recipe),

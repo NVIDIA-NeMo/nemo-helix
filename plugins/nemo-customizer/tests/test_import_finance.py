@@ -54,9 +54,9 @@ def _row(**overrides: object) -> dict:
 
 def test_ocr_row_uses_an_image_part_and_the_thinking_target() -> None:
     projected = finance.project_row(_row(), "visual_ocr", "train")
-    message = finance.finance_row(projected)
+    message = finance.finance_row(projected, "ws/ocr")
     user = message["messages"][0]["content"]
-    assert user[0] == {"type": "image_url", "image_url": {"url": "train/q.png"}}
+    assert user[0] == {"type": "image_url", "image_url": {"url": "fileset://ws/ocr#train/q.png"}}
     assert user[1]["type"] == "text"
     assert "What is revenue?" in user[1]["text"]
     assert message["messages"][1]["content"] == "<think>\nRead the page.\n</think>\n10"
@@ -99,9 +99,11 @@ def test_write_capability_records_the_leakage_audit(tmp_path: Path) -> None:
         validation_ratio=0.1,
         render_dpi=150,
         parent_audit={"overlaps": {}},
+        fileset="ws/ocr",
     )
     written = json.loads((tmp_path / "visual_ocr" / "test.jsonl").read_text().splitlines()[0])
     assert written["messages"][1]["content"] == "10"
+    assert written["messages"][0]["content"][0]["image_url"]["url"] == "fileset://ws/ocr#images/q.png"
     assert (tmp_path / "visual_ocr" / "images" / "q.png").is_file()
     assert manifest["overlaps"]["train__test"]["document_lineages"] == 0
     assert "parent_audit" in json.loads((tmp_path / "visual_ocr" / "split_manifest.json").read_text())

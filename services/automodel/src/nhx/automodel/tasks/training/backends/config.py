@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from nemo_automodel._transformers.registry import ModelRegistry
-from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL
+from nhx.automodel.app.constants import PAUSE_SENTINEL_FILE_NAME, PAUSE_SIGNAL, SERVICE_NAME
 from nhx.automodel.tasks.training.backends.vlm import CONVERSATION_DATASET_TARGET, rewrite_fileset_rows
 from nhx.automodel.tasks.training.chat_templates import resolve_chat_template
 from nhx.automodel.tasks.training.datasets.preparation import (
@@ -44,6 +44,8 @@ from nhx.automodel.tasks.training.sequence_packing import (
     calculate_target_packing_factor,
     estimate_dataset_sequence_lengths,
 )
+from nhx.common.client_factory import get_task_nemo_client
+from nhx.customization_common.image_refs import FilesetImageResolver
 from nhx.customization_common.schemas.checkpoint import (
     VLM_LORA_EXCLUDE_MODULES,
     CheckpointTraits,
@@ -393,7 +395,7 @@ def _compile_vlm_config(
         optimizer_target=_resolve_optimizer_target(customizer_config, TrainingRecipe.SFT),
     )
     _build_checkpoint(cfg, customizer_config, workspace_dir)
-    _configure_vlm_datasets(cfg, customizer_config, prepared, workspace_dir)
+    _configure_vlm_datasets(cfg, customizer_config, prepared, workspace_dir, job_ctx)
 
     cfg["dataloader"] = {
         "_target_": "torchdata.stateful_dataloader.StatefulDataLoader",
@@ -465,6 +467,7 @@ def _configure_vlm_datasets(
     customizer_config: TrainingStepConfig,
     prepared: PreparedDataset,
     workspace_dir: Path,
+    job_ctx: NHXJobContext,
 ) -> None:
     """Rewrite fileset rows into Automodel conversation JSONL."""
     schema, column_keys = detect_dataset_schema(
@@ -481,20 +484,22 @@ def _configure_vlm_datasets(
     image_dir = workspace_dir / "dataset" / "images"
     train_out = workspace_dir / "dataset" / "vlm_train.jsonl"
     val_out = workspace_dir / "dataset" / "vlm_validation.jsonl"
-    rewrite_fileset_rows(
-        prepared.train_file,
-        train_out,
+    with FilesetImageResolver(
+        job_workspace=job_ctx.workspace,
+        dataset_fileset=customizer_config.dataset.fileset,
         dataset_root=dataset_root,
-        image_dir=image_dir,
-        column_keys=column_keys,
-    )
-    rewrite_fileset_rows(
-        prepared.validation_file,
-        val_out,
-        dataset_root=dataset_root,
-        image_dir=image_dir,
-        column_keys=column_keys,
-    )
+        cache_dir=image_dir,
+        client_factory=lambda: get_task_nemo_client(SERVICE_NAME, workspace=job_ctx.workspace),
+    ) as fileset_images:
+        for source, dest in ((prepared.train_file, train_out), (prepared.validation_file, val_out)):
+            rewrite_fileset_rows(
+                source,
+                dest,
+                dataset_root=dataset_root,
+                image_dir=image_dir,
+                column_keys=column_keys,
+                fileset_images=fileset_images,
+            )
     chat_template = resolve_chat_template(
         model_path=customizer_config.model.path,
         model_name=customizer_config.model.name,

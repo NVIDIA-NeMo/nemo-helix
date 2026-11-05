@@ -158,7 +158,7 @@ def _build_download_config(job_spec: RlJobOutput, me: ModelEntity, *, workspace:
     model_fileset = _require_fileset(me.fileset, label=f"Model '{me.workspace}/{me.name}'")
     dataset_ref = FileSetRef.model_validate(job_spec.dataset)
     if dataset_ref.workspace is None:
-        dataset_ref = FileSetRef(workspace=workspace, name=dataset_ref.name)
+        dataset_ref = dataset_ref.model_copy(update={"workspace": workspace})
 
     downloads = [
         DownloadItem(src=FileSetRef.model_validate(model_fileset), dest=DEFAULT_MODEL_PATH),
@@ -168,7 +168,7 @@ def _build_download_config(job_spec: RlJobOutput, me: ModelEntity, *, workspace:
     if job_spec.training_type == TrainingType.GRPO:
         env_ref = FileSetRef.model_validate(_require_fileset(job_spec.environment, label="Environment"))
         if env_ref.workspace is None:
-            env_ref = FileSetRef(workspace=workspace, name=env_ref.name)
+            env_ref = env_ref.model_copy(update={"workspace": workspace})
         downloads.append(DownloadItem(src=env_ref, dest=DEFAULT_ENVIRONMENT_PATH))
 
     return FileIOTaskConfig(download=downloads)

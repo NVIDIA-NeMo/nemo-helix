@@ -83,11 +83,12 @@ def _make_job_output(
     integrations: IntegrationsSpec | None = None,
     *,
     environment: str | None = None,
+    dataset: str = "default/prefs",
 ) -> RlJobOutput:
     training = training or DPOTraining(type="dpo")
     return RlJobOutput(
         model="default/base-model",
-        dataset="default/prefs",
+        dataset=dataset,
         environment=environment,
         training=training,
         integrations=integrations,
@@ -460,12 +461,26 @@ async def test_compiler_rejects_model_without_fileset(
         await platform_job_config_compiler("default", _make_job_output(), platform_clients)
 
 
-def test_grpo_download_includes_environment() -> None:
-    job = _make_job_output(GRPOTraining(type="grpo"), environment="default/my-env")
+@pytest.mark.parametrize(
+    ("dataset", "environment", "expected_dataset", "expected_environment"),
+    [
+        ("shared/prefs", "shared/my-env", "shared/prefs", "shared/my-env"),
+        ("prefs", "my-env", "default/prefs", "default/my-env"),
+        ("shared/prefs#sub/", "shared/my-env#envs/a/", "shared/prefs#sub/", "shared/my-env#envs/a/"),
+        ("prefs#sub/", "my-env#envs/a/", "default/prefs#sub/", "default/my-env#envs/a/"),
+    ],
+    ids=["workspace", "no-workspace", "workspace-path", "no-workspace-path"],
+)
+def test_grpo_download_includes_environment(
+    dataset: str, environment: str, expected_dataset: str, expected_environment: str
+) -> None:
+    """A ref without a workspace takes the job's and keeps its ``#path``."""
+    job = _make_job_output(GRPOTraining(type="grpo"), environment=environment, dataset=dataset)
     cfg = _build_download_config(job, _make_model_entity(), workspace="default")
-    dests = [item.dest for item in cfg.download]
-    assert "/var/run/scratch/job/environment" in dests
+    srcs = {item.dest: str(item.src) for item in cfg.download}
     assert len(cfg.download) == 3
+    assert srcs["/var/run/scratch/job/dataset"] == expected_dataset
+    assert srcs["/var/run/scratch/job/environment"] == expected_environment
 
 
 def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None) -> None:

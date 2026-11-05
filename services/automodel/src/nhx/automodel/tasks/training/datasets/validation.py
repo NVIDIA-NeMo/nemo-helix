@@ -21,6 +21,7 @@ from jsonschema.validators import validator_for
 from nhx.automodel.entities.values import FinetuningType, TrainingType
 from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
 from nhx.automodel.tasks.training.datasets.schemas import SFTDatasetSchemaType
+from nhx.customization_common.image_refs import ImageReferenceError, check_image_url
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +132,16 @@ def is_multimodal_chat_row(row: Any) -> bool:
 
 def row_has_image_part(row: Any) -> bool:
     """True when a multimodal row carries an ``image_url`` part."""
+    return any(True for _ in _image_urls(row))
+
+
+def _image_urls(row: Any) -> Iterable[str]:
+    """The URL of every ``image_url`` part in a ``messages`` row."""
     if not isinstance(row, dict):
-        return False
+        return
     messages = row.get("messages")
     if not isinstance(messages, list):
-        return False
+        return
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -145,8 +151,8 @@ def row_has_image_part(row: Any) -> bool:
             continue
         for part in parts:
             if isinstance(part, dict) and part.get("type") == "image_url":
-                return True
-    return False
+                image_url = part.get("image_url")
+                yield image_url.get("url", "") if isinstance(image_url, dict) else ""
 
 
 def _is_multimodal_part(part: Any) -> bool:
@@ -326,6 +332,11 @@ class DatasetValidator:
                 self._validate_json_object(obj, validator)
             except Exception as e:
                 if is_multimodal_chat_row(obj) and self.allow_multimodal:
+                    for url in _image_urls(obj):
+                        try:
+                            check_image_url(url)
+                        except ImageReferenceError as exc:
+                            raise DatasetFormatError(f"{source} line {line_number}: {exc}") from exc
                     validated_rows += 1
                     continue
                 if is_multimodal_chat_row(obj) and row_has_image_part(obj):

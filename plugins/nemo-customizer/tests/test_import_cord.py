@@ -64,9 +64,11 @@ def test_write_split_saves_the_image_beside_the_jsonl(tmp_path: Path) -> None:
         [{"image": image, "ground_truth": json.dumps({"gt_parse": {"nm": "A"}})}],
         tmp_path,
         "validation.jsonl",
+        "validation",
+        "ws/cord",
     )
     row = json.loads((tmp_path / "validation.jsonl").read_text())
     assert count == 1
     assert image.saved == tmp_path / "images" / "00000.png"
-    assert row == cord.cord_row("images/00000.png", "<s_nm>A</s_nm>")
+    assert row == cord.cord_row("fileset://ws/cord#validation/images/00000.png", "<s_nm>A</s_nm>")
     assert row["messages"][0]["content"][1]["text"] == cord.CORD_PROMPT

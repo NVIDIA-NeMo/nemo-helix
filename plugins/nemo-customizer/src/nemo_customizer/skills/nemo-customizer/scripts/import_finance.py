@@ -5,8 +5,10 @@
 """Write the three finance capability filesets as OpenAI multimodal JSONL.
 
 Run this before upload. Automodel does not convert TAT-DQA or BizBench.
-Each directory you upload is already the training row. OCR rows carry a
-relative ``image_url``. Reasoning and code rows are text. Train and validation
+Each directory you upload is already the training row. OCR rows carry an
+``image_url`` that references the ``visual_ocr`` upload
+(``fileset://default/finance-ocr#images/<name>.png``), the form training and the
+inference gateway both resolve. Reasoning and code rows are text. Train and validation
 assistant text is the thinking-trace target. Test assistant text is the answer
 only. ``split_manifest.json`` in each directory is the leakage audit.
 
@@ -16,9 +18,10 @@ CodeFinQA and CodeTAT-QA.
 
     uv run --no-project --with datasets --with pillow --with pymupdf --with huggingface_hub \
       plugins/nemo-customizer/src/nemo_customizer/skills/nemo-customizer/scripts/import_finance.py \
-      --output /tmp/finance
+      --output /tmp/finance --ocr-fileset default/finance-ocr
 
-Then upload each capability directory (new fileset names, no ``--exist-ok``):
+Then upload each capability directory (new fileset names, no ``--exist-ok``).
+``visual_ocr`` must go to the fileset ``--ocr-fileset`` names:
 
     nemo files filesets create finance-ocr --workspace default --purpose dataset
     nemo files upload /tmp/finance/visual_ocr finance-ocr --workspace default
@@ -55,6 +58,7 @@ TAT_REVISION = "bc46208b22f0bfe47152c98fd0938d238ce868c2"
 BIZ_REVISION = "0a793f2f886156902c72b4a22cab82bb9dceaecf"
 BIZ_TASKS = ("CodeFinQA", "CodeTAT-QA")
 TARGET_TEMPLATE = "<think>\n{trace}\n</think>\n{answer}"
+DEFAULT_OCR_FILESET = "default/finance-ocr"
 JSONL_NAMES = {"train": "train.jsonl", "validation": "validation.jsonl", "test": "test.jsonl"}
 CAPABILITIES = {
     "visual_ocr": {
@@ -140,13 +144,16 @@ def build_user_prompt(task: str, task_family: str, question: str, context: str =
     )
 
 
-def finance_row(row: dict[str, Any]) -> dict[str, Any]:
-    """One chat row. Text-only content is a string. An image is a part list."""
+def finance_row(row: dict[str, Any], fileset: str = DEFAULT_OCR_FILESET) -> dict[str, Any]:
+    """One chat row. Text-only content is a string. An image is a part list.
+
+    ``image_path`` is relative to the capability directory, uploaded to ``fileset``.
+    """
     prompt = build_user_prompt(row["task"], row["task_family"], row["question"], row.get("context") or "")
-    image_url = str(row.get("image_path") or "")
-    if image_url:
+    image_path = str(row.get("image_path") or "")
+    if image_path:
         user: str | list[dict[str, Any]] = [
-            {"type": "image_url", "image_url": {"url": image_url}},
+            {"type": "image_url", "image_url": {"url": f"fileset://{fileset}#{image_path}"}},
             {"type": "text", "text": prompt},
         ]
     else:
@@ -529,8 +536,12 @@ def write_capability(
     validation_ratio: float,
     render_dpi: int,
     parent_audit: dict,
+    fileset: str = DEFAULT_OCR_FILESET,
 ) -> dict:
-    """Write one capability fileset: JSONL, OCR images, and the leakage audit."""
+    """Write one capability fileset: JSONL, OCR images, and the leakage audit.
+
+    ``fileset`` is where this directory is uploaded; image urls point into it.
+    """
     spec = CAPABILITIES[capability]
     allowed = set(spec["tasks"])
     projected = {split: [] for split in SPLITS}
@@ -547,7 +558,7 @@ def write_capability(
     for split, rows in projected.items():
         with (dest / JSONL_NAMES[split]).open("w", encoding="utf-8") as handle:
             for row in rows:
-                handle.write(json.dumps(finance_row(row), ensure_ascii=False) + "\n")
+                handle.write(json.dumps(finance_row(row, fileset), ensure_ascii=False) + "\n")
     manifest = {
         "name": capability,
         "seed": seed,
@@ -595,6 +606,7 @@ def write_filesets(
     seed: int = 42,
     validation_ratio: float = 0.1,
     render_dpi: int = 150,
+    ocr_fileset: str = DEFAULT_OCR_FILESET,
 ) -> dict[str, dict]:
     """Write ``visual_ocr``, ``reasoning``, and ``code_generation`` under ``output``."""
     if output.exists():
@@ -615,6 +627,7 @@ def write_filesets(
             validation_ratio=validation_ratio,
             render_dpi=render_dpi,
             parent_audit=parent_audit,
+            fileset=ocr_fileset,
         )
     return manifests
 
@@ -628,7 +641,14 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--validation-ratio", type=float, default=0.1)
     parser.add_argument("--render-dpi", type=int, default=150)
+    parser.add_argument(
+        "--ocr-fileset",
+        default=DEFAULT_OCR_FILESET,
+        help="<workspace>/<name> of the fileset you upload visual_ocr/ to; image urls point into it",
+    )
     args = parser.parse_args()
+    if args.ocr_fileset.count("/") != 1:
+        parser.error("--ocr-fileset must be <workspace>/<name>")
     tat_source = args.tat_source_dir
     biz_source = args.biz_source_dir
     if tat_source is None or biz_source is None:
@@ -642,6 +662,7 @@ def main() -> None:
         seed=args.seed,
         validation_ratio=args.validation_ratio,
         render_dpi=args.render_dpi,
+        ocr_fileset=args.ocr_fileset,
     )
     print(json.dumps({name: item["counts"] for name, item in manifests.items()}, indent=2, sort_keys=True))
 

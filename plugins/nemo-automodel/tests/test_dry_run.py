@@ -15,15 +15,18 @@ from nhx.customization_common.dry_run import check_local_dataset_rows
 from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 
 _CHAT = {"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]}
-_IMAGE_CHAT = {
-    "messages": [
-        {
-            "role": "user",
-            "content": [{"type": "image_url", "image_url": {"url": "a.png"}}, {"type": "text", "text": "q"}],
-        },
-        {"role": "assistant", "content": "a"},
-    ]
-}
+
+
+def _image_chat(url: str) -> dict:
+    return {
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "image_url", "image_url": {"url": url}}, {"type": "text", "text": "q"}],
+            },
+            {"role": "assistant", "content": "a"},
+        ]
+    }
 
 
 def _spec() -> Any:
@@ -54,16 +57,31 @@ def test_a_row_training_rejects_fails(tmp_path: Path) -> None:
     assert "train.jsonl line 1 does not conform to the expected schema" in check.message
 
 
-@pytest.mark.parametrize("has_vision_tower", [True, False])
-def test_an_image_row_passes_only_for_a_vision_model(tmp_path: Path, has_vision_tower: bool) -> None:
-    (tmp_path / "train.jsonl").write_text(json.dumps(_IMAGE_CHAT) + "\n")
+@pytest.mark.parametrize(
+    ("has_vision_tower", "url", "error"),
+    [
+        (True, "fileset://ws/images#a.png", None),
+        (True, "data:image/png;base64,aa", None),
+        (True, "a.png", None),
+        (
+            True,
+            "https://example.com/a.png",
+            "train.jsonl line 1: Image URL 'https://example.com/a.png' is not accepted",
+        ),
+        (False, "a.png", "train.jsonl line 1 has an image row, which requires a model with a vision tower"),
+    ],
+)
+def test_an_image_row_passes_only_for_a_vision_model(
+    tmp_path: Path, has_vision_tower: bool, url: str, error: str | None
+) -> None:
+    (tmp_path / "train.jsonl").write_text(json.dumps(_image_chat(url)) + "\n")
     traits = CheckpointTraits(has_vision_tower=has_vision_tower)
     [dataset] = AutomodelJob._dry_run_datasets(_spec(), "ws", traits)
 
     check = check_local_dataset_rows(dataset, tmp_path)
-    assert check.passed is has_vision_tower, check.message
-    if not has_vision_tower:
-        assert "train.jsonl line 1 has an image row, which requires a model with a vision tower" in check.message
+    assert check.passed is (error is None), check.message
+    if error is not None:
+        assert error in check.message
 
 
 @pytest.mark.parametrize("has_vision_tower", [True, False])

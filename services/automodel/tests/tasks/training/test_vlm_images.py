@@ -5,13 +5,16 @@ import base64
 import json
 from pathlib import Path
 
+import httpx
 import pytest
+from nemo_helix_plugin.client.client import NemoClient
 from nhx.automodel.tasks.training.backends import vlm
 from nhx.automodel.tasks.training.backends.vlm import rewrite_fileset_rows
 from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
+from nhx.customization_common.image_refs import FilesetImageResolver
 
 
-def _rewrite(tmp_path: Path, url: str) -> dict:
+def _rewrite(tmp_path: Path, url: str, fileset_images: FilesetImageResolver | None = None) -> dict:
     dataset = tmp_path / "data"
     dataset.mkdir(exist_ok=True)
     source = dataset / "training.jsonl"
@@ -28,7 +31,14 @@ def _rewrite(tmp_path: Path, url: str) -> dict:
         encoding="utf-8",
     )
     dest = tmp_path / "out.jsonl"
-    rewrite_fileset_rows(source, dest, dataset_root=dataset, image_dir=tmp_path / "images", column_keys=None)
+    rewrite_fileset_rows(
+        source,
+        dest,
+        dataset_root=dataset,
+        image_dir=tmp_path / "images",
+        column_keys=None,
+        fileset_images=fileset_images,
+    )
     return json.loads(dest.read_text(encoding="utf-8"))
 
 
@@ -39,6 +49,46 @@ def test_a_relative_image_url_stays_under_the_dataset(tmp_path: Path) -> None:
         "type": "image",
         "image": str(tmp_path / "data" / "scans" / "receipt.png"),
     }
+
+
+def _fileset_images(tmp_path: Path) -> FilesetImageResolver:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/apis/files/v2/workspaces/other/filesets/pics/-/a.png":
+            return httpx.Response(200, request=request, stream=httpx.ByteStream(b"downloaded"))
+        return httpx.Response(404, request=request, json={"detail": "not found"})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    return FilesetImageResolver(
+        job_workspace="default",
+        dataset_fileset="default/train-data",
+        dataset_root=tmp_path / "data",
+        cache_dir=tmp_path / "images",
+        client_factory=lambda: client,
+    )
+
+
+@pytest.mark.parametrize(
+    ("url", "content"),
+    [("fileset://train-data#scans/receipt.png", b"local"), ("fileset://other/pics#a.png", b"downloaded")],
+    ids=["dataset_fileset", "other_fileset"],
+)
+def test_a_fileset_image_url_resolves_to_a_local_file(tmp_path: Path, url: str, content: bytes) -> None:
+    (tmp_path / "data" / "scans").mkdir(parents=True)
+    (tmp_path / "data" / "scans" / "receipt.png").write_bytes(b"local")
+
+    with _fileset_images(tmp_path) as fileset_images:
+        row = _rewrite(tmp_path, url, fileset_images)
+
+    assert Path(row["conversation"][0]["content"][0]["image"]).read_bytes() == content
+
+
+def test_a_fileset_image_url_that_cannot_be_read_is_a_dataset_error(tmp_path: Path) -> None:
+    with pytest.raises(DatasetFormatError, match="cannot resolve"):
+        _rewrite(tmp_path, "fileset://train-data#a.png")
+    with _fileset_images(tmp_path) as fileset_images, pytest.raises(DatasetFormatError, match="not found"):
+        _rewrite(tmp_path, "fileset://other/pics#missing.png", fileset_images)
 
 
 def test_thinking_tool_calls_and_tools_survive_the_rewrite(tmp_path: Path) -> None:

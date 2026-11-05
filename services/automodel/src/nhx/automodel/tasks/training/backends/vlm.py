@@ -24,6 +24,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
+from nhx.customization_common.image_refs import FILESET_IMAGE_PREFIX, FilesetImageResolver, ImageReferenceError
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +44,12 @@ def rewrite_fileset_rows(
     dataset_root: Path,
     image_dir: Path,
     column_keys: tuple[str, str] | None,
+    fileset_images: FilesetImageResolver | None = None,
 ) -> None:
-    """Write conversation JSONL. Image bytes land under ``image_dir``."""
+    """Write conversation JSONL. Image bytes land under ``image_dir``.
+
+    ``fileset_images`` resolves ``fileset://`` image URLs; without it they are rejected.
+    """
     dest.parent.mkdir(parents=True, exist_ok=True)
     temp_path: Path | None = None
     try:
@@ -68,6 +73,7 @@ def rewrite_fileset_rows(
                     dataset_root=dataset_root,
                     image_dir=image_dir,
                     column_keys=column_keys,
+                    fileset_images=fileset_images,
                 )
                 record: dict[str, Any] = {"conversation": conversation}
                 if isinstance(row.get("tools"), list):
@@ -109,6 +115,7 @@ def _row_to_conversation(
     dataset_root: Path,
     image_dir: Path,
     column_keys: tuple[str, str] | None,
+    fileset_images: FilesetImageResolver | None,
 ) -> list[dict[str, Any]]:
     messages = row.get("messages")
     if isinstance(messages, list):
@@ -117,7 +124,9 @@ def _row_to_conversation(
             converted = {"role": message["role"]}
             content = message.get("content")
             if content is not None:
-                converted["content"] = _content_parts(content, dataset_root=dataset_root, image_dir=image_dir)
+                converted["content"] = _content_parts(
+                    content, dataset_root=dataset_root, image_dir=image_dir, fileset_images=fileset_images
+                )
             if message.get("thinking") is not None:
                 converted["thinking"] = message["thinking"]
             if message.get("tool_calls"):
@@ -134,7 +143,9 @@ def _row_to_conversation(
     ]
 
 
-def _content_parts(content: Any, dataset_root: Path, image_dir: Path) -> list[dict[str, Any]]:
+def _content_parts(
+    content: Any, dataset_root: Path, image_dir: Path, fileset_images: FilesetImageResolver | None
+) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     parts = [content] if isinstance(content, dict) else content
@@ -152,28 +163,36 @@ def _content_parts(content: Any, dataset_root: Path, image_dir: Path) -> list[di
             converted.append({"type": "text", "text": str(part.get("text", ""))})
         elif part.get("type") == "image_url":
             url = str((part.get("image_url") or {}).get("url", ""))
-            converted.append({"type": "image", "image": _resolve_image(url, dataset_root, image_dir)})
+            converted.append({"type": "image", "image": _resolve_image(url, dataset_root, image_dir, fileset_images)})
         else:
             converted.append(dict(part))
     return converted
 
 
-def _resolve_image(url: str, dataset_root: Path, image_dir: Path) -> str:
-    """Map an image URL onto a file under ``dataset_root``.
+def _resolve_image(url: str, dataset_root: Path, image_dir: Path, fileset_images: FilesetImageResolver | None) -> str:
+    """Map an image URL onto a local file.
 
-    A ``data:`` URL is decoded into ``image_dir``. Any other URL is a path
-    relative to the dataset. An ``http`` or ``https`` URL is not a path:
-    ``Path`` does not treat it as absolute, so joining it would look for a
+    A ``fileset://`` URL is the documented form, the one the inference gateway
+    also accepts. A ``data:`` URL is decoded into ``image_dir``. Any other URL is
+    a legacy path relative to the dataset. An ``http`` or ``https`` URL is not a
+    path: ``Path`` does not treat it as absolute, so joining it would look for a
     file named after the URL. An absolute path is not joined either:
     ``Path / "/etc/shadow"`` discards the root and opens that file.
     """
     if url.startswith("data:"):
         return _write_data_url(url, image_dir)
+    if url.startswith(FILESET_IMAGE_PREFIX):
+        if fileset_images is None:
+            raise DatasetFormatError(f"Image URL {url!r} is a fileset reference, which this dataset cannot resolve.")
+        try:
+            return str(fileset_images.local_path(url))
+        except ImageReferenceError as exc:
+            raise DatasetFormatError(str(exc)) from exc
     scheme = urlparse(url).scheme
     if scheme:
         raise DatasetFormatError(
-            f"Image URL {url!r} must be a path relative to the dataset directory or a data: URL. "
-            f"Remote {scheme} URLs are not downloaded."
+            f"Image URL {url!r} must be a fileset://<workspace>/<fileset>#<path> reference, a data: URL, "
+            f"or a path relative to the dataset directory. Remote {scheme} URLs are not downloaded."
         )
     relative = Path(url)
     if relative.is_absolute():

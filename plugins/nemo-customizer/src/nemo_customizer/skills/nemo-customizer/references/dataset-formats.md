@@ -46,24 +46,34 @@ Automodel detects schema from the **first JSONL line**.
 | Schema | JSONL shape | Job JSON |
 |--------|-------------|----------|
 | **CHAT** (preferred when model has chat template) | `{"messages": [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]}` | (none) |
-| **MULTIMODAL** (fileset shape only; trainer support pending) | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset-relative path or a `data:` URL. The assistant label stays one text part. | (none) |
+| **MULTIMODAL** (vision checkpoints) | Same `messages` list. `content` is a string (one text part) or a list of `{type: text, text}` and `{type: image_url, image_url: {url}}`. `url` is a fileset reference or a `data:` URL (§ **Image URLs**). The assistant label stays one text part. | (none) |
 | **SFT** | `{"prompt": "...", "completion": "..."}` | (none) |
 | **CUSTOM** | Any two columns, e.g. `{"input": "...", "output": "..."}` | `"prompt_template": "{input} {output}"` on `dataset` |
 | **EMBEDDING** | `{"query": "...", "pos_doc": "...", "neg_doc": ["...", "..."]}` | `training.recipe: bi_encoder` or `cross_encoder`. `neg_doc` must be a **non-empty** list; convert-only retrieval Stage 1 emits `[]` and training crashes unless you mine first. |
 
-**Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it. String `content` stays CHAT. A row with an image saves that file next to the JSONL and sets the user message to an `image_url` part followed by a text part; that part list is MULTIMODAL (`hf-conversion.md` § Image rows). `scripts/import_cord.py` and `scripts/import_finance.py` are examples of that conversion (CORD-v2, and finance OCR, reasoning, and code). Upload the directory that is already this shape; Automodel does not convert the Hugging Face dataset.
+**Conversion preference:** CHAT if the model has a chat template (`hf-conversion.md` § **Chat-template check**, or model `spec.is_chat` / `spec.chat_template`) → else SFT. Use CUSTOM or EMBEDDING only when the user asks or the task requires it. String `content` stays CHAT. A row with an image saves that file in the fileset beside the JSONL and sets the user message to an `image_url` part, pointing at that file, followed by a text part; that part list is MULTIMODAL (`hf-conversion.md` § Image rows). `scripts/import_cord.py` and `scripts/import_finance.py` are examples of that conversion (CORD-v2, and finance OCR, reasoning, and code). Upload the directory that is already this shape; Automodel does not convert the Hugging Face dataset.
 
-MULTIMODAL rows are the fileset to upload. Automodel detects a `messages` row as CHAT, and `ChatDataset` requires string `content`, so an image row fails validation until multimodal training support lands.
+MULTIMODAL rows train on a checkpoint with a vision tower. On a text checkpoint an image row fails validation.
 
 ```json
 {"messages": [
   {"role": "user", "content": [
-    {"type": "image_url", "image_url": {"url": "images/receipt.png"}},
+    {"type": "image_url", "image_url": {"url": "fileset://default/receipts#images/receipt.png"}},
     {"type": "text", "text": "Describe this image."}
   ]},
   {"role": "assistant", "content": "<s_menu><s_nm>"}
 ]}
 ```
+
+### Image URLs
+
+One image URL form works end to end: the same row trains, evaluates, and goes to the inference gateway unchanged.
+
+- `fileset://<workspace>/<fileset>#<path>` (recommended). `fileset://<fileset>#<path>` uses the job's workspace. The file is usually in the dataset fileset itself (upload the JSONL and `images/` together); training reads that from the downloaded dataset. A file in another fileset is downloaded with the job creator's permissions. PNG, JPEG, GIF, or WebP, at most 25 MiB.
+- An inline base64 `data:` URL (`data:image/png;base64,...`), same types and size limit.
+- A path relative to the dataset fileset root (`images/receipt.png`) still trains on Automodel SFT, but the gateway does not resolve it. Prefer `fileset://`.
+
+`http(s)` URLs are rejected, in training and in the dry run: training nodes may have no internet access, and a URL can change after the job reads it, so the dataset would not be reproducible. `file://` URLs and absolute paths are rejected too. `fileset://` refs are for SFT datasets. GRPO rows carry images as base64 `data:` URLs in their `input_image` parts, the form the gateway and vLLM accept (**nemo-gym-environments** skill, `references/rollout-rows.md`).
 
 **Why CHAT for chat models:** SFT (and CUSTOM) rows train as plain text, `prompt + completion`, with no chat template and no end-of-sequence token. A chat model trained that way barely changes through `/v1/chat/completions`, and `/v1/completions` output runs past the answer. Put the exact user prompt you will send at inference in the `user` turn.
 
