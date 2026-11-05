@@ -4,9 +4,8 @@
 """Pure paired baseline-vs-candidate comparison of Evaluation metrics.
 
 This module is the single pairing implementation shared by the compare API,
-``nemo intake evaluations compare``, and Studio's EvaluationCompareChart. It
-mirrors the rules Studio's comparison view applies when it pairs two runs by
-test case:
+``nemo intake evaluations compare``, and Studio's EvaluationCompareChart, which
+reads the API. It pairs two runs by test case under these rules:
 
 - Sessions without a ``test_case_name`` cannot be paired and are dropped.
 - A failed evaluator result scores ``0``.
@@ -29,7 +28,7 @@ import random
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
-# Two paired values closer than this count as the same, matching Studio's comparison tolerance.
+# Two paired values closer than this count as the same; Studio's describeComparison uses the same tolerance.
 SAME_TOLERANCE = 1e-9
 
 # Bootstrap configuration. The seed is fixed so an (input, metric) pair always
@@ -43,8 +42,7 @@ BOOTSTRAP_SEED = 0
 WEAK_INTERVAL_MAX_PAIRS = 9
 
 _EVALUATOR_METRIC_PREFIX = "evaluators."
-# Studio's direction rule (``higherIsBetter`` in the EvaluationCompareChart):
-# evaluator scores go up when things get better; every rollup metric goes down.
+# Evaluator scores go up when things get better; every rollup metric goes down.
 _LOWER_IS_BETTER_METRICS = frozenset({"cost_usd", "latency_ms", "tokens"})
 
 
@@ -162,7 +160,8 @@ def compare_test_case_means(
     Differences are signed ``candidate - baseline``; ``mean_paired_difference``
     and the interval bounds keep that sign. ``p_candidate_better`` is the
     fraction of bootstrap resamples whose mean difference favors the candidate
-    under the metric's direction. ``n_pairs == 0`` yields an empty interval.
+    under the metric's direction; tied resamples favor neither side.
+    ``n_pairs == 0`` yields an empty interval.
     """
     # Sorted so the resampling sequence — and therefore the interval — does not
     # depend on input ordering.
@@ -195,10 +194,7 @@ def compare_test_case_means(
     resampled_means: list[float] = []
     favoring = 0
     for _ in range(resamples):
-        total = 0.0
-        for _ in range(n_pairs):
-            total += differences[rng.randrange(n_pairs)]
-        resample_mean = total / n_pairs
+        resample_mean = sum(rng.choices(differences, k=n_pairs)) / n_pairs
         resampled_means.append(resample_mean)
         if _favoring(resample_mean, metric):
             favoring += 1

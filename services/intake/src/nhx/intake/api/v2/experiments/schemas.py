@@ -408,7 +408,9 @@ class EvaluationCompareResponse(BaseModel):
         json_schema_extra={"nullable": True},
         description=(
             "Fraction of bootstrap resamples whose mean paired difference favors the candidate "
-            "under the metric's direction. Null when no test case is shared."
+            "under the metric's direction. Resamples within 1e-9 of zero are ties and count as "
+            "neither better nor worse, so 1 minus this value is not the chance the candidate is worse. "
+            "Null when no test case is shared."
         ),
     )
     interval_caveat: str | None = Field(

@@ -211,8 +211,8 @@ class EvaluationReadService:
                 _sanitize_for_log(candidate_name),
             )
             raise EvaluationTelemetryUnavailableError(configured=True) from exc
-        # The bootstrap is pure CPU over every paired attempt; off the event loop so a
-        # large comparison cannot stall the other requests this worker is serving.
+        # The bootstrap is pure CPU over every paired test case. A thread keeps the event loop
+        # scheduling other requests, but it still holds the GIL while it resamples.
         return await to_thread(
             compare_evaluation_sessions,
             (session for session in sessions if session.evaluation_name == baseline_name),

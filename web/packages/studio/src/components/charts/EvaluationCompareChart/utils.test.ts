@@ -104,6 +104,12 @@ describe('describeComparison', () => {
     );
   });
 
+  it('gives no direction to a mean within the endpoint tie tolerance', () => {
+    expect(describeComparison(comparison({ mean_paired_difference: 1e-12 }))).toBe(
+      'mean +0 · 95% CI +0.1 to +0.4 · P(better) 62% · 2 paired test cases'
+    );
+  });
+
   it('keeps negative bounds signed and singularizes one pair', () => {
     expect(
       describeComparison(

@@ -107,6 +107,9 @@ export interface HeadToHead {
 const formatSignedDifference = (value: number): string =>
   `${value > 0 ? '+' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
 
+/** The compare endpoint counts paired differences within this tolerance as the same. */
+const SAME_TOLERANCE = 1e-9;
+
 /** The direction the endpoint reports: for cost and latency a negative difference is better. */
 const favorsCandidate = (compare: EvaluationCompareResponse, difference: number): boolean =>
   compare.higher_is_better ? difference > 0 : difference < 0;
@@ -121,7 +124,12 @@ export function describeComparison(compare: EvaluationCompareResponse): string {
   const parts: string[] = [];
   if (compare.mean_paired_difference != null) {
     const mean = compare.mean_paired_difference;
-    const direction = mean === 0 ? '' : favorsCandidate(compare, mean) ? ' (better)' : ' (worse)';
+    const direction =
+      Math.abs(mean) <= SAME_TOLERANCE
+        ? ''
+        : favorsCandidate(compare, mean)
+          ? ' (better)'
+          : ' (worse)';
     parts.push(`mean ${formatSignedDifference(mean)}${direction}`);
   }
   if (compare.interval_low != null && compare.interval_high != null) {

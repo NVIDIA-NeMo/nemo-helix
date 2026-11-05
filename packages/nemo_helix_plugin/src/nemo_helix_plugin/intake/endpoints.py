@@ -136,7 +136,7 @@ def list_evaluations(
 def compare_evaluations(
     *,
     workspace: str | None = None,
-    query_params: CompareEvaluationsQueryParams | None = None,
+    query_params: CompareEvaluationsQueryParams,
 ) -> EvaluationCompareResponse: ...
 
 
