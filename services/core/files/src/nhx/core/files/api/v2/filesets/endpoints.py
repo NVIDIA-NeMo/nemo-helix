@@ -19,7 +19,7 @@ from fastapi import (
 from fastapi.responses import FileResponse
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
-from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
+from nhx.common.api.common import ErrorResponse, PaginationData
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
@@ -53,6 +53,7 @@ from nhx.core.files.api.v2.filesets.schemas import (
     FilesetFilter,
     FilesetOutput,
     FilesetPage,
+    FilesetSortField,
     ListFilesetFilesResponse,
     UpdateFilesetRequest,
     fileset_file_output_from_info,
@@ -413,8 +414,8 @@ async def list_filesets(
     workspace: str,
     page: int = Query(default=1, ge=1, description="Page number."),
     page_size: int = Query(default=10, ge=1, le=100, description="Page size."),
-    sort: GenericSortField = Query(
-        default=GenericSortField.CREATED_AT_DESC,
+    sort: FilesetSortField = Query(
+        default=FilesetSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
     ),
     parsed: ParsedFilter = Depends(make_filter_dep(FilesetFilter)),
@@ -433,7 +434,7 @@ async def list_filesets(
         workspace=workspace,
         page=page,
         page_size=page_size,
-        sort=sort.value,
+        sort=sort.entity_sort,
         filter_operation=parsed.operation,
     )
 
