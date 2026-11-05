@@ -91,8 +91,10 @@ export const CopyFilesetModal: FC<CopyFilesetModalProps> = ({ source, onClose, o
     >
       <Stack gap="density-lg">
         <Text kind="body/regular/sm">
-          Creates a local fileset with a copy of every file, so you can edit, upload, and delete
-          files. Files are copied through your browser, so large filesets may take a while.
+          {source.storage.type === 'local'
+            ? 'Creates a new local fileset with a copy of every file.'
+            : 'Creates a local fileset with a copy of every file, so you can edit, upload, and delete files.'}{' '}
+          Files are copied through your browser, so large filesets may take a while.
         </Text>
         <FilesetNameField
           control={control}

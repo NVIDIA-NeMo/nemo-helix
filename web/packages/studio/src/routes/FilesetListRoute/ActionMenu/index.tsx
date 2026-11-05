@@ -82,9 +82,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
         <DropdownContent align="end" className="w-[180px]">
           <DropdownItem onClick={() => onNavigateToDetails(dataset)}>View</DropdownItem>
           <DropdownItem onClick={() => setModalOpen('edit')}>Edit</DropdownItem>
-          {dataset.storage.type !== 'local' && (
-            <DropdownItem onClick={() => setModalOpen('copy')}>Copy to New Fileset</DropdownItem>
-          )}
+          <DropdownItem onClick={() => setModalOpen('copy')}>Copy to New Fileset</DropdownItem>
           <DropdownItem onClick={() => setModalOpen('delete')} danger>
             Delete
           </DropdownItem>

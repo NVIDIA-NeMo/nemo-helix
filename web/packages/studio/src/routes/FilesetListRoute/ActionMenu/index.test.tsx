@@ -133,13 +133,14 @@ describe('ActionMenu', () => {
   });
 
   describe('Copy to New Fileset', () => {
-    it('is hidden for local filesets', async () => {
+    it('opens the copy modal for local filesets', async () => {
       const user = userEvent.setup();
       render(<ActionMenu {...defaultProps} />);
 
       await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
 
-      expect(screen.queryByText('Copy to New Fileset')).not.toBeInTheDocument();
+      expect(screen.getByText(/creates a new local fileset/i)).toBeInTheDocument();
     });
 
     it('opens the copy modal for external filesets', async () => {
@@ -155,6 +156,7 @@ describe('ActionMenu', () => {
 
       expect(screen.getByText(`Copy Fileset: ${mockDataset.name}`)).toBeInTheDocument();
       expect(screen.getByRole('textbox', { name: /name/i })).toHaveValue('test-dataset-copy');
+      expect(screen.getByText(/so you can edit, upload, and delete files/i)).toBeInTheDocument();
     });
   });
 
