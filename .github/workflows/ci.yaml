@@ -1862,19 +1862,19 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           WHEEL: ${{ steps.helix.outputs.wheel-path }}
-        run: bash .github/scripts/test-wheel-install.sh nemo-helix venv
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix venv
       - name: Install and test CLI (tool)
         if: ${{ !cancelled() && steps.helix.outcome == 'success' }}
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           WHEEL: ${{ steps.helix.outputs.wheel-path }}
-        run: bash .github/scripts/test-wheel-install.sh nemo-helix tool
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix tool
       - name: Install and test plugin (venv)
         if: ${{ !cancelled() && steps.plugin.outcome == 'success' }}
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           WHEEL: ${{ steps.plugin.outputs.wheel-path }}
-        run: bash .github/scripts/test-wheel-install.sh nemo-helix-plugin venv
+        run: bash tests/packaging/test-wheel-install.sh nemo-helix-plugin venv
 
   # E2E tests: start services from the workspace venv and run the e2e
   # suite against the real process.

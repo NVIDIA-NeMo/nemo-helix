@@ -15,7 +15,7 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.core.models.api.dependencies import get_model_deployment_service
 from nhx.core.models.api.permissions import check_deployment_config_access
 from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
-from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, NOT_FOUND_ERRORS, deployments_enabled
+from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, LIST_REQUEST_ERRORS, deployments_enabled
 from nhx.core.models.schemas import (
     CreateModelDeploymentRequest,
     ModelDeployment,
@@ -80,7 +80,7 @@ async def list_deployments(
             all_versions=all_versions,
         )
         return result
-    except NOT_FOUND_ERRORS:
+    except LIST_REQUEST_ERRORS:
         raise
     except PermissionDeniedError:
         raise
