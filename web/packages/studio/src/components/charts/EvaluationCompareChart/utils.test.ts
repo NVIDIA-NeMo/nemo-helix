@@ -2,14 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SERIES_COLORS } from '@nemo/common/src/components/charts/tokens';
-import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
+import type { EvaluationCompareResponse } from '@nemo/sdk/generated/platform/schema';
 import {
   buildImprovementRows,
   buildMetricValueRows,
+  describeComparison,
   describeImprovement,
-  headToHead,
   improvementPercent,
-  meanScoreByTestCase,
   symmetricAxisBound,
   toComparedEvaluations,
 } from '@studio/components/charts/EvaluationCompareChart/utils';
@@ -26,29 +25,29 @@ const row = (overrides: Partial<EvaluationRow> & { id: string }): EvaluationRow 
     ...overrides,
   }) as EvaluationRow;
 
-const session = (
-  testCase: string | undefined,
-  scores: Record<string, number>,
-  failed: string[] = []
-): EvaluationSessionResponse =>
-  ({
-    workspace: 'default',
-    evaluation_name: 'e',
-    session_id: Math.random().toString(),
-    test_case_name: testCase,
-    trace_id: 't',
-    root_span_id: 'r',
-    started_at: '2026-01-01T00:00:00Z',
-    status: 'success',
-    evaluator_scores: scores,
-    failed_evaluators: failed,
-  }) as EvaluationSessionResponse;
-
 const metricById = (rows: EvaluationRow[], id: string) => {
   const metric = deriveTrendMetrics(rows).find((m) => m.id === id);
   if (!metric) throw new Error(`no metric ${id}`);
   return metric;
 };
+
+const comparison = (overrides: Partial<EvaluationCompareResponse>): EvaluationCompareResponse =>
+  ({
+    workspace: 'default',
+    baseline: 'base',
+    candidate: 'cand',
+    metric: 'evaluators.acc',
+    higher_is_better: true,
+    n_pairs: 2,
+    better: 1,
+    same: 1,
+    worse: 0,
+    mean_paired_difference: 0.25,
+    interval_low: 0.1,
+    interval_high: 0.4,
+    p_candidate_better: 0.62,
+    ...overrides,
+  }) as EvaluationCompareResponse;
 
 describe('toComparedEvaluations', () => {
   it('orders oldest first and assigns colors in that order', () => {
@@ -98,17 +97,55 @@ describe('buildImprovementRows', () => {
   });
 });
 
-describe('meanScoreByTestCase', () => {
-  it('averages repeated attempts and counts a failed evaluator as zero', () => {
-    const scores = meanScoreByTestCase(
-      [session('tc1', { acc: 1 }), session('tc1', {}, ['acc']), session('tc2', { acc: 0.5 })],
-      'acc'
+describe('describeComparison', () => {
+  it('summarizes the mean, interval, probability, and pair count', () => {
+    expect(describeComparison(comparison({}))).toBe(
+      'mean +0.25 · 95% CI +0.1 to +0.4 · P(better) 62% · 2 paired test cases'
     );
-    expect(Object.fromEntries(scores)).toEqual({ tc1: 0.5, tc2: 0.5 });
   });
 
-  it('skips sessions without a test case name', () => {
-    expect(meanScoreByTestCase([session(undefined, { acc: 1 })], 'acc').size).toBe(0);
+  it('keeps negative bounds signed and singularizes one pair', () => {
+    expect(
+      describeComparison(
+        comparison({
+          n_pairs: 1,
+          mean_paired_difference: -0.5,
+          interval_low: -1.25,
+          interval_high: 0,
+          p_candidate_better: 0.2,
+        })
+      )
+    ).toBe('mean -0.5 · 95% CI -1.25 to 0 · P(better) 20% · 1 paired test case');
+  });
+
+  it('omits the pieces the response does not carry', () => {
+    expect(
+      describeComparison(
+        comparison({
+          mean_paired_difference: undefined,
+          interval_low: undefined,
+          interval_high: undefined,
+          p_candidate_better: undefined,
+        })
+      )
+    ).toBe('2 paired test cases');
+  });
+
+  it('says when nothing paired', () => {
+    expect(
+      describeComparison(
+        comparison({
+          n_pairs: 0,
+          better: 0,
+          same: 0,
+          worse: 0,
+          mean_paired_difference: undefined,
+          interval_low: undefined,
+          interval_high: undefined,
+          p_candidate_better: undefined,
+        })
+      )
+    ).toBe('no paired test cases');
   });
 });
 
@@ -132,23 +169,5 @@ describe('symmetricAxisBound', () => {
   it('never collapses to zero', () => {
     expect(symmetricAxisBound([])).toBe(1);
     expect(symmetricAxisBound([0])).toBe(1);
-  });
-});
-
-describe('headToHead', () => {
-  it('counts only test cases both runs scored', () => {
-    const baseline = new Map([
-      ['a', 0.5],
-      ['b', 0.5],
-      ['c', 0.5],
-      ['only-baseline', 1],
-    ]);
-    const candidate = new Map([
-      ['a', 0.9],
-      ['b', 0.5],
-      ['c', 0.1],
-      ['only-candidate', 1],
-    ]);
-    expect(headToHead(baseline, candidate)).toEqual({ better: 1, same: 1, worse: 1 });
   });
 });
