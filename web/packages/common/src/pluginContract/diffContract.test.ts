@@ -187,6 +187,51 @@ describe('diffContract', () => {
   });
 });
 
+describe('diffContract hardening', () => {
+  it.each(['abc', '', '>=1', '1.2'])('fails closed on unparseable contractVersion %j', (v) => {
+    const issues = diff(sidecar({ contractVersion: v }));
+    expect(
+      issues.map((i) => i.code),
+      `contractVersion ${JSON.stringify(v)}`
+    ).toEqual(['PLUGIN_CONTRACT_UNSUPPORTED']);
+    expect(hasBlockingIssues(issues)).toBe(true);
+  });
+
+  it('links every issue code to the contract docs', () => {
+    const scenarios: Record<IssueCode, PluginSidecar | null> = {
+      PLUGIN_MANIFEST_MISSING: null,
+      PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
+      PLUGIN_SINGLETON_BUNDLED: sidecar({ bundledPackages: ['react-router'] }),
+      PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
+      PLUGIN_VERSION_DRIFT: sidecar({ builtAgainst: { ...STUDIO, 'react-router': '8.2.0' } }),
+      PLUGIN_VERSION_INCOMPATIBLE: sidecar({
+        builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
+      }),
+    };
+    for (const [code, input] of Object.entries(scenarios) as [IssueCode, PluginSidecar | null][]) {
+      const issue = diff(input).find((i) => i.code === code);
+      expect(issue, `${code} should be emitted`).toBeDefined();
+      expect(
+        issue!.steps.some((s) => s.includes('plugins/example-plugin/web/AGENTS.md')),
+        `${code} steps link the docs`
+      ).toBe(true);
+    }
+  });
+
+  it('skips malformed builtAgainst versions and still parses pre-releases', () => {
+    for (const built of ['19.2.3garbage', '19.2.3.4', '>=8', '8', '']) {
+      expect(
+        codes(sidecar({ builtAgainst: { react: built } })),
+        `built ${JSON.stringify(built)} is malformed and skipped`
+      ).toEqual([]);
+    }
+    expect(
+      codes(sidecar({ builtAgainst: { react: '19.1.0-rc.1' } })),
+      'pre-release parses as 19.1.0'
+    ).toEqual([]);
+  });
+});
+
 describe('PLUGIN_CONTRACT', () => {
   it('classifies the shared dependencies', () => {
     const kinds = Object.fromEntries(PLUGIN_CONTRACT.entries.map((e) => [e.specifier, e.kind]));
