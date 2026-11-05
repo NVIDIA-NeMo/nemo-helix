@@ -25,6 +25,9 @@ interface ChatErrorDescription {
 /** Turns a chat failure message into an actionable description, or `undefined` if it is unknown. */
 type DescribeChatError = (message: string) => ChatErrorDescription | undefined;
 //#endregion
+//#region src/components/Chat/MessageContent/textSize.d.ts
+type MessageTextSize = 'md' | 'lg';
+//#endregion
 //#region ../../node_modules/.pnpm/@types+unist@3.0.3/node_modules/@types/unist/index.d.ts
 // ## Interfaces
 /**
@@ -429,6 +432,8 @@ interface MessageContentProps {
   markdownLinkComponent?: Components['a'];
   markdownTableOptions?: MarkdownTableOptions;
   renderAsMarkdown?: boolean;
+  /** Body text size: `md` (14px) for replies, `lg` (16px) for user prompts. */
+  textSize?: MessageTextSize;
 }
 declare namespace shared_d_exports {
   export { AllModels, ChatModel, ComparisonFilter, CompoundFilter, ErrorObject, FunctionDefinition, FunctionParameters, Metadata, Reasoning, ReasoningEffort, ResponseFormatJSONObject, ResponseFormatJSONSchema, ResponseFormatText, ResponsesModel };
@@ -691,8 +696,8 @@ interface AssistantChatProps {
   onError?: (error: Error) => void;
   /**
    * Explains a failed reply. Called with the raw error message; a returned title and hint become
-   * the message body, while the raw error stays in the error banner and is what "Copy error"
-   * copies. Omit it (or return `undefined`) to show the generic line above the raw error.
+   * the error banner's message, while the raw error sits behind the "Show details" row below it.
+   * Omit it (or return `undefined`) to show the generic line instead.
    */
   describeError?: DescribeChatError;
   /**
