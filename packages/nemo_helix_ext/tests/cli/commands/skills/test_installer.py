@@ -265,6 +265,69 @@ class TestInstallManifest:
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
         assert any("unreadable" in record.message for record in caplog.records)
 
+    def test_prune_keeps_a_recorded_directory_it_cannot_remove(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        """A failed removal is warned about and stays recorded so a later full install retries it."""
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        installer.install(
+            Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha"), "beta": _make_skill("beta")}, prune=True
+        )
+
+        def _fail(path: Path) -> None:
+            raise PermissionError(f"busy: {path}")
+
+        monkeypatch.setattr("nemo_helix_ext.cli.commands.skills.installer.shutil.rmtree", _fail)
+        with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
+            installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "nemo-beta" / "SKILL.md").exists()
+        assert installer.pruned_directories == []
+        assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha", "nemo-beta"]
+        assert any("Could not remove" in record.message for record in caplog.records)
+
+    def test_prune_leaves_a_recorded_name_without_the_installed_skill_prefix(self, tmp_path: Path):
+        """The installer only writes ``nemo-*`` directories, so it never removes anything else."""
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        _write_skill_dir(skills_root, "team-skill")
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["team-skill"]}))
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "team-skill" / "SKILL.md").exists()
+        assert "team-skill" in _read_manifest(tmp_path)["owned"]
+
+    @pytest.mark.parametrize("manifest", [{"owned": "nemo-a"}, {"owned": ["nemo-a", 1]}, ["nemo-a"]])
+    def test_prune_warns_on_a_manifest_with_an_unexpected_shape(
+        self, tmp_path: Path, manifest: object, caplog: pytest.LogCaptureFixture
+    ):
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        _write_skill_dir(skills_root, "nemo-a")
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps(manifest))
+
+        with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
+            installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "nemo-a" / "SKILL.md").exists()
+        assert any("unexpected shape" in record.message for record in caplog.records)
+
+    def test_prune_never_removes_a_recorded_name_matching_a_written_one_case_insensitively(self, tmp_path: Path):
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-ALPHA"]}))
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "nemo-alpha" / "SKILL.md").exists()
+        assert installer.pruned_directories == []
+        assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
+
     def test_prune_leaves_a_recorded_name_that_is_a_plain_file(self, tmp_path: Path):
         """A recorded name that is now a regular file is not a directory this installer owns."""
         installer = DirectoryLayoutInstaller()

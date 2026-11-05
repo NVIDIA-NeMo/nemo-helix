@@ -477,6 +477,33 @@ class TestInstall:
         assert "Failed to load 'nemo.skills' entry point" in result.output
         assert "Removed" not in result.stdout
 
+    def test_full_install_skips_prune_when_allowlist_hides_a_skill_provider(self, tmp_path: Path, monkeypatch):
+        """Skills of a plugin hidden by the allowlist are still installed, not "no longer shipped"."""
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        hidden = skills_root / "nemo-hidden-plugin-skill"
+        hidden.mkdir()
+        (hidden / "SKILL.md").write_text("hidden")
+        manifest["owned"].append("nemo-hidden-plugin-skill")
+        manifest_path.write_text(json.dumps(manifest))
+
+        monkeypatch.setattr(
+            "nemo_helix_ext.cli.commands.skills.cli.skill_providers_excluded_by_allowlist", lambda: ["hidden"]
+        )
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert hidden.is_dir()
+        assert "Plugin allowlist excludes skill provider(s): hidden" in result.output
+        assert "Removed" not in result.stdout
+
     def test_install_to_custom_path_writes_its_own_manifest(self, tmp_path: Path):
         """Each skills root keeps its own manifest file."""
         import json

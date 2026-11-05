@@ -19,6 +19,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     get_installer,
     list_agent_names,
     load_skills,
+    skill_providers_excluded_by_allowlist,
 )
 from nemo_helix_ext.skills import skills_dir as platform_skills_dir
 
@@ -319,6 +320,17 @@ def test_duplicate_entry_points_with_same_path_collapse(monkeypatch, tmp_path: P
     skills = load_skills()
 
     assert set(skills.keys()) == {"shared-skill"}
+
+
+def test_skill_providers_excluded_by_allowlist_names_hidden_providers(monkeypatch, tmp_path: Path):
+    fake_eps = [
+        _fake_provider_ep("platform", "nemo-helix-ext", tmp_path / "platform"),
+        _fake_provider_ep("hidden", "hidden-plugin", tmp_path / "hidden"),
+    ]
+    monkeypatch.setattr("nemo_helix_plugin.discovery.discover_entry_points", lambda _group: {"platform": fake_eps[0]})
+    monkeypatch.setattr("nemo_helix_ext.cli.commands.skills.registry._raw_entry_points", lambda _group: fake_eps)
+
+    assert skill_providers_excluded_by_allowlist() == ["hidden"]
 
 
 def test_duplicate_entry_points_prefer_ext_when_content_matches(monkeypatch, tmp_path: Path):

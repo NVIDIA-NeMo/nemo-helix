@@ -83,6 +83,11 @@ For Helm, put these structured settings under `platformConfig` in your values fi
 Update external gateway routes, SIEM and audit rules, service-identity matching,
 job-source filters, scripts, and integrations that match the previous values.
 
+**Permissions and stored entity kinds are unchanged.** Keep `evaluator.*` roles and
+scopes, task-kind discriminators, and entity types. Python classes and types such
+as `Evaluator`, `EvaluatorPluginService`, and `EvaluatorPerms` also retain their
+names for this change.
+
 ## Remove installed agent skills from the old names
 
 If you previously ran `nemo skills install` (or `nemo setup` skill installation),
@@ -96,11 +101,6 @@ Reinstalling does not remove them: those directories were written by an older
 version that did not record what it installed, and `nemo skills install` only
 removes directories recorded in its own manifest. Do **not** delete other
 `nemo-*` directories you did not install from NeMo.
-
-**Permissions and stored entity kinds are unchanged.** Keep `evaluator.*` roles and
-scopes, task-kind discriminators, and entity types. Python classes and types such
-as `Evaluator`, `EvaluatorPluginService`, and `EvaluatorPerms` also retain their
-names for this change.
 
 ## Existing job history
 

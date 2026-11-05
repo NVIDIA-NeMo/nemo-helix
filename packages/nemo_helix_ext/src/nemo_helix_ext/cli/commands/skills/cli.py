@@ -16,6 +16,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     list_agent_names,
     load_skills,
     load_skills_with_warnings,
+    skill_providers_excluded_by_allowlist,
 )
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.formatters import (
@@ -356,16 +357,20 @@ def install(
     skills, discovery_warnings = _resolve_skills(skill)
     project_root = path if path is not None else _find_project_root(project_dir)
     # A full install (no --skill) is a sync of the recorded directories in
-    # the roots it writes. Never prune from a degraded discovery: a plugin
-    # whose skills failed to load must not read as "no longer shipped".
-    if skill is None and discovery_warnings:
-        typer.echo(
-            "Plugin skill discovery reported warnings; skipping removal of previously installed skills:",
-            err=True,
-        )
-        for warning in discovery_warnings:
-            typer.echo(f"  {warning}", err=True)
-    result_paths = installer.install(scope, project_root, skills, prune=skill is None and not discovery_warnings)
+    # the roots it writes. Never prune from an incomplete discovery: a plugin
+    # whose skills failed to load or are hidden by the plugin allowlist must
+    # not read as "no longer shipped".
+    prune_blockers: list[str] = []
+    if skill is None:
+        prune_blockers = list(discovery_warnings)
+        excluded = skill_providers_excluded_by_allowlist()
+        if excluded:
+            prune_blockers.append(f"Plugin allowlist excludes skill provider(s): {', '.join(excluded)}")
+    if prune_blockers:
+        typer.echo("Skill discovery is incomplete; skipping removal of previously installed skills:", err=True)
+        for blocker in prune_blockers:
+            typer.echo(f"  {blocker}", err=True)
+    result_paths = installer.install(scope, project_root, skills, prune=skill is None and not prune_blockers)
     typer.echo(f"Installed {len(skills)} skill(s) for {installer.display_name}:")
     for path in result_paths:
         typer.echo(f"  {path}")

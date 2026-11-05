@@ -374,6 +374,16 @@ def _discover_skill_providers() -> dict[str, SkillProvider]:
     return {name: _join_same_name_candidates(name, candidates) for name, candidates in candidates_by_name.items()}
 
 
+def skill_providers_excluded_by_allowlist() -> list[str]:
+    """Names of installed ``nemo.skills`` providers the plugin allowlist hides from discovery."""
+    try:
+        from nemo_helix_plugin.discovery import discover_entry_points
+    except ImportError:
+        return []
+    allowed_names = set(discover_entry_points("nemo.skills").keys())
+    return sorted({ep.name for ep in _raw_entry_points("nemo.skills") if ep.name not in allowed_names})
+
+
 @lru_cache(maxsize=1)
 def _load_skills_cached() -> dict[str, Skill]:
     """Discover and load all skills via the ``nemo.skills`` entry-point mechanism.

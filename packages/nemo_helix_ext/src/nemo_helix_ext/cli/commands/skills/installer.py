@@ -11,7 +11,13 @@ import tempfile
 from pathlib import Path
 
 import yaml
-from nemo_helix_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name, validate_skill_name
+from nemo_helix_ext.cli.commands.skills.base import (
+    INSTALLED_SKILL_PREFIX,
+    Scope,
+    Skill,
+    installed_skill_name,
+    validate_skill_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +46,10 @@ def _read_owned_directories(skills_root: Path) -> list[str]:
             )
         return []
     owned = data.get("owned") if isinstance(data, dict) else None
-    if not isinstance(owned, list):
+    if not isinstance(owned, list) or not all(isinstance(name, str) for name in owned):
+        logger.warning("Installed-skills manifest %s has an unexpected shape; treating as unrecorded", manifest_path)
         return []
-    return [name for name in owned if isinstance(name, str)]
+    return owned
 
 
 def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
@@ -67,12 +74,13 @@ def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
 def _remove_if_owned(skills_root: Path, name: str) -> bool:
     """Remove ``skills_root/name`` when it is a directory this installer owns.
 
-    Safety checks, in order: the name must be a single path segment, the
+    Safety checks, in order: the name must be a single path segment carrying
+    the installed-skill prefix (the only names this installer writes), the
     resolved target must stay inside ``skills_root`` (symlinks pointing out
     are left alone), and anything that is not a directory is left alone. A
     missing directory counts as already removed.
     """
-    if not _is_single_path_segment(name):
+    if not _is_single_path_segment(name) or not name.startswith(INSTALLED_SKILL_PREFIX):
         return False
     target = skills_root / name
     if not target.exists() and not target.is_symlink():
@@ -155,12 +163,18 @@ class BaseAgentInstaller:
             owned = _read_owned_directories(skills_root)
             kept: list[str] = []
             if prune:
+                # Case-insensitive: on a case-insensitive filesystem a recorded name differing
+                # only in case from one just written is the same directory.
+                installed_folded = {installed.casefold() for installed in installed_dirs}
                 for name in owned:
-                    if name in installed_dirs:
-                        # Still shipped: overwrite, never remove.
-                        kept.append(name)
-                        continue
-                    if not _remove_if_owned(skills_root, name):
+                    if name.casefold() in installed_folded:
+                        continue  # Still shipped: overwritten above and recorded below, never removed.
+                    try:
+                        removed = _remove_if_owned(skills_root, name)
+                    except OSError as exc:
+                        logger.warning("Could not remove %s (%s); keeping it recorded", skills_root / name, exc)
+                        removed = False
+                    if not removed:
                         kept.append(name)
                     else:
                         self.pruned_directories.append(skills_root / name)
