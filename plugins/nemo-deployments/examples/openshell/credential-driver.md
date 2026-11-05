@@ -34,16 +34,12 @@ The URL must be reachable from the driver container. `localhost` inside that con
 
 ## Start the sidecar, then the gateway
 
-From this directory, define a helper so every operation uses the same project and both files:
+From this directory:
 
 ```sh
-dc() {
-  docker compose -p nemo-secrets-dev \
-    -f docker-compose.yml -f docker-compose.credentials.yml "$@"
-}
-dc config --quiet
-dc up -d --wait credential-driver
-dc ps -a
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml config --quiet
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml up -d --wait credential-driver
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml ps -a
 ```
 
 The health probe calls the local `GetCapabilities` RPC without contacting Helix or reading secrets.
@@ -51,15 +47,15 @@ The health probe calls the local `GetCapabilities` RPC without contacting Helix 
 Before starting the gateway, complete the base example's JWT-key generation and ensure its `/var/lib/openshell` host directory and port 17670 are not used by another gateway. A different Compose project name isolates the new named volumes, but does not isolate the base example's bind-mounted gateway state or published port. Do not run this against an existing gateway's data directory. The `gateway-credentials.toml` file preserves the base example's pinned runtime settings and adds the driver socket configuration.
 
 ```sh
-dc up -d gateway
-dc logs --tail=50 credential-driver gateway
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml up -d gateway
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml logs --tail=50 credential-driver gateway
 ```
 
 Check that OpenShell completes credential-driver protocol negotiation.
 
 ## Connect Helix provisioning
 
-For a Helix installation with authentication disabled, add `-f docker-compose.credentials-noauth.yml` after the credentials overlay in the helper above. Supply `registration.key`; initialization removes any previously staged `helix.token` after validating the key. The override explicitly selects `--auth-disabled` for initialization and the driver. Changing auth modes requires recreating the workload's providers; bindings from the other mode are rejected. TLS and sandbox network restrictions still apply.
+For a Helix installation with authentication disabled, add `-f docker-compose.credentials-noauth.yml` after `-f docker-compose.credentials.yml` in each command. Supply `registration.key`; initialization removes any previously staged `helix.token` after validating the key. The override explicitly selects `--auth-disabled` for initialization and the driver. Changing auth modes requires recreating the workload's providers; bindings from the other mode are rejected. TLS and sandbox network restrictions still apply.
 
 Mount the same signing key into the trusted Helix controller, then configure its OpenShell executor or job execution profile with the matching gateway ID and approved injection profiles. Follow the [environment integration guide](../../../nemo-agents/docs/provider-fulfillments.md#operator-configuration). These controller settings are not set by the sidecar overlay.
 
@@ -76,15 +72,15 @@ The SQLite registry stores binding metadata and revocation tombstones, never raw
 After replacing the source `helix.token`, restage it:
 
 ```sh
-dc run --rm --no-deps credential-init
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml run --rm --no-deps credential-init
 ```
 
 The running driver rereads the staged token on each NeMo call. The source bind mount is not read continuously, so updating only the host file is insufficient. Signing-key rotation needs an explicit migration and is deliberately not handled by this command.
 
 ```sh
-dc restart credential-driver
-dc ps
-dc down
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml restart credential-driver
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml ps
+docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml down
 ```
 
 `down` retains the binding and credential volumes. Do not use `down -v` as routine cleanup: removing the registry also removes replay/revocation history. Socket, state and credential volumes are separate; only the socket volume is shared with the gateway. None is passed into agent sandboxes.
