@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Stress tests for the WASM policy engine.
+"""Stress tests for the embedded Rego policy engine.
 
 Run with: uv run pytest -v services/auth/tests/test_policy_engine_stress.py
 Skip slow tests: uv run pytest -v services/auth/tests/test_policy_engine_stress.py -m "not slow"
@@ -16,23 +16,15 @@ from pathlib import Path
 
 import pytest
 import yaml
-from nhx.common.config import Configuration
 from nhx.core.auth.app.embedded_pdp import engine as embedded_pdp_engine
 from nhx.core.auth.app.embedded_pdp import evaluate, reload_policy, set_policy_data
-from nhx.core.auth.config import AuthServiceConfig
-
-# Large-scale fixtures load multi‑MB JSON into OPA; default embedded PDP WASM memory (32 MiB) is too small.
-_STRESS_PDP_MEMORY_MB = 512
 
 
 @pytest.fixture(scope="module", autouse=True)
-def stress_embedded_pdp_memory_limit():
-    """Raise WASM memory for this module so large-scale policy data can load."""
-    cfg = AuthServiceConfig(embedded_pdp_memory_limit_mb=_STRESS_PDP_MEMORY_MB)  # type: ignore[misc]
-    Configuration.set_override(cfg)
+def reset_stress_policy():
+    """Keep large-scale policy state isolated from other test modules."""
     embedded_pdp_engine._reset_policy_state_for_testing()
     yield
-    Configuration.clear_override(AuthServiceConfig)
     embedded_pdp_engine._reset_policy_state_for_testing()
 
 

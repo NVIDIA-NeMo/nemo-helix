@@ -19,8 +19,8 @@ from nhx.common.config.base import AccessKeyConfig, TokenSigningConfig
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.testing.client import create_test_client
 
-# Keep this test in its own xdist group while embedded PDP uses process-wide
-# wasmtime state. This limits cross-test scheduling noise under --dist loadgroup.
+# Keep this test in its own xdist group: embedded PDP shares policy data process-wide
+# while native runtimes are thread-confined. This limits scheduling noise under --dist loadgroup.
 pytestmark = pytest.mark.xdist_group("auth_scoped_access_keys")
 
 ACCESS_KEYS_PATH = "/apis/auth/v2/access-keys"

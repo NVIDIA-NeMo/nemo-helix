@@ -23,11 +23,11 @@ For each request, the authorization middleware:
 
 ## Embedded PDP (Default)
 
-The embedded PDP uses a WASM-compiled Rego policy engine built into the auth service. No external OPA sidecar is required.
+The embedded PDP evaluates Rego sources with Regorus inside the auth service. No external OPA sidecar or policy build step is required.
 
 ### How It Works
 
-- Rego policy files are compiled into the `policy.wasm` artifact loaded by the auth service
+- Rego policy sources are shipped in the auth package's `app/policies` directory and loaded by the embedded evaluator
 - Policy data (role bindings, workspace visibility, endpoint permissions) is served by the auth service
 - Data is refreshed on a configurable interval (default: 30 seconds)
 
@@ -38,9 +38,36 @@ auth:
  enabled: true
  policy_decision_point_provider: "embedded"
  policy_decision_point_base_url: "http://auth:8000"
- embedded_pdp_auto_build_wasm: true
  policy_data_refresh_interval: 30 # seconds
 ```
+
+### Binary Distribution and Updates
+
+The embedded engine is installed through the pinned
+[`gordon-to-regorus`](https://pypi.org/project/gordon-to-regorus/) Python
+distribution, currently version `0.13.0`. Its Python import remains `regorus`.
+This is a third-party wheel distribution of upstream Regorus 0.13.0, not a
+Microsoft-published Python package. Supported platforms install a native wheel
+through the package manager; the auth service does not download executables or
+start an OPA subprocess.
+
+Updates require rerunning the shared Rego corpus, auth integration tests, and
+native-dependency/advisory checks. The pin does not automatically track later
+upstream fixes. If the wheel publisher falls behind, NeMo maintainers can build
+and publish separately named wheels from a reviewed upstream commit, preserving
+license notices and recording source, toolchain, artifact hashes, and build
+provenance. That fallback requires its own release and security-update ownership;
+it is not an automatic runtime download or an existing release guarantee.
+
+### Runtime and Resource Boundaries
+
+Regorus evaluates policy in native Rust through Python bindings inside the auth
+service process, without the former WASM sandbox's memory or fuel limits. The removed
+`embedded_pdp_cpu_limit`, `embedded_pdp_memory_limit_mb`, and
+`embedded_pdp_auto_build_wasm` settings no longer apply. Use external OPA in a
+separate container with resource limits when policy evaluation needs an
+independent resource boundary; container limits on the auth service apply to
+the whole service, not just policy evaluation.
 
 ### PDP URL Format
 

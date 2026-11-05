@@ -47,20 +47,6 @@ class AuthServiceConfig(SharedAuthConfig):
         description="Name of the default workspace where all authenticated users get Editor role",
     )
 
-    # Embedded PDP resource limits
-    embedded_pdp_cpu_limit: int = Field(
-        default=1500,
-        description="CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. "
-        "Default of 1500 keeps a platform-scoped service-principal check within budget on a "
-        "production-sized route/scope table (full plugin-merged authorization data).",
-    )
-    embedded_pdp_memory_limit_mb: int = Field(
-        default=256,
-        description="Maximum linear memory (MB) the embedded PDP WASM runtime can consume. "
-        "Default of 256 accommodates the allocation the scope-family scan makes over a "
-        "production-sized authorization-data document.",
-    )
-
     # Plugin HTTP authz fail-mode: what to do when a plugin contributes invalid authz
     # (an unruled route, or a rule referencing an undeclared / out-of-namespace permission).
     # The offending routes are always emitted as explicit denies; this controls the blast

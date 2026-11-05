@@ -16,7 +16,8 @@ package authz
 import future.keywords.if
 import future.keywords.in
 
-import data.common
+# Fully qualified shared-rule references preserve nested `with` overrides in
+# both OPA and Regorus; importing the namespace can resolve its documents early.
 
 # API to check if principal has a specific role in a workspace (called by services)
 # Input format:
@@ -36,12 +37,12 @@ has_role := result if {
 	required_role := input.role
 
 	# Get all applicable principals
-	applicable_principals := common.get_applicable_principals
+	applicable_principals := data.common.get_applicable_principals
 	count(applicable_principals) > 0
 
 	# Check if any principal has the required role in the workspace (including ServiceSystem for service:*)
 	some principal in applicable_principals
-	some r in common.effective_roles(principal, workspace)
+	some r in data.common.effective_roles(principal, workspace)
 	required_role == r
 
 	result := {"has_role": true}

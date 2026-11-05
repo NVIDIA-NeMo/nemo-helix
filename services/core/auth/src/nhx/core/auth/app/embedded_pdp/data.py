@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Policy data management for the embedded WASM policy engine.
+"""Policy data management for the embedded Rego policy engine.
 
 This module handles loading and refreshing authorization data for the policy engine.
 """
@@ -30,7 +30,7 @@ async def apply_embedded_policy_document(
     *,
     skip_static_bootstrap: bool = False,
 ) -> dict[str, Any]:
-    """Build authorization data and push it into the embedded PDP WASM store.
+    """Build authorization data and publish it to the embedded PDP.
 
     This is the single implementation shared by the auth service refresh loop and
     per-request policy reload (``load_policy_data``).
@@ -42,7 +42,7 @@ async def apply_embedded_policy_document(
             ``None`` to load static YAML only (after bootstrap when applicable).
         skip_static_bootstrap: If ``False`` (default), load static YAML first so the PDP
             can authorize entity fetches. If ``True``, skip that step — use on steady-state
-            background refresh when WASM already holds a full document.
+            background refresh when the interpreter already holds a full document.
 
     Returns:
         The full authorization data dict last applied via ``set_policy_data``.
@@ -80,7 +80,7 @@ async def load_policy_data(entities_client: Optional[EntityClient] = None) -> bo
     if depth > 0:
         logger.debug(
             "Skipping nested load_policy_data (depth=%d): inner PDP eval during entity fetch "
-            "for policy reload; bootstrap data from outer load is already in WASM.",
+            "for policy reload; bootstrap data from outer load is already in the interpreter.",
             depth,
         )
         return True

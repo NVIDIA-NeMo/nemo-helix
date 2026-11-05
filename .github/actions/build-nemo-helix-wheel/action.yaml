@@ -14,9 +14,7 @@ description: >
   call this action so the test wheel and the published wheel come out of
   one code path.
 
-  Assumes the repository has already been checked out to `inputs.source-root`
-  and that any required runtime assets (e.g. policy.wasm via the
-  build-policy-wasm action) already exist on disk.
+  Assumes the repository has already been checked out to `inputs.source-root`.
 
 inputs:
   package:

@@ -55,7 +55,7 @@ The PDP can run in two modes. For technical details, see [Policy Engine](/docume
 ### Embedded (default)
 
 - **Provider**: `policy_decision_point_provider: "embedded"`.
-- The auth service runs a built-in WASM policy engine. No OPA sidecar is required.
+- The auth service runs a built-in Regorus policy engine. No OPA sidecar is required.
 - Policy data (role bindings, scopes, etc.) is loaded from the entity store and refreshed on an interval (`policy_data_refresh_interval`).
 
 Use embedded for new deployments and when you do not already have an OPA fleet.
@@ -80,7 +80,6 @@ NHX_AUTH_ENABLED=true
 NHX_AUTH_POLICY_DECISION_POINT_BASE_URL=http://auth:8000
 NHX_AUTH_POLICY_DECISION_POINT_PROVIDER=embedded
 NHX_AUTH_ADMIN_EMAIL=admin@example.com
-NHX_AUTH_EMBEDDED_PDP_AUTO_BUILD_WASM=true
 NHX_AUTH_TOKEN_SIGNING__PRIVATE_KEY_FILE=/etc/nhx/workload-token/private-key.pem
 ```
 
@@ -314,30 +313,13 @@ auth:
  enabled: true
  policy_decision_point_provider: embedded
  policy_decision_point_base_url: "http://localhost:8080"
- embedded_pdp_auto_build_wasm: true
  admin_email: "admin@example.com"
 ```
 
-When running from a source checkout, embedded PDP startup can automatically build
-a missing `policy.wasm` with the pinned OPA version used by `make build-policy`.
-Packaged deployments should include `policy.wasm` at image or wheel build time;
-set `embedded_pdp_auto_build_wasm: false` to fail fast if that artifact is missing.
-After changing policy source files, run `make build-policy` to refresh the
-artifact.
-
-In offline development environments, provide the pinned OPA binary explicitly:
-
-```bash
-OPA_BIN=/path/to/opa_linux_amd64_static uv run nemo services run --host 127.0.0.1 --port 8080
-```
-
-Or seed the local cache used by `script/build_policy_wasm.sh`:
-
-```bash
-mkdir -p .cache/opa/v1.8.0
-cp /path/to/opa_linux_amd64_static .cache/opa/v1.8.0/opa_linux_amd64_static
-chmod +x .cache/opa/v1.8.0/opa_linux_amd64_static
-```
+The embedded PDP evaluates the Rego sources shipped in the auth package's
+`app/policies` directory using Regorus. No OPA binary, policy build step, or
+network download is required at runtime. Restart the auth service after changing
+policy sources. OPA is only needed for the external PDP or `make test-policy-opa`.
 
 ### Production with embedded PDP
 
@@ -346,7 +328,6 @@ auth:
  enabled: true
  policy_decision_point_base_url: "http://auth:8000"
  policy_decision_point_provider: embedded
- embedded_pdp_auto_build_wasm: false
  policy_data_refresh_interval: 30
  admin_email: "platform-admin@company.com"
  oidc:

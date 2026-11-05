@@ -8,6 +8,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -43,8 +44,10 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
-      # Keep container builds and deployed/process e2e out of PRs and the merge queue.
+      # Preserve post-merge/manual behavior; only explicitly labeled trusted PRs opt into e2e.
       post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      # Current labels retain opt-in on synchronize/other label events; absent draft must fail closed.
+      pr-e2e: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && toJSON(github.event.pull_request.draft) == 'false' && contains(github.event.pull_request.labels.*.name, 'e2e') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
@@ -132,6 +135,11 @@ jobs:
           enable-cache: false
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
+      - name: Test e2e opt-in policy
+        run: >-
+          uv run --isolated --no-project --with pytest==9.1.1 --with pyyaml==6.0.3
+          python -m pytest -c /dev/null -p no:cacheprovider --confcutdir=.github/scripts/tests
+          .github/scripts/tests/test_ci_e2e_policy.py -q
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
@@ -193,8 +201,9 @@ jobs:
     name: Build CPU smoke images
     needs: [changes]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
         needs.changes.outputs.customization-auth == 'true'
@@ -487,7 +496,7 @@ jobs:
     name: Kind CPU e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -562,7 +571,7 @@ jobs:
     name: Kind Gym agent-evaluate e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -637,10 +646,10 @@ jobs:
     name: Kind customizer auth e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
-      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.pr-e2e == 'true' || needs.changes.outputs.customization-auth == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -693,10 +702,11 @@ jobs:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.e2e == 'true'
       )
@@ -986,30 +996,18 @@ jobs:
             web/packages/sdk/generated/
             diff.txt
 
-  policy-wasm:
-    name: OPA policy build and tests
+  opa-policy-test:
+    name: Test OPA Policy
     runs-on: ubuntu-latest
-    outputs:
-      # Preserve the raw outcome: continue-on-error makes the conclusion success.
-      policy-test-outcome: ${{ steps.policy-test.outcome }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - uses: ./.github/actions/build-policy-wasm
-        id: build
-      - name: Upload policy WASM
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Install Flox
+        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
         with:
-          name: policy-wasm
-          retention-days: 1
-          path: services/core/auth/src/nhx/core/auth/assets/policy.wasm
+          disable-metrics: "true"
       - name: Test OPA policy
-        id: policy-test
-        # Test failures must fail CI status, not block consumers of a valid WASM.
-        continue-on-error: true
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
         with:
           dir: ./tools/open-policy-agent
@@ -1052,7 +1050,6 @@ jobs:
 
   python-unit-test:
     name: Python unit tests (py${{ matrix.python-version }})
-    needs: [policy-wasm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1068,11 +1065,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1325,7 +1317,6 @@ jobs:
 
   python-integration-test:
     name: Python integration tests (${{ matrix.group }})
-    needs: [policy-wasm]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1339,11 +1330,6 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1400,7 +1386,7 @@ jobs:
     # advisory so this does not make every team's integration suite blocking. Path-filtered, so it
     # skips -- and skips count as pass -- on PRs that do not touch the evaluator. Also hosts the
     # opt-in Harbor taskset integration step so its failures gate merges too.
-    needs: [changes, policy-wasm]
+    needs: [changes]
     if: >-
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
@@ -1416,11 +1402,6 @@ jobs:
           persist-credentials: false
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1478,6 +1459,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
@@ -1522,20 +1504,14 @@ jobs:
 
   python-auth-idp-e2e-test:
     name: Python auth-idp ${{ matrix.runtime }} tests
-    needs:
-      [
-        changes,
-        policy-wasm,
-        build-cpu-smoke-images,
-        python-auth-idp-static-test,
-      ]
+    needs: [changes, build-cpu-smoke-images, python-auth-idp-static-test]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
       ) &&
-      needs.policy-wasm.result == 'success' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
       needs.python-auth-idp-static-test.result == 'success'
@@ -1641,11 +1617,6 @@ jobs:
         shell: bash
         run: |
           helm show chart zitadel --repo https://charts.zitadel.com --version 10.0.6
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Run auth-idp ${{ matrix.runtime }} tests
         run: >
           contrib/auth/${{ matrix.provider }}/run.sh
@@ -1684,7 +1655,6 @@ jobs:
   # both packages and both CLI install methods within each interpreter's job.
   wheel-build:
     name: Wheel build and install tests (py${{ matrix.python-version }})
-    needs: [policy-wasm]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -1698,11 +1668,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Build nemo-helix wheel
         id: helix
         uses: ./.github/actions/build-nemo-helix-wheel
@@ -1765,10 +1730,9 @@ jobs:
   # suite against the real process.
   python-e2e-test:
     name: Python e2e tests
-    needs: [changes, policy-wasm]
+    needs: [changes]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
-      needs.policy-wasm.result == 'success'
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1776,11 +1740,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1823,9 +1782,9 @@ jobs:
   # NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG are unset there.
   python-e2e-image-test:
     name: Python e2e tests (prebuilt image)
-    needs: [changes, policy-wasm, build-cpu-smoke-images]
+    needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -1841,11 +1800,6 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
-      - name: Download policy WASM
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: policy-wasm
-          path: services/core/auth/src/nhx/core/auth/assets
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
@@ -1893,7 +1847,6 @@ jobs:
     name: Post-merge image and e2e status
     needs:
       - changes
-      - policy-wasm
       - python-auth-idp-static-test
       - build-cpu-smoke-images
       - build-garak-test-image
@@ -1905,8 +1858,8 @@ jobs:
       - python-auth-idp-e2e-test
       - python-e2e-test
       - python-e2e-image-test
-    # Independent of ci-status: image builds and auth/image e2e are not all in
-    # that gate's needs list. Still report when a prerequisite prevents e2e.
+    # Independent of ci-status: separate garak/Safe Synthesizer image builds
+    # are not in that gate's needs list. Still report prerequisite failures.
     if: >
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -2535,7 +2488,7 @@ jobs:
       - evaluator-integration-test
       - ngc-metadata-test
       - test-gates
-      - policy-wasm
+      - opa-policy-test
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
@@ -2550,6 +2503,8 @@ jobs:
       # - python-integration-test
       - wheel-build
       - python-e2e-test
+      - python-e2e-image-test
+      - python-auth-idp-e2e-test
       - github-scripts
       - web-typecheck
       - web-test
@@ -2581,12 +2536,3 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
-
-      - name: Check OPA policy test outcome
-        if: always()
-        shell: bash
-        env:
-          POLICY_TEST_OUTCOME: ${{ needs.policy-wasm.outputs.policy-test-outcome }}
-        run: |
-          printf 'OPA policy tests: %s\n' "${POLICY_TEST_OUTCOME:-missing}"
-          test "${POLICY_TEST_OUTCOME}" = success

@@ -79,7 +79,7 @@ auth:
   enabled: false
   # Base URL for the Policy Decision Point (auth service or external OPA). | default: 'http://localhost:8080'
   policy_decision_point_base_url: http://localhost:8080
-  # Policy Decision Point provider: 'embedded' for auth service's built-in WASM engine, 'opa' for external OPA sidecar. | default: 'embedded' | values: 'embedded' | 'opa'
+  # Policy Decision Point provider: 'embedded' for auth service's built-in Rego interpreter (Regorus), 'opa' for external OPA sidecar. | default: 'embedded' | values: 'embedded' | 'opa'
   policy_decision_point_provider: embedded
   # HTTP timeout in seconds for outbound Policy Decision Point (PDP) requests | default: 5
   policy_decision_point_request_timeout_seconds: 5
@@ -87,8 +87,6 @@ auth:
   propagation_poll_interval_seconds: 1.0
   # Allow unsigned JWTs (`alg=none`) for local development/testing. Disabled by default and should not be enabled in production. | default: False
   allow_unsigned_jwt: false
-  # When auth is enabled with the embedded PDP and policy.wasm is missing, build it automatically from a local NeMo Helix source checkout. Packaged deployments should include policy.wasm at build time and can disable this for fail-fast startup. | default: True
-  embedded_pdp_auto_build_wasm: true
   # OIDC configuration for native token validation.
   oidc:
     # Enable native OIDC token validation. | default: False
@@ -162,10 +160,6 @@ auth:
   admin_email:
   # Name of the default workspace where all authenticated users get Editor role | default: 'default'
   default_workspace: default
-  # CPU budget for embedded PDP policy evaluation, in millions of WASM fuel units. Default of 1500 keeps a platform-scoped service-principal check within budget on a production-sized route/scope table (full plugin-merged authorization data). | default: 1500
-  embedded_pdp_cpu_limit: 1500
-  # Maximum linear memory (MB) the embedded PDP WASM runtime can consume. Default of 256 accommodates the allocation the scope-family scan makes over a production-sized authorization-data document. | default: 256
-  embedded_pdp_memory_limit_mb: 256
   # Fail-mode for a plugin that contributes invalid HTTP authz. | default: 'hard_fail' | values: 'deny_route' | 'quarantine' | 'hard_fail'
   on_invalid_plugin: hard_fail
   # Additional service principal names allowed for stable account materialization. Built-in Helix services, plugin services, and inference middleware installed where the auth service runs (and passing the plugin allowlist there) are allowed automatically. When the inference gateway runs separately from auth, add each middleware entry-point name here.
