@@ -7,6 +7,14 @@ from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
 
 from nemoguardrails import RailsConfig as InternalSdkRailsConfig
+from nemoguardrails.rails.llm.options import (
+    ActivatedRail,
+    GenerationLog,
+    GenerationResponse,
+    RailsResult,
+    RailStatus,
+    RailType,
+)
 from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
 from nhx.guardrails.app.services.rails.engine import RailsEngine, uses_iorails
 from nhx.guardrails.app.utils.context_utils import (
@@ -263,6 +271,85 @@ async def run_generate_async(
         options=options,
         state=state,
     )
+
+
+def _last_text_by_role(messages: List[dict], role: str) -> str:
+    """Text of the last message with ``role``, or "" when there is none or it is not plain text."""
+    for message in reversed(messages):
+        if message.get("role") == role:
+            content = message.get("content")
+            return content if isinstance(content, str) else ""
+    return ""
+
+
+def _rails_result_to_generation_response(
+    result: RailsResult,
+    flows_by_type: Dict[RailType, List[str]],
+) -> GenerationResponse:
+    """Shape an IORails verdict like the LLMRails generation result the checks response is built from.
+
+    The checks response reads ``log.activated_rails`` to report each rail's status, with ``stop``
+    meaning blocked. IORails reports only the verdict and which rail blocked, so every rail that ran is
+    reported as passed, up to the one that blocked. The blocking rail is reported even when it is not
+    one of the config's flows (a rail that failed to run), so a block is never reported as success.
+    """
+    activated_rails: List[ActivatedRail] = []
+    blocked = result.status is RailStatus.BLOCKED
+    for rail_type, flows in flows_by_type.items():
+        for flow in flows:
+            # IORails names the blocking rail without the ``$model=...`` suffix its flow carries.
+            is_blocking_rail = blocked and flow.split(" $")[0] == result.rail
+            activated_rails.append(ActivatedRail(type=rail_type.value, name=flow, stop=is_blocking_rail))
+            if is_blocking_rail:
+                return GenerationResponse(
+                    response=[{"role": "assistant", "content": result.content}],
+                    log=GenerationLog(activated_rails=activated_rails),
+                )
+
+    if blocked:
+        rail_type = next(iter(flows_by_type), RailType.OUTPUT)
+        activated_rails.append(ActivatedRail(type=rail_type.value, name=result.rail or rail_type.value, stop=True))
+
+    return GenerationResponse(
+        response=[{"role": "assistant", "content": result.content}],
+        log=GenerationLog(activated_rails=activated_rails),
+    )
+
+
+async def run_check_async(
+    rails_engine: RailsEngine,
+    messages: List[dict],
+    rail_types: List[str],
+    state: Optional[Any] = None,
+) -> GenerationResponse:
+    """Run the config's rails over ``messages`` as supplied, without generating a response.
+
+    A check audits text the caller already has, so the main model must not run: IORails'
+    ``generate_async`` always calls it and then judges its reply, which would report a verdict on text
+    nobody supplied. IORails' ``check_async`` judges the supplied messages. Runs on the server loop for
+    the same reason as :func:`run_generate_async`.
+
+    Only IORails needs this. LLMRails treats a trailing assistant message as the text to check and
+    skips generation, so its checks stay on :func:`run_generate_async`.
+    """
+    if not uses_iorails(rails_engine):
+        raise ValueError("run_check_async only serves IORails engines; use run_generate_async for LLMRails")
+    if state is not None:
+        raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+
+    rails_config = rails_engine.config
+    flows_by_type: Dict[RailType, List[str]] = {}
+    for rail_type in (RailType.INPUT, RailType.OUTPUT):
+        if rail_type.value not in rail_types:
+            continue
+        flows = list(getattr(rails_config.rails, rail_type.value).flows or [])
+        # A rail that has nothing to read does not run, so it is not reported as having passed.
+        checked_role = "user" if rail_type is RailType.INPUT else "assistant"
+        if flows and _last_text_by_role(messages, checked_role):
+            flows_by_type[rail_type] = flows
+
+    result = await rails_engine.check_async(messages, rail_types=list(flows_by_type))
+    return _rails_result_to_generation_response(result, flows_by_type)
 
 
 def stream_rails_async(
