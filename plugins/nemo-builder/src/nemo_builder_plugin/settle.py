@@ -3,11 +3,11 @@
 
 """Settling: a ``pending`` image whose job will never complete it is failed.
 
-An image is ``pending`` while its job may still complete it. Its job decides that: once the job has ended, or if it
-was never created, nothing will. :func:`settle` asks Jobs about each ``pending`` image it is given, and writes the
-ones it finds abandoned ``failed``, conditional on the version it read. A row its push step completed meanwhile
-conflicts, and is read again. Reading one image settles it, and the ``builder-settle`` controller settles every
-``pending`` one each pass; the two can run at once, since each write is conditional.
+An image is ``pending`` while its job may still complete it. Its job decides that: once the job has ended, or if
+there is none (never created, or deleted), nothing will. :func:`settle` asks Jobs about each ``pending`` image it is
+given, and writes the ones it finds abandoned ``failed``, conditional on the version it read. A row its push step
+completed meanwhile conflicts, and is read again. Reading one image settles it, and the ``builder-settle`` controller
+settles every ``pending`` one each pass; the two can run at once, since each write is conditional.
 
 A submit writes the rows, then creates the job, so a row without a job is only abandoned once :data:`JOB_GRACE` has
 passed. A submit slow enough to create its job after that builds images already failed: their push step's completion
@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 
 #: How long after its row was written an image may have no job: far longer than a submit takes between the two.
 JOB_GRACE = timedelta(minutes=5)
-NEVER_CREATED = "not built: its build job was never created"
+#: Jobs has no such job: the submit never created it, or it was deleted. Jobs' 404 doesn't say which.
+NO_JOB = "not built: its build job was not found (never created, or deleted)"
 
 _ENDED = frozenset(HelixJobStatus.terminals())
 
@@ -99,7 +100,7 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | None, now: dateti
             return None
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
-        return NEVER_CREATED if now - created >= JOB_GRACE else None
+        return NO_JOB if now - created >= JOB_GRACE else None
     if status in _ENDED:
         return f"not built: its build job ended ({status.value}) without publishing it"
     return None

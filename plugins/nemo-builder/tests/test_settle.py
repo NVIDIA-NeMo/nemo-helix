@@ -10,7 +10,7 @@ from typing import Literal
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.settle import JOB_GRACE, NEVER_CREATED, settle
+from nemo_builder_plugin.settle import JOB_GRACE, NO_JOB, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
@@ -98,7 +98,7 @@ class TestWhatAReadFails:
     async def test_a_pending_image_with_no_job_fails_once_the_grace_has_passed(self) -> None:
         rows = FakeRows(_row(age=JOB_GRACE))
         [image] = await _settle(rows, FakeJobs({}))
-        assert (image.status, image.status_detail) == ("failed", NEVER_CREATED)
+        assert (image.status, image.status_detail) == ("failed", NO_JOB)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("age", [JOB_GRACE - timedelta(seconds=1), None], ids=["within-the-grace", "undated"])
