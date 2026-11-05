@@ -250,6 +250,8 @@ class EvaluatorTasksetRunsResource:
 
         A recent snapshot: the run, the taskset and the rows are read at slightly different times, so a task's
         row can trail the run's phase by one controller pass.
+
+        Every page is read before the first task is yielded, so a failed read raises before any task.
         """
         yield from self._iter_tasks(self.retrieve(run_id, workspace=workspace))
 
@@ -277,6 +279,17 @@ class EvaluatorTasksetRunsResource:
         return self._client.send(request).data()
 
     def _iter_tasks(self, run: TasksetRunStatus) -> builtins.list[NamedTask]:
+        """Every task of ``run``, read in full before any is returned.
+
+        A list, not a generator, on purpose:
+
+        - All or an error: ``iter_tasks`` and ``results`` never hand out tasks and then fail on a later page.
+        - ``task=None`` entries need every page: a taskset index without a row is only known once all rows are.
+        - Each call is one short read; a lazy generator would hold later pages open while the caller works.
+
+        A run has at most a few hundred tasks. ``iter_tasks`` is already an iterator, so this can stream pages
+        later without changing callers.
+        """
         names = _names_by_index(self._pinned_taskset(run))
         rows: builtins.list[TasksetRunTask] = []
         number = 1
@@ -384,6 +397,8 @@ class AsyncEvaluatorTasksetRunsResource:
 
         A recent snapshot: the run, the taskset and the rows are read at slightly different times, so a task's
         row can trail the run's phase by one controller pass.
+
+        Every page is read before the first task is yielded, so a failed read raises before any task.
         """
         for named in await self._iter_tasks(await self.retrieve(run_id, workspace=workspace)):
             yield named
@@ -414,6 +429,7 @@ class AsyncEvaluatorTasksetRunsResource:
         return (await self._client.send(request)).data()
 
     async def _iter_tasks(self, run: TasksetRunStatus) -> builtins.list[NamedTask]:
+        """Every task of ``run``, read in full before any is returned; see the sync resource's ``_iter_tasks``."""
         names = _names_by_index(await self._pinned_taskset(run))
         rows: builtins.list[TasksetRunTask] = []
         number = 1

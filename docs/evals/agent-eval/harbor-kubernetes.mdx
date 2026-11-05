@@ -539,8 +539,9 @@ nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --agent oracle \
 ```
 
 - Keep the original spec content and execution settings. If the spec came from stdin, supply the identical JSON again.
-- Ctrl-C during submit prints a full recovery command; transport/HTTP errors may print only a key. Retain the published
-  reference, settings and source label from the original submit; without them an identical replay is not guaranteed.
+- Ctrl-C during submit, and a failure where the run may have been accepted, print a full recovery command with the key.
+  Retain the published reference, settings and source label from the original submit; without them an identical replay
+  is not guaranteed.
 - You can choose `--idempotency-key` up front on the initial submit and reuse it for recovery.
 - The key doesn't undo task uploads or image builds that ran before the run was accepted.
 
