@@ -46,6 +46,7 @@ def minimal_authz_data():
     """Minimal authorization data for testing."""
     return {
         "authz": {
+            "decision_contract_version": 2,
             "principals": {
                 "test@example.com": {
                     "workspaces": {
@@ -106,7 +107,8 @@ class TestEntrypointValidation:
         assert "allow" in entrypoints
         assert "has_permissions" in entrypoints
         assert "has_role" in entrypoints
-        assert len(entrypoints) == 3
+        assert "decision" in entrypoints
+        assert len(entrypoints) == 4
 
 
 class TestPolicyLoading:
@@ -254,7 +256,7 @@ class TestAllowEntrypoint:
         )
         assert result["allowed"] is True
 
-    def test_platform_admin_bypass(self, minimal_authz_data):
+    def test_platform_admin_cannot_bypass_an_unknown_route(self, minimal_authz_data):
         set_policy_data(minimal_authz_data)
         result = evaluate(
             "allow",
@@ -264,7 +266,7 @@ class TestAllowEntrypoint:
                 "method": "DELETE",
             },
         )
-        assert result["allowed"] is True
+        assert result["allowed"] is False
 
 
 class TestHasPermissionsEntrypoint:
@@ -464,13 +466,13 @@ class TestDefaultDenyWithoutData:
 
     def test_empty_endpoints_denies_authenticated_get(self):
         """Authenticated GET is denied when endpoints dict is empty."""
-        set_policy_data({"authz": {"endpoints": {}, "principals": {}, "roles": {}}})
+        set_policy_data({"authz": {"decision_contract_version": 2, "endpoints": {}, "principals": {}, "roles": {}}})
         result = evaluate("allow", self.AUTHENTICATED_REQUEST)
         assert result["allowed"] is False
 
     def test_empty_endpoints_denies_authenticated_post(self):
         """Authenticated POST is denied when endpoints dict is empty."""
-        set_policy_data({"authz": {"endpoints": {}, "principals": {}, "roles": {}}})
+        set_policy_data({"authz": {"decision_contract_version": 2, "endpoints": {}, "principals": {}, "roles": {}}})
         result = evaluate(
             "allow",
             {
@@ -483,7 +485,7 @@ class TestDefaultDenyWithoutData:
 
     def test_empty_endpoints_denies_service_principal(self):
         """Service principals are denied when endpoints dict is empty."""
-        set_policy_data({"authz": {"endpoints": {}, "principals": {}, "roles": {}}})
+        set_policy_data({"authz": {"decision_contract_version": 2, "endpoints": {}, "principals": {}, "roles": {}}})
         result = evaluate(
             "allow",
             {
@@ -499,6 +501,7 @@ class TestDefaultDenyWithoutData:
         set_policy_data(
             {
                 "authz": {
+                    "decision_contract_version": 2,
                     "endpoints": {},
                     "principals": {"admin@example.com": {"workspaces": {"system": ["HelixAdmin"]}}},
                     "roles": {"HelixAdmin": {"permissions": ["*"]}},
@@ -517,7 +520,7 @@ class TestDefaultDenyWithoutData:
 
     def test_health_endpoints_allowed_with_empty_endpoints(self):
         """Health endpoints remain accessible even with empty endpoint data."""
-        set_policy_data({"authz": {"endpoints": {}, "principals": {}, "roles": {}}})
+        set_policy_data({"authz": {"decision_contract_version": 2, "endpoints": {}, "principals": {}, "roles": {}}})
         for health_path in ["/health/live", "/health/ready", "/status", "/metrics"]:
             result = evaluate("allow", {"path": health_path, "method": "GET"})
             assert result["allowed"] is True, f"{health_path} should be allowed"
@@ -620,7 +623,11 @@ class TestWithStaticAuthzData:
             "/apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs"
         ]["post"]
 
-        assert post_config == {"permissions": ["jobs.logs.create"], "scopes": []}
+        assert post_config == {
+            "permissions": ["jobs.logs.create"],
+            "scopes": [],
+            "on_behalf_of": {"actor_permissions": ["jobs.logs.create"], "permissions": []},
+        }
 
 
 class TestIntakeAuthorization:
@@ -1069,6 +1076,7 @@ class TestWasmNativeBuiltins:
     def test_namespace_fence_denies_subpaths_in_wasm(self, static_authz_data):
         """Regression: the fence's subpath arm was written with sprintf and never fired in WASM."""
         static_authz_data["authz"].setdefault("config", {})["denied_plugin_prefixes"] = ["/apis/brokenplugin"]
+        static_authz_data["authz"]["endpoints"]["/apis/brokenplugin-extra/x"] = {"get": {"permissions": []}}
         set_policy_data(static_authz_data)
         cases = [
             ("/apis/brokenplugin/sub/route", False),  # subpath fenced (the bug: this was allowed)
@@ -1120,3 +1128,45 @@ async def test_taskset_task_read_authorizer_preserves_caller_access(static_authz
             assert denied.value.status_code == 403
     finally:
         auth_client_context.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_retains_dynamic_restrictions(monkeypatch, minimal_authz_data):
+    from unittest.mock import AsyncMock
+
+    from nhx.core.auth.app.embedded_pdp import data
+
+    # This explicit restriction must survive failure, not revert to service defaults.
+    minimal_authz_data["authz"]["principals"]["service:jobs"] = {"workspaces": {"test-workspace": ["Viewer"]}}
+    set_policy_data(minimal_authz_data)
+    query = {
+        "principal_id": "service:jobs",
+        "method": "POST",
+        "path": "/apis/models/v2/workspaces/test-workspace/models",
+    }
+    before = evaluate("allow", query)
+    assert not before["allowed"]
+    build = AsyncMock(side_effect=RuntimeError("role bindings unavailable"))
+    monkeypatch.setattr(data, "build_authorization_data", build)
+    assert not await data.load_policy_data()
+    assert build.await_count == 1
+    assert evaluate("allow", query) == before
+
+
+@pytest.mark.asyncio
+async def test_first_load_bootstraps_before_fetching_dynamic_data(monkeypatch, minimal_authz_data):
+    from unittest.mock import AsyncMock
+
+    from nhx.core.auth.app.embedded_pdp import data
+    from nhx.core.auth.app.embedded_pdp.engine import policy_data_loaded
+
+    states = []
+
+    async def build(client):
+        states.append(policy_data_loaded())
+        return minimal_authz_data
+
+    monkeypatch.setattr(data, "build_authorization_data", AsyncMock(side_effect=build))
+    await data.apply_embedded_policy_document(None)
+    assert states == [False, True]
+    assert policy_data_loaded()

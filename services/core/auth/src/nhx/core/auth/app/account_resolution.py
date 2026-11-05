@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Mapping
 
 from nemo_helix_plugin.discovery import discover_entry_points
@@ -281,6 +281,11 @@ class AccountResolver:
                 subject_aliases=aliases,
             )
 
+        # Request-time verified delegation never converts the persisted account.
+        if auth_input.get("verified_workload_delegation") is True and _string_value(
+            auth_input, "on_behalf_of_principal_id"
+        ):
+            context = replace(context, caller_kind="service_principal")
         return context
 
     async def _resolve_descriptor(self, descriptor: Mapping[str, Any]) -> tuple[str, list[str], CallerKind]:

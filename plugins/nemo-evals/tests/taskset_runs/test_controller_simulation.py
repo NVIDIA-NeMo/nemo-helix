@@ -627,7 +627,7 @@ class Sim:
 
         self._orig_entity_update = entity_store.update
         monkeypatch.setattr(entity_store, "update", self._entity_update)
-        self.store = TasksetRunStore._with_entity_adapter(entity_store, files_client)
+        self.store = TasksetRunStore._with_entity_adapter(entity_store, files_client, service_entities=entity_store)
         self._orig_update_member = self.store.update_member
         monkeypatch.setattr(self.store, "update_member", self._update_member)
         monkeypatch.setattr(self.store, "load_plan", self._load_plan)

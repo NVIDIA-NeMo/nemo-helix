@@ -400,6 +400,7 @@ class TasksetRunService:
                 accepted_at, runs.queue_timeout_seconds, runs.finalization_grace_seconds
             )
             acceptance = RunAcceptance(
+                creator=caller,
                 plan=plan,
                 idempotency_key=req.idempotency_key,
                 request_digest=digest,

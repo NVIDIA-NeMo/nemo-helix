@@ -16,17 +16,19 @@ from typing import cast
 
 import httpx
 import uvicorn
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from nhx.common.api.utils import QueryParamSchemaFastAPI
 from nhx.common.auth import AuthorizationMiddleware
 from nhx.common.config import get_auth_config, get_platform_config
+from nhx.common.entities import EntityClient
 from nhx.common.http_clients import close_shared_http_clients
 from nhx.common.observability import initialize_obs, setup_fastapi_instrumentations, setup_global_instrumentations
-from nhx.common.observability.context import create_app_context_dependency
+from nhx.common.observability.context import create_app_context_dependency, get_app_ctx
 from nhx.common.pyleak import detect_blocking
-from nhx.common.service import Service
+from nhx.common.service import DependencyProvider, Service
+from nhx.common.service.dependencies import get_entity_client
 from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS, HelixAppConfig
 from nhx.platform_runner.controller_threads import (
@@ -318,6 +320,21 @@ def create_app(
                 configure_app(app)
         if service_instance._service_config is not None:
             app.state.service_configs[type(service_instance._service_config)] = service_instance._service_config
+
+    # Credential-bearing dependencies must use the owning router's provider;
+    # merging bound overrides alone would select the last registered service.
+    providers = {service.name: service.dependency_provider for service in services}
+
+    def current_provider() -> DependencyProvider:
+        context = get_app_ctx()
+        if context is None or context.service_name not in providers:
+            raise HTTPException(status_code=503, detail="Missing registered service context")
+        return providers[context.service_name]
+
+    def scoped_entity_client() -> EntityClient:
+        return current_provider().get_entity_client()
+
+    app.dependency_overrides[get_entity_client] = scoped_entity_client
 
     app.add_exception_handler(Exception, platform_global_exception_handler)
     return app

@@ -23,6 +23,7 @@ from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationDat
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth.principal_identifier import is_service_principal
 from nhx.common.entities.client import (
     EntityBase,
     EntityClient,
@@ -362,7 +363,7 @@ async def create_fileset(
 
         # Temporary fix for making immutable datasets and preserving trust_remote_code
         service_source = custom_fields.get("service_source", None)
-        if service_source and not auth_client.principal.id.startswith("service:"):
+        if service_source and not is_service_principal(auth_client.principal.id):
             custom_fields.pop("service_source", None)
 
         fileset = Fileset(
@@ -597,7 +598,7 @@ async def update_fileset_metadata(
     if request.custom_fields:
         original_service_source = fileset.custom_fields.get("service_source", None)
         new_service_source = request.custom_fields.pop("service_source", original_service_source)
-        if not auth_client.principal.id.startswith("service:"):
+        if not is_service_principal(auth_client.principal.id):
             new_service_source = original_service_source
 
         if new_service_source:
@@ -914,6 +915,14 @@ async def upload_file(
     """Upload file content to a fileset."""
     logger.info(f"PUT /filesets/{name}/-/{path} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    # Producer-owned contents remain immutable to ordinary callers even when
+    # authorization is disabled. Route permissions are enforced independently.
+    if fileset.custom_fields.get("service_source") and not is_service_principal(auth_client.principal.id):
+        raise HTTPException(
+            status_code=HTTP_403_FORBIDDEN,
+            detail="Access denied: This fileset's files are immutable",
+        )
+
     secrets = await resolve_storage_secrets_for_user(fileset.storage, workspace, client, auth_client)
     storage = storage_impl_factory(fileset.storage, secrets)
 
@@ -925,14 +934,6 @@ async def upload_file(
     else:
         # Default to octet-stream for application/octet-stream or any other type
         chunk_processor = OctetStreamChunkProcessor()
-
-    # Temporary fix for making immutable datasets and preserving trust_remote_code
-    service_source = fileset.custom_fields.get("service_source")
-    if service_source and not auth_client.principal.id.startswith("service:"):
-        raise HTTPException(
-            status_code=HTTP_403_FORBIDDEN,
-            detail="Access denied: This fileset's files are immutable",
-        )
 
     # Get content length from request headers for backends that need it (e.g., S3)
     content_length_header = request.headers.get("content-length")

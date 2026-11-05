@@ -16,7 +16,7 @@ from nemo_helix_plugin.client.errors import (
     UnprocessableEntityError,
     raise_for_status,
 )
-from nemo_helix_plugin.client.types import RESPONSE_VALIDATION_CONTEXT_KEY
+from nemo_helix_plugin.client.types import RESPONSE_VALIDATION_CONTEXT_KEY, RetryPolicy
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient, EntitiesClient
 from nemo_helix_plugin.entities.types import (
     WORKSPACE_NOT_FOUND_CODE,
@@ -601,6 +601,10 @@ class EntityClient:
             client: The NemoClient-based async entities client.
         """
         self._client = client
+
+    def with_retry(self, retry: RetryPolicy) -> Self:
+        """Clone the adapter's retry policy while sharing its transport."""
+        return type(self)(self._client.with_retry(retry))
 
     async def close(self) -> None:
         """Close the underlying HTTP client.

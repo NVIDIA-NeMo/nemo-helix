@@ -4,7 +4,7 @@
 """Tests for ModelDeployment API endpoints."""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI, Request, Response
@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.config import AuthConfig
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
 from nhx.core.models.api.v2.deployments import router
@@ -36,11 +37,10 @@ def mock_deployment_service():
 @pytest.fixture
 def mock_auth_client():
     """Create a mock AuthClient with auth disabled."""
-    client = MagicMock(spec=AuthClient)
-    client.auth_enabled = False
-    client.is_service_principal = False
-    client.principal = Principal(id="test-principal", email="test@example.com", groups=[])
-    return client
+    return AuthClient(
+        config=AuthConfig(enabled=False),
+        principal=Principal(id="test-principal", email="test@example.com", groups=[]),
+    )
 
 
 @pytest.fixture

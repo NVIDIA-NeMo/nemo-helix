@@ -93,3 +93,21 @@ def test_embedded_pdp_enforces_platform_scopes_from_derived_families():
     assert evaluate("allow", {**request, "scopes": ["platform:read"]})["allowed"] is False
     # Unconfigured provider scopes are still ignored.
     assert evaluate("allow", {**request, "scopes": ["openid", "external:read"]})["allowed"] is True
+
+
+def test_named_operation_scopes_are_registered_even_without_routes() -> None:
+    assert derive_scope_families({"operations": {"example.read": {"scopes": ["example:read"]}}}) == {"example": True}
+
+
+def test_policy_contract_and_revision_are_strict_and_idempotent() -> None:
+    from nhx.core.auth.app.scope_families import with_policy_revision
+
+    for version in [None, 1, "2", True]:
+        with pytest.raises(ValueError, match="version 2"):
+            with_policy_revision({"authz": {"decision_contract_version": version}})
+    first = with_policy_revision({"authz": {"decision_contract_version": 2, "endpoints": {}}})
+    assert with_policy_revision(first) == first
+    altered = with_policy_revision(
+        {"authz": {"decision_contract_version": 2, "endpoints": {"/x": {"get": {"permissions": []}}}}}
+    )
+    assert altered["authz"]["config"]["policy_revision"] != first["authz"]["config"]["policy_revision"]

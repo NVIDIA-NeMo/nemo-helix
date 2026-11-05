@@ -356,13 +356,14 @@ class TestPrincipalOtlpHeaders:
 
 
 class TestBuildServicePrincipalHeadersDelegation:
-    """build_service_principal_headers must forward the acting user's id, email, and groups."""
+    """request_service_principal_auth_headers must forward the acting user's id, email, and groups."""
 
     def test_propagates_effective_user_claims(self):
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
         from nhx.common.config import AuthConfig
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         user = Principal(
             id="user@example.com",
@@ -371,7 +372,7 @@ class TestBuildServicePrincipalHeadersDelegation:
         )
         token = auth_client_context.set(AuthClient(principal=user, config=AuthConfig()))
         try:
-            h = build_service_principal_headers("guardrails")
+            h = request_service_principal_auth_headers("guardrails")
             assert h["X-NHX-Principal-Id"] == "service:guardrails"
             assert h["X-NHX-Actor-Aliases"] == "service:guardrails"
             assert h["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
@@ -381,15 +382,16 @@ class TestBuildServicePrincipalHeadersDelegation:
             auth_client_context.reset(token)
 
     def test_no_on_behalf_headers_when_only_service_context(self):
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
         from nhx.common.config import AuthConfig
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         svc = Principal(id="service:batch", email=None, groups=[])
         token = auth_client_context.set(AuthClient(principal=svc, config=AuthConfig()))
         try:
-            h = build_service_principal_headers("jobs")
+            h = request_service_principal_auth_headers("jobs")
             assert h == {
                 "X-NHX-Principal-Id": "service:jobs",
                 "X-NHX-Actor-Aliases": "service:jobs",
@@ -398,18 +400,19 @@ class TestBuildServicePrincipalHeadersDelegation:
             auth_client_context.reset(token)
 
     def test_id_only_when_no_auth_context(self):
-        from nhx.common.auth import build_service_principal_headers
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
-        assert build_service_principal_headers("x") == {
+        assert request_service_principal_auth_headers("x") == {
             "X-NHX-Principal-Id": "service:x",
             "X-NHX-Actor-Aliases": "service:x",
         }
 
     def test_propagates_effective_account_context(self):
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
         from nhx.common.config import AuthConfig
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         user = Principal(
             id="user@example.com",
@@ -419,7 +422,7 @@ class TestBuildServicePrincipalHeadersDelegation:
         )
         token = auth_client_context.set(AuthClient(principal=user, config=AuthConfig()))
         try:
-            h = build_service_principal_headers("guardrails")
+            h = request_service_principal_auth_headers("guardrails")
             assert h["X-NHX-Principal-On-Behalf-Of"] == "user@example.com"
             assert h["X-NHX-Subject-Account-Id"] == "account-user"
             assert h["X-NHX-Subject-Aliases"] == "user@example.com,legacy-user"
@@ -429,9 +432,10 @@ class TestBuildServicePrincipalHeadersDelegation:
     def test_token_exchange_mode_mints_service_obo_bearer_without_trusted_headers(self):
         from unittest.mock import patch
 
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         config = _auth_config_with_token_exchange()
         user = Principal(
@@ -446,7 +450,7 @@ class TestBuildServicePrincipalHeadersDelegation:
             with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
                 provider_cls.return_value.get_access_token.return_value = "service-obo-token"
 
-                h = build_service_principal_headers("guardrails")
+                h = request_service_principal_auth_headers("guardrails")
 
             assert h == {"Authorization": "Bearer service-obo-token"}
             provider_cls.assert_called_once_with(config, "guardrails", user.effective_principal)
@@ -456,9 +460,10 @@ class TestBuildServicePrincipalHeadersDelegation:
     def test_token_exchange_mode_rejects_service_bearer_for_remote_cleartext_platform(self, monkeypatch):
         from unittest.mock import patch
 
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         monkeypatch.setenv("NHX_BASE_URL", "http://platform.example.test")
         Configuration.clear_cache()
@@ -468,7 +473,7 @@ class TestBuildServicePrincipalHeadersDelegation:
         try:
             with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
                 with pytest.raises(ValueError, match="service principal headers.*cleartext remote endpoint"):
-                    build_service_principal_headers("guardrails")
+                    request_service_principal_auth_headers("guardrails")
 
             provider_cls.assert_not_called()
         finally:
@@ -478,9 +483,10 @@ class TestBuildServicePrincipalHeadersDelegation:
     def test_token_exchange_mode_mints_service_only_bearer_for_service_context(self):
         from unittest.mock import patch
 
-        from nhx.common.auth import auth_client_context, build_service_principal_headers
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
+        from nhx.common.platform_client_context import request_service_principal_auth_headers
 
         config = _auth_config_with_token_exchange()
         service = Principal(id="service:batch", authz_aliases=["service:batch"])
@@ -489,7 +495,7 @@ class TestBuildServicePrincipalHeadersDelegation:
             with patch("nhx.common.platform_client_context.ServiceWorkloadAccessTokenProvider") as provider_cls:
                 provider_cls.return_value.get_access_token.return_value = "service-token"
 
-                h = build_service_principal_headers("jobs")
+                h = request_service_principal_auth_headers("jobs")
 
             assert h == {"Authorization": "Bearer service-token"}
             provider_cls.assert_called_once_with(config, "jobs", None)
@@ -500,9 +506,10 @@ class TestBuildServicePrincipalHeadersDelegation:
     async def test_token_exchange_mode_async_mints_service_obo_bearer_without_sync_file_load(self):
         from unittest.mock import patch
 
-        from nhx.common.auth import auth_client_context, build_service_principal_headers_async
+        from nhx.common.auth import auth_client_context
         from nhx.common.auth.client import AuthClient
         from nhx.common.auth.models import Principal
+        from nhx.common.platform_client_context import request_service_principal_auth_headers_async
 
         config = _auth_config_with_token_exchange()
         user = Principal(id="user@example.com", email="user@example.com", groups=["team-a"])
@@ -518,7 +525,7 @@ class TestBuildServicePrincipalHeadersDelegation:
                     return_value="async-service-obo-token",
                 ) as get_access_token_async,
             ):
-                h = await build_service_principal_headers_async("guardrails")
+                h = await request_service_principal_auth_headers_async("guardrails")
 
             assert h == {"Authorization": "Bearer async-service-obo-token"}
             get_access_token_async.assert_awaited_once()

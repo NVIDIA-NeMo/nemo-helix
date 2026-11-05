@@ -11,7 +11,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.client.errors import NotFoundError
-from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.config import AuthConfig
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.dependencies import (
@@ -122,7 +123,7 @@ def test_workspace_error_response(
     service = Mock(spec=[method])
     service_method = AsyncMock(side_effect=error)
     setattr(service, method, service_method)
-    auth_client = Mock(spec=AuthClient, auth_enabled=False)
+    auth_client = AuthClient(config=AuthConfig(enabled=False), principal=Principal())
     monkeypatch.setattr(response_policy, "current_auth_client", lambda request: auth_client)
 
     # No default argument: FastAPI would treat it as a request parameter.

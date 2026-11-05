@@ -1,50 +1,41 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from unittest.mock import AsyncMock, Mock
+"""The actual compiled route policy replaces the former Python OBO branch."""
 
 import pytest
-from fastapi import HTTPException
-from nhx.common.auth.models import Principal
-from nhx.core.jobs.api.v2.jobs.endpoints import require_delegated_create_permission
-
-DELEGATED = Principal(id="service:evals", on_behalf_of="alice@example.com", on_behalf_of_groups=["evals-team"])
+from nhx.testing.policy import PolicyHarness
 
 
-def _auth_client(principal: Principal, *, allowed: bool = True) -> Mock:
-    return Mock(principal=principal, on_behalf_of_has_permissions=AsyncMock(return_value=allowed))
-
-
-async def test_delegated_create_without_permission_is_forbidden() -> None:
-    auth_client = _auth_client(DELEGATED, allowed=False)
-
-    with pytest.raises(HTTPException) as exc_info:
-        await require_delegated_create_permission(auth_client, "team-ws")
-
-    assert exc_info.value.status_code == 403
-    assert "alice@example.com" in exc_info.value.detail
-    auth_client.on_behalf_of_has_permissions.assert_awaited_once_with("team-ws", ["jobs.create"])
-
-
-async def test_delegated_create_with_permission_is_allowed() -> None:
-    auth_client = _auth_client(DELEGATED)
-
-    await require_delegated_create_permission(auth_client, "team-ws")
-
-    auth_client.on_behalf_of_has_permissions.assert_awaited_once_with("team-ws", ["jobs.create"])
+@pytest.fixture
+def policy() -> PolicyHarness:
+    harness = PolicyHarness()
+    harness.document["authz"]["principals"]["alice"] = {"workspaces": {"team": ["Editor"]}}
+    harness.install(harness.document)
+    return harness
 
 
 @pytest.mark.parametrize(
-    "principal",
+    "principal,obo,workspace,allowed",
     [
-        pytest.param(Principal(id="service:evals"), id="service"),
-        pytest.param(Principal(id="alice@example.com"), id="user"),
-        pytest.param(Principal(id="alice@example.com", on_behalf_of="bob@example.com"), id="user-delegating"),
+        ("service:evals", "alice", "team", True),
+        ("service:evals", "alice", "other", False),
+        ("service:evals", "bob", "team", False),
+        ("service:evals", "", "other", True),
+        ("alice", "", "team", True),
     ],
 )
-async def test_undelegated_or_user_create_is_left_to_the_route_gate(principal: Principal) -> None:
-    auth_client = _auth_client(principal, allowed=False)
-
-    await require_delegated_create_permission(auth_client, "team-ws")
-
-    auth_client.on_behalf_of_has_permissions.assert_not_awaited()
+def test_jobs_create_uses_subject_permissions(
+    policy: PolicyHarness, principal: str, obo: str, workspace: str, allowed: bool
+) -> None:
+    result = policy.evaluate(
+        "allow",
+        {
+            "principal_id": principal,
+            "on_behalf_of_principal_id": obo,
+            "caller_kind": "service_principal" if principal.startswith("service:") else "principal",
+            "method": "POST",
+            "path": f"/apis/jobs/v2/workspaces/{workspace}/jobs",
+        },
+    )
+    assert result["allowed"] is allowed

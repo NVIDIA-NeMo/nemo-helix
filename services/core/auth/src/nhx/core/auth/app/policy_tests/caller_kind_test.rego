@@ -99,10 +99,8 @@ test_service_only_route_allows_service_principal if {
 	result.allowed == true
 }
 
-# A human HelixAdmin is ALLOWED on a service-only route — its global admin bypass is not
-# clawed back here (only non-admin humans are denied, per
-# test_service_only_route_denies_human_principal above).
-test_service_only_route_allows_platform_admin if {
+# S-024: a human admin remains ineligible for a service-only caller contract.
+test_service_only_route_denies_platform_admin_without_caller_eligibility if {
 	result := authz.allow
 		with input as {
 			"principal_id": "platform-admin@example.com",
@@ -114,7 +112,7 @@ test_service_only_route_allows_platform_admin if {
 		with data.authz.workspaces as caller_kind_test_data.workspaces
 		with data.authz.principals as caller_kind_test_data.principals
 
-	result.allowed == true
+	result.allowed == false
 }
 
 # --- Mixed route (callers: ["principal", "service_principal"]) ---

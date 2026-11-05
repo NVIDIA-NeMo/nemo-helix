@@ -301,7 +301,7 @@ class TasksetRunStatus(BaseModel):
     )
 
 
-_INTERNAL_FIELDS = {"plan_ref", "plan_digest", "request_digest"}
+_INTERNAL_FIELDS = {"creator", "plan_ref", "plan_digest", "request_digest"}
 
 
 class TasksetRunTask(BaseModel):
@@ -381,5 +381,5 @@ def to_status(run: TasksetRunEntity) -> TasksetRunStatus:
     """
     data = run.model_dump(exclude=run.__base_fields__ | _INTERNAL_FIELDS, exclude_computed_fields=True)
     return TasksetRunStatus.model_validate(
-        {**data, "run_id": run.name, "workspace": run.workspace, "created_by": run.created_by}
+        {**data, "run_id": run.name, "workspace": run.workspace, "created_by": run.creator_id}
     )

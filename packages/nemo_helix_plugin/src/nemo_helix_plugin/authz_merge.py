@@ -8,6 +8,9 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from nemo_helix_plugin.auth.decisions import OperationRule
+from nemo_helix_plugin.authz_format import validate_decision_contract
+
 
 def _merge_permission_node_into(target: dict[str, Any], overlay: dict[str, Any]) -> None:
     """Merge a nested permission registry tree into ``target`` in place.
@@ -82,16 +85,29 @@ def merge_authz_contributions(
 
     merged = copy.deepcopy(base_data)
     authz = merged.setdefault("authz", {})
+    validate_decision_contract(authz)
+    authz["decision_contract_version"] = 2
     registry = authz.setdefault("permissions", {})
     endpoints = authz.setdefault("endpoints", {})
     roles = authz.setdefault("roles", {})
+    operations = authz.setdefault("operations", {})
 
     auto_role_grants: dict[str, set[str]] = {}
 
     for contribution in contributions:
+        validate_decision_contract(contribution)
         flat_permissions = contribution.get("permissions") or {}
         if isinstance(flat_permissions, dict):
             _merge_flat_permissions_into(registry, flat_permissions)
+
+        for operation_id, payload in contribution.get("operations", {}).items():
+            rule = OperationRule.model_validate(payload)
+            if not operation_id.startswith(rule.owner + "."):
+                raise ValueError(f"operation {operation_id!r} does not belong to {rule.owner!r}")
+            normalized = rule.model_dump(exclude_none=True)
+            if operation_id in operations and operations[operation_id] != normalized:
+                raise ValueError(f"conflicting operation {operation_id!r}")
+            operations[operation_id] = normalized
 
         contrib_endpoints = contribution.get("endpoints") or {}
         if isinstance(contrib_endpoints, dict):

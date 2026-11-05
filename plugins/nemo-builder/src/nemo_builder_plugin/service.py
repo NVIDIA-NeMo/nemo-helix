@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,14 +16,9 @@ from nemo_builder_plugin.authz import scope
 from nemo_builder_plugin.backend import BackendRejectedError
 from nemo_builder_plugin.backends import load_backend
 from nemo_builder_plugin.completion import (
-    Caller,
     CompleteRequest,
     CompletionConflict,
-    caller_refusal,
     complete,
-    current_caller,
-    read_refusal,
-    submit_refusal,
 )
 from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
@@ -36,10 +32,14 @@ from nemo_builder_plugin.submit import (
     submit_build_set,
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
+from nemo_helix_plugin.auth import RuntimeAuthClient, current_auth_client
+from nemo_helix_plugin.auth.decisions import DecisionRequest, ImageFacts, OperationRule, ResourceTarget
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
@@ -64,6 +64,31 @@ class BuilderService(NemoService):
     name: ClassVar[str] = "builder"
     dependencies: ClassVar[list[str]] = ["entities", "jobs", "secrets"]
 
+    def authorization_operations(self) -> dict[str, OperationRule]:
+        return {
+            "builder.build.submit": OperationRule(
+                owner="builder",
+                predicate="builder_submit",
+                permissions=[BuildPerms.CREATE.id],
+                callers=["principal", "service_principal"],
+                scopes=["builder:write"],
+            ),
+            "builder.image.read": OperationRule(
+                owner="builder",
+                predicate="builder_read",
+                permissions=[ContainerImagePerms.READ.id],
+                callers=["principal", "service_principal"],
+                scopes=["builder:read"],
+            ),
+            "builder.image.complete": OperationRule(
+                owner="builder",
+                predicate="builder_complete",
+                permissions=[ContainerImagePerms.COMPLETE.id],
+                callers=["principal", "service_principal"],
+                scopes=["builder:write"],
+            ),
+        }
+
     def get_routers(self) -> list[RouterSpec]:
         return [
             RouterSpec(
@@ -73,6 +98,14 @@ class BuilderService(NemoService):
                 prefix="/v2/workspaces/{workspace}",
             )
         ]
+
+
+async def get_service_entity_client(
+    request_client: AsyncNemoClient = Depends(get_nemo_client),
+) -> AsyncIterator[NemoEntitiesClient]:
+    """Use builder credentials for records containing the verified creator snapshot."""
+    async with get_async_nemo_client(as_service="builder", internal=True, http_client=request_client._http) as client:
+        yield NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
 
 
 def _build_router() -> APIRouter:
@@ -86,17 +119,22 @@ def _build_router() -> APIRouter:
         workspace: str,
         body: BuildSet,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
+        service_entities: NemoEntitiesClient = Depends(get_service_entity_client),
         client: AsyncNemoClient = Depends(get_nemo_client),
-        caller: Caller = Depends(current_caller),
+        authorizer: RuntimeAuthClient = Depends(current_auth_client),
     ) -> SubmitBuildResponse:
         """Submit a set of images to build.
 
         Creates one `pending` ``ContainerImage`` per spec, then the job that builds them. With
         `max_concurrent_builds` set, the images are `queued` instead, and the job starts once a slot is free.
         """
-        refusal = submit_refusal(caller)
-        if refusal is not None:
-            raise HTTPException(status_code=403, detail=refusal)
+        if not await authorizer.has_operation(
+            DecisionRequest(
+                operation="builder.build.submit",
+                target=ResourceTarget(workspace=workspace, resource_type="container_image", name=""),
+            )
+        ):
+            raise HTTPException(status_code=403, detail="Build submission denied")
         jobs_client = AsyncJobsClient.from_client(client)
 
         async def create_job(request):
@@ -130,6 +168,7 @@ def _build_router() -> APIRouter:
                 backend=backend,
                 workspace=workspace,
                 entity_client=entity_client,
+                create_queued_build=service_entities.create,
                 create_job=create_job,
                 get_job_fields=get_job_fields,
                 secret_readable=secret_readable,
@@ -203,13 +242,17 @@ def _build_router() -> APIRouter:
         workspace: str,
         name: str,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
-        caller: Caller = Depends(current_caller),
+        authorizer: RuntimeAuthClient = Depends(current_auth_client),
     ) -> ContainerImage:
         """Read one image. This is what a caller polls until `status` leaves `pending`."""
         row = await _get_row(entity_client, workspace, name)
-        refusal = read_refusal(row, caller)
-        if refusal is not None:
-            raise HTTPException(status_code=403, detail=refusal)
+        if not await authorizer.has_operation(
+            DecisionRequest(
+                operation="builder.image.read",
+                target=ResourceTarget(workspace=workspace, resource_type="container_image", name=name),
+            )
+        ):
+            raise HTTPException(status_code=403, detail="Image read denied")
         return row
 
     @router.post("/container-images/{name}/complete", response_model=ContainerImage, tags=["Builder"])
@@ -220,22 +263,21 @@ def _build_router() -> APIRouter:
         name: str,
         body: CompleteRequest,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
-        caller: Caller = Depends(current_caller),
+        authorizer: RuntimeAuthClient = Depends(current_auth_client),
     ) -> ContainerImage:
         """Make an image `ready` at the digest its push step pushed and signed.
 
         Completing an image already `ready` at that digest returns it; 409 if it settled otherwise.
         """
         row = await _get_row(entity_client, workspace, name)
-        refusal = caller_refusal(row, caller)
-        if refusal is not None:
-            logger.warning(
-                "completing %s/%s refused: %s",
-                sanitize_for_log(workspace),
-                sanitize_for_log(name),
-                sanitize_for_log(refusal),
+        if not await authorizer.has_operation(
+            DecisionRequest(
+                operation="builder.image.complete",
+                target=ResourceTarget(workspace=workspace, resource_type="container_image", name=name),
+                facts=ImageFacts(created_by=row.created_by or ""),
             )
-            raise HTTPException(status_code=403, detail=refusal)
+        ):
+            raise HTTPException(status_code=403, detail="Image completion denied")
         try:
             ready = await complete(
                 entity_client,

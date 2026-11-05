@@ -174,9 +174,18 @@ class Principal(BaseModel):
         description="Alternate trusted identifiers for the on-behalf-of principal",
     )
 
+    verified_workload_delegation: bool = Field(
+        default=False,
+        exclude=True,
+        repr=False,
+        description="Authentication-owned fact from a verified Helix workload access token",
+    )
+
     @property
     def caller_kind(self) -> CallerKind:
         """Whether the caller is a service principal, derived from the trusted principal id."""
+        if self.verified_workload_delegation and self.is_delegated:
+            return "service_principal"
         if not self.id:
             return "principal"
         return parse_principal_identifier(self.id, validate=False).caller_kind

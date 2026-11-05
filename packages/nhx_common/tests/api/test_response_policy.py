@@ -51,12 +51,12 @@ class ComputedItem(BaseModel):
 
 
 class SecretPolicy(ResponsePolicy[Item]):
-    def can_read(self, auth_client: RuntimeAuthClient) -> bool:
+    async def can_read(self, auth_client: RuntimeAuthClient) -> bool:
         return auth_client.principal.id == "service:reader"
 
 
 class ComputedPolicy(ResponsePolicy[ComputedItem]):
-    def can_read(self, auth_client: RuntimeAuthClient) -> bool:
+    async def can_read(self, auth_client: RuntimeAuthClient) -> bool:
         return auth_client.principal.id == "service:reader"
 
 

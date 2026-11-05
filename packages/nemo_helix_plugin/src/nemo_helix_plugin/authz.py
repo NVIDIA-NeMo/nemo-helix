@@ -54,6 +54,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeVar
 
+from nemo_helix_plugin.auth.decisions import (
+    DelegatedRequirements,
+    OperationPredicate,
+    OperationRule,
+)
+
 # ---------------------------------------------------------------------------
 # Plugin authoring API: a typed permission vocabulary + path rules.
 #
@@ -422,6 +428,9 @@ class AuthzEndpointMethod:
     callers: list[str] | None = None
     """Allowed caller kinds (:class:`CallerKind` values). ``None`` ⇒ PRINCIPAL (default)."""
 
+    predicate: OperationPredicate = "permissions"
+    on_behalf_of: DelegatedRequirements | None = None
+
     deny: bool = False
     """When True the route is unconditionally denied — the fail-closed marker for an
     unruled or invalid plugin route. The PDP denies it outright, overriding every allow
@@ -442,9 +451,11 @@ class AuthzContribution:
     role_permissions: dict[str, list[str]] = field(default_factory=dict)
     """Optional explicit role → permission grants (merged with defaults)."""
 
+    operations: dict[str, OperationRule] = field(default_factory=dict)
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize for :func:`nhx.common.auth.authz_merge.merge_authz_contributions`."""
-        return {
+        payload = {
             "permissions": dict(self.permissions),
             "endpoints": {
                 path: {
@@ -453,13 +464,23 @@ class AuthzContribution:
                         **({"scopes": spec.scopes} if spec.scopes is not None else {}),
                         **({"callers": spec.callers} if spec.callers is not None else {}),
                         **({"deny": True} if spec.deny else {}),
+                        **({"predicate": spec.predicate} if spec.predicate != "permissions" else {}),
+                        **({"on_behalf_of": spec.on_behalf_of.model_dump()} if spec.on_behalf_of is not None else {}),
                     }
                     for method, spec in methods.items()
                 }
                 for path, methods in self.endpoints.items()
             },
             "role_permissions": {role: list(perms) for role, perms in self.role_permissions.items()},
+            **(
+                {"operations": {name: rule.model_dump(exclude_none=True) for name, rule in self.operations.items()}}
+                if self.operations
+                else {}
+            ),
         }
+
+        payload["decision_contract_version"] = 2
+        return payload
 
 
 def scopes_for(api_area: str, write: bool) -> list[str]:

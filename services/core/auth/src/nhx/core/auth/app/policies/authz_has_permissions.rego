@@ -24,31 +24,6 @@ import data.common
 # {
 #   "allowed": true
 # }
-has_permissions := result if {
-	# Platform admin bypass - has access to everything
-	applicable_principals := common.get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check if any principal is a platform admin
-	some principal in applicable_principals
-	"HelixAdmin" in data.authz.principals[principal].workspaces.system
-
-	result := {"allowed": true}
-} else := result if {
-	workspace := input.workspace
-	required_permissions := input.permissions
-
-	# Get all applicable principals
-	applicable_principals := common.get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check if any principal has all required permissions in the workspace
-	# Note: has_permissions also checks wildcard principal "*" as fallback
-	some principal in applicable_principals
-	common.has_permissions(principal, workspace, required_permissions)
-
-	result := {"allowed": true}
-} else := result if {
-	# Default deny
-	result := {"allowed": false}
-}
+has_permissions := {"allowed": true} if {
+    common.principal_set_permissions(common.get_applicable_principals, input.workspace, input.permissions, false, [])
+} else := {"allowed": false}

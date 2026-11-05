@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.auth.decisions import DecisionRequest, ResourceTarget
 from nhx.common.api.common import DeleteResponse, Page
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -27,13 +28,14 @@ router = APIRouter(tags=["IAM"])
 logger = logging.getLogger(__name__)
 
 
-def require_service_principal_for_iam_role_bindings(auth_client: AuthClient) -> None:
-    """Enforce access rules for IAM role-binding routes."""
-    if not auth_client.auth_enabled:
-        return
-    if auth_client.principal.caller_kind == "service_principal":
-        return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+async def require_role_binding_operation(auth_client: AuthClient, workspace: str, action: str, name: str = "") -> None:
+    if not await auth_client.has_operation(
+        DecisionRequest(
+            operation=f"auth.iam.{action}",
+            target=ResourceTarget(workspace=workspace, resource_type="role_binding", name=name),
+        )
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def _generate_binding_name(principal: str, workspace: str, role: str) -> str:
@@ -90,7 +92,7 @@ async def list_role_bindings(
 
     This endpoint requires Platform Admin permissions.
     """
-    require_service_principal_for_iam_role_bindings(auth_client)
+    await require_role_binding_operation(auth_client, "system", "list")
 
     # Translate is_active filter to revoked_at EXISTS filter for database query
     is_active_value = parsed.remove("is_active")
@@ -148,12 +150,12 @@ async def create_role_binding(
     By default, this endpoint waits for the role to propagate before returning.
     Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
     """
-    require_service_principal_for_iam_role_bindings(auth_client)
     # Get the principal ID of the user making the request
     granted_by = auth_client.principal.id if auth_client.principal.id else "system"
 
     # Check if there's already an active binding for this principal/workspace/role
     target_workspace = role_binding.workspace or "system"
+    await require_role_binding_operation(auth_client, target_workspace, "create")
     existing_all = await entities_client.list(
         RoleBindingEntity,
         workspace=ALL_WORKSPACES,
@@ -219,8 +221,8 @@ async def get_role_binding(
 
     This endpoint requires Platform Admin permissions.
     """
-    require_service_principal_for_iam_role_bindings(auth_client)
     obj = await _get_role_binding_by_name(entities_client, name)
+    await require_role_binding_operation(auth_client, obj.workspace, "read", name)
 
     return RoleBinding.model_validate(obj.model_dump())
 
@@ -247,8 +249,8 @@ async def revoke_role_binding(
     By default, this endpoint waits for the role to be revoked before returning.
     Use `wait_role_propagation=false` to skip waiting (useful for bulk operations).
     """
-    require_service_principal_for_iam_role_bindings(auth_client)
     obj = await _get_role_binding_by_name(entities_client, name)
+    await require_role_binding_operation(auth_client, obj.workspace, "delete", name)
 
     if obj.revoked_at is not None:
         raise HTTPException(status_code=409, detail="Role binding is already revoked")

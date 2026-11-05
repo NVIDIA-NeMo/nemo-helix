@@ -37,7 +37,7 @@ fi
 
 POLICY_DIR="${REPO_ROOT}/services/core/auth/src/nhx/core/auth/app/policies"
 OUTPUT_DIR="${OUTPUT_DIR:-${REPO_ROOT}/services/core/auth/src/nhx/core/auth/assets}"
-ENTRYPOINTS="-e authz/allow -e authz/has_permissions -e authz/has_role"
+ENTRYPOINTS="-e authz/allow -e authz/has_permissions -e authz/has_role -e authz/decision"
 
 detect_opa_asset() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"

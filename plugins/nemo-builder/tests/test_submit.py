@@ -45,6 +45,7 @@ PROFILES = [
 class FakeEntityClient:
     def __init__(self) -> None:
         self.rows: dict[str, ContainerImage] = {}
+        self.queued: dict[str, QueuedBuild] = {}
         self.events: list[str] = []
         #: Rows whose next update is refused, as a row changed since it was read would be.
         self.changed: set[str] = set()
@@ -55,6 +56,14 @@ class FakeEntityClient:
             raise EntityConflictError(f"{entity.name} exists")
         self.events.append(f"create:{entity.name}")
         self.rows[entity.name] = entity
+        return entity
+
+    async def create_queued_build(self, entity: QueuedBuild) -> QueuedBuild:
+        if entity.name in self.queued:
+            self.events.append(f"conflict:{entity.name}")
+            raise EntityConflictError(f"{entity.name} exists")
+        self.events.append(f"create:{entity.name}")
+        self.queued[entity.name] = entity
         return entity
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage:
@@ -142,6 +151,7 @@ async def _submit(
         backend=ExecutionBackend(config or _config(), PROFILES),
         workspace="default",
         entity_client=entity_client,
+        create_queued_build=entity_client.create_queued_build,
         create_job=jobs.create_job,
         get_job_fields=jobs.get_job_fields,
         secret_readable=secret_readable,
@@ -160,7 +170,7 @@ class TestOrdering:
         assert [i.status for i in result.images] == ["queued", "queued"]
         assert client.events == ["create:demo-1.img0", "create:demo-1.img1", "create:builder-demo-1"]
         assert jobs.jobs == {}
-        queued = client.rows["builder-demo-1"]
+        queued = client.queued["builder-demo-1"]
         assert isinstance(queued, QueuedBuild)
         assert (queued.state, queued.images) == ("queued", ["demo-1.img0", "demo-1.img1"])
         request = CreateHelixJobRequest.model_validate(queued.request)

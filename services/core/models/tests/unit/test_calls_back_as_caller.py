@@ -37,7 +37,7 @@ async def test_the_setting_is_stored_and_returned() -> None:
 
     entity_client.create.side_effect = created
 
-    provider = await ModelProviderService(entity_client).create_model_provider(
+    provider = await ModelProviderService(entity_client, service_entities=entity_client).create_model_provider(
         CreateModelProviderRequest(name="switchyard", host_url="http://switchyard:4002", calls_back_as_caller=True),
         "default",
     )
@@ -59,7 +59,7 @@ async def test_an_update_that_leaves_the_setting_out_keeps_it(sent: dict[str, bo
     entity_client.get.return_value = existing
     entity_client.update.side_effect = lambda entity: entity
 
-    provider = await ModelProviderService(entity_client).upsert_model_provider(
+    provider = await ModelProviderService(entity_client, service_entities=entity_client).upsert_model_provider(
         "default", "switchyard", UpsertModelProviderRequest(host_url="http://switchyard:4002", **sent)
     )
 
@@ -78,7 +78,7 @@ async def test_an_upsert_that_creates_a_provider_leaves_the_setting_off_unless_s
 
     entity_client.create.side_effect = created
 
-    provider = await ModelProviderService(entity_client).upsert_model_provider(
+    provider = await ModelProviderService(entity_client, service_entities=entity_client).upsert_model_provider(
         "default", "switchyard", UpsertModelProviderRequest(host_url="http://switchyard:4002")
     )
 

@@ -139,7 +139,7 @@ class JobProviderProvisioner:
             if auth_context is None:
                 raise ProviderProvisioningError("Gateway providers require the workload creator's auth context.")
             principal = auth_context.principal_on_behalf_of or auth_context.principal_id
-            if not principal or principal.startswith("service:"):
+            if not principal:
                 raise ProviderProvisioningError("Gateway providers require a user or service-account creator.")
         owner = _digest([self.config.gateway_id, workload_workspace, workload_id])
         sandbox: pb.Sandbox | None = None
@@ -255,6 +255,7 @@ class JobProviderProvisioner:
                             workload=workload,
                         ),
                         requester_secrets=secrets_client,
+                        creator=auth_context if auth_enabled else None,
                     )
                     credentials[key] = ticket.get_secret_value()
             except (PermissionError, PermissionDeniedError, NotFoundError):
@@ -329,12 +330,17 @@ class JobProviderProvisioner:
             raise ProviderAccessRevoked("Gateway provider access was removed. Start a new workload to restore access.")
         return names
 
-    async def _issue_ticket(self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient) -> SecretStr:
+    async def _issue_ticket(
+        self, scope: BindingScope, *, requester_secrets: AsyncSecretsClient, creator: AuthContext | None
+    ) -> SecretStr:
         """Check creator permission and secret metadata before signing the registration request."""
+        creator_id = (creator.principal_on_behalf_of or creator.principal_id) if creator is not None else None
+        if creator_id != scope.principal_id:
+            raise ProviderProvisioningError("Creator snapshot does not match the binding.")
         await authorize_secret_binding(
             workspace=scope.secret_workspace,
             name=scope.secret_name,
-            principal_id=scope.principal_id,
+            creator=creator,
             secrets_client=requester_secrets,
         )
         return self.tickets.sign(scope)

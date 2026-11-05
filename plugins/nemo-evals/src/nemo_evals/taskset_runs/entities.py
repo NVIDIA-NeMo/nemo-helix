@@ -71,6 +71,8 @@ class TasksetRunEntity(EntityBase):
 
     __entity_type__: ClassVar[str] = "taskset_run"
 
+    creator: str = Field(default="", description="Submitting principal, independent of the storage writer.")
+
     plan_ref: str = Field(
         description=(
             "Files ref (workspace/fileset#plan.json) of the frozen execution plan. "
@@ -142,6 +144,13 @@ class TasksetRunEntity(EntityBase):
     @property
     def auth_context(self) -> AuthContext | None:
         return self._auth_context
+
+    @property
+    def creator_id(self) -> str | None:
+        """Use the protected submitter snapshot when available, then legacy/display metadata."""
+        if self._auth_context is not None:
+            return self._auth_context.principal_on_behalf_of or self._auth_context.principal_id
+        return self.creator or self.created_by
 
     def with_auth_context(self, auth_context: AuthContext | None) -> Self:
         """Set the creator's principal snapshot (in place); submit calls it once, before the run's create."""

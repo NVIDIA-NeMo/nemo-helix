@@ -1818,3 +1818,58 @@ def test_sync_as_service_keeps_auth_context_for_direct_service_token_exchange(mo
 
     assert result.auth_context is not None
     assert result.auth_context.principal_id == "creator@example.com"
+
+
+class _CredentialProbe(EntityBase):
+    __entity_type__ = "widget"
+
+
+@pytest.mark.asyncio
+async def test_direct_service_selection_replaces_user_token_and_memberships() -> None:
+    from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+
+    original, transport = _service_entities_client()
+    caller = EntityClient(
+        AsyncEntitiesClient(
+            base_url=original._client.base_url,
+            auth="user-token",
+            default_headers={
+                "authorization": "Bearer stale-user-token",
+                "x-nhx-principal-groups": "admin-group",
+                "X-NHX-Principal-On-Behalf-Of": "alice@example.com",
+            },
+            http_client=transport,
+        )
+    )
+    await caller.as_service("models").delete(_CredentialProbe, "test-entity", workspace="test-workspace")
+    headers = transport.request.call_args.kwargs["headers"]
+    normalized = {name.lower(): value for name, value in headers.items()}
+    assert normalized["x-nhx-principal-id"] == "service:models"
+    assert not normalized.get("authorization")
+    assert not normalized.get("x-nhx-principal-groups")
+    assert not normalized.get("x-nhx-principal-on-behalf-of")
+
+
+def test_sync_direct_service_selection_replaces_user_token_and_memberships() -> None:
+    from nemo_helix_plugin.entities.client import EntitiesClient
+
+    original, transport = _sync_service_entities_client()
+    caller = SyncEntityClient(
+        EntitiesClient(
+            base_url=original._client.base_url,
+            auth="user-token",
+            default_headers={
+                "authorization": "Bearer stale-user-token",
+                "x-nhx-principal-groups": "admin-group",
+                "X-NHX-Principal-On-Behalf-Of": "alice@example.com",
+            },
+            http_client=transport,
+        )
+    )
+    caller.as_service("models").delete(_CredentialProbe, "test-entity", workspace="test-workspace")
+    headers = transport.request.call_args.kwargs["headers"]
+    normalized = {name.lower(): value for name, value in headers.items()}
+    assert normalized["x-nhx-principal-id"] == "service:models"
+    assert not normalized.get("authorization")
+    assert not normalized.get("x-nhx-principal-groups")
+    assert not normalized.get("x-nhx-principal-on-behalf-of")

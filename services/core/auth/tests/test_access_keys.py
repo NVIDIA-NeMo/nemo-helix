@@ -4,6 +4,7 @@
 import asyncio
 import logging
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, PropertyMock, call, patch
@@ -14,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.auth.access_keys.issuer import AccessKeyOperationNotImplementedError
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse
+from nemo_helix_plugin.auth.decisions import DecisionEvaluationInput, PolicyDecision
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.common import PaginatedResult, PaginationData
@@ -36,6 +38,45 @@ from nhx.core.auth.app.access_keys import (
     get_access_key_registry,
 )
 from nhx.core.auth.entities import AccessKeyEntity
+from nhx.testing.policy import PolicyHarness
+
+_policy = PolicyHarness()
+
+
+_policy_probe = AsyncMock()
+
+
+@pytest.fixture(autouse=True)
+def canonical_policy(monkeypatch):
+    original = AuthClient._evaluate_decision
+    _policy_probe.reset_mock()
+
+    async def evaluate(self: AuthClient, context: DecisionEvaluationInput) -> PolicyDecision:
+        if not self.auth_enabled:
+            return await original(self, context)
+        await _policy_probe(context)
+        return _policy.decide(context)
+
+    monkeypatch.setattr(AuthClient, "_evaluate_decision", evaluate)
+
+
+@contextmanager
+def _as_admin(allowed: bool = True):
+    saved = deepcopy(_policy.document)
+    for principal in [
+        "alice@example.com",
+        "bob@example.com",
+        "admin@example.com",
+        "service-account:ci-bot",
+        "service:auth",
+    ]:
+        _policy.document["authz"]["principals"][principal] = {
+            "workspaces": {"system": ["HelixAdmin"] if allowed else []}
+        }
+    try:
+        yield _policy_probe
+    finally:
+        _policy.install(saved)
 
 
 class InMemoryAccessKeyRegistry:
@@ -87,10 +128,7 @@ class InMemoryAccessKeyRegistry:
         key = self.keys.get(jti)
         if key is None:
             return None
-        if key.entity_type == "SERVICE_ACCOUNT":
-            if admin_override is not None and await admin_override():
-                return key
-        elif self.owners[jti] == principal:
+        if await _policy.authorize_key(principal, self._as_entity_view(jti, key)):
             return key
         return None
 
@@ -195,7 +233,11 @@ class InMemoryAccessKeyRegistry:
         # This fake stores raw AccessKeyCreateResponse objects, so translate field names
         # for rotate_async's state reads, which rely on the entity shape.
         owner = self.owners[jti]
-        return SimpleNamespace(
+        return AccessKeyEntity(
+            name=jti,
+            workspace="system",
+            issuer=key.issuer,
+            audiences=key.audiences,
             key_name=key.name,
             description=key.description,
             principal=owner,
@@ -205,7 +247,7 @@ class InMemoryAccessKeyRegistry:
             service_attributes=key.service_attributes,
             issued_at=key.created_at,
             expires_at=key.expires_at,
-            status=self._status(jti, key),
+            status=key.status if self._status(jti, key) == "EXPIRED" else self._status(jti, key),
             grace_period_expires_at=self.rotating.get(jti),
             rotation_successor_jti=self.rotating_successor.get(jti),
         )
@@ -223,7 +265,7 @@ class InMemoryAccessKeyRegistry:
             raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found")
         view = self._as_entity_view(jti, key)
         if self.get_status_status_override is not None:
-            view = SimpleNamespace(**{**vars(view), "status": self.get_status_status_override})
+            view = view.model_copy(update={"status": self.get_status_status_override})
         return view
 
     async def discard_unreturned(self, jti):
@@ -454,7 +496,7 @@ def test_create_access_key_rejects_rotation_of_missing_key(client):
 
 
 def test_create_access_key_rejects_rotation_of_service_bound_key(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         service_key = client.post(
             "/v2/access-keys",
             json={"name": "service-key", "service_account_id": "otel-collector"},
@@ -584,7 +626,7 @@ def test_create_access_key_rotation_revoke_failure_logs_when_compensation_also_f
 
 
 def test_create_access_key_rejects_rotation_combined_with_service_account(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         prior = client.post("/v2/access-keys", json={"name": "prior"}).json()
 
         response = client.post(
@@ -998,7 +1040,7 @@ def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
 
     issuer = get_access_key_issuer(
         auth_client=auth_client,
-        registry=AccessKeyRegistry(entity_client=AsyncMock()),
+        registry=AccessKeyRegistry(entity_client=AsyncMock(), authorize_record=_policy.authorize_key),
         workspaces_client=AsyncMock(),
     )
 
@@ -1006,7 +1048,7 @@ def test_access_key_issuer_uses_effective_principal_for_delegated_requests():
 
 
 def test_create_service_access_key_requires_platform_admin(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=False) as has_role:
+    with _as_admin(False) as has_role:
         response = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
@@ -1014,7 +1056,7 @@ def test_create_service_access_key_requires_platform_admin(client):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
-    has_role.assert_awaited_once_with("system", "HelixAdmin")
+    has_role.assert_awaited_once()
 
 
 def test_service_account_principal_cannot_create_or_manage_service_bound_keys_even_with_platform_admin_role(client):
@@ -1025,7 +1067,7 @@ def test_service_account_principal_cannot_create_or_manage_service_bound_keys_ev
         )
     )
     try:
-        with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True) as has_role:
+        with _as_admin(True) as has_role:
             response = client.post(
                 "/v2/access-keys",
                 json={"name": "otel", "service_account_id": "otel-collector"},
@@ -1035,8 +1077,7 @@ def test_service_account_principal_cannot_create_or_manage_service_bound_keys_ev
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
-    # The service-account identity check short-circuits before any PDP role lookup.
-    has_role.assert_not_awaited()
+    has_role.assert_awaited_once()
 
 
 def test_privileged_service_principal_cannot_create_service_bound_keys_even_with_platform_admin_role(client):
@@ -1047,7 +1088,7 @@ def test_privileged_service_principal_cannot_create_service_bound_keys_even_with
         )
     )
     try:
-        with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True) as has_role:
+        with _as_admin(True) as has_role:
             response = client.post(
                 "/v2/access-keys",
                 json={"name": "otel", "service_account_id": "otel-collector"},
@@ -1057,7 +1098,7 @@ def test_privileged_service_principal_cannot_create_service_bound_keys_even_with
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Only HelixAdmin can create service-bound Scoped Access Keys"
-    has_role.assert_not_awaited()
+    has_role.assert_awaited_once()
 
 
 def test_create_service_access_key_is_denied_when_auth_is_disabled(client):
@@ -1075,7 +1116,7 @@ def test_create_service_access_key_is_denied_when_auth_is_disabled(client):
 
 
 def test_platform_admin_creates_and_manages_service_access_key(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         response = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
@@ -1093,14 +1134,14 @@ def test_platform_admin_creates_and_manages_service_access_key(client):
 
 
 def test_demoted_platform_admin_lists_personal_key_but_not_service_key(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         personal = client.post("/v2/access-keys", json={"name": "personal"}).json()
         service = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
         ).json()
 
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=False):
+    with _as_admin(False):
         response = client.get("/v2/access-keys")
 
     assert response.status_code == 200
@@ -1110,20 +1151,20 @@ def test_demoted_platform_admin_lists_personal_key_but_not_service_key(client):
 
 
 def test_service_key_creator_cannot_revoke_after_losing_platform_admin(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         created = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
         ).json()
 
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=False):
+    with _as_admin(False):
         revoked = client.delete(f"/v2/access-keys/{created['jti']}")
 
     assert revoked.status_code == 404
 
 
 def test_platform_admin_can_revoke_service_key_created_by_a_different_admin(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         created = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
@@ -1148,7 +1189,7 @@ def test_platform_admin_can_revoke_service_key_created_by_a_different_admin(clie
 
 
 def test_platform_admin_rotates_service_key_and_preserves_binding_and_expiration(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         created = client.post(
             "/v2/access-keys",
             json={
@@ -1184,20 +1225,20 @@ def test_platform_admin_rotates_service_key_and_preserves_binding_and_expiration
 
 
 def test_service_key_creator_cannot_rotate_after_losing_platform_admin(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         created = client.post(
             "/v2/access-keys",
             json={"name": "otel", "service_account_id": "otel-collector"},
         ).json()
 
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=False):
+    with _as_admin(False):
         rotated = client.post(f"/v2/access-keys/{created['jti']}/rotate")
 
     assert rotated.status_code == 404
 
 
 def test_platform_admin_cannot_revoke_another_admins_personal_access_key(client):
-    with patch.object(AuthClient, "has_role", new_callable=AsyncMock, return_value=True):
+    with _as_admin(True):
         created = client.post("/v2/access-keys", json={"name": "personal"}).json()
 
         other_admin_token = auth_client_context.set(
@@ -1339,6 +1380,7 @@ async def test_mixed_store_listing_does_not_drop_fetched_rows() -> None:
     registry = AccessKeyRegistry(
         entity_client=entity_client,
         credential_adapter=StubCredentialAdapter(credential),
+        authorize_record=_policy.authorize_key,
     )
 
     result = await registry.list_for_principal(

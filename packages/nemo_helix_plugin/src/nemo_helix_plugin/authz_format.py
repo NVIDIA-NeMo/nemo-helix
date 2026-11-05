@@ -117,6 +117,20 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
     if not isinstance(authz, dict):
         return
 
+    from nemo_helix_plugin.auth.decisions import OperationRule
+
+    for operation_id, payload in authz.get("operations", {}).items():
+        rule = OperationRule.model_validate(payload)
+        if not operation_id.startswith(rule.owner + "."):
+            raise ValueError(f"operation {operation_id!r} does not belong to {rule.owner!r}")
+        validate_permission_strings(rule.permissions, context=f"operations[{operation_id!r}].permissions")
+        validate_nhx_scope_strings_for_config(rule.scopes, context=f"operations[{operation_id!r}].scopes")
+        if rule.on_behalf_of is not None:
+            validate_permission_strings(
+                rule.on_behalf_of.actor_permissions, context=f"{operation_id}.actor_permissions"
+            )
+            validate_permission_strings(rule.on_behalf_of.permissions, context=f"{operation_id}.subject_permissions")
+
     roles = authz.get("roles")
     if isinstance(roles, dict):
         for role_name, role_cfg in roles.items():
@@ -137,6 +151,20 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
             for method_name, op in methods.items():
                 if not isinstance(op, dict):
                     continue
+                if "predicate" in op:
+                    from nemo_helix_plugin.auth.decisions import OPERATION_PREDICATE_ADAPTER
+
+                    OPERATION_PREDICATE_ADAPTER.validate_python(op["predicate"])
+                if "on_behalf_of" in op:
+                    from nemo_helix_plugin.auth.decisions import DelegatedRequirements
+
+                    delegated = DelegatedRequirements.model_validate(op["on_behalf_of"])
+                    validate_permission_strings(
+                        delegated.actor_permissions, context=f"{path}.{method_name}.actor_permissions"
+                    )
+                    validate_permission_strings(
+                        delegated.permissions, context=f"{path}.{method_name}.on_behalf_of.permissions"
+                    )
                 perms = op.get("permissions")
                 if isinstance(perms, list):
                     validate_permission_strings(
@@ -160,3 +188,12 @@ def validate_static_authz_data(data: dict[str, Any]) -> None:
                         [c for c in callers_list if isinstance(c, str)],
                         context=f"endpoints[{path!r}].{method_name}.callers",
                     )
+
+    validate_decision_contract(authz)
+
+
+def validate_decision_contract(payload: dict[str, Any]) -> None:
+    # Unversioned declarations use the current format; there is only one evaluator.
+    version = payload.get("decision_contract_version", 2)
+    if type(version) is not int or version != 2:
+        raise ValueError("Authorization metadata requires decision contract version 2")

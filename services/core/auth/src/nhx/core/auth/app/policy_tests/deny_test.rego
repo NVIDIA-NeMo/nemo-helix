@@ -96,9 +96,8 @@ test_denied_plugin_prefix_denies_service_principal if {
 	result.allowed == false
 }
 
-# Control: WITHOUT the fence, that same unknown path is allowed for a service principal via the
-# no-match bypass — proving the fence is what closes the hole.
-test_unknown_path_without_fence_hits_service_bypass if {
+# Unknown routes remain denied even without a quarantine fence.
+test_unknown_path_denied_even_without_quarantine_fence if {
 	result := authz.allow
 		with input as {"principal_id": "service:x", "method": "POST", "path": "/apis/badplugin/v2/workspaces/ws1/anything/deep/path"}
 		with data.authz.roles as deny_test_data.roles
@@ -106,7 +105,7 @@ test_unknown_path_without_fence_hits_service_bypass if {
 		with data.authz.workspaces as deny_test_data.workspaces
 		with data.authz.principals as deny_test_data.principals
 
-	result.allowed == true
+	result.allowed == false
 }
 
 # Sibling safety: a prefix-sharing namespace (/apis/badplugin-extra) is NOT collaterally fenced by
@@ -116,7 +115,9 @@ test_sibling_prefix_not_collaterally_fenced if {
 	result := authz.allow
 		with input as {"principal_id": "service:x", "method": "POST", "path": "/apis/badplugin-extra/v2/workspaces/ws1/anything"}
 		with data.authz.roles as deny_test_data.roles
-		with data.authz.endpoints as deny_test_data.endpoints
+		with data.authz.endpoints as object.union(deny_test_data.endpoints, {
+            "/apis/badplugin-extra/v2/workspaces/{workspace}/anything": {"post": {"permissions": []}}
+        })
 		with data.authz.workspaces as deny_test_data.workspaces
 		with data.authz.principals as deny_test_data.principals
 		with data.authz.config as {"denied_plugin_prefixes": ["/apis/badplugin"]}

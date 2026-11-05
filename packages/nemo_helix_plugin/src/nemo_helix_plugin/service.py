@@ -41,6 +41,7 @@ from typing import ClassVar
 
 from fastapi import APIRouter
 from nemo_helix_plugin._base import _NamedPlugin
+from nemo_helix_plugin.auth.decisions import OperationRule
 from nemo_helix_plugin.authz import Permission
 from starlette.requests import Request
 from starlette.responses import Response
@@ -127,6 +128,10 @@ class NemoService(_NamedPlugin):
         Override for cleanup (e.g. closing connections).
         The default implementation does nothing.
         """
+
+    def authorization_operations(self) -> dict[str, OperationRule]:
+        """Named resource operations owned by this service, evaluated by the shared PDP."""
+        return {}
 
     def extra_permissions(self) -> list[Permission]:
         """Permissions this service owns that are *not* attached to a route.

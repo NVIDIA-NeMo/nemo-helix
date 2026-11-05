@@ -36,201 +36,11 @@ import data.common.valid_service_principal
 #   }
 # }
 allow := result if {
-	allow_request
-	not deny_request
+	operation_allowed
 	result := {"allowed": true, "headers": {"X-NHX-Authorized": "true"}}
 } else := result if {
 	result := {"allowed": false, "headers": {"X-NHX-Authorized": "false"}}
 }
-
-# ALLOW REQUEST RULES
-
-# Default deny
-default allow_request := false
-
-# Platform admin bypass - has access to everything, but must still pass scope_check_passed
-# first so a HelixAdmin's own scoped Access Key stays scoped down.
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	scope_check_passed
-
-	# Check if any principal is a platform admin
-	some principal in applicable_principals
-	"HelixAdmin" in data.authz.principals[principal].workspaces.system
-}
-
-# Service principals on paths that do not match any configured API pattern (e.g. legacy /v1/...).
-# Known paths are authorized via the ServiceSystem role (wildcard permission) and has_permissions.
-allow_request if {
-	principal_id := extract_principal_id
-	valid_service_principal(principal_id)
-	endpoint_scan == ""
-}
-
-# Allow if any applicable principal has required permissions and scopes (if provided)
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check scopes first (faster)
-	scope_check_passed
-
-	path := extract_path
-	method := extract_method
-	required_permissions := req_permissions
-	count(required_permissions) > 0
-
-	workspace_scan != ""
-	workspace := workspace_scan
-
-	# Skip this rule for wildcard workspace - use cross-workspace rule instead
-	workspace != "-"
-
-	# Check if any principal has the required permissions
-	some principal in applicable_principals
-	has_permissions(principal, workspace, required_permissions)
-}
-
-# Wildcard workspace "-" with mutating methods: permission-based authorization.
-# GET/HEAD for "-" use cross-workspace rules above; mutating methods were previously
-# allowed only via unconditional service bypass (service:* defaults to ServiceSystem with "*").
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check scopes first (faster)
-	scope_check_passed
-
-	path := extract_path
-	method := extract_method
-	required_permissions := req_permissions
-	count(required_permissions) > 0
-
-	workspace_scan != ""
-	workspace := workspace_scan
-	workspace == "-"
-	method in ["POST", "PUT", "PATCH", "DELETE"]
-
-	some principal in applicable_principals
-	valid_service_principal(principal)
-	has_permissions(principal, workspace, required_permissions)
-}
-
-# Workspace-less endpoints with required permissions: check against the system workspace.
-# Covers IAM APIs, workspace creation, and any future workspace-less permission-gated
-# endpoint without needing path-specific rules.
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-	scope_check_passed
-	path := extract_path
-	method := extract_method
-	required_permissions := req_permissions
-	count(required_permissions) > 0
-	workspace_scan == ""
-	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
-}
-
-# Allow cross-workspace LIST operations (GET/HEAD without workspace in path) for authenticated
-# users — the workspace-filtered list case (results scoped to the caller's accessible
-# workspaces; an empty list when they have none).
-# Only applies when the endpoint declares NO required permissions. A permission-stamped
-# no-workspace GET must instead satisfy its permission (rule below); otherwise the stamped
-# permission is decorative, which is how the bundle-download endpoint had to be special-cased.
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check scopes first (faster)
-	scope_check_passed
-
-	method := extract_method
-	method in ["GET", "HEAD"]
-	path := extract_path
-
-	# Ensure the path matches a known endpoint pattern.
-	# normalize_endpoint is undefined for unknown paths, failing the rule (deny by default).
-	endpoint_scan != ""
-
-	# Match if no workspace can be extracted from path (undefined = no workspace placeholder)
-	workspace_scan == ""
-
-	# Permissionless only: an endpoint with no `permissions` (empty or absent) keeps the
-	# "any authenticated user" behavior; a permissioned one falls through to the rule below.
-	not req_has_permissions
-}
-
-# A permission-stamped no-workspace GET/HEAD must satisfy its declared permission in the system
-# workspace (the home for non-workspace-scoped resources, matching the IAM rule above), so the
-# permission is enforced rather than decorative.
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	scope_check_passed
-
-	method := extract_method
-	method in ["GET", "HEAD"]
-	path := extract_path
-	endpoint_scan != ""
-	workspace_scan == ""
-
-	required_permissions := req_permissions
-	count(required_permissions) > 0
-
-	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
-}
-
-# True when the matched endpoint declares one or more required permissions for this method.
-# Undefined required-permissions (an endpoint with no `permissions` key) makes count() undefined,
-# so this is false there — absent/empty permissions are treated alike (no permission required).
-req_has_permissions if {
-	count(req_permissions) > 0
-}
-
-# Allow cross-workspace LIST operations with "-" wildcard workspace
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check scopes first (faster)
-	scope_check_passed
-
-	method := extract_method
-	method in ["GET", "HEAD"]
-	path := extract_path
-
-	# Match if workspace is "-" wildcard
-	workspace_scan != ""
-	workspace := workspace_scan
-	workspace == "-"
-}
-
-# Allow if endpoint explicitly has no required permissions
-# but still require authentication (at least one principal).
-#
-# SECURITY: We check the endpoint config directly instead of using get_required_permissions,
-# because we need to distinguish between:
-#   - endpoints explicitly configured with `permissions: []` → allow
-#   - endpoints not in the config at all (unknown) → deny (fail-closed)
-# If normalize_endpoint cannot match the path, it is undefined, the rule body fails,
-# and access is denied.
-allow_request if {
-	applicable_principals := get_applicable_principals
-	count(applicable_principals) > 0
-
-	# Check scopes first (faster)
-	scope_check_passed
-	path := extract_path
-	method := extract_method
-	req_permissions == []
-}
-
-# DENY REQUEST RULES
 
 # Default allow (deny_request overrides allow_request when true)
 default deny_request := false
@@ -266,22 +76,6 @@ path_under_denied_prefix(path, prefix) if {
 	substring(path, count(prefix), 1) == "/"
 }
 
-# Deny direct secret value access for non-service principals (including HelixAdmin).
-# Secret values must only be accessed through the service delegation pattern, where a
-# service principal reads the value on behalf of a user with secrets.access permission.
-# Matches: /apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access
-deny_request if {
-	path := extract_path
-	base_path := split(path, "?")[0]
-	path_parts := split(base_path, "/")
-	count(path_parts) == 9
-	path_parts[4] == "workspaces"
-	path_parts[6] == "secrets"
-	path_parts[8] == "access"
-
-	request_caller_kind != "service_principal"
-}
-
 # OPA policy bundle download: system-scoped iam.bundle.read only (see static-authz endpoints).
 # Without this deny, the cross-workspace GET rule would allow any authenticated user for this path.
 default bundle_access_ok := false
@@ -314,7 +108,7 @@ nested_entities_internal_only if {
 
 deny_request if {
 	nested_entities_internal_only
-	request_caller_kind != "service_principal"
+	not operation_platform_actor
 	not platform_admin_in_system
 }
 
@@ -367,6 +161,7 @@ principal_only_route if {
 # ServiceSystem "*" wildcard), so `callers` could not actually scope a route to human users.
 deny_request if {
 	principal_only_route
+	not operation_delegated
 	request_caller_kind == "service_principal"
 }
 
@@ -432,12 +227,6 @@ entities_workspace_object_path(base_path, method) if {
 	parts[2] == "v2"
 	parts[3] == "workspace-deletions"
 	lower(method) == "get"
-}
-
-# Health check endpoints - always allow (must match middleware auth exclusions)
-allow_request if {
-	path := extract_path
-	path in ["/health/live", "/health/ready", "/status", "/metrics"]
 }
 
 # Deny all non-health requests when no endpoint data is loaded (fail-closed).

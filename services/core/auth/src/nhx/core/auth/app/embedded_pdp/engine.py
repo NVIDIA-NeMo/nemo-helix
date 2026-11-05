@@ -10,13 +10,13 @@ from functools import cache
 from typing import Any, Dict, List, Optional, cast
 
 from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
-from nhx.core.auth.app.scope_families import with_scope_families
+from nhx.core.auth.app.scope_families import with_policy_revision
 from wasmtime import Config, Engine, Func, FuncType, Instance, Limits, Memory, MemoryType, Module, Store, ValType
 
 logger = logging.getLogger(__name__)
 
 # Entrypoint IDs (order of -e flags in: opa build -e authz/allow -e authz/has_permissions -e authz/has_role)
-ENTRYPOINT_MAP = {"allow": 0, "has_permissions": 1, "has_role": 2}
+ENTRYPOINT_MAP = {"allow": 0, "has_permissions": 1, "has_role": 2, "decision": 3}
 
 DATA_LOADING_FUEL = 10_000_000_000
 
@@ -89,6 +89,10 @@ class OPAPolicy:
         self._base_heap = self._export_func("opa_heap_ptr_get")(self.store)
         self._data_heap = self._base_heap
         self._data_addr: Optional[int] = None
+        entrypoints = self._read_json(self._export_func("entrypoints")(self.store))
+        expected = {f"authz/{name}": number for name, number in ENTRYPOINT_MAP.items()}
+        if entrypoints != expected:
+            raise PolicyEngineError("Compiled policy does not support decision contract version 2")
 
     def _assert_owner_thread(self) -> None:
         current_thread_id = threading.get_ident()
@@ -253,9 +257,16 @@ def get_policy() -> OPAPolicy:
     return _policy_runtime.get_policy()
 
 
+def policy_data_loaded() -> bool:
+    """Whether a validated policy document is installed, without loading dynamic facts."""
+    with _policy_runtime._lock:
+        return _policy_runtime._data_loaded
+
+
 def set_policy_data(data: Dict[str, Any]) -> None:
     """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
-    _policy_runtime.set_data(with_scope_families(data))
+    document = with_policy_revision(data)
+    _policy_runtime.set_data(document)
 
 
 def reload_policy() -> None:

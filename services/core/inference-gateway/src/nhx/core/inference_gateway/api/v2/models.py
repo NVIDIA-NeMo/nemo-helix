@@ -8,10 +8,6 @@ from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, Path, Request, Response, status
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service.dependencies import get_nemo_client
-from nhx.core.inference_gateway.api.authz import (
-    MODEL_EXEC_PERMISSION,
-    enforce_delegated_workspace_access,
-)
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -103,7 +99,6 @@ async def model_entity_proxy(
     # workspace before any routing — including the mock short-circuit — so a
     # delegated workload cannot reach a workspace its creator cannot.
     validate_entity_name(workspace, field_name="workspace")
-    await enforce_delegated_workspace_access(workspace, MODEL_EXEC_PERMISSION)
 
     # If mock mode enabled and request has explicit mock response, skip model lookup
     if is_mock_request(request):

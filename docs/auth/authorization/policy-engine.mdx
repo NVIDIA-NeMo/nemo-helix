@@ -109,13 +109,14 @@ The worst-case propagation delay for authorization changes is approximately **2Ã
 
 ## Policy Entrypoints
 
-The PDP exposes three entrypoints:
+The PDP exposes four entrypoints:
 
 | Entrypoint | Purpose | Used By |
 |------------|---------|---------|
 | `allow` | Authorize a request (method + path + principal + workspace) | Middleware (every request) |
 | `has_permissions` | Check if a principal has specific permissions in a workspace | Services (programmatic checks) |
 | `has_role` | Check if a principal has a specific role in a workspace | Services (role checks) |
+| `decision` | Evaluate a typed registered operation, workspace scope or protected field | Middleware and service authorization adapters |
 
 ### `allow` â€” Request Authorization
 

@@ -407,7 +407,7 @@ def platform_auth_headers(
     return headers
 
 
-def _service_principal_auth_context() -> tuple[AuthConfig, Principal | None]:
+def _request_service_principal_auth_context() -> tuple[AuthConfig, Principal | None]:
     auth_client = auth_client_context.get()
     config = auth_client.config if auth_client is not None else get_auth_config()
     on_behalf_of: Principal | None = None
@@ -418,8 +418,14 @@ def _service_principal_auth_context() -> tuple[AuthConfig, Principal | None]:
     return config, on_behalf_of
 
 
-def service_principal_auth_headers(service_name: str) -> dict[str, str]:
-    config, on_behalf_of = _service_principal_auth_context()
+def service_principal_auth_headers(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> dict[str, str]:
+    """Authenticate directly as the service unless an OBO principal is explicit."""
+    auth_client = auth_client_context.get()
+    config = auth_client.config if auth_client is not None else get_auth_config()
     if config.enabled and config.oidc.workload is not None:
         require_authorization_header_destination(
             purpose=f"service principal headers for {service_name!r}",
@@ -430,8 +436,14 @@ def service_principal_auth_headers(service_name: str) -> dict[str, str]:
     return _trusted_service_principal_headers(service_name, on_behalf_of=on_behalf_of)
 
 
-async def service_principal_auth_headers_async(service_name: str) -> dict[str, str]:
-    config, on_behalf_of = _service_principal_auth_context()
+async def service_principal_auth_headers_async(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> dict[str, str]:
+    """Async direct/explicit-OBO counterpart, without ambient identity selection."""
+    auth_client = auth_client_context.get()
+    config = auth_client.config if auth_client is not None else get_auth_config()
     if config.enabled and config.oidc.workload is not None:
         require_authorization_header_destination(
             purpose=f"service principal headers for {service_name!r}",
@@ -441,6 +453,18 @@ async def service_principal_auth_headers_async(service_name: str) -> dict[str, s
         return {AUTHORIZATION_HEADER: f"Bearer {token}"}
 
     return _trusted_service_principal_headers(service_name, on_behalf_of=on_behalf_of)
+
+
+def request_service_principal_auth_headers(service_name: str) -> dict[str, str]:
+    """Authenticate as the service OBO the current effective request principal."""
+    _, principal = _request_service_principal_auth_context()
+    return service_principal_auth_headers(service_name, on_behalf_of=principal)
+
+
+async def request_service_principal_auth_headers_async(service_name: str) -> dict[str, str]:
+    """Async counterpart explicitly inheriting the request's effective principal."""
+    _, principal = _request_service_principal_auth_context()
+    return await service_principal_auth_headers_async(service_name, on_behalf_of=principal)
 
 
 def build_platform_auth_plan(

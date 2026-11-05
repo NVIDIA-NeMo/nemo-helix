@@ -37,7 +37,7 @@ def client_context(secrets_service_config) -> ClientContext:
 @pytest.fixture
 def model_provider_service(client_context):
     """Create a ModelProviderService with test EntityClient."""
-    return ModelProviderService(client_context.entity_client)
+    return ModelProviderService(client_context.entity_client, service_entities=client_context.entity_client)
 
 
 @pytest.fixture

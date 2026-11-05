@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import pytest
 from nemo_deployments_plugin.backends.openshell import authorization as deployment_authorization
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.openshell.registration import BindingScope, RegistrationTickets
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient, SecretsClient
@@ -75,7 +76,7 @@ async def test_ticket_preflight_uses_existing_permission_and_metadata_services(p
         await authorization.authorize_secret_binding(
             workspace=scope.secret_workspace,
             name=scope.secret_name,
-            principal_id=scope.principal_id,
+            creator=AuthContext(principal_id=scope.principal_id) if scope.principal_id else None,
             secrets_client=requester,
         )
         assert tickets.verify(tickets.sign(scope)).secret_name == "bound-token"
@@ -87,7 +88,7 @@ async def test_ticket_preflight_uses_existing_permission_and_metadata_services(p
                 await authorization.authorize_secret_binding(
                     workspace=denied.secret_workspace,
                     name=denied.secret_name,
-                    principal_id=denied.principal_id,
+                    creator=AuthContext(principal_id=denied.principal_id) if denied.principal_id else None,
                     secrets_client=requester,
                 )
         secrets_client.delete_secret(workspace="private-bindings", name="bound-token")
@@ -95,7 +96,7 @@ async def test_ticket_preflight_uses_existing_permission_and_metadata_services(p
             await authorization.authorize_secret_binding(
                 workspace=scope.secret_workspace,
                 name=scope.secret_name,
-                principal_id=scope.principal_id,
+                creator=AuthContext(principal_id=scope.principal_id) if scope.principal_id else None,
                 secrets_client=requester,
             )
         decrypt.assert_not_called()

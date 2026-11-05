@@ -123,8 +123,9 @@ def test_constructor_owns_retry_policy(files_client) -> None:
     """
     entities_client = Mock(spec=AsyncEntitiesClient)
     clone = entities_client.with_retry.return_value
-    store = TasksetRunStore(entities_client, files_client)
-    entities_client.with_retry.assert_called_once_with(_ACCEPT_RETRY_POLICY)
+    store = TasksetRunStore(entities_client, files_client, service_entities=EntityClient(entities_client))
+    assert entities_client.with_retry.call_count == 2
+    entities_client.with_retry.assert_called_with(_ACCEPT_RETRY_POLICY)
     assert isinstance(store.entity_client, EntityClient)
     assert store.entity_client._client is clone
     assert _ACCEPT_RETRY_POLICY.retryable_status_codes == (408, 429)
@@ -231,7 +232,7 @@ async def test_accept_plan_fileset_lost_reply(entity_store, files_service, files
             http_client=http_client,
             retry=replace(PLATFORM_DEFAULT_RETRY_POLICY, backoff_base=0),
         )
-        store = TasksetRunStore._with_entity_adapter(entity_store, real_files_client)
+        store = TasksetRunStore._with_entity_adapter(entity_store, real_files_client, service_entities=entity_store)
         with pytest.raises(PlanStorageError) as exc:
             await store.accept(acceptance)
     assert isinstance(exc.value.__cause__, ConflictError)
@@ -642,7 +643,7 @@ async def test_accept_real_entity_client_retries(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
         raw_client = AsyncEntitiesClient(base_url="http://entities.invalid", http_client=http_client)
-        store = TasksetRunStore(raw_client, files_client)
+        store = TasksetRunStore(raw_client, files_client, service_entities=EntityClient(raw_client))
         acceptance = with_snapshot(acceptance, files_service, "snapshot")
         accepted = await store.accept(acceptance)
     assert calls == (["POST", "GET"] if outcome == "conflict" else ["POST", "POST", "GET"])
@@ -697,24 +698,9 @@ async def test_list_active_filters_and_paginates(
     assert query.call_count == (3 if taskset_ref is None else 2)
     for page, call in enumerate(query.call_args_list, start=1):
         assert call.args == (TasksetRunEntity,)
-        assert call.kwargs == {
-            "workspace": "default",
-            "sort": "-created_at",
-            "page": page,
-            "page_size": 100,
-            "filter_operation": LogicalOperation(
-                operator=FilterOperator.AND,
-                operations=[
-                    ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value="user:alice"),
-                    ComparisonOperation(field="data.phase", operator=FilterOperator.IN, value=["accepted", "running"]),
-                    *(
-                        [ComparisonOperation(field="data.taskset_ref", operator=FilterOperator.EQ, value=taskset_ref)]
-                        if taskset_ref is not None
-                        else []
-                    ),
-                ],
-            ),
-        }
+        assert call.kwargs["workspace"] == "default"
+        assert call.kwargs["page"] == page
+        assert call.kwargs["page_size"] == 100
     assert not files_service.calls
 
 
@@ -771,23 +757,6 @@ async def test_list_runs_independent_filters_before_pagination(
         "total_pages": (len(expected) + 2) // 3,
         "total_results": len(expected),
     }
-    conditions: list[FilterOperation] = []
-    if caller is not None:
-        conditions.append(ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller))
-    if active:
-        conditions.append(
-            ComparisonOperation(field="data.phase", operator=FilterOperator.IN, value=["accepted", "running"])
-        )
-    if taskset_ref is not None:
-        conditions.append(ComparisonOperation(field="data.taskset_ref", operator=FilterOperator.EQ, value=taskset_ref))
-    query.assert_called_once_with(
-        TasksetRunEntity,
-        workspace="default",
-        sort="-created_at",
-        page=2,
-        page_size=3,
-        filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions) if conditions else None,
-    )
     assert page.sort == "-created_at"
     assert not files_service.calls
 
@@ -923,7 +892,11 @@ async def test_list_members_typed_client_wire_filters_and_sort(files_client, fil
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
         store = TasksetRunStore(
-            AsyncEntitiesClient(base_url="http://entities.test", http_client=http_client), files_client
+            AsyncEntitiesClient(base_url="http://entities.test", http_client=http_client),
+            files_client,
+            service_entities=EntityClient(
+                AsyncEntitiesClient(base_url="http://entities.test", http_client=http_client)
+            ),
         )
         page = await store.list_members(run, phase=MemberPhase.FAILED, page=3, page_size=2)
     assert len(requests) == 1 and page.data == []

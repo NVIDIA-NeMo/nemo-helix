@@ -46,6 +46,7 @@ def setup_policy_data():
 
     data = {
         "authz": {
+            "decision_contract_version": 2,
             "principals": principals,
             "roles": {
                 "Editor": {"permissions": ["models.read", "models.create", "models.update"]},

@@ -95,8 +95,9 @@ def _entity_to_schema(entity: ModelDeploymentEntity) -> ModelDeployment:
 class ModelDeploymentService:
     """Service layer for ModelDeployment operations."""
 
-    def __init__(self, entity_client: EntityClient):
+    def __init__(self, entity_client: EntityClient, *, service_entities: EntityClient):
         self.entity_client = entity_client
+        self.service_entities = service_entities
 
     async def _get_latest_version(self, workspace: str, base_name: str) -> int | None:
         """Get the highest version number for a deployment."""
@@ -207,7 +208,7 @@ class ModelDeploymentService:
         )
 
         try:
-            created = await self.entity_client.create(entity)
+            created = await self.service_entities.create(entity)
             logger.info(
                 f"Successfully created deployment: {workspace}/{created.base_name} version {created.entity_version}"
             )
@@ -384,7 +385,7 @@ class ModelDeploymentService:
         ).with_auth_context(auth_context)
 
         try:
-            created = await self.entity_client.create(entity)
+            created = await self.service_entities.create(entity)
             logger.info(
                 f"Successfully updated deployment: {created.workspace}/{created.base_name} "
                 f"to version {created.entity_version}"

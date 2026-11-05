@@ -21,6 +21,27 @@ from nhx.common.config import AuthConfig
 from nhx.common.config.base import OIDCConfig, OIDCWorkloadConfig, TokenSigningConfig
 
 
+def _bind_reply(mock_post, response) -> None:
+    def respond(url, *, json, **kwargs):
+        if str(url).endswith("/decision"):
+            context = json["input"]
+            response.json.return_value = {
+                "result": {
+                    "protocol_version": 2,
+                    "decision_type": "operation",
+                    "allowed": True,
+                    "operation": context["operation"],
+                    "target": context["target"],
+                    "principal_context_digest": context["principal_context_digest"],
+                    "policy_revision": "mock-policy",
+                    "reason": "policy_decision",
+                }
+            }
+        return response
+
+    mock_post.side_effect = respond
+
+
 def _write_private_key(path: Path) -> None:
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     path.write_bytes(
@@ -96,7 +117,7 @@ class TestHasPermissionsFormatValidation:
         mock_response.json.return_value = {"result": {"allowed": True}}
         mock_response.raise_for_status = MagicMock()
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
             result = await auth_client.has_permissions("ws", ["secrets.read", "models.create"])
         assert result is True
@@ -112,7 +133,7 @@ class TestHasPermissionsFormatValidation:
         mock_response.json.return_value = {"result": {"allowed": True}}
         mock_response.raise_for_status = MagicMock()
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
             out = await auth_client.authorize_request(
                 "GET",
@@ -151,7 +172,7 @@ class TestHasPermissionsFormatValidation:
                 new=AsyncMock(return_value="pdp-service-token"),
             ),
         ):
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(
                 principal=principal,
                 config=exchange_config,
@@ -215,7 +236,7 @@ class TestHasPermissionsFormatValidation:
         mock_response.json.return_value = {"result": {"allowed": True}}
         mock_response.raise_for_status = MagicMock()
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
             out = await auth_client.authorize_request(
                 "GET",
@@ -235,7 +256,7 @@ class TestHasPermissionsFormatValidation:
         mock_response.json.return_value = {"result": {"allowed": True}}
         mock_response.raise_for_status = MagicMock()
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(principal=principal, config=auth_config, http_client=mock_http_client)
             out = await auth_client.authorize_request(
                 "GET",
@@ -262,7 +283,7 @@ class TestHasPermissionsPdpPayloadWithDelegation:
         mock_response.raise_for_status = MagicMock()
 
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(
                 principal=principal_service_delegating,
                 config=auth_config,
@@ -272,8 +293,10 @@ class TestHasPermissionsPdpPayloadWithDelegation:
         body = mock_post.call_args[1]["json"]["input"]
         assert body["principal_id"] == "service:evaluator"
         assert body["on_behalf_of_principal_id"] == "user@example.com"
-        assert body["principal_email"] == "user@example.com"
-        assert body["principal_groups"] == ["workspace-editors"]
+        assert body["actor_email"] == "svc@example.com"
+        assert body["actor_groups"] == ["platform-admin"]
+        assert body["subject_email"] == "user@example.com"
+        assert body["subject_groups"] == ["workspace-editors"]
 
     @pytest.mark.asyncio
     async def test_has_permissions_service_permitted_delegate_not_sent_to_pdp(self, auth_config):
@@ -342,7 +365,7 @@ class TestHasRole:
         mock_response.raise_for_status = MagicMock()
 
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(
                 principal=principal_service_delegating,
                 config=auth_config,
@@ -352,12 +375,17 @@ class TestHasRole:
 
         body = mock_post.call_args.kwargs["json"]["input"]
         assert body == {
-            "principal_id": "user@example.com",
+            "principal_id": "service:evaluator",
             "principal_email": "user@example.com",
             "principal_groups": ["workspace-editors"],
             "on_behalf_of_principal_id": "user@example.com",
             "workspace": "system",
             "role": "HelixAdmin",
+            "actor_email": "svc@example.com",
+            "actor_groups": ["platform-admin"],
+            "subject_email": "user@example.com",
+            "subject_groups": ["workspace-editors"],
+            "verified_workload_delegation": False,
         }
 
     @pytest.mark.asyncio
@@ -403,7 +431,7 @@ class TestAuthorizeRequestPdpPayloadWithDelegation:
         mock_response.raise_for_status = MagicMock()
 
         with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
+            _bind_reply(mock_post, mock_response)
             auth_client = AuthClient(
                 principal=principal_service_delegating,
                 config=auth_config,
@@ -412,8 +440,10 @@ class TestAuthorizeRequestPdpPayloadWithDelegation:
             out = await auth_client.authorize_request("GET", "/v2/workspaces/ws/models", http_client=mock_http_client)
         assert out.allowed is True
         body = mock_post.call_args[1]["json"]["input"]
-        assert body["principal_email"] == "user@example.com"
-        assert body["principal_groups"] == ["workspace-editors"]
+        assert body["actor_email"] == "svc@example.com"
+        assert body["actor_groups"] == ["platform-admin"]
+        assert body["subject_email"] == "user@example.com"
+        assert body["subject_groups"] == ["workspace-editors"]
         assert body["on_behalf_of_principal_id"] == "user@example.com"
 
 
@@ -457,144 +487,6 @@ class TestWaitRole:
             )
 
         close.assert_not_called()
-
-
-class TestOnBehalfOfHasPermissions:
-    """Tests for the on_behalf_of_has_permissions method."""
-
-    @pytest.mark.asyncio
-    async def test_auth_disabled_returns_true(self, auth_config_disabled, principal_with_delegate):
-        """Test that when auth is disabled, method returns True."""
-        auth_client = AuthClient(
-            principal=principal_with_delegate,
-            config=auth_config_disabled,
-        )
-
-        result = await auth_client.on_behalf_of_has_permissions(
-            workspace_id="test-workspace",
-            permissions=["secrets.read"],
-        )
-
-        assert result is True
-
-    @pytest.mark.asyncio
-    async def test_on_behalf_of_with_permissions_returns_true(self, auth_config, principal_with_delegate):
-        """Test that when delegated user has permissions, method returns True."""
-        # Create a real AsyncClient but mock its post method
-        mock_http_client = httpx.AsyncClient()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": {"allowed": True}}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            auth_client = AuthClient(
-                principal=principal_with_delegate,
-                config=auth_config,
-                http_client=mock_http_client,
-            )
-
-            result = await auth_client.on_behalf_of_has_permissions(
-                workspace_id="test-workspace",
-                permissions=["secrets.read"],
-            )
-
-            assert result is True
-
-            # Verify the mock was called with the delegated principal
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
-            request_json = call_args[1]["json"]
-
-            # The delegated principal ID should be used
-            assert request_json["input"]["principal_id"] == "delegated-user@example.com"
-            assert request_json["input"]["workspace"] == "test-workspace"
-            assert request_json["input"]["permissions"] == ["secrets.read"]
-
-    @pytest.mark.asyncio
-    async def test_on_behalf_of_without_permissions_returns_false(self, auth_config, principal_with_delegate):
-        """Test that when delegated user lacks permissions, method returns False."""
-        # Create a real AsyncClient but mock its post method
-        mock_http_client = httpx.AsyncClient()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": {"allowed": False}}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            auth_client = AuthClient(
-                principal=principal_with_delegate,
-                config=auth_config,
-                http_client=mock_http_client,
-            )
-
-            result = await auth_client.on_behalf_of_has_permissions(
-                workspace_id="test-workspace",
-                permissions=["secrets.read"],
-            )
-
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_on_behalf_of_has_permissions_sends_delegate_claims_when_present(
-        self, auth_config, principal_service_delegating
-    ):
-        """Delegated PDP check uses on-behalf-of email/groups when set on the outer principal."""
-        mock_http_client = httpx.AsyncClient()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": {"allowed": True}}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            auth_client = AuthClient(
-                principal=principal_service_delegating,
-                config=auth_config,
-                http_client=mock_http_client,
-            )
-
-            await auth_client.on_behalf_of_has_permissions(
-                workspace_id="test-workspace",
-                permissions=["secrets.read"],
-            )
-
-            request_json = mock_post.call_args[1]["json"]
-            assert request_json["input"]["principal_id"] == "user@example.com"
-            assert request_json["input"]["principal_email"] == "user@example.com"
-            assert request_json["input"]["principal_groups"] == ["workspace-editors"]
-            assert "on_behalf_of_principal_id" not in request_json["input"]
-
-    @pytest.mark.asyncio
-    async def test_on_behalf_of_multiple_permissions(self, auth_config, principal_with_delegate):
-        """Test checking multiple permissions for delegated user."""
-        mock_http_client = httpx.AsyncClient()
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"result": {"allowed": True}}
-        mock_response.raise_for_status = MagicMock()
-
-        with patch.object(mock_http_client, "post", new_callable=AsyncMock) as mock_post:
-            mock_post.return_value = mock_response
-
-            auth_client = AuthClient(
-                principal=principal_with_delegate,
-                config=auth_config,
-                http_client=mock_http_client,
-            )
-
-            result = await auth_client.on_behalf_of_has_permissions(
-                workspace_id="test-workspace",
-                permissions=["secrets.read", "secrets.write"],
-            )
-
-            assert result is True
-
-            # Verify all permissions were checked
-            call_args = mock_post.call_args
-            request_json = call_args[1]["json"]
-            assert request_json["input"]["permissions"] == ["secrets.read", "secrets.write"]
 
 
 class TestGetNemoClientOnBehalfOf:

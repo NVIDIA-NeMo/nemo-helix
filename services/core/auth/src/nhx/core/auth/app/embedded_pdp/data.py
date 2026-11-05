@@ -13,7 +13,7 @@ from typing import Any, Optional
 from nhx.common.entities import EntityClient
 
 from ..bundle import build_authorization_data
-from .engine import set_policy_data
+from .engine import policy_data_loaded, set_policy_data
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,7 @@ async def apply_embedded_policy_document(
         Exception: If ``build_authorization_data`` fails (callers handle fallback where
             appropriate).
     """
-    if not skip_static_bootstrap:
+    if not skip_static_bootstrap and not policy_data_loaded():
         bootstrap = await build_authorization_data(None)
         set_policy_data(bootstrap)
         authz = bootstrap.get("authz", {})
@@ -74,7 +74,7 @@ async def load_policy_data(entities_client: Optional[EntityClient] = None) -> bo
 
     Returns:
         True if policy data was loaded successfully, False otherwise.
-        On failure, static data is still loaded (without dynamic role bindings).
+        On failure, retain the last valid snapshot; bootstrap static data only if none exists.
     """
     depth = _load_policy_depth.get()
     if depth > 0:
@@ -109,12 +109,14 @@ async def _load_policy_data_impl(entities_client: Optional[EntityClient] = None)
         )
         return True
     except Exception as e:
-        logger.warning("Failed to load dynamic policy data: %s. Loading static data only.", e)
-        # Load static data without dynamic role bindings
+        logger.warning("Failed to load dynamic policy data; retaining the valid policy snapshot: %s", e)
+        # Retain a valid snapshot rather than dropping restrictive dynamic bindings.
+        if policy_data_loaded():
+            return False
         try:
             data = await build_authorization_data(None)
             set_policy_data(data)
-            logger.info("Static policy data loaded (dynamic data will be loaded on next refresh)")
+            logger.info("Static bootstrap loaded (dynamic data will be retried)")
             return False
         except Exception as fallback_error:
             logger.exception("Failed to load even static policy data: %s", fallback_error)

@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from unittest.mock import patch
 
+import httpx
 import pytest
 from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -402,6 +403,7 @@ class TestProviderResolution:
                 internal: bool = False,
                 on_behalf_of: str | RuntimePrincipal | None = None,
                 workspace: str | None = None,
+                http_client: httpx.Client | None = None,
             ) -> NemoClient:
                 kwargs = {
                     "as_service": as_service,
@@ -419,6 +421,7 @@ class TestProviderResolution:
                 internal: bool = False,
                 on_behalf_of: str | RuntimePrincipal | None = None,
                 workspace: str | None = None,
+                http_client: httpx.AsyncClient | None = None,
             ) -> AsyncNemoClient:
                 kwargs = {
                     "as_service": as_service,
@@ -448,3 +451,26 @@ class TestProviderResolution:
 class TestProtocolConformance:
     def test_default_provider_is_protocol_instance(self):
         assert isinstance(DefaultNemoClientProvider(), NemoClientProvider)
+
+
+async def test_explicit_credentials_share_transport_without_sharing_identity(monkeypatch):
+    monkeypatch.setenv("NHX_PRINCIPAL", json.dumps({"id": "service:outer", "on_behalf_of": "old-user"}))
+    provider = DefaultNemoClientProvider()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as transport:
+        async with (
+            provider.get_async_nemo_client(as_service="evals", http_client=transport) as direct,
+            provider.get_async_nemo_client(as_service="evals", on_behalf_of="alice", http_client=transport) as obo,
+        ):
+            assert direct._http is obo._http is transport
+            assert get_forwarding_headers(direct)["X-NHX-Principal-Id"] == "service:evals"
+            assert "X-NHX-Principal-On-Behalf-Of" not in get_forwarding_headers(direct)
+            assert get_forwarding_headers(obo)["X-NHX-Principal-On-Behalf-Of"] == "alice"
+        assert not transport.is_closed
+
+
+def test_sync_explicit_credentials_borrow_transport(monkeypatch):
+    monkeypatch.delenv("NHX_WORKLOAD_IDENTITY_TOKEN_FILE", raising=False)
+    with httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200))) as transport:
+        with DefaultNemoClientProvider().get_nemo_client(as_service="evals", http_client=transport) as client:
+            assert client._http is transport
+        assert not transport.is_closed

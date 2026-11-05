@@ -17,6 +17,7 @@ import httpx
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute, iter_route_contexts
+from nemo_helix_plugin.auth.decisions import OperationRule
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nhx.common.api.utils import register_query_param_schemas
 from nhx.common.auth import Principal
@@ -128,6 +129,7 @@ class DependencyProvider:
         self._platform_config: Optional[HelixConfig] = None
         self._runtime_context: Optional[HelixRuntimeContext] = None
         self._service_name: str = "platform"
+        self._bound_service_name: str | None = None
 
     def get_http_client(self) -> httpx.AsyncClient:
         """Return the httpx.AsyncClient for this provider, creating it lazily.
@@ -271,6 +273,11 @@ class DependencyProvider:
             get_sync_nemo_client,
         )
 
+        if self._bound_service_name is not None and self._bound_service_name != service.name:
+            raise ValueError("A dependency provider cannot authenticate as multiple services")
+        self._bound_service_name = service.name
+        self._service_name = service.name
+
         app.dependency_overrides[get_request_authorizer] = request_authorizer
         app.dependency_overrides[get_nemo_client] = self.get_request_scoped_nemo_client
         app.dependency_overrides[get_sync_nemo_client] = self.get_request_scoped_sync_nemo_client
@@ -361,6 +368,10 @@ class Service(ABC, Generic[TConfig]):
         self._service_config = (
             cast(TConfig | None, Configuration.get_service_config(config_class)) if config_class else None
         )
+
+    def authorization_operations(self) -> dict[str, OperationRule]:
+        """Core service resource operations normally reside in static policy data."""
+        return {}
 
     @property
     def dependency_provider(self) -> DependencyProvider:

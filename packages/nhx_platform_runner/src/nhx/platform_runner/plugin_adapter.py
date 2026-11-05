@@ -22,6 +22,7 @@ import threading
 from collections.abc import Callable
 
 from fastapi import FastAPI
+from nemo_helix_plugin.auth.decisions import OperationRule
 from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.service import NemoService
 from nhx.common.config import get_platform_config
@@ -41,6 +42,9 @@ class NemoServiceAdapter(Service):
         super().__init__(name=plugin.name, module_name=type(plugin).__module__)
         self._plugin = plugin
         self._dependencies = list(getattr(type(plugin), "dependencies", []))
+
+    def authorization_operations(self) -> dict[str, OperationRule]:
+        return self._plugin.authorization_operations()
 
     def get_routers(self) -> list[RouterConfig]:
         return [

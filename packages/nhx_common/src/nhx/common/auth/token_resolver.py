@@ -52,6 +52,7 @@ def _workload_access_principal_from_claims(claims: TokenClaims) -> Principal:
         return _direct_principal_from_claims(claims)
     return Principal(
         id=claims.actor.subject,
+        verified_workload_delegation=True,
         groups=claims.actor.groups,
         authz_aliases=[claims.actor.subject],
         on_behalf_of=claims.subject,

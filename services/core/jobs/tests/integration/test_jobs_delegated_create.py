@@ -128,7 +128,104 @@ def test_service_create_for_user_without_access_is_forbidden(
     email = unique_email("outsider")
     user = Principal(id=email, email=email, authz_aliases=[email])
 
-    with pytest.raises(PermissionDeniedError, match="not allowed to create jobs"):
+    with pytest.raises(PermissionDeniedError, match="Forbidden"):
         JobsClient.from_client(_on_behalf_of(client, user)).create_job(
             workspace=workspace, body=_job(short_unique_name("forbidden"))
         )
+
+
+def test_creator_capture_is_atomic_and_obo_cannot_replace_or_erase_it(
+    client: NemoClient, group_workspace: tuple[str, str]
+) -> None:
+    from copy import deepcopy
+
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nemo_helix_plugin.entities.types import EntityUpdate
+
+    workspace, group = group_workspace
+    email = unique_email("creator")
+    creator = Principal(id=email, email=email, groups=[group], authz_aliases=[email])
+    delegated = _on_behalf_of(client, creator)
+    name = short_unique_name("capture")
+    job = JobsClient.from_client(delegated).create_job(workspace=workspace, body=_job(name)).data()
+    direct_entities = EntitiesClient.from_client(as_user(client, "service:jobs"))
+    obo_entities = EntitiesClient.from_client(_on_behalf_of(as_user(client, "service:jobs"), creator))
+
+    stored = direct_entities.get_entity_by_name(workspace=workspace, entity_type="platform_job", name=job.name).data()
+    snapshot = deepcopy(stored.data["_auth_context"])
+    assert stored.created_by == "service:jobs"
+    assert stored.updated_by in ("service:jobs", email)
+    assert snapshot["principal_on_behalf_of"] == email
+    assert snapshot["principal_on_behalf_of_groups"] == [group]
+    for supplied in ["omit", None, {"principal_id": "forged"}]:
+        data = deepcopy(stored.data)
+        data.pop("_auth_context")
+        if supplied != "omit":
+            data["_auth_context"] = supplied
+        returned = obo_entities.update_entity_by_name(
+            workspace=workspace,
+            entity_type="platform_job",
+            name=job.name,
+            body=EntityUpdate(data=data, expected_db_version=stored.db_version),
+        ).data()
+        assert "_auth_context" not in returned.data
+        stored = direct_entities.get_entity_by_name(
+            workspace=workspace, entity_type="platform_job", name=job.name
+        ).data()
+        assert stored.data["_auth_context"] == snapshot
+        assert stored.created_by == "service:jobs" and stored.updated_by == email
+
+    steps = list(JobsClient.from_client(delegated).list_steps(name=job.name, workspace=workspace).items())
+    assert steps and all(step.auth_context is None for step in steps)
+
+
+@pytest.mark.parametrize(
+    "actor,obo,entity_type",
+    [
+        ("service:models", False, "platform_job"),
+        ("service:jobs", True, "platform_job"),
+        ("service:jobs", False, "deployments_deployment"),
+    ],
+)
+def test_capture_mode_is_not_a_credential(
+    client: NemoClient, group_workspace: tuple[str, str], actor: str, obo: bool, entity_type: str
+) -> None:
+    from nemo_helix_plugin.entities.client import EntitiesClient
+    from nemo_helix_plugin.entities.types import EntityCreateInput
+
+    workspace, group = group_workspace
+    identity = Principal(
+        id=actor, on_behalf_of="creator" if obo else None, on_behalf_of_groups=[group] if obo else None
+    )
+    source = client.with_headers(identity.get_headers()).with_headers({"X-NHX-Entity-Write-Mode": "server-capture-v1"})
+    created = (
+        EntitiesClient.from_client(source)
+        .create_entity(
+            workspace=workspace,
+            entity_type=entity_type,
+            body=EntityCreateInput(
+                name=short_unique_name("denied"), data={"_auth_context": {"principal_id": "forged"}}
+            ),
+        )
+        .data()
+    )
+    assert "_auth_context" not in created.data
+    assert created.created_by == identity.effective_id
+
+
+def test_direct_service_job_remains_attributed_to_its_own_identity(
+    client: NemoClient, group_workspace: tuple[str, str]
+) -> None:
+    from nemo_helix_plugin.entities.client import EntitiesClient
+
+    workspace, _ = group_workspace
+    direct = as_user(client, SERVICE_PRINCIPAL)
+    job = JobsClient.from_client(direct).create_job(workspace=workspace, body=_job(short_unique_name("service"))).data()
+    stored = (
+        EntitiesClient.from_client(direct)
+        .get_entity_by_name(workspace=workspace, entity_type="platform_job", name=job.name)
+        .data()
+    )
+    assert stored.created_by == "service:jobs"
+    assert stored.data["_auth_context"]["principal_id"] == SERVICE_PRINCIPAL
+    assert stored.data["_auth_context"].get("principal_on_behalf_of") is None

@@ -1259,7 +1259,8 @@ def _generate_permissions_reference(auth_config: Dict) -> str:
     lines.append("<Note>")
     lines.append("")
     lines.append(
-        "HelixAdmin is omitted — it bypasses permission checks entirely at the policy level. "
+        "HelixAdmin is omitted from the table. Its grants do not bypass caller eligibility, "
+        "token scopes, delegation constraints, or protected-field rules. "
         "JobRunner is intended for workload identities, not interactive users."
     )
     lines.append("")

@@ -13,7 +13,11 @@ from nhx.core.auth.app.access_keys import AccessKeyRegistry
 from nhx.core.auth.entities import AccessKeyEntity
 from nhx.core.entities.app.repository import AccountCredentialStore, AccountIdentityStore
 from nhx.core.entities.app.repository.sqlalchemy.base import Base
+from nhx.testing.policy import PolicyHarness
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+_policy = PolicyHarness()
+
 
 # Relative to the real clock, which the registry's active check reads, so the keys stay unexpired.
 NOW = datetime.now(UTC)
@@ -60,7 +64,7 @@ def _key(jti: str = "ak_new") -> AccessKeyCreateResponse:
 async def test_new_access_key_writes_only_account_credentials(credential_backend) -> None:
     adapter, owner_account_id = credential_backend
     legacy_client = AsyncMock()
-    registry = AccessKeyRegistry(legacy_client, adapter)
+    registry = AccessKeyRegistry(legacy_client, adapter, authorize_record=_policy.authorize_key)
 
     await registry.add(_key(), owner_principal="alice", owner_account_id=owner_account_id)
 
@@ -85,7 +89,7 @@ async def test_existing_legacy_access_key_remains_valid(credential_backend) -> N
     )
     legacy_client = AsyncMock()
     legacy_client.get.return_value = legacy
-    registry = AccessKeyRegistry(legacy_client, adapter)
+    registry = AccessKeyRegistry(legacy_client, adapter, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_legacy", "alice") is True
     legacy_client.get.assert_awaited()
@@ -96,7 +100,7 @@ async def test_missing_new_and_legacy_records_fail_closed(credential_backend) ->
     adapter, _owner_account_id = credential_backend
     legacy_client = AsyncMock()
     legacy_client.get.side_effect = EntityNotFoundError("missing")
-    registry = AccessKeyRegistry(legacy_client, adapter)
+    registry = AccessKeyRegistry(legacy_client, adapter, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_missing", "alice") is False
 
@@ -104,7 +108,7 @@ async def test_missing_new_and_legacy_records_fail_closed(credential_backend) ->
 @pytest.mark.asyncio
 async def test_a_stored_key_keeps_its_service_attributes(credential_backend) -> None:
     adapter, owner_account_id = credential_backend
-    registry = AccessKeyRegistry(AsyncMock(), adapter)
+    registry = AccessKeyRegistry(AsyncMock(), adapter, authorize_record=_policy.authorize_key)
     attributes = {"evals": {"kind": "trial", "attempt": 1, "policy": {"model_access": "closed"}}}
 
     await registry.add(
@@ -133,7 +137,7 @@ async def test_a_legacy_record_never_vouches_for_service_attributes(credential_b
     )
     legacy_client = AsyncMock()
     legacy_client.get.return_value = forged
-    registry = AccessKeyRegistry(legacy_client, adapter)
+    registry = AccessKeyRegistry(legacy_client, adapter, authorize_record=_policy.authorize_key)
 
     rotatable = await registry.get_rotatable("ak_legacy", "alice")
 
@@ -155,7 +159,7 @@ async def test_without_a_credential_store_entity_records_keep_their_attributes()
     )
     entity_client = AsyncMock()
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     rotatable = await registry.get_rotatable("ak_only", "alice")
 

@@ -13,6 +13,7 @@ from nemo_helix_plugin.auth.access_keys.issuer import (
     AccessKeyOperationNotImplementedError,
 )
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyReversibleStatus
+from nemo_helix_plugin.auth.decisions import AccessKeyFacts, DecisionRequest, ResourceTarget
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.auth import AuthClient, get_auth_client
@@ -113,17 +114,14 @@ _ACCESS_KEY_ROTATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 async def _is_platform_admin(auth_client: AuthClient) -> bool:
-    # Only human HelixAdmins may create or manage service-bound Scoped Access Keys — the
-    # same invariant AccessKeyIssuerService._target_principal enforces for creation. A
-    # service-account principal must never qualify here, even if it were ever (mis)granted
-    # the HelixAdmin role, since that would let a service credential manage other
-    # service-bound credentials, including its own.
-    if auth_client.principal.effective_principal.is_service_identity():
-        return False
-    # Deny (rather than has_role's own default-allow) when auth is globally disabled: there is
-    # no real identity to check "is HelixAdmin" against, so we don't silently grant this
-    # highly privileged, service-account-impersonating capability.
-    return auth_client.auth_enabled and await auth_client.has_role("system", "HelixAdmin")
+    # Auth-off never enables platform-owned credential administration.
+    return auth_client.auth_enabled and await auth_client.has_operation(
+        DecisionRequest(
+            operation="auth.access-key.lifecycle",
+            target=ResourceTarget(workspace="system", resource_type="access_key", name=""),
+            facts=AccessKeyFacts(owner="", service_bound=True),
+        )
+    )
 
 
 def get_workspaces_client(

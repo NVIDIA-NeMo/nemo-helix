@@ -6,11 +6,10 @@
 from __future__ import annotations
 
 import pytest
-from nemo_builder_plugin import completion as completion_module
-from nemo_builder_plugin.completion import Caller, CompletionConflict, caller_refusal, complete, current_caller
+from nemo_builder_plugin.completion import CompletionConflict, complete
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance, UpstreamImage
-from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityConflictError
+from policy_helpers import Caller, allows
 
 DIGEST = "sha256:" + "d" * 64
 STEP = Caller(auth=True, actor="job-step", submitter="alice")
@@ -59,31 +58,21 @@ async def _complete(rows: FakeRows, digest: str = DIGEST) -> ContainerImage:
     return await complete(rows, workspace="ws-a", name="build-1-0", digest=digest)
 
 
-class TestTheCaller:
-    def test_with_platform_auth_off_no_caller_is_checked(self) -> None:
-        assert caller_refusal(_row(), Caller(auth=False)) is None
-
-    def test_a_job_step_acting_for_the_images_submitter_may(self) -> None:
-        assert caller_refusal(_row(), STEP) is None
-
-    def test_a_users_own_token_is_refused(self) -> None:
-        refusal = caller_refusal(_row(), Caller(auth=True, actor="alice"))
-        assert refusal is not None and "job step" in refusal
-
-    def test_a_job_step_acting_for_someone_else_is_refused(self) -> None:
-        refusal = caller_refusal(_row(), Caller(auth=True, actor="job-step", submitter="bob"))
-        assert refusal is not None and "someone else" in refusal
-
-    def test_a_row_with_no_recorded_submitter_is_refused(self) -> None:
-        assert caller_refusal(_row(submitter=None), STEP) is not None
-
-    def test_the_caller_comes_from_the_platforms_auth_context(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        context = AuthContext(principal_id="job-step", principal_on_behalf_of="alice")
-        monkeypatch.setattr(completion_module, "current_auth_context", lambda: context)
-        monkeypatch.setattr(completion_module, "platform_auth_enabled", lambda: True)
-        assert current_caller() == STEP
-        monkeypatch.setattr(completion_module, "platform_auth_enabled", lambda: False)
-        assert current_caller() == Caller(auth=False)
+class TestCompletionPolicy:
+    @pytest.mark.parametrize(
+        "caller,owner,allowed",
+        [
+            (Caller(auth=False), "alice", True),
+            (Caller(auth=True, actor="job-step", submitter="alice"), "alice", True),
+            (Caller(auth=True, actor="alice"), "alice", False),
+            (Caller(auth=True, actor="job-step", submitter="bob"), "alice", False),
+            (Caller(auth=True, actor="job-step", submitter="alice"), None, False),
+        ],
+    )
+    def test_completion_requires_the_represented_creator(
+        self, caller: Caller, owner: str | None, allowed: bool
+    ) -> None:
+        assert allows(caller, "builder.image.complete", _row(submitter=owner)) is allowed
 
 
 class TestComplete:

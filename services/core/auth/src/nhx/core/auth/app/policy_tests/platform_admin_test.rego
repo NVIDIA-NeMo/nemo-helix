@@ -25,6 +25,19 @@ platform_admin_test_data := {
         }
     },
     "endpoints": {
+        "/apis/secrets/v2/workspaces/{workspace}/secrets": {
+            "get": {"permissions": ["secrets.list"]}
+        },
+        "/apis/secrets/v2/workspaces/{workspace}/secrets/{name}": {
+            "get": {"permissions": ["secrets.read"]},
+            "delete": {"permissions": ["secrets.delete"]}
+        },
+        "/apis/secrets/v2/workspaces/{workspace}/secrets/{name}/access": {
+            "get": {
+                "permissions": ["secrets.access"], "callers": ["service_principal"],
+                "on_behalf_of": {"actor_permissions": ["secrets.access"], "permissions": ["secrets.read"]}
+            }
+        },
         "/apis/models/v2/workspaces/{workspace}/models": {
             "get": {"permissions": ["models.list"]}
         },
@@ -264,9 +277,8 @@ service_only_endpoints := {
     }
 }
 
-# Test platform admin is ALLOWED on a service-only route — the admin global bypass holds
-# here (only non-admin humans are denied on service-only routes).
-test_platform_admin_allowed_on_service_only_route if {
+# S-024: admin permissions cannot override a service-only caller contract.
+test_platform_admin_cannot_override_service_only_contract if {
     result := authz.allow with input as {
         "principal_id": "platform-admin@example.com",
         "method": "DELETE",
@@ -277,5 +289,5 @@ test_platform_admin_allowed_on_service_only_route if {
     with data.authz.workspaces as platform_admin_test_data.workspaces
     with data.authz.principals as platform_admin_test_data.principals
 
-    result.allowed == true
+    result.allowed == false
 }

@@ -8,11 +8,6 @@ from typing import Annotated
 from aiohttp import ClientSession
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from nemo_helix_plugin.inference_middleware import InferenceAccessRequest
-from nhx.core.inference_gateway.api.authz import (
-    PROVIDER_EXEC_PERMISSION,
-    PROVIDER_READ_PERMISSION,
-    enforce_delegated_workspace_access,
-)
 from nhx.core.inference_gateway.api.caller_context import context_headers, gateway_seal, refuse_router_keys
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
@@ -64,7 +59,6 @@ async def provider_ready(
         404 Not Found if the provider is not yet in the gateway's cache
     """
     validate_workspace_and_name(workspace, name)
-    await enforce_delegated_workspace_access(workspace, PROVIDER_READ_PERMISSION)
     logger.info(f"Provider ready check: {workspace}/{name}")
 
     model_info = model_cache.get_from_provider(workspace, name)
@@ -138,7 +132,6 @@ async def provider_proxy(
     # workspace before any routing — including the mock short-circuit — so a
     # delegated workload cannot reach a workspace its creator cannot.
     validate_workspace_and_name(workspace, name)
-    await enforce_delegated_workspace_access(workspace, PROVIDER_EXEC_PERMISSION)
 
     # If mock mode enabled and request has explicit mock response, skip provider lookup
     if is_mock_request(request):

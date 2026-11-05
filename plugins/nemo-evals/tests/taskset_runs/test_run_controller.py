@@ -247,9 +247,10 @@ class Harness:
         self, plan: TasksetRunPlan, *, name: str, creator: str = "user:alice", workspace: str = "default", **run: Any
     ) -> TasksetRunEntity:
         accepted = run.pop("accepted_at", datetime(2026, 10, 15, 12, tzinfo=timezone.utc))
-        self.entity_store.caller = creator
+        self.entity_store.caller = "service:evals"
         record = TasksetRunEntity(
             name=name,
+            creator=creator,
             workspace=workspace,
             plan_ref=f"{workspace}/{name}-plan#plan.json",
             plan_digest="f" * 64,
@@ -311,7 +312,7 @@ def config(**caps: Any) -> RunControllerConfig:
 
 @pytest.fixture
 def store(entity_store, files_client) -> TasksetRunStore:
-    return TasksetRunStore._with_entity_adapter(entity_store, files_client)
+    return TasksetRunStore._with_entity_adapter(entity_store, files_client, service_entities=entity_store)
 
 
 @pytest.fixture
@@ -1888,8 +1889,10 @@ def test_the_controller_creates_on_behalf_of_the_stored_principal(harbor_run):
     assert on_behalf_of(harbor_run) == "user:development"  # auth off: no creator, no snapshot
     harbor_run._created_by = "user:alice"
     assert on_behalf_of(harbor_run) == "user:alice"
+    harbor_run.creator = "forged-display-creator"
     snapshot = AuthContext(principal_id="user:bob", principal_email="bob@ac9.test", principal_groups=["ac9-users"])
     principal = on_behalf_of(harbor_run.with_auth_context(snapshot))
+    assert harbor_run.creator_id == "user:bob"
     assert not isinstance(principal, str)
     assert (principal.id, principal.email, list(principal.groups or [])) == ("user:bob", "bob@ac9.test", ["ac9-users"])
 

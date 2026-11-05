@@ -25,6 +25,7 @@ import textwrap
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
+from nemo_helix_plugin.auth.decisions import DecisionRequest, LifecycleFacts, ResourceTarget
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
@@ -35,7 +36,6 @@ from nhx.core.entities.api.dependencies import AuthClientDep, EntityRepository, 
 from nhx.core.entities.api.v2.utils import (
     ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
-    bindings_cache_delete,
     get_accessible_workspaces,
 )
 from nhx.core.entities.api.v2.workspaces.schemas import (
@@ -222,6 +222,7 @@ async def create_workspace(
     The creator is automatically granted Admin role on the workspace, keyed by email when
     available (otherwise principal ID).
     """
+    # The sample flow owns this namespace in every deployment mode.
     if workspace.name.startswith(SAMPLE_WORKSPACE_PREFIX) and auth_client.principal.id != "service:agents":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -284,7 +285,6 @@ async def create_workspace(
                 "revoked_at": None,
             },
         )
-        await bindings_cache_delete(binding_principal)
 
         # Wait for Admin role to propagate if requested
         if wait_role_propagation:
@@ -337,7 +337,7 @@ async def list_workspaces(
 ) -> Page[Workspace]:
     """List workspaces accessible to the current principal."""
     # Get accessible workspaces for access control
-    accessible_workspaces = await get_accessible_workspaces(entity_repository)
+    accessible_workspaces = await get_accessible_workspaces()
 
     combined_filter = _exclude_deleting_workspaces(add_workspace_filtering(accessible_workspaces, filter, field="name"))
 
@@ -496,10 +496,6 @@ async def delete_workspace(
 
     # Delete all role bindings immediately (revoke access)
     deleted_bindings = await _delete_all_role_bindings(entity_repository, name)
-    for binding in deleted_bindings:
-        principal = binding.data.get("principal")
-        if principal is not None:
-            await bindings_cache_delete(str(principal))
     logger.info(
         "Deleted role bindings for workspace deletion",
         extra={"workspace": name, "deleted_count": len(deleted_bindings)},
@@ -519,23 +515,14 @@ def _workspace_not_found(name: str) -> HTTPException:
 
 
 async def _may_read_workspace_deletion(auth_client: AuthClient, workspace: Workspace) -> bool:
-    """Allow the creator, a platform admin, or a service principal.
-
-    Auth off allows the read. Anyone else gets the same not-found response as a
-    missing workspace, so the route does not confirm that the name exists.
-    """
-    if not auth_client.auth_enabled or auth_client.principal.caller_kind == "service_principal":
-        return True
-    created_by = (workspace.created_by or "").strip()
-    principal = auth_client.principal
-    identities = {principal.effective_id.strip()}
-    email = (principal.effective_email or "").strip()
-    if email:
-        identities.add(email)
-    identities.discard("")
-    if created_by and created_by in identities:
-        return True
-    return await auth_client.has_role("system", "HelixAdmin")
+    """Translate the policy result while preserving hidden-not-found presentation."""
+    return await auth_client.has_operation(
+        DecisionRequest(
+            operation="entities.workspace.deletion-status",
+            target=ResourceTarget(workspace=workspace.name, resource_type="workspace", name=workspace.name),
+            facts=LifecycleFacts(created_by=(workspace.created_by or "").strip()),
+        )
+    )
 
 
 @router.get(
@@ -737,8 +724,6 @@ async def add_workspace_member(
                 },
             )
 
-    await bindings_cache_delete(member.principal)
-
     # Wait for roles to propagate if requested
     if wait_role_propagation and member.roles:
         for role in member.roles:
@@ -893,8 +878,6 @@ async def update_workspace_member(
                 },
             )
 
-    await bindings_cache_delete(principal_id)
-
     # Wait for roles to propagate if requested
     if wait_role_propagation:
         # Wait for all added roles to be granted
@@ -1018,8 +1001,6 @@ async def remove_workspace_member(
                 "revoked_at": now.isoformat(),
             },
         )
-
-    await bindings_cache_delete(principal_id)
 
     # Wait for roles to be revoked if requested
     if wait_role_propagation and revoked_roles:

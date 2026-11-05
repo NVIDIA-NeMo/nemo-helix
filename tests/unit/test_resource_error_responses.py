@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nhx.common.api.common import ErrorResponse
-from nhx.common.auth import get_auth_client
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.config import AuthConfig
 
 MODEL_MODULE = "nhx.core.models.api.v2."
 AUTH_MODULE = "nhx.core.auth.oidc_broker.routes"
@@ -96,7 +97,9 @@ def test_missing_model_resource_matches_documented_response(
     getattr(service, method_name).return_value = None
     app.dependency_overrides[getattr(module, dependency_name)] = lambda: service
     # Some model routes use response-policy dependencies that read the request auth client.
-    app.dependency_overrides[get_auth_client] = lambda: SimpleNamespace(auth_enabled=False)
+    app.dependency_overrides[get_auth_client] = lambda: AuthClient(
+        principal=Principal(), config=AuthConfig(enabled=False)
+    )
     response = TestClient(app).get(route.path_format.format(workspace="default", name="missing-resource"))
     assert response.status_code == 404
     assert response.headers["content-type"] == "application/json"

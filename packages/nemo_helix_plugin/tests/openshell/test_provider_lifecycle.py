@@ -6,6 +6,7 @@
 # ruff: noqa: E402 -- Optional OpenShell dependencies must be checked before driver imports.
 
 import asyncio
+import json
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,7 +19,6 @@ from google.protobuf.message import Message
 grpc = pytest.importorskip("grpc")
 pytest.importorskip("openshell")
 
-from nemo_deployments_plugin.backends.openshell import authorization as deployment_authorization
 from nemo_deployments_plugin.backends.openshell import provisioning as deployment_provisioning
 from nemo_deployments_plugin.backends.openshell.credential_driver import wire
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import BindingRegistry, ProviderOwner
@@ -33,6 +33,7 @@ from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.jobs import endpoints as jobs_endpoints
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, JobStatusDetailsUpdate
+from nemo_helix_plugin.openshell import authorization as shared_authorization
 from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
 from nemo_helix_plugin.openshell.provider_client import ProviderGatewayClient
 from nemo_helix_plugin.openshell.registration import RegistrationDenied, RegistrationTickets
@@ -43,8 +44,8 @@ from nemo_helix_plugin.openshell.types import (
     ProviderAccessRevoked,
 )
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
-from nhx.core.jobs.controllers.backends.openshell import authorization as job_authorization
 from nhx.core.jobs.controllers.backends.openshell import provisioning as job_provisioning
+from nhx.testing.policy import mock_operation_response
 from openshell._proto import datamodel_pb2 as dm
 from openshell._proto import openshell_pb2 as pb
 
@@ -222,21 +223,20 @@ class Gateway:
 @pytest.fixture(params=["job", "deployment"])
 async def setup(tmp_path: Path, monkeypatch, request):
     kind = request.param
-    authorization = job_authorization if kind == "job" else deployment_authorization
     provisioning = job_provisioning if kind == "job" else deployment_provisioning
     provisioner_type = (
         job_provisioning.JobProviderProvisioner
         if kind == "job"
         else deployment_provisioning.DeploymentProviderProvisioner
     )
-    monkeypatch.setattr(authorization, "platform_auth_enabled", lambda: True)
+    monkeypatch.setattr(shared_authorization, "platform_auth_enabled", lambda: True)
     requests = []
 
     def http(request):
         requests.append(request)
         assert not request.url.path.endswith("/access"), "Provisioning must never fetch a secret value"
-        if request.url.path.endswith("/has_permissions"):
-            return httpx.Response(200, json={"result": {"allowed": True}})
+        if request.url.path.endswith("/decision"):
+            return mock_operation_response(json.loads(request.content)["input"], allowed=True)
         assert request.url.path.endswith("/secrets/token")
         return httpx.Response(200, json={"id": "token-id", "name": "token", "workspace": "team"})
 

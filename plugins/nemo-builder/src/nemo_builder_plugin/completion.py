@@ -5,12 +5,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig
 from nemo_builder_plugin.identity import DIGEST_PATTERN
-from nemo_helix_plugin.auth import current_auth_context, is_service_principal_id, platform_auth_enabled
 from nemo_helix_plugin.entities import EntityConflictError
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,73 +23,6 @@ class CompleteRequest(BaseModel):
     runtime_config: ImageRuntimeConfig | None = Field(
         default=None, description="How the image starts by default, read from the config the push step pushed."
     )
-
-
-@dataclass(frozen=True, slots=True)
-class Caller:
-    """Who is asking. With platform auth off, nobody in particular."""
-
-    auth: bool
-    #: The principal the request came as: with a job's token, the job step.
-    actor: str | None = None
-    #: Whom the actor acts for, when it is delegated.
-    submitter: str | None = None
-
-
-def current_caller() -> Caller:
-    """The caller of the current request, from the platform's auth context."""
-    if not platform_auth_enabled():
-        return Caller(auth=False)
-    context = current_auth_context()
-    if context is None:
-        return Caller(auth=True)
-    return Caller(auth=True, actor=context.principal_id, submitter=context.principal_on_behalf_of)
-
-
-def caller_refusal(row: ContainerImage, caller: Caller) -> str | None:
-    """Why ``caller`` may not complete ``row``, or None if it may. With platform auth off, anyone may.
-
-    A user's own token is refused: the caller must act for the image's submitter, as its push step does.
-    That doesn't show the caller is the push step: the platform also takes a request's identity from its
-    headers, which anything inside the cluster, a build's own ``RUN`` included, can set.
-    """
-    if not caller.auth:
-        return None
-    if caller.submitter is None:
-        return "only a job step acting for the image's submitter may complete it"
-    if caller.submitter != row.created_by:
-        return f"{row.name} was submitted by someone else"
-    return None
-
-
-def read_refusal(row: ContainerImage, caller: Caller) -> str | None:
-    """Why ``caller`` may not read ``row``, or None if it may.
-
-    A person needs only the permission, which the policy checks. A service must act for a person, though not
-    necessarily the image's submitter, so that one person's build can be reused for another. The policy admits a
-    service on its own permissions, whoever it acts for, so the calling service must check that its user may read
-    images here.
-    """
-    if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
-        return None
-    if caller.submitter is None or is_service_principal_id(caller.submitter):
-        return f"a service may read {row.name} only acting for a person"
-    return None
-
-
-def submit_refusal(caller: Caller) -> str | None:
-    """Why ``caller`` may not submit builds, or None if it may.
-
-    A service must act for a person, as a platform service building for a user does. The entity store records the
-    rows as created by that person; acting for no one, or for a service, they would be the builder's own, which no push
-    step acts for, so none would ever complete. The policy admits a service on its own permissions, whoever it acts
-    for.
-    """
-    if not caller.auth or caller.actor is None or not is_service_principal_id(caller.actor):
-        return None
-    if caller.submitter is None or is_service_principal_id(caller.submitter):
-        return "a service may submit builds only acting for a person"
-    return None
 
 
 class CompletionConflict(Exception):
