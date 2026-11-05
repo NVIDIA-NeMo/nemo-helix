@@ -1050,6 +1050,60 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs/{run_id}/tasks/{task_index}:
+    get:
+      tags:
+      - Evals Plugin Taskset Run Routes
+      summary: Get Taskset Run Task
+      description: "Read one task of a run with each of its trials, as its task Job\
+        \ reports them while it runs.\n\nArgs:\n    workspace: Workspace containing\
+        \ the run and its children.\n    run_id: Public run name.\n    task_index:\
+        \ Zero-based task index, as the run's task list gives it.\n    service: Shared\
+        \ request-scoped run service.\n\nReturns:\n    The stored task with ``trials``\
+        \ read from its task Job now; omitted before the task has a Job,\n    when\
+        \ the Job reported no trials, or when the caller can't read it.\n\nRaises:\n\
+        \    HTTPException: Permission denied (403), the run or task is absent (404),\
+        \ or an unexpected failure (500)."
+      operationId: get_taskset_run_task_apis_evals_v2_workspaces__workspace__agent_evaluate_runs__run_id__tasks__task_index__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Run Id
+      - name: task_index
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 0
+          description: Zero-based index of the task in the run's resolved task list.
+          title: Task Index
+        description: Zero-based index of the task in the run's resolved task list.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksetRunTaskDetail'
+        '403':
+          description: Caller lacks permission to read run resources.
+        '404':
+          description: Run, or that task of it, not found in this workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/evals/v2/workspaces/{workspace}/eval-results:
     get:
       tags:
@@ -9669,6 +9723,67 @@ components:
         Construction takes the public fields only. Instances contain no parent,
 
         persistence metadata or live Job state; read routes omit unset details.'
+    TasksetRunTaskDetail:
+      properties:
+        task:
+          type: string
+          title: Task
+          description: Member name within the run, for example task-7.
+        task_index:
+          type: integer
+          minimum: 0.0
+          title: Task Index
+          description: Zero-based index of the task in the run's resolved task list.
+        task_name:
+          title: Task Name
+          description: The task's id in the run's taskset (a Harbor task's native
+            id); omitted for runs from before it.
+          type: string
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/MemberPhase'
+          description: Stored image preparation and execution progress of this task.
+        job:
+          title: Job
+          description: Name of this task's Jobs Service Job; set when the create is
+            first attempted.
+          type: string
+        job_status:
+          allOf:
+          - $ref: '#/components/schemas/HelixJobStatus'
+          description: The Job's status as the controller last read it; omitted until
+            the task's Job is registered.
+        error:
+          title: Error
+          description: Stored reason the task failed, was cancelled or expired.
+          type: string
+        publication:
+          allOf:
+          - $ref: '#/components/schemas/PublicationOutcome'
+          description: What the task published to Intake, as its Job reported it when
+            the task settled; omitted when it reported nothing.
+        trial_counts:
+          allOf:
+          - $ref: '#/components/schemas/TrialCounts'
+          description: The task Job's trials counted by phase, as the controller last
+            read them; every planned trial counts as pending until the Job reports.
+        trials:
+          title: Trials
+          description: Each of the task's trials, read from its Job on this request;
+            trial_counts is counted from this list. Omitted before the task has a
+            Job, when the Job reported no trials, or when the Job can't be read.
+          items:
+            $ref: '#/components/schemas/TrialProgress'
+          type: array
+      additionalProperties: false
+      type: object
+      required:
+      - task
+      - task_index
+      - phase
+      title: TasksetRunTaskDetail
+      description: One task with each of its trials, as its task Job last reported
+        them.
     TasksetRunTasksPage:
       properties:
         data:
@@ -9875,6 +9990,56 @@ components:
       title: TrialPhase
       description: Where a Harbor trial is in its lifecycle, following the events
         Harbor raises for it.
+    TrialProgress:
+      properties:
+        trial:
+          type: string
+          title: Trial
+          description: Harbor's trial name, unique within the task Job.
+        session_id:
+          title: Session Id
+          description: Intake session holding the trial's traces (<task Job>:<trial>),
+            once anything is recorded there.
+          type: string
+        phase:
+          allOf:
+          - $ref: '#/components/schemas/TrialPhase'
+          description: Where the trial is in its lifecycle.
+        attempts:
+          type: integer
+          minimum: 0.0
+          title: Attempts
+          description: Attempts Harbor started, retries included.
+          default: 0
+        started_at:
+          title: Started At
+          description: When the trial's first attempt started.
+          type: string
+          format: date-time
+        finished_at:
+          title: Finished At
+          description: When the trial settled; None until then.
+          type: string
+          format: date-time
+        reward:
+          title: Reward
+          description: The verifier's primary reward for the last attempt.
+          type: number
+        error_type:
+          title: Error Type
+          description: Exception type of the last failed attempt.
+          type: string
+        error:
+          title: Error
+          description: Exception message of the last failed attempt, truncated.
+          type: string
+      type: object
+      required:
+      - trial
+      - phase
+      title: TrialProgress
+      description: 'One trial of a task Job: its phase, timing, reward and error,
+        as of the Job''s last report.'
     ValidationError:
       properties:
         loc:
