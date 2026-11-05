@@ -742,11 +742,7 @@ def test_evaluations_compare_maps_remote_errors(intake_cli) -> None:
             "--workspace",
             "other",
         ],
-        [
-            httpx.Response(
-                400, json={"detail": "Unsupported metric 'duration_ms': use 'evaluators.<name>'."}
-            )
-        ],
+        [httpx.Response(400, json={"detail": "Unsupported metric 'duration_ms': use 'evaluators.<name>'."})],
     )
 
     assert result.exit_code == 3

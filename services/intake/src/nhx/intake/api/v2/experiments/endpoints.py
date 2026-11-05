@@ -554,7 +554,7 @@ async def compare_evaluations(
     except InvalidEvaluationMetricError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported metric {metric!r}: use 'evaluators.<name>', 'cost_usd', 'latency_ms', or 'tokens'.",
+            detail=str(exc),
         ) from exc
     except EvaluationNotFoundError as exc:
         raise _evaluation_not_found_http_error(exc) from exc

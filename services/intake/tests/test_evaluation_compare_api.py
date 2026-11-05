@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nhx.intake.api.v2.experiments.dependencies import get_evaluation_compare_repository
-from nhx.intake.experiments.compare import EvaluationMetricSession
+from nhx.intake.experiments.compare import CompareMetric, EvaluationMetricSession
 from nhx.intake.repository.evaluation_compare import EvaluationCompareRepository
 
 EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
@@ -34,7 +34,7 @@ _SESSIONS: list[EvaluationMetricSession] = [
 
 class _ScriptedCompareRepository(EvaluationCompareRepository):
     def __init__(self, sessions: list[EvaluationMetricSession]) -> None:
-        self._sessions = sessions
+        self.sessions = sessions
         self.calls: list[tuple[str, list[str], str]] = []
 
     async def get_metric_sessions(
@@ -42,10 +42,10 @@ class _ScriptedCompareRepository(EvaluationCompareRepository):
         *,
         workspace: str,
         evaluation_names: list[str],
-        metric: object,
+        metric: CompareMetric,
     ) -> list[EvaluationMetricSession]:
-        self.calls.append((workspace, list(evaluation_names), str(getattr(metric, "id", metric))))
-        return self._sessions
+        self.calls.append((workspace, list(evaluation_names), metric.id))
+        return self.sessions
 
 
 def _create_group_and_evaluations(client: TestClient) -> None:
@@ -154,6 +154,42 @@ def test_compare_returns_503_when_telemetry_is_unavailable(client: TestClient) -
     assert response.status_code == 503, response.text
 
 
+def test_compare_returns_503_when_the_comparison_read_fails(client: TestClient) -> None:
+    _create_group_and_evaluations(client)
+
+    class FailingCompareRepository(EvaluationCompareRepository):
+        async def get_metric_sessions(
+            self,
+            *,
+            workspace: str,
+            evaluation_names: list[str],
+            metric: CompareMetric,
+        ) -> list[EvaluationMetricSession]:
+            raise RuntimeError("clickhouse unavailable")
+
+    app = cast(FastAPI, client.app)
+    app.dependency_overrides[get_evaluation_compare_repository] = lambda: FailingCompareRepository()
+    response = client.get(
+        COMPARE,
+        params={"baseline": "base-eval", "candidate": "cand-eval", "metric": "evaluators.accuracy"},
+    )
+
+    assert response.status_code == 503, response.text
+
+
+def test_compare_returns_404_for_a_soft_deleted_evaluation(client: TestClient) -> None:
+    _create_group_and_evaluations(client)
+    deleted = client.delete(f"{EVALUATIONS}/base-eval")
+    assert deleted.status_code == 204, deleted.text
+
+    response = client.get(
+        COMPARE,
+        params={"baseline": "base-eval", "candidate": "cand-eval", "metric": "evaluators.accuracy"},
+    )
+
+    assert response.status_code == 404, response.text
+
+
 def test_compare_without_shared_test_cases_reports_an_empty_interval(
     client: TestClient, scripted_repository: _ScriptedCompareRepository
 ) -> None:
@@ -161,7 +197,7 @@ def test_compare_without_shared_test_cases_reports_an_empty_interval(
         EvaluationMetricSession("base-eval", "tc1", 1.0),
         EvaluationMetricSession("cand-eval", "tc2", 1.0),
     ]
-    scripted_repository._sessions = disjoint
+    scripted_repository.sessions = disjoint
 
     response = client.get(
         COMPARE,
