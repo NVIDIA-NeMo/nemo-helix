@@ -315,14 +315,6 @@ jobs:
           find "${FASTEMBED_CACHE_DIR}/models--qdrant--all-MiniLM-L6-v2-onnx/snapshots" \
             -mindepth 1 -maxdepth 1 -type d -print -quit | grep -q .
 
-      - name: Save fastembed model cache
-        if: steps.fastembed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        continue-on-error: true
-        with:
-          path: ${{ runner.temp }}/fastembed-cache
-          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
-
       - name: Log in to GHCR
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
@@ -350,6 +342,14 @@ jobs:
         if: env.PUBLISH_IMAGES == 'true'
         shell: bash
         run: make docker-push TARGET=docker-cpu-ci
+
+      - name: Save fastembed model cache
+        if: steps.fastembed-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        continue-on-error: true
+        with:
+          path: ${{ runner.temp }}/fastembed-cache
+          key: fastembed-qdrant-all-MiniLM-L6-v2-onnx-main-v1
 
   build-garak-test-image:
     name: Build garak test image
