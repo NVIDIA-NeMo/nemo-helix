@@ -226,7 +226,8 @@ class IntakeService(Service[IntakeConfig]):
         except BaseException:
             # The lifespan never runs on_shutdown when startup failed, so close the
             # pool here instead of leaking its worker processes.
-            await self._stop_atif_ingest_executor(self.atif_ingest_executor)
+            executor, self.atif_ingest_executor = self.atif_ingest_executor, None
+            await self._stop_atif_ingest_executor(executor)
             raise
 
     def _start_rest_of_intake(self, cfg: IntakeConfig, settings: ClickHouseSettings) -> None:
@@ -253,7 +254,12 @@ class IntakeService(Service[IntakeConfig]):
             max_workers=ATIF_INGEST_POOL_WORKERS,
             mp_context=get_context(ATIF_INGEST_POOL_START_METHOD),
         )
-        self._warm_atif_ingest_executor(executor)
+        try:
+            self._warm_atif_ingest_executor(executor)
+        except BaseException:
+            # Warm-up spawns synchronously; a failed second spawn must not leak the first worker.
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
         return executor
 
     def _warm_atif_ingest_executor(self, executor: ProcessPoolExecutor) -> None:
@@ -269,10 +275,12 @@ class IntakeService(Service[IntakeConfig]):
         await asyncio.to_thread(executor.shutdown, True)
 
     def _log_atif_ingest_warmup_failure(self, future: Future[None]) -> None:
+        if future.cancelled():
+            return
         error = future.exception()
         if error is not None:
             logger.warning(
-                "ATIF ingest worker warm-up failed; the first ingest will retry the spawn",
+                "ATIF ingest worker warm-up failed; the next ingest returns 503 and rebuilds the pool",
                 exc_info=error,
                 extra={"service": self.name},
             )
@@ -281,7 +289,7 @@ class IntakeService(Service[IntakeConfig]):
         """Replace a pool whose worker died so later ingests heal instead of failing until restart.
 
         ``ProcessPoolExecutor`` never recovers from a dead worker. Safe under
-        overlapping failures: when the current pool is no longer ``broken``,`
+        overlapping failures: when the current pool is no longer ``broken``,
         another caller already rebuilt it and this call is a no-op.
         """
         if self.atif_ingest_executor is not broken:
@@ -290,7 +298,15 @@ class IntakeService(Service[IntakeConfig]):
             "ATIF ingest worker pool broke; replacing it",
             extra={"service": self.name},
         )
-        self.atif_ingest_executor = self._create_atif_ingest_executor()
+        try:
+            replacement = self._create_atif_ingest_executor()
+        except OSError:
+            logger.exception(
+                "Could not replace the broken ATIF ingest worker pool; the next ingest retries",
+                extra={"service": self.name},
+            )
+            return
+        self.atif_ingest_executor = replacement
         # The broken pool has no live work left; closing it must not block the loop.
         broken.shutdown(wait=False, cancel_futures=True)
 
@@ -324,7 +340,10 @@ class IntakeService(Service[IntakeConfig]):
         if executor is not None:
             # Requests have drained by lifespan shutdown; a straggler mapping still
             # finishes so no offload outlives the service, but off the loop.
-            await self._stop_atif_ingest_executor(executor)
+            try:
+                await self._stop_atif_ingest_executor(executor)
+            except Exception:
+                logger.exception("ATIF ingest worker pool failed to shut down", extra={"service": self.name})
         reconciler = self._reconciler
         self._reconciler = None
         if reconciler is not None:

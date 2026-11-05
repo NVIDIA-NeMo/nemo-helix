@@ -141,6 +141,7 @@ class _RecordingIntakeService:
 
     def __init__(self) -> None:
         self.rebuilt: list[ProcessPoolExecutor] = []
+        self.atif_ingest_executor: ProcessPoolExecutor | None = None
 
     def rebuild_atif_ingest_executor(self, *, broken: ProcessPoolExecutor) -> None:
         self.rebuilt.append(broken)
@@ -193,6 +194,8 @@ async def _ingest(
     denormalizer: _RecordingDenormalizer | None = None,
     intake: _RecordingIntakeService | None = None,
 ) -> FastAPIResponse:
+    intake = intake or _RecordingIntakeService()
+    intake.atif_ingest_executor = executor
     return await ingest_atif(
         workspace="default",
         body=body,
@@ -200,8 +203,7 @@ async def _ingest(
         service=service,  # ty: ignore[invalid-argument-type]
         entity_client=object(),  # ty: ignore[invalid-argument-type]
         denormalizer=denormalizer,  # ty: ignore[invalid-argument-type]
-        executor=executor,
-        intake=intake or _RecordingIntakeService(),  # ty: ignore[invalid-argument-type]
+        intake=intake,  # ty: ignore[invalid-argument-type]
     )
 
 
@@ -226,7 +228,7 @@ def test_atif_ingest_executor_dependency_returns_503_after_shutdown() -> None:
 @pytest.mark.asyncio
 async def test_prepare_atif_batch_pool_output_matches_inline_mapping(atif_pool) -> None:
     """The worker produces exactly the rows the on-loop path built before."""
-    body = _ingest_body()
+    body = _ingest_body(with_verifier=True)
     trajectory = body.to_trajectory()
     ingested_at = utc_now()
     max_subagent_depth = IntakeConfig().atif_max_subagent_depth
@@ -251,6 +253,36 @@ async def test_prepare_atif_batch_pool_output_matches_inline_mapping(atif_pool) 
     assert prepared.span_rows == span_rows_for_insert(spans)
     assert prepared.evaluator_result_rows == evaluator_result_rows_for_insert(evaluator_results)
     assert prepared.span_rows, "the representative trajectory must map to at least one span row"
+    assert prepared.evaluator_result_rows, "the verifier reward must map to an evaluator result row"
+
+
+@pytest.mark.asyncio
+async def test_pool_shut_down_after_the_request_read_it_returns_503() -> None:
+    executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
+    executor.shutdown(wait=True)
+    service = _RecordingSpansService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _ingest(executor, _ingest_body(), service=service)
+
+    assert exc_info.value.status_code == 503
+    assert service.batches == []
+
+
+def test_rebuild_keeps_the_broken_pool_when_the_replacement_cannot_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+    service = IntakeService()
+    broken = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
+    service.atif_ingest_executor = broken
+
+    def _spawn_fails() -> ProcessPoolExecutor:
+        raise OSError("too many open files")
+
+    monkeypatch.setattr(service, "_create_atif_ingest_executor", _spawn_fails)
+    try:
+        service.rebuild_atif_ingest_executor(broken=broken)
+        assert service.atif_ingest_executor is broken
+    finally:
+        broken.shutdown(wait=False, cancel_futures=True)
 
 
 @pytest.mark.flaky(reruns=2)

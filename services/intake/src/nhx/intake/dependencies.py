@@ -64,6 +64,3 @@ def get_atif_ingest_executor(intake: IntakeServiceDep) -> ProcessPoolExecutor:
             detail="ATIF ingest is unavailable; the intake service is not running or is shutting down",
         )
     return executor
-
-
-AtifIngestExecutorDep = Annotated[ProcessPoolExecutor, Depends(get_atif_ingest_executor)]

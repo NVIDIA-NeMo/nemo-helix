@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from concurrent.futures.process import BrokenProcessPool
+from concurrent.futures import Future
+from concurrent.futures.process import BrokenProcessPool, ProcessPoolExecutor
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.dependencies import AtifIngestExecutorDep, IntakeConfigDep, IntakeServiceDep
+from nhx.intake.dependencies import IntakeConfigDep, IntakeServiceDep, get_atif_ingest_executor
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
@@ -27,7 +29,7 @@ from nhx.intake.spans.ingest.atif_domain import (
     validate_atif_v17_subagent_ref_resolution_keys,
 )
 from nhx.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError
-from nhx.intake.spans.ingest.atif_offload import prepare_atif_batch
+from nhx.intake.spans.ingest.atif_offload import PreparedAtifBatch, prepare_atif_batch
 from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from nhx.intake.spans.ingest.evaluation_context_validation import validate_evaluation_context
 from nhx.intake.spans.storage import utc_now
@@ -141,6 +143,25 @@ class AtifIngestRequest(BaseModel):
         )
 
 
+def _submit_atif_batch(
+    executor: ProcessPoolExecutor,
+    workspace: str,
+    trajectory: AtifTrajectory,
+    ingested_at: datetime,
+    max_subagent_depth: int,
+) -> Future[PreparedAtifBatch]:
+    try:
+        return executor.submit(prepare_atif_batch, workspace, trajectory, ingested_at, max_subagent_depth)
+    except BrokenProcessPool:
+        raise
+    except RuntimeError as error:
+        # Shut down by on_shutdown after this request read the pool.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest is unavailable; the intake service is not running or is shutting down",
+        ) from error
+
+
 @router.post(
     "/v2/workspaces/{workspace}/ingest/atif",
     tags=[API_TAG],
@@ -154,7 +175,6 @@ async def ingest_atif(
     service: SpansServiceDep,
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
-    executor: AtifIngestExecutorDep,
     intake: IntakeServiceDep,
 ) -> Response:
     await validate_evaluation_context(
@@ -164,24 +184,25 @@ async def ingest_atif(
     )
     ingested_at = utc_now()
     trajectory = body.to_trajectory()
+    # Read the pool only now: the validation await above can outlast a rebuild or shutdown.
+    executor = get_atif_ingest_executor(intake)
     # Mapping and row building are pure CPU over picklable data, so they run in
     # the service-owned ingest process pool instead of blocking the event loop.
     # A worker exception or a dead worker propagates here and inserts nothing.
-    loop = asyncio.get_running_loop()
     try:
-        prepared = await loop.run_in_executor(
-            executor,
-            prepare_atif_batch,
-            workspace,
-            trajectory,
-            ingested_at,
-            config.atif_max_subagent_depth,
-        )
+        future = _submit_atif_batch(executor, workspace, trajectory, ingested_at, config.atif_max_subagent_depth)
+        prepared = await asyncio.wrap_future(future)
     except AtifTrajectoryDepthError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except BrokenProcessPool as error:
         # A worker died, which permanently breaks a ProcessPoolExecutor. Fail this
         # request (nothing was inserted) and replace the pool so retries heal.
+        logger.error(
+            "ATIF ingest worker died mapping session %s in workspace %s",
+            trajectory.session_id,
+            workspace,
+            exc_info=error,
+        )
         intake.rebuild_atif_ingest_executor(broken=executor)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
