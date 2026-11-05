@@ -4863,12 +4863,14 @@ components:
 
         ``lora`` publishes the HF PEFT adapter. ``lora_merged`` trains the same adapter
 
-         and folds it into the base model at export.'
+        and folds it into the base model at export.'
       x-learning-rate-defaults:
       - value: 1.0e-05
         when:
           finetuning_type: lora
-
+      - value: 1.0e-05
+        when:
+          finetuning_type: lora_merged
     RlJobInput:
       properties:
         name:
