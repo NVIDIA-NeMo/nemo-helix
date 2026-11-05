@@ -13,18 +13,15 @@ import { ChatErrorBanner } from '@nemo/common/src/components/AssistantChat/ChatE
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
-import type { MessageTextSize } from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import type { ReactNode } from 'react';
 
 interface AssistantChatMessageContentProps extends MessageRenderProps {
   contentSurfaceClassName?: string;
-  textSize?: MessageTextSize;
 }
 
 export const AssistantChatMessageContent = ({
   contentSurfaceClassName,
   messageContentProps,
-  textSize,
   toolCallPartComponent: ToolCallPart,
 }: AssistantChatMessageContentProps) => {
   // A failed reply's text is shown as the error banner's message, not in the body.
@@ -48,9 +45,7 @@ export const AssistantChatMessageContent = ({
               return <WorkGroup indices={part.indices}>{children}</WorkGroup>;
             case 'text':
               if (failed || !part.text.trim()) return null;
-              return surface(
-                <MessageContent content={part.text} textSize={textSize} {...messageContentProps} />
-              );
+              return surface(<MessageContent content={part.text} {...messageContentProps} />);
             case 'image':
               return surface(
                 <img

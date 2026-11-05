@@ -4,10 +4,6 @@
 import { messageMarkdownComponents } from '@nemo/common/src/components/Chat/MessageContent/markdownComponents';
 import { MarkdownDataViewTable } from '@nemo/common/src/components/Chat/MessageContent/MarkdownDataViewTable';
 import { remarkNormalizeEmptyOrderedListMarkers } from '@nemo/common/src/components/Chat/MessageContent/remarkPlugin';
-import {
-  MessageTextSizeContext,
-  useMessageTextStyle,
-} from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import type { MessageContentProps } from '@nemo/common/src/components/Chat/MessageContent/types';
 import { splitMessageWithLabels } from '@nemo/common/src/components/Chat/MessageContent/utils';
 import { CodeDisplay } from '@nemo/common/src/components/CodeDisplay';
@@ -33,25 +29,7 @@ export const MessageContent: FC<PropsWithChildren<MessageContentProps>> = ({
   markdownLinkComponent,
   markdownTableOptions,
   renderAsMarkdown = true,
-  textSize = 'md',
-}) => (
-  <MessageTextSizeContext.Provider value={textSize}>
-    <MessageSnippets
-      content={content}
-      markdownLinkComponent={markdownLinkComponent}
-      markdownTableOptions={markdownTableOptions}
-      renderAsMarkdown={renderAsMarkdown}
-    />
-  </MessageTextSizeContext.Provider>
-);
-
-const MessageSnippets: FC<Omit<MessageContentProps, 'textSize'>> = ({
-  content,
-  markdownLinkComponent,
-  markdownTableOptions,
-  renderAsMarkdown,
 }) => {
-  const textStyle = useMessageTextStyle();
   const snippets = useMemo(() => splitMessageWithLabels(content), [content]);
   const markdownComponents = useMemo<Components>(
     () => ({
@@ -70,8 +48,7 @@ const MessageSnippets: FC<Omit<MessageContentProps, 'textSize'>> = ({
       return (
         <div
           className={cn(
-            'max-w-full whitespace-normal font-normal text-primary',
-            textStyle.className,
+            'max-w-full whitespace-normal text-sm font-normal leading-6 text-primary',
             // Code blocks split a reply into snippets; only the reply's opening element loses its
             // top margin, so a heading that follows a code block keeps its spacing.
             index === 0 && '[&>:first-child]:mt-0'

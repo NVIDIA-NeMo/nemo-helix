@@ -3,10 +3,6 @@
 
 import { DEFAULT_MARKDOWN_TABLE_OPTIONS } from '@nemo/common/src/components/Chat/MessageContent/constants';
 import { MarkdownParagraph } from '@nemo/common/src/components/Chat/MessageContent/MarkdownParagraph';
-import {
-  DEFAULT_MESSAGE_TEXT_STYLE,
-  type MessageTextStyle,
-} from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import type {
   ElementWithChildrenProps,
   MarkdownTableData,
@@ -37,10 +33,7 @@ export const isMarkdownParagraphElement = (
 ): node is ReactElement<ElementWithChildrenProps> =>
   isElementWithChildren(node) && (node.type === MarkdownParagraph || isElementNamed(node, 'p'));
 
-export const renderListItemChildren = (
-  children: ReactNode,
-  textStyle: MessageTextStyle = DEFAULT_MESSAGE_TEXT_STYLE
-): ReactNode => {
+export const renderListItemChildren = (children: ReactNode): ReactNode => {
   const childNodes = Children.toArray(children);
   const firstContentIndex = childNodes.findIndex((child) => !isWhitespaceTextNode(child));
   const firstContent = childNodes[firstContentIndex];
@@ -50,8 +43,8 @@ export const renderListItemChildren = (
   }
 
   return [
-    <Text asChild kind={textStyle.kind} key="leading-list-paragraph">
-      <span className={textStyle.className}>{getChildNodes(firstContent)}</span>
+    <Text asChild kind="body/regular/md" key="leading-list-paragraph">
+      <span className="text-sm leading-6">{getChildNodes(firstContent)}</span>
     </Text>,
     ...childNodes.slice(firstContentIndex + 1),
   ];

@@ -5,25 +5,9 @@ import { INLINE_CODE_CLASS } from '@nemo/common/src/components/Chat/MessageConte
 import { renderListItemChildren } from '@nemo/common/src/components/Chat/MessageContent/helpers';
 import { MarkdownDataViewTable } from '@nemo/common/src/components/Chat/MessageContent/MarkdownDataViewTable';
 import { MarkdownParagraph } from '@nemo/common/src/components/Chat/MessageContent/MarkdownParagraph';
-import { useMessageTextStyle } from '@nemo/common/src/components/Chat/MessageContent/textSize';
 import { Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { Components } from 'react-markdown';
-
-const MarkdownListItem: Components['li'] = ({ children, className }) => {
-  const textStyle = useMessageTextStyle();
-  return (
-    <li
-      className={cn(
-        'mb-density-xs whitespace-normal pl-density-xs last:mb-0 [&>p]:my-0',
-        textStyle.className,
-        className
-      )}
-    >
-      {renderListItemChildren(children, textStyle)}
-    </li>
-  );
-};
 
 // Headings step down from 18px so each level reads above the 14px reply text. Their top margin
 // is only dropped at the very start of a reply (see MessageContent), not after a code block.
@@ -68,7 +52,16 @@ export const messageMarkdownComponents: Components = {
       {children}
     </ol>
   ),
-  li: MarkdownListItem,
+  li: ({ children, className }) => (
+    <li
+      className={cn(
+        'mb-density-xs whitespace-normal pl-density-xs text-sm leading-6 last:mb-0 [&>p]:my-0',
+        className
+      )}
+    >
+      {renderListItemChildren(children)}
+    </li>
+  ),
   hr: () => <hr className="my-density-md border-base" />,
   blockquote: ({ children, className }) => (
     <blockquote
