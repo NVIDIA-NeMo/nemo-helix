@@ -159,8 +159,10 @@ trial appears when its task Job finishes.
   can't be read ends `failed` with a `plan_unreadable: …` error, even if tasks succeeded: ask the operator.
 - Trial errors (agent install fails, agent crashes) are stored on the trial; the task Job still succeeds.
   `max_retries` in the spec reruns an errored trial up to that many times, each in a new sandbox.
-- Failed task Jobs aren't rerun. Find them with `nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed`, then
-  resubmit those indexes with `--taskset <taskset_ref>`; `runs status --json` has `taskset_ref`.
+- Failed task Jobs aren't rerun. Find them with
+  `nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed --page-size 1000` (if it ends with
+  `next: --page N`, list that page too), then resubmit those indexes with `--taskset <taskset_ref>`;
+  `runs status --json` has `taskset_ref`.
   This starts a new run; use a fresh key if the spec pins an `idempotency_key`.
 - Same `--idempotency-key` and identical request → the existing run. Same key, changed request → HTTP 409.
   After an unclear submit failure, use the already-published taskset, the original settings and publication
