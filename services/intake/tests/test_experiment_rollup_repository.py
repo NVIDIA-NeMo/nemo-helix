@@ -3,7 +3,7 @@
 
 """Evaluation rollup repository tests."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
@@ -204,10 +204,28 @@ async def test_evaluation_rollups_bound_sessions_to_created_after():
     )
 
     # The bound lands on the scoped-session SQL, so every rollup query (run counts,
-    # scores, metrics) sees it, with the instant as an inclusive lower bound.
+    # scores, metrics) sees it, with the instant as an inclusive lower bound. One requested
+    # name emits a bare conjunct — the OR form would block partition pruning on root_started_at.
     for query in executor.queries:
         assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
-        assert "evaluation_name != %(evaluation_name_0)s" in query.statement
+        assert "evaluation_name !=" not in query.statement
+        assert query.parameters["created_after_0"] == _CREATED_AFTER_US
+
+
+@pytest.mark.asyncio
+async def test_evaluation_rollups_floor_created_after_to_whole_second():
+    executor = _Executor(_empty_results())
+    repository = _repository(executor)
+
+    await repository.get_rollups(
+        workspace="default",
+        evaluation_names=["exp-a"],
+        # A sub-second created_at must not drop a run whose whole-second start time falls in
+        # the same second as the Evaluation's creation.
+        created_after_by_name={"exp-a": _CREATED_AFTER + timedelta(microseconds=123456)},
+    )
+
+    for query in executor.queries:
         assert query.parameters["created_after_0"] == _CREATED_AFTER_US
 
 

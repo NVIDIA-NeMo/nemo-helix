@@ -148,6 +148,21 @@ class EvaluationDenormalizer(BackgroundWorker):
             and evaluation.model_names == rollup.model_names
         ):
             return
+        # The rollup took multiple ClickHouse round trips, so the entity read before it may be
+        # stale. update() resolves the row by name and only checks db_version, and a recreated
+        # namesake starts at the same db_version, so writing the stale object could stamp the
+        # deleted evaluation's payload onto the recreated entity. Re-read and verify identity.
+        try:
+            current = await self._entity_client.get(Experiment, name=evaluation.name, workspace=evaluation.workspace)
+        except EntityNotFoundError:
+            # Deleted between the rollup and the write; nothing to update.
+            return
+        if current.id != evaluation.id:
+            # Deleted and recreated during the rollup: this rollup is bounded to the deleted
+            # lifetime, so its facets belong to the old entity. Requeue; the next cycle refreshes
+            # the recreated entity with its own created_at bound.
+            self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
+            return
         evaluation.agent_names = rollup.agent_names
         evaluation.agent_versions = rollup.agent_versions
         evaluation.model_names = rollup.model_names

@@ -204,6 +204,10 @@ class EvaluationReadService:
                 ),
                 True,
             )
+        except KeyError:
+            # A missing created_after_by_name entry is a caller bug, not a ClickHouse outage;
+            # fail loudly instead of reporting every rollup as unavailable.
+            raise
         except Exception:
             logger.exception("Skipping evaluation rollup hydration because ClickHouse is unavailable")
             return {}, False

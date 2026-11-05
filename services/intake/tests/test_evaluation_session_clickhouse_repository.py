@@ -193,6 +193,27 @@ async def test_list_sessions_bound_applies_to_plain_page_query() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_sessions_floors_created_after_to_whole_second() -> None:
+    created_after = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    executor = _Executor([[{"count()": 0}]])
+
+    await _repository(executor).list_sessions(
+        workspace="default",
+        evaluation_name="evaluation-a",
+        created_after=created_after,
+        page=1,
+        page_size=10,
+        mode="summary",
+    )
+
+    # A sub-second created_at must not drop a session whose whole-second start time falls in
+    # the same second as the Evaluation's creation.
+    assert executor.queries[0].parameters["created_after_us"] == int(
+        created_after.replace(microsecond=0).timestamp() * 1_000_000
+    )
+
+
+@pytest.mark.asyncio
 async def test_metric_sort_uses_bounded_page_then_restores_hydration_order() -> None:
     executor = _Executor(
         [

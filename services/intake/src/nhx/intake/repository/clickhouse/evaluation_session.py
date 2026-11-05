@@ -26,13 +26,13 @@ from nhx.intake.repository.evaluation_session import (
 from nhx.intake.spans.domain import IntakeResponseMode, SpanStatus
 from nhx.intake.spans.span_rollups import summed_metric_columns, usage_sql
 from nhx.intake.spans.storage import (
+    created_after_bound_micros,
     float_or_none,
     int_or_none,
     normalize_span_status,
     str_or_none,
     text_query_parameters,
     text_select_for_mode,
-    to_unix_micros,
 )
 
 # Sort fields that require a pre-pagination spans join to compute. These values live in the
@@ -95,7 +95,7 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
-        created_after: datetime | None = None,
+        created_after: datetime | None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
@@ -113,7 +113,9 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
             if created_after is not None
             else ""
         )
-        created_after_parameters = {} if created_after is None else {"created_after_us": to_unix_micros(created_after)}
+        created_after_parameters = (
+            {} if created_after is None else {"created_after_us": created_after_bound_micros(created_after)}
+        )
 
         base_parameters: dict[str, Any] = {
             "workspace": workspace,

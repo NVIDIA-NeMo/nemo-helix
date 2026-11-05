@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
@@ -370,7 +371,7 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
 
 
 def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: TestClient) -> None:
-    """GH #3183: deleting an Evaluation frees its name, and a recreated Evaluation must not
+    """Deleting an Evaluation frees its name, and a recreated Evaluation must not
     inherit the deleted one's runs. Its rollup and session list are bounded to its own
     created_at: empty before its own publish, a row started before created_at stays out,
     and a row started after it is counted alone.
@@ -408,6 +409,11 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
 
     deleted = client.delete(f"{EVALUATIONS}/{evaluation_name}")
     assert deleted.status_code == 204, deleted.text
+
+    # The lifetime bound is floored to the whole second, so the recreate must land in a strictly
+    # later second than the deleted lifetime's run for the exclusion below to be deterministic
+    # even when delete and recreate happen within the same wall-clock second.
+    time.sleep(1.1)
 
     second = client.post(EVALUATIONS, json=body)
     assert second.status_code == 201, second.text

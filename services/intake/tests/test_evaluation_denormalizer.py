@@ -63,6 +63,7 @@ class _FakeEntityClient:
         update_error: Exception | None = None,
         existing: Experiment | None = None,
         created_at: datetime | None = None,
+        replace_after_first_get: Experiment | Exception | None = None,
     ) -> None:
         self.updated: list[Experiment] = []
         self.get_calls: list[tuple[str, str]] = []
@@ -70,9 +71,16 @@ class _FakeEntityClient:
         self._update_error = update_error
         self._existing = existing
         self._created_at = created_at
+        self._replace_after_first_get = replace_after_first_get
 
     async def get(self, entity_type: type[Experiment], *, name: str, workspace: str) -> Experiment:
         self.get_calls.append((name, workspace))
+        # Simulate the entity changing under the denormalizer mid-cycle: the first get loads the
+        # pre-rollup entity, later gets see its replacement (or its disappearance).
+        if self._replace_after_first_get is not None and len(self.get_calls) > 1:
+            if isinstance(self._replace_after_first_get, Exception):
+                raise self._replace_after_first_get
+            return self._replace_after_first_get
         if self._get_error is not None:
             raise self._get_error
         if self._existing is not None:
@@ -216,6 +224,47 @@ async def test_deleted_evaluation_is_skipped() -> None:
     await refresher.flush()
     # A deleted entity writes no facets; its name may already belong to a new evaluation.
     assert repo.calls == []
+    assert entity_client.updated == []
+    assert refresher.pending() == set()
+
+
+@pytest.mark.asyncio
+async def test_recreated_namesake_during_rollup_is_requeued_not_written() -> None:
+    # The entity is deleted and its name recreated while the rollup runs: update() resolves by
+    # name and only checks db_version (equal here), so without an identity re-check the stale
+    # payload would land on the recreated entity.
+    created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    old = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    old._created_at = created_at
+    old._id = "old-entity-id"
+    replacement = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds-new")
+    replacement._id = "new-entity-id"
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(existing=old, replace_after_first_get=replacement)
+    refresher = _refresher(repo, entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    # The rollup ran bounded to the deleted lifetime's created_at, but its facets never reached
+    # the recreated namesake; the name is requeued so the next cycle refreshes it with its own bound.
+    assert repo.calls == [("default", ["eval-a"], {"eval-a": created_at})]
+    assert entity_client.updated == []
+    assert refresher.pending() == {("default", "eval-a")}
+
+
+@pytest.mark.asyncio
+async def test_evaluation_deleted_during_rollup_is_skipped() -> None:
+    # Deleted between the rollup and the write: nothing to update, and nothing requeued —
+    # the evaluation no longer exists.
+    repo = _FakeRollupRepo()
+    entity_client = _FakeEntityClient(replace_after_first_get=EntityNotFoundError("gone"))
+    refresher = _refresher(repo, entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    assert repo.calls == [("default", ["eval-a"], {"eval-a": None})]
     assert entity_client.updated == []
     assert refresher.pending() == set()
 

@@ -60,7 +60,7 @@ class EvaluationSessionRepository(ABC):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
-        created_after: datetime | None = None,
+        created_after: datetime | None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
@@ -69,8 +69,9 @@ class EvaluationSessionRepository(ABC):
         """Return one page of sessions for an Evaluation.
 
         ``created_after`` bounds the sessions to those whose ``root_started_at`` is at or after that
-        instant (inclusive). ``None`` keeps the name-only match. Callers pass the Evaluation entity's
-        ``created_at`` so an Evaluation recreated under a deleted Evaluation's name does not list the
-        deleted one's sessions.
+        instant (inclusive, floored to the whole second so second-truncated producer timestamps do
+        not lose the first run). ``None`` keeps the name-only match. Callers pass the Evaluation
+        entity's ``created_at`` so an Evaluation recreated under a deleted Evaluation's name does not
+        list the deleted one's sessions.
         """
         pass

@@ -13,7 +13,7 @@ from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository, ScoreRollup
 from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
 from nhx.intake.spans.span_rollups import USAGE_SUPERSEDED_EXPRESSION, USAGE_TIER_EXPRESSION, session_total, usage_sql
-from nhx.intake.spans.storage import float_or_none, to_unix_micros
+from nhx.intake.spans.storage import created_after_bound_micros, float_or_none
 
 
 class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
@@ -128,17 +128,27 @@ def _created_after_bound_sql(
     lifetime. A name with a bound only sees sessions at or after its Evaluation's creation; ``None``
     keeps the name-only match (legacy entities carry no created_at, and the bound must not invent one).
     """
-    clauses: list[str] = []
-    parameters: dict[str, int] = {}
-    for index, evaluation_name in enumerate(evaluation_names):
-        created_after = created_after_by_name[evaluation_name]
-        if created_after is None:
-            continue
-        parameters[f"created_after_{index}"] = to_unix_micros(created_after)
-        clauses.append(
+    bounded: list[tuple[int, datetime]] = []
+    for index, name in enumerate(evaluation_names):
+        created_after = created_after_by_name[name]
+        if created_after is not None:
+            bounded.append((index, created_after))
+    if not bounded:
+        return "", {}
+    parameters = {
+        f"created_after_{index}": created_after_bound_micros(created_after) for index, created_after in bounded
+    }
+    if len(bounded) == 1 and len(evaluation_names) == 1:
+        # One requested name: the name filter is already an equality, so a bare conjunct is
+        # equivalent — and unlike the OR form it lets ClickHouse prune partitions on
+        # root_started_at (the GET and denormalizer paths).
+        clauses = ["root_started_at >= fromUnixTimestamp64Micro(%(created_after_0)s)"]
+    else:
+        clauses = [
             f"(evaluation_name != %(evaluation_name_{index})s"
             f" OR root_started_at >= fromUnixTimestamp64Micro(%(created_after_{index})s))"
-        )
+            for index, _created_after in bounded
+        ]
     return "".join(f"\n            AND {clause}" for clause in clauses), parameters
 
 

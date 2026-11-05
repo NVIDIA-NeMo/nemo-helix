@@ -8,7 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from nhx.common.api.common import PaginationData
@@ -28,11 +28,23 @@ def to_unix_micros(value: datetime) -> int:
     """Datetime to Unix microseconds, as consumed by ``fromUnixTimestamp64Micro``.
 
     Naive values read as UTC: entity-store timestamps are UTC, and a local-time reading would
-    silently shift an Evaluation lifetime bound by the server's offset.
+    silently shift an Evaluation lifetime bound by the server's offset. Integer arithmetic keeps
+    exact microsecond resolution (a float seconds product can round at current epoch scale).
     """
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return int(value.timestamp() * 1_000_000)
+    return (value - datetime(1970, 1, 1, tzinfo=timezone.utc)) // timedelta(microseconds=1)
+
+
+def created_after_bound_micros(created_after: datetime) -> int:
+    """Inclusive ``root_started_at`` lifetime lower bound, floored to the whole second.
+
+    Producers commonly truncate span start times to whole seconds, so a run starting in the same
+    second as the Evaluation's creation must not fall below the bound and silently vanish from
+    rollups and session lists. The delete/recreate cycles this bound exists to separate are
+    seconds-to-minutes apart, so the floor cannot pull the deleted namesake's runs back in.
+    """
+    return to_unix_micros(created_after.replace(microsecond=0))
 
 
 def stable_id(*parts: str, prefix: str | None = None) -> str:

@@ -52,7 +52,7 @@ class _SessionRepository(EvaluationSessionRepository):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
-        created_after: datetime | None = None,
+        created_after: datetime | None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
@@ -167,6 +167,22 @@ async def test_list_evaluations_degrades_when_rollups_fail() -> None:
     assert result.rollups_available is False
     assert result.evaluations[0].entity is evaluation
     assert result.evaluations[0].rollup is None
+
+
+@pytest.mark.asyncio
+async def test_missing_created_after_entry_is_raised_not_masked_as_clickhouse_outage() -> None:
+    # A missing created_after_by_name entry is a caller bug, not a ClickHouse outage: it must
+    # surface instead of silently reading as "rollups unavailable".
+    client, _, get_mock = _entity_client()
+    get_mock.return_value = _evaluation("eval-1")
+    service = EvaluationReadService(
+        entity_client=client,
+        rollup_repository=_RollupRepository(KeyError("created_after_by_name is missing entries for: eval-1")),
+        session_repository=None,
+    )
+
+    with pytest.raises(KeyError, match="created_after_by_name"):
+        await service.get_evaluation(workspace="default", name="eval-1")
 
 
 @pytest.mark.asyncio
