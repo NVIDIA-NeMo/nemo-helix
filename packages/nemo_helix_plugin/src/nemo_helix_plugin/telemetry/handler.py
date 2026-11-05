@@ -99,6 +99,8 @@ def build_payload(
 ) -> dict[str, Any]:
     if not events:
         raise ValueError("build_payload requires at least one event")
+    if any(queued.event._schema_version != events[0].event._schema_version for queued in events):
+        raise ValueError("build_payload requires a single event schema version")
     return {
         "browserType": "undefined",
         "clientId": CLIENT_ID,
@@ -132,7 +134,7 @@ def build_payload(
         "events": [
             {
                 "ts": _get_iso_timestamp(queued.timestamp),
-                "parameters": queued.event.model_dump(by_alias=True, mode="json"),
+                "parameters": queued.event.model_dump(by_alias=True, mode="json", exclude_none=True),
                 "name": queued.event._event_name,
             }
             for queued in events

@@ -76,13 +76,8 @@ class TestWireContractSmoke:
         queued = QueuedEvent(event=event, timestamp=datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc))
         payload = build_payload([queued], source_client_version="1.0.0", session_id="test")
 
-        # Envelope keys must match exactly.
-        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS, (
-            f"Envelope keys mismatch: {set(payload.keys()) ^ EXPECTED_ENVELOPE_KEYS}"
-        )
-
-        # Schema version must be 1.10.
-        assert payload["eventSchemaVer"] == "1.10"
+        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS
+        assert payload["eventSchemaVer"] == "1.12"
 
         # Must be JSON serializable.
         json_str = json.dumps(payload)
@@ -113,13 +108,8 @@ class TestWireContractSmoke:
         queued = QueuedEvent(event=event, timestamp=datetime(2026, 1, 1, 13, 0, 0, tzinfo=timezone.utc))
         payload = build_payload([queued], source_client_version="1.2.3", session_id="cmd-test")
 
-        # Envelope keys must match exactly.
-        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS, (
-            f"Envelope keys mismatch: {set(payload.keys()) ^ EXPECTED_ENVELOPE_KEYS}"
-        )
-
-        # Schema version must be 1.10.
-        assert payload["eventSchemaVer"] == "1.10"
+        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS
+        assert payload["eventSchemaVer"] == "1.12"
 
         # Must be JSON serializable.
         json_str = json.dumps(payload)
@@ -151,13 +141,8 @@ class TestWireContractSmoke:
         queued = QueuedEvent(event=event, timestamp=datetime(2026, 1, 1, 14, 0, 0, tzinfo=timezone.utc))
         payload = build_payload([queued], source_client_version="2.0.0", session_id="job-test")
 
-        # Envelope keys must match exactly.
-        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS, (
-            f"Envelope keys mismatch: {set(payload.keys()) ^ EXPECTED_ENVELOPE_KEYS}"
-        )
-
-        # Schema version must be 1.10.
-        assert payload["eventSchemaVer"] == "1.10"
+        assert set(payload.keys()) == EXPECTED_ENVELOPE_KEYS
+        assert payload["eventSchemaVer"] == "1.12"
 
         # Must be JSON serializable.
         json_str = json.dumps(payload)

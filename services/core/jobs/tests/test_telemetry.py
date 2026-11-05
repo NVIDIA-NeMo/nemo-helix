@@ -34,6 +34,9 @@ def test_build_job_run_telemetry_uses_stamped_session_id() -> None:
     assert event.event.model == "defined"
     assert event.event.input_tokens == 12
     assert event.event.output_tokens == 7
+    assert event.event.token_counts_source == "job-summary"
+    # Two different recognized tools are not attributed arbitrarily to one.
+    assert event.event.tool_category == "unknown"
 
 
 def test_build_job_run_telemetry_returns_none_without_session_id() -> None:
@@ -67,7 +70,7 @@ def test_build_payload_matches_job_run_wire_contract() -> None:
         session_id=event.session_id,
     )
 
-    assert payload["eventSchemaVer"] == "1.10"
+    assert payload["eventSchemaVer"] == "1.12"
     assert payload["sessionId"] == "session-123"
     assert payload["events"][0]["name"] == "job_run"
     assert payload["events"][0]["ts"] == "2026-09-10T12:00:00.123Z"
@@ -79,6 +82,30 @@ def test_build_payload_matches_job_run_wire_contract() -> None:
     assert params["model"] == "undefined"
     assert params["inputTokens"] == -1
     assert params["outputTokens"] == -1
+    assert params["tokenCountsSource"] == "unknown"
+    assert params["toolCategory"] == "unknown"
+
+
+@pytest.mark.parametrize(
+    "raw,expected", [(None, -1), (0, 0), ("12", 12), (-2, -1), (True, -1), (float("inf"), -1), (2**63, -1)]
+)
+def test_token_count_provenance_and_bounds(raw: object, expected: int) -> None:
+    telemetry = build_job_run_telemetry(
+        source="custom",
+        status="completed",
+        status_details={"input_tokens": raw},
+        custom_fields=build_job_telemetry_custom_fields(
+            "session-123", plugins=["nemo-agent-optimization-plugin-run-strategy"]
+        ),
+        created_at=None,
+        updated_at=None,
+    )
+    assert telemetry is not None
+    assert telemetry.event.input_tokens == expected
+    assert telemetry.event.output_tokens == -1
+    assert telemetry.event.token_counts_source == ("job-summary" if expected >= 0 else "unknown")
+    assert telemetry.event.tool_category == "agent-optimization"
+    assert telemetry.event.event_id.version == 4
 
 
 def test_redact_endpoint_strips_query_and_credentials() -> None:

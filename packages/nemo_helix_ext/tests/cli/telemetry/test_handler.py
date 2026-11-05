@@ -142,6 +142,22 @@ class TestBuildPayload:
         payload = build_payload([self._make_queued()], source_client_version="1.0.0")
         assert payload["cpuArchitecture"] == "undefined"
 
+    def test_event_id_survives_rebuilding_a_retry_payload(self):
+        queued = self._make_queued()
+        first = build_payload([queued], source_client_version="test")
+        queued.retry_count += 1
+        retry = build_payload([queued], source_client_version="test")
+        assert first["events"][0]["parameters"]["eventId"] == retry["events"][0]["parameters"]["eventId"]
+
+    def test_mixed_schema_versions_are_rejected(self):
+        class OldEvent(_StubEvent):
+            _schema_version: ClassVar[str] = "1.10"
+
+        old = self._make_queued()
+        old.event = OldEvent()
+        with pytest.raises(ValueError, match="single event schema version"):
+            build_payload([old, self._make_queued()], source_client_version="test")
+
     def test_empty_events_raises(self):
         with pytest.raises(ValueError):
             build_payload([], source_client_version="1.0.0")

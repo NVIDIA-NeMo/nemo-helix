@@ -13,7 +13,7 @@ from importlib import metadata
 from typing import Any
 
 from nemo_helix_plugin.jobs.telemetry import get_job_telemetry_plugins, get_job_telemetry_session_id
-from nemo_helix_plugin.telemetry.events import JobRunEvent, TaskStatusEnum
+from nemo_helix_plugin.telemetry.events import JobRunEvent, TaskStatusEnum, job_tool_category
 from nemo_helix_plugin.telemetry.handler import TelemetryHandler
 
 logger = logging.getLogger(__name__)
@@ -65,12 +65,13 @@ def _model_data_bucket(raw_model: object) -> str:
 
 def _token_count(details: dict[str, Any], key: str) -> int:
     raw_value = details.get(key)
-    if raw_value is None:
+    if raw_value is None or isinstance(raw_value, bool):
         return -1
     try:
-        return int(raw_value)
-    except (TypeError, ValueError):
+        count = int(raw_value)
+    except (TypeError, ValueError, OverflowError):
         return -1
+    return count if 0 <= count <= 9223372036854775807 else -1
 
 
 def _duration_sec(created_at: datetime | None, updated_at: datetime | None) -> float:
@@ -96,14 +97,19 @@ def build_job_run_telemetry(
         return None
 
     details = status_details if isinstance(status_details, dict) else {}
+    plugins = get_job_telemetry_plugins(custom_fields)
+    input_tokens = _token_count(details, "input_tokens")
+    output_tokens = _token_count(details, "output_tokens")
     event = JobRunEvent(
         job_type=_job_type_bucket(source),
+        tool_category=job_tool_category(source.strip().lower().replace("_", "-"), plugins),
+        token_counts_source="job-summary" if input_tokens >= 0 or output_tokens >= 0 else "unknown",
         task_status=_STATUS_MAP.get(status, TaskStatusEnum.UNDEFINED),
         duration_sec=_duration_sec(created_at, updated_at),
-        plugins=get_job_telemetry_plugins(custom_fields),
+        plugins=plugins,
         model=_model_data_bucket(details.get("model")),
-        input_tokens=_token_count(details, "input_tokens"),
-        output_tokens=_token_count(details, "output_tokens"),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
     return JobRunTelemetry(event=event, session_id=session_id)
 
