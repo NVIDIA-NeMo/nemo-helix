@@ -5,7 +5,9 @@
 
 import asyncio
 import logging
+from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import replace
+from multiprocessing import get_context
 from pathlib import Path
 from typing import ClassVar, List
 
@@ -33,6 +35,17 @@ logger = logging.getLogger(__name__)
 
 # Interruptible pause between failed local ClickHouse reconciles. Tests set this to 0.
 LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS = 5.0
+
+# Worker processes that run the CPU-heavy part of ATIF ingest (mapping and row
+# building). Two workers overlap back-to-back trajectories without competing for
+# many cores. The spawn start method keeps workers from inheriting a forked copy
+# of this multithreaded server process.
+ATIF_INGEST_POOL_WORKERS = 2
+ATIF_INGEST_POOL_START_METHOD = "spawn"
+
+
+def _atif_ingest_worker_noop() -> None:
+    """Trivial task that pre-spawns an ingest worker during startup."""
 
 
 class _LocalClickHouseProvisioner(BackgroundWorker):
@@ -128,6 +141,9 @@ class IntakeService(Service[IntakeConfig]):
         super().__init__(name="intake", module_name="nhx.intake")
         # The client is owned by the service lifecycle; it is absent before startup and after shutdown.
         self.clickhouse_client: ClickHouseSpanClient | None = None
+        # Process pool that runs ATIF mapping and row building off the event loop;
+        # absent before startup and after shutdown.
+        self.atif_ingest_executor: ProcessPoolExecutor | None = None
         # Background worker that denormalizes agent/model name fields onto Evaluation entities.
         self.denormalizer: EvaluationDenormalizer | None = None
         self._local_clickhouse_data_dir: Path | None = None
@@ -204,6 +220,12 @@ class IntakeService(Service[IntakeConfig]):
         self._reconciler = None
         cfg = self.service_config or IntakeConfig()
         settings = ClickHouseSettings.from_config(cfg)
+        # Start the ingest worker pool first so the spawn cost overlaps the rest of startup.
+        self.atif_ingest_executor = ProcessPoolExecutor(
+            max_workers=ATIF_INGEST_POOL_WORKERS,
+            mp_context=get_context(ATIF_INGEST_POOL_START_METHOD),
+        )
+        self._warm_atif_ingest_executor()
         # The denormalizer needs a service-principal entity client (no request context).
         self._denormalizer_entity_client = self.dependency_provider.get_service_entity_client(self.name)
         if self._denormalizer_entity_client is None:
@@ -221,6 +243,23 @@ class IntakeService(Service[IntakeConfig]):
             self.clickhouse_client = ClickHouseSpanClient(settings)
             self._start_denormalizer(self.clickhouse_client)
         self._ready = True
+
+    def _warm_atif_ingest_executor(self) -> None:
+        """Pre-spawn one ingest worker so the first ATIF ingest skips interpreter startup."""
+        executor = self.atif_ingest_executor
+        if executor is None:
+            return
+        future = executor.submit(_atif_ingest_worker_noop)
+        future.add_done_callback(self._log_atif_ingest_warmup_failure)
+
+    def _log_atif_ingest_warmup_failure(self, future: Future[None]) -> None:
+        error = future.exception()
+        if error is not None:
+            logger.warning(
+                "ATIF ingest worker warm-up failed; the first ingest will retry the spawn",
+                exc_info=error,
+                extra={"service": self.name},
+            )
 
     def _adopt_reconciled_clickhouse(self, url: str, settings: ClickHouseSettings, data_dir: Path | None) -> None:
         """Install the reconciled client. No await, so shutdown cannot interleave mid-assign."""
@@ -244,10 +283,15 @@ class IntakeService(Service[IntakeConfig]):
         self.denormalizer.start()
 
     async def on_shutdown(self) -> None:
-        """Close the client and stop the managed local ClickHouse container."""
+        """Stop the ingest pool, close the client, and stop the managed local ClickHouse container."""
 
         self._ready = False
         self._readiness_message = ""
+        executor, self.atif_ingest_executor = self.atif_ingest_executor, None
+        if executor is not None:
+            # In-flight requests have drained by shutdown time; wait for any
+            # remaining worker so no offload outlives the service.
+            executor.shutdown(wait=True)
         reconciler = self._reconciler
         self._reconciler = None
         if reconciler is not None:

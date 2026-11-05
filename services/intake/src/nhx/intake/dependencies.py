@@ -5,6 +5,7 @@
 
 import logging
 from collections.abc import AsyncIterator
+from concurrent.futures import ProcessPoolExecutor
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
@@ -52,3 +53,17 @@ def get_intake_config(intake: IntakeServiceDep) -> IntakeConfig:
 
 
 IntakeConfigDep = Annotated[IntakeConfig, Depends(get_intake_config)]
+
+
+def get_atif_ingest_executor(intake: IntakeServiceDep) -> ProcessPoolExecutor:
+    """Require the ATIF ingest process pool owned by the running Intake service."""
+    executor = intake.atif_ingest_executor
+    if executor is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ATIF ingest is not running; the intake service is shutting down",
+        )
+    return executor
+
+
+AtifIngestExecutorDep = Annotated[ProcessPoolExecutor, Depends(get_atif_ingest_executor)]

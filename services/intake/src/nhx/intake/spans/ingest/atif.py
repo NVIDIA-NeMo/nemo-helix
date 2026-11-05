@@ -5,14 +5,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.dependencies import IntakeConfigDep
+from nhx.intake.dependencies import AtifIngestExecutorDep, IntakeConfigDep
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
-from nhx.intake.spans.domain import TraceBatch
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
     AtifFinalMetrics,
@@ -24,11 +24,8 @@ from nhx.intake.spans.ingest.atif_domain import (
     validate_atif_tool_call_references,
     validate_atif_v17_subagent_ref_resolution_keys,
 )
-from nhx.intake.spans.ingest.atif_mapping import (
-    AtifTrajectoryDepthError,
-    trajectory_to_evaluator_results,
-    trajectory_to_spans,
-)
+from nhx.intake.spans.ingest.atif_mapping import AtifTrajectoryDepthError
+from nhx.intake.spans.ingest.atif_offload import prepare_atif_batch
 from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from nhx.intake.spans.ingest.evaluation_context_validation import validate_evaluation_context
 from nhx.intake.spans.storage import utc_now
@@ -153,6 +150,7 @@ async def ingest_atif(
     service: SpansServiceDep,
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
+    executor: AtifIngestExecutorDep,
 ) -> Response:
     await validate_evaluation_context(
         workspace=workspace,
@@ -161,24 +159,27 @@ async def ingest_atif(
     )
     ingested_at = utc_now()
     trajectory = body.to_trajectory()
-    max_subagent_depth = config.atif_max_subagent_depth
+    # Mapping and row building are pure CPU over picklable data, so they run in
+    # the service-owned ingest process pool instead of blocking the event loop.
+    # A worker exception or a dead worker propagates here and inserts nothing.
+    loop = asyncio.get_running_loop()
     try:
-        spans = trajectory_to_spans(
-            workspace=workspace,
-            trajectory=trajectory,
-            ingested_at=ingested_at,
-            max_subagent_depth=max_subagent_depth,
+        prepared = await loop.run_in_executor(
+            executor,
+            prepare_atif_batch,
+            workspace,
+            trajectory,
+            ingested_at,
+            config.atif_max_subagent_depth,
         )
     except AtifTrajectoryDepthError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    evaluator_results = trajectory_to_evaluator_results(
-        workspace=workspace,
-        trajectory=trajectory,
-        spans=spans,
-        ingested_at=ingested_at,
-        max_subagent_depth=max_subagent_depth,
+    # The awaited insert is the commit point for the 201: when it raises, the
+    # trajectory is not stored and the denormalizer is never marked dirty.
+    await service.ingest_prepared_batch(
+        span_rows=prepared.span_rows,
+        evaluator_result_rows=prepared.evaluator_result_rows,
     )
-    await service.ingest_batch(TraceBatch(spans=spans, evaluator_results=evaluator_results))
     context = body.evaluation_context
     if denormalizer is not None and context is not None and context.evaluation_name:
         denormalizer.mark_dirty(workspace=workspace, evaluation_name=context.evaluation_name)

@@ -1045,6 +1045,89 @@ def test_atif_ingest_rejects_unknown_keys_outside_content_parts(
     assert forbidden_key in ingest_response.text
 
 
+def _verifier_trajectory_body(session_id: str) -> dict:
+    """A minimal trajectory whose verifier scores become evaluator_results rows."""
+    verifier_started_at = _BASE_TIME + timedelta(minutes=1)
+    verifier_finished_at = _BASE_TIME + timedelta(minutes=2)
+    return {
+        "schema_version": "ATIF-v1.6",
+        "session_id": session_id,
+        "agent": {"name": "test-agent", "version": "1.0"},
+        "steps": [
+            {"step_id": 1, "source": "user", "message": "hello"},
+            {"step_id": 2, "source": "agent", "message": "done"},
+        ],
+        "extra": {
+            "verifier": {
+                "started_at": _atif_timestamp(verifier_started_at),
+                "finished_at": _atif_timestamp(verifier_finished_at),
+            },
+            "verifier_result": {"rewards": {"reward": 0.5, "format_check": 1}},
+        },
+    }
+
+
+def test_atif_ingest_stores_verifier_rewards_as_evaluator_results(client: TestClient):
+    """One ingest returns 201 and the stored evaluator results still match the mapper."""
+    body = _verifier_trajectory_body("atif-evaluator-results")
+
+    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert ingest_response.status_code == 201, ingest_response.text
+
+    spans_response = client.get(
+        "/apis/intake/v2/workspaces/default/spans",
+        params={
+            "filter[session_id]": body["session_id"],
+            "filter[started_at][gte]": _HISTORICAL_GTE,
+            "page_size": 50,
+            "sort": "started_at",
+        },
+    )
+    assert spans_response.status_code == 200, spans_response.text
+    evaluator_span = next(span for span in spans_response.json()["data"] if span["kind"] == "EVALUATOR")
+
+    results_response = client.get(
+        "/apis/intake/v2/workspaces/default/evaluator-results",
+        params={"filter[session_id]": body["session_id"], "page_size": 50},
+    )
+    assert results_response.status_code == 200, results_response.text
+    by_name = {result["name"]: result for result in results_response.json()["data"]}
+    assert set(by_name) == {"reward", "format_check"}
+    reward = by_name["reward"]
+    assert reward["span_id"] == evaluator_span["span_id"]
+    assert reward["session_id"] == body["session_id"]
+    assert reward["workspace"] == "default"
+    assert reward["value"] == 0.5
+    assert reward["data_type"] == "NUMERIC"
+    assert reward["status"] == "SCORED"
+    assert reward["created_by"] == "intake:atif_importer"
+    assert by_name["format_check"]["value"] == 1
+
+
+def test_atif_ingest_runs_on_the_service_process_pool(client: TestClient, intake_service: IntakeService):
+    """The pool lives with the service: present during requests, gone after shutdown."""
+    assert intake_service.atif_ingest_executor is not None
+
+    body = _verifier_trajectory_body("atif-pool-lifecycle")
+    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert ingest_response.status_code == 201, ingest_response.text
+
+
+def test_intake_service_shuts_down_atif_process_pool(intake_config: IntakeConfig, intake_service: IntakeService):
+    """Shutdown closes the pool, so no late offload can outlive the service."""
+    with create_test_client(
+        lambda: intake_service,
+        client_type=TestClient,
+        service_configs={IntakeService: intake_config},
+    ):
+        executor = intake_service.atif_ingest_executor
+        assert executor is not None
+
+    assert intake_service.atif_ingest_executor is None
+    with pytest.raises(RuntimeError, match="shutdown"):
+        executor.submit(int)
+
+
 def _create_experiment(client: TestClient, name: str) -> str:
     group_id = _ensure_group(client)
     response = client.post(

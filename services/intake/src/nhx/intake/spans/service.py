@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from nhx.common.api.common import PaginatedResult
 from nhx.intake.repository.annotations import AnnotationsRepository
@@ -86,6 +87,21 @@ class IntakeSpansService:
         await self._spans.save_spans(batch.spans)
         if batch.evaluator_results:
             await self._evaluator_results.save_evaluator_results(batch.evaluator_results)
+
+    async def ingest_prepared_batch(
+        self,
+        *,
+        span_rows: list[list[Any]],
+        evaluator_result_rows: list[list[Any]],
+    ) -> None:
+        """Insert rows that an ingest worker process built off the event loop.
+
+        Mirrors ``ingest_batch``: spans first, then evaluator results. This
+        awaited insert is the commit point of an ATIF ingest ``201``.
+        """
+        await self._spans.insert_span_rows(span_rows)
+        if evaluator_result_rows:
+            await self._evaluator_results.insert_evaluator_result_rows(evaluator_result_rows)
 
     async def list_spans(
         self,

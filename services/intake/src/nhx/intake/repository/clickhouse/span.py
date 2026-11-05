@@ -86,12 +86,25 @@ class _SpanStorageRef:
         )
 
 
+def span_rows_for_insert(spans: list[IntakeSpan]) -> list[list[Any]]:
+    """Build ClickHouse insert rows for spans, in SPAN_INSERT_COLUMNS order.
+
+    Pure function over picklable data, so the ATIF ingest worker can call it in
+    its process pool; ``ClickHouseSpanRepository.insert_span_rows`` consumes the
+    result on the event loop.
+    """
+    return [dict_to_row(_span_to_row(span), SPAN_INSERT_COLUMNS) for span in spans]
+
+
 class ClickHouseSpanRepository(SpanRepository):
     def __init__(self, executor: ClickHouseExecutor) -> None:
         self._executor = executor
 
     async def save_spans(self, spans: list[IntakeSpan]) -> None:
-        rows = [dict_to_row(_span_to_row(span), SPAN_INSERT_COLUMNS) for span in spans]
+        await self.insert_span_rows(span_rows_for_insert(spans))
+
+    async def insert_span_rows(self, rows: list[list[Any]]) -> None:
+        """Insert rows prebuilt by ``span_rows_for_insert``; column order is fixed."""
         await self._executor.insert(
             ClickHouseInsert(
                 name="spans.save",
