@@ -28,7 +28,7 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import MAX_REVISION, ContainerImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
-from nemo_builder_plugin.settle import JobStatus, settle
+from nemo_builder_plugin.settle import JobStatus, job_status_from, settle
 from nemo_builder_plugin.submit import (
     BuildConflict,
     InvalidBuildRequest,
@@ -67,15 +67,11 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
 async def _job_status(workspace: str, name: str) -> HelixJobStatus | None:
     # As the builder, not the reader: a reader who may not see the job must not have it taken for missing.
     async with get_async_nemo_client(as_service="builder", internal=True) as client:
-        try:
-            response = await AsyncJobsClient.from_client(client).get_job_status(workspace=workspace, name=name)
-        except NotFoundError:
-            return None
-    return response.data().status
+        return await job_status_from(AsyncJobsClient.from_client(client))(workspace, name)
 
 
 def get_job_status() -> JobStatus:
-    """How the image routes read a build job's status, to settle the images it abandoned."""
+    """How reading an image reads its build job's status, to settle it if the job abandoned it."""
     return _job_status
 
 
@@ -196,17 +192,16 @@ def _build_router() -> APIRouter:
         status: Literal["pending", "ready", "failed"] | None = Query(
             default=None,
             description=(
-                "Only images in this state. The images found abandoned as they are listed fail then, so `failed` "
-                "leaves out the abandoned ones nothing has read yet."
+                "Only images in this stored state. The `builder-settle` controller fails an abandoned `pending` "
+                "image within a minute or so, so until then `pending` includes it and `failed` doesn't."
             ),
         ),
         page_params: PageParams = Depends(make_page_dep(max_size=100)),
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
-        job_status: JobStatus = Depends(get_job_status),
     ) -> list[ContainerImage]:
-        """List the images in a workspace, in whatever state they are in, or only one job's or one build set's.
+        """List the images in a workspace, in whatever state they are stored in, or only one job's or one build set's.
 
-        A `pending` image whose job has ended, or that has had no job for five minutes, is failed as it is listed.
+        Listing doesn't settle: the `builder-settle` controller fails the abandoned ones.
         """
         filters: dict[str, object] = {}
         if job is not None:
@@ -224,8 +219,7 @@ def _build_router() -> APIRouter:
             page=page_params.page,
             page_size=page_params.page_size,
         )
-        images = await settle(entity_client, response.data, job_status)
-        return [image for image in images if status is None or image.status == status]
+        return response.data
 
     @router.get("/container-images/{name}", response_model=ContainerImage, tags=["Builder"])
     @scope.read

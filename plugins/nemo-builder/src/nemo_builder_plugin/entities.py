@@ -4,9 +4,9 @@
 """``ContainerImage``: one row per image a build publishes.
 
 The builder writes a row ``pending`` when the build is submitted. It becomes ``ready`` when the image's push step
-has pushed and signed the image and completes it, or ``failed`` when the submit is refused, or when a read finds its
-job ended without completing it (see ``settle``). The builder's routes never change a row after that, but they aren't
-the only way to write one: see the README's Security limitations.
+has pushed and signed the image and completes it, or ``failed`` when the submit is refused, or once its job is found
+to have ended without completing it (see ``settle``). The builder never changes a row after that, but it isn't the
+only way to write one: see the README's Security limitations.
 """
 
 from __future__ import annotations

@@ -98,26 +98,20 @@ class TestListingOneJobsImages:
         assert response.status_code == 422
         entities.list.assert_not_awaited()
 
-    def test_the_images_whose_job_ended_fail_as_they_are_listed(self) -> None:
-        entities = _entities(_row())
-        page = MagicMock()
-        page.data = [_row(), _row("ready", DIGEST)]
-        entities.list.return_value = page
-        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
-        response = TestClient(_app(entities, job_status=job_status)).get("/v2/workspaces/ws-a/container-images")
-        assert response.status_code == 200
-        assert [image["status"] for image in response.json()] == ["failed", "ready"]
-        job_status.assert_awaited_once_with("ws-a", "build-1")
-
-    def test_an_image_that_failed_as_it_was_listed_leaves_a_status_filter(self) -> None:
+    def test_listing_returns_the_stored_status_and_asks_jobs_nothing(self) -> None:
+        """Settling as it lists would move rows out of a `status` filter between pages: builder-settle does it."""
         entities = _entities(_row())
         page = MagicMock()
         page.data = [_row()]
         entities.list.return_value = page
-        app = _app(entities, job_status=AsyncMock(return_value=HelixJobStatus.CANCELLED))
-        response = TestClient(app).get("/v2/workspaces/ws-a/container-images", params={"status": "pending"})
+        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
+        response = TestClient(_app(entities, job_status=job_status)).get(
+            "/v2/workspaces/ws-a/container-images", params={"status": "pending"}
+        )
         assert response.status_code == 200
-        assert response.json() == []
+        assert [image["status"] for image in response.json()] == ["pending"]
+        job_status.assert_not_awaited()
+        entities.update.assert_not_awaited()
 
 
 DIGEST = "sha256:" + "d" * 64
