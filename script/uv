@@ -15,6 +15,10 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 if [[ "${TOOLCHAIN:-}" == "system" ]]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "TOOLCHAIN=system requires uv on PATH." >&2
+    exit 1
+  fi
   exec uv "$@"
 fi
 

@@ -11,6 +11,7 @@ interaction is driven by stubs on PATH.
 
 import json
 import os
+import re
 import stat
 import subprocess
 from collections.abc import Callable
@@ -21,6 +22,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SHIM = REPO_ROOT / "script" / "uv"
 UV_LOCK_SCRIPT = REPO_ROOT / "script" / "uv-lock.sh"
+GENERATE_OPENAPI_SCRIPT = REPO_ROOT / "script" / "generate-openapi-spec.sh"
 PRE_COMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 
 # Shell scripts whose uv invocations must route through script/uv.
@@ -32,12 +34,26 @@ SHELL_SURFACES = {
     "tools/lint/run-ty-check.sh": "script/uv",
 }
 
-# Pre-commit hook entries whose uv invocations must route through script/uv.
+# Pre-commit hook entries that must reference script/uv. Every entry in the
+# config is additionally scanned for a bare uv command.
 PRE_COMMIT_UV_HOOKS = (
     "config-reference-docs",
     "copyright-fix",
     "skill-frontmatter-lint",
 )
+
+# `uv` in command position: line start, after a shell command separator, after
+# `(` (which covers command substitution like $(uv ...)), or after a command
+# keyword. Catches the bare-uv shapes without flagging prose or identifiers.
+BARE_UV_COMMAND_RE = re.compile(
+    r"""(?:^|[;&|(]|\b(?:exec|command|do|then|else)\s+)"""
+    r"""(?:\s|[A-Za-z_][A-Za-z_0-9]*=(?:"[^"]*"|'[^']*'|[^\s"']*)\s*)*"""
+    r"""\buv(?:\s|$)"""
+)
+
+# Shell metacharacters that can precede a command, used to split pre-commit
+# entry strings such as `bash -c 'uv run ...'` into command tokens.
+ENTRY_TOKEN_SPLIT_RE = re.compile(r"""[\s;|&()$'"]+""")
 
 STUB = """\
 #!/usr/bin/env python3
@@ -49,7 +65,12 @@ record_dir = os.environ["RECORD_DIR"]
 name = os.path.basename(sys.argv[0])
 with open(os.path.join(record_dir, name + ".json"), "w") as handle:
     json.dump(sys.argv, handle)
-if sys.argv[1:] == ["--version"]:
+args = sys.argv[1:]
+if name == "flox" and args[-2:] == ["uv", "--version"]:
+    # The root Flox environment's activate profile writes banners to stdout.
+    print("NeMo Helix")
+    print("uv 0.13.4")
+elif args == ["--version"]:
     print("uv 0.0.0")
 raise SystemExit(0)
 """
@@ -72,6 +93,7 @@ def make_stub_env(
         toolchain: str | None = None,
         flox_env_project: str | None = None,
         include_flox: bool = True,
+        include_uv: bool = True,
     ) -> dict[str, str]:
         env = dict(os.environ)
         env["RECORD_DIR"] = str(record_dir)
@@ -86,6 +108,10 @@ def make_stub_env(
             env["FLOX_ENV_PROJECT"] = flox_env_project
         if not include_flox:
             (bin_dir / "flox").unlink()
+        if not include_uv:
+            (bin_dir / "uv").unlink()
+            # Drop host tool locations so a real uv on PATH cannot leak in.
+            env["PATH"] = str(bin_dir) + os.pathsep + "/usr/bin:/bin"
         return env
 
     def record(name: str) -> list[str] | None:
@@ -97,16 +123,22 @@ def make_stub_env(
     return make_env, record
 
 
-def run_shim(
+def run_shim(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    # Exec the shim directly, the way make ($(CURDIR)/script/uv) and the
+    # pre-commit entries (script/uv) do: a non-executable blob fails here too.
+    return subprocess.run([str(SHIM), *args], env=env, capture_output=True, text=True, check=False)
+
+
+def run_script(
     env: dict[str, str],
+    script: Path,
     *args: str,
-    cwd: Path | None = None,
-    script: Path | None = None,
+    cwd: Path = REPO_ROOT,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(script or SHIM), *args],
+        ["bash", str(script), *args],
         env=env,
-        cwd=None if cwd is None else str(cwd),
+        cwd=str(cwd),
         capture_output=True,
         text=True,
         check=False,
@@ -120,6 +152,15 @@ def test_toolchain_system_execs_path_uv_without_flox(tmp_path: Path) -> None:
     uv_args = record("uv")
     assert uv_args is not None
     assert uv_args[1:] == ["--version"]
+    assert record("flox") is None
+
+
+def test_toolchain_system_without_uv_reports_how_to_proceed(tmp_path: Path) -> None:
+    make_env, record = make_stub_env(tmp_path)
+    result = run_shim(make_env(toolchain="system", include_uv=False), "--version")
+    assert result.returncode != 0
+    assert "TOOLCHAIN=system" in result.stderr
+    assert "uv" in result.stderr
     assert record("flox") is None
 
 
@@ -142,6 +183,19 @@ def test_active_flox_env_matches_resolved_path(tmp_path: Path) -> None:
     assert record("flox") is None
 
 
+def test_other_flox_env_still_activates_repo_env(tmp_path: Path) -> None:
+    """FLOX_ENV_PROJECT pointing at a different Flox env must not shortcut."""
+    make_env, record = make_stub_env(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    result = run_shim(make_env(flox_env_project=str(elsewhere)), "--version")
+    assert result.returncode == 0, result.stderr
+    flox_args = record("flox")
+    assert flox_args is not None
+    assert flox_args[1:] == ["-q", "activate", "--dir", str(REPO_ROOT), "--", "uv", "--version"]
+    assert record("uv") is None
+
+
 def test_unactivated_shell_runs_uv_via_flox(tmp_path: Path) -> None:
     make_env, record = make_stub_env(tmp_path)
     result = run_shim(make_env(), "lock", "--check")
@@ -160,28 +214,31 @@ def test_missing_flox_reports_how_to_proceed(tmp_path: Path) -> None:
     assert "TOOLCHAIN=system" in result.stderr
 
 
-def test_makefile_routes_uv_through_shim() -> None:
-    text = (REPO_ROOT / "Makefile").read_text()
-    assert "UV := $(CURDIR)/script/uv" in text
-    assert "UV := $(FLOX_EXEC) uv" not in text
-
-
 def test_uv_lock_version_mismatch_does_not_suggest_curl(tmp_path: Path) -> None:
     make_env, record = make_stub_env(tmp_path)
-    result = run_shim(make_env(toolchain="system"), cwd=REPO_ROOT, script=UV_LOCK_SCRIPT)
+    result = run_script(make_env(toolchain="system"), UV_LOCK_SCRIPT)
     assert result.returncode != 0
     assert "curl" not in result.stderr
+    assert "uv 0.13.4" in result.stderr
     assert "flox -q activate" in result.stderr
     assert "TOOLCHAIN=system" in result.stderr
 
 
+def test_uv_lock_tolerates_flox_activate_stdout(tmp_path: Path) -> None:
+    """The version gate must survive Flox profile banners around uv output."""
+    make_env, record = make_stub_env(tmp_path)
+    result = run_script(make_env(), UV_LOCK_SCRIPT)
+    assert result.returncode == 0, result.stderr
+    # The version check ran through flox, then the lock ran through flox again.
+    flox_args = record("flox")
+    assert flox_args is not None
+    assert flox_args[1:] == ["-q", "activate", "--dir", str(REPO_ROOT), "--", "uv", "lock"]
+    assert record("uv") is None
+
+
 def test_generate_openapi_spec_routes_through_shim(tmp_path: Path) -> None:
     make_env, record = make_stub_env(tmp_path)
-    result = run_shim(
-        make_env(toolchain="system"),
-        cwd=REPO_ROOT,
-        script=REPO_ROOT / "script" / "generate-openapi-spec.sh",
-    )
+    result = run_script(make_env(toolchain="system"), GENERATE_OPENAPI_SCRIPT)
     assert result.returncode == 0, result.stderr
     uv_args = record("uv")
     assert uv_args is not None
@@ -189,17 +246,19 @@ def test_generate_openapi_spec_routes_through_shim(tmp_path: Path) -> None:
     assert record("flox") is None
 
 
-def tokenize(line: str) -> list[str]:
-    return [token for raw in line.split() if (token := raw.strip("'\""))]
+def test_makefile_routes_uv_through_shim() -> None:
+    text = (REPO_ROOT / "Makefile").read_text()
+    assert 'UV := "$(CURDIR)/script/uv"' in text
+    assert "UV := $(FLOX_EXEC) uv" not in text
 
 
 def bare_uv_lines(text: str) -> list[int]:
-    """Line numbers of comment-stripped lines whose tokens include bare `uv`."""
+    """Line numbers of comment-stripped lines with `uv` in command position."""
     offenders = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         if line.lstrip().startswith("#"):
             continue
-        if "uv" in tokenize(line):
+        if BARE_UV_COMMAND_RE.search(line):
             offenders.append(lineno)
     return offenders
 
@@ -231,7 +290,14 @@ def pre_commit_entries(text: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize("hook_id", PRE_COMMIT_UV_HOOKS)
-def test_pre_commit_entries_do_not_invoke_bare_uv(hook_id: str) -> None:
+def test_pre_commit_uv_hooks_reference_shim(hook_id: str) -> None:
     entry = pre_commit_entries(PRE_COMMIT_CONFIG.read_text())[hook_id]
     assert "script/uv" in entry, f"{hook_id} must route uv through script/uv"
-    assert "uv" not in tokenize(entry), f"{hook_id} entry invokes bare uv: {entry}"
+
+
+def test_no_pre_commit_entry_invokes_bare_uv() -> None:
+    """Guards every entry, not just today's known uv hooks."""
+    entries = pre_commit_entries(PRE_COMMIT_CONFIG.read_text())
+    assert entries, "pre-commit entry parsing found no entries"
+    offenders = [(hook_id, entry) for hook_id, entry in entries.items() if "uv" in ENTRY_TOKEN_SPLIT_RE.split(entry)]
+    assert not offenders, f"pre-commit entries invoke bare uv: {offenders}"
