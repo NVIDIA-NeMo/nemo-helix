@@ -468,6 +468,8 @@ async def test_virtual_model_proxy_typed_context_defaults_unset_backend_format_t
 @pytest.mark.asyncio
 async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_context(mock_proxy_client):
     seen_clients: list[AsyncNemoClient | None] = []
+    seen_image_urls: list[str] = []
+    files_requests: list[httpx.Request] = []
 
     class _ContextPlugin(NemoInferenceMiddleware):
         async def process_request(
@@ -477,7 +479,17 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
             middleware_config: object,
         ) -> ImmediateResponse:
             seen_clients.append(ctx.request_nemo_client)
+            for body in (request.body, ctx.original_request.body):
+                seen_image_urls.append(body["messages"][0]["content"][0]["image_url"]["url"])
             return ImmediateResponse(data={"ok": True})
+
+    async def image_bytes() -> AsyncIterator[bytes]:
+        yield b"png-bytes"
+
+    def files_handler(request: httpx.Request) -> httpx.Response:
+        files_requests.append(request)
+        # A streamed body, like the Files service sends (a bytes body counts as already read).
+        return httpx.Response(200, content=image_bytes())
 
     workspace = "e2e-test"
     vm_name = "my-router"
@@ -491,7 +503,7 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
     request.headers = {"content-type": "application/json"}
     request.query_params = {}
 
-    async with httpx.AsyncClient() as http_client:
+    async with httpx.AsyncClient(transport=httpx.MockTransport(files_handler)) as http_client:
         request_nemo_client = AsyncNemoClient(
             base_url="http://platform.test",
             default_headers={"traceparent": "00-request"},
@@ -507,7 +519,12 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
                 workspace=workspace,
             ),
             trailing_uri="v1/chat/completions",
-            json_body={"model": vm_name, "messages": [{"role": "user", "content": "hi"}]},
+            json_body={
+                "model": vm_name,
+                "messages": [
+                    {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "fileset://pics#a.png"}}]}
+                ],
+            },
             http_client=mock_proxy_client,
             model_cache=ModelCache(),
             registry=registry,
@@ -518,6 +535,11 @@ async def test_virtual_model_proxy_adds_request_nemo_client_to_middleware_contex
     body = json.loads(await _read_streaming_response(response))
     assert body == {"ok": True}
     assert seen_clients == [request_nemo_client]
+    # The fileset image is fetched with the caller's client and inlined before middleware and the snapshot.
+    assert [(r.url.path, r.headers["traceparent"]) for r in files_requests] == [
+        (f"/apis/files/v2/workspaces/{workspace}/filesets/pics/-/a.png", "00-request")
+    ]
+    assert seen_image_urls == ["data:image/png;base64,cG5nLWJ5dGVz"] * 2
     mock_proxy_client.request.assert_not_called()
 
 

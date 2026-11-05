@@ -195,10 +195,11 @@ def test_compile_mounts_memory_backed_shm_on_main_containers_only(shm_size: str 
     assert [m["mountPath"] for m in own["volumeMounts"]] == ["/dev/shm"]
     assert own["volumeMounts"][0]["name"] == "user-shm"
     assert "volumeMounts" not in pod_spec["init_containers"][0]
-    # The generated volume's name is reserved.
+    # A configured volume already named "dshm" keeps working; shared memory takes another name.
     clash = config.model_copy(update={"volume_mounts": [VolumeMount(name="dshm", mountPath="/data")]})
-    with pytest.raises(ValueError, match="reserved for shm_size"):
-        compile_config(clash)
+    clash_spec = _serialized(compile_config(clash).pod_spec_kwargs)
+    assert {"name": "dshm-1", "emptyDir": {"medium": "Memory", "sizeLimit": "32Gi"}} in clash_spec["volumes"]
+    assert {"name": "dshm-1", "mountPath": "/dev/shm"} in clash_spec["containers"][0]["volumeMounts"]
 
 
 def test_compile_applies_k8s_deployment_config() -> None:

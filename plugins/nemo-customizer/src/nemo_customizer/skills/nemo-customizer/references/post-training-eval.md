@@ -109,7 +109,7 @@ Training and evaluation use the **same CHAT JSONL row shape**:
 
 The **final** turn is the label; every earlier turn is context. Send `messages[:-1]` and score against `messages[-1].content`. Do not flatten the rows to `prompt` / `expected`, and do not send the label turn; a model without a chat template gets its prompt from the completions template in **Hand-off to nemo-evals**.
 
-An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label is a string, so the reference stays `{{ item.messages[-1].content }}`. A relative `image_url` is the fileset path the trainer reads. The inference gateway does not have that fileset, so a prompt sent there needs a `data:` URL or a URL the gateway can fetch.
+An image row keeps the part list on the user turn. Send `messages[:-1]` with those image parts intact. The assistant label is a string, so the reference stays `{{ item.messages[-1].content }}`. A relative `image_url` is the fileset path the trainer reads, and the inference gateway does not resolve it. Rewrite it to `fileset://<workspace>/<fileset>#<path>` with the dataset's fileset, which the gateway inlines with the caller's permissions, or send a `data:` URL.
 
 ## Reading the result
 
@@ -141,7 +141,7 @@ vLLM accepts max ranks of 1, 8, 16, 32, 64, 128, 256, 320, 512. An inline `deplo
 - `--enable-expert-parallel`: whole experts per GPU, for high-concurrency serving. NVIDIA's cookbook uses it only in text-only throughput setups.
 - `--skip-mm-profiling`: faster startup, but vLLM stops reserving vision-encoder memory, so large images under load can run out of GPU memory.
 
-On Blackwell GPUs add `--mm-encoder-attn-backend TORCH_SDPA`. Send images to the deployment as `data:` URLs; it does not read fileset paths.
+On Blackwell GPUs add `--mm-encoder-attn-backend TORCH_SDPA`. Send images as `data:` URLs, as `fileset://<workspace>/<fileset>#<path>` references, which the gateway inlines on every route (PNG, JPEG, GIF, or WebP; at most 25 MiB), or as `http(s)` URLs, which the deployment downloads itself; `--allowed-media-domains <host> ...` in `additional_args` limits those hosts. Neither the gateway nor the deployment reads local paths.
 
 **Pick the engine.** Deploy with **`engine: vllm`** by default; it is also the default for an inline `deployment_config` on the job. Use `engine: nim` only when the user asks for NIM or has a model-specific NIM image for the model. When using NIM for a Hugging Face checkpoint:
 

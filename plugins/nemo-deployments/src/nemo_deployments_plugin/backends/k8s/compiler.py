@@ -533,10 +533,16 @@ def _build_config_file_volume(configmap_name: str, config_files: list[ConfigFile
     )
 
 
-def _build_shm_volume(shm_size: str) -> Any:
+def _build_shm_volume(shm_size: str, taken_names: set[str]) -> Any:
+    # Pick a name no configured volume uses, so an existing mount named "dshm" keeps working.
+    name = SHM_VOLUME_NAME
+    suffix = 1
+    while name in taken_names:
+        name = f"{SHM_VOLUME_NAME}-{suffix}"
+        suffix += 1
     k8s = k8s_client_module()
     return k8s.client.V1Volume(
-        name=SHM_VOLUME_NAME,
+        name=name,
         empty_dir=k8s.client.V1EmptyDirVolumeSource(medium="Memory", size_limit=shm_size),
     )
 
@@ -625,9 +631,8 @@ def compile_workload(
         for container in config.containers
     ]
     if config.shm_size:
-        if any(mount.name == SHM_VOLUME_NAME for mount in pvc_mounts):
-            raise ValueError(f"Volume name {SHM_VOLUME_NAME!r} is reserved for shm_size; rename the volume mount.")
-        volumes = [*volumes, _build_shm_volume(config.shm_size)]
+        shm_volume = _build_shm_volume(config.shm_size, {volume.name for volume in volumes})
+        volumes = [*volumes, shm_volume]
         k8s = k8s_client_module()
         for main_container in main_containers:
             # A container that already mounts something at /dev/shm keeps its own mount.
@@ -635,7 +640,7 @@ def compile_workload(
                 continue
             main_container.volume_mounts = [
                 *(main_container.volume_mounts or []),
-                k8s.client.V1VolumeMount(name=SHM_VOLUME_NAME, mount_path="/dev/shm"),
+                k8s.client.V1VolumeMount(name=shm_volume.name, mount_path="/dev/shm"),
             ]
 
     pod_spec_kwargs: dict[str, Any] = {

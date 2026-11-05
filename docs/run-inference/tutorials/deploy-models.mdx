@@ -832,7 +832,8 @@ The platform adds these `vllm serve` flags:
 | ---- | ----- | ---- | --- |
 | `--max-model-len` | `114688` | Always | vLLM cannot fit a KV cache for the model's native 1M-token context and exits at startup. |
 | `--reasoning-parser` | `nemotron_v3` | Always | Returns the model's thinking in the response's `reasoning` field, separate from the answer in `content`. |
-| `--tool-call-parser`, `--enable-auto-tool-choice` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
+| `--tool-call-parser` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
+| `--enable-auto-tool-choice` | (no value) | Same as `--tool-call-parser` | Lets the model decide when to call a tool. |
 | `--mamba-ssm-cache-dtype` | `float32` | Always | Precision of the state the Mamba layers carry between tokens. |
 | `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | Always | At most one image and one video per request. |
 | `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model with an MTP layer, without LoRA | Faster generation; see below. |
@@ -864,7 +865,19 @@ These flags are off by default. Add one to `additional_args` when its tradeoff s
 
 On Kubernetes, set `executor_config.disk_size` to fit the checkpoint, because the default `50Gi` [weights volume](#model-weights-volume) is too small: at least `300Gi` for BF16 and `100Gi` for NVFP4.
 
-Send images in the request as `data:` URLs. The server does not read file or fileset paths.
+Send each image in the request in one of three forms:
+
+- A `data:` URL that carries the image bytes inline.
+- A fileset reference, `fileset://<workspace>/<fileset>#<path>`, or `fileset://<fileset>#<path>` for a fileset in the request's workspace. The gateway downloads the file with your permissions and replaces the reference with a `data:` URL before the request reaches middleware or the model. The file must be PNG, JPEG, GIF, or WebP, as named by its extension, and at most 25 MiB. Fileset references work on every gateway route: by model entity, through the OpenAI-compatible endpoint, and by provider.
+- An `http://` or `https://` URL. The model server downloads the image itself, so it needs network access to that host. To limit which hosts it downloads from, list them with `--allowed-media-domains`:
+
+  ```json
+  "additional_args": ["--allowed-media-domains", "upload.wikimedia.org", "images.example.com"]
+  ```
+
+  A URL on any other host is rejected. `data:` URLs and fileset references are not affected, because they reach the server as inline bytes.
+
+Neither the gateway nor the model server reads local file paths, and the gateway rejects `file://` URLs.
 
 <Tabs>
 
@@ -964,6 +977,27 @@ response = InferenceGatewayClient.from_client(client).provider_post(
             ],
         }],
         # Thinking tokens count toward max_tokens
+        "max_tokens": 2048,
+    }),
+)
+
+# Or reference an image stored in a fileset; the gateway inlines it for you
+client.files.create_fileset(body=CreateFilesetRequest(name="receipts"), exist_ok=True)
+with open("receipt.png", "rb") as f:
+    client.files.upload_file(name="receipts", path="receipt.png", content=f.read())
+
+response = InferenceGatewayClient.from_client(client).model_post(
+    name="super-vl-bf16",
+    trailing_uri="v1/chat/completions",
+    body=JsonBody({
+        "model": "default/super-vl-bf16",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": "fileset://default/receipts#receipt.png"}},
+                {"type": "text", "text": "What is the total on this receipt?"},
+            ],
+        }],
         "max_tokens": 2048,
     }),
 )
