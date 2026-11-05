@@ -31,9 +31,9 @@ describe('MessageContent', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: 'Overview' })).toHaveClass(
       'mb-density-sm',
-      'mt-density-2xl',
-      'first:mt-0'
+      'mt-density-2xl'
     );
+    expect(screen.getByTestId('chat-message-content-text')).toHaveClass('[&>:first-child]:mt-0');
     expect(screen.getByRole('heading', { level: 2, name: 'Plan' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: 'Plan' })).toHaveClass(
       'mb-density-sm',
@@ -60,6 +60,24 @@ describe('MessageContent', () => {
       'last:mb-0',
       '[&>p]:my-0'
     );
+  });
+
+  it('keeps the top margin on a heading that follows a code block', () => {
+    render(<MessageContent content={'Intro.\n\n```bash\nls\n```\n\n### After the code'} />);
+
+    expect(screen.getByRole('heading', { level: 3, name: 'After the code' })).toHaveClass(
+      'mt-density-lg'
+    );
+    const [intro, afterCode] = screen.getAllByTestId('chat-message-content-text');
+    expect(intro).toHaveClass('[&>:first-child]:mt-0');
+    expect(afterCode).toHaveTextContent('After the code');
+    expect(afterCode).not.toHaveClass('[&>:first-child]:mt-0');
+  });
+
+  it('indents bullet lists like ordered lists so markers stay inside the reply', () => {
+    render(<MessageContent content={'- One\n- Two'} />);
+
+    expect(screen.getByRole('list')).toHaveClass('pl-density-2xl');
   });
 
   it('keeps loose ordered list content aligned with the number marker', () => {

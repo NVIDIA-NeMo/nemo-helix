@@ -64,14 +64,17 @@ const MessageSnippets: FC<Omit<MessageContentProps, 'textSize'>> = ({
     [markdownLinkComponent, markdownTableOptions]
   );
 
-  return snippets.map((descriptor) => {
+  return snippets.map((descriptor, index) => {
     const contentHash = simpleHash(descriptor.value);
     if (descriptor.type === 'plaintext') {
       return (
         <div
           className={cn(
             'max-w-full whitespace-normal font-normal text-primary',
-            textStyle.className
+            textStyle.className,
+            // Code blocks split a reply into snippets; only the reply's opening element loses its
+            // top margin, so a heading that follows a code block keeps its spacing.
+            index === 0 && '[&>:first-child]:mt-0'
           )}
           data-testid="chat-message-content-text"
           key={`plaintext-${contentHash}`}
