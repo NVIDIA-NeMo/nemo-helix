@@ -8,6 +8,7 @@ import os
 import tarfile
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, auto
@@ -1491,7 +1492,7 @@ def job_route_factory(
             # doesn't fit this collection is not this collection's Job: 404, not a render 500.
             if job_resp.source != service_name:
                 try:
-                    job_output_adapter.validate_python(job_resp.spec)
+                    job_output_adapter.validate_python(deepcopy(job_resp.spec))
                 except ValidationError as exc:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{name}' not found"

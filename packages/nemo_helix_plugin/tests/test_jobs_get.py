@@ -21,12 +21,19 @@ import pytest
 from fastapi import FastAPI
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client
 from nemo_helix_plugin.jobs.api_factory import job_route_factory
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from starlette.testclient import TestClient
 
 
 class _WidgetSpec(BaseModel):
     color: str
+
+    @field_validator("color", mode="before")
+    @classmethod
+    def _read_legacy_color(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            return value.pop("value")
+        return value
 
 
 def _fake_compiler(workspace, original_spec, transformed_spec, entity_client, job_name, async_client):
@@ -102,3 +109,30 @@ def test_get_another_collections_job_is_404(client: TestClient) -> None:
 
     assert resp.status_code == 404, resp.text
     assert resp.json()["detail"] == "Job 'run-1-task-0' not found"
+
+
+def test_get_pre_rename_job_with_mutating_validator(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        _RECORDS,
+        "widget-legacy",
+        _job_record(name="widget-legacy", source="old-widgets.paint", spec={"color": {"value": "green"}}),
+    )
+
+    resp = client.get("/apis/widgets/v2/workspaces/default/jobs/widget-legacy")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["spec"] == {"color": "green"}
+
+
+def test_get_own_source_invalid_spec_is_500(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(
+        _RECORDS,
+        "widget-broken",
+        _job_record(name="widget-broken", source="widgets.paint", spec={"colour": "red"}),
+    )
+
+    with TestClient(client.app, raise_server_exceptions=False) as unraised_client:
+        resp = unraised_client.get("/apis/widgets/v2/workspaces/default/jobs/widget-broken")
+
+    assert resp.status_code == 500, resp.text
+    assert resp.json()["detail"].startswith("failed to render job config:")
