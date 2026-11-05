@@ -646,9 +646,11 @@ ENV NVTE_FRAMEWORK=pytorch \
     NVTE_BUILD_MAX_JOBS=2 \
     CUDNN_HOME=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn \
     CUDNN_PATH=/opt/venv/lib/python3.13/site-packages/nvidia/cudnn
+# Keep this in lockstep with nvidia-cudnn-cu13 in NeMo-RL's uv.lock: TE resolves
+# cuDNN sublibraries at runtime against whichever copy the venv installs.
 RUN uv pip install --python /opt/venv/bin/python \
     --extra-index-url https://pypi.org/simple \
-    "nvidia-cudnn-cu13==9.20.0.48" && \
+    "nvidia-cudnn-cu13==9.26.0.51" && \
     build-rl-cuda-ext-wheel.sh sdist "transformer-engine-torch==2.18.0"
 
 # One /wheels directory, one architecture per platform build.

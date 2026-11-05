@@ -17,12 +17,20 @@ from nemo_evals.harbor.compose.models import (
     ComposeError,
     ComposeImage,
     ComposeMainSettings,
+    ComposeSecurity,
     ComposeService,
     ComposeTask,
+    ComposeTmpfs,
     ComposeVolumeMount,
 )
 from nemo_evals.harbor.compose.parser import parse_compose
-from nhx_sandbox.harbor_opensandbox_services import MAIN_SERVICE, RESERVED_NAMES, RESERVED_PORTS, ComposeServices
+from nhx_sandbox.harbor_opensandbox_services import (
+    MAIN_SERVICE,
+    RESERVED_NAMES,
+    RESERVED_PORTS,
+    ComposeServices,
+    egress_api_port_for,
+)
 from pydantic import ValidationError
 
 # The bounds of ``MainReadiness.timeout_sec`` in ``ComposeServices``.
@@ -68,6 +76,18 @@ def to_compose_services(task: ComposeTask, images: Mapping[str, str] | None = No
     if task.main.readiness is None and wait_budget_sec > MIN_READY_TIMEOUT_SEC:
         # With no readiness check on `main`, there's nowhere else to carry a wait longer than the default.
         spec["services_timeout_sec"] = _clamped_timeout_sec(wait_budget_sec)
+
+    # The egress sidecar's policy API listens on 18080 too. If `main` or a service needs that port, move the API
+    # instead. `main` counts as well: every container in the pod shares one network.
+    container_ports = [port.port for port in task.main.ports]
+    for service in task.services.values():
+        container_ports.extend(port.port for port in service.ports)
+    try:
+        egress_api_port = egress_api_port_for(container_ports)
+    except ValueError as error:
+        raise ComposeError("compose_reserved_port", str(error), compose_path=task.compose_path) from error
+    if egress_api_port is not None:
+        spec["egress_api_port"] = egress_api_port
 
     # `ComposeServices` is the sandbox's own model, so whatever it rejects would also fail on the server. The parser
     # has already refused what Compose would, so anything rejected here is a limit of the sandbox, not of Compose.
@@ -217,6 +237,27 @@ def _mount_spec(mount: ComposeVolumeMount, volume_names: Mapping[str, str]) -> d
     return {"name": volume_names[mount.name], "mount_path": mount.mount_path, "read_only": mount.read_only}
 
 
+def _security_and_tmpfs_spec(security: ComposeSecurity | None, tmpfs: list[ComposeTmpfs]) -> dict[str, Any]:
+    """Render a container's restrictions and ``tmpfs`` as the ``security`` and ``tmpfs`` keys ``ComposeServices`` takes."""
+    spec: dict[str, Any] = {}
+    if security is not None:
+        # Only what the file sets, so the spec the extension reads stays as small as the file. `or None` drops a
+        # False or empty setting, but uid and gid are passed as they are: 0 is root, not unset.
+        settings = {
+            "run_as_user": security.user,
+            "run_as_group": security.group,
+            "read_only_root_filesystem": security.read_only or None,
+            "drop_capabilities": security.cap_drop or None,
+            "no_new_privileges": security.no_new_privileges or None,
+        }
+        spec["security"] = {key: value for key, value in settings.items() if value is not None}
+    if tmpfs:
+        spec["tmpfs"] = [
+            {"mount_path": mount.mount_path, **({"size_limit": mount.size} if mount.size else {})} for mount in tmpfs
+        ]
+    return spec
+
+
 def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: Mapping[str, str]) -> dict[str, Any]:
     """Render ``main``'s part of the spec; ``wait_budget_sec`` becomes its readiness timeout when it has a readiness check."""
     spec: dict[str, Any] = {}
@@ -234,6 +275,7 @@ def _main_spec(main: ComposeMainSettings, wait_budget_sec: float, volume_names: 
         spec["add_capabilities"] = main.add_capabilities
     if main.readiness is not None:
         spec["readiness"] = {"exec": main.readiness.exec_, "timeout_sec": _clamped_timeout_sec(wait_budget_sec)}
+    spec.update(_security_and_tmpfs_spec(main.security, main.tmpfs))
     return spec
 
 
@@ -281,6 +323,7 @@ def _service_spec(
         spec["volume_mounts"] = [_mount_spec(mount, volume_names) for mount in service.volume_mounts]
     if service.shm_size is not None:
         spec["shm_size"] = service.shm_size
+    spec.update(_security_and_tmpfs_spec(service.security, service.tmpfs))
     return spec
 
 

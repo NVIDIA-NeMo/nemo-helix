@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Collapse } from '@nemo/icons/icons';
+import { ChevronDoubleRight } from '@nemo/icons/icons';
 import { Button, Divider, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { Empty } from '@studio/components/Empty';
 import {
@@ -101,7 +101,7 @@ export const AssistantArtifactsPane = ({
             type="button"
             onClick={onCollapse}
           >
-            <Collapse size="18" />
+            <ChevronDoubleRight size="18" />
           </Button>
         </Tooltip>
       </Flex>

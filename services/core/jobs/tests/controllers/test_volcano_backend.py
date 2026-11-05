@@ -2309,3 +2309,23 @@ def test_terminate_volcano_job_deletes_network_policy(
     volcano_job._networking_v1.delete_namespaced_network_policy.assert_called_once_with(
         name=name_for_step(test_step_pending), namespace="test-namespace"
     )
+
+
+@pytest.mark.parametrize("immediate", [False, True])
+@pytest.mark.parametrize(
+    "platform_status", [HelixJobStatus.CANCELLED, HelixJobStatus.ACTIVE, HelixJobStatus.ERROR, HelixJobStatus.COMPLETED]
+)
+def test_cleanup_unfinished_volcano_job_only_for_cancelled_step(
+    volcano_job, test_step_pending, immediate, platform_status
+):
+    step = test_step_pending.model_copy(update={"status": platform_status})
+    job = _volcano_job_for_step(step)
+    volcano_job._execution_profile_config.cleanup_completed_jobs_immediately = immediate
+    with (
+        patch.object(volcano_job, "get_volcano_job_list_by_labels", return_value=[job]),
+        patch.object(volcano_job, "get_step_safe", return_value=step),
+        patch.object(volcano_job, "check_step_is_terminal", return_value=platform_status.is_terminal()),
+        patch.object(volcano_job, "terminate_job") as terminate,
+    ):
+        volcano_job.cleanup_steps()
+    assert terminate.call_count == (1 if platform_status == HelixJobStatus.CANCELLED else 0)

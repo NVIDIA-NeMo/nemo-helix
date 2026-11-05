@@ -5,7 +5,7 @@ import {
   encodeColumnFiltersParam,
   FILTERS_SEARCH_PARAM,
 } from '@nemo/common/src/hooks/useStudioDataViewState/columnFiltersParam';
-import { getPartsFromNamedEntityRef, NamedEntityRef } from '@nemo/common/src/namedEntity';
+import { getPartsFromNamedEntityRef, type NamedEntityRef } from '@nemo/common/src/namedEntity';
 import { AGENT_NAME_FILTER_ID } from '@studio/components/IntakeLists/traceFilterIds';
 import {
   ANONYMIZER_ENABLED,
@@ -29,10 +29,10 @@ import {
 import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
-import { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
+import type { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
 import type { ModelDetailTab } from '@studio/routes/ModelDetailRoute/constants';
-import { createSearchParams, generatePath, RouteObject } from 'react-router';
+import { createSearchParams, generatePath, type RouteObject } from 'react-router';
 
 const gateRoutes = (enabled: boolean, routes: RouteObject | RouteObject[]) => {
   if (!enabled) return [];

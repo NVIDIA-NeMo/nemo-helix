@@ -11,7 +11,7 @@ import type {
 import { creatorToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { getPartsFromReference, getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { filterModel, isBaseModel } from '@nemo/common/src/utils/models';
-import { ChevronDown, HourglassMid } from '@nemo/icons/icons';
+import { ChevronDown, CircleTick } from '@nemo/icons/icons';
 import type { ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -163,7 +163,7 @@ export const ModelDropdown: FC<ModelDropdownProps> = ({
                 creatorToIcon(selectedWorkspace, { className: 'text-base flex-shrink-0' })}
               {loading && !selectedName ? (
                 <>
-                  <HourglassMid size="16" className="animate-spin shrink-0" />
+                  <CircleTick size="16" className="animate-spin shrink-0" />
                   <Text className="truncate">{placeholder}</Text>
                 </>
               ) : (

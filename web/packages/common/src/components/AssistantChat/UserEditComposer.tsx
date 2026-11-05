@@ -3,7 +3,7 @@
 
 import { ComposerPrimitive, MessagePrimitive } from '@assistant-ui/react';
 import { ComposerAttachmentsRow } from '@nemo/common/src/components/AssistantChat/ComposerAttachments';
-import { IconImage, Close } from '@nemo/icons/icons';
+import { ImportImage, Close } from '@nemo/icons/icons';
 import { Button, Flex, Text, TextArea, Tooltip } from '@nvidia/foundations-react-core';
 
 export const UserEditComposer = ({
@@ -36,7 +36,7 @@ export const UserEditComposer = ({
                 type="button"
                 className="mr-auto"
               >
-                <IconImage size="16" />
+                <ImportImage size="16" />
               </Button>
             </ComposerPrimitive.AddAttachment>
           </Tooltip>

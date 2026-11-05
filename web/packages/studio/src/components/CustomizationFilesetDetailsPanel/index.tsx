@@ -17,9 +17,12 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { CUSTOMIZATION_TYPE_BADGES, CustomizationFileType } from '@studio/constants/customization';
+import {
+  CUSTOMIZATION_TYPE_BADGES,
+  type CustomizationFileType,
+} from '@studio/constants/customization';
 import { parseFilesetUri, useCustomizationFilesAsRows } from '@studio/hooks/useCustomizationFiles';
-import { ComponentProps, useState } from 'react';
+import { type ComponentProps, useState } from 'react';
 
 type Props = {
   filesetUri?: string;

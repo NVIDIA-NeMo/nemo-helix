@@ -5,6 +5,7 @@
 
 import io
 import json
+import shlex
 import subprocess
 import tarfile
 from datetime import UTC, datetime
@@ -15,11 +16,13 @@ from typing import cast
 import httpx
 import pytest
 import typer
+from nemo_evals import runs_cli
 from nemo_evals.api.fields import TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
+    SUBMIT_CONNECT_TIMEOUT_SECONDS,
     SUBMIT_TIMEOUT_SECONDS,
     BundleJobView,
     Candidate,
@@ -159,7 +162,7 @@ def _ready(name):
 
 def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting):
     result = submitting.invoke(
-        "--taskset", STORED, "--experiment", "m4", "--dataset", "datacurve/deep-swe@sha256:" + "a" * 64
+        "--taskset", STORED, "--experiment", "m4", "--intake-dataset", "datacurve/deep-swe@sha256:" + "a" * 64
     )
     assert result.exit_code == 0, result.output
     assert submitting.published == [] and submitting.posts == []
@@ -171,6 +174,7 @@ def test_submit_with_a_taskset_uploads_nothing_and_requests_no_builds(submitting
         "dataset_version": "sha256:" + "a" * 64,
     }
     assert "Run run-1 accepted: 2 tasks, queued" in result.output
+    assert "Rerun these tasks" not in result.output  # --taskset already names it
 
 
 @pytest.mark.parametrize("phase", ["running", "cancelled"])
@@ -189,19 +193,22 @@ def test_submit_narrows_a_taskset_by_publishing_a_selection_without_uploading_ta
     assert submitting.posts == [] and submitting.bodies[0]["spec"]["tasks"].endswith("#" + "3" * 64)
 
 
-def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting):
+@pytest.mark.parametrize("workspace", ["ac9", "team"], ids=["configured", "other"])
+def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting, workspace):
+    """The suggested command must run as printed: build-images reads the workspace from the ref."""
     submitting.refuse = True
-    result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64)
+    result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64, "--workspace", workspace)
     assert result.exit_code == 1
-    assert f"Check with: nemo evals tasksets build-images {STORED} --status" in result.output
+    stored = f"{workspace}/deep-swe-162c7ea7#" + "2" * 64
+    assert f"Check with: nemo evals tasksets build-images {shlex.quote(stored)} --status\n" in result.output
 
 
 @pytest.mark.parametrize(
     "args",
     [
         ["--taskset", STORED, "--harbor-hub", "x/y@1"],
-        ["--taskset", STORED, "--dataset", "x/y"],  # no --experiment
-        ["--harbor-hub", "x/y@1", "--experiment", "e", "--dataset", "x/y"],  # the source sets the dataset
+        ["--taskset", STORED, "--intake-dataset", "x/y"],  # no --experiment
+        ["--harbor-hub", "x/y@1", "--experiment", "e", "--intake-dataset", "x/y"],  # the source sets the dataset
     ],
 )
 def test_taskset_flags_that_do_not_combine(submitting, args):
@@ -235,11 +242,193 @@ def test_the_wrapper_follows_one_retry_and_never_submits_after_a_failed_build(
     result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--experiment", "m4", "--poll-seconds", "0")
     assert bool(submitting.bodies) is submitted, result.output
     assert len(attempts) == min(failures, 1) + 1  # at most one retry
-    assert "Submit later with: nemo evals runs submit --taskset " + STORED in result.output
+    assert "Submit later" not in result.output
     if submitted:
+        rerun = f"Rerun these tasks: nemo evals runs submit --taskset {shlex.quote(STORED)} --experiment m4 --intake-dataset datacurve/deep-swe"
+        assert rerun in result.output  # the same Experiment and Intake label
         assert submitting.bodies[0]["publication"]["intake"]["dataset_name"] == "datacurve/deep-swe"
     else:
         assert result.exit_code == 1 and "image builds failed" in result.output
+
+
+def test_build_hints_outside_the_configured_workspace_name_it_only_where_the_command_takes_it(submitting, monkeypatch):
+    other = "team/deep-swe-162c7ea7#" + "2" * 64
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(other, MEMBERS[:1], 1, None)
+    )
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nemo_evals.runs_cli.wait_for_builds", interrupted)
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--workspace", "team")
+    # build-images has no --workspace: the qualified ref carries it
+    assert f"Check them with: nemo evals tasksets build-images {shlex.quote(other)} --status\n" in result.output
+    assert f"submit with: nemo evals runs submit --taskset {shlex.quote(other)} --workspace team\n" in result.output
+
+
+def test_ctrl_c_during_the_build_wait_says_how_to_submit_later(submitting, monkeypatch):
+    created = CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    monkeypatch.setattr("nemo_evals.runs_cli.create_taskset", lambda *a, **k: created)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nemo_evals.runs_cli.wait_for_builds", interrupted)
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--agent", "openhands")
+    assert result.exit_code == 130 and submitting.bodies == []
+    assert f"Check them with: nemo evals tasksets build-images {shlex.quote(STORED)} --status" in result.output
+    assert (
+        f"Once they're ready, submit with: nemo evals runs submit --taskset {shlex.quote(STORED)} --agent openhands"
+        in result.output
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "kept"),
+    [
+        (
+            ["--agent", "openhands", "--sandbox-profile", "harbor-web", "--cpus", "4", "--experiment", "my exp"],
+            " --agent openhands --sandbox-profile harbor-web --cpus 4 --experiment 'my exp'",
+        ),
+        (["--agent", "oracle", "--dispatcher-profile", "gpu"], " --dispatcher-profile gpu"),  # oracle: the default
+    ],
+)
+def test_the_rerun_command_keeps_the_run_settings(submitting, monkeypatch, options, kept):
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", *options)
+    assert f"Rerun these tasks: nemo evals runs submit --taskset {shlex.quote(STORED)}{kept}\n" in result.output, (
+        result.output
+    )
+
+
+def test_the_rerun_command_keeps_the_spec_file_not_the_default_agent(submitting, monkeypatch, tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
+    result = submitting.invoke(
+        "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--spec-file", str(spec)
+    )
+    rerun = f"Rerun these tasks: nemo evals runs submit --taskset {shlex.quote(STORED)} --spec-file {shlex.quote(str(spec))}\n"
+    assert rerun in result.output, result.output
+    assert "idempotency_key" not in result.output
+
+
+def test_the_rerun_command_warns_when_the_spec_file_pins_the_key(submitting, monkeypatch, tmp_path):
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+                "idempotency_key": "pinned",
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
+    args = ["--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--spec-file", str(spec)]
+    assert "spec file's idempotency_key; pass a new --idempotency-key" in submitting.invoke(*args).output
+    # The rerun drops --idempotency-key (repeating k2 would return this run), so it falls back to the file's key
+    explicit = submitting.invoke(*args, "--idempotency-key", "k2").output
+    assert "spec file's idempotency_key; pass a new --idempotency-key" in explicit
+    assert "k2" not in explicit.split("Rerun these tasks:", 1)[1].splitlines()[0]
+
+
+def test_submit_reads_the_spec_file_once(submitting, monkeypatch, tmp_path):
+    """A stream such as ``--spec-file /dev/stdin`` can't be read again after the request is built."""
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": "default/full", "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+                "idempotency_key": "pinned",
+            }
+        )
+    )
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
+    submit = runs_cli.submit_run
+
+    def consumed(*args, **kwargs):
+        spec.unlink()  # like a stream already read
+        return submit(*args, **kwargs)
+
+    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", consumed)
+    result = submitting.invoke(
+        "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--spec-file", str(spec)
+    )
+    assert result.exit_code == 0, result.output
+    assert "spec file's idempotency_key; pass a new --idempotency-key" in result.output
+    assert "--spec-file '<spec file>'" in result.output  # the stream's path is gone by then
+
+
+def test_a_spec_file_alone_is_read_once(submitting, monkeypatch, tmp_path):
+    """With no source or --taskset, the spec's taskset is selected from the same read as the request."""
+    spec = tmp_path / "run.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"tasks": STORED, "target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+            }
+        )
+    )
+    select = runs_cli.select_from_taskset
+
+    def consumed(*args, **kwargs):
+        spec.unlink()  # like a stream already read
+        return select(*args, **kwargs)
+
+    monkeypatch.setattr("nemo_evals.runs_cli.select_from_taskset", consumed)
+    result = submitting.invoke("--spec-file", str(spec), "--tasks", "0")
+    assert result.exit_code == 0, result.output
+    assert submitting.bodies and submitting.bodies[0]["spec"]["target"]["source"]["name"] == "openhands"
+
+
+def test_ctrl_c_during_the_submit_says_to_retry_the_published_taskset_with_the_same_key(submitting, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
+    )
+    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", interrupted)
+    result = submitting.invoke(
+        "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--idempotency-key", "k-$USER"
+    )
+    assert result.exit_code == 130
+    assert "the run may still be accepted" in result.output
+    # The published taskset, not the source, which may have moved since; the key is quoted, so the shell keeps it.
+    retry = (
+        f"submit with the same key: nemo evals runs submit --taskset {shlex.quote(STORED)} --idempotency-key 'k-$USER'"
+    )
+    assert retry in result.output
+    assert "image builds" not in result.output and "--harbor-hub" not in result.output
+
+
+def test_ctrl_c_before_the_submit_names_the_taskset(submitting, monkeypatch):
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("nemo_evals.runs_cli.run_request", interrupted)
+    result = submitting.invoke("--taskset", STORED)
+    assert result.exit_code == 130
+    assert "Interrupted. Submit with: nemo evals runs submit --taskset " + shlex.quote(STORED) in result.output
 
 
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
@@ -536,6 +725,35 @@ def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
 
 
+def test_a_submit_that_stops_connecting_after_a_503_says_an_earlier_attempt_may_have_landed():
+    answers = iter([httpx.Response(503, json={"detail": "busy"})])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if (response := next(answers, None)) is not None:
+            return response
+        raise httpx.ConnectError("Connection refused")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="an earlier one reached the platform.*--idempotency-key k-1$"):
+        submit_run(client, {"idempotency_key": "k-1"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+
+
+def test_a_submit_connects_with_a_short_timeout_and_reads_with_the_long_one():
+    seen: list[dict[str, float | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.extensions["timeout"])
+        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    submit_run(client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+    assert seen[0]["connect"] == SUBMIT_CONNECT_TIMEOUT_SECONDS and seen[0]["read"] == SUBMIT_TIMEOUT_SECONDS
+
+
 @pytest.mark.parametrize("error", [httpx.ReadTimeout(""), httpx.RemoteProtocolError("Server disconnected")])
 def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(error):
     timeouts = []
@@ -550,6 +768,36 @@ def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(
     with pytest.raises(RuntimeError, match="the run may still be accepted.*--idempotency-key k-123$"):
         submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
     assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectError("Connection refused"), httpx.ConnectTimeout("")])
+def test_a_submit_that_never_connected_is_resent_with_the_same_body(error):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.content)
+        if len(bodies) == 1:
+            raise error
+        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    status = submit_run(
+        client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
+    )
+    assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
+
+
+def test_a_submit_that_never_connects_names_its_key():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Connection refused")
+
+    client = NemoClient(
+        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(RuntimeError, match="nothing was sent.*--idempotency-key k-123$"):
+        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
 
 
 @pytest.fixture
@@ -1422,3 +1670,20 @@ def test_a_failed_download_is_an_error_not_a_traceback(tmp_path, archive, status
     result, _ = downloading(tmp_path, archive, download_status=status)
     assert result.exit_code == 1 and result.output.startswith("Error: ")
     assert not (tmp_path / "run-x" / "agent-eval-results").exists()
+
+
+@pytest.mark.parametrize("path", ["/dev/stdin", "/dev/fd/63", "/proc/self/fd/0"])
+def test_a_spec_file_under_dev_or_proc_is_a_stream_even_when_redirected_from_a_file(path):
+    assert runs_cli._is_stream(Path(path))  # `--spec-file /dev/stdin < spec.json`: is_file() is true
+
+
+def test_a_regular_spec_file_is_not_a_stream(tmp_path):
+    spec = tmp_path / "spec.json"
+    spec.write_text("{}")
+    assert not runs_cli._is_stream(spec)
+
+
+@pytest.mark.parametrize("path", ["/dev/shm/run.json", "/proc/self/cwd/spec.json"])
+def test_a_regular_file_under_dev_or_proc_is_not_a_stream(monkeypatch, path):
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    assert not runs_cli._is_stream(Path(path))

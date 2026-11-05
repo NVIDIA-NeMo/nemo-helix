@@ -6,16 +6,20 @@ import {
   Button,
   Divider,
   DropdownContent,
-  DropdownDividerItemEntry,
+  type DropdownDividerItemEntry,
   DropdownItem,
   DropdownRoot,
   DropdownTrigger,
   Flex,
+  Stack,
+  Text,
 } from '@nvidia/foundations-react-core';
 import React, { type FC, type ReactElement, type ReactNode } from 'react';
 
 export interface ActionMenuItem {
   label: string;
+  /** Secondary line under the label, for when the label alone doesn't say what the action does. */
+  description?: string;
   onSelect: () => void;
   icon?: ReactElement<{ size?: number; fill?: string; className?: string }>;
   disabled?: boolean;
@@ -50,6 +54,7 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
   'data-testid': testId = 'actions-menu',
 }) => {
   const triggerIcon = icon ?? (label ? <Sparkle /> : undefined);
+  const hasDescriptions = actions.some((action) => action.description);
 
   return (
     <DropdownRoot>
@@ -68,7 +73,7 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
         align="end"
         side="bottom"
         data-testid={`${testId}-content`}
-        className="w-[180px] min-w-[180px]"
+        className={hasDescriptions ? 'w-[260px] min-w-[260px]' : 'w-[180px] min-w-[180px]'}
       >
         {actions.map((action, key) => (
           <React.Fragment key={`action-${key}`}>
@@ -83,7 +88,16 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
             >
               <Flex align="center" gap="density-sm" className="pr-6">
                 {action.icon && React.cloneElement(action.icon, { size: 20, fill: 'solid' })}
-                {action.label}
+                {action.description ? (
+                  <Stack gap="density-xxs" className="items-start text-left">
+                    {action.label}
+                    <Text kind="body/regular/sm" className="text-secondary">
+                      {action.description}
+                    </Text>
+                  </Stack>
+                ) : (
+                  action.label
+                )}
               </Flex>
             </DropdownItem>
             {action.divider && <Divider width={action.divider.width} />}

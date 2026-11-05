@@ -8,7 +8,7 @@ import {
   type BudgetId,
   OPTIMIZATION_BUDGETS,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 /** How many trials the sampler gets. More trials cost more agent runs but raise the odds the study

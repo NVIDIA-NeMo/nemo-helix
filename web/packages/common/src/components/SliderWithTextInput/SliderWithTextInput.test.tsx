@@ -72,6 +72,24 @@ describe('SliderWithTextInput', () => {
       expect(slider).toHaveValue('0');
       expect(textInput).toHaveValue(0);
     });
+
+    it('rests the thumb at unsetValue while the field is unset, leaving the input empty', () => {
+      const field = { ...createMockField(), value: undefined };
+      render(
+        <SliderWithTextInput
+          field={field}
+          unsetPlaceholder="0.00005"
+          unsetValue={5e-5}
+          min={1e-6}
+          max={1e-3}
+          step={1e-6}
+        />
+      );
+
+      expect(screen.getByRole('slider')).toHaveValue('0.00005');
+      expect(screen.getByRole('spinbutton')).toHaveValue(null);
+      expect(screen.getByRole('spinbutton')).toHaveAttribute('placeholder', '0.00005');
+    });
   });
 
   describe('Slider Configuration', () => {

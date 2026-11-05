@@ -937,6 +937,11 @@ components:
             $ref: '#/components/schemas/Container'
           type: array
           title: Containers
+        gateway_providers:
+          additionalProperties:
+            $ref: '#/components/schemas/GatewayProviderBinding'
+          type: object
+          title: Gateway Providers
         initContainers:
           items:
             $ref: '#/components/schemas/Container'
@@ -1158,6 +1163,26 @@ components:
           title: Command
       type: object
       title: ExecAction
+    GatewayProviderBinding:
+      properties:
+        profile:
+          type: string
+          minLength: 1
+          title: Profile
+        credentials:
+          additionalProperties:
+            type: string
+          type: object
+          minProperties: 1
+          title: Credentials
+      additionalProperties: false
+      type: object
+      required:
+      - profile
+      - credentials
+      title: GatewayProviderBinding
+      description: Select a provider profile and map its credential slots to Helix
+        secret references.
     HTTPGetAction:
       properties:
         path:

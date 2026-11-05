@@ -6,7 +6,7 @@ import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
 import { ROUTES } from '@studio/constants/routes';
 import { iconColorClass } from '@studio/routes/constants';
 import { getWorkspaceSafeSynthesizerRoute } from '@studio/routes/utils';
-import { FC, lazy } from 'react';
+import { type FC, lazy } from 'react';
 import type { RouteObject } from 'react-router';
 
 const SafeSynthesizerListRoute = lazy(() =>

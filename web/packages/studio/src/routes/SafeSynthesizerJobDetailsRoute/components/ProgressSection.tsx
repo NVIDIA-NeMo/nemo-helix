@@ -5,7 +5,7 @@ import { LogViewer } from '@nemo/common/src/components/LogViewer';
 import type { LogLoadProgress, LogStatus } from '@nemo/common/src/utils/logs';
 import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { Panel } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface ProgressSectionProps {
   jobId: string;

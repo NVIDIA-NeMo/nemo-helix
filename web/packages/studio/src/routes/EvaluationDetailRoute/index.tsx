@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
+import { DownloadMenu } from '@nemo/common/src/components/DownloadMenu';
 import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
 import { useGetEvaluation } from '@nemo/sdk/generated/platform/evaluations';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
+import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
 import { EvaluationSessionsDataView } from '@studio/components/dataViews/EvaluationSessionsDataView';
+import { listEvaluationSessionsWithModeFallback } from '@studio/components/dataViews/EvaluationSessionsDataView/listEvaluationSessionsWithModeFallback';
 import { OriginatingInsightLink } from '@studio/components/OriginatingInsightLink';
 import { OPTIMIZER_ENABLED } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -15,7 +18,27 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { EvaluationDetailMetrics } from '@studio/routes/EvaluationDetailRoute/EvaluationDetailMetrics';
 import { getExperimentDetailRoute, getExperimentRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
-import { type FC } from 'react';
+import { evaluationSessionsExport } from '@studio/util/resultExports';
+import type { FC } from 'react';
+
+const SESSIONS_PAGE_SIZE = 1000;
+
+/** Every test case of an evaluation, with full input/output payloads. */
+const fetchAllSessions = async (workspace: string, evaluationName: string) => {
+  const sessions: EvaluationSessionResponse[] = [];
+  for (let page = 1; ; page++) {
+    const { data, pagination } = await listEvaluationSessionsWithModeFallback(
+      workspace,
+      evaluationName,
+      { page, page_size: SESSIONS_PAGE_SIZE, mode: 'detailed' }
+    );
+    sessions.push(...data);
+    const totalPages = pagination?.total_pages;
+    if (data.length < SESSIONS_PAGE_SIZE || (totalPages !== undefined && page >= totalPages)) {
+      return sessions;
+    }
+  }
+};
 
 export const EvaluationDetailRoute: FC = () => {
   const workspace = useWorkspaceFromPath();
@@ -50,6 +73,18 @@ export const EvaluationDetailRoute: FC = () => {
           className="p-0"
           slotHeading={evaluationName}
           slotDescription={showInsightCard ? undefined : evaluation?.description || undefined}
+          slotActions={
+            <DownloadMenu
+              fileName={`${evaluationName}-results`}
+              disabled={!evaluation?.run_count && !evaluation?.test_case_count}
+              getData={async () =>
+                evaluationSessionsExport(
+                  evaluation,
+                  await fetchAllSessions(workspace, evaluationName)
+                )
+              }
+            />
+          }
         />
         <EvaluationDetailMetrics evaluationName={evaluationName} />
         {showInsightCard ? (
@@ -63,7 +98,7 @@ export const EvaluationDetailRoute: FC = () => {
             </Stack>
           </Card>
         ) : null}
-        <div className="flex flex-col gap-4 border-t border-base pt-4">
+        <Stack className="min-h-[480px] flex-1 gap-4 border-t border-base pt-4">
           <div className="flex items-center gap-3">
             <Text kind="title/sm">Test cases</Text>
             {evaluation?.run_count !== undefined && (
@@ -76,7 +111,7 @@ export const EvaluationDetailRoute: FC = () => {
             evaluationName={evaluationName}
             experimentName={experimentName}
           />
-        </div>
+        </Stack>
       </Stack>
     </AccessibleTitle>
   );

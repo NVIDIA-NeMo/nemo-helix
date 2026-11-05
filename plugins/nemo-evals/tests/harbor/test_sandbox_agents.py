@@ -6,14 +6,17 @@
 import asyncio
 import ipaddress
 import logging
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, override
+from typing import Any, Literal, override
 
 import pytest
 from harbor.environments.base import ExecResult
-from harbor.models.task.config import NetworkMode, NetworkPolicy
+from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
+from harbor.models.trial.paths import TrialPaths
 from nemo_evals.harbor import opensandbox_environment
 from nemo_evals.harbor.opensandbox_environment import AgentChannelOpenSandboxEnvironment
+from nemo_evals.harbor.setup_egress_readiness import RESOLVE_HOSTS_SCRIPT, RESOLVE_TIMEOUT_SEC
 from nhx_sandbox import egress
 from nhx_sandbox.harbor_opensandbox_environment import NemoOpenSandboxEnvironment
 from nhx_sandbox.opensandbox_policy import EgressVerificationError
@@ -63,6 +66,56 @@ def test_allowlist_without_channel_keeps_the_task_hosts():
     assert allowed & {IGW, "pypi.org"} == {"pypi.org"}
 
 
+def _is_denied(policy: Any, address: str) -> bool:
+    ip = ipaddress.ip_address(address)
+    return any(
+        ip in network
+        for network in (ipaddress.ip_network(rule.target) for rule in policy.rules if rule.action == "deny")
+        if network.version == ip.version
+    )
+
+
+@pytest.mark.parametrize("address", ["10.0.0.51", "169.254.169.254"])
+def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(monkeypatch, address):
+    """The task's host is allowed by name only; the operator's channel host still gets its carve-out."""
+    answers = {"internal.attacker.com": address, IGW: "10.0.0.60"}
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
+    environment = _environment(NetworkMode.ALLOWLIST, (IGW,), trusted=("*.com",), allowed=("internal.attacker.com",))
+    environment._agent_setup_hosts = ("registry.npmjs.org",)
+
+    policy = environment.egress_policy()
+    opened = opensandbox_environment.build_egress_policy(
+        environment._egress_allowlist(
+            (*_allowed(policy), *environment._agent_setup_hosts),
+            extra_operator_hosts=environment._agent_setup_hosts,
+        )
+    )
+
+    for built in (policy, opened):
+        assert {"internal.attacker.com"} <= _allowed(built)
+        assert _is_denied(built, address)
+        assert not _is_denied(built, "10.0.0.60")
+
+
+def test_a_task_naming_a_setup_host_gets_no_carve_out_from_the_closed_policy(monkeypatch):
+    """Setup hosts are trusted for the window only, so a task naming one under a wildcard is name-only."""
+    monkeypatch.setattr(
+        egress,
+        "_resolve_host",
+        lambda target: (ipaddress.ip_network("10.77.0.9"),) if target == "registry.corp.example" else (),
+    )
+    environment = _environment(
+        NetworkMode.ALLOWLIST, (IGW,), trusted=("*.corp.example",), allowed=("registry.corp.example",)
+    )
+    environment._agent_setup_hosts = ("registry.corp.example",)
+
+    policy = environment.egress_policy()
+    assert {"registry.corp.example"} <= _allowed(policy)
+    assert _is_denied(policy, "10.77.0.9")
+
+
 def test_public_tasks_keep_the_profile_allowlist():
     policy = _environment(NetworkMode.PUBLIC, (IGW,), trusted=(IGW, "pypi.org")).egress_policy()
     assert {IGW, "pypi.org"} <= _allowed(policy)
@@ -98,11 +151,24 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
     calls: list[str]
     execs: list[tuple[str, dict[str, Any]]]
     kill_exit: int
+    unresolved: tuple[str, ...]
+    #: What the host check does instead of answering: raise this, or hang.
+    resolve_fails: Exception | Literal["hang"] | None
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         command = f"{opensandbox_environment.SHELL} -c {script}"
-        self.execs.append((command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}}))
+        self.execs.append(
+            (command, {"env": {"PATH": opensandbox_environment.SYSTEM_PATH, **env}, "timeout": timeout_sec})
+        )
+        if script == RESOLVE_HOSTS_SCRIPT:
+            self.calls.append("resolve")
+            if self.resolve_fails == "hang":
+                await asyncio.Event().wait()
+            if isinstance(self.resolve_fails, Exception):
+                raise self.resolve_fails
+            unresolved = [host for host in env["HOSTS"].split() if host in self.unresolved]
+            return ExecResult(stdout="".join(f"{host}\n" for host in unresolved), return_code=1 if unresolved else 0)
         if "kill -9" in command:
             self.calls.append("kill")
             return ExecResult(stdout="", stderr="could not kill: 9", return_code=self.kill_exit)
@@ -111,16 +177,25 @@ class _SetupWindowEnvironment(AgentChannelOpenSandboxEnvironment):
 
 
 def _setup_environment(
-    monkeypatch, *, mode: NetworkMode = NetworkMode.NO_NETWORK, setup: tuple[str, ...] = SETUP, kill_exit: int = 0
+    monkeypatch,
+    *,
+    mode: NetworkMode = NetworkMode.NO_NETWORK,
+    setup: tuple[str, ...] = SETUP,
+    kill_exit: int = 0,
+    trusted: tuple[str, ...] = ("registry.npmjs.org",),
+    allowed: tuple[str, ...] = (),
+    answers: dict[str, str] | None = None,
 ) -> _SetupWindowEnvironment:
     monkeypatch.setattr(opensandbox_environment, "network_rules", lambda rules: list(rules))
-    monkeypatch.setattr(egress, "_resolve_host", lambda target: ())  # no DNS from unit tests
+    answers = answers or {}  # no DNS from unit tests
+    monkeypatch.setattr(
+        egress, "_resolve_host", lambda target: (ipaddress.ip_network(answers[target]),) if target in answers else ()
+    )
     environment = object.__new__(_SetupWindowEnvironment)
-    environment._network_policy = NetworkPolicy(network_mode=mode)
+    environment._network_policy = NetworkPolicy(network_mode=mode, allowed_hosts=list(allowed))
     environment._agent_channel_hosts = (IGW,)
     environment._agent_setup_hosts = setup
-    environment._trusted_allowed_hosts = ("registry.npmjs.org",)
-    environment._trusted_targets = frozenset(environment._trusted_allowed_hosts)
+    environment._trusted_allowed_hosts = trusted
     environment._resolver_addresses = ()
     environment._egress_verification = "strict"
     environment._services = None
@@ -129,6 +204,8 @@ def _setup_environment(
     environment.calls = []
     environment.execs = []
     environment.kill_exit = kill_exit
+    environment.unresolved = ()
+    environment.resolve_fails = None
     environment._sandbox = _FakeSandbox(environment.egress_policy().rules, environment.calls)
     return environment
 
@@ -143,8 +220,55 @@ async def test_setup_window_opens_the_setup_hosts_only_inside_the_block(monkeypa
     async with environment.agent_setup_egress():
         assert _allowed_now(environment) == {IGW, *SETUP}
     assert _allowed_now(environment) == {IGW}
-    # Processes are listed before opening; rules leave before leftovers are killed, so nothing reconnects.
-    assert environment.calls == ["list", "patch", "delete", "kill"]
+    # Processes are listed before opening; the setup hosts must resolve before the block runs; rules leave
+    # before leftovers are killed, so nothing reconnects.
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_only_the_setup_hostnames_are_looked_up(monkeypatch):
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "*.pypi.org", "10.77.0.9"))
+    async with environment.agent_setup_egress():
+        pass
+    resolve_env = next(kwargs["env"] for command, kwargs in environment.execs if "getent" in command)
+    assert resolve_env["HOSTS"] == "registry.npmjs.org"
+
+
+async def test_a_setup_host_that_does_not_resolve_is_logged_and_setup_still_runs(monkeypatch, caplog):
+    """The hosts serve every agent on the profile; one this agent doesn't need mustn't stop its setup."""
+    environment = _setup_environment(monkeypatch, setup=("registry.npmjs.org", "astral.sh"))
+    environment.unresolved = ("astral.sh",)
+    ran = False
+    with caplog.at_level(logging.WARNING):
+        async with environment.agent_setup_egress():
+            ran = True
+    assert ran
+    assert "astral.sh did not resolve" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
+
+
+async def test_the_host_check_is_bounded_in_the_sandbox(monkeypatch):
+    environment = _setup_environment(monkeypatch)
+    async with environment.agent_setup_egress():
+        pass
+    (timeout,) = [kwargs["timeout"] for command, kwargs in environment.execs if "getent" in command]
+    assert timeout == RESOLVE_TIMEOUT_SEC
+
+
+@pytest.mark.parametrize("failure", [ConnectionError("execd unreachable"), "hang"], ids=["raises", "hangs"])
+async def test_a_host_check_that_fails_or_hangs_is_logged_and_setup_still_runs(monkeypatch, caplog, failure):
+    """A failed or stuck check is only a warning: setup runs, inside the window, which then closes as usual."""
+    monkeypatch.setattr(opensandbox_environment, "RESOLVE_TIMEOUT_SEC", 0)
+    monkeypatch.setattr(opensandbox_environment, "_RESOLVE_TIMEOUT_SLACK_SEC", 0.05)
+    environment = _setup_environment(monkeypatch)
+    environment.resolve_fails = failure
+    ran = False
+    with caplog.at_level(logging.WARNING):
+        async with asyncio.timeout(5):
+            async with environment.agent_setup_egress():
+                ran = _allowed_now(environment) == {IGW, *SETUP}
+    assert ran and _allowed_now(environment) == {IGW}
+    assert "running agent setup anyway" in caplog.text
+    assert environment.calls == ["list", "patch", "resolve", "delete", "kill"]
 
 
 async def test_setup_window_closes_when_setup_fails(monkeypatch):
@@ -198,7 +322,7 @@ async def test_setup_window_fails_when_the_sidecar_keeps_a_setup_host(monkeypatc
 async def test_a_setup_host_the_task_already_allows_is_left_in_place(monkeypatch):
     environment = _setup_environment(monkeypatch, mode=NetworkMode.PUBLIC)
     before = _allowed_now(environment)
-    assert "registry.npmjs.org" in before  # the trusted allowlist already has it
+    assert {"registry.npmjs.org"} <= before  # the trusted allowlist already has it
     async with environment.agent_setup_egress():
         assert "*.pypi.org" in _allowed_now(environment)
     assert _allowed_now(environment) == before
@@ -239,6 +363,24 @@ async def test_a_private_setup_host_is_carved_out_of_the_deny_ranges(monkeypatch
         assert not any(registry in network for network in _denied_networks(environment))
     assert "10.77.0.9" not in _allowed_now(environment)
     assert any(registry in network for network in _denied_networks(environment))
+
+
+async def test_a_task_naming_a_private_setup_host_reaches_it_only_during_setup(monkeypatch):
+    """A task may narrow a wildcard to the setup hostname, but that must not keep its address open."""
+    environment = _setup_environment(
+        monkeypatch,
+        mode=NetworkMode.ALLOWLIST,
+        setup=("registry.corp.example",),
+        trusted=("*.corp.example",),
+        allowed=("registry.corp.example",),
+        answers={"registry.corp.example": "10.77.0.9"},
+    )
+    registry = ipaddress.ip_address("10.77.0.9")
+    assert any(registry in network for network in _denied_networks(environment))  # before setup: denied
+    async with environment.agent_setup_egress():
+        assert not any(registry in network for network in _denied_networks(environment))  # during: allowed
+    assert {"registry.corp.example"} <= _allowed_now(environment)  # the task still has it by name
+    assert any(registry in network for network in _denied_networks(environment))  # after setup: denied
 
 
 @pytest.mark.parametrize("failure", [asyncio.CancelledError, RuntimeError], ids=["cancelled", "failed"])
@@ -285,7 +427,7 @@ class _GatewayCAEnvironment(AgentChannelOpenSandboxEnvironment):
         self.uploads.append((str(source_path), target_path))
 
     @override
-    async def _exec_cleanup(self, script: str, **env: str) -> ExecResult:
+    async def _exec_cleanup(self, script: str, *, timeout_sec: int | None = None, **env: str) -> ExecResult:
         self.scripts.append((script, env))
         self.script_env.append({**self._persistent_env, **env})
         return self.result
@@ -389,3 +531,30 @@ async def test_the_gateway_ca_is_installed_after_the_sandbox_starts(monkeypatch,
 
     assert started == [False]
     assert len(environment.scripts) == installs
+
+
+def _sized_environment(tmp_path: Path, **task: Any) -> AgentChannelOpenSandboxEnvironment:
+    """An agent sandbox for a task with ``task`` in its ``[environment]``; nothing is created."""
+    environment_dir = tmp_path / "environment"
+    environment_dir.mkdir(exist_ok=True)
+    return AgentChannelOpenSandboxEnvironment(
+        environment_dir=environment_dir,
+        environment_name="tb",
+        session_id="tb__abc",
+        trial_paths=TrialPaths(trial_dir=tmp_path / "tb__abc"),
+        task_env_config=EnvironmentConfig(docker_image="registry.example/tb:1", **task),
+        domain="opensandbox.example",
+        api_key="",
+        sandbox_resource_defaults={"cpus": 1},
+    )
+
+
+@pytest.mark.parametrize(("task", "threads"), [({"cpus": 4}, "4"), ({}, "1")], ids=["task", "default"])
+def test_openmp_threads_match_the_cpu_limit(tmp_path, task, threads):
+    """The sandbox sees every node CPU, so PyTorch and BLAS would otherwise start a thread per one of them."""
+    assert _sized_environment(tmp_path, **task)._persistent_env["OMP_NUM_THREADS"] == threads
+
+
+def test_the_task_can_set_its_own_openmp_threads(tmp_path):
+    environment = _sized_environment(tmp_path, cpus=4, env={"OMP_NUM_THREADS": "1"})
+    assert environment._persistent_env["OMP_NUM_THREADS"] == "1"

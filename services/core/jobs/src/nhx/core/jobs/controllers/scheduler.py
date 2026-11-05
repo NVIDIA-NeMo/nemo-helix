@@ -27,6 +27,7 @@ from nhx.core.jobs.controllers.backends.exceptions import (
     SchedulingDeferred,
 )
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
+from nhx.core.jobs.controllers.concurrency_admission import round_robin_by_user
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
 from opentelemetry import metrics, trace
 
@@ -96,7 +97,12 @@ class JobScheduler(HeartbeatMixin, Controller):
             "Scheduler fetched job steps",
             extra={"count": len(steps), "duration_seconds": time.monotonic() - fetch_started_at},
         )
-        for step in steps:
+        # Snapshot current load once per pass for admission controllers that count in-flight work.
+        begin_pass = getattr(self._admission, "begin_pass", None)
+        if len(steps) > 0 and callable(begin_pass):
+            begin_pass()
+        # Round-robin across users so one user's backlog cannot starve others when capacity is scarce.
+        for step in round_robin_by_user(steps):
             with start_span_with_ctx(
                 tracer, "jobs_scheduler/schedule_step", JobContext(id=step.job, step_name=step.name)
             ):

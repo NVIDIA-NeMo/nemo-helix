@@ -35,7 +35,7 @@ import { InsightTracesTable } from '@studio/routes/optimizer/InsightTracesTable'
 import { InsightExperiments } from '@studio/routes/optimizer/OptimizerInsightRoute/InsightExperiments';
 import { getOptimizerRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { Link, useParams } from 'react-router';
 
 export const OptimizerInsightRoute: FC = () => {

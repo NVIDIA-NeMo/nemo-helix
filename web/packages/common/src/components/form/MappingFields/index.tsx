@@ -19,9 +19,9 @@ import { isDefined } from '@nemo/common/src/utils/isDefined';
 import { Banner, Stack } from '@nvidia/foundations-react-core';
 import { useEffect, useMemo } from 'react';
 import {
-  Control,
-  FieldArrayPath,
-  FieldValues,
+  type Control,
+  type FieldArrayPath,
+  type FieldValues,
   useFieldArray,
   useFormState,
   useWatch,

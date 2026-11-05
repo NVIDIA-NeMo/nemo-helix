@@ -81,6 +81,7 @@ from nhx_sandbox.harbor_opensandbox_services import (
     COMPOSE_FILENAMES,
     COMPOSE_MAIN_FEATURE,
     COMPOSE_SECURITY_FEATURE,
+    EGRESS_PORT_FEATURE,
     EXTENSION_KEY,
     MAIN_SERVICE,
     ComposeServices,
@@ -92,6 +93,7 @@ from nhx_sandbox.opensandbox_policy import (
     EgressVerificationError,
     EgressVerificationMode,
     canonical_egress_target,
+    egress_target_covers,
     to_opensandbox_policy,
     verify_applied_egress,
 )
@@ -162,6 +164,15 @@ AGENT_BUNDLE_EXEC_TIMEOUT_SEC = 60
 TERMINATION_CHECK_BUDGET_SEC = 10
 # After a command was cut off, how often stop asks again until the server reports the sandbox stopped.
 TERMINATION_POLL_INTERVAL_SEC = 1.0
+
+
+def _is_address(target: str) -> bool:
+    """Whether ``target`` is an IP address or CIDR rather than a hostname."""
+    try:
+        ipaddress.ip_network(target, strict=False)
+    except ValueError:
+        return False
+    return True
 
 
 def sandbox_role(session_id: str, trial_name: str) -> str:
@@ -301,7 +312,6 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         self._health_check_poll_interval_sec = health_check_poll_interval_sec
         self._metadata = dict(metadata or {})
         self._trusted_allowed_hosts = tuple(trusted_allowed_hosts or ())
-        self._trusted_targets = frozenset(canonical_egress_target(host) for host in self._trusted_allowed_hosts)
         self._resolver_addresses = tuple(resolver_addresses) if resolver_addresses is not None else None
         self._image_entrypoints = dict(image_entrypoints or {})
         self._runtime: SandboxRuntime = runtime
@@ -411,7 +421,9 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         if network_policy.network_mode != NetworkMode.ALLOWLIST:
             return
         outside = sorted(
-            host for host in network_policy.allowed_hosts if canonical_egress_target(host) not in self._trusted_targets
+            host
+            for host in network_policy.allowed_hosts
+            if not any(egress_target_covers(trusted, host) for trusted in self._trusted_allowed_hosts)
         )
         if outside:
             raise ValueError(
@@ -427,7 +439,35 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         targets = (
             tuple(self._network_policy.allowed_hosts) if mode == NetworkMode.ALLOWLIST else self._trusted_allowed_hosts
         )
-        return build_egress_policy(EgressAllowlist(targets=targets, resolver_addresses=self._resolver_addresses))
+        return build_egress_policy(self._egress_allowlist(targets))
+
+    def _operator_hosts(self) -> tuple[str, ...]:
+        """Egress targets from the operator rather than the task; their addresses may be carved out."""
+        return self._trusted_allowed_hosts
+
+    def _egress_allowlist(
+        self, targets: tuple[str, ...], *, extra_operator_hosts: tuple[str, ...] = ()
+    ) -> EgressAllowlist:
+        """Allow ``targets``, carving out the addresses of operator hostnames only.
+
+        A task hostname admitted through an operator ``*.`` wildcard is allowed by name only, as the
+        wildcard is: carving out its resolved addresses would let it reach private space the operator's
+        own policy denies, such as ``internal.example.com`` resolving to ``10.0.0.51`` under ``*.com``.
+        ``extra_operator_hosts`` are trusted for this policy only, such as hosts open for a limited window.
+        """
+        operator_names = {canonical_egress_target(host) for host in (*self._operator_hosts(), *extra_operator_hosts)}
+        name_only = tuple(
+            target
+            for target in targets
+            if not target.startswith("*")
+            and not _is_address(target)
+            and canonical_egress_target(target) not in operator_names
+        )
+        return EgressAllowlist(
+            targets=tuple(target for target in targets if target not in name_only),
+            name_only_targets=name_only,
+            resolver_addresses=self._resolver_addresses,
+        )
 
     def _resource(self) -> dict[str, str]:
         """CPU, memory, GPU and disk limits from the task.
@@ -495,6 +535,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 ready_timeout_sec=self._ready_timeout_sec,
                 health_check_poll_interval_sec=self._health_check_poll_interval_sec,
                 entrypoint=[self._as_written(argument) for argument in entrypoint] if entrypoint is not None else None,
+                egress_api_port=self._services.egress_api_port if self._services is not None else None,
             ),
             # Kubernetes starts main only after the bundle and services, so without this a bundle that
             # can't install, or a crashing service, would leave the create waiting for main until its
@@ -749,6 +790,16 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
             raise RuntimeError(
                 "The OpenSandbox server's NeMo compose services extension doesn't support compose files that only "
                 "change main, or main's command and working directory."
+            )
+        # An older extension would leave the egress API on 18080, so the service that needs that port couldn't start.
+        if (
+            self._services is not None
+            and self._services.egress_api_port is not None
+            and EGRESS_PORT_FEATURE not in features
+        ):
+            raise RuntimeError(
+                "The OpenSandbox server's NeMo compose services extension is too old to move the egress policy API "
+                "off port 18080, which one of this task's containers needs."
             )
         # An extension from before them would refuse the spec's `security` and `tmpfs` as unknown fields.
         if (

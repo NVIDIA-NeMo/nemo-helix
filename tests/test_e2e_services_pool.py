@@ -539,6 +539,26 @@ def test_acquire_for_module_reregisters_released_owner_before_next_release(tmp_p
     assert module_a_binding["service_url"] == "http://127.0.0.1:8080"
 
 
+@pytest.mark.parametrize(
+    ("config_layers", "auth_enabled"),
+    [
+        # Kubernetes customizer smoke installs the cluster with auth and passes this config.
+        (["e2e/quickstart/auth.yaml"], True),
+        ([{"auth": {"enabled": False}}], False),
+    ],
+)
+def test_acquire_for_external_cluster_takes_auth_from_config(monkeypatch, config_layers, auth_enabled) -> None:
+    """An external cluster starts nothing locally; the config only decides whether to send admin headers."""
+    monkeypatch.setenv("NHX_BASE_URL", "http://cluster.example:8080")
+    pool = services_pool.E2EServicesPool()
+
+    services = pool.acquire_for_config("tests/test_external.py", config_layers, {"backend": "subprocess"})
+
+    assert services.url == "http://cluster.example:8080"
+    assert services.proc is None
+    assert services.auth_enabled is auth_enabled
+
+
 def test_describe_active_module_binding_ignores_stale_active_key() -> None:
     pool = services_pool.E2EServicesPool()
     key = services_pool.ServicesPoolKey(config_hash="shared")

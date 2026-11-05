@@ -30,6 +30,17 @@ reusable actions, and supporting docs.
   On successful `main` pushes, it also sends a completion event to an external
   CI consumer.
 
+  Python integration tests run in two duration-balanced, whole-package groups
+  with four xdist workers each. `services` covers services except core secrets;
+  `platform` covers secrets, plugins, packages, and root tests. Both retain normal
+  discovery and `loadgroup` scheduling. Reports and crash dumps are separate per
+  group; the coverage comment combines raw data from both groups.
+
+  Local `make test-integration` still runs the entire suite. To select a group,
+  use `make test-integration PYTEST_EXTRA=--integration-group=services` (or
+  `platform`). Allocation lives in `tests/integration_groups.py`. Grouping does
+  not change whether integration tests block merges or introduce retries.
+
   The final `ci-status` job is the merge gate for this workflow. Repository
   branch protection or rulesets should require `CI status`, not the individual
   test jobs. The job checks every job listed in its `needs` and passes only
@@ -66,6 +77,28 @@ reusable actions, and supporting docs.
 - `release-smoke.yaml`
   Verifies published charts, containers and wheels. Timestamped RC charts map
   to `.dev` wheels; numbered prereleases such as `1.0.0-rc1` remain distinct.
+
+## Post-merge image and end-to-end checks
+
+Container image builds and platform e2e checks in `ci.yaml` run only on pushes
+to `main`, or via `workflow_dispatch`. They are skipped for
+pull requests and merge-group validation. This includes CPU smoke, garak, and
+Safe Synthesizer image builds; all Kind suites; Authentik/ZITADEL runtime tests;
+and both Python e2e jobs. Existing path filters and manual publishing inputs
+still apply. Studio UI e2e and Docker source-image smoke remain manual-only.
+
+Lint, unit tests, integration tests, wheel build/install checks, Helm validation,
+and Docker bake-graph validation stay pre-merge. Printing the bake graph does
+not build an image. Integration required-check policy is unchanged.
+
+On automatic `main` runs, `Post-merge image and e2e status` waits for the image/e2e
+jobs and their prerequisites, writes a result summary, and sends one failure
+alert per run through the existing `SLACK_ALERTS_WEBHOOK`. The alert identifies
+failed/cancelled jobs, the commit, and the run containing logs and artifacts.
+Path-filtered skips are normal; prerequisite failures still alert when their
+dependent tests cannot run. Missing webhook configuration or failed delivery
+fails the notification job rather than silently dropping an alert. Manual runs
+do not send Slack alerts. Main-run concurrency behavior is unchanged.
 
 ## GitHub Apps
 

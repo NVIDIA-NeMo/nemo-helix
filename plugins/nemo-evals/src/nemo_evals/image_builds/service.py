@@ -169,6 +169,7 @@ class ImageBuildService:
             job=build_job_name(task, task_revision.content_hash, attempt),
             allowed_registries=request.allowed_registries,
             platform=request.platform,
+            rebuild=request.rebuild,
         )
         build._parent = head.id
         try:

@@ -244,7 +244,9 @@
 {"name": "nemo-fabric-adapters-nooa", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-remote-agent", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-collector", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-fabric-evidence", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-runtime", "license": "APACHE-2.0", "compatible": true}
+{"name": "nemo-helix-tavily-plugin", "license": "MIT", "compatible": true}
 {"name": "nemo-relay", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-relay-cli-bin", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-safe-synthesizer", "license": "APACHE-2.0", "compatible": true}

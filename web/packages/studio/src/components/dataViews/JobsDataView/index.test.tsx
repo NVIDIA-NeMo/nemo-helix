@@ -4,8 +4,8 @@
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
 import {
-  HelixJobResponse,
-  HelixJobResponsesPage,
+  type HelixJobResponse,
+  type HelixJobResponsesPage,
   HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';

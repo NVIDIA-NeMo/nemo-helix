@@ -4,7 +4,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { FormModal, FormModalProps } from '@nemo/common/src/components/FormModal';
+import { FormModal, type FormModalProps } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { handleFormErrorsGeneric } from '@nemo/common/src/utils/forms/error';
 import {
@@ -16,8 +16,8 @@ import {
 import { EntitiesUpdateWorkspaceBody } from '@nemo/sdk/generated/platform/zod/entity-store';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { queryClient } from '@studio/api/queryClient';
-import { FC, useEffect } from 'react';
-import { SubmitHandler, useForm } from 'react-hook-form';
+import { type FC, useEffect } from 'react';
+import { type SubmitHandler, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const formSchema = EntitiesUpdateWorkspaceBody.extend({

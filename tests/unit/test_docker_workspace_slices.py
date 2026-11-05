@@ -28,6 +28,12 @@ CVE_PACKAGE_FLOORS = (
         (
             Path("docker/automodel/Dockerfile.nhx-automodel-base"),
             Path("docker/rl/Dockerfile.nhx-rl-base"),
+        ),
+    ),
+    (
+        "virtualenv",
+        "21.14.13",
+        (
             Path("docker/locks/nhx-gym-tasks/pyproject.toml"),
             Path("docker/locks/nhx-gym-host/pyproject.toml"),
         ),
@@ -166,7 +172,7 @@ def test_gym_locks_resolve_fixed_virtualenv(project: str) -> None:
 
     lock = _load_pyproject(ROOT / "docker/locks" / project / "uv.lock")
     virtualenv = next(package for package in lock["package"] if package["name"] == "virtualenv")
-    assert Version(virtualenv["version"]) >= Version("21.14.9")
+    assert Version(virtualenv["version"]) >= Version("21.14.13")
 
 
 def test_ngc_notebook_is_replaced_before_system_copy_cleanup() -> None:

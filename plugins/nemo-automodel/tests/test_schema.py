@@ -5,7 +5,14 @@ import json
 
 import pytest
 from nemo_automodel_plugin.cli.inputs import load_job_json
-from nemo_automodel_plugin.schema import AutomodelJobInput, AutomodelJobOutput, DeploymentParams, ExportSpec
+from nemo_automodel_plugin.schema import (
+    AUTOMODEL_LEARNING_RATE_DEFAULTS,
+    AutomodelJobInput,
+    AutomodelJobOutput,
+    DeploymentParams,
+    ExportSpec,
+)
+from nhx.customization_common.schema import LEARNING_RATE_DEFAULTS_KEY
 from pydantic import ValidationError
 
 
@@ -161,6 +168,11 @@ def test_sft_learning_rate_defaults_follow_finetuning_type(
         }
     ).with_resolved_recipe("causal_lm")
     assert spec.optimizer.learning_rate == expected
+
+
+def test_job_input_schema_publishes_learning_rate_defaults() -> None:
+    schema = AutomodelJobInput.model_json_schema()
+    assert schema[LEARNING_RATE_DEFAULTS_KEY] == AUTOMODEL_LEARNING_RATE_DEFAULTS
 
 
 def test_forwarded_spec_keeps_the_learning_rate_unset_only_without_defaults() -> None:

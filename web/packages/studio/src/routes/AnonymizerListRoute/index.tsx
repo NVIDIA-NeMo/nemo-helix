@@ -8,7 +8,7 @@ import { ANONYMIZER_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { getNewAnonymizerRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { Link, Outlet } from 'react-router';
 
 export const AnonymizerListRoute: FC | null = ANONYMIZER_ENABLED

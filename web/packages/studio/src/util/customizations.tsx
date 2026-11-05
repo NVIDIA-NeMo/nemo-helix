@@ -5,7 +5,7 @@ import type { StatTileDiagnosticProps, StatTileStatus } from '@nemo/common/src/c
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { formatTimeInSeconds, utcToLocalDate } from '@nemo/common/src/utils/date';
 import { formatFinetuningType } from '@nemo/common/src/utils/formatters';
-import { GraphNode, Gpu } from '@nemo/icons/icons';
+import { ShapeCircle, GpuCard } from '@nemo/icons/icons';
 import type { RlGRPOTraining, RlJobOutput } from '@nemo/sdk/generated/customizer/schema';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 import { Badge } from '@nvidia/foundations-react-core';
@@ -802,11 +802,11 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
   if (isAutomodelJob(job)) {
     const p = job.spec.parallelism;
     const badges: ReactNode[] = [
-      badge('num_gpus_per_node', <Gpu />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
-      badge('num_nodes', <GraphNode />, getTextWithCount('Node', p.num_nodes ?? 0)),
+      badge('num_gpus_per_node', <GpuCard />, getTextWithCount('GPU', p.num_gpus_per_node ?? 0)),
+      badge('num_nodes', <ShapeCircle />, getTextWithCount('Node', p.num_nodes ?? 0)),
       badge(
         'tensor_parallel_size',
-        <Gpu />,
+        <GpuCard />,
         getTextWithCount('Tensor Parallel', p.tensor_parallel_size ?? 0)
       ),
     ];
@@ -821,7 +821,7 @@ export const getTrainingOptionBadges = (job: CustomizationJob | null | undefined
     const badges: ReactNode[] = [];
     if (gpus) {
       const gpuCount = gpus.split(',').filter(Boolean).length;
-      badges.push(badge('gpus', <Gpu />, getTextWithCount('GPU', gpuCount)));
+      badges.push(badge('gpus', <GpuCard />, getTextWithCount('GPU', gpuCount)));
     }
     badges.push(badge('precision', undefined, `Precision: ${precision}`));
     return badges;

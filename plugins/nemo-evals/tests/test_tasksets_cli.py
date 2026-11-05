@@ -22,7 +22,7 @@ from nemo_evals.runs_cli import (
     wait_for_builds,
 )
 from nemo_evals.sdk.resources import Evaluator
-from nemo_evals.tasksets_cli import STATUS_BUILDING, add_tasksets_commands
+from nemo_evals.tasksets_cli import STATUS_BUILDING, _print_status, add_tasksets_commands
 from nemo_helix_plugin.client.errors import NemoTransportError
 from typer.testing import CliRunner
 
@@ -274,6 +274,13 @@ def test_status_reads_the_default_platform_build_and_names_tasks_never_requested
     assert result.output.splitlines()[0] == "Image builds for 2 tasks: 1 ready, 0 building, 0 failed, 1 not requested."
 
 
+def test_status_reads_build_times_without_a_zone_as_utc(capsys):
+    """The entity store returns timestamps without a zone, which can't be subtracted from an aware now."""
+    build = _build("a", "1", "running").model_copy(update={"updated_at": T0.replace(tzinfo=None)})
+    assert _print_status({"default/a#" + DIGEST: build}, now=T0 + timedelta(minutes=5)) == STATUS_BUILDING
+    assert "(no change for 5m" in capsys.readouterr().out
+
+
 def test_wait_and_status_do_not_combine(cli):
     assert cli(FakeBuilds(), "build-images", "default/suite", "--wait", "--status").exit_code == 2
 
@@ -305,11 +312,13 @@ def test_create_prints_the_dataset_flag_and_the_ref_last(cli, monkeypatch):
     result = cli(FakeBuilds(), "create", "--harbor-hub", "datacurve/deep-swe@latest", "--workspace", "ac9")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines() == [
-        f"Dataset for Intake: --dataset datacurve/deep-swe@sha256:{'a' * 64}",
+        f"Intake label: --intake-dataset datacurve/deep-swe@sha256:{'a' * 64}",
         created.ref,
     ]
     as_json = json.loads(cli(FakeBuilds(), "create", "--harbor-hub", "x/y@1", "--json").output)
-    assert as_json["taskset_ref"] == created.ref and as_json["dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    assert (
+        as_json["taskset_ref"] == created.ref and as_json["intake_dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    )
 
 
 def test_create_needs_exactly_one_source(cli, tmp_path: Path):

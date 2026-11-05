@@ -3,9 +3,9 @@
 
 import { Toast } from '@nvidia/foundations-react-core';
 import {
-  FC,
-  PropsWithChildren,
-  SyntheticEvent,
+  type FC,
+  type PropsWithChildren,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -20,7 +20,7 @@ import {
   TOAST_ENQUEUE_MS,
 } from './constants';
 import { getTransformStyles } from './GetTransformStyles';
-import { AddToastFn, ToastContextValue, ToastDescriptor } from './types';
+import type { AddToastFn, ToastContextValue, ToastDescriptor } from './types';
 import { ToastContext } from './useToast';
 
 export const ToastProvider: FC<PropsWithChildren> = ({ children }) => {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { DownloadMenu } from '@nemo/common/src/components/DownloadMenu';
 import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { CJobCancellableStatuses } from '@nemo/common/src/constants/query';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
@@ -17,9 +18,11 @@ import { getCustomizationJobStatusQueryKey } from '@studio/hooks/useCustomizatio
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { SaveTemplateModal } from '@studio/routes/CustomizationJobDetailsRoute/SaveTemplateModal';
 import { getNewCustomizationFormRoute } from '@studio/routes/utils';
+import { hasMetrics } from '@studio/types/customization';
 import { CustomizationBackend, type CustomizationJob } from '@studio/util/customizationBackend';
+import { customizationMetricsExport } from '@studio/util/resultExports';
 import { useQueryClient } from '@tanstack/react-query';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DetailActionsProps {
@@ -88,8 +91,22 @@ export const DetailActions: FC<DetailActionsProps> = ({ status, backend, name, j
   const isCancellable = status !== undefined && CJobCancellableStatuses.includes(status);
   const isCancelling = isPending || status === HelixJobStatus.cancelling;
 
+  const statusDetails = job?.status_details;
+  const metrics = hasMetrics(statusDetails) ? statusDetails.metrics : undefined;
+
   return (
     <Flex gap="density-sm" align="center">
+      <DownloadMenu
+        label="Download metrics"
+        fileName={`${name}-metrics`}
+        disabled={!Object.values(metrics ?? {}).some((series) => series?.length)}
+        descriptions={{
+          json: 'Job details with every metric series',
+          jsonl: 'One training step per line',
+          csv: 'Training steps as a table, for spreadsheets',
+        }}
+        getData={() => customizationMetricsExport({ name, status }, metrics)}
+      />
       <QuickActionsMenuRoot
         actions={[
           {

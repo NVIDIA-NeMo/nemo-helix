@@ -95,6 +95,8 @@ def test_infer_backend_format():
     assert _infer_backend_format("anthropic/claude-opus-4-7") == "ANTHROPIC_MESSAGES"
     assert _infer_backend_format("CLAUDE-3-haiku") == "ANTHROPIC_MESSAGES"
     assert _infer_backend_format("my-claude-like-model") == "OPENAI_CHAT"
+    assert _infer_backend_format("nvidia-nvidia-nemotron-decide", "evaluation") == "SYSTEMONE"
+    assert _infer_backend_format("claude-3-haiku", "chat") == "ANTHROPIC_MESSAGES"
 
 
 def _make_discoverable_provider(
@@ -260,6 +262,31 @@ async def test_discover_models_keeps_the_serving_engine(mock_client):
     assert [m["owned_by"] for m in result.models] == ["sglang", None]
 
 
+@pytest.mark.asyncio
+async def test_discover_models_keeps_the_mode(mock_client):
+    mock_client.gateway_provider_client.get_provider_models = AsyncMock(
+        return_value={
+            "object": "list",
+            "data": [
+                {"id": "nvidia/nvidia/nemotron-decide", "mode": "evaluation"},
+                {"id": "gcp/google/gemini", "mode": "chat"},
+                {"id": "plain"},
+            ],
+        }
+    )
+    reconciler = ModelProviderReconciler(
+        client=mock_client,
+        controller_config=ControllerConfig(),
+        entity_cache=ModelEntityCache(client=mock_client, emit_heartbeat=lambda: None),
+        emit_heartbeat=lambda: None,
+    )
+
+    result = await reconciler._discover_models(_make_discoverable_provider())
+
+    assert isinstance(result, DiscoverySuccess)
+    assert [m["mode"] for m in result.models] == ["evaluation", "chat", None]
+
+
 @pytest.mark.parametrize(
     ("max_retries", "expect_get_call_kwargs"),
     [
@@ -367,7 +394,7 @@ async def test_get_available_models_from_provider_parses_json_string_response(re
     result = await reconciler._discover_models(model_provider)
 
     assert isinstance(result, DiscoverySuccess)
-    assert result.models == [{"id": "llama3:latest", "root": None, "parent": None, "owned_by": "library"}]
+    assert result.models == [{"id": "llama3:latest", "root": None, "parent": None, "owned_by": "library", "mode": None}]
 
 
 @pytest.mark.asyncio
@@ -1085,6 +1112,81 @@ async def test_ensure_model_entity_doesnt_overwrite_existing_backend_format(reco
     body = call.kwargs["body"]
     assert body.backend_format is None
     assert body.model_providers == ["test-ns/test-provider"]
+
+
+@pytest.mark.parametrize("existing_format", [None, "OPENAI_CHAT"])
+@pytest.mark.asyncio
+async def test_ensure_model_entity_marks_evaluation_mode_model_as_systemone(reconciler, existing_format):
+    """A model the provider lists with mode "evaluation" serves only /v1/systemone, so chat is replaced."""
+    existing_entity = MagicMock()
+    existing_entity.model_providers = ["test-ns/test-provider"]
+    existing_entity.fileset = None
+    existing_entity.api_endpoint = None
+    existing_entity.backend_format = existing_format
+
+    existing_entity.workspace = "test-ns"
+    existing_entity.name = "nvidia-nvidia-nemotron-decide"
+    reconciler._models_client.list_models = AsyncMock(return_value=_AsyncPage([existing_entity]))
+    await reconciler._entity_cache.refresh()
+
+    ctx = ModelContext(
+        model_provider=MagicMock(),
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_build_artifact_details", return_value=ArtifactDetails()):
+        await reconciler._ensure_model_entity_for_provider(
+            model_workspace="test-ns",
+            model_name="nvidia-nvidia-nemotron-decide",
+            provider=ctx.model_provider,
+            provider_id="test-ns/test-provider",
+            ctx=ctx,
+            mode="evaluation",
+        )
+    await reconciler._entity_cache.flush()
+
+    update = reconciler._models_client.update_model
+    update.assert_awaited_once()
+    call = update.await_args
+    assert call is not None
+    assert call.kwargs["body"].backend_format == "SYSTEMONE"
+
+
+@pytest.mark.asyncio
+async def test_ensure_model_entity_keeps_user_format_for_evaluation_mode_model(reconciler):
+    """Only the chat default is replaced; any other value a user set stays."""
+    existing_entity = MagicMock()
+    existing_entity.model_providers = ["test-ns/test-provider"]
+    existing_entity.fileset = None
+    existing_entity.api_endpoint = None
+    existing_entity.backend_format = "ANTHROPIC_MESSAGES"
+
+    existing_entity.workspace = "test-ns"
+    existing_entity.name = "test-model"
+    reconciler._models_client.list_models = AsyncMock(return_value=_AsyncPage([existing_entity]))
+    await reconciler._entity_cache.refresh()
+
+    ctx = ModelContext(
+        model_provider=MagicMock(),
+        model_deployment=None,
+        model_deployment_config=None,
+        model_entity=None,
+    )
+
+    with patch.object(reconciler, "_build_artifact_details", return_value=ArtifactDetails()):
+        await reconciler._ensure_model_entity_for_provider(
+            model_workspace="test-ns",
+            model_name="test-model",
+            provider=ctx.model_provider,
+            provider_id="test-ns/test-provider",
+            ctx=ctx,
+            mode="evaluation",
+        )
+    await reconciler._entity_cache.flush()
+
+    reconciler._models_client.update_model.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -2868,8 +2970,9 @@ async def test_reconcile_creates_virtual_models_even_when_update_status_fails(re
     mock_client.virtual_models_client.delete_virtual_model.assert_not_awaited()
 
 
+@pytest.mark.parametrize("prompt_root", ["e2e-ws/qwen-lora-base", "qwen-lora-base"])
 @pytest.mark.asyncio
-async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler):
+async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler, prompt_root):
     """Deployment-backed provider builds served_models with base, LoRA (&adapters/), and prompt-tuned
     formats, and creates passthrough VirtualModels for the base and prompt-tuned entries only.
 
@@ -2896,7 +2999,7 @@ async def test_deployment_backed_served_models_base_lora_prompt_tuned(reconciler
     discovered = [
         {"id": "e2e-ws/qwen-lora-base", "root": "e2e-ws/qwen-lora-base", "parent": None},
         {"id": "qwen-lora-base-lora-e2e-dataset-5c30", "root": "/scratch/loras/...", "parent": "e2e-ws/qwen-lora-base"},
-        {"id": "qwen-lora-prompt-tuned", "root": "e2e-ws/qwen-lora-base", "parent": None},
+        {"id": "qwen-lora-prompt-tuned", "root": prompt_root, "parent": None},
     ]
     reconciler._models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
 
@@ -2956,6 +3059,49 @@ def test_handle_model_deployment_provider_unmatched_skipped(reconciler):
     out = reconciler._generate_deployment_served_model_mappings(provider, "ws/p", result, ctx)
     assert len(out) == 1
     assert out[0].model_entity_id == "ws/base"
+
+
+@pytest.mark.parametrize("with_entity", [False, True])
+@pytest.mark.asyncio
+async def test_relative_deployment_model_id_creates_passthrough_virtual_model(reconciler, mock_client, with_entity):
+    """Relative config IDs must match vLLM's qualified discovery ID before VM creation."""
+    ctx = _deployment_backed_ctx()
+    ctx.model_deployment_config.model_entity_id = "base-entity"
+    ctx.model_deployment_config.model_spec = MagicMock(model_namespace="ws")
+    ctx.model_entity = _base_entity([]) if with_entity else None
+    mock_client.models_client.update_provider_status = AsyncMock(return_value=_ModelResponse())
+
+    with patch.object(reconciler, "_discover_models", return_value=DiscoverySuccess(_DEPLOYMENT_DISCOVERED)):
+        await reconciler.reconcile_model_providers([ctx])
+
+    served = _provider_status_call(mock_client.models_client.update_provider_status)["served_models"]
+    assert {mapping.model_entity_id for mapping in served} == {
+        "ws/base-entity",
+        "ws/base-entity&adapters/default/pirate-speak",
+    }
+    create = mock_client.virtual_models_client.create_virtual_model
+    create.assert_awaited_once()
+    assert create.call_args.kwargs["workspace"] == "ws"
+    assert create.call_args.kwargs["body"].name == "base-entity"
+    assert create.call_args.kwargs["body"].default_model_entity == "ws/base-entity"
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "entity_workspace", "model_namespace", "model_name", "expected"),
+    [
+        ("base", "model-ws", "ignored", "ignored/source", "model-ws/base"),
+        ("base", None, "model-ws", "source-ws/source", "model-ws/base"),
+        ("other/base", "ignored", "ignored", "ignored/source", "other/base"),
+        ("base", None, None, "source", "base"),
+        ("base", None, None, "source-ws/source@revision", "source-ws/base"),
+    ],
+)
+def test_resolve_relative_base_backend_model_id(entity_id, entity_workspace, model_namespace, model_name, expected):
+    config = MagicMock()
+    config.model_entity_id = entity_id
+    config.model_spec = MagicMock(model_namespace=model_namespace, model_name=model_name, model_revision=None)
+    entity = MagicMock(workspace=entity_workspace) if entity_workspace else None
+    assert _resolve_base_backend_model_id(config, entity) == expected
 
 
 def test_resolve_base_backend_model_id_from_nim_deployment_only():

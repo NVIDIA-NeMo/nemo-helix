@@ -27,14 +27,14 @@ import type {
   CreateJobsListFilter as DataDesignerJobsListFilter,
   CreateJobsSortField as DataDesignerJobsSortField,
 } from '@nemo/sdk/generated/data-designer/schema';
-import { Banner, Button, Text } from '@nvidia/foundations-react-core';
+import { Button, Text } from '@nvidia/foundations-react-core';
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { DataDesignerJobActionsMenu } from '@studio/components/DataDesignerJobActionsMenu';
 import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getDataDesignerJobDetailsRoute, getNewDataDesignerJobRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 type DataDesignerJobWithId = DataDesignerJob & { id: string };
@@ -52,7 +52,6 @@ export const DataDesignerJobsDataView: FC = () => {
   const queryClient = useQueryClient();
 
   const [deleteJobs, setDeleteJobs] = useState<DataDesignerJob[]>([]);
-  const [cancelError, setCancelError] = useState<string | undefined>(undefined);
 
   const deleteJobMutation = useDataDesignerDeleteCreateJob({
     mutation: {
@@ -183,13 +182,7 @@ export const DataDesignerJobsDataView: FC = () => {
     rowActionsColumn({
       size: 70,
       enableResizing: false,
-      cell: ({ row }) => (
-        <DataDesignerJobActionsMenu
-          job={row.original}
-          includeViewDetails
-          onCancelError={setCancelError}
-        />
-      ),
+      cell: ({ row }) => <DataDesignerJobActionsMenu job={row.original} includeViewDetails />,
     }),
   ];
 
@@ -197,12 +190,6 @@ export const DataDesignerJobsDataView: FC = () => {
 
   return (
     <>
-      {cancelError && (
-        <Banner kind="inline" status="error">
-          {cancelError}
-        </Banner>
-      )}
-
       <StudioDataView<DataDesignerJobWithId>
         dataViewState={dataViewState}
         searchField="name"

@@ -8,7 +8,7 @@ import {
   useSafeSynthesizerDownloadJobResultSyntheticData,
   useSafeSynthesizerListJobResults,
 } from '@nemo/sdk/generated/safe-synthesizer/safe-synthesizer';
-import { type GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import type { GenerateJob } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { ThemeProvider } from '@nvidia/foundations-react-core';
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';

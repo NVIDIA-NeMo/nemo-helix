@@ -15,8 +15,8 @@ import { EngineFields } from '@studio/routes/NewDeploymentRoute/EngineFields';
 import { GPULoraFields } from '@studio/routes/NewDeploymentRoute/GPULoraFields';
 import type { WizardFormValues } from '@studio/routes/NewDeploymentRoute/schema';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
-import { FC } from 'react';
-import { Control, FieldErrors } from 'react-hook-form';
+import type { FC } from 'react';
+import type { Control, FieldErrors } from 'react-hook-form';
 
 export type HuggingFaceSourceFieldsProps = {
   workspace: string;

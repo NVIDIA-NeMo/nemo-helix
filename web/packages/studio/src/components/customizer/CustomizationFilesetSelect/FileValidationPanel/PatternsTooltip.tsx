@@ -4,7 +4,7 @@
 import { HelpCircle } from '@nemo/icons/icons';
 import { Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { tooltipClassName } from '@studio/styles/common';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 const PatternsTooltipContent: FC = () => (
   <div className={tooltipClassName}>

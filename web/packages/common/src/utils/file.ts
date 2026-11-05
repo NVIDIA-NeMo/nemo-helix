@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { parquetRead } from 'hyparquet';
+import {
+  jsonlLines,
+  parquetRowCount,
+  readParquetObjects,
+} from '@nemo/common/src/utils/parseRecords';
 import Papa from 'papaparse';
 
-import { FileFormatType } from '../types';
+import type { FileFormatType } from '../types';
 
 /**
  * Searches through an object's keys (one layer deep) to find an array that contains
@@ -104,27 +108,12 @@ export async function getFirstRow(
  */
 export async function getFileRowCount(file: File, format: FileFormatType): Promise<number> {
   try {
-    if (format === 'parquet') {
-      let count = 0;
-      const buffer = await file.arrayBuffer();
-      await parquetRead({
-        file: buffer,
-        rowFormat: 'object',
-        onComplete: (rows) => {
-          count = rows.length;
-        },
-      });
-      return count;
-    }
+    if (format === 'parquet') return await parquetRowCount(file);
 
     const text = await file.text();
 
     if (format === 'jsonl') {
-      const lines = text
-        .trim()
-        .split('\n')
-        .filter((line) => line.length > 0);
-      return lines.length;
+      return jsonlLines(text).length;
     } else if (format === 'csv') {
       const result = Papa.parse<Record<string, string>>(text, {
         header: true,
@@ -155,33 +144,19 @@ export async function getRowAtIndex(
 ): Promise<Record<string, unknown> | null> {
   try {
     if (format === 'parquet') {
-      let targetRow: Record<string, unknown> | null = null;
-      const buffer = await file.arrayBuffer();
-      await parquetRead({
-        file: buffer,
-        rowFormat: 'object',
-        rowStart: index,
-        rowEnd: index + 1,
-        onComplete: (rows) => {
-          const row = rows[0];
-          if (row) {
-            // Coerce BigInt (from INT64 columns) to number for JSON Schema inference.
-            targetRow = Object.fromEntries(
-              Object.entries(row).map(([k, v]) => [k, typeof v === 'bigint' ? Number(v) : v])
-            );
-          }
-        },
-      });
-      return targetRow;
+      const [row] = await readParquetObjects(file, { rowStart: index, rowEnd: index + 1 });
+      // Coerce BigInt (from INT64 columns) to number for JSON Schema inference.
+      return row
+        ? Object.fromEntries(
+            Object.entries(row).map(([k, v]) => [k, typeof v === 'bigint' ? Number(v) : v])
+          )
+        : null;
     }
 
     const text = await file.text();
 
     if (format === 'jsonl') {
-      const lines = text
-        .trim()
-        .split('\n')
-        .filter((line) => line.length > 0);
+      const lines = jsonlLines(text);
       if (index >= 0 && index < lines.length) {
         return JSON.parse(lines[index]);
       }

@@ -14,7 +14,7 @@ import { ExistingDataset } from '@nemo/common/src/components/UploadModal/Dataset
 import { NewDataset } from '@nemo/common/src/components/UploadModal/DatasetUploader/NewDataset';
 import { DatasetSelect } from '@nemo/common/src/components/UploadModal/DatasetUploader/Select';
 import { Stack } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   projectId: string;

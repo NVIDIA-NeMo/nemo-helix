@@ -9,6 +9,7 @@ from typing import Callable
 
 import torch
 from accelerate import init_empty_weights
+from nhx.core.models.parallelism.checkpoint import inspect_checkpoint
 from nhx.core.models.parallelism.constants import DEFAULT_EXCLUDE_PATTERNS, DEFAULT_INCLUDE_PATTERNS
 from nhx.core.models.parallelism.hueristics import (
     comm_cost_proxy,
@@ -185,6 +186,9 @@ def infer_model_cfg_from_hf(
         tokenizer = AutoTokenizer.from_pretrained(cfg.name_or_path, trust_remote_code=is_trusted)
         is_chat = getattr(tokenizer, "chat_template", None) is not None
 
+    # Vision and audio live on the root. Dimensions below prefer the nested language config.
+    inspected = inspect_checkpoint(cfg)
+    root_cfg = cfg
     if getattr(cfg, "text_config", None):
         cfg = getattr(cfg, "text_config")
 
@@ -192,8 +196,9 @@ def infer_model_cfg_from_hf(
     basic_config = extract_basic_config(cfg)
     n_layers = basic_config["num_layers"]
 
-    # Detect architecture-specific features
-    moe_config = detect_moe_config_from_cfg(cfg)
+    # Detect architecture-specific features. MoE walks the root so thinker/language
+    # configs are visible; the rest describe the language stack.
+    moe_config = detect_moe_config_from_cfg(root_cfg)
     mamba_config = detect_mamba_config_from_cfg(cfg, n_layers, is_trusted)
     gated_mlp = detect_gated_mlp_from_cfg(cfg)
     sliding_window_config = detect_sliding_window_from_cfg(cfg)
@@ -228,6 +233,10 @@ def infer_model_cfg_from_hf(
         moe_config=moe_config,
         mamba_config=mamba_config,
         sliding_window_config=sliding_window_config,
+        has_vision_tower=inspected.has_vision_tower,
+        has_audio_tower=inspected.has_audio_tower,
+        num_experts=inspected.expert_count,
+        num_nextn_predict_layers=inspected.num_nextn_predict_layers,
         linear_layers=linear_layers if linear_layers else None,
     )
 

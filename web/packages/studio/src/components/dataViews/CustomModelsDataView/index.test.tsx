@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_EMPTY_STATES } from '@nemo/common/src/components/EntityEmptyState/registry';
-import { ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
+import type { ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
 import { CustomModelsDataView } from '@studio/components/dataViews/CustomModelsDataView';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';

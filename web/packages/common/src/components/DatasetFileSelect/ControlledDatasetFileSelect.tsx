@@ -11,7 +11,7 @@ import type { FileListItem } from '@nemo/common/src/components/FileList';
 import type { UseControllerComponentProps } from '@nemo/common/src/utils/types';
 import type { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { FormField } from '@nvidia/foundations-react-core';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import { useController } from 'react-hook-form';
 
 interface ControlledDatasetFileSelectProps extends UseControllerComponentProps {

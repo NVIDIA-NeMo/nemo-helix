@@ -1,19 +1,19 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
+import type {
   FilesetFileOutput,
   FilesetOutput,
   FilesetPurpose,
 } from '@nemo/sdk/generated/platform/schema';
-import {
+import type {
   ModalContent,
   ModalHeading,
   ModalMain,
   ModalRoot,
   ModalFooter,
 } from '@nvidia/foundations-react-core';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 /**
  * @deprecated Use FilesetFileOutput directly from '@nemo/sdk/generated/platform/schema'

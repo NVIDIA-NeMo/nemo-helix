@@ -14,7 +14,7 @@ import {
   isJobProgressNotFoundError,
 } from '@studio/routes/agents/AssistantChatRoute/utils/jobProgress';
 import { useQuery } from '@tanstack/react-query';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { Link } from 'react-router';
 
 interface JobProgressToolCallProps {

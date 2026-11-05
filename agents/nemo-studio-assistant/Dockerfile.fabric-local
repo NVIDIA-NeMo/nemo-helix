@@ -27,7 +27,7 @@ RUN apt-get update && \
 # pinned release binary before placing it on the global runtime PATH.
 RUN curl -fsSL https://raw.githubusercontent.com/NVIDIA/NeMo-Relay/40c5990361afc26ae8b901ff1f49c2b03ddd9ede/install.sh -o /tmp/install-nemo-relay.sh && \
     echo "ba2585a32e568643819992fa66b750004328351fce422b979d8c11cfc8bbfadb  /tmp/install-nemo-relay.sh" | sha256sum -c - && \
-    NEMO_RELAY_VERSION=0.9.3 sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \
+    NEMO_RELAY_VERSION=0.11.0 sh /tmp/install-nemo-relay.sh --install-dir /usr/local/bin && \
     rm /tmp/install-nemo-relay.sh && \
     nemo-relay --version
 
@@ -49,7 +49,7 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \
     [ "$#" -eq 1 ] && [ -f "$1" ] || { echo "expected exactly one nemo_helix wheel in wheelhouse/, found: $*" >&2; exit 1; } && \
     uv pip install --no-sources --constraint /workspace/constraints.fabric-local.txt \
       "$1[nemo-agents-plugin]" \
-      "nemo-fabric==0.5.0" . && \
+      "nemo-fabric==0.6.0" . && \
     chmod -R a+rX /opt/uv /workspace/.venv
 
 

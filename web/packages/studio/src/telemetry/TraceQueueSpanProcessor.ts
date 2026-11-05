@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TraceQueue } from '@nemo/common/src/utils/TraceQueue';
-import { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-web';
+import type { ReadableSpan, SpanProcessor } from '@opentelemetry/sdk-trace-web';
 import {
   enhanceFetchSpanName,
   enhanceXhrSpanName,

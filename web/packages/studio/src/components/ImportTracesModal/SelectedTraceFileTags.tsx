@@ -5,7 +5,7 @@ import { FileTag } from '@nemo/common/src/components/FileTag';
 import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { FORMAT_LABELS } from '@studio/components/ImportTracesModal/detectTraceFormat';
 import type { SelectedTraceFile } from '@studio/components/ImportTracesModal/ingestTraceFiles';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface SelectedTraceFileTagsProps {
   files: SelectedTraceFile[];

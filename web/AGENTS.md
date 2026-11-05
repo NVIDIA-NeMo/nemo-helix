@@ -31,7 +31,7 @@ The `kaizen-ui` skill is not committed — it is synced from the `@nvidia/founda
   - `@studio/` → `packages/studio/src/` (inside the studio package)
   - `@nemo/common/` → `packages/common/src/`
   - `@nemo/sdk` → `packages/sdk/`
-- Use `import type` for type-only imports
+- Use `import type { A }` when every specifier is a type. When a module supplies both values and types, mark the types inline in one import (`import { memo, type FC } from 'react'`) — `no-duplicate-imports` rejects a separate `import type` line. ESLint (`consistent-type-imports`, `no-import-type-side-effects`) enforces both and `pnpm lint:fix` applies them.
 
 ## Importing the generated SDK
 

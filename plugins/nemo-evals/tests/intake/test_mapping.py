@@ -17,6 +17,7 @@ from nemo_evals.intake.mapping import (
     DEFAULT_AGENT_VERSION,
     RecordedSteps,
     atif_steps_from_trial,
+    otlp_ingest_for_trial,
     run_task_to_evaluation_context,
     score_to_evaluator_results,
     session_id_for,
@@ -29,7 +30,13 @@ from nhx_evals_sdk.agent_eval.scores import (
     AgentEvalScoreStatus,
     AgentEvalTaskScore,
 )
-from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, AgentOutput, TrialError
+from nhx_evals_sdk.agent_eval.trials import (
+    AgentEvalTrial,
+    AgentEvalTrialStatus,
+    AgentOutput,
+    TrialError,
+    TrialMeasurements,
+)
 from nhx_evals_sdk.metrics.protocol import (
     BooleanValue,
     ContinuousScore,
@@ -38,6 +45,7 @@ from nhx_evals_sdk.metrics.protocol import (
     MetricOutput,
 )
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 STARTED_AT = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -635,3 +643,147 @@ async def test_a_trajectory_with_no_steps_is_treated_as_absent(tmp_path: Path) -
 
     # Ingest needs at least one step, so an empty trajectory must fall back to the synthetic step.
     assert await atif_steps_from_trial(trial, started_at=STARTED_AT) is None
+
+
+# --- otlp_ingest_for_trial: caller identity ---------------------------------
+
+_OTLP_TRACE_ID = "0123456789abcdef0123456789abcdef"
+_OTLP_ROOT_SPAN_ID = "0102030405060708"
+_OTLP_CHILD_SPAN_ID = "aabbccddeeff0011"
+
+
+def _otlp_document() -> dict[str, Any]:
+    """A trace whose root already records the producer's agent and model identity."""
+    return {
+        "resourceSpans": [
+            {
+                "scopeSpans": [
+                    {
+                        "spans": [
+                            {
+                                "traceId": _OTLP_TRACE_ID,
+                                "spanId": _OTLP_ROOT_SPAN_ID,
+                                "name": "agent run",
+                                "attributes": [
+                                    {"key": "gen_ai.agent.name", "value": {"stringValue": "relay"}},
+                                    {"key": "gen_ai.agent.version", "value": {"stringValue": "0.162.1"}},
+                                    {"key": "gen_ai.request.model", "value": {"stringValue": "relay-model"}},
+                                ],
+                            },
+                            {
+                                "traceId": _OTLP_TRACE_ID,
+                                "spanId": _OTLP_CHILD_SPAN_ID,
+                                "parentSpanId": _OTLP_ROOT_SPAN_ID,
+                                "name": "child",
+                                "attributes": [{"key": "gen_ai.agent.name", "value": {"stringValue": "subagent"}}],
+                            },
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def _published_spans(trial: AgentEvalTrial, **identity: Any):
+    """Publish the trial's OTLP trace and return the sent payload's spans, by name."""
+    published = None
+
+    async def run() -> dict[str, Any]:
+        nonlocal published
+        published = await otlp_ingest_for_trial(
+            trial,
+            session_id="run-1:t-1",
+            evaluation_name="exp-1",
+            measurements=TrialMeasurements(),
+            started_at=STARTED_AT,
+            **identity,
+        )
+        assert published is not None
+        payload, _span_id = published
+        return _parse_spans(payload)
+
+    return run
+
+
+def _parse_spans(payload: bytes) -> dict[str, Any]:
+    request = ExportTraceServiceRequest()
+    request.ParseFromString(payload)
+    spans = [span for rs in request.resource_spans for ss in rs.scope_spans for span in ss.spans]
+    return {span.name: span for span in spans}
+
+
+@pytest.mark.asyncio
+async def test_an_omitted_identity_keeps_the_producer_values(tmp_path: Path) -> None:
+    # No agent name, no model, and the default version: the producer recorded who ran the trace,
+    # and the caller passed nothing that should replace it. Intake reads the agent back from the
+    # root span's gen_ai.agent.name, so overriding it with defaults would mislabel the trace.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+
+    spans = await _published_spans(trial)()
+
+    attributes = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert attributes["gen_ai.agent.name"] == "relay"
+    assert attributes["gen_ai.agent.version"] == "0.162.1"
+    assert attributes["gen_ai.request.model"] == "relay-model"
+
+
+@pytest.mark.asyncio
+async def test_an_empty_identity_keeps_the_producer_values(tmp_path: Path) -> None:
+    # An empty string is not a name. Intake reads a blank agent name as no agent, so stamping
+    # "" would publish a trace that is worse than the one the producer recorded.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+
+    spans = await _published_spans(trial, agent_name="", model_name="")()
+
+    attributes = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert attributes["gen_ai.agent.name"] == "relay"
+    assert attributes["gen_ai.request.model"] == "relay-model"
+
+
+@pytest.mark.asyncio
+async def test_an_explicit_identity_overrides_the_root_only(tmp_path: Path) -> None:
+    # An explicit name, version, and model replace the producer's on the root span. Child spans
+    # keep their own identity: stamping them would clobber a subagent's recorded name.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+
+    spans = await _published_spans(trial, agent_name="eval-agent", agent_version="3.1.4", model_name="gpt-x")()
+
+    root = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert root["gen_ai.agent.name"] == "eval-agent"
+    assert root["gen_ai.agent.version"] == "3.1.4"
+    assert root["gen_ai.request.model"] == "gpt-x"
+
+    child_keys = {attribute.key: attribute.value.string_value for attribute in spans["child"].attributes}
+    assert child_keys["gen_ai.agent.name"] == "subagent"
+    assert "gen_ai.agent.version" not in child_keys
+    assert "gen_ai.request.model" not in child_keys
+
+
+@pytest.mark.asyncio
+async def test_the_default_unknown_version_keeps_the_producer_version(tmp_path: Path) -> None:
+    # DEFAULT_AGENT_VERSION is "I have no version to give", matching the ATIF path: a producer
+    # version already on the root span wins over the placeholder.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+
+    spans = await _published_spans(trial, agent_name="eval-agent")()
+
+    root = {attribute.key: attribute.value.string_value for attribute in spans["agent run"].attributes}
+    assert root["gen_ai.agent.version"] == "0.162.1"
+
+
+@pytest.mark.asyncio
+async def test_the_cached_trace_survives_a_publish_byte_for_byte(tmp_path: Path) -> None:
+    # The evidence handle caches the parsed messages, so a publish that stamped them in place
+    # would change what every later reader of the cached evidence sees.
+    trial = _trial_with_trace(tmp_path, document=_otlp_document(), evidence_format="otlp")
+    assert trial.evidence is not None
+    handle = await trial.evidence.trace("trace", format="otlp")
+    before = ExportTraceServiceRequest(resource_spans=await handle.resource_spans()).SerializeToString()
+
+    run = _published_spans(trial, agent_name="eval-agent", model_name="gpt-x")
+    await run()
+    await run()  # a second publish reads the same cache again
+
+    after = ExportTraceServiceRequest(resource_spans=await handle.resource_spans()).SerializeToString()
+    assert after == before

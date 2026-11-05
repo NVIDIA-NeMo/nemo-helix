@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
 import { NewDatasetButton } from '@studio/components/NewDatasetButton';
@@ -19,7 +19,7 @@ import {
   getNewFilesetRoute,
   getWorkspaceFilesetsRoute,
 } from '@studio/routes/utils';
-import { FC, useCallback } from 'react';
+import { type FC, useCallback } from 'react';
 import { Link, Outlet, useNavigate } from 'react-router';
 
 export const FilesetListRoute: FC = () => {

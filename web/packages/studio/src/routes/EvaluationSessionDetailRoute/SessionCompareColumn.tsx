@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { ChevronUpDown, IconError } from '@nemo/icons/icons';
+import { Collapse, ChevronUpDown, IconError } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
@@ -13,7 +13,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
-import { type NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
+import type { NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { runLabel } from '@studio/routes/EvaluationSessionDetailRoute/runLabel';
@@ -149,7 +149,7 @@ export const SessionCompareColumn: FC<SessionCompareColumnProps> = ({
             onClick={collapseAll}
             disabled={spanRows.length === 0}
           >
-            <ChevronUpDown size="14" aria-hidden />
+            <Collapse size="14" aria-hidden />
           </Button>
           <Button
             kind="tertiary"

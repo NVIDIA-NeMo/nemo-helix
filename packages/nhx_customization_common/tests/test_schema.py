@@ -10,7 +10,11 @@ when merged into the single ``/apis/customization`` FastAPI app.
 """
 
 import pytest
-from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.schema import (
+    LearningRateDefault,
+    NamespacedModel,
+    match_learning_rate_default,
+)
 from pydantic import Field, ValidationError
 
 
@@ -121,3 +125,22 @@ def test_subclass_with_own_model_config_still_inherits_extra_forbid():
     assert WithOwnConfig.model_json_schema()["additionalProperties"] is False
     with pytest.raises(ValidationError):
         WithOwnConfig.model_validate({"value": 1, "bogus": 2})
+
+
+LEARNING_RATE_RULES: list[LearningRateDefault] = [
+    {"when": {"training.recipe": "bi_encoder"}, "value": 1e-5},
+    {"when": {"training.finetuning_type": "all_weights"}, "value": 5e-6},
+]
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"training.recipe": "bi_encoder", "training.finetuning_type": "all_weights"}, 1e-5),
+        ({"training.recipe": "sft", "training.finetuning_type": "all_weights"}, 5e-6),
+        ({"training.recipe": "sft", "training.finetuning_type": "lora"}, None),
+        ({}, None),
+    ],
+)
+def test_match_learning_rate_default_returns_first_matching_rule(values, expected):
+    assert match_learning_rate_default(LEARNING_RATE_RULES, values) == expected

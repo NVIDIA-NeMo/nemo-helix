@@ -26,7 +26,7 @@ import type {
 } from '@studio/components/AgentTraceStatistics/types';
 import { RANGE_LABELS } from '@studio/components/AgentTraceStatistics/utils';
 import { AxiosError } from 'axios';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 const RANGE_OPTIONS: TraceStatisticsRange[] = ['day', 'week', 'month', 'max'];
 

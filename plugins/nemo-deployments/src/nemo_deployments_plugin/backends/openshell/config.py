@@ -13,6 +13,7 @@ from typing import Literal
 from urllib.parse import urlparse
 
 from nemo_deployments_plugin.endpoint_transport import EndpointTransport
+from nemo_helix_plugin.openshell.types import GatewayCredentialConfig
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -68,6 +69,7 @@ class OpenShellExecutorConfig(BaseModel):
     """Knobs for a named openshell executor instance."""
 
     model_config = ConfigDict(extra="forbid")
+    gateway_credentials: GatewayCredentialConfig | None = None
 
     gateway_endpoint: str = Field(
         default="http://127.0.0.1:17670",

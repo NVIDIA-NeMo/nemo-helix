@@ -55,11 +55,13 @@ def handler(mock_rails_service, mock_request, mock_request_body, mock_response_m
 
 
 @pytest.mark.asyncio
+@patch("nhx.guardrails.app.handlers.checks.retire_rails_engine")
 @patch("nhx.guardrails.app.handlers.checks.convert_check_request_to_guardrails")
 @patch("nhx.guardrails.app.handlers.checks.create_guardrail_check_response_from_generation_response")
 async def test_handle_request(
     mock_create_response,
     mock_convert_request,
+    mock_retire,
     handler,
 ):
     mock_convert_request.return_value = MagicMock()
@@ -82,6 +84,7 @@ async def test_handle_request(
     assert response is not None
     assert isinstance(response, GuardrailCheckResponse)
     assert response.status == StatusEnum.SUCCESS
+    mock_retire.assert_not_called()  # the engine comes from the shared registry
 
 
 def test_ensure_request_id(handler):
@@ -95,8 +98,24 @@ def test_get_guardrails_config(handler):
     assert config is None
 
 
+def _inline_config_handler(mock_rails_service, mock_request, **guardrails) -> CheckRequestHandler:
+    inline_config = {"models": [{"type": "main", "engine": "nim", "model": "default/my-model"}]}
+    request_body = GuardrailCheckRequest(
+        messages=[{"role": "user", "content": "test"}],
+        model="default/my-model",
+        guardrails=GuardrailsDataInput(config_ids=None, config=inline_config, **guardrails),
+    )
+    return CheckRequestHandler(
+        rails_service=mock_rails_service,
+        request=mock_request,
+        request_body=request_body,
+        response_model=GuardrailCheckResponse,
+        workspace="test-workspace",
+    )
+
+
 @pytest.mark.asyncio
-@patch("nhx.guardrails.app.handlers.checks.LLMRails")
+@patch("nhx.guardrails.app.handlers.checks.create_rails_engine")
 @patch("nhx.guardrails.app.handlers.checks.set_main_model_into_context")
 async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context,
@@ -110,22 +129,7 @@ async def test_inline_config_sets_main_model_in_context(
     The main model is extracted at inference-time to determine the base URL for the model.
     This test ensures the model is set into context correctly when handling a check request given an inline config.
     """
-    inline_config = {
-        "models": [{"type": "main", "engine": "nim", "model": "default/my-model"}],
-    }
-    request_body = GuardrailCheckRequest(
-        messages=[{"role": "user", "content": "test"}],
-        model="default/my-model",
-        guardrails=GuardrailsDataInput(config_ids=None, config=inline_config),
-    )
-
-    handler = CheckRequestHandler(
-        rails_service=mock_rails_service,
-        request=mock_request,
-        request_body=request_body,
-        response_model=GuardrailCheckResponse,
-        workspace="test-workspace",
-    )
+    handler = _inline_config_handler(mock_rails_service, mock_request)
     handler._handle_non_streaming = AsyncMock(return_value=MagicMock())
 
     await handler.handle_request()
@@ -133,3 +137,23 @@ async def test_inline_config_sets_main_model_in_context(
     mock_set_main_model_into_context.assert_called_once()
     called_model = mock_set_main_model_into_context.call_args[0][0]
     assert called_model.type == "main"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "failure"])
+@patch("nhx.guardrails.app.handlers.checks.retire_rails_engine")
+@patch("nhx.guardrails.app.handlers.checks.create_rails_engine")
+async def test_inline_config_engine_is_retired_after_the_request(
+    mock_create_engine, mock_retire, fails, mock_rails_service, mock_request
+):
+    """Each inline-config request builds its own engine; leaving it running would leak its workers."""
+    handler = _inline_config_handler(mock_rails_service, mock_request)
+    handler._handle_non_streaming = AsyncMock(side_effect=RuntimeError("boom")) if fails else AsyncMock()
+
+    if fails:
+        with pytest.raises(RuntimeError):
+            await handler.handle_request()
+    else:
+        await handler.handle_request()
+
+    mock_retire.assert_called_once_with(mock_create_engine.return_value)
