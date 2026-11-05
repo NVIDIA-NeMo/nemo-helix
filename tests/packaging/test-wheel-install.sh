@@ -54,7 +54,7 @@ if [[ "${package}" == nemo-helix ]]; then
   # Fail directly on plugin import errors: degraded discovery and auth-disabled
   # startup can otherwise hide missing workspace-only dependencies. -I also
   # prevents checkout/PYTHONPATH imports from satisfying a broken wheel.
-  "${python_bin}" -I "${GITHUB_WORKSPACE}/.github/scripts/check-wheel-imports.py"
+  "${python_bin}" -I "${GITHUB_WORKSPACE}/tests/packaging/check-wheel-imports.py"
   export PATH="${bin_dir}:${PATH}"
   bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
 else
