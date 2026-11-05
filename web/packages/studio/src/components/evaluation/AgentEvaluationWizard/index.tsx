@@ -3,8 +3,9 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import { isConflictError } from '@nemo/common/src/api/common/utils';
+import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
-import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
+import { DEFAULT_DEBOUNCE_MS, JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { getEntityNameError, toValidEntityName } from '@nemo/common/src/utils/entityName';
@@ -36,6 +37,7 @@ import {
   Tooltip,
   Upload,
 } from '@nvidia/foundations-react-core';
+import { useAgentDeployments } from '@studio/api/agents/useAgentDeployments';
 import { submitAgentEvalJob } from '@studio/api/evaluation/agent-evaluations';
 import { useFilesetFile } from '@studio/api/files/useFilesetFile';
 import {
@@ -101,6 +103,7 @@ import {
 import { nameCheckStatus, nameFieldSlots } from '@studio/components/form/entityNameCheck';
 import { LINK_DOCS_STUDIO_EXPERIMENTS, LINK_EVAL_DOCS } from '@studio/constants/links';
 import { useJudgeModels } from '@studio/hooks/evaluation/useJudgeModels';
+import { deploymentModeLabel } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { getAgentEvaluationsTabRoute } from '@studio/routes/utils';
 import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useRef, useState } from 'react';
@@ -175,6 +178,7 @@ const blockedWith = (hint: string): StepBlocker => ({ kind: 'hint', hint });
 
 const submitEvaluationBaseSchema = z.object({
   agent: z.string().min(1, 'Agent is required'),
+  deployment: z.string(),
   judgeModel: z.string(),
   mode: z.enum([MODE_DEFAULT, MODE_EXPERIMENT]),
   /** Name of the experiment created on the "new experiment" path. The fileset holding this run's
@@ -241,9 +245,11 @@ const makeSubmitEvaluationSchema = (requiresJudgeModel: () => boolean) =>
 
 const makeDefaultValues = (
   agent?: string,
-  sourceEvaluation?: string
+  sourceEvaluation?: string,
+  deployment?: string
 ): SubmitEvaluationFormData => ({
   agent: agent ?? '',
+  deployment: deployment ?? '',
   judgeModel: '',
   // Provisional: the preselect effect corrects this once the evaluation list resolves.
   mode: MODE_EXPERIMENT,
@@ -295,6 +301,9 @@ interface AgentEvaluationWizardProps {
   /** Name of an evaluation to start from. Opens the wizard on its last step with that run already
    *  chosen, which is how "New evaluation from this configuration" hands a row's config over. */
   sourceEvaluation?: string;
+  /** Deployment to preselect, e.g. the one the agent page was showing. Held like a user's pick, so
+   *  if it stops the wizard says so instead of falling back to another. */
+  deployment?: string;
 }
 
 interface SeededEntities {
@@ -419,6 +428,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
   workspace,
   agent: agentProp,
   sourceEvaluation,
+  deployment: deploymentProp,
 }) => {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -446,7 +456,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
 
   const methods = useForm<SubmitEvaluationFormData>({
     resolver: zodResolver(schema),
-    defaultValues: makeDefaultValues(agentProp, sourceEvaluation),
+    defaultValues: makeDefaultValues(agentProp, sourceEvaluation, deploymentProp),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
   });
@@ -480,6 +490,47 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     modeDefaultApplied.current = true;
     if (sources.isEmpty) setValue('mode', MODE_DEFAULT);
   }, [selectedAgent, sources.isLoading, sources.isEmpty, setValue]);
+
+  const deployment = useWatch({ control, name: 'deployment' });
+  const {
+    deployments: agentDeployments,
+    isLoading: isDeploymentsLoading,
+    isUnavailable: isDeploymentsUnavailable,
+    refetch: refetchDeployments,
+  } = useAgentDeployments({
+    workspace,
+    agent: selectedAgent ? bareName(selectedAgent) : undefined,
+    refetchInterval: step === 'evaluation' ? JOB_POLLING_INTERVAL_LONG : false,
+  });
+  // Turning the poll on does not fetch, so the list the field opens on would be as old as the
+  // steps before it.
+  useEffect(() => {
+    if (step === 'evaluation') void refetchDeployments({ cancelRefetch: false });
+  }, [step, refetchDeployments]);
+  const runningDeployments = agentDeployments.filter((d) => d.status === 'running' && !!d.name);
+  // Fixed the first time it is shown, so a poll cannot swap the deployment the user saw.
+  const [shownDefault, setShownDefault] = useState<string>();
+  const firstRunning = runningDeployments[0]?.name;
+  if (step === 'evaluation' && !shownDefault && firstRunning) setShownDefault(firstRunning);
+  const selectedDeployment = deployment || shownDefault || '';
+
+  const deploymentIssue = (() => {
+    if (!selectedAgent || isDeploymentsLoading) return undefined;
+    if (isDeploymentsUnavailable) {
+      return `Couldn't load the deployments of ${bareName(selectedAgent)}. Retrying...`;
+    }
+    if (runningDeployments.length === 0) {
+      return `${bareName(selectedAgent)} has no running deployment. Deploy it to run an evaluation.`;
+    }
+    if (selectedDeployment && !runningDeployments.some((d) => d.name === selectedDeployment)) {
+      return `Deployment ${selectedDeployment} is no longer running. Pick another.`;
+    }
+    return undefined;
+  })();
+  const deploymentItems = runningDeployments.map((d) => ({
+    value: d.name ?? '',
+    children: `${d.name} · ${deploymentModeLabel(d.deployment_mode)}`,
+  }));
 
   // Nothing is preselected here. A step whose whole job is "choose the run to re-run" should not
   // answer itself — Next stays disabled until the user picks, and stepBlocker says why. (A run
@@ -793,6 +844,7 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
         const selections = {
           workspace,
           agent: formData.agent,
+          deployment: selectedDeployment,
           filesetName,
           experimentName: nameStem,
           evaluationId,
@@ -849,6 +901,12 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     // Everything Run Evaluation waits on, so the button is disabled instead of swallowing the
     // click. Schema errors stay out: those only show once a submit is tried.
     if (step === 'evaluation') {
+      if (isDeploymentsLoading) {
+        return blockedWith('Loading deployments...');
+      }
+      if (deploymentIssue) {
+        return SHOWN_ON_FIELD;
+      }
       if (mode === MODE_EXPERIMENT) {
         if (hasNoEvaluations) {
           return SHOWN_ON_FIELD;
@@ -1187,6 +1245,25 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
                     disabled={isPending}
                   />
                 ))}
+
+              <ControlledSelect
+                useControllerProps={{ control, name: 'deployment' }}
+                items={deploymentItems}
+                value={selectedDeployment}
+                loading={isDeploymentsLoading}
+                disabled={isPending || isDeploymentsLoading}
+                placeholder={
+                  isDeploymentsLoading ? 'Loading deployments...' : 'Select a deployment'
+                }
+                formFieldProps={{
+                  slotLabel: 'Deployment',
+                  slotHelp:
+                    'The running deployment this evaluation calls. It is recorded on the job, so results can be traced back to it.',
+                  slotError: deploymentIssue,
+                  status: deploymentIssue ? 'error' : undefined,
+                }}
+                hideError
+              />
 
               <ControlledTextInput
                 useControllerProps={{ control, name: 'evaluationRecordName' }}

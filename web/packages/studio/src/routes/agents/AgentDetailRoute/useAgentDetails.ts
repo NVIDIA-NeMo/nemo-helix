@@ -6,11 +6,11 @@ import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   getAgentsListDeploymentsQueryKey,
   useAgentsDeleteDeployment,
-  useAgentsListDeployments,
 } from '@nemo/sdk/generated/agents/agent-deployments';
 import { useAgentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import { getEvaluation, useListEvaluations } from '@nemo/sdk/generated/platform/evaluations';
 import type { EvaluationResponse } from '@nemo/sdk/generated/platform/schema';
+import { useAgentDeployments } from '@studio/api/agents/useAgentDeployments';
 import { fetchEvaluatorJobs } from '@studio/api/evaluation/evaluator-jobs';
 import { fetchExperimentsByIds } from '@studio/api/evaluation/experiments';
 import {
@@ -80,31 +80,21 @@ export const useAgentDetails = ({
   });
 
   const {
-    data: deploymentsResponse,
+    deployments: agentDeployments,
     isLoading: isDeploymentsLoading,
     refetch: refetchDeployments,
-  } = useAgentsListDeployments(workspace, undefined, {
-    query: {
-      enabled: !!agentName,
-      // Poll quickly while any deployment is mid-transition (pending/starting/deleting)
-      // so the panel reflects controller-side progress; otherwise use the long interval
-      // to match the agents table.
-      refetchInterval: (query) => {
-        const deployments = query.state.data?.data ?? [];
-        const transitional = deployments.some(
-          (d) =>
-            d.agent === agentName &&
-            (d.status === 'pending' || d.status === 'starting' || d.status === 'deleting')
-        );
-        if (transitional) {
-          return JOB_POLLING_INTERVAL_MS;
-        }
-        return JOB_POLLING_INTERVAL_LONG;
-      },
-    },
+    isPending: isDeploymentsPending,
+  } = useAgentDeployments({
+    workspace,
+    agent: agentName,
+    // Poll fast while a deployment is mid-transition; otherwise match the agents table.
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some(
+        (d) => d.status === 'pending' || d.status === 'starting' || d.status === 'deleting'
+      )
+        ? JOB_POLLING_INTERVAL_MS
+        : JOB_POLLING_INTERVAL_LONG,
   });
-
-  const deploymentsData = deploymentsResponse?.data;
 
   const { data: agentEvalsResponse, isPending: isAgentEvalsPending } = useListEvaluations(
     workspace,
@@ -184,14 +174,6 @@ export const useAgentDetails = ({
     },
   });
 
-  const agentDeployments = useMemo(
-    () =>
-      (deploymentsData ?? [])
-        .filter((d) => d.agent === agentName)
-        .sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')),
-    [deploymentsData, agentName]
-  );
-
   const experimentIds = useMemo(() => {
     const ids = new Set<string>();
     for (const evaluation of evalResponses) {
@@ -254,6 +236,7 @@ export const useAgentDetails = ({
   return {
     isDeploymentsLoading,
     refetchDeployments,
+    isDeploymentsPending,
     agent,
     isAgentLoading,
     isAgentPending,

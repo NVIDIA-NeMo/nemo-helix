@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EvalJobRow } from '@studio/api/evaluation/utils';
+import { EVAL_CONFIG_FILESET_KEY } from '@studio/components/evaluation/experimentEvalConfig';
+import { ROUTES } from '@studio/constants/routes';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
-import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
+import { getAgentRunEvaluationRoute } from '@studio/routes/utils';
+import { LG_SELECTOR_TIMEOUT, LOCATION_DISPLAY_TEST_ID } from '@studio/tests/util/constants';
+import { LocationDisplay } from '@studio/tests/util/LocationDisplay';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 
 const makeEval = (overrides: Partial<AgentEvaluationRow> & { name: string }): AgentEvaluationRow =>
   ({
@@ -62,6 +66,7 @@ describe('EvaluationsTable Job column', () => {
       created_at: '2024-12-17T16:08:56.880768',
       kind: 'dataset',
       agentName: 'my-agent',
+      deployment: null,
       configLabel: null,
       evaluationName: null,
       outcome: null,
@@ -79,6 +84,106 @@ describe('EvaluationsTable Job column', () => {
     for (const link of links) {
       expect(link).toHaveAttribute('href', '/workspaces/default/jobs/my-eval-job');
     }
+  });
+});
+
+describe('EvaluationsTable Deployment column', () => {
+  const jobCalling = (name: string, deployment: EvalJobRow['deployment']): EvalJobRow => ({
+    id: name,
+    name,
+    status: 'completed',
+    created_at: '2024-12-17T16:08:56.880768',
+    kind: 'task',
+    agentName: 'my-agent',
+    deployment,
+    configLabel: null,
+    evaluationName: null,
+    outcome: null,
+  });
+
+  it('shows the deployment a run called, and marks a by-agent run as Default', async () => {
+    renderTable(
+      [],
+      [
+        jobCalling('pinned-run', {
+          kind: 'deployment',
+          workspace: 'default',
+          name: 'my-agent-k8s',
+        }),
+        jobCalling('routed-run', { kind: 'default' }),
+      ]
+    );
+
+    expect(
+      (await screen.findAllByText('my-agent-k8s', undefined, { timeout: LG_SELECTOR_TIMEOUT }))
+        .length
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText('Default').length).toBeGreaterThan(0);
+  });
+});
+
+describe('EvaluationsTable row actions', () => {
+  it('re-runs an evaluation on the deployment its job called', async () => {
+    const user = userEvent.setup();
+    render(
+      <TestProviders>
+        <MemoryRouter>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <EvaluationsTable
+                  workspace="default"
+                  agentName="my-agent"
+                  evaluations={[
+                    makeEval({
+                      name: 'baseline',
+                      metadata: { [EVAL_CONFIG_FILESET_KEY]: 'baseline-data' },
+                    }),
+                  ]}
+                  jobs={[
+                    {
+                      id: 'baseline-job',
+                      name: 'baseline-job',
+                      status: 'completed',
+                      created_at: '2024-12-17T16:08:56.880768',
+                      kind: 'task',
+                      agentName: 'my-agent',
+                      deployment: {
+                        kind: 'deployment',
+                        workspace: 'default',
+                        name: 'my-agent-k8s',
+                      },
+                      configLabel: null,
+                      evaluationName: 'baseline',
+                      outcome: null,
+                    },
+                  ]}
+                />
+              }
+            />
+            <Route path={ROUTES.workspace.agentEvaluationNew} element={<LocationDisplay />} />
+          </Routes>
+        </MemoryRouter>
+      </TestProviders>
+    );
+
+    const [actions] = await screen.findAllByRole(
+      'button',
+      { name: /actions/i },
+      { timeout: LG_SELECTOR_TIMEOUT }
+    );
+    await user.click(actions);
+    await user.click(
+      await screen.findByRole('menuitem', { name: 'New evaluation from this configuration' })
+    );
+
+    expect(await screen.findByTestId(LOCATION_DISPLAY_TEST_ID)).toHaveTextContent(
+      getAgentRunEvaluationRoute('default', 'my-agent', {
+        source: 'baseline',
+        deployment: 'my-agent-k8s',
+      })
+    );
   });
 });
 

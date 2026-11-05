@@ -11,6 +11,7 @@ import type {
   AssistantSessionHistoryItem,
 } from '@studio/routes/agents/AssistantChatRoute/types';
 import { getJobProgressDetailRoute } from '@studio/routes/agents/AssistantChatRoute/utils/jobProgress';
+import { safeDecodeURIComponent } from '@studio/util/functions';
 
 interface AssistantArtifactQuestion {
   header?: string;
@@ -160,14 +161,6 @@ const getString = (value: unknown): string | undefined => {
   return trimmed || undefined;
 };
 
-const decodeEncodedFilePath = (value: string): string => {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-};
-
 const normalizeStudioLinkDestination = (value: string | undefined): string | undefined => {
   const normalized = value
     ?.trim()
@@ -187,7 +180,7 @@ const getStudioLinkArgument = (
       argumentName === 'file_path' &&
       (key === 'file_path_encoded' || key === 'filePathEncoded')
     ) {
-      return decodeEncodedFilePath(value);
+      return safeDecodeURIComponent(value);
     }
     return value;
   }

@@ -81,6 +81,31 @@ describe('AgentEvaluationDetailRoute', () => {
     });
   });
 
+  it('shows the deployment the run called, read from its target URL', async () => {
+    server.use(
+      http.get(
+        `${PLATFORM_BASE_URL}/apis/evals/v2/workspaces/${workspace}/agent-evaluate/jobs/${JOB_NAME}`,
+        () =>
+          HttpResponse.json({
+            ...completedJob,
+            spec: {
+              ...completedJob.spec,
+              target: {
+                kind: 'agent',
+                agent: {
+                  name: 'my-agent',
+                  url: `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/${workspace}/deployments/my-agent-k8s/-/v1/chat/completions`,
+                },
+              },
+            },
+          })
+      )
+    );
+    renderDetail();
+
+    expect(await screen.findByText('my-agent-k8s')).toBeInTheDocument();
+  });
+
   describe('run outcome', () => {
     const failedJob = {
       ...completedJob,

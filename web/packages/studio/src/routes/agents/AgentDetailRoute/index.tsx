@@ -119,6 +119,7 @@ export const AgentDetailRoute: FC = () => {
     isDeploying,
     isDeploymentsLoading,
     refetchDeployments,
+    isDeploymentsPending,
   } = useAgentDetails({
     workspace,
     agentName,
@@ -222,10 +223,16 @@ export const AgentDetailRoute: FC = () => {
     [agentName]
   );
 
-  const canRunEvaluation = !!agentName && canDeploy;
+  const hasRunningDeployment = healthyDeployments.length > 0;
+  const canRunEvaluation = !!agentName && canDeploy && hasRunningDeployment;
   const navigate = useNavigate();
+  // Carries the deployment the header is showing, so the run evaluates what the user is looking at.
+  const contextDeployment =
+    selectedDeployment?.status === 'running' ? selectedDeployment.name : undefined;
   const runEvaluation = () => {
-    if (agentName) navigate(getAgentRunEvaluationRoute(workspace, agentName));
+    if (agentName) {
+      navigate(getAgentRunEvaluationRoute(workspace, agentName, { deployment: contextDeployment }));
+    }
   };
 
   const actionFromUrl = searchParams.get(ACTION_SEARCH_PARAM);
@@ -234,8 +241,16 @@ export const AgentDetailRoute: FC = () => {
   // `isLoading`: a paused retry (hidden tab, offline) is not loading, but has not settled either.
   useEffect(() => {
     if (!actionFromUrl || isAgentPending) return;
-    if (actionFromUrl === 'run-evaluation' && canRunEvaluation && agentName) {
-      navigate(getAgentRunEvaluationRoute(workspace, agentName), { replace: true });
+    // Only the evaluation link depends on deployments; an optimize link must not wait on them.
+    if (actionFromUrl === 'run-evaluation' && isDeploymentsPending) return;
+    // Opens even without a running deployment: the wizard says why it cannot run.
+    if (actionFromUrl === 'run-evaluation' && canDeploy && agentName) {
+      navigate(
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: contextDeployment }),
+        {
+          replace: true,
+        }
+      );
       return;
     }
     const optimizeRequested =
@@ -256,9 +271,11 @@ export const AgentDetailRoute: FC = () => {
   }, [
     actionFromUrl,
     isAgentPending,
+    isDeploymentsPending,
     agent,
     setSearchParams,
-    canRunEvaluation,
+    canDeploy,
+    contextDeployment,
     agentName,
     workspace,
     navigate,

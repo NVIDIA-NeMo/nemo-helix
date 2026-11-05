@@ -192,7 +192,8 @@ export const ExperimentDataView: FC<ExperimentDataViewProps> = ({
   const rerun = useCallback(
     (evaluation: EvaluationRow) => {
       const agent = evaluation.agent_names?.[0];
-      if (agent) navigate(getAgentRunEvaluationRoute(workspace, agent, evaluation.name));
+      if (agent)
+        navigate(getAgentRunEvaluationRoute(workspace, agent, { source: evaluation.name }));
     },
     [navigate, workspace]
   );

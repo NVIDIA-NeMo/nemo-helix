@@ -18,6 +18,7 @@ import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvalua
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
+import { agentDeployment, agentDeploymentsHandler } from '@studio/mocks/handlers/agentDeployments';
 import { mockApiUrl } from '@studio/mocks/mockApiUrl';
 import { server } from '@studio/mocks/node';
 import { PARQUET, parquetFile } from '@studio/tests/util/parquetFixtures';
@@ -95,6 +96,7 @@ const filesetFile = (fileset: string, path: string) => ({
 
 const mockListApis = () => {
   server.use(
+    agentDeploymentsHandler([agentDeployment(AGENT, `${AGENT}-subprocess`)]),
     http.get(mockApiUrl(getListExperimentsQueryKey, ':workspace'), () =>
       HttpResponse.json({ data: [] })
     ),

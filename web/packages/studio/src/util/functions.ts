@@ -62,3 +62,12 @@ export const isScalar = (value: unknown): value is string | number | boolean =>
 export const isNaNScore = (value: unknown): boolean =>
   (typeof value === 'number' && !Number.isFinite(value)) ||
   (typeof value === 'string' && value.toLowerCase() === 'nan');
+
+/** `decodeURIComponent`, returning the input unchanged when it is not valid percent-encoding. */
+export const safeDecodeURIComponent = (value: string): string => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};

@@ -7,9 +7,13 @@ import {
   getAgentEvaluationDetailRoute,
   getEvaluationResultDetailsRoute,
 } from '@studio/routes/utils';
-import { isPlainObject } from '@studio/util/functions';
+import { isPlainObject, safeDecodeURIComponent } from '@studio/util/functions';
 
 export type EvalJobKind = 'task' | 'dataset';
+
+export type EvalJobDeployment =
+  | { kind: 'deployment'; workspace: string; name: string }
+  | { kind: 'default' };
 
 export interface EvalJobRow {
   id: string;
@@ -18,6 +22,7 @@ export interface EvalJobRow {
   created_at?: string;
   kind: EvalJobKind;
   agentName: string | null;
+  deployment: EvalJobDeployment | null;
   configLabel: string | null;
   /** Intake Evaluation the run publishes to, when it asked to. The join key between a job and its
    *  published results — absent for a run submitted without `publication.intake`. */
@@ -51,6 +56,27 @@ export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
       : asNonEmptyString(target.name);
   if (!name) return null;
   return stripWorkspacePrefix(name, job.workspace);
+};
+
+const GATEWAY_ROUTE = /\/apis\/agents\/v2\/workspaces\/([^/]+)\/(deployments|agents)\/([^/]+)\/-\//;
+
+export const deploymentForEvalSpec = (spec: unknown): EvalJobDeployment | null => {
+  const target = asRecord(asRecord(spec)?.target);
+  const endpoint = target?.kind === 'agent' ? asRecord(target.agent) : target;
+  // Drop the query and fragment so a route that only appears there doesn't match.
+  const path = asNonEmptyString(endpoint?.url)?.split(/[?#]/, 1)[0];
+  const match = path?.match(GATEWAY_ROUTE);
+  if (!match) {
+    return null;
+  }
+  const [, workspace, route, name] = match;
+  return route === 'deployments'
+    ? {
+        kind: 'deployment',
+        workspace: safeDecodeURIComponent(workspace),
+        name: safeDecodeURIComponent(name),
+      }
+    : { kind: 'default' };
 };
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
@@ -98,6 +124,7 @@ export const toEvalJobRow = (job: HelixJobResponse): EvalJobRow => ({
   created_at: job.created_at,
   kind: evalJobKind(job),
   agentName: targetNameForEvalJob(job),
+  deployment: deploymentForEvalSpec(job.spec),
   configLabel: evalJobConfigLabel(job),
   evaluationName: publishedEvaluationName(job),
   outcome: evalRunOutcomeOf(job.status_details),

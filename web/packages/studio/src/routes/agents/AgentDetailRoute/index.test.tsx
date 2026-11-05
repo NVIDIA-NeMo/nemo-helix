@@ -10,6 +10,10 @@ vi.hoisted(() => {
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import {
+  agentDeployment,
+  agentDeploymentsHandler,
+} from '@studio/mocks/handlers/agentDeployments';
 import { server } from '@studio/mocks/node';
 import { AgentDetailRoute } from '@studio/routes/agents/AgentDetailRoute';
 import {
@@ -247,7 +251,7 @@ describe('AgentDetailRoute', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('opens the Run Agent Evaluation page from the header', async () => {
+  it('opens the Run Agent Evaluation page on the deployment the header shows', async () => {
     const user = userEvent.setup();
     renderWithWizardRoute();
 
@@ -256,11 +260,39 @@ describe('AgentDetailRoute', () => {
     await user.click(headerButton);
 
     await waitFor(() =>
+      expect(currentLocation()).toBe(
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: 'rag-agent-prod' })
+      )
+    );
+  });
+
+  it('leaves the deployment to the wizard when the header shows one that is not running', async () => {
+    const user = userEvent.setup();
+    renderWithWizardRoute();
+
+    await user.click(await screen.findByRole('button', { name: 'Deployment' }));
+    await user.click(await screen.findByRole('menuitem', { name: /sql-agent-dev/ }));
+    const [headerButton] = screen.getAllByRole('button', { name: 'Run Evaluation' });
+    await user.click(headerButton);
+
+    await waitFor(() =>
       expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
     );
   });
 
-  it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {
+  it('disables Run Evaluation when the agent has no running deployment', async () => {
+    server.use(
+      agentDeploymentsHandler([
+        agentDeployment(agentName, `${agentName}-down`, { status: 'failed' }),
+      ])
+    );
+    renderDetail();
+
+    const [headerButton] = await screen.findAllByRole('button', { name: 'Run Evaluation' });
+    await waitFor(() => expect(headerButton).toBeDisabled());
+  });
+
+  const renderRunEvaluationLink = () =>
     renderRoute(undefined, {
       history: `${getAgentEvaluationsTabRoute(workspace, agentName)}&action=run-evaluation`,
       routes: [
@@ -268,6 +300,24 @@ describe('AgentDetailRoute', () => {
         { path: ROUTES.workspace.agentEvaluationNew, element: <LocationDisplay /> },
       ],
     });
+
+  it('sends an old ?action=run-evaluation link to the Run Agent Evaluation page', async () => {
+    renderRunEvaluationLink();
+
+    await waitFor(() =>
+      expect(currentLocation()).toBe(
+        getAgentRunEvaluationRoute(workspace, agentName, { deployment: 'rag-agent-prod' })
+      )
+    );
+  });
+
+  it('opens the wizard from an old ?action=run-evaluation link without a running deployment', async () => {
+    server.use(
+      agentDeploymentsHandler([
+        agentDeployment(agentName, `${agentName}-down`, { status: 'failed' }),
+      ])
+    );
+    renderRunEvaluationLink();
 
     await waitFor(() =>
       expect(currentLocation()).toBe(getAgentRunEvaluationRoute(workspace, agentName))
