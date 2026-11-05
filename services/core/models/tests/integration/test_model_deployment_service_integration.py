@@ -6,9 +6,13 @@
 import pytest
 import pytest_asyncio
 from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.projects.client import AsyncProjectsClient
+from nemo_helix_plugin.projects.types import CreateProjectRequest
 from nhx.common.api.common import Page
+from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.core.models.api.service.model_deployment_config_service import ModelDeploymentConfigService
 from nhx.core.models.api.service.model_deployment_service import ModelDeploymentService
+from nhx.core.models.entities import ModelDeployment as ModelDeploymentEntity
 from nhx.core.models.schemas import (
     ContainerExecutorConfig,
     CreateModelDeploymentConfigRequest,
@@ -491,6 +495,151 @@ async def test_filter_by_status_integration(
     ready_deployments = [d for d in result.data if d.name == "status-test-deployment"]
     assert len(ready_deployments) == 1
     assert ready_deployments[0].status == ModelDeploymentStatus.READY
+
+
+@pytest.mark.asyncio
+async def test_latest_listing_complete_sorted_page_walk(client_context, deployment_service):
+    """Select and sort winners across multiple entity pages, including ties/nulls."""
+    client = client_context.entity_client
+    for index in range(1003):
+        await client.create(
+            ModelDeploymentEntity(
+                workspace="default",
+                name=f"deployment-{index:04d}-v1",
+                base_name=f"deployment-{index:04d}",
+                entity_version=1,
+                config="config",
+                config_version=2,
+                status=ModelDeploymentStatus.READY,
+                status_message=None if index % 2 else "ready",
+            )
+        )
+    # Updates change the position of names originally encountered on page one;
+    # the winning rows are beyond the original 1000-row window by created_at.
+    for index in (0, 1):
+        await client.create(
+            ModelDeploymentEntity(
+                workspace="default",
+                name=f"deployment-{index:04d}-v2",
+                base_name=f"deployment-{index:04d}",
+                entity_version=2,
+                config="config",
+                config_version=10,
+                status=ModelDeploymentStatus.PENDING,
+                status_message="updated",
+            )
+        )
+
+    ready_filter = ComparisonOperation(operator=FilterOperator.EQ, field="data.status", value="READY")
+    for sort in (
+        "created_at",
+        "-created_at",
+        "updated_at",
+        "-updated_at",
+        "config_version",
+        "-config_version",
+        "status_message",
+        "-status_message",
+    ):
+        # Use the entity backend as the ordering oracle, including numeric and
+        # nullable data sorts and the ID tie-breaker for many identical values.
+        rows = []
+        entity_page = 1
+        while True:
+            result = await client.list(
+                ModelDeploymentEntity, workspace="default", sort=sort, page=entity_page, page_size=257
+            )
+            rows.extend(result.data)
+            if entity_page == result.pagination.total_pages:
+                break
+            entity_page += 1
+        assert len(rows) == 1005
+        winners = {}
+        for row in rows:
+            if row.base_name not in winners or row.entity_version > winners[row.base_name].entity_version:
+                winners[row.base_name] = row
+        expected_latest = [row for row in rows if row.id == winners[row.base_name].id]
+        for all_versions, expected in ((False, expected_latest), (True, rows)):
+            actual = []
+            for page in range(1, 5):
+                result = await deployment_service.list_deployments(
+                    workspace="default",
+                    sort=sort,
+                    page=page,
+                    page_size=257,
+                    all_versions=all_versions,
+                )
+                assert result.pagination.page == page
+                assert result.pagination.page_size == 257
+                assert result.pagination.total_results == len(expected)
+                assert result.pagination.total_pages == 4
+                assert result.pagination.current_page_size == len(result.data)
+                actual.extend(result.data)
+            assert [row.id for row in actual] == [row.id for row in expected]
+            assert len({row.id for row in actual}) == len(expected)
+            beyond = await deployment_service.list_deployments(
+                workspace="default",
+                sort=sort,
+                page=5,
+                page_size=257,
+                all_versions=all_versions,
+            )
+            assert beyond.data == []
+            assert beyond.pagination.total_results == len(expected)
+
+    # Filtering remains before latest selection: an older matching version is
+    # returned even when the newest version has another status.
+    filtered = await deployment_service.list_deployments(
+        workspace="default",
+        page_size=1000,
+        filter_operation=ready_filter,
+    )
+    assert filtered.pagination.total_results == 1003
+    assert all(row.entity_version == 1 for row in filtered.data)
+    assert len(filtered.data) == 1000
+    tail = await deployment_service.list_deployments(
+        workspace="default",
+        page=2,
+        page_size=1000,
+        filter_operation=ready_filter,
+    )
+    assert len(tail.data) == 3
+    assert len({row.id for row in filtered.data + tail.data}) == 1003
+
+
+@pytest.mark.asyncio
+async def test_latest_listing_preserves_workspace_and_project_filters(client_context, deployment_service):
+    client = client_context.entity_client
+    projects_client = AsyncProjectsClient.from_client(client_context.async_client)
+    for workspace, project in (("default", "project-one"), ("default", "project-two"), ("workspace1", "project-one")):
+        await projects_client.create_project(workspace=workspace, body=CreateProjectRequest(name=project))
+    for workspace, project, version in (
+        ("default", "project-one", 1),
+        ("default", "project-one", 2),
+        ("default", "project-two", 3),
+        ("workspace1", "project-one", 4),
+    ):
+        await client.create(
+            ModelDeploymentEntity(
+                workspace=workspace,
+                project=project,
+                name=f"shared-v{version}",
+                base_name="shared",
+                entity_version=version,
+                config="config",
+                config_version=1,
+            )
+        )
+    project_filter = ComparisonOperation(operator=FilterOperator.EQ, field="project", value="project-one")
+    for all_versions, expected_versions in ((False, [2]), (True, [1, 2])):
+        result = await deployment_service.list_deployments(
+            workspace="default",
+            filter_operation=project_filter,
+            all_versions=all_versions,
+        )
+        assert result.pagination.total_results == len(expected_versions)
+        assert [row.entity_version for row in result.data] == expected_versions
+        assert all(row.workspace == "default" and row.project == "project-one" for row in result.data)
 
 
 @pytest.mark.asyncio
