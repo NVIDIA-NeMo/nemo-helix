@@ -216,6 +216,22 @@ class TestWorkspaceCleanupStep:
         controller.step()
         assert not controller.is_healthy
 
+    def test_failed_step_pins_unhealthy_until_the_next_successful_step_clears_it(self):
+        repo = AsyncMock()
+        repo.list_workspaces.side_effect = [
+            Exception("db error"),
+            ([], None),
+            ([], None),
+            ([], None),
+        ]
+        controller = _make_controller(workspace_repo=repo)
+
+        controller.step()
+        assert not controller.is_healthy
+
+        controller.step()
+        assert controller.is_healthy
+
 
 class TestWorkspaceCleanupAsyncStep:
     @pytest.mark.asyncio

@@ -6,6 +6,10 @@
 Provides abstract interfaces and implementations for database operations.
 """
 
+import asyncio
+from dataclasses import dataclass
+from weakref import WeakKeyDictionary
+
 from nhx.core.entities.app.database import create_async_engine_for_entities
 from nhx.core.entities.app.repository.account_credential import (
     AccountCredentialConflictError,
@@ -30,36 +34,80 @@ from nhx.core.entities.config import EntitiesConfig
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-_async_engine: AsyncEngine | None = None
-_async_session_maker: async_sessionmaker[AsyncSession] | None = None
+
+@dataclass
+class _LoopEngineBinding:
+    """The async engine and session maker owned by one event loop."""
+
+    engine: AsyncEngine
+    session_maker: async_sessionmaker[AsyncSession]
+
+
+# One engine per event loop. In local single-process mode the uvicorn lifespan and the
+# entities controller thread each run their own loop, and SQLAlchemy's async pool binds
+# its queue to the loop that first uses it; sharing one engine across loops raises
+# "Queue is bound to a different event loop" under pool pressure. Each loop therefore
+# owns its own engine. Weakly keyed so a loop that is garbage-collected without a
+# dispose does not pin its entry (and its engine) in the registry forever.
+_async_engines: WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopEngineBinding] = WeakKeyDictionary()
+
+
+def _binding_for_current_loop() -> _LoopEngineBinding | None:
+    """Return the engine binding the running event loop owns, if any."""
+    return _async_engines.get(asyncio.get_running_loop())
 
 
 async def initialize_async_engine(config: EntitiesConfig) -> None:
-    """Initialize the async engine with the given config.
+    """Initialize the async engine for the current event loop with the given config.
 
-    This should be called once during service startup.
+    This should be called once per event loop during service startup. Every loop that
+    queries the entity store needs its own engine: the uvicorn lifespan loop and the
+    entities controller thread's loop in local single-process mode.
 
     Args:
         config: Entities service configuration
     """
-    global _async_engine, _async_session_maker
-
-    if _async_engine is not None:
-        if _async_engine.url != make_url(config.get_async_sqlalchemy_url()):
+    loop = asyncio.get_running_loop()
+    binding = _async_engines.get(loop)
+    if binding is not None:
+        if binding.engine.url != make_url(config.get_async_sqlalchemy_url()):
             raise RuntimeError(
                 "The entities engine is already initialized for a different database. One process runs one "
                 "entity store; a test that opens a second service context must close the first one before it."
             )
-        return  # Already initialized
+        return  # Already initialized on this loop
 
-    _async_engine = create_async_engine_for_entities(config)
-    _async_session_maker = async_sessionmaker(bind=_async_engine, class_=AsyncSession, expire_on_commit=False)
+    engine = create_async_engine_for_entities(config)
+    _async_engines[loop] = _LoopEngineBinding(
+        engine=engine,
+        session_maker=async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False),
+    )
+
+
+async def get_async_engine() -> AsyncEngine:
+    """Get the async engine for the current event loop.
+
+    Note: initialize_async_engine() must have been called on this event loop first.
+
+    Returns:
+        The async engine owned by the running event loop
+
+    Raises:
+        RuntimeError: If called before initialize_async_engine() on this event loop
+    """
+    binding = _binding_for_current_loop()
+    if binding is None:
+        raise RuntimeError(
+            "Async engine not initialized on this event loop. Call initialize_async_engine(config) during service "
+            "startup."
+        )
+    return binding.engine
 
 
 async def get_async_session_maker() -> async_sessionmaker[AsyncSession]:
-    """Get async session maker for entities database.
+    """Get async session maker for the entities database on the current event loop.
 
-    Note: initialize_async_engine() must be called first during service startup.
+    Note: initialize_async_engine() must have been called on this event loop first.
 
     Returns:
         The initialized async session maker
@@ -67,12 +115,12 @@ async def get_async_session_maker() -> async_sessionmaker[AsyncSession]:
     Raises:
         RuntimeError: If called before initialize_async_engine()
     """
-    global _async_session_maker
-    if _async_session_maker is None:
+    binding = _binding_for_current_loop()
+    if binding is None:
         raise RuntimeError(
             "Async session maker not initialized. Call initialize_async_engine(config) during service startup."
         )
-    return _async_session_maker
+    return binding.session_maker
 
 
 async def ping_database() -> bool:
@@ -81,10 +129,11 @@ async def ping_database() -> bool:
     Returns:
         True if the database is reachable, False otherwise.
     """
-    if _async_session_maker is None:
+    binding = _binding_for_current_loop()
+    if binding is None:
         return False
     try:
-        async with _async_session_maker() as session:
+        async with binding.session_maker() as session:
             await session.execute(text("SELECT 1"))
         return True
     except Exception:
@@ -92,15 +141,14 @@ async def ping_database() -> bool:
 
 
 async def dispose_async_engine() -> None:
-    """Dispose the async engine, closing all connections.
+    """Dispose the current event loop's async engine, closing its connections.
 
-    Should be called during service shutdown to properly close database connections.
+    Should be called during shutdown of each event loop that initialized an engine.
+    Other event loops' engines are untouched: each loop owns its own engine.
     """
-    global _async_engine, _async_session_maker
-    if _async_engine is not None:
-        await _async_engine.dispose()
-        _async_engine = None
-        _async_session_maker = None
+    binding = _async_engines.pop(asyncio.get_running_loop(), None)
+    if binding is not None:
+        await binding.engine.dispose()
 
 
 def dep_workspace_repository(session_maker: async_sessionmaker[AsyncSession]) -> WorkspaceRepositoryInterface:
@@ -133,6 +181,7 @@ __all__ = [
     "dep_workspace_repository",
     "dep_entity_repository",
     "dispose_async_engine",
+    "get_async_engine",
     "get_async_session_maker",
     "initialize_async_engine",
     "ping_database",
