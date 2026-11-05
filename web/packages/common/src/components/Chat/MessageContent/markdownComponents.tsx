@@ -70,7 +70,7 @@ export const messageMarkdownComponents: Components = {
   blockquote: ({ children, className }) => (
     <blockquote
       className={cn(
-        'my-density-sm rounded-r border-l-4 border-l-[var(--border-color-brand)] bg-[var(--background-color-accent-green-subtle)] px-density-sm py-density-xs text-primary',
+        'my-density-sm border-l-2 border-base py-density-xs pl-density-md text-primary',
         className
       )}
     >
