@@ -78,6 +78,28 @@ reusable actions, and supporting docs.
   Verifies published charts, containers and wheels. Timestamped RC charts map
   to `.dev` wheels; numbered prereleases such as `1.0.0-rc1` remain distinct.
 
+## Post-merge image and end-to-end checks
+
+Container image builds and platform e2e checks in `ci.yaml` run only on pushes
+to `main`, or via `workflow_dispatch`. They are skipped for
+pull requests and merge-group validation. This includes CPU smoke, garak, and
+Safe Synthesizer image builds; all Kind suites; Authentik/ZITADEL runtime tests;
+and both Python e2e jobs. Existing path filters and manual publishing inputs
+still apply. Studio UI e2e and Docker source-image smoke remain manual-only.
+
+Lint, unit tests, integration tests, wheel build/install checks, Helm validation,
+and Docker bake-graph validation stay pre-merge. Printing the bake graph does
+not build an image. Integration required-check policy is unchanged.
+
+On automatic `main` runs, `Post-merge image and e2e status` waits for the image/e2e
+jobs and their prerequisites, writes a result summary, and sends one failure
+alert per run through the existing `SLACK_ALERTS_WEBHOOK`. The alert identifies
+failed/cancelled jobs, the commit, and the run containing logs and artifacts.
+Path-filtered skips are normal; prerequisite failures still alert when their
+dependent tests cannot run. Missing webhook configuration or failed delivery
+fails the notification job rather than silently dropping an alert. Manual runs
+do not send Slack alerts. Main-run concurrency behavior is unchanged.
+
 ## GitHub Apps
 
 - DCO app
