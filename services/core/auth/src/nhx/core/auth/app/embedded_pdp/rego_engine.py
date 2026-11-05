@@ -308,35 +308,39 @@ class RegoPolicy:
             self._data_loaded = True
 
     def evaluate(self, input_data: dict[str, Any], entrypoint: int = 0) -> list[dict[str, Any]]:
-        """Evaluate concurrently, rejecting decisions that cross a data epoch."""
+        """Evaluate concurrently; serialize one fresh retry if a data refresh wins."""
         self._assert_owner()
         if type(entrypoint) is not int or entrypoint not in range(len(ENTRYPOINTS)):
             raise PolicyEngineError(f"Invalid entrypoint: {entrypoint}")
         name = ENTRYPOINTS[entrypoint]
         for attempt in range(2):
-            with self._lock:
-                if not self._data_loaded:
-                    raise PolicyEngineError("Policy data not loaded — refusing to evaluate (fail-closed)")
-                if not self._alive() or self._client is None:
-                    self._data_loaded = False
-                    raise PolicyEngineError("OPA process is not running — refusing to evaluate")
-                client, generation = self._client, self._generation
-            try:
-                document = self._request_json(client, "POST", f"/v1/data/authz/{name}", {"input": input_data})
-            except Exception as exc:
-                raise PolicyEngineError(f"OPA evaluation failed: {exc}") from exc
-            with self._lock:
-                if generation != self._generation or not self._data_loaded or not self._alive():
-                    if attempt == 0 and self._data_loaded and self._alive():
-                        continue
-                    raise PolicyEngineError("OPA policy state changed during evaluation — refusing stale decision")
-            result = document.get("result") if isinstance(document, dict) else None
-            if not isinstance(result, dict):
-                raise PolicyEngineError("OPA entrypoint returned an undefined or non-object decision")
-            verdict = "has_role" if name == "has_role" else "allowed"
-            if type(result.get(verdict)) is not bool:
-                raise PolicyEngineError(f"OPA entrypoint returned an invalid '{verdict}' decision")
-            return [{"result": result}]
+            # Ordinary queries remain concurrent. A retry must hold the same
+            # lock as data publication through its HTTP response, otherwise
+            # another legitimate refresh can continually invalidate it.
+            with self._lock if attempt else contextlib.nullcontext():
+                with self._lock:
+                    if not self._data_loaded:
+                        raise PolicyEngineError("Policy data not loaded — refusing to evaluate (fail-closed)")
+                    if not self._alive() or self._client is None:
+                        self._data_loaded = False
+                        raise PolicyEngineError("OPA process is not running — refusing to evaluate")
+                    client, generation = self._client, self._generation
+                try:
+                    document = self._request_json(client, "POST", f"/v1/data/authz/{name}", {"input": input_data})
+                except Exception as exc:
+                    raise PolicyEngineError(f"OPA evaluation failed: {exc}") from exc
+                with self._lock:
+                    if generation != self._generation or not self._data_loaded or not self._alive():
+                        if attempt == 0 and self._data_loaded and self._alive():
+                            continue
+                        raise PolicyEngineError("OPA policy state changed during evaluation — refusing stale decision")
+                result = document.get("result") if isinstance(document, dict) else None
+                if not isinstance(result, dict):
+                    raise PolicyEngineError("OPA entrypoint returned an undefined or non-object decision")
+                verdict = "has_role" if name == "has_role" else "allowed"
+                if type(result.get(verdict)) is not bool:
+                    raise PolicyEngineError(f"OPA entrypoint returned an invalid '{verdict}' decision")
+                return [{"result": result}]
         raise PolicyEngineError("OPA data changed repeatedly during evaluation")
 
     def close(self) -> None:

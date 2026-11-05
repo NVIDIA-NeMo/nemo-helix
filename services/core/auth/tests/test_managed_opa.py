@@ -147,6 +147,102 @@ def test_inflight_decision_is_rechecked_after_revocation(policy, policy_data, mo
         assert result[0]["result"]["has_role"] is False
 
 
+def test_retry_cannot_be_invalidated_by_a_second_concurrent_refresh(policy, policy_data, monkeypatch):
+    policy.set_data(policy_data)
+    original = policy._request_json
+    first_started, first_release = Event(), Event()
+    retry_started, retry_release = Event(), Event()
+    writer_started, writer_finished = Event(), Event()
+    calls = []
+
+    def delayed(client, method, path, data):
+        result = original(client, method, path, data)
+        if method == "POST":
+            calls.append(None)
+            if len(calls) == 1:
+                first_started.set()
+                assert first_release.wait(5)
+            elif len(calls) == 2:
+                retry_started.set()
+                assert retry_release.wait(5)
+        return result
+
+    def regrant():
+        writer_started.set()
+        policy.set_data(policy_data)
+        writer_finished.set()
+
+    monkeypatch.setattr(policy, "_request_json", delayed)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        try:
+            decision = executor.submit(policy.evaluate, request(), 2)
+            assert first_started.wait(5)
+            revoked = copy.deepcopy(policy_data)
+            revoked["authz"]["principals"] = {}
+            policy.set_data(revoked)
+            first_release.set()
+            assert retry_started.wait(5)
+            refresh = executor.submit(regrant)
+            assert writer_started.wait(5)
+            # The retry observes the revoked snapshot, not the stale initial
+            # grant. A later publication must wait until that decision finishes.
+            assert not writer_finished.wait(0.1)
+            retry_release.set()
+            assert decision.result(timeout=5)[0]["result"]["has_role"] is False
+            refresh.result(timeout=5)
+        finally:
+            first_release.set()
+            retry_release.set()
+    assert len(calls) == 2
+    assert policy.evaluate(request(), 2)[0]["result"]["has_role"] is True
+
+
+def test_manager_successful_refresh_has_no_separate_invalidation_gap(opa_binary, policy_data, monkeypatch):
+    manager = engine._PolicyRuntimeManager()
+    monkeypatch.setattr(manager, "_create_policy", lambda: RegoPolicy(opa_binary))
+    first_started, first_release, decision_done = Event(), Event(), Event()
+    try:
+        manager.set_data(policy_data)
+        policy = manager.get_policy()
+        original_request, original_invalidate = policy._request_json, policy.invalidate_data
+
+        def delayed(client, method, path, data):
+            result = original_request(client, method, path, data)
+            if method == "POST":
+                first_started.set()
+                assert first_release.wait(5)
+            return result
+
+        def separate_invalidation():
+            original_invalidate()
+            # Exercise the previous manager's publication gap deterministically:
+            # its in-flight query sees unloaded data before set_data can begin.
+            first_release.set()
+            assert decision_done.wait(5)
+
+        def decide():
+            try:
+                return policy.evaluate(request(), 2)
+            finally:
+                decision_done.set()
+
+        monkeypatch.setattr(policy, "_request_json", delayed)
+        monkeypatch.setattr(policy, "invalidate_data", separate_invalidation)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            decision = executor.submit(decide)
+            try:
+                assert first_started.wait(5)
+                revoked = copy.deepcopy(policy_data)
+                revoked["authz"]["principals"] = {}
+                manager.set_data(revoked)
+            finally:
+                first_release.set()
+            assert decision.result(timeout=5)[0]["result"]["has_role"] is False
+    finally:
+        first_release.set()
+        manager.close()
+
+
 @pytest.mark.parametrize("value", [None, True, [], {"has_role": "true"}, {"has_role": 1}])
 def test_invalid_decisions_are_rejected(policy, policy_data, monkeypatch, value):
     policy.set_data(policy_data)

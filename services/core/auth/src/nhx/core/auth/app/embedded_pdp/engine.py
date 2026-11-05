@@ -91,8 +91,10 @@ class _PolicyRuntimeManager:
             if self._data_loaded and self._data_json == content and policy.is_ready():
                 return
             self._data_loaded = False
-            policy.invalidate_data()
             try:
+                # The runtime invalidates and publishes under one lock. A
+                # separate invalidation here would expose an artificial gap
+                # to in-flight decisions during an otherwise successful refresh.
                 policy.set_data(document)
             except Exception:
                 self._data = {}
