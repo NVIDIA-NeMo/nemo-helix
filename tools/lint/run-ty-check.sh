@@ -5,7 +5,7 @@
 set -e
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
-uv_shim="${repo_root}/script/uv"
+uv_bin="${repo_root}/script/uv"
 
 # Get the list of changed Python files
 files=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.py$' || true)
@@ -17,7 +17,7 @@ fi
 
 # Filter out files excluded in pyproject.toml's [tool.ty.src].exclude.
 # Captured in an assignment so a filter failure stops the script under `set -e`.
-filter_output=$(printf '%s\n' "$files" | "${uv_shim}" run --frozen tools/lint/filter_ty_exclusions.py)
+filter_output=$(printf '%s\n' "$files" | "${uv_bin}" run --frozen tools/lint/filter_ty_exclusions.py)
 filtered_files=()
 while IFS= read -r filtered_file; do
 	[ -n "$filtered_file" ] || continue
@@ -29,4 +29,4 @@ if [ ${#filtered_files[@]} -eq 0 ]; then
 	exit 0
 fi
 
-"${uv_shim}" run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"
+"${uv_bin}" run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"

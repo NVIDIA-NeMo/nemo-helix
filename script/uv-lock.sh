@@ -6,9 +6,9 @@ set -euo pipefail
 
 required_uv_version="0.13.4"
 
-shim="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/uv"
+uv_bin="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/uv"
 
-uv_version_output="$("${shim}" --version)"
+uv_version_output="$("${uv_bin}" --version)"
 # Anchor to the uv line: a Flox activate profile can write banners to stdout
 # around the version output, so field 2 of every line is not a version.
 actual_uv_version="$(printf '%s\n' "${uv_version_output}" | awk '/^uv [0-9]/{print $2; exit}')"
@@ -20,4 +20,4 @@ if [[ "${actual_uv_version}" != "${required_uv_version}" ]]; then
   exit 1
 fi
 
-exec "${shim}" lock "$@"
+exec "${uv_bin}" lock "$@"
