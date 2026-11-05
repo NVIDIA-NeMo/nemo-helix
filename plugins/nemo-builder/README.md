@@ -388,7 +388,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it has had no job for five minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it has had no job for five minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -722,6 +722,24 @@ builds are started and not yet finished. In a burst, `fetch` runs ahead of `buil
 burst's contexts land on the work volume while `build` works through them that many at a time. Size
 the work volume for the largest burst, not for `builder.maxConcurrentBuilds` builds. A cap on whole
 builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
+
+### Upgrading from 0.10
+
+0.10's builder capped builds with its own queue; 0.11 leaves that to the build profiles'
+`max_active_jobs`. What 0.10 left behind still works, but is deprecated and goes in a later release:
+
+- **The `builder-queue` controller** is now a name for `builder-settle`, which it runs, and it logs a
+  warning as it starts. Select `builder-settle` instead. Under a controller group, such as `all`, both
+  run, and each pass settles twice; that's safe, since every write is conditional.
+- **`builder.max_concurrent_builds`** is accepted and ignored, with a warning. The chart's
+  `builder.maxConcurrentBuilds` keeps its name, and sets the build profiles' `max_active_jobs`
+  instead.
+- **The `queued` status** is still read, and still filters a listing, but nothing writes it.
+  `builder-settle` settles the images 0.10 left `queued` as it does `pending` ones: one whose job 0.10's
+  queue created completes or fails with it, and one whose job it never created fails, five minutes
+  after it was submitted, with a `status_detail` saying to submit the next revision.
+- **The queued builds 0.10 stored** are deleted by `builder-settle`, since each holds its submitter's
+  principal.
 
 ## Limitations
 

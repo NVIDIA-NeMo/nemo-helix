@@ -194,11 +194,12 @@ def _build_router() -> APIRouter:
             default=None, max_length=128, description="Only the images of the build set with this `name`."
         ),
         revision: int | None = Query(default=None, ge=1, description="Only the images of this `revision`."),
-        status: Literal["pending", "ready", "failed"] | None = Query(
+        status: Literal["queued", "pending", "ready", "failed"] | None = Query(
             default=None,
             description=(
                 "Only images in this stored state. The `builder-settle` controller fails an abandoned `pending` "
-                "image within a minute or so, so until then `pending` includes it and `failed` doesn't."
+                "image within a minute or so, so until then `pending` includes it and `failed` doesn't. `queued` is "
+                "deprecated: only 0.10's builder wrote it."
             ),
         ),
         page: int = Query(default=1, ge=1),

@@ -273,6 +273,8 @@ def test_a_selection_in_extra_args_without_settle_is_refused_too(extra_args: lis
         pytest.param({"extraArgs": ["--controllers=jobs,builder-settle"]}, id="extra-args"),
         pytest.param({"extraArgs": ["--controllers", "jobs, builder-settle"]}, id="extra-args-as-two-args"),
         pytest.param({"extraArgs": ["--controller-group=all"]}, id="extra-args-group"),
+        # Deprecated: 0.10's name for builder-settle, which it runs.
+        pytest.param({"controllers": ["jobs", "builder-queue"]}, id="deprecated-name"),
     ],
 )
 def test_a_selection_with_settle_renders(controller: dict) -> None:

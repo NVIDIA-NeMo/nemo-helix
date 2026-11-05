@@ -8,6 +8,7 @@ How a build runs is set here, never in the request.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar, Self
 
 from nemo_builder_plugin.identity import (
@@ -28,6 +29,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class SandboxConfig(BaseModel):
@@ -85,6 +88,15 @@ class BuilderConfig(NemoConfig):
     push_profile: str = Field(
         default="build-push",
         description="The one the push step runs on, the only step that holds the registry credential and signing key.",
+    )
+
+    max_concurrent_builds: int | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated and ignored since 0.11: Jobs caps builds now. Set the build profiles' `max_active_jobs` "
+            "instead, which the Helm chart's `builder.maxConcurrentBuilds` does."
+        ),
     )
 
     registry: str | None = Field(
@@ -198,6 +210,16 @@ class BuilderConfig(NemoConfig):
             "images unsigned."
         ),
     )
+
+    @model_validator(mode="after")
+    def _warn_max_concurrent_builds(self) -> Self:
+        # Read from the field set, not the attribute: reading a deprecated field warns on every read.
+        if "max_concurrent_builds" in self.model_fields_set:
+            logger.warning(
+                "builder.max_concurrent_builds is deprecated and ignored: set the build profiles' max_active_jobs "
+                "instead (the Helm chart's builder.maxConcurrentBuilds does)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _credential_is_whole(self) -> Self:

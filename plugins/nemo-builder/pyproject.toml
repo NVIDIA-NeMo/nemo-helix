@@ -27,6 +27,8 @@ builder = "nemo_builder_plugin.service:BuilderService"
 
 [project.entry-points."nemo.controllers"]
 builder-settle = "nemo_builder_plugin.controller:SettleController"
+# Deprecated since 0.11: 0.10's name, kept so a selection naming it still settles.
+builder-queue = "nemo_builder_plugin.controller:BuildQueueController"
 
 [project.scripts]
 # compile.py emits `nhx-build <step>` as each job step's command.

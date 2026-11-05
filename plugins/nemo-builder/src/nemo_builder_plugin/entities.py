@@ -7,6 +7,9 @@ The builder writes a row ``pending`` when the build is submitted. It becomes ``r
 has pushed and signed the image and completes it, or ``failed`` when the submit is refused, or once its job is found
 to have ended without completing it (see ``settle``). The builder never changes a row after that, but it isn't the
 only way to write one: see the README's Security limitations.
+
+``queued`` is deprecated: 0.10's builder wrote it when it queued a build itself (see :class:`QueuedBuild`). Rows it
+left ``queued`` are settled as ``pending`` ones are; nothing writes it any more.
 """
 
 from __future__ import annotations
@@ -72,7 +75,8 @@ class ImageRuntimeConfig(BaseModel):
 class ContainerImage(NemoEntity, entity_type="container_image"):
     """One image. ``name`` is ``<set>-<revision>.<spec>``, or ``<set>-<revision>`` for the set's unnamed spec."""
 
-    status: Literal["pending", "ready", "failed"] = "pending"
+    # `queued`: deprecated, only on rows 0.10's builder wrote.
+    status: Literal["queued", "pending", "ready", "failed"] = "pending"
     status_detail: str | None = None
 
     registry: str = Field(description="Registry host the image is published to.")
@@ -103,3 +107,11 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
         if self.digest is None:
             return None
         return f"{self.registry}/{self.repository}@{self.digest}"
+
+
+class QueuedBuild(NemoEntity, entity_type="builder_queued_build"):
+    """Deprecated: a build 0.10's builder queued itself, until its queue controller created the job.
+
+    Nothing writes one any more. ``builder-settle`` deletes the ones 0.10 left, since each holds its submitter's
+    principal; their images settle as any others do. Its fields are left out: nothing reads them.
+    """

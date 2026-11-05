@@ -929,6 +929,8 @@ builder:
   control_profile: build-control
   # The one the push step runs on, the only step that holds the registry credential and signing key. | default: 'build-push'
   push_profile: build-push
+  # Deprecated and ignored since 0.11: Jobs caps builds now. Set the build profiles' `max_active_jobs` instead, which the Helm chart's `builder.maxConcurrentBuilds` does.
+  max_concurrent_builds:
   # Host of the registry every image is published to, with an optional port; prefix it with `http://` for plain HTTP. Unset refuses every submit.
   registry:
   # Path every image is published under, before `<workspace>/`. For GAR, `<project>/<repository>`; for Artifactory, the repository key. | default: ''

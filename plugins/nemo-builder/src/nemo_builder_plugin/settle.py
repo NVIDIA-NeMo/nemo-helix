@@ -12,6 +12,10 @@ settles every ``pending`` one each pass; the two can run at once, since each wri
 A submit writes the rows, then creates the job, so a row without a job is only abandoned once :data:`JOB_GRACE` has
 passed. A submit slow enough to create its job after that builds images already failed: their push step's completion
 is refused, and the job fails. Either way, the images end ``failed``, and a caller submits the next revision.
+
+A ``queued`` row, which only 0.10's builder wrote, is settled as a ``pending`` one is. If 0.10's queue created its job,
+it is completed or failed with that job; if not, nothing will create it now, and it fails once :data:`JOB_GRACE` has
+passed.
 """
 
 from __future__ import annotations
@@ -32,10 +36,14 @@ logger = logging.getLogger(__name__)
 
 #: How long after its row was written an image may have no job: far longer than a submit takes between the two.
 JOB_GRACE = timedelta(minutes=5)
+#: A ``queued`` row with no job: 0.10's queue never started it, and nothing will now.
+QUEUE_GONE = "not built: it was queued by an earlier builder, whose queue is gone; submit its next revision"
 #: Jobs has no such job: the submit never created it, or it was deleted. Jobs' 404 doesn't say which.
 NO_JOB = "not built: its build job was not found (never created, or deleted)"
 
 _ENDED = frozenset(HelixJobStatus.terminals())
+#: The statuses a job may still complete. ``queued`` is deprecated (see the module docstring).
+WAITING = ("pending", "queued")
 
 #: The status of the job ``(workspace, name)``, or None when there is no such job.
 JobStatus = Callable[[str, str], Awaitable[HelixJobStatus | None]]
@@ -64,7 +72,7 @@ class _Rows(Protocol):
 async def settle(
     rows: _Rows, images: list[ContainerImage], job_status: JobStatus, *, now: datetime | None = None
 ) -> list[ContainerImage]:
-    """``images`` as they stand once each abandoned ``pending`` one is failed. Each job is asked about once.
+    """``images`` as they stand once each abandoned waiting one is failed. Each job is asked about once.
 
     A job that can't be read leaves its images as they are, for the next read to settle.
     """
@@ -74,7 +82,7 @@ async def settle(
     settled: list[ContainerImage] = []
     for image in images:
         job = image.provenance.job
-        if image.status != "pending" or job in unreadable:
+        if image.status not in WAITING or job in unreadable:
             settled.append(image)
             continue
         if job not in statuses:
@@ -100,7 +108,9 @@ def _abandoned(image: ContainerImage, status: HelixJobStatus | None, now: dateti
             return None
         if created.tzinfo is None:
             created = created.replace(tzinfo=UTC)
-        return NO_JOB if now - created >= JOB_GRACE else None
+        if now - created < JOB_GRACE:
+            return None
+        return QUEUE_GONE if image.status == "queued" else NO_JOB
     if status in _ENDED:
         return f"not built: its build job ended ({status.value}) without publishing it"
     return None

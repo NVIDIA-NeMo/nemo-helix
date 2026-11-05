@@ -44,7 +44,8 @@ The build namespace: each build's job steps and sandboxes run here, apart from t
 {{- $names = append $names (trim (toString .)) }}
 {{- end }}
 {{- end }}
-{{- if or (and $names (not (has "builder-settle" $names))) (and (not $names) $group (ne (trim $group) "all")) }}
+{{- /* builder-queue: deprecated, 0.10's name for builder-settle, which it runs. */}}
+{{- if or (and $names (not (has "builder-settle" $names)) (not (has "builder-queue" $names))) (and (not $names) $group (ne (trim $group) "all")) }}
 {{- fail "builder.enabled needs the builder-settle controller, which fails the images whose build job ended without publishing them: add it to core.controller.controllers, or use core.controller.controllerGroup all (or the same in core.controller.extraArgs, if it selects the controllers)" }}
 {{- end }}
 {{- /* Not `restricted`: the sandbox runs as root. The chart's own labels win over builder.namespaceLabels. */}}
