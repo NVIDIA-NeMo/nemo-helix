@@ -2493,7 +2493,7 @@ paths:
         required: false
         schema:
           allOf:
-          - $ref: '#/components/schemas/GenericSortField'
+          - $ref: '#/components/schemas/FilesetSortField'
           description: The field to sort by. To sort in decreasing order, use `-`
             in front of the field name.
           default: -created_at
@@ -15921,6 +15921,26 @@ components:
       - generic
       - model
       title: FilesetPurpose
+    FilesetSortField:
+      type: string
+      enum:
+      - created_at
+      - -created_at
+      - updated_at
+      - -updated_at
+      - name
+      - -name
+      - storage_type
+      - -storage_type
+      title: FilesetSortField
+      description: 'Sort options for listing filesets.
+
+
+        Extends the generic entity sorts with ``storage_type``, which orders by the
+
+        storage backend recorded on the fileset. Prefix a field with ``-`` for
+
+        descending order.'
     FinetuningType:
       type: string
       enum:
