@@ -1,0 +1,54 @@
+{{/*
+SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+
+{{- /*
+Ingress isolation for OpenSandbox sandbox pods. Each sandbox runs execd, which executes the commands it is sent, as the
+image's user, on the pod IP. Harbor evaluations give every sandbox they create its own execd token, which works on any
+cluster; this policy is the second layer, for clusters whose CNI enforces it. It also covers what the token doesn't:
+ports other than execd, such as Compose services, and sandboxes created by other clients, such as Gym and GRPO. OpenSandbox creates no NetworkPolicy, and its
+egress sidecar filters only what leaves a sandbox. Platform clients reach sandboxes through the OpenSandbox server's
+proxy, so the server's namespace is the only source a sandbox needs to admit.
+*/}}
+{{- $sandboxes := .Values.networkPolicies.sandboxes }}
+{{- $sandboxCapable := or .Values.sandboxClusterCapable (dig "platform" "sandbox_cluster_capable" false .Values.platformConfig) }}
+{{- if and .Values.networkPolicies.enabled $sandboxes.enabled $sandboxCapable }}
+{{- $serverNamespace := .Values.opensandbox.namespace }}
+{{- if not $serverNamespace }}
+{{- fail "opensandbox.namespace is required when networkPolicies.sandboxes.enabled: sandbox pods admit traffic only from that namespace" }}
+{{- end }}
+{{- $sandboxNamespace := .Values.opensandbox.composeServices.sandboxNamespace | default .Release.Namespace }}
+{{- if and (eq $serverNamespace $sandboxNamespace) (not $sandboxes.serverPodSelector) }}
+{{- fail "networkPolicies.sandboxes.serverPodSelector is required when the OpenSandbox server runs in the sandbox namespace: admitting the whole namespace would admit the sandboxes themselves" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-opensandbox-sandbox-ingress" (include "nemo-helix.fullname" .) | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $sandboxNamespace }}
+  labels:
+    app.kubernetes.io/component: opensandbox-sandbox
+    {{- include "nemo-helix.labels" . | nindent 4 }}
+spec:
+  # The OpenSandbox server puts this label on every sandbox pod it creates.
+  podSelector:
+    matchExpressions:
+      - key: opensandbox.io/id
+        operator: Exists
+  policyTypes:
+    - Ingress
+  ingress:
+    # Every port: the server proxies to whichever endpoint port a client asks for, not only execd's.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $serverNamespace | quote }}
+          {{- with $sandboxes.serverPodSelector }}
+          podSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+    {{- with $sandboxes.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

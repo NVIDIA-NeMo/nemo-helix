@@ -75,3 +75,73 @@ def test_sandbox_cluster_capable_wires_domain_protocol_and_secret() -> None:
     assert platform["sandbox_api_key_secret_key"] == "api-key"
     assert "sandbox_cluster_capable" not in config.get("rl", {})
     assert _has_opensandbox_deployment(documents) is False
+
+
+SANDBOX_POLICIES = ("--set", "networkPolicies.enabled=true", "--set", "sandboxClusterCapable=true")
+
+
+def _sandbox_policies(documents: list[dict]) -> list[dict]:
+    return [
+        document
+        for document in documents
+        if document["kind"] == "NetworkPolicy" and document["metadata"]["name"].endswith("-opensandbox-sandbox-ingress")
+    ]
+
+
+def test_sandbox_pods_admit_ingress_only_from_the_opensandbox_server_namespace() -> None:
+    """Every sandbox pod, on every port, admits only the server's namespace: execd there takes commands unauthenticated."""
+    (policy,) = _sandbox_policies(_helm_template(*SANDBOX_POLICIES))
+
+    assert policy["metadata"]["namespace"] == "default"
+    assert policy["spec"] == {
+        "podSelector": {"matchExpressions": [{"key": "opensandbox.io/id", "operator": "Exists"}]},
+        "policyTypes": ["Ingress"],
+        "ingress": [
+            {"from": [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "opensandbox-system"}}}]}
+        ],
+    }
+
+
+def test_sandbox_policy_goes_to_the_sandbox_namespace_and_narrows_to_the_server_pods() -> None:
+    """The policy lands where the server creates sandboxes, and a server pod selector narrows the namespace."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.composeServices.sandboxNamespace=nemo-sandboxes",
+            "--set",
+            "networkPolicies.sandboxes.serverPodSelector.matchLabels.app=opensandbox-server",
+        )
+    )
+
+    assert policy["metadata"]["namespace"] == "nemo-sandboxes"
+    assert policy["spec"]["ingress"] == [
+        {
+            "from": [
+                {
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "opensandbox-system"}},
+                    "podSelector": {"matchLabels": {"app": "opensandbox-server"}},
+                }
+            ]
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(("--set", "networkPolicies.enabled=true"), id="no-opensandbox"),
+        pytest.param(("--set", "sandboxClusterCapable=true"), id="network-policies-off"),
+        pytest.param((*SANDBOX_POLICIES, "--set", "networkPolicies.sandboxes.enabled=false"), id="sandbox-policy-off"),
+    ],
+)
+def test_sandbox_policy_is_not_rendered(args: tuple[str, ...]) -> None:
+    assert _sandbox_policies(_helm_template(*args)) == []
+
+
+def test_sandbox_policy_refuses_to_admit_the_whole_sandbox_namespace() -> None:
+    """A server in the sandbox namespace needs a pod selector, or the policy would admit the sandboxes themselves."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(*SANDBOX_POLICIES, "--set", "opensandbox.namespace=default")
+
+    assert "networkPolicies.sandboxes.serverPodSelector is required" in refused.value.stderr

@@ -346,6 +346,17 @@ networkPolicies:
       - low: 3000
         high: 4999
 
+  # -- Ingress isolation for OpenSandbox sandbox pods, a second layer over the per-sandbox execd token Harbor evaluations set. It also covers ports other than execd, such as Compose services, and sandboxes from other clients, such as Gym and GRPO. OpenSandbox's egress sidecar filters only what leaves a sandbox, so without this policy any pod that can reach a sandbox's IP can connect to it. Needs a CNI that enforces NetworkPolicy.
+  # @default -- This object has the following default values for sandbox pod ingress isolation.
+  sandboxes:
+    # -- Create a NetworkPolicy in the sandbox namespace that admits sandbox pod ingress only from the OpenSandbox server namespace, `opensandbox.namespace`.
+    # Rendered only with `sandboxClusterCapable`. Platform clients reach sandboxes through the server's proxy, so nothing else needs to connect to them.
+    enabled: true
+    # -- Pod selector for the OpenSandbox server pods within `opensandbox.namespace`. Empty admits every pod in that namespace. Required when the server runs in the sandbox namespace.
+    serverPodSelector: {}
+    # -- Extra NetworkPolicy ingress rules appended to the sandbox policy, for a gateway in ingress gateway mode or for debugging.
+    extraIngress: []
+
 # -- NCCL chart test (`helm test`): multi-node allreduce check. Templates use helm.sh/hook: test — they are not created on install/upgrade, only when you run helm test.
 # Requires nodes labeled with gpuNodeLabelKey/gpuNodeLabelValue (default NFD / GPU operator style).
 # See https://helm.sh/docs/topics/chart_tests/

@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# TEST INPUT FOR CI ONLY. This is not an example and not for deployment.
+# tools/lint/lint-helm.sh renders the chart with this file and validates the output with kubeconform, so the
+# OpenSandbox sandbox ingress NetworkPolicy, which needs sandboxClusterCapable, is checked against the Kubernetes schemas.
+sandboxClusterCapable: true
+opensandbox:
+  namespace: opensandbox-system
+networkPolicies:
+  enabled: true
+  sandboxes:
+    serverPodSelector:
+      matchLabels:
+        app.kubernetes.io/name: opensandbox-server
+    extraIngress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: opensandbox-gateway
