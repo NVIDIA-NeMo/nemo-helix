@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-import requests
 from _import_common import (
     ImportBundle,
     add_common_arguments,
@@ -31,6 +30,7 @@ from _import_common import (
     validate_common_arguments,
     validated_service_url,
 )
+from requests import get as http_get
 
 SOURCE = "phoenix"
 MAX_PAGES = 1000
@@ -217,7 +217,7 @@ def _fetch_pages(
         page_params = list(params.items()) if isinstance(params, dict) else list(params)
         if cursor:
             page_params.append(("cursor", cursor))
-        response = requests.get(url, headers=headers, params=page_params, timeout=60, allow_redirects=False)
+        response = http_get(url, headers=headers, params=page_params, timeout=60, allow_redirects=False)
         if response.status_code != 200:
             raise RuntimeError(f"Phoenix GET returned {response.status_code}: {response.text[:2000]}")
         payload = _object(response.json(), "Phoenix response")

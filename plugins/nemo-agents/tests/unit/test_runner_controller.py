@@ -498,7 +498,7 @@ async def test_read_runtime_instance_dials_a_gateway_routed_endpoint_through_its
     with (
         patch("nemo_agents_plugin.deployment_routing.get_deployment_transport", return_value=transport),
         patch.object(EndpointTransport, "client_kwargs", return_value={"verify": tls_context}),
-        patch("httpx.AsyncClient", return_value=client) as client_cls,
+        patch("nemo_agents_plugin.runner.controller.AsyncClient", return_value=client) as client_cls,
     ):
         assert await ctrl._read_runtime_instance(deployment) == ("runtime-1", EXPIRATION_NOW)
 

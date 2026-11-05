@@ -3,10 +3,10 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
+from nemo_helix_ext.local import install
 from nemo_helix_ext.local.install import services_extra_install_command
 
 
@@ -22,6 +22,6 @@ def test_services_extra_install_command_matches_install_method(
 ) -> None:
     if uv_tool_env:
         (tmp_path / "uv-receipt.toml").write_text("[tool]\n")
-    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    monkeypatch.setattr(install, "sys_prefix", str(tmp_path))
 
     assert services_extra_install_command() == expected

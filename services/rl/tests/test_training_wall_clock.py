@@ -104,7 +104,7 @@ def test_driver_clock_starts_at_popen_and_ends_after_wait(
         events.append("popen")
         return Proc(events)
 
-    monkeypatch.setattr("nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap.subprocess.Popen", popen)
+    monkeypatch.setattr("nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap.Popen", popen)
     bootstrap.progress = EventProgress(events)
 
     assert bootstrap._run_driver("driver.py", ["--config", "cfg.yaml"]) == 0
@@ -124,7 +124,7 @@ def test_driver_clock_closes_when_the_driver_fails(
         events.append("popen")
         return Proc(events, fail=True)
 
-    monkeypatch.setattr("nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap.subprocess.Popen", popen)
+    monkeypatch.setattr("nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap.Popen", popen)
     bootstrap.progress = EventProgress(events)
 
     with pytest.raises(RuntimeError, match="driver failed"):

@@ -3,8 +3,10 @@
 
 """Offline stored Harbor jobs must score without native Harbor or archive access."""
 
-import builtins
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskHash, ResolvedHarborTaskDefinition
@@ -96,21 +98,24 @@ def offline_worker(monkeypatch, tmp_path):
     monkeypatch.setattr(AsyncFilesClient, "download_file", forbidden)
     monkeypatch.setattr(HarborTasksetLoader, "load", forbidden)
     monkeypatch.setattr(HarborAgentTaskRunner, "__init__", forbidden)
-    original_import = builtins.__import__
-
-    def guarded_import(name, *args, **kwargs):
-        if name == "harbor" or name.startswith("harbor.") or name == "nemo_evals.harbor.materialization":
-            forbidden()
-        return original_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", guarded_import)
-    ctx = JobContext(
+    loaded = _harbor_modules()
+    yield JobContext(
         workspace="default",
         job_id="rescore",
         storage=StoragePaths(ephemeral=tmp_path / "ephemeral", persistent=tmp_path / "persistent"),
         results=LocalJobResults(root=tmp_path / "results"),
     )
-    return ctx
+    # Exact only where nothing has imported these modules yet: see the fresh-process test below.
+    assert _harbor_modules() <= loaded, f"Offline scoring imported {sorted(_harbor_modules() - loaded)}"
+
+
+def _harbor_modules():
+    """Harbor's modules and the archive materializer, as far as this process has imported them."""
+    return {
+        name
+        for name in sys.modules
+        if name == "harbor" or name.startswith("harbor.") or name == "nemo_evals.harbor.materialization"
+    }
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
@@ -190,3 +195,41 @@ def test_offline_preparation_needs_no_platform_client(offline_worker, tmp_path):
     )
     assert [task.id for task in tasks] == ["native/task"]
     assert not (tmp_path / "unused").exists()
+
+
+def test_offline_scoring_imports_nothing_from_harbor_in_a_fresh_process():
+    """Run the offline tests in a new interpreter, where no earlier test has imported Harbor's modules.
+
+    In a shared worker, earlier tests may already have imported a module offline scoring must not
+    load, so the fixture's before/after check can miss it. A fresh interpreter without conftests makes
+    the check exact: the conftests import the evals API, which imports the archive materializer.
+    """
+    root = Path(__file__).resolve().parents[3]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            __file__,
+            "-c",
+            str(root / "pytest.ini"),
+            "--rootdir",
+            str(root),
+            "--noconftest",
+            "-k",
+            "rescore_executes or rescore_preserves or offline_preparation_needs",
+            "-p",
+            "no:cacheprovider",
+            "-n",
+            "0",
+            "-q",
+            "-o",
+            "addopts=",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-4000:]
+    assert "11 passed" in result.stdout

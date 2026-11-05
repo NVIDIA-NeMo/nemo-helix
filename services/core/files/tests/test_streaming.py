@@ -384,7 +384,7 @@ async def test_download_url_success():
 
     mock_session = create_mock_aiohttp_session(mock_response)
 
-    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.ClientSession", return_value=mock_session):
         result = await download_url("https://example.com/api/data")
 
         assert result == {"status": "ok", "data": "test"}
@@ -399,7 +399,7 @@ async def test_download_url_with_headers():
 
     mock_session = create_mock_aiohttp_session(mock_response)
 
-    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.ClientSession", return_value=mock_session):
         result = await download_url("https://example.com/api/data", headers={"Authorization": "Bearer token"})
 
         assert result == {"authenticated": True}
@@ -544,7 +544,7 @@ async def test_download_url_preserves_encoded_url():
         "https://api.ngc.nvidia.com/v2/models/org/nvidia/team/nemo/test/1.0/files?path=model.yaml&key=a%2Bb%3Dc"
     )
 
-    with patch("nhx.core.files.app.streaming.aiohttp.ClientSession", return_value=mock_session):
+    with patch("nhx.core.files.app.streaming.ClientSession", return_value=mock_session):
         await download_url(encoded_url, headers={"Authorization": "Bearer token"})
 
     # Verify the URL was passed with encoded=True (yarl URL object)

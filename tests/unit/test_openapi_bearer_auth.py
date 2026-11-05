@@ -3,11 +3,14 @@
 
 """Native auth metadata and executable demo-credential renderer contracts."""
 
+import builtins
 import json
 import os
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -161,18 +164,35 @@ def test_registration_detects_conflicts_and_does_not_alias_the_definition():
         register_bearer_security_scheme(spec)
 
 
+def _exec_with_fake_requests(source: str, request: Mock) -> None:
+    """Run a Python sample whose ``import requests`` resolves to a fake, inside the sample only."""
+    real_import = builtins.__import__
+
+    def sample_import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "requests":
+            return SimpleNamespace(request=request)
+        return real_import(name, globals, locals, fromlist, level)
+
+    exec(source, {"__builtins__": {**vars(builtins), "__import__": sample_import}})
+
+
 def test_python_uses_runtime_demo_token_and_fails_before_network_when_missing(bearer_request, bearer_samples):
     source = bearer_samples["python"]
     response = Mock()
-    with (
-        patch.dict(os.environ, {"NHX_ACCESS_TOKEN": "demo-token"}),
-        patch("requests.request", return_value=response) as send,
-    ):
-        exec(source, {})
+    send = Mock(return_value=response)
+    with patch.dict(os.environ, {"NHX_ACCESS_TOKEN": "demo-token"}):
+        _exec_with_fake_requests(source, send)
     send.assert_called_once_with("GET", bearer_request.url, headers={"Authorization": "Bearer demo-token"})
-    with patch.dict(os.environ, {}, clear=True), patch("requests.request") as send:
+    send = Mock()
+    with patch.dict(os.environ, {}, clear=True):
         with pytest.raises(KeyError, match="NHX_ACCESS_TOKEN"):
-            exec(source, {})
+            _exec_with_fake_requests(source, send)
     send.assert_not_called()
 
 

@@ -27,6 +27,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, 
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import aclosing, contextmanager, suppress
 from dataclasses import dataclass, field
+from os import killpg
 from pathlib import Path
 from typing import IO, Any
 
@@ -233,7 +234,7 @@ async def stop_process_group(proc: subprocess.Popen[bytes]) -> None:
             return
         # macOS answers EPERM, not ESRCH, when the group's only member has exited but is not yet reaped.
         with suppress(ProcessLookupError, PermissionError):
-            os.killpg(proc.pid, sig)
+            killpg(proc.pid, sig)
         deadline = time.monotonic() + _GRACE_SECONDS
         while proc.poll() is None and time.monotonic() < deadline:
             await asyncio.sleep(0.05)

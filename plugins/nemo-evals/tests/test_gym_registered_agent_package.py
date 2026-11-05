@@ -156,7 +156,7 @@ def test_download_wheels_hands_pip_a_constraints_file_and_cleans_it_up(tmp_path:
         seen["constraints"] = Path(command[idx + 1]).read_text()
         return mocker.Mock(returncode=0, stderr="")
 
-    mocker.patch("nemo_evals.jobs.gym_registered_agent_package.subprocess.run", side_effect=run)
+    mocker.patch("nemo_evals.jobs.gym_registered_agent_package.run", side_effect=run)
     wheelhouse = tmp_path / "wheels"
     wheelhouse.mkdir()
 
@@ -226,7 +226,7 @@ def test_a_stalled_wheelhouse_download_is_cut_off(tmp_path: Path, mocker: Mocker
     import subprocess
 
     mocker.patch(
-        "nemo_evals.jobs.gym_registered_agent_package.subprocess.run",
+        "nemo_evals.jobs.gym_registered_agent_package.run",
         side_effect=subprocess.TimeoutExpired(cmd="pip download", timeout=1),
     )
     wheelhouse = tmp_path / "wheels"

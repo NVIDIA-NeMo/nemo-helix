@@ -51,30 +51,20 @@ class SandboxSDK:
     docker_from_env: Callable[[], Any]
 
 
-def _load_agents_sdk() -> SandboxSDK:
-    try:
-        # The OpenAI Agents SDK is imported only when this Docker runtime is actually used, so it
-        # is absent from the default type-checking environment.
-        from agents.run import RunConfig  # ty: ignore[unresolved-import]
-        from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig  # ty: ignore[unresolved-import]
-        from agents.sandbox.config import DEFAULT_PYTHON_SANDBOX_IMAGE  # ty: ignore[unresolved-import]
-        from agents.sandbox.entries import Dir, File, LocalDir  # ty: ignore[unresolved-import]
-        from agents.sandbox.sandboxes.docker import (  # ty: ignore[unresolved-import]
-            DockerSandboxClient,
-            DockerSandboxClientOptions,
-        )
+def _import_agents_sdk() -> SandboxSDK:
+    # The OpenAI Agents SDK is imported only when this Docker runtime is actually used, so it
+    # is absent from the default type-checking environment.
+    from agents.run import RunConfig  # ty: ignore[unresolved-import]
+    from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig  # ty: ignore[unresolved-import]
+    from agents.sandbox.config import DEFAULT_PYTHON_SANDBOX_IMAGE  # ty: ignore[unresolved-import]
+    from agents.sandbox.entries import Dir, File, LocalDir  # ty: ignore[unresolved-import]
+    from agents.sandbox.sandboxes.docker import (  # ty: ignore[unresolved-import]
+        DockerSandboxClient,
+        DockerSandboxClientOptions,
+    )
 
-        from agents import Runner  # ty: ignore[unresolved-import]
-        from docker import from_env as docker_from_env
-    except ImportError as exc:
-        # Audience split is in the error text: SDK extras are not propagated into the
-        # bundled nemo-helix wheel.
-        raise RuntimeError(
-            "DockerSandboxAgentRuntime requires the openai-agents[docker] Python packages. "
-            "Standalone SDK: pip install 'nhx-evals-sdk[agent-runtimes]'. "
-            "Bundled in nemo-helix (no SDK extras): "
-            "pip install 'openai-agents[docker]'"
-        ) from exc
+    from agents import Runner  # ty: ignore[unresolved-import]
+    from docker import from_env as docker_from_env
 
     return SandboxSDK(
         Runner=Runner,
@@ -90,6 +80,20 @@ def _load_agents_sdk() -> SandboxSDK:
         DEFAULT_PYTHON_SANDBOX_IMAGE=DEFAULT_PYTHON_SANDBOX_IMAGE,
         docker_from_env=docker_from_env,
     )
+
+
+def _load_agents_sdk() -> SandboxSDK:
+    try:
+        return _import_agents_sdk()
+    except ImportError as exc:
+        # Audience split is in the error text: SDK extras are not propagated into the
+        # bundled nemo-helix wheel.
+        raise RuntimeError(
+            "DockerSandboxAgentRuntime requires the openai-agents[docker] Python packages. "
+            "Standalone SDK: pip install 'nhx-evals-sdk[agent-runtimes]'. "
+            "Bundled in nemo-helix (no SDK extras): "
+            "pip install 'openai-agents[docker]'"
+        ) from exc
 
 
 class DockerSandboxAgentRuntime:

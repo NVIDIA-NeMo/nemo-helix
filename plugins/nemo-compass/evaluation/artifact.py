@@ -16,16 +16,16 @@ import datetime
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+from subprocess import run
 
-import httpx
 from evaluation import export
 from evaluation.intake_client import build_basic_auth_intake_client
 from evaluation.registry import Subject
+from httpx import get
 from nemo_helix_plugin.client.client import AsyncNemoClient
 
 LOCAL_URL = "http://localhost:8080"  # the local NeMo Helix (the default restore/analyze target)
@@ -108,7 +108,7 @@ def fetch_platform_info(base_url: str) -> dict | None:
     bundle (a later task's attribute-catalog inversion keys off it).
     """
     try:
-        resp = httpx.get(f"{base_url.rstrip('/')}/cluster-info", timeout=10.0)
+        resp = get(f"{base_url.rstrip('/')}/cluster-info", timeout=10.0)
         resp.raise_for_status()
         data = resp.json()
         return {"platform_version": data.get("platform_version"), "revision": data.get("revision")}
@@ -302,6 +302,6 @@ def snapshot_export(
             env=os.environ,
         )
         (state / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        subprocess.run(["tar", "--zstd", "-cf", str(out), "-C", tmp, "state"], check=True)
+        run(["tar", "--zstd", "-cf", str(out), "-C", tmp, "state"], check=True)
     print(f"export bundle written to {out}")
     return out
