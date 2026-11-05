@@ -397,6 +397,61 @@ class TestInstall:
         assert_exit_code(result, 0)
         assert (skills_path / "nemo-inference" / "SKILL.md").exists()
 
+    def test_full_install_prunes_recorded_directory_and_keeps_unrecorded(self, tmp_path: Path, monkeypatch):
+        """End-to-end manifest behavior through the CLI.
+
+        A full install records every directory it writes. A later full install
+        removes a recorded directory that is no longer in the install set,
+        while an unrecorded neighbor (e.g. a user-written skill) survives.
+        """
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        assert installed_skill_name("inference") in manifest["owned"]
+
+        # A directory recorded by an older install that this build no longer
+        # ships, plus an unrecorded user-written skill.
+        stale = skills_root / "nemo-stale"
+        stale.mkdir()
+        (stale / "SKILL.md").write_text("stale")
+        manifest["owned"].append("nemo-stale")
+        manifest_path.write_text(json.dumps(manifest))
+        user_skill = skills_root / "nemo-user-skill"
+        user_skill.mkdir()
+        (user_skill / "SKILL.md").write_text("user skill")
+
+        result = runner.invoke(app, "skills install --agent claude --skill inference")
+        assert_exit_code(result, 0)
+        # A subset install removes nothing.
+        assert (skills_root / "nemo-inference" / "SKILL.md").exists()
+        assert stale.is_dir()
+        assert "nemo-stale" in json.loads(manifest_path.read_text())["owned"]
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert not stale.exists()
+        assert (user_skill / "SKILL.md").read_text() == "user skill"
+        owned = json.loads(manifest_path.read_text())["owned"]
+        assert "nemo-stale" not in owned
+        assert installed_skill_name("inference") in owned
+
+    def test_install_to_custom_path_writes_its_own_manifest(self, tmp_path: Path):
+        """Each skills root keeps its own manifest file."""
+        import json
+
+        skills_path = tmp_path / "custom" / "skills"
+        result = runner.invoke(app, ["skills", "install", "--path", str(skills_path), "--skill", "inference"])
+        assert_exit_code(result, 0)
+        manifest_path = skills_path / ".nemo-helix-installed-skills.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["owned"] == [installed_skill_name("inference")]
+
 
 class TestFindProjectRoot:
     def test_uses_cwd_even_when_parent_has_git_directory(self, tmp_path: Path, monkeypatch):

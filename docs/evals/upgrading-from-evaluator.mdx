@@ -83,6 +83,20 @@ For Helm, put these structured settings under `platformConfig` in your values fi
 Update external gateway routes, SIEM and audit rules, service-identity matching,
 job-source filters, scripts, and integrations that match the previous values.
 
+## Remove installed agent skills from the old names
+
+If you previously ran `nemo skills install` (or `nemo setup` skill installation),
+delete the `nemo-evaluator` and `nemo-evaluator-plugin` directories from each
+agent's skills directory, for example `.claude/skills/`, `.cursor/skills/`,
+`.agents/skills/`, or `.opencode/skills/` in each project (and the matching
+user-scope directories). Then run `nemo skills install` again to install the
+renamed `nemo-evals` and `nemo-evals-plugin` skills.
+
+Reinstalling does not remove them: those directories were written by an older
+version that did not record what it installed, and `nemo skills install` only
+removes directories recorded in its own manifest. Do **not** delete other
+`nemo-*` directories you did not install from NeMo.
+
 **Permissions and stored entity kinds are unchanged.** Keep `evaluator.*` roles and
 scopes, task-kind discriminators, and entity types. Python classes and types such
 as `Evaluator`, `EvaluatorPluginService`, and `EvaluatorPerms` also retain their

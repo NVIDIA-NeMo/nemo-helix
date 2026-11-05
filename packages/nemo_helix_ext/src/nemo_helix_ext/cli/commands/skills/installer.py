@@ -3,11 +3,70 @@
 
 """Base agent installer with default install logic."""
 
+import json
 import shutil
 from pathlib import Path
 
 import yaml
 from nemo_helix_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name, validate_skill_name
+
+# Manifest file recording the skill directories this installer wrote, kept
+# beside the installed skills (one per skills root, so project scope, user
+# scope, and `--path` each get their own). Only files recorded here are ever
+# removed by a pruning full install; directories written before this record
+# existed are left alone.
+INSTALLED_SKILLS_MANIFEST_NAME = ".nemo-helix-installed-skills.json"
+
+
+def _is_single_path_segment(name: str) -> bool:
+    """True when ``name`` can only ever resolve directly beneath a directory."""
+    return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
+
+
+def _read_owned_directories(skills_root: Path) -> list[str]:
+    """Return recorded owned directory names for ``skills_root``, tolerating a missing or corrupt manifest."""
+    try:
+        data = json.loads((skills_root / INSTALLED_SKILLS_MANIFEST_NAME).read_text())
+    except (OSError, ValueError):
+        return []
+    owned = data.get("owned") if isinstance(data, dict) else None
+    if not isinstance(owned, list):
+        return []
+    return [name for name in owned if isinstance(name, str)]
+
+
+def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
+    """Write the manifest last, after all writes and removals for this install."""
+    skills_root.mkdir(parents=True, exist_ok=True)
+    manifest_path = skills_root / INSTALLED_SKILLS_MANIFEST_NAME
+    # A kept name can also be one this call wrote (overwrite), so dedupe.
+    manifest_path.write_text(json.dumps({"owned": sorted(set(owned))}, indent=2) + "\n")
+
+
+def _remove_if_owned(skills_root: Path, name: str) -> bool:
+    """Remove ``skills_root/name`` when it is a directory this installer owns.
+
+    Safety checks, in order: the name must be a single path segment, the
+    resolved target must stay inside ``skills_root`` (symlinks pointing out
+    are left alone), and anything that is not a directory is left alone. A
+    missing directory counts as already removed.
+    """
+    if not _is_single_path_segment(name):
+        return False
+    target = skills_root / name
+    if not target.exists() and not target.is_symlink():
+        return True  # Already gone; treat the recorded name as removed.
+    root_resolved = skills_root.resolve()
+    target_resolved = target.resolve()
+    if target_resolved == root_resolved or root_resolved not in target_resolved.parents:
+        return False  # Resolves outside the skills root: leave it alone.
+    if target.is_symlink():
+        target.unlink()  # The link itself lives inside the root; its target does not get touched.
+        return True
+    if not target.is_dir():
+        return False  # A plain file is not a directory this installer wrote.
+    shutil.rmtree(target)
+    return True
 
 
 def format_agent_skill_content(skill: Skill) -> str:
@@ -33,8 +92,16 @@ class BaseAgentInstaller:
         """Format skill content for this agent. Default: return raw content."""
         return skill.raw
 
-    def install(self, scope: Scope, project_root: Path, skills: dict[str, Skill]) -> list[Path]:
-        """Install all skills. Returns list of paths written."""
+    def install(self, scope: Scope, project_root: Path, skills: dict[str, Skill], prune: bool = False) -> list[Path]:
+        """Install all skills. Returns list of paths written.
+
+        Writes the new skill files first (including overwriting a same-named
+        skill), then, when ``prune`` is true, removes directories a previous
+        full install recorded that this install set no longer contains, and
+        finally writes the manifest. Only full installs (no ``--skill``)
+        pass ``prune=True``; subset installs record what they wrote and never
+        remove anything.
+        """
         paths: list[Path] = []
         pending: list[tuple[Skill, Path]] = []
         destinations: dict[Path, str] = {}
@@ -50,6 +117,28 @@ class BaseAgentInstaller:
             path.write_text(self.format_content(skill))
             self._copy_companion_files(skill, path)
             paths.append(path)
+
+        # The skills root is the parent of the installed skill directory
+        # (``SKILL.md``'s grandparent). Each root owns its own manifest.
+        wrote: dict[Path, set[str]] = {}
+        for path in paths:
+            skills_root = path.parent.parent
+            wrote.setdefault(skills_root, set()).add(path.parent.name)
+
+        for skills_root, installed_dirs in wrote.items():
+            owned = _read_owned_directories(skills_root)
+            if prune:
+                kept = [
+                    name
+                    for name in owned
+                    if name in installed_dirs  # Still shipped: overwrite, never remove.
+                    or not _remove_if_owned(skills_root, name)
+                ]
+            else:
+                kept = owned
+            # Manifest last: a crash before this write leaves the previous
+            # record intact, so the next full install finishes the removal.
+            _write_owned_directories(skills_root, [*kept, *installed_dirs])
         return paths
 
     def _copy_companion_files(self, skill: Skill, installed_path: Path) -> None:

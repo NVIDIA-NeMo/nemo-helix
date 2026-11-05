@@ -306,6 +306,10 @@ def install(
     Use --skill to select specific skills, --user for user scope, or
     --project-dir to explicitly select a known agent's project directory.
 
+    A full install (no --skill) is a sync: it also removes skill directories
+    that a previous full install recorded and this build no longer ships.
+    A --skill install records what it wrote and removes nothing.
+
     Examples:
       nemo skills install --agent claude
       nemo skills install --agent claude --user
@@ -346,7 +350,10 @@ def install(
 
     skills = _resolve_skills(skill)
     project_root = path if path is not None else _find_project_root(project_dir)
-    result_paths = installer.install(scope, project_root, skills)
+    # A full install (no --skill) is a sync: recorded skills this build no
+    # longer ships are removed. A subset install records what it wrote and
+    # deletes nothing.
+    result_paths = installer.install(scope, project_root, skills, prune=skill is None)
     typer.echo(f"Installed {len(skills)} skill(s) for {installer.display_name}:")
     for path in result_paths:
         typer.echo(f"  {path}")

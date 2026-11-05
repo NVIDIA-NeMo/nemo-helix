@@ -67,6 +67,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _resolve_setup_workspace,
     _run_auto_mode,
     _run_interactive_mode,
+    _run_skill_install,
     _save_data_dir,
     _select_model_pair,
     _select_usable_model_pair,
@@ -1767,6 +1768,42 @@ class TestMaybeInstallSkills:
             )
 
         assert (custom_path / "nemo-alpha" / "SKILL.md").exists()
+
+    def test_run_skill_install_does_not_prune(self, tmp_path):
+        """`nemo setup` installs a user-chosen subset and must never prune.
+
+        Setup's chosen subset can happen to be every skill, but pruning is a
+        full-sync behavior owned by `nemo skills install` without `--skill`.
+        """
+        captured: list[dict] = []
+
+        class _CaptureInstaller:
+            name = "claude"
+            display_name = "Claude Code"
+            supported_scopes = [Scope.PROJECT, Scope.USER]
+
+            def install(self, scope, project_root, skills, **kwargs):
+                captured.append({"scope": scope, "skills": skills, "kwargs": kwargs})
+                return []
+
+            def get_install_path(self, scope, project_root, skill_name):
+                return project_root / ".claude" / "skills" / skill_name / "SKILL.md"
+
+        skills = {"alpha": self._skill("alpha")}
+        with patch(
+            "nemo_helix_ext.cli.commands.setup.get_installer",
+            side_effect=lambda name: _CaptureInstaller(),
+        ):
+            _run_skill_install(
+                agents=["claude"],
+                scope=Scope.PROJECT,
+                skill_names=["alpha"],
+                all_skills=skills,
+                project_root=tmp_path,
+            )
+
+        assert len(captured) == 1
+        assert "prune" not in captured[0]["kwargs"]
 
     @pytest.mark.parametrize(
         "call_kwargs",
