@@ -13,8 +13,12 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from nhx.intake.experiments.compare import CompareMetric, EvaluationMetricSession
-from nhx.intake.repository.clickhouse.evaluation_session import usage_by_session_sql
+from nhx.intake.experiments.compare import (
+    CompareMetric,
+    EvaluationMetricSession,
+    InvalidEvaluationMetricError,
+)
+from nhx.intake.repository.clickhouse.evaluation_session import SESSION_USAGE, usage_by_session_sql
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.repository.clickhouse.trace import current_spans_sql
@@ -57,7 +61,10 @@ class ClickHouseEvaluationCompareRepository(EvaluationCompareRepository):
                 _latency_sessions_sql(trace_index_table=trace_index_table, evaluation_names_sql=evaluation_names_sql),
                 "evaluation_compare.latency_sessions",
             )
-        else:
+        elif metric.id in _USAGE_VALUE_EXPR:
+            # The usage pipeline reads span attribute bags by parameterized key, so its
+            # parameters must be bound like the session reads do.
+            parameters.update(SESSION_USAGE.parameters)
             statement, query_name = (
                 _usage_sessions_sql(
                     trace_index_table=trace_index_table,
@@ -66,6 +73,10 @@ class ClickHouseEvaluationCompareRepository(EvaluationCompareRepository):
                     metric=metric,
                 ),
                 "evaluation_compare.usage_sessions",
+            )
+        else:
+            raise InvalidEvaluationMetricError(
+                f"Unsupported metric {metric.id!r}: use 'evaluators.<name>', 'cost_usd', 'latency_ms', or 'tokens'."
             )
 
         rows = await self._executor.fetch_all(

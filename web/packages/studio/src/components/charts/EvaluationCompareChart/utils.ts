@@ -14,9 +14,6 @@ const EVALUATOR_METRIC_PREFIX = 'evaluators.';
 export const isEvaluatorMetric = (metric: TrendMetric): boolean =>
   metric.id.startsWith(EVALUATOR_METRIC_PREFIX);
 
-export const evaluatorNameOf = (metric: TrendMetric): string =>
-  metric.id.slice(EVALUATOR_METRIC_PREFIX.length);
-
 /** Scores go up when things get better; cost, latency, tokens and duration go down. */
 export const higherIsBetter = isEvaluatorMetric;
 
@@ -110,16 +107,22 @@ export interface HeadToHead {
 const formatSignedDifference = (value: number): string =>
   `${value > 0 ? '+' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 3 })}`;
 
+/** The direction the endpoint reports: for cost and latency a negative difference is better. */
+const favorsCandidate = (compare: EvaluationCompareResponse, difference: number): boolean =>
+  compare.higher_is_better ? difference > 0 : difference < 0;
+
 /**
  * One line summarizing the endpoint's paired comparison for one candidate: the mean paired
- * difference (signed candidate − baseline), its 95% bootstrap interval, and P(candidate
- * better), for the one selected metric.
+ * difference (signed candidate − baseline, with better/worse per the metric's direction),
+ * its 95% bootstrap interval, and P(candidate better), for the one selected metric.
  */
 export function describeComparison(compare: EvaluationCompareResponse): string {
   if (compare.n_pairs === 0) return 'no paired test cases';
   const parts: string[] = [];
   if (compare.mean_paired_difference != null) {
-    parts.push(`mean ${formatSignedDifference(compare.mean_paired_difference)}`);
+    const mean = compare.mean_paired_difference;
+    const direction = mean === 0 ? '' : favorsCandidate(compare, mean) ? ' (better)' : ' (worse)';
+    parts.push(`mean ${formatSignedDifference(mean)}${direction}`);
   }
   if (compare.interval_low != null && compare.interval_high != null) {
     parts.push(
@@ -133,7 +136,9 @@ export function describeComparison(compare: EvaluationCompareResponse): string {
   return parts.join(' · ');
 }
 
-const NICE_STEPS = [1, 2, 2.5, 4, 5, 6, 8, 10];/** Smallest round bound (…, 10, 20, 25, 40, 50, 60, 80, 100, …) covering every value, so ±half ticks stay round. */
+const NICE_STEPS = [1, 2, 2.5, 4, 5, 6, 8, 10];
+
+/** Smallest round bound (…, 10, 20, 25, 40, 50, 60, 80, 100, …) covering every value, so ±half ticks stay round. */
 export function symmetricAxisBound(values: readonly number[]): number {
   const largest = Math.max(1, ...values.map(Math.abs));
   const magnitude = 10 ** Math.floor(Math.log10(largest));

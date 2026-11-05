@@ -14437,27 +14437,32 @@ components:
           title: Mean Paired Difference
           description: Mean of the per-test-case differences, signed candidate minus
             baseline. Null when no test case is shared.
+          nullable: true
           type: number
         interval_low:
           title: Interval Low
           description: Lower bound of the 95% bootstrap interval of the mean paired
             difference.
+          nullable: true
           type: number
         interval_high:
           title: Interval High
           description: Upper bound of the 95% bootstrap interval of the mean paired
             difference.
+          nullable: true
           type: number
         p_candidate_better:
           title: P Candidate Better
           description: Fraction of bootstrap resamples whose mean paired difference
             favors the candidate under the metric's direction. Null when no test case
             is shared.
+          nullable: true
           type: number
         interval_caveat:
           title: Interval Caveat
           description: 'Plain-language caveat about the interval: absent pairs, or
             a small pair count, make it a weak estimate.'
+          nullable: true
           type: string
       type: object
       required:

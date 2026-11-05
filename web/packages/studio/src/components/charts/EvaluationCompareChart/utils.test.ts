@@ -100,7 +100,7 @@ describe('buildImprovementRows', () => {
 describe('describeComparison', () => {
   it('summarizes the mean, interval, probability, and pair count', () => {
     expect(describeComparison(comparison({}))).toBe(
-      'mean +0.25 · 95% CI +0.1 to +0.4 · P(better) 62% · 2 paired test cases'
+      'mean +0.25 (better) · 95% CI +0.1 to +0.4 · P(better) 62% · 2 paired test cases'
     );
   });
 
@@ -115,7 +115,21 @@ describe('describeComparison', () => {
           p_candidate_better: 0.2,
         })
       )
-    ).toBe('mean -0.5 · 95% CI -1.25 to 0 · P(better) 20% · 1 paired test case');
+    ).toBe('mean -0.5 (worse) · 95% CI -1.25 to 0 · P(better) 20% · 1 paired test case');
+  });
+
+  it('names a negative difference better for lower-is-better metrics', () => {
+    expect(
+      describeComparison(
+        comparison({
+          higher_is_better: false,
+          mean_paired_difference: -0.05,
+          interval_low: -0.12,
+          interval_high: 0.02,
+          p_candidate_better: 0.9,
+        })
+      )
+    ).toBe('mean -0.05 (better) · 95% CI -0.12 to +0.02 · P(better) 90% · 2 paired test cases');
   });
 
   it('omits the pieces the response does not carry', () => {

@@ -4,6 +4,7 @@
 """Cross-store read composition for Evaluations."""
 
 import logging
+from asyncio import to_thread
 from dataclasses import dataclass
 
 from nhx.common.api.filter import FilterOperation
@@ -210,7 +211,10 @@ class EvaluationReadService:
                 _sanitize_for_log(candidate_name),
             )
             raise EvaluationTelemetryUnavailableError(configured=True) from exc
-        return compare_evaluation_sessions(
+        # The bootstrap is pure CPU over every paired attempt; off the event loop so a
+        # large comparison cannot stall the other requests this worker is serving.
+        return await to_thread(
+            compare_evaluation_sessions,
             (session for session in sessions if session.evaluation_name == baseline_name),
             (session for session in sessions if session.evaluation_name == candidate_name),
             metric,

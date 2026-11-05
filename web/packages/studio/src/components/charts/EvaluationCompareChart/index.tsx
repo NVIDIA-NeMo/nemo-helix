@@ -109,7 +109,8 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
 
   const renderHeadToHead = () => {
     if (!headToHeadMetric) return <Placeholder>No evaluator scores to compare.</Placeholder>;
-    if (comparisons.isError) return <Placeholder>Could not load the paired comparison.</Placeholder>;
+    if (comparisons.isError)
+      return <Placeholder>Could not load the paired comparison.</Placeholder>;
     if (comparisons.isLoading) {
       return (
         <Flex aria-busy align="center" gap="density-md">

@@ -115,6 +115,11 @@ async def test_get_metric_sessions_reads_tokens_and_cost_from_span_usage() -> No
         (query,) = executor.queries
         assert query.name == "evaluation_compare.usage_sessions"
         assert executor.tables == [ClickHouseTable.TRACE_INDEX, ClickHouseTable.SPANS]
+        # The usage pipeline reads span attribute bags by parameterized key; those keys
+        # must be bound or the query fails before it reaches ClickHouse.
+        assert query.parameters["input_tokens_key"]
+        assert query.parameters["output_tokens_key"]
+        assert query.parameters["cost_usd_key"]
         # Sessions without usage keep a NULL value row rather than dropping out, so the
         # pairing rules can omit them from the mean.
         assert sessions[-1].value is None

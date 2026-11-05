@@ -388,20 +388,24 @@ class EvaluationCompareResponse(BaseModel):
     worse: int = Field(description="Paired test cases where the candidate is worse.")
     mean_paired_difference: float | None = Field(
         default=None,
+        json_schema_extra={"nullable": True},
         description=(
             "Mean of the per-test-case differences, signed candidate minus baseline. Null when no test case is shared."
         ),
     )
     interval_low: float | None = Field(
         default=None,
+        json_schema_extra={"nullable": True},
         description="Lower bound of the 95% bootstrap interval of the mean paired difference.",
     )
     interval_high: float | None = Field(
         default=None,
+        json_schema_extra={"nullable": True},
         description="Upper bound of the 95% bootstrap interval of the mean paired difference.",
     )
     p_candidate_better: float | None = Field(
         default=None,
+        json_schema_extra={"nullable": True},
         description=(
             "Fraction of bootstrap resamples whose mean paired difference favors the candidate "
             "under the metric's direction. Null when no test case is shared."
@@ -409,6 +413,7 @@ class EvaluationCompareResponse(BaseModel):
     )
     interval_caveat: str | None = Field(
         default=None,
+        json_schema_extra={"nullable": True},
         description=(
             "Plain-language caveat about the interval: absent pairs, or a small pair count, make it a weak estimate."
         ),
