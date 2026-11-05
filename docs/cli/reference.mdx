@@ -9403,7 +9403,7 @@ nemo evals runs submit [OPTIONS]
 * `--harbor-git`: Public git repo of Harbor tasks, pinned to a tag or commit: `<url>@<ref>` reads `tasks/` at that ref. For another directory, use a GitHub tree URL: `https://github.com/<org>/<repo>/tree/<ref>/<dir>`.
 * `--taskset`: Stored taskset, workspace/name#digest (from `nemo evals tasksets create`): uploads no tasks and requests no image builds; submit refuses a task whose image isn't built.
 * `--spec-file <PATH>`: TasksetRunInput JSON: its target and execution, and its taskset unless `--taskset`, `--harbor-dir`, `--harbor-hub` or `--harbor-git` supplies the tasks.
-* `--dataset`: Intake dataset, NAME[@VERSION], for the run's Evaluation (with `--taskset` and `--experiment`); `tasksets create` prints it. `--harbor-hub` and `--harbor-git` set it themselves.
+* `--intake-dataset`: Intake label, NAME[@VERSION], shown as the dataset of the run's Evaluation; doesn't select tasks. With `--taskset` and `--experiment` only; `tasksets create` prints it. `--harbor-hub` and `--harbor-git` set it themselves.
 * `--tasks`: Indexes or names, comma-separated; default all.
 * `--agent`: Harbor built-in agent (without `--spec-file`). [default: oracle]
 * `--sandbox-profile`: Operator sandbox profile; default: the operator's (without `--spec-file`).

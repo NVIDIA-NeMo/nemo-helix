@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { withOperators } from '@nemo/common/src/api/filterOperators';
+import { jsonFilter, withOperators } from '@nemo/common/src/api/filterOperators';
 import { jobsListJobs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobListSortField,
@@ -40,4 +40,25 @@ export const fetchEvaluatorJobs = async (
     page++;
   }
   return all;
+};
+
+/** The newest evaluator job that published to `evaluationName`, matched server-side on its spec. */
+export const fetchEvaluationJob = async (
+  workspace: string,
+  evaluationName: string,
+  signal: AbortSignal
+): Promise<HelixJobResponse | undefined> => {
+  const res = await jobsListJobs(
+    workspace,
+    {
+      page_size: 1,
+      sort: '-created_at' as HelixJobListSortField,
+      filter: jsonFilter<HelixJobsListFilter>({
+        source: { $in: [...EVALUATOR_JOB_SOURCES] },
+        'spec.publication.intake.evaluation_id': { $eq: evaluationName },
+      }),
+    },
+    signal
+  );
+  return res?.data?.[0];
 };
