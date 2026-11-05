@@ -47,11 +47,24 @@ class VolumeStatusUpdate(BaseModel):
 
 
 class ImagesUnsupportedError(RuntimeError):
-    """The backend has no host-local image store to prune."""
+    """The backend has no host-local image store to list or prune."""
 
 
 class ImageInUseError(RuntimeError):
     """A container (in any state) still references the image."""
+
+
+@dataclass(frozen=True)
+class ImageInfo:
+    """A host-local image with a tag under a listing prefix."""
+
+    id: str
+    tags: tuple[str, ...]
+    labels: dict[str, str]
+    size: int
+    created: str
+    #: Containers in any state, platform-managed or not, created from this image.
+    containers: int
 
 
 @dataclass(frozen=True)
@@ -142,6 +155,10 @@ class DeploymentBackend(abc.ABC):
         backend_config: dict[str, Any] | None = None,
     ) -> VolumeStatusUpdate:
         raise NotImplementedError
+
+    async def list_images(self, *, repository_prefix: str) -> list[ImageInfo]:
+        """List local images with a tag under *repository_prefix*, with all of their tags."""
+        raise ImagesUnsupportedError(f"{type(self).__name__} has no local image store")
 
     async def remove_image(self, reference: str) -> bool:
         """Remove (or untag) *reference* without forcing.

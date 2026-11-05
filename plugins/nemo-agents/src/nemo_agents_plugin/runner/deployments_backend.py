@@ -950,6 +950,15 @@ class DeploymentsRunnerBackend(RunnerBackend):
         )
         return DeploymentInfo(name=name, status="starting", endpoint="", endpoints=[], staged_spec=staged_spec)
 
+    def internal_entity_client(self) -> NemoEntitiesClient:
+        """Platform-internal client, for checks that span workspaces the caller cannot see.
+
+        Built fresh rather than reusing the controller's cached client, whose transport is bound to the
+        controller's event loop and fails when used from a request handler's loop.
+        """
+        client = get_async_nemo_client(as_service="agents", internal=True)
+        return NemoEntitiesClient(AsyncEntitiesClient.from_client(client))
+
     async def image_store(self) -> DeploymentBackend:
         """The docker executor's backend, which holds the host's local agent images."""
         return (await self._registry()).resolve(executor_for_mode(self._config, "docker"))

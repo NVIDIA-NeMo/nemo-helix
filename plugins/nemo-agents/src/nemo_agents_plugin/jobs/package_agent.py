@@ -35,7 +35,7 @@ from nemo_agents_plugin.entities import (
     Agent,
     ethos_fileset_name,
 )
-from nemo_agents_plugin.images import TAG_NAMESPACE
+from nemo_agents_plugin.images import TAG_NAMESPACE, build_labels
 from nemo_helix_plugin.agents.validation import require_agent_config, resolve_agent_fileset
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoResponseValidationError
@@ -378,7 +378,7 @@ class PackageAgentJob(NemoJob):
         cfg = PackageAgentSpec.model_validate(config)
         with tempfile.TemporaryDirectory(prefix="nemo-agent-package-") as tmp:
             build_dir = Path(tmp)
-            asyncio.run(self._stage(cfg, build_dir, async_sdk))
+            spec_revision = asyncio.run(self._stage(cfg, build_dir, async_sdk))
             self._drop_staged_dockerignore(build_dir)
             agent_config_path = build_dir / AGENT_CONFIG_FILENAME
             agent_config_path.write_text(
@@ -397,6 +397,7 @@ class PackageAgentJob(NemoJob):
                 agent_version=cfg.agent_version,
                 agent_author=cfg.agent_author,
                 tag_namespace=f"{TAG_NAMESPACE}/{cfg.workspace}",
+                labels=build_labels(workspace=cfg.workspace, agent=cfg.agent, spec_revision=spec_revision),
                 skip_validation=cfg.skip_validation,
                 on_progress=logger.info,
             )
@@ -447,12 +448,14 @@ class PackageAgentJob(NemoJob):
         return ctx.results.save(PACKAGE_RESULT_NAME, path)
 
     @staticmethod
-    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNemoClient | None) -> None:
+    async def _stage(cfg: PackageAgentSpec, build_dir: Path, async_sdk: AsyncNemoClient | None) -> str:
         """Stage the referenced source fileset, or ``{agent}-ethos``, into *build_dir*.
 
         Must run before ``agent.yaml`` is written — staging clears the tree first.
+        Returns the revision the staged files came from, empty when unknown.
         """
         from nemo_agents_plugin.runner.fabric_artifact_staging import stage_fabric_ethos_dir
+        from nemo_agents_plugin.spec_revision import stage_with_spec_revision
 
         if async_sdk is None and cfg.source_fileset is None:
             logger.warning(
@@ -462,11 +465,19 @@ class PackageAgentJob(NemoJob):
                 ethos_fileset_name(cfg.agent),
             )
 
-        await stage_fabric_ethos_dir(
+        files_client = AsyncFilesClient.from_client(async_sdk) if async_sdk is not None else None
+        _, spec = await stage_with_spec_revision(
+            files_client,
             workspace=cfg.workspace,
             agent_name=cfg.agent,
-            agent_config=cfg.agent_config,
-            base_dir=build_dir,
-            files_client=AsyncFilesClient.from_client(async_sdk) if async_sdk is not None else None,
             source_fileset=cfg.source_fileset,
+            stage=lambda: stage_fabric_ethos_dir(
+                workspace=cfg.workspace,
+                agent_name=cfg.agent,
+                agent_config=cfg.agent_config,
+                base_dir=build_dir,
+                files_client=files_client,
+                source_fileset=cfg.source_fileset,
+            ),
         )
+        return spec.revision

@@ -54,6 +54,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/agent-images:
+    get:
+      tags:
+      - Agent Images
+      summary: List Images
+      description: List the agent images the platform built in this workspace, newest
+        first.
+      operationId: list_images_apis_agents_v2_workspaces__workspace__agent_images_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: agent
+        in: query
+        required: false
+        schema:
+          description: Only images built for this agent.
+          title: Agent
+          type: string
+        description: Only images built for this agent.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentImageList'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/agents/v2/workspaces/{workspace}/agent-images/{image_id}:
+    delete:
+      tags:
+      - Agent Images
+      summary: Delete Image
+      description: 'Remove an agent image that no container or deployment uses.
+
+
+        Only this workspace''s tags are removed, so a tag added outside the platform
+        keeps the image.'
+      operationId: delete_image_apis_agents_v2_workspaces__workspace__agent_images__image_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: image_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Image Id
+      responses:
+        '204':
+          description: Successful Response
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/agents/v2/workspaces/{workspace}/agents:
     post:
       tags:
@@ -207,6 +276,19 @@ paths:
         schema:
           type: string
           title: Name
+      - name: remove_images
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Also remove the images the platform built for this agent that
+            no container or deployment uses. Images still in use by deployments being
+            torn down are removed with those deployments.
+          default: false
+          title: Remove Images
+        description: Also remove the images the platform built for this agent that
+          no container or deployment uses. Images still in use by deployments being
+          torn down are removed with those deployments.
       responses:
         '204':
           description: Successful Response
@@ -3455,6 +3537,67 @@ components:
           type: object
       title: AgentFilter
       type: object
+    AgentImage:
+      properties:
+        id:
+          type: string
+          title: Id
+          description: Immutable image ID.
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+          description: This workspace's tags for the image.
+        agent:
+          title: Agent
+          description: Agent the image was built for, when known.
+          type: string
+        spec_revision:
+          type: string
+          title: Spec Revision
+          description: Revision of the agent's spec fileset the image was built from.
+            Empty when unknown.
+          default: ''
+        size:
+          type: integer
+          title: Size
+          description: Image size in bytes.
+          default: 0
+        created:
+          type: string
+          title: Created
+          description: When the image was built.
+          default: ''
+        in_use:
+          type: boolean
+          title: In Use
+          description: A container or a deployment in any workspace still uses the
+            image.
+        deployments:
+          items:
+            type: string
+          type: array
+          title: Deployments
+          description: Deployments in this workspace that reference the image.
+      type: object
+      required:
+      - id
+      - tags
+      - in_use
+      title: AgentImage
+      description: A platform-built agent image on the deployment host.
+    AgentImageList:
+      properties:
+        data:
+          items:
+            $ref: '#/components/schemas/AgentImage'
+          type: array
+          title: Data
+      type: object
+      required:
+      - data
+      title: AgentImageList
     AgentInline:
       properties:
         description:

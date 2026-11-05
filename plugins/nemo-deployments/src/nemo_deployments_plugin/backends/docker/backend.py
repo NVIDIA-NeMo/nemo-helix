@@ -11,6 +11,7 @@ import logging
 import os
 import tarfile
 import uuid
+from collections import Counter
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from nemo_deployments_plugin.backends.base import (
     BackendStatusUpdate,
     DeploymentBackend,
+    ImageInfo,
     ImageInUseError,
     LogResult,
     MissingBackendDependencyError,
@@ -1618,6 +1620,30 @@ class DockerDeploymentBackend(DeploymentBackend):
             if ws and dep_name:
                 seen.add(f"{ws}/{dep_name}")
         return sorted(seen)
+
+    async def list_images(self, *, repository_prefix: str) -> list[ImageInfo]:
+        def _list() -> list[ImageInfo]:
+            matched = [
+                (image, tuple(sorted(image.tags)))
+                for image in self._client.images.list()
+                if any(t.startswith(repository_prefix) for t in image.tags)
+            ]
+            if not matched:
+                return []
+            usage = Counter(c.attrs.get("ImageID", "") for c in self._client.containers.list(all=True, sparse=True))
+            return [
+                ImageInfo(
+                    id=image.id,
+                    tags=tags,
+                    labels=dict(image.labels or {}),
+                    size=int(image.attrs.get("Size") or 0),
+                    created=str(image.attrs.get("Created") or ""),
+                    containers=usage[image.id],
+                )
+                for image, tags in matched
+            ]
+
+        return await asyncio.to_thread(_list)
 
     async def remove_image(self, reference: str) -> bool:
         try:

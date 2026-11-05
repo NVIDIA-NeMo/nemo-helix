@@ -330,10 +330,39 @@ class TestRun:
             )
 
         assert result == {"image": "my-agent-abc123:26.08.21", "agent": "my-agent", "published": ""}
+        assert captured["kwargs"]["labels"] == {
+            "com.nemo.agent.workspace": "default",
+            "com.nemo.agent.name": "my-agent",
+        }
         assert captured["workspace"] == "default"
         assert captured["source_fileset"] == source_fileset
         assert captured["rendered"] == FABRIC_CONFIG
         assert captured["staged_skill"], "agent.yaml must be written after staging clears the tree"
+
+    def test_labels_the_image_with_the_staged_spec_revision(self) -> None:
+        from nemo_agents_plugin.spec_revision import SpecRevision
+
+        captured: dict[str, Any] = {}
+
+        async def _stage_with_revision(files_client: Any, *, stage: Any, **_: Any) -> tuple[None, SpecRevision]:
+            return await stage(), SpecRevision(revision="abc123")
+
+        def _build(agent_config_path: Path, **kwargs: Any) -> str:
+            captured["labels"] = kwargs["labels"]
+            return "my-agent-abc123:26.08.21"
+
+        with (
+            patch("nemo_agents_plugin.runner.fabric_artifact_staging.stage_fabric_ethos_dir", AsyncMock()),
+            patch("nemo_agents_plugin.spec_revision.stage_with_spec_revision", _stage_with_revision),
+            patch("nemo_agents_plugin.container.builder.build_fabric_agent_image", _build),
+        ):
+            PackageAgentJob().run(
+                PackageAgentSpec(agent="my-agent", workspace="default", agent_config=FABRIC_CONFIG).model_dump(
+                    mode="json"
+                ),
+            )
+
+        assert captured["labels"]["com.nemo.agent.spec-revision"] == "abc123"
 
     def test_explicit_fileset_without_client_does_not_build(self) -> None:
         from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStagingError
