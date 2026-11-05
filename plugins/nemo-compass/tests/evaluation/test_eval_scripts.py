@@ -26,7 +26,7 @@ def test_stack_resolves_labeled_clickhouse_on_configured_port(monkeypatch, click
         commands.append(command)
         return subprocess.CompletedProcess(command, 0, stdout="nhx-intake-clickhouse-managed\n", stderr="")
 
-    monkeypatch.setattr(stack.subprocess, "run", fake_run)
+    monkeypatch.setattr(stack, "run", fake_run)
 
     assert stack._intake_clickhouse_container(clickhouse_url) == "nhx-intake-clickhouse-managed"
     assert "label=nhx.nvidia.com/managed-by=nemo-helix" in commands[0]
@@ -35,7 +35,7 @@ def test_stack_resolves_labeled_clickhouse_on_configured_port(monkeypatch, click
 
 
 def test_stack_rejects_nonlocal_clickhouse_url(monkeypatch):
-    monkeypatch.setattr(stack.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("docker must not run"))
+    monkeypatch.setattr(stack, "run", lambda *_args, **_kwargs: pytest.fail("docker must not run"))
 
     with pytest.raises(RuntimeError, match="ClickHouse URL is not local"):
         stack._intake_clickhouse_container("https://clickhouse.example.internal:8443")
@@ -43,7 +43,7 @@ def test_stack_rejects_nonlocal_clickhouse_url(monkeypatch):
 
 def test_stack_rejects_multiple_matching_clickhouse_containers(monkeypatch):
     monkeypatch.setattr(
-        stack.subprocess,
+        stack,
         "run",
         lambda command, **_kwargs: subprocess.CompletedProcess(
             command,
@@ -66,7 +66,7 @@ def test_stack_does_not_select_unlabeled_same_name_container(monkeypatch):
         # intentionally excludes it.
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(stack.subprocess, "run", fake_run)
+    monkeypatch.setattr(stack, "run", fake_run)
 
     with pytest.raises(RuntimeError, match="labeled Intake ClickHouse.*none found"):
         stack._intake_clickhouse_container()

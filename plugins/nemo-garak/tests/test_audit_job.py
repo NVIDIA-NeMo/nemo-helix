@@ -264,7 +264,7 @@ class TestAggregateReports:
         jsonl.parent.mkdir(parents=True)
         jsonl.write_text("{}")
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             result = _aggregate_reports(tmp_path, "garak_runs", "run1", str(fake_garak_python))
 
@@ -281,7 +281,7 @@ class TestAggregateReports:
         jsonl.parent.mkdir(parents=True)
         jsonl.write_text("{}")
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1, stderr="boom")
             with pytest.raises(GarakFailure, match="aggregate_reports failed"):
                 _aggregate_reports(tmp_path, "garak_runs", "run1", str(fake_garak_python))
@@ -293,7 +293,7 @@ class TestAggregateReports:
             (d / "run1.report.jsonl").write_text("{}")
             (d / "run1.hitlog.jsonl").write_bytes(b"hit-" + probe.encode())
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             _aggregate_reports(tmp_path, "garak_runs", "run1", str(fake_garak_python))
 
@@ -316,7 +316,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict()
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             # returncode=0 but no HTML planted → probe "fails", GarakFailure caught internally.
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx)
@@ -350,7 +350,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(config=_make_config(description="will-be-stripped"))
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx)
 
@@ -368,7 +368,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(target=_make_target(options={"endpoint": "https://example.invalid", "key_env": "X"}))
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx)
 
@@ -411,7 +411,7 @@ class TestAuditJobRun:
             return subprocess.CompletedProcess(args=[], returncode=0)
 
         with (
-            patch("nemo_garak.jobs.audit.subprocess.run", side_effect=fake_run),
+            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=fake_run),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=True),
         ):
             _plant_reports(ctx.storage.persistent, "run1", (".report.jsonl", ".report.html", ".hitlog.jsonl"))
@@ -430,7 +430,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict()
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=2)
             result = AuditJob().run(spec, ctx=ctx)
 
@@ -443,7 +443,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict()
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             result = AuditJob().run(spec, ctx=ctx)
 
@@ -465,7 +465,7 @@ class TestAuditJobRun:
             return subprocess.CompletedProcess(args=[], returncode=0)
 
         with (
-            patch("nemo_garak.jobs.audit.subprocess.run", side_effect=fake_run),
+            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=fake_run),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=True),
         ):
             _plant_reports(ctx.storage.persistent, "custom-prefix", (".report.jsonl",), report_dir="custom_dir")
@@ -483,7 +483,7 @@ class TestAuditJobRun:
     ) -> None:
         ctx = _make_ctx(tmp_path)
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             AuditJob().run(_make_spec_dict(), ctx=ctx)
 
@@ -504,7 +504,7 @@ class TestAuditJobRun:
             return subprocess.CompletedProcess(args=[], returncode=0)
 
         with (
-            patch("nemo_garak.jobs.audit.subprocess.run", side_effect=fake_run),
+            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=fake_run),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=False),
         ):
             AuditJob().run(_make_spec_dict(), ctx=ctx)
@@ -518,7 +518,7 @@ class TestAuditJobRun:
     ) -> None:
         ctx = _make_ctx(tmp_path)
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             AuditJob().run(_make_spec_dict(), ctx=ctx)
 
@@ -542,7 +542,7 @@ class TestAuditJobRun:
 
         spec = _make_spec_dict(max_probe_retries=1)
         with (
-            patch("nemo_garak.jobs.audit.subprocess.run", side_effect=fake_run),
+            patch("nemo_garak.jobs.audit.run_subprocess", side_effect=fake_run),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=False),
         ):
             result = AuditJob().run(spec, ctx=ctx)
@@ -558,7 +558,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(max_probe_retries=1, fail_job_on_retries_exhausted=True)
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             result = AuditJob().run(spec, ctx=ctx)
 
@@ -595,7 +595,7 @@ class TestAuditJobRun:
 
             spec = _make_spec_dict(fail_job_on_retries_exhausted=False)
             with (
-                patch("nemo_garak.jobs.audit.subprocess.run", side_effect=fake_run),
+                patch("nemo_garak.jobs.audit.run_subprocess", side_effect=fake_run),
                 patch("nemo_garak.jobs.audit._aggregate_reports", return_value=False),
             ):
                 result = AuditJob().run(spec, ctx=ctx)
@@ -610,7 +610,7 @@ class TestAuditJobRun:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(fail_job_on_retries_exhausted=False)
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             result = AuditJob().run(spec, ctx=ctx)
 
@@ -637,7 +637,7 @@ class TestAuditJobRun:
 
         with (
             patch("nemo_garak.jobs.audit.garakapi.parse_plugin_spec") as mock_spec,
-            patch("nemo_garak.jobs.audit.subprocess.run") as mock_run,
+            patch("nemo_garak.jobs.audit.run_subprocess") as mock_run,
         ):
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             AuditJob().run(_make_spec_dict(), ctx=ctx)
@@ -662,7 +662,7 @@ class TestAuditJobRun:
         cfg_dict = _garak_config_dict(_make_config())
         (probe_dir / "config.yaml").write_text(yaml.safe_dump(cfg_dict))
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             AuditJob().run(_make_spec_dict(), ctx=ctx)
 
@@ -690,10 +690,10 @@ class TestAuditJobRun:
             return original_signal(signum, handler)
 
         with (
-            patch("nemo_garak.jobs.audit.subprocess.run") as mock_run,
-            patch("nemo_garak.jobs.audit.signal.signal", side_effect=capture_signal),
+            patch("nemo_garak.jobs.audit.run_subprocess") as mock_run,
+            patch("nemo_garak.jobs.audit.signal", side_effect=capture_signal),
             patch("nemo_garak.jobs.audit._aggregate_reports", return_value=False) as mock_agg,
-            patch("nemo_garak.jobs.audit.sys.exit") as mock_exit,
+            patch("nemo_garak.jobs.audit.sys_exit") as mock_exit,
         ):
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=1)
             AuditJob().run(_make_spec_dict(), ctx=ctx)
@@ -1047,7 +1047,7 @@ class TestAuditJobIGW:
         spec = _make_spec_dict(target=target)
         sdk = _mock_sdk("https://igw-resolved.example/v1")
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx, sdk=sdk)
 
@@ -1071,7 +1071,7 @@ class TestAuditJobIGW:
         ctx = _make_ctx(tmp_path)
         spec = _make_spec_dict(target=_make_target(options={"nim": {"max_tokens": 100}}))
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx)  # no sdk kwarg
 
@@ -1100,7 +1100,7 @@ class TestAuditJobIGW:
         async_sdk.models_client.get_provider = AsyncMock(return_value=MagicMock(data=MagicMock()))
         async_sdk.models_client.get_provider_route_openai_url.return_value = "https://igw-async.example/v1"
 
-        with patch("nemo_garak.jobs.audit.subprocess.run") as mock_run:
+        with patch("nemo_garak.jobs.audit.run_subprocess") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
             AuditJob().run(spec, ctx=ctx, sdk=None, async_sdk=async_sdk)
 

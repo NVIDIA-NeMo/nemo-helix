@@ -80,12 +80,10 @@ async def test_custom_environment_reaches_native_harbor_job(tmp_path, monkeypatc
         captured.append(job_config)
         return _FakeJob()
 
-    _stub_harbor(monkeypatch, create)
-
     class EnvironmentJobConfig(_DriftConfig):
         environment: dict[str, Any]
 
-    monkeypatch.setattr(sys.modules["harbor.job"], "JobConfig", EnvironmentJobConfig)
+    _stub_harbor(monkeypatch, create, job_config=EnvironmentJobConfig)
     environment = HarborEnvironmentConfig(
         import_path="custom.environment:Environment", kwargs={"use_server_proxy": True}
     )
@@ -163,12 +161,10 @@ async def test_native_job_captures_validated_jobs_dir(tmp_path, monkeypatch):
         captured.append(job_config)
         return _FakeJob()
 
-    _stub_harbor(monkeypatch, create)
-
     class StorageConfig(_DriftConfig):
         jobs_dir: Path
 
-    monkeypatch.setattr(sys.modules["harbor.job"], "JobConfig", StorageConfig)
+    _stub_harbor(monkeypatch, create, job_config=StorageConfig)
     exclusions = []
 
     @contextmanager
@@ -1218,7 +1214,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
     templates from the host environment for built-in and import-path agents alike, so a shape that
     dropped either would silently run the agent with its defaults or without its credential.
     """
-    import harbor.job
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     agent_kwargs = {"fabric_adapter_id": "nvidia.fabric.codex", "fabric_harness_settings": {"turns": [1, 2]}}
     jobs_dir = tmp_path / "jobs"
@@ -1248,7 +1244,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
         async def run(self) -> None:
             return None
 
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", FakeJob.create)
     _, run_job = _build_native_job(
         config,
         tmp_path / "dataset",
@@ -1275,7 +1271,7 @@ async def test_the_job_scope_holds_each_planned_job_while_it_runs(
     """A caller can change a planned job's trials before any runs, and clean up after the last."""
     import contextlib
 
-    import harbor.job
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     events: list[str] = []
 
@@ -1295,7 +1291,7 @@ async def test_the_job_scope_holds_each_planned_job_while_it_runs(
         yield
         events.append("exit")
 
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", FakeJob.create)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="scoped")
     _, run_job = _build_native_job(
         config, tmp_path / "dataset", None, job_name="scoped", env_templates={}, job_scope=scope
@@ -1419,7 +1415,7 @@ def test_build_native_job_rejects_escaping_job_name_before_rmtree(
 
     rmtree_calls: list[Path] = []
     monkeypatch.setattr(
-        "nhx_evals_sdk.agent_eval.runtimes.harbor.runtime.shutil.rmtree",
+        "nhx_evals_sdk.agent_eval.runtimes.harbor.runtime.rmtree",
         lambda path, **kwargs: rmtree_calls.append(Path(path)),
     )
 
@@ -1795,6 +1791,7 @@ def test_digest_survives_readlink_failing_mid_walk(tmp_path: Path, monkeypatch: 
     # The link itself disappearing between is_symlink() and readlink is a real race
     # against any process cleaning up the tree. It must degrade to a marker rather
     # than raise out of run_tasks and kill an otherwise-good evaluation.
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
     from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import _digest_directory
 
     agent = tmp_path / "agent"
@@ -1805,7 +1802,7 @@ def test_digest_survives_readlink_failing_mid_walk(tmp_path: Path, monkeypatch: 
     def exploding_readlink(*_args: object, **_kwargs: object) -> str:
         raise OSError(2, "No such file or directory")
 
-    monkeypatch.setattr(os, "readlink", exploding_readlink)
+    monkeypatch.setattr(harbor_runtime, "readlink", exploding_readlink)
 
     assert _digest_directory(agent)  # must not raise
 
@@ -1999,6 +1996,8 @@ def _stub_harbor(
     monkeypatch: pytest.MonkeyPatch,
     job_create: Callable[[object], Awaitable[object]],
     verifier_calls: list[dict[str, object]] | None = None,
+    *,
+    job_config: type[_DriftConfig] | None = None,
 ) -> None:
     """Install a minimal fake ``harbor`` package so ``run_job`` can execute.
 
@@ -2006,7 +2005,8 @@ def _stub_harbor(
     ``job_create`` becomes ``Job.create``; every config class is a permissive stub,
     since what is under test is the control flow around Harbor, not the payload.
     ``verifier_calls`` records ``VerifierConfig`` kwargs, which no caller can read back
-    off the permissive ``JobConfig`` stub.
+    off the permissive ``JobConfig`` stub. ``job_config`` replaces that stub, for a test that
+    reads a field back off the config ``Job.create`` receives.
     """
 
     def _module(name: str, **attrs: object) -> None:
@@ -2030,7 +2030,7 @@ def _stub_harbor(
     # JobConfig is a real model, not `_anything`: the resume-refusal path reads and
     # re-validates the persisted one to report what differed. Pydantic ignores the
     # kwargs _build_native_job passes that this stand-in doesn't declare.
-    _module("harbor.job", DatasetConfig=_anything, Job=_Job, JobConfig=_DriftConfig)
+    _module("harbor.job", DatasetConfig=_anything, Job=_Job, JobConfig=job_config or _DriftConfig)
     _module("harbor.models")
     _module("harbor.models.job")
     _module("harbor.models.job.config", RetryConfig=_anything)
@@ -3566,8 +3566,8 @@ def test_build_native_job_requires_templates_for_exactly_the_env_secrets(tmp_pat
 async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import harbor.job
     import yaml
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     created: list[Any] = []
 
@@ -3580,7 +3580,7 @@ async def test_harbor_task_containers_have_a_docker_host_gateway_alias(
         async def run(self) -> None:
             return None
 
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", FakeJob.create)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs")
     _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
     await run_job()
@@ -3605,7 +3605,7 @@ async def _created_jobs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dataset: Path
 ) -> list[tuple[str, Path, Any, list[str]]]:
     """Run a native job over ``dataset`` with Harbor's Job faked: ``(name, parent, task filter, overlays)`` per job."""
-    import harbor.job
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     created: list[Any] = []
 
@@ -3618,7 +3618,7 @@ async def _created_jobs(
         async def run(self) -> None:
             return None
 
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", FakeJob.create)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", agent_name="oracle")
     _, run_job = _build_native_job(config, dataset, None, job_name="j", env_templates={})
     await run_job()
@@ -3719,21 +3719,21 @@ def test_the_sidecar_overlay_aliases_the_host_on_harbors_egress_sidecar() -> Non
 async def test_a_task_harbor_cant_load_runs_the_selection_as_one_job_without_an_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import harbor.trial.network_policy as network_policy
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     # A sidecar overlay on a task Harbor ends up running without a sidecar would break its compose project.
     dataset = tmp_path / "dataset"
     _harbor_task(dataset, "open")
     _harbor_task(dataset, "probe", RESTRICTED_TASKS[0])
     _harbor_task(dataset, "unknown")
-    plan = network_policy.resolve_trial_network_plan
+    plan = harbor_runtime._trial_network_plan
 
     def fail_for_unknown(task_config: Any, *args: Any, **kwargs: Any) -> Any:
         if task_config.task.name == "probe/unknown":
             raise ValueError("unclassifiable")
         return plan(task_config, *args, **kwargs)
 
-    monkeypatch.setattr(network_policy, "resolve_trial_network_plan", fail_for_unknown)
+    monkeypatch.setattr(harbor_runtime, "_trial_network_plan", fail_for_unknown)
 
     jobs = await _created_jobs(tmp_path, monkeypatch, dataset)
 
@@ -3829,7 +3829,7 @@ async def test_a_single_harbor_job_dir_rerun_as_a_split_is_discarded(
 
 @pytest.mark.asyncio
 async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import harbor.job
+    from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
     monkeypatch.delenv("DOCKER_HOST", raising=False)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", env_vars={"DOCKER_HOST": "tcp://agent-only:2375"})
@@ -3845,7 +3845,7 @@ async def test_env_vars_are_literals_for_the_agent_only(tmp_path: Path, monkeypa
         async def run(self) -> None:
             return None
 
-    monkeypatch.setattr(harbor.job, "Job", FakeJob)
+    monkeypatch.setattr(harbor_runtime, "_create_harbor_job", FakeJob.create)
     _, run_job = _build_native_job(config, tmp_path / "dataset", None, job_name="j", env_templates={})
     await run_job()
 

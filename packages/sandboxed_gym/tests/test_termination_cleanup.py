@@ -9,11 +9,11 @@ is to re-raise with the default action installed, which would take the test sess
 
 from __future__ import annotations
 
-import atexit
 import signal
 from collections.abc import Callable
 
 import pytest
+import sandboxed_gym.orchestrator as orchestrator_module
 from sandboxed_gym.orchestrator import (
     _TERMINATION_SHUTDOWNS,
     TERMINATION_SIGNALS,
@@ -22,27 +22,23 @@ from sandboxed_gym.orchestrator import (
 
 
 @pytest.fixture(autouse=True)
-def restore_process_state():
+def restore_process_state(monkeypatch: pytest.MonkeyPatch):
     """Undo the process-global handlers and atexit hooks each test installs."""
     original = {signum: signal.getsignal(signum) for signum in TERMINATION_SIGNALS}
+    # Tests replace signal.signal through the same monkeypatch, which is undone only after this
+    # teardown, so restore the handlers with the real function.
+    set_handler = signal.signal
     registered: list[Callable[[], object]] = []
-    real_register = atexit.register
     prior_shutdowns = list(_TERMINATION_SHUTDOWNS)
     _TERMINATION_SHUTDOWNS.clear()
 
-    def _tracking_register(func, *args, **kwargs):
-        registered.append(func)
-        return real_register(func, *args, **kwargs)
-
-    atexit.register = _tracking_register  # ty: ignore[invalid-assignment]
+    # Record the hooks instead of registering them, so the test process never runs them at exit.
+    monkeypatch.setattr(orchestrator_module, "register_atexit", registered.append)
     try:
         yield registered
     finally:
-        atexit.register = real_register
-        for func in registered:
-            atexit.unregister(func)
         for signum, handler in original.items():
-            signal.signal(signum, handler)
+            set_handler(signum, handler)
         _TERMINATION_SHUTDOWNS.clear()
         _TERMINATION_SHUTDOWNS.extend(prior_shutdowns)
 

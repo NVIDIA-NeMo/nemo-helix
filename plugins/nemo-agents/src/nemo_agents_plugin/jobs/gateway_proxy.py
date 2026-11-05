@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
 from nemo_agents_plugin.fabric.gateway_models import gateway_models, is_gateway_url
 from nemo_helix_plugin.auth import platform_auth_enabled
@@ -39,6 +38,7 @@ from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR, get_env_access_token
 from nemo_helix_plugin.client.oidc_factory import resolve_workload_exchange_provider
 from nemo_helix_plugin.client_provider import get_forwarding_headers, get_nemo_client
+from uvicorn import Config, Server
 
 logger = logging.getLogger(__name__)
 
@@ -205,8 +205,8 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-        server = uvicorn.Server(
-            uvicorn.Config(
+        server = Server(
+            Config(
                 app,
                 host="127.0.0.1",
                 port=port,

@@ -347,33 +347,27 @@ async def test_local_only_is_evaluation_plumbing_and_requires_a_path(tmp_path: P
 
 
 @pytest.mark.asyncio
-async def test_local_backend_reads_and_writes_insights_file_with_explicit_utf8(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_local_backend_reads_and_writes_insights_file_with_explicit_utf8(tmp_path: Path) -> None:
     read_calls: list[dict[str, object]] = []
     write_calls: list[dict[str, object]] = []
-    original_read_text = Path.read_text
-    original_write_text = Path.write_text
 
-    def spy_read_text(self: Path, encoding: str | None = None, errors: str | None = None) -> str:
-        read_calls.append({"encoding": encoding, "errors": errors})
-        return original_read_text(self, encoding=encoding, errors=errors)
+    class _SpyPath(Path):
+        def read_text(self, encoding: str | None = None, errors: str | None = None) -> str:
+            read_calls.append({"encoding": encoding, "errors": errors})
+            return super().read_text(encoding=encoding, errors=errors)
 
-    def spy_write_text(
-        self: Path,
-        data: str,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> int:
-        write_calls.append({"encoding": encoding, "errors": errors, "newline": newline})
-        return original_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
-
-    monkeypatch.setattr(Path, "read_text", spy_read_text)
-    monkeypatch.setattr(Path, "write_text", spy_write_text)
+        def write_text(
+            self,
+            data: str,
+            encoding: str | None = None,
+            errors: str | None = None,
+            newline: str | None = None,
+        ) -> int:
+            write_calls.append({"encoding": encoding, "errors": errors, "newline": newline})
+            return super().write_text(data, encoding=encoding, errors=errors, newline=newline)
 
     async with _async_platform() as client:
-        backend = LocalCompassBackend(client=client, path=tmp_path / "insights.yaml")
+        backend = LocalCompassBackend(client=client, path=_SpyPath(tmp_path / "insights.yaml"))
         backend.store.write_records([])
         backend.store.read_records()
 

@@ -25,7 +25,7 @@ from nemo_fabric_adapters.common.utils import (
 from nemo_helix_plugin.client_provider import get_async_task_nemo_client
 from nemo_helix_plugin.nooa_model_client import ConfiguredModelRefs
 from nemo_helix_plugin.tasks.logging_setup import configure_task_logging
-from nemo_relay import plugin as relay_plugin
+from nemo_relay.plugin import activate as activate_relay_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ class CompassRuntime:
         # adapters have a named guard against.
         with _applied_environment(telemetry.env):
             reject_ambient_relay_plugin_config()
-            async with relay_plugin.activate(_relay_plugin_config(telemetry)) as activation:
+            async with activate_relay_plugin(_relay_plugin_config(telemetry)) as activation:
                 reject_inherited_relay_plugin_config(activation.report)
                 return await self._run_analysis(request, relay_scope_name=COMPASS_RELAY_SCOPE)
 

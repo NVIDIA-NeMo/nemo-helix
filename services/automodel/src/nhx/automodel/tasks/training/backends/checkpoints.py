@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
+from shutil import copytree
 
 from nhx.automodel.tasks.training.chat_templates import (
     apply_chat_template_to_checkpoint,
@@ -340,7 +341,7 @@ def merge_lora_embedding_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged embedding LoRA adapter to %s", output_path)
 
     finally:
@@ -405,7 +406,7 @@ def merge_lora_cross_encoder_adapter(
             logger.warning("Could not save tokenizer: %s", e)
 
         output_path.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(tmp_path, output_path, dirs_exist_ok=True)
+        copytree(tmp_path, output_path, dirs_exist_ok=True)
         logger.info("Successfully merged cross-encoder LoRA adapter to %s", output_path)
 
     finally:
@@ -781,7 +782,7 @@ def process_checkpoint(
     elif finetuning_type == FinetuningType.LORA:
         # LoRA unmerged: just copy the adapter files
         logger.info(f"Copying {type_label} LoRA adapter from {checkpoint_path} to {output_path}".replace("  ", " "))
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF_PEFT
         # Note: For hf-peft, chat template is inherited from base model at inference time
 
@@ -791,7 +792,7 @@ def process_checkpoint(
         logger.info(
             f"Copying {type_label} full weights checkpoint from {checkpoint_path} to {output_path}".replace("  ", " ")
         )
-        shutil.copytree(checkpoint_path, output_path, dirs_exist_ok=True)
+        copytree(checkpoint_path, output_path, dirs_exist_ok=True)
         checkpoint_format = CheckpointFormat.HF
 
         # Fix FSDP2 architecture naming

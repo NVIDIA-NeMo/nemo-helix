@@ -147,14 +147,14 @@ def test_signing_key_cache_maps_unreadable_private_key_file_to_missing_message(
 ) -> None:
     key_path = tmp_path / "private.pem"
     _write_private_key(key_path)
-    original_read_bytes = Path.read_bytes
+    original_read_bytes = signing_keys._read_private_key_bytes
 
     def unreadable_read_bytes(path: Path) -> bytes:
         if path == key_path:
             raise PermissionError("permission denied")
         return original_read_bytes(path)
 
-    monkeypatch.setattr(Path, "read_bytes", unreadable_read_bytes)
+    monkeypatch.setattr(signing_keys, "_read_private_key_bytes", unreadable_read_bytes)
     cache = RSASigningKeyCache()
 
     with pytest.raises(RuntimeError, match="private key file is required"):

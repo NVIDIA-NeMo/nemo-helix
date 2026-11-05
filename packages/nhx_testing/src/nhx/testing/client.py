@@ -13,6 +13,7 @@ import uuid
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from time import sleep
 from typing import Awaitable, Callable, Coroutine, Generator, Mapping, Protocol, TypeVar
 from unittest.mock import patch
 
@@ -431,7 +432,7 @@ def _post_after_auth_warmup(
             return
         if response.status_code != 403 or time.monotonic() >= deadline:
             raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text}")
-        time.sleep(_AUTH_WARMUP_PAUSE_SECONDS)
+        sleep(_AUTH_WARMUP_PAUSE_SECONDS)
 
 
 @contextmanager
@@ -740,7 +741,7 @@ def create_test_client(
                 response = client.get("/health/ready")
                 if response.status_code == 200:
                     break
-                time.sleep(0.1)
+                sleep(0.1)
             else:
                 # Include /status in timeout error for debugging
                 status_text = ""

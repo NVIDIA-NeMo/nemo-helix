@@ -17,7 +17,7 @@ import pytest
 from nemo_helix_plugin.job_context import JobContext
 from nhx.customization_common.training.pause import ResumeCheckpointMissingError
 from nhx.unsloth.schemas import DatasetSpec, ModelLoadSpec, OutputResponse, TrainingSpec, UnslothJobOutput
-from nhx.unsloth.tasks.training.backends import unsloth_sft
+from nhx.unsloth.tasks.training.backends import pause, unsloth_sft
 from nhx.unsloth.tasks.training.backends.callbacks import TrainingProgressCallback
 from nhx.unsloth.tasks.training.backends.pause import create_pause_callback, newest_complete_checkpoint
 
@@ -50,14 +50,11 @@ def test_a_trainer_state_that_cannot_be_read_fails_without_removing_the_checkpoi
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: OSError
 ) -> None:
     checkpoint = _complete(tmp_path, 40)
-    read_text = Path.read_text
 
-    def failing_read(path: Path, *args: Any, **kwargs: Any) -> str:
-        if path.name == "trainer_state.json":
-            raise error
-        return read_text(path, *args, **kwargs)
+    def failing_read(checkpoint: Path) -> str:
+        raise error
 
-    monkeypatch.setattr(Path, "read_text", failing_read)
+    monkeypatch.setattr(pause, "_read_trainer_state", failing_read)
 
     with pytest.raises(type(error)):
         newest_complete_checkpoint(tmp_path)

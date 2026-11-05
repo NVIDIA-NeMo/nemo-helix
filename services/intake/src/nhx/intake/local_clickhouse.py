@@ -25,6 +25,7 @@ import sys
 from asyncio import to_thread
 from dataclasses import dataclass, replace
 from enum import Enum, auto
+from os import getgid, getuid
 from pathlib import Path
 from time import monotonic, sleep
 from typing import Any, Final, cast
@@ -45,8 +46,8 @@ from nhx.intake.spans.clickhouse_migrations import parse_clickhouse_url
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import Timeout as RequestsTimeout
 
-import docker
 from docker import DockerClient
+from docker import from_env as docker_from_env
 
 logger = logging.getLogger(__name__)
 
@@ -317,7 +318,7 @@ def remove_local_clickhouse(
 def _connect_docker() -> DockerClient:
     client: DockerClient | None = None
     try:
-        client = docker.from_env(timeout=10)
+        client = docker_from_env(timeout=10)
         client.ping()
         return client
     except (DockerException, RequestsConnectionError, RequestsTimeout, OSError) as exc:
@@ -593,7 +594,7 @@ def _restore_data_dir_ownership(container: Container) -> None:
     container.reload()
     if container.status != "running":
         container.start()
-    owner = f"{os.getuid()}:{os.getgid()}"
+    owner = f"{getuid()}:{getgid()}"
     result = container.exec_run(
         ["chown", "-R", owner, CLICKHOUSE_DATA_PATH],
         user="root",
@@ -637,6 +638,14 @@ def _expected_labels(data_dir: Path, data_instance_id: str) -> dict[str, str]:
     }
 
 
+def _set_mode(path: Path, mode: int) -> None:
+    path.chmod(mode)
+
+
+def _stat(path: Path) -> os.stat_result:
+    return path.stat()
+
+
 def _ensure_data_directory_identity(data_dir: Path, *, manage_permissions: bool) -> str:
     data_dir.mkdir(parents=True, exist_ok=True)
     tmp_dir = data_dir / "tmp"
@@ -644,7 +653,7 @@ def _ensure_data_directory_identity(data_dir: Path, *, manage_permissions: bool)
     if manage_permissions:
         for path in (data_dir, tmp_dir):
             try:
-                path.chmod(0o755)
+                _set_mode(path, 0o755)
             except PermissionError:
                 # A rootless Docker bind mount can leave this path owned by a
                 # container-mapped UID after a previous run. The container-side
@@ -669,12 +678,12 @@ def _ensure_data_directory_identity(data_dir: Path, *, manage_permissions: bool)
         else:
             return data_instance_id
 
-    identity_stat = identity_path.stat()
+    identity_stat = _stat(identity_path)
     matching_instance_ids: list[str] = []
     for instance_path in data_dir.glob(f"{_DATA_INSTANCE_FILE_PREFIX}*"):
         try:
             instance_id = UUID(instance_path.name.removeprefix(_DATA_INSTANCE_FILE_PREFIX)).hex
-            instance_stat = instance_path.stat()
+            instance_stat = _stat(instance_path)
         except (FileNotFoundError, ValueError):
             continue
         if os.path.samestat(identity_stat, instance_stat):

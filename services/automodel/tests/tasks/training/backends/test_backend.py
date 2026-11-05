@@ -5,27 +5,19 @@
 
 import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.automodel.tasks.training.backends.backend import AutomodelBackend
+from nhx.automodel.tasks.training.backends.checkpoints import ModelType
+from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
+from nhx.automodel.tasks.training.protocol import LibraryConfig
+from nhx.automodel.tasks.training.schemas import TrainingRecipe
+from nhx.customization_common.training.progress import TrainingWallClock
 from pytest_mock import MockerFixture
-
-# Mock nemo_automodel before importing backend/config modules
-# (nemo_automodel is only available in the training container)
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
-
-from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
-from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
-from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
-from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
-from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
-from nhx.customization_common.training.progress import TrainingWallClock  # noqa: E402
 
 
 class TestAutomodelBackend:
@@ -209,8 +201,8 @@ class RecordingProgress(JobsServiceProgressReporter):
 
 
 def run_execute(monkeypatch: pytest.MonkeyPatch, progress: JobsServiceProgressReporter, proc: Proc):
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", lambda *a, **k: proc)
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", lambda *a, **k: proc)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     config = MagicMock()
     config.parallelism.num_nodes = 1
@@ -274,8 +266,8 @@ class TestExecuteTrainingTrackerRun:
             launched["env"] = env
             return proc
 
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", popen)
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", popen)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
         monkeypatch.setattr(
             "nhx.automodel.tasks.training.backends.backend.find_mlflow_run_id",
             lambda config: "run-1" if config == mlflow_config else None,

@@ -54,20 +54,22 @@ def _write_harbor_result(trial_dir: Path, *, exception_type: str | None = None, 
     )
 
 
+class _StoppedAfterFilter(Exception):
+    """Raised by the job's environment preflight, which ``jobs resume`` runs right after its filter."""
+
+
+class _StopAtPreflight:
+    """The job's environment: its preflight ends ``jobs resume`` before Docker or ``Job.run``."""
+
+    @classmethod
+    def preflight(cls) -> None:
+        raise _StoppedAfterFilter
+
+
 @contextmanager
 def _halt_harbor_cli_after_filter() -> Generator[None, None, None]:
     """Let ``jobs resume`` delete matching trials, then stop before Docker/Job.run."""
-    from unittest.mock import patch
-
-    def abandon(coro: Any) -> object:
-        coro.close()
-        return object()
-
-    with (
-        patch("harbor.environments.factory.EnvironmentFactory.run_preflight"),
-        patch("harbor.cli.jobs.run_async", side_effect=abandon),
-        patch("harbor.cli.jobs.print_job_results_tables"),
-    ):
+    with pytest.raises(_StoppedAfterFilter):
         yield
 
 
@@ -75,10 +77,9 @@ def _cli_job_dir(tmp_path: Path) -> Path:
     jobs_dir = tmp_path / "jobs"
     job_dir = jobs_dir / "resume-job"
     job_dir.mkdir(parents=True)
-    (job_dir / "config.json").write_text(
-        JobConfig(job_name="resume-job", jobs_dir=jobs_dir, quiet=True).model_dump_json(),
-        encoding="utf-8",
-    )
+    config = JobConfig(job_name="resume-job", jobs_dir=jobs_dir, quiet=True)
+    config.environment.import_path = f"{__name__}:{_StopAtPreflight.__qualname__}"
+    (job_dir / "config.json").write_text(config.model_dump_json(), encoding="utf-8")
     return job_dir
 
 
@@ -155,13 +156,12 @@ def test_harbor_cli_filter_flag_replaces_the_cancelled_error_default(tmp_path: P
     assert inspect.signature(resume).parameters["filter_error_types"].default == ["CancelledError"]
     assert "filter_error_types_set = set(filter_error_types)" in source
 
-    with _halt_harbor_cli_after_filter():
-        result = CliRunner().invoke(
-            jobs_app,
-            ["resume", "--job-path", str(job_dir), "--filter-error-type", "AgentTimeoutError"],
-        )
+    result = CliRunner().invoke(
+        jobs_app,
+        ["resume", "--job-path", str(job_dir), "--filter-error-type", "AgentTimeoutError"],
+    )
 
-    assert result.exit_code == 0, result.output
+    assert isinstance(result.exception, _StoppedAfterFilter), result.output
     remaining = sorted(path.name for path in job_dir.iterdir() if path.is_dir())
     assert remaining == ["cancelled"], "passing -f replaces CancelledError rather than appending to it"
 

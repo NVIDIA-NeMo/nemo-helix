@@ -1428,7 +1428,7 @@ def _mock_subject_jwks_client(
             captured["url"] = url
             return _FakeResponse(jwks)
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
     return captured
 
 
@@ -1513,7 +1513,7 @@ def test_jwt_subject_token_decoder_does_not_cache_invalid_jwks(
             captured["url"] = url
             return _FakeResponse(jwks_responses.pop(0))
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
     subject_token = _signed_subject_token(exchange_config, exchange_service, audience="nemo-helix-workload")
 
     with pytest.raises(exchange.jwt.InvalidTokenError, match="valid JWKS"):
@@ -1559,7 +1559,7 @@ def test_jwt_subject_token_decoder_refreshes_cached_jwks_on_unknown_kid(
             captured["url"] = url
             return _FakeResponse(jwks_responses.pop(0))
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
 
     claims = asyncio.run(exchange_service.decode_jwt_subject_token(exchange_config, subject_token))
 
@@ -1692,7 +1692,7 @@ def test_kubernetes_subject_token_decoder_posts_token_review_with_async_client(
                 }
             )
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
 
     decoded = asyncio.run(
         exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
@@ -1758,7 +1758,7 @@ def test_kubernetes_subject_token_decoder_preserves_single_pod_uid_reference(
                 }
             )
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
 
     decoded = asyncio.run(
         exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
@@ -1812,7 +1812,7 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
                 }
             )
 
-    monkeypatch.setattr(exchange.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(exchange, "AsyncClient", FakeAsyncClient)
 
     with pytest.raises(exchange._InvalidGrantError):
         asyncio.run(

@@ -341,7 +341,7 @@ class TestInstall:
 
     def test_install_cursor_user_scope(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HOME", str(tmp_path))
         result = runner.invoke(app, "skills install --agent cursor --user --skill inference")
         assert_exit_code(result, 0)
         assert (tmp_path / ".cursor" / "skills" / "nemo-inference" / "SKILL.md").exists()

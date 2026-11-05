@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from httpx import post
 from nemo_helix_plugin.client.constants import (
     DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE as _DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
 )
@@ -104,7 +105,7 @@ def token_exchange_grant(
     if scope:
         data["scope"] = scope
 
-    response = httpx.post(
+    response = post(
         token_endpoint,
         data=data,
         timeout=timeout,

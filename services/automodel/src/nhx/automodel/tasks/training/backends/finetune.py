@@ -14,6 +14,7 @@ import logging
 import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from os import kill
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -339,7 +340,7 @@ class AutomodelRecipeWrapper:
         if not _is_global_rank_zero():
             return None
         pid = os.getpid()
-        return PausePoller(self._job_ctx, SERVICE_NAME, on_pause=lambda: os.kill(pid, PAUSE_SIGNAL)).start()
+        return PausePoller(self._job_ctx, SERVICE_NAME, on_pause=lambda: kill(pid, PAUSE_SIGNAL)).start()
 
     def _stopped_for_pause(self) -> bool:
         """Whether the loop ended on the pause signal rather than by finishing.

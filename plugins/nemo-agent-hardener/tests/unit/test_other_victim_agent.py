@@ -44,7 +44,7 @@ def test_python_executor_returns_a_timeout_error_instead_of_hanging(monkeypatch:
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 30)
 
-    monkeypatch.setattr(agent.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent, "run", fake_run)
 
     assert agent._python_executor("while True: pass") == "error: execution timed out after 30s"
 
@@ -57,7 +57,7 @@ def test_bash_executor_reports_a_timeout_rather_than_looking_like_a_refusal(
     def fake_run(cmd, **kwargs):
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout") or 30)
 
-    monkeypatch.setattr(agent.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent, "run", fake_run)
 
     assert agent._bash_executor("sleep 600") == "error: execution timed out after 30s"
 
@@ -81,7 +81,7 @@ def test_bash_executor_output_is_capped(monkeypatch: pytest.MonkeyPatch) -> None
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, returncode=0, stdout=huge, stderr="")
 
-    monkeypatch.setattr(agent.subprocess, "run", fake_run)
+    monkeypatch.setattr(agent, "run", fake_run)
 
     result = agent._bash_executor("echo huge")
 
