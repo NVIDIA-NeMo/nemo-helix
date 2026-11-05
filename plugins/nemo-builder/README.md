@@ -741,14 +741,14 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 ### Reliability
 
 - **A row whose build fails is failed by `builder-settle`, or when it's read.** Once a `pending`
-  image's job has ended, or once it has had no job for five minutes (a submit that died, or that Jobs
-  refused, between writing its rows and creating its job), it is written `failed`, with the reason in
-  `status_detail`. The `builder-settle` controller does that for every `pending` image every 30
-  seconds, and reading one image does it for that image at once. Listing doesn't, so a listing's
-  `status` lags by up to a pass, and without `builder-settle` such rows stay `pending` in listings for
-  good: the chart refuses a controller selection that leaves it out. Within the five minutes,
-  submitting the same request again creates its job; after them, submit the next `revision`: the same
-  one again would build images already failed.
+  image's job has ended, or once it has had no job for five minutes (a submit that died, or that
+  Jobs refused, between writing its rows and creating its job; or a job deleted before it ended), it
+  is written `failed`, with the reason in `status_detail`. The `builder-settle` controller does that
+  for every `pending` image every 30 seconds, and reading one image does it for that image at once.
+  Listing doesn't, so a listing's `status` lags by up to a pass, and without `builder-settle` such
+  rows stay `pending` in listings for good: the chart refuses a controller selection that leaves it
+  out. Within the five minutes, submitting the same request again creates its job; after them,
+  submit the next `revision`: the same one again would build images already failed.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
