@@ -41,6 +41,7 @@ from nhx.core.inference_gateway.api.errors import (
     raise_no_providers_for_model_entity,
     raise_unresolved_provider_secret,
 )
+from nhx.core.inference_gateway.api.images import resolve_fileset_images
 from nhx.core.inference_gateway.api.metrics import UpstreamRequestLabels, record_upstream_request
 from nhx.core.inference_gateway.api.middleware_registry import (
     MiddlewareRegistry,
@@ -1096,9 +1097,9 @@ async def virtual_model_proxy(
     - Providing *json_body* — the already-parsed request body dict.  Pass ``{}``
       for bodyless methods (e.g. GET).
 
-    Pipeline: seed ``body["model"]`` → build context → request middleware → resolve model entity
-    → proxy with served model name → restore model entity → response middleware →
-    :func:`stream_response_result` → post-response fire-and-forget (non-streaming only).
+    Pipeline: seed ``body["model"]`` → inline fileset images → build context → request middleware
+    → resolve model entity → proxy with served model name → restore model entity → response
+    middleware → :func:`stream_response_result` → post-response fire-and-forget (non-streaming only).
 
     If the VirtualModel is in :attr:`MiddlewareRegistry.broken_vms` (because a
     referenced ``config_id`` was deleted upstream, a plugin failed validation, or
@@ -1166,6 +1167,10 @@ async def virtual_model_proxy(
             )
         else:
             json_body["model"] = virtual_model.default_model_entity
+
+    # Inline fileset image references before any middleware runs, so plugins (e.g.
+    # guardrails) and the original_request snapshot see the actual image.
+    await resolve_fileset_images(json_body, workspace=workspace, request_nemo_client=request_nemo_client)
 
     # Build per-request context.  original_request captures the state after model
     # seeding but before any plugin runs; plugins receive a separate InferenceRequest

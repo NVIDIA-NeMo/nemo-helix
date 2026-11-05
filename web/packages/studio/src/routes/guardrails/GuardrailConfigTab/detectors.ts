@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { Rails } from '@nemo/sdk/generated/platform/schema';
 import { recognizeFlow } from '@studio/routes/guardrails/GuardrailConfigTab/flowRegistry';
 import type { DetectorKey, Field, Scope } from '@studio/routes/guardrails/GuardrailConfigTab/types';
@@ -51,9 +52,6 @@ export const humanize = (key: string): string =>
 export const detectorMeta = (key: string): DetectorMeta =>
   DETECTOR_META[key] ?? { label: humanize(key), firstParty: false };
 
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 /**
  * Enumerate the detectors actually present in a `rails.config` object, in
  * canonical order, with any unknown keys appended so nothing is dropped.
@@ -95,7 +93,7 @@ export const deriveScopes = (rails: Rails | undefined, key: string): Scope[] => 
   const scopes = new Set<Scope>();
 
   const detector = rails?.config?.[key as DetectorKey];
-  if (isObject(detector)) {
+  if (isPlainObject(detector)) {
     for (const scope of ['input', 'output', 'retrieval'] as const) {
       if (detector[scope] != null) scopes.add(scope);
     }
@@ -131,7 +129,7 @@ const formatScalar = (key: string, value: string | number | boolean): string => 
  * object is always available via the raw-config section.
  */
 export const summarizeDetector = (value: unknown): Field[] => {
-  if (!isObject(value)) return [];
+  if (!isPlainObject(value)) return [];
   const fields: Field[] = [];
 
   for (const [key, raw] of Object.entries(value)) {
@@ -139,12 +137,12 @@ export const summarizeDetector = (value: unknown): Field[] => {
     const label = humanize(key);
 
     if (Array.isArray(raw)) {
-      const items = raw.map((item) => (isObject(item) ? JSON.stringify(item) : String(item)));
+      const items = raw.map((item) => (isPlainObject(item) ? JSON.stringify(item) : String(item)));
       fields.push({ label, value: items.length ? items.join(', ') : '—' });
       continue;
     }
 
-    if (isObject(raw)) {
+    if (isPlainObject(raw)) {
       if (Array.isArray(raw.entities)) {
         fields.push({
           label: `${label} entities`,

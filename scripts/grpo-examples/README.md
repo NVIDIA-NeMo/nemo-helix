@@ -109,11 +109,11 @@ uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judg
 ```bash
 .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
 
-nemo files filesets create math-with-judge-env -w default --purpose environment --exist-ok
-nemo files upload /tmp/mwj-env/ math-with-judge-env -w default
+nemo files filesets create math-with-judge-env --workspace default --purpose environment --exist-ok
+nemo files upload /tmp/mwj-env/ math-with-judge-env --workspace default
 
-nemo files filesets create math-with-judge-gym-data -w default --purpose dataset --exist-ok
-nemo files upload /tmp/mwj-data/ math-with-judge-gym-data -w default
+nemo files filesets create math-with-judge-gym-data --workspace default --purpose dataset --exist-ok
+nemo files upload /tmp/mwj-data/ math-with-judge-gym-data --workspace default
 ```
 
 The trailing slash matters: it uploads the directory's *contents*. `--purpose
@@ -136,9 +136,9 @@ nemo customization rl --job-json plugins/nemo-rl/tests/fixtures/minimal_grpo_lor
 Each also needs the model entity it names. Create it the same way as for any other backend:
 
 ```bash
-nemo files filesets create qwen3-8b-base -w default --purpose model --exist-ok \
+nemo files filesets create qwen3-8b-base --workspace default --purpose model --exist-ok \
   --storage '{"type":"huggingface","repo_id":"Qwen/Qwen3-8B-Base","repo_type":"model","revision":"main"}'
-nemo models create qwen3-8b-base -w default --exist-ok \
+nemo models create qwen3-8b-base --workspace default --exist-ok \
   --input-data '{"name":"qwen3-8b-base","fileset":"default/qwen3-8b-base","custom_fields":{"hf_model_id":"Qwen/Qwen3-8B-Base"}}'
 ```
 
