@@ -73,36 +73,114 @@ def test_existing_native_full_capture():
                     for key, value in _attributes_to_dict(source.attributes).items():
                         if key.startswith("nemo_relay."):
                             assert domain.attributes_string[key] == value
-    outer, nested, llm, tool, broken = (
-        spans[name] for name in ("outer-agent", "nested-agent", "recorded-model", "lookup", "broken")
-    )
-    assert outer.kind is nested.kind is SpanKind.AGENT
-    assert outer.attributes_string["gen_ai.agent.name"] == "outer-agent"
-    assert nested.attributes_string["gen_ai.agent.name"] == "nested-agent"
-    assert nested.external_parent_span_id == outer.external_span_id
-    assert llm.external_parent_span_id == tool.external_parent_span_id == nested.external_span_id
-    assert json.loads(outer.input) == {"instruction": "hello"}
-    assert outer.output == "hello back"
-    assert json.loads(nested.output) == {"answer": "hello back"}
-    assert llm.kind is SpanKind.LLM
-    assert json.loads(llm.input)["messages"][0]["role"] == "user"
-    message = json.loads(llm.output)["messages"][0]
-    assert message["role"] == "assistant"
-    assert message["content"] == "hello back"
-    assert message["id"] == "msg-1"
-    assert llm.attributes_string["gen_ai.request.model"] == "recorded-model"
-    assert llm.attributes_string["gen_ai.system"] == "recorded-provider"
-    assert llm.attributes_number["llm.token_count.prompt"] == 11
-    assert llm.attributes_number["llm.token_count.completion"] == 3
-    assert llm.attributes_number["llm.token_count.total"] == 14
-    assert "llm.token_count.completion_details.reasoning" not in llm.attributes_number
-    assert tool.kind is SpanKind.TOOL
-    assert tool.attributes_string["gen_ai.tool.name"] == "lookup"
-    assert json.loads(tool.input) == {"query": "hello"}
-    assert json.loads(tool.output) == {"answer": "world"}
-    assert broken.status is SpanStatus.ERROR
-    assert "recorded failure" in broken.attributes_string["exception.message"]
-    assert broken.attributes_string["exception.type"] == "internal_error"  # explicit error.type wins
+    # Compare one normalized shape, excluding volatile source IDs/timestamps and
+    # raw bags whose losslessness is checked independently above.
+    semantic_keys = {
+        "gen_ai.agent.name",
+        "gen_ai.request.model",
+        "gen_ai.system",
+        "gen_ai.tool.name",
+        "exception.message",
+        "exception.type",
+    }
+
+    def payload(value: str):
+        return json.loads(value) if value.startswith(("{", "[")) else value
+
+    actual = {
+        name: {
+            "kind": span.kind.value,
+            "status": span.status.value,
+            "input": payload(span.input),
+            "output": payload(span.output),
+            "identity_and_error": {key: value for key, value in span.attributes_string.items() if key in semantic_keys},
+            "usage": span.attributes_number,
+        }
+        for name, span in spans.items()
+    }
+    assert actual == {
+        "outer-agent": {
+            "kind": "AGENT",
+            "status": "success",
+            "input": {"instruction": "hello"},
+            "output": "hello back",
+            "identity_and_error": {"gen_ai.agent.name": "outer-agent"},
+            "usage": {},
+        },
+        "nested-agent": {
+            "kind": "AGENT",
+            "status": "success",
+            "input": {"text": "hello"},
+            "output": {"answer": "hello back"},
+            "identity_and_error": {"gen_ai.agent.name": "nested-agent"},
+            "usage": {},
+        },
+        "recorded-model": {
+            "kind": "LLM",
+            "status": "success",
+            "input": {
+                "model": "recorded-model",
+                "messages": [
+                    {
+                        "role": "user",
+                        "type": "human",
+                        "content": "hello",
+                        "id": None,
+                        "name": None,
+                        "additional_kwargs": {},
+                        "response_metadata": {},
+                    }
+                ],
+            },
+            "output": {
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "type": "ai",
+                        "content": "hello back",
+                        "id": "msg-1",
+                        "name": None,
+                        "additional_kwargs": {},
+                        "tool_calls": [],
+                        "invalid_tool_calls": [],
+                        "response_metadata": {"model_name": "recorded-model", "model_provider": "recorded-provider"},
+                        "usage_metadata": {"input_tokens": 11, "output_tokens": 3, "total_tokens": 14},
+                    }
+                ]
+            },
+            "identity_and_error": {"gen_ai.request.model": "recorded-model", "gen_ai.system": "recorded-provider"},
+            "usage": {"llm.token_count.prompt": 11, "llm.token_count.completion": 3, "llm.token_count.total": 14},
+        },
+        "lookup": {
+            "kind": "TOOL",
+            "status": "success",
+            "input": {"query": "hello"},
+            "output": {"answer": "world"},
+            "identity_and_error": {"gen_ai.tool.name": "lookup"},
+            "usage": {},
+        },
+        "broken": {
+            "kind": "TOOL",
+            "status": "error",
+            "input": "",
+            "output": "",
+            "identity_and_error": {
+                "gen_ai.tool.name": "broken",
+                "exception.type": "internal_error",
+                "exception.message": "internal error: ValueError: recorded failure",
+            },
+            "usage": {},
+        },
+    }
+
+
+@pytest.mark.parametrize("direction", ["input", "output"])
+def test_deeply_nested_native_json_remains_raw_instead_of_failing_ingest(direction):
+    value = "[" * 100_000
+    key = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+    domain = _domain(_span({"nemo_relay.scope_type": "agent", key: value}))
+    assert getattr(domain, direction) == value
+    assert domain.attributes_string[key] == value
 
 
 @pytest.mark.parametrize(

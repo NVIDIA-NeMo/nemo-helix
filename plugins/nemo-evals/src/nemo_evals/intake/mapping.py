@@ -53,6 +53,7 @@ from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_
 from nhx_evals_sdk.values.otlp import (
     fill_missing_root_end_time,
     fill_missing_start_times,
+    root_span,
     root_span_id,
     set_root_span_attributes,
     set_root_span_error,
@@ -446,7 +447,10 @@ def _enrich_trial_boundary(
         for scope in resource.scope_spans
         for span in scope.spans
     ]
-    root, resource_attributes = next((span, attrs) for span, attrs in spans if not span.parent_span_id)
+    root = root_span(resource_spans)
+    if root is None:
+        return
+    resource_attributes = next(attrs for span, attrs in spans if span is root)
     root_attributes = {**resource_attributes, **{attribute.key: attribute.value for attribute in root.attributes}}
     # Follow actual parent links, rather than treating unrelated spans as descendants.
     connected = {bytes(root.span_id)}

@@ -341,7 +341,7 @@ def _relay_json(value: Any) -> Any:
     if isinstance(value, str) and value.lstrip().startswith(("{", "[")):
         try:
             return json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
     return value
 

@@ -340,7 +340,7 @@ def set_root_span_attributes(resource_spans: list[ResourceSpans], attributes: Ma
     Totals for a whole run belong on the one span that represents it. Writing them to every
     span would have any rollup that sums across a trace count them once per span.
     """
-    root = _root_span(resource_spans)
+    root = root_span(resource_spans)
     if root is not None:
         _set_attributes(root, attributes)
 
@@ -350,7 +350,7 @@ def set_root_span_error(resource_spans: list[ResourceSpans], *, message: str | N
 
     Intake reads span status, not attributes, to decide a span failed.
     """
-    root = _root_span(resource_spans)
+    root = root_span(resource_spans)
     if root is None:
         return
     root.status.code = Status.STATUS_CODE_ERROR
@@ -375,12 +375,12 @@ def fill_missing_root_end_time(resource_spans: list[ResourceSpans], *, duration_
 
     Only a root with a start and no end is touched: a producer-recorded end always wins.
     """
-    root = _root_span(resource_spans)
+    root = root_span(resource_spans)
     if root is not None and root.start_time_unix_nano and not root.end_time_unix_nano:
         root.end_time_unix_nano = root.start_time_unix_nano + duration_unix_nano
 
 
-def _root_span(resource_spans: list[ResourceSpans]) -> Span | None:
+def root_span(resource_spans: list[ResourceSpans]) -> Span | None:
     """The span that stands for the whole run, or ``None`` when no one span does.
 
     That is the single parentless span or, beside childless roots such as a harness's standalone
@@ -421,7 +421,7 @@ def _set_attributes(span: Span, attributes: Mapping[str, AttributeValue]) -> Non
 
 def root_span_id(resource_spans: list[ResourceSpans]) -> str | None:
     """Return the hex id of the span a trial-level score attaches to, or ``None`` when there is none."""
-    root = _root_span(resource_spans)
+    root = root_span(resource_spans)
     if root is None:
         return None
     span_id = bytes(root.span_id)

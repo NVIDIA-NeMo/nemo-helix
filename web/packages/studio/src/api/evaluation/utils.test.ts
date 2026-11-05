@@ -1,28 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { getMetricsAsList, targetNameForEvalJob, toEvalJobRow } from '@studio/api/evaluation/utils';
-import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
-
-describe('registered runner jobs', () => {
-  it.each(['fabric', 'harbor', 'gym'])(
-    'joins %s jobs by publication rather than runner name',
-    (kind) => {
-      const job = makeEvaluatorJob({
-        spec: {
-          target: { kind, name: 'unrelated-runner', source: { agent: 'my-agent' } },
-          publication: { intake: { evaluation_id: 'published-eval' } },
-        },
-      });
-      expect(targetNameForEvalJob(job)).toBe('my-agent');
-      expect(toEvalJobRow(job)).toMatchObject({
-        agentName: 'my-agent',
-        evaluationName: 'published-eval',
-        status: 'completed',
-      });
-    }
-  );
-});
+import { getMetricsAsList } from '@studio/api/evaluation/utils';
 
 describe('getMetricsAsList', () => {
   it('returns empty array for undefined tasks', () => {

@@ -82,16 +82,6 @@ describe('fetchAgentEvalJob', () => {
 });
 
 describe('agentNameForJob', () => {
-  it.each(['fabric', 'harbor', 'gym'])('reads the registered %s source AgentRef', (kind) => {
-    const job = baseJob({
-      spec: {
-        target: { kind, source: { agent: 'ws-a/support-bot-mini' } },
-        tasks: [],
-      } as unknown as AgentEvaluateJob['spec'],
-    });
-    expect(agentNameForJob(job)).toBe('support-bot-mini');
-  });
-
   it('reads the agent name from the target', () => {
     expect(agentNameForJob(baseJob())).toBe('support-bot-mini');
   });

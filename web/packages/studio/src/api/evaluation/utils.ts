@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { HelixJobResponse } from '@nemo/sdk/generated/platform/schema';
-import { agentNameForTarget } from '@studio/api/evaluation/agentTarget';
 import { type EvalRunOutcome, evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
 import {
   getAgentEvaluationDetailRoute,
@@ -38,8 +37,21 @@ const specOf = (job: HelixJobResponse): Record<string, unknown> => job.spec ?? {
 export const evalJobKind = (job: HelixJobResponse): EvalJobKind =>
   specOf(job).dataset !== undefined ? 'dataset' : 'task';
 
-export const targetNameForEvalJob = (job: HelixJobResponse): string | null =>
-  agentNameForTarget(specOf(job).target, job.workspace);
+const stripWorkspacePrefix = (name: string, workspace?: string): string => {
+  const prefix = workspace ? `${workspace}/` : '';
+  return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
+};
+
+export const targetNameForEvalJob = (job: HelixJobResponse): string | null => {
+  const target = asRecord(specOf(job).target);
+  if (!target) return null;
+  const name =
+    target.kind === 'agent'
+      ? asNonEmptyString(asRecord(target.agent)?.name)
+      : asNonEmptyString(target.name);
+  if (!name) return null;
+  return stripWorkspacePrefix(name, job.workspace);
+};
 
 export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   const spec = specOf(job);

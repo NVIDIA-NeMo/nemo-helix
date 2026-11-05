@@ -1153,6 +1153,30 @@ async def test_native_agent_descendant_direct_payloads_are_lossless_fallbacks() 
     assert "gen_ai.agent.name" not in recorded
 
 
+async def test_boundary_enrichment_uses_canonical_run_root_beside_an_earlier_event_mark() -> None:
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+
+    trial = _otlp_trial(extra_spans=[_recorded_agent("aabbccddeeff0011", output_text="agent answer")])
+    assert trial.evidence is not None
+    data = trial.evidence.descriptors["trace"].data
+    run_resource = data["resourceSpans"][0]
+    run_resource["resource"] = {"attributes": [{"key": "input.value", "value": {"stringValue": "resource request"}}]}
+    mark = {"traceId": "f" * 32, "spanId": "f" * 16, "name": "standalone mark"}
+    data["resourceSpans"].insert(0, {"scopeSpans": [{"spans": [mark]}]})
+    trial.output = AgentOutput(output_text=None)
+    result = _result([trial], [])
+    result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "task instruction"})]
+    intake = InMemoryIntakeService()
+    report = await publish_to_intake(result, client=intake.client(), experiment_id="exp-1")
+    mark_span, run_span, _ = _published_spans(intake)
+    run_attrs = _attributes(run_span)
+    assert report.published_trials[0].span_id == run_span.span_id.hex() == _OTLP_SPAN_ID
+    assert "input.value" not in run_attrs  # The selected root's explicit resource value wins.
+    assert run_attrs["output.value"].string_value == "agent answer"
+    assert run_attrs["nemo.evaluation.boundary.output"].string_value == "unambiguous_descendant"
+    assert "output.value" not in _attributes(mark_span)
+
+
 @pytest.mark.parametrize("scope", ["agent", "function", "tool"])
 async def test_explicit_native_root_boundary_is_not_overwritten_by_retained_trial_output(scope: str) -> None:
     native = _recorded_agent(_OTLP_SPAN_ID)

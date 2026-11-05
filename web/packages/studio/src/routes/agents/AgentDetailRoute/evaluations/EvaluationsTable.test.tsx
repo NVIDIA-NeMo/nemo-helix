@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type EvalJobRow, toEvalJobRow } from '@studio/api/evaluation/utils';
-import { makeEvaluatorJob } from '@studio/mocks/evaluation/jobs';
+import type { EvalJobRow } from '@studio/api/evaluation/utils';
 import { EvaluationsTable } from '@studio/routes/agents/AgentDetailRoute/evaluations/EvaluationsTable';
 import type { AgentEvaluationRow } from '@studio/routes/agents/AgentDetailRoute/useAgentDetails';
 import { LG_SELECTOR_TIMEOUT } from '@studio/tests/util/constants';
@@ -55,45 +54,6 @@ describe('EvaluationsTable Duration column', () => {
 });
 
 describe('EvaluationsTable Job column', () => {
-  it('keeps the seventh publication joined to its job and recorded results', async () => {
-    const jobs = Array.from({ length: 7 }, (_, index) =>
-      toEvalJobRow(
-        makeEvaluatorJob({
-          id: `job-${index}`,
-          name: `job-${index}`,
-          spec: {
-            target: { kind: 'fabric', source: { agent: 'my-agent' } },
-            publication: { intake: { evaluation_id: `published-${index}` } },
-          },
-        })
-      )
-    );
-    renderTable(
-      jobs.map((_, index) =>
-        makeEval({
-          name: `published-${index}`,
-          // Entity id deliberately differs from the publication name used for the join.
-          id: `entity-${index}`,
-          aggregate_scores: { 'judge.accuracy': { mean: 0.83, count: 1, failed_count: 0 } },
-          tokens: { mean: 1234, sum: 2468, count: 2 },
-        })
-      ),
-      jobs
-    );
-
-    const links = await screen.findAllByRole(
-      'link',
-      { name: 'job-6' },
-      { timeout: LG_SELECTOR_TIMEOUT }
-    );
-    for (const link of links) {
-      expect(link).toHaveAttribute('href', '/workspaces/default/jobs/job-6');
-    }
-    expect((await screen.findAllByText('0.83')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('1,234').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('2,468').length).toBeGreaterThan(0);
-  });
-
   it('links to the generic job detail route, not the evaluation result route', async () => {
     const job: EvalJobRow = {
       id: 'job-1',
