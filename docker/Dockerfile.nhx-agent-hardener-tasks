@@ -29,6 +29,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         --no-install-project && \
     /opt/agent-hardener/venv/bin/python -c \
         "from agent_hardener.garak_venv import provision_garak_venv; provision_garak_venv()"
+# Garak's provisioner resolves independently of both committed locks.
+RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
+    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
+    python /tmp/patch-python-cve-deps.py \
+        --root /opt/agent-hardener/venv --root /opt/agent-hardener/garak-venv \
+        --overrides /tmp/python-cve-overrides.txt
+
 RUN set -eux; \
     case "${TARGETARCH:-$(dpkg --print-architecture)}" in \
         amd64) target="x86_64-unknown-linux-musl"; sha256="${OPENSHELL_SHA256_AMD64}" ;; \

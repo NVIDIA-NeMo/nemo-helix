@@ -47,6 +47,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache --no-deps \
     -e /opt/Automodel
 
+# Re-apply floors after platform glue, including when CI supplies a prebuilt base.
+RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
+    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
+    python /tmp/patch-python-cve-deps.py \
+        --python ${VIRTUAL_ENV}/bin/python --overrides /tmp/python-cve-overrides.txt \
+        --overrides /app/docker/automodel/no_override_requirements.txt
+
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
 # Update each installed Python environment and rebuild embedded Go TLS clients.
@@ -66,7 +73,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Late file cleanup for bundled or non-package-managed files.
 RUN --mount=type=bind,source=docker/scripts/remove-listed-files.py,target=/tmp/remove-listed-files.py,readonly \
     --mount=type=bind,source=docker/removals/files/final/customizer-codecs.txt,target=/tmp/file-removals.txt,readonly \
-    python /tmp/remove-listed-files.py /tmp/file-removals.txt
+    --mount=type=bind,source=docker/removals/files/final/training-fsspec.txt,target=/tmp/fsspec-file-removals.txt,readonly \
+    python /tmp/remove-listed-files.py /tmp/file-removals.txt /tmp/fsspec-file-removals.txt
 
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 ENTRYPOINT ["/opt/venv/bin/python"]

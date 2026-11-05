@@ -24,6 +24,8 @@ nemo-sandboxed-gym = ["nhx-build-tools"]
 [tool.uv]
 constraint-dependencies = [
     "certifi>=2026.10.19",
+    "fsspec>=2026.6.0", # GHSA-27vj-qcqg-25rc
+    "urllib3>=2.8.0", # GHSA-vxq7-64xx-v4gw and GHSA-8988-9cw3-xx77
     "pip>=26.2.2",
     "mlflow-skinny>=3.15.0,<3.16.0",
     "sqlparse>=0.6.0,<0.7",

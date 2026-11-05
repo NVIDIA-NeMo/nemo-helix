@@ -55,6 +55,16 @@ RUN if UV_LINK_MODE=copy gym env prefetch "+config_paths=[responses_api_agents/s
       echo "prefetch failed; venvs will be built at run time"; \
     fi
 
+# Component venvs are resolved by Gym, independently of the host lock. Patch
+# every nested venv and drop stale cached archives before copying the cache.
+# Prefetch uses UV_LINK_MODE=copy, so cache eviction cannot break those venvs.
+RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
+    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
+    python /tmp/patch-python-cve-deps.py \
+        --root /opt/gym-host-venv --root "${NEMO_GYM_VENV_DIR}" \
+        --overrides /tmp/python-cve-overrides.txt && \
+    uv cache clean urllib3 fsspec datasets
+
 # Full MLflow carries gateway server CVEs, while this image only needs Gym's client-side imports.
 # Prefetched Gym venvs live at ${NEMO_GYM_VENV_DIR}/<kind>/<server>/.venv, not one directory deep.
 RUN find /opt/gym-host-venv "${NEMO_GYM_VENV_DIR}" \

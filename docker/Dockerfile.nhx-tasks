@@ -11,6 +11,13 @@ FROM ${NHX_PYTHON_BASE} AS builder
 COPY --from=nhx-workspace . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group cpu-tasks --no-editable
+# Keep this release's frozen workspace intact; patch the installed task venv
+# before collecting sources. Both OpenShell and Agent Hardener inherit it.
+RUN --mount=type=bind,source=docker/scripts/patch-python-cve-deps.py,target=/tmp/patch-python-cve-deps.py,readonly \
+    --mount=type=bind,source=docker/python-cve-overrides.txt,target=/tmp/python-cve-overrides.txt,readonly \
+    python /tmp/patch-python-cve-deps.py \
+        --python /app/.venv/bin/python --overrides /tmp/python-cve-overrides.txt
+
 # Harbor task Jobs (nemo-evals) run trials in nhx-sandbox's OpenSandbox environment; fail the build
 # if the image can't import it.
 RUN /app/.venv/bin/python -c 'import nemo_evals.harbor.opensandbox_environment'
