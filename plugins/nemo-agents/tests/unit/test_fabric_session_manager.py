@@ -206,7 +206,9 @@ async def test_open_session_stops_runtime_when_registration_fails(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("relay_session_root", [None, "c46d3588-d205-497f-b96b-37f938263064"])
 async def test_invoke_once_uses_unregistered_runtime(
+    relay_session_root: str | None,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -228,13 +230,14 @@ async def test_invoke_once_uses_unregistered_runtime(
         fabric=cast(Any, fabric),
     )
 
-    result = await manager.invoke_once(FabricInvocationRequest(input="hello"))
+    result = await manager.invoke_once(FabricInvocationRequest(input="hello", relay_session_root=relay_session_root))
 
     assert result.response == "hello"
     request, captured_fabric = captured[0]
     assert request.fabric_config is fabric_config
     assert request.input == "hello"
     assert request.caller_context == {}
+    assert request.relay_session_root == relay_session_root
     assert captured_fabric is fabric
     assert await registry.count() == 0
 
