@@ -5905,6 +5905,9 @@ interface CreateSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'
   errorText?: string;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  instruction?: FormModalProps['instruction'];
+  initialValues?: Partial<CreateSecretFormData>;
+  valueHelp?: ReactNode;
 }
 export declare const CreateSecretModal: FC<CreateSecretModalProps>;
 //#endregion

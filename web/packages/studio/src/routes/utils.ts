@@ -28,6 +28,7 @@ import {
 } from '@studio/constants/environment';
 import { ROUTES } from '@studio/constants/routes';
 import { ACTION_SEARCH_PARAM } from '@studio/routes/agents/AgentDetailRoute/tabs';
+import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import type { FilesetDetailTab } from '@studio/routes/FilesetDetailRoute/constants';
 import type { GuardrailChecksSubTab } from '@studio/routes/guardrails/GuardrailChecksTab/constants';
@@ -650,8 +651,14 @@ export const getModelChatRoute = (model: NamedEntityRef) => {
   return generatePath(ROUTES.models.modelChat, { modelNamespace, modelName });
 };
 
-export const getAgentsListRoute = (workspace: string) => {
-  return generatePath(ROUTES.workspace.agentsList, { workspace });
+export const REGISTER_AGENT_SEARCH_PARAM = 'register';
+
+export const getAgentsListRoute = (workspace: string, options?: { register?: NewAgentTab }) => {
+  const base = generatePath(ROUTES.workspace.agentsList, { workspace });
+  if (options?.register) {
+    return `${base}?${new URLSearchParams({ [REGISTER_AGENT_SEARCH_PARAM]: options.register })}`;
+  }
+  return base;
 };
 
 export const getAssistantChatRoute = (workspace: string) => {
