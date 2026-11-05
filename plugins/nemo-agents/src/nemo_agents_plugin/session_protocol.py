@@ -8,7 +8,7 @@ from uuid import UUID
 import base58
 
 SESSION_ID_HEADER = "X-Nemo-Session-Id"
-"""HTTP header carrying the persisted Platform session entity ID."""
+"""HTTP header carrying the session UUID; legacy and internal requests use entity IDs."""
 
 _SESSION_ID_PREFIX = "agent-session-"
 
