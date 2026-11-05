@@ -50,7 +50,7 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,7 @@ def _to_fabric_invocation_request(
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
+        relay_session_root=session_id_to_uuid(session_id) if session_id is not None else None,
     )
 
 
