@@ -89,10 +89,16 @@ def _to_fabric_invocation_request(
         else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     )
     caller_context = {"session_id": session_id} if session_id is not None else {}
+    relay_session_root = None
+    if session_id is not None:
+        try:
+            relay_session_root = session_id_to_uuid(session_id)
+        except ValueError:
+            pass  # Direct callers may use opaque session IDs.
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
-        relay_session_root=session_id_to_uuid(session_id) if session_id is not None else None,
+        relay_session_root=relay_session_root,
     )
 
 

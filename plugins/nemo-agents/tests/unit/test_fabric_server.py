@@ -442,22 +442,25 @@ def test_chat_completion_returns_reasoning_from_fabric_messages(
     }
 
 
+@pytest.mark.parametrize(("session_id", "relay_session_root"), [(SESSION_ID, SESSION_UUID), ("session-1", None)])
 def test_chat_completion_with_session_id_reuses_session(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    session_id: str,
+    relay_session_root: str | None,
 ) -> None:
     config_path = _write_agent_config(tmp_path)
     app = create_fabric_serving_app(config_path)
     resolve_calls: list[str] = []
 
-    async def resolve_session(session_id: str) -> Any:
-        resolve_calls.append(session_id)
-        return SimpleNamespace(session_id=SESSION_ID, runtime=object())
+    async def resolve_session(requested_session_id: str) -> Any:
+        resolve_calls.append(requested_session_id)
+        return SimpleNamespace(session_id=requested_session_id, runtime=object())
 
     async def invoke_session(session: Any, request: Any) -> FabricRuntimeResult:
-        assert request.caller_context == {"session_id": SESSION_ID}
-        assert request.relay_session_root == SESSION_UUID
+        assert request.caller_context == {"session_id": session_id}
+        assert request.relay_session_root == relay_session_root
         return FabricRuntimeResult(status="succeeded", response="hello again")
 
     with TestClient(app) as client:
@@ -465,13 +468,13 @@ def test_chat_completion_with_session_id_reuses_session(
         monkeypatch.setattr(app.state.session_manager, "invoke_session", invoke_session)
         response = client.post(
             "/v1/chat/completions",
-            headers={SESSION_ID_HEADER: SESSION_ID},
+            headers={SESSION_ID_HEADER: session_id},
             json={"messages": [{"role": "user", "content": "hello again"}]},
         )
 
     assert response.status_code == 200
-    assert response.headers[SESSION_ID_HEADER] == SESSION_ID
-    assert resolve_calls == [SESSION_ID]
+    assert response.headers[SESSION_ID_HEADER] == session_id
+    assert resolve_calls == [session_id]
 
 
 @pytest.mark.parametrize(
@@ -650,21 +653,24 @@ def test_streaming_chat_completion_without_session_uses_one_shot_stream(
     assert _sse_line_payload(lines[-2])["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
 
 
+@pytest.mark.parametrize(("session_id", "relay_session_root"), [(SESSION_ID, SESSION_UUID), ("session-1", None)])
 def test_streaming_chat_completion_reuses_supplied_session_id(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
     monkeypatch: pytest.MonkeyPatch,
+    session_id: str,
+    relay_session_root: str | None,
 ) -> None:
     app = create_fabric_serving_app(_write_agent_config(tmp_path))
     resolve_calls: list[str] = []
 
-    async def resolve_session(session_id: str) -> Any:
-        resolve_calls.append(session_id)
-        return SimpleNamespace(session_id=SESSION_ID, runtime=object())
+    async def resolve_session(requested_session_id: str) -> Any:
+        resolve_calls.append(requested_session_id)
+        return SimpleNamespace(session_id=requested_session_id, runtime=object())
 
     def stream_session(session: Any, request: Any) -> _FakeStreamContext:
-        assert request.caller_context == {"session_id": SESSION_ID}
-        assert request.relay_session_root == SESSION_UUID
+        assert request.caller_context == {"session_id": session_id}
+        assert request.relay_session_root == relay_session_root
         return _FakeStreamContext(_FakeFabricStream(result=FabricRuntimeResult(status="succeeded", response="done")))
 
     with TestClient(app) as client:
@@ -673,14 +679,14 @@ def test_streaming_chat_completion_reuses_supplied_session_id(
         with client.stream(
             "POST",
             "/v1/chat/completions",
-            headers={SESSION_ID_HEADER: SESSION_ID},
+            headers={SESSION_ID_HEADER: session_id},
             json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
         ) as response:
             lines = [line for line in response.iter_lines() if line]
 
     assert response.status_code == 200
-    assert response.headers[SESSION_ID_HEADER] == SESSION_ID
-    assert resolve_calls == [SESSION_ID]
+    assert response.headers[SESSION_ID_HEADER] == session_id
+    assert resolve_calls == [session_id]
     assert _sse_line_payload(lines[1])["choices"] == [{"index": 0, "delta": {"content": "done"}}]
 
 
