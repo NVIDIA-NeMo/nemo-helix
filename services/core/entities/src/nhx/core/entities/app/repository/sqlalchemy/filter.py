@@ -8,6 +8,7 @@ from typing import Any, List, NamedTuple, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchCondition
 from nhx.common.api.filter import FilterOperation, FilterOperator, FilterRepository
+from nhx.core.entities.app.repository.exceptions import InvalidFilterError
 from sqlalchemy import (
     JSON,
     ColumnElement,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     cast,
     false,
     func,
+    inspect,
     literal,
     literal_column,
     not_,
@@ -91,19 +93,22 @@ class SQLAlchemyFilterRepository(FilterRepository):
             whether the column is a JSON element accessor
 
         Raises:
-            ValueError: If field doesn't exist on the model
+            InvalidFilterError: If field is not a mapped column or valid JSON data path
         """
-        # explicit field check
-        if hasattr(self.model, field):
+        # Inspect the mapper rather than accepting arbitrary ORM/Python attributes.
+        # Use getattr only after validation so aliased models retain their SQL alias.
+        mapped = inspect(self.model)
+        mapper = mapped.mapper
+        if field in mapper.column_attrs:
             return getattr(self.model, field), False
 
-        # check for data access
-        if field.startswith("data."):
+        if field.startswith("data.") and "data" in mapper.column_attrs:
             column = getattr(self.model, "data")
             path = field.split(".")[1:]
-            return self._get_json_element(column, path), isinstance(column.type, JSON)
+            if all(path) and isinstance(column.type, JSON):
+                return self._get_json_element(column, path), True
 
-        raise ValueError(f"Field '{field}' does not exist on model {self.model.__name__}")
+        raise InvalidFilterError(f"Invalid filter field '{field}'")
 
     def _coerce_value_for_column(self, column: ColumnElement, value: Any) -> Any:
         """Coerce Python types from filter inputs based on column type.
@@ -116,7 +121,10 @@ class SQLAlchemyFilterRepository(FilterRepository):
         a tz-aware datetime would cause type mismatches on PostgreSQL.
         """
         if isinstance(column.type, DateTime) and isinstance(value, str):
-            return datetime.fromisoformat(value).replace(tzinfo=None)
+            try:
+                return datetime.fromisoformat(value).replace(tzinfo=None)
+            except ValueError as exc:
+                raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
 
         return value
 
