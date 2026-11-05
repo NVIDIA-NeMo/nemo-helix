@@ -1,8 +1,9 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authorization API endpoints using embedded WASM policy evaluation."""
+"""Authorization API endpoints using embedded Rego policy evaluation."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -97,7 +98,7 @@ async def evaluate_policy(
         account_context = await resolve_authz_account_context(request.input, config)
         enriched_input = {**request.input, **account_context.to_policy_fields()}
 
-        result = evaluate(entrypoint, enriched_input)
+        result = await asyncio.to_thread(evaluate, entrypoint, enriched_input)
         return AuthzResponse(result={**result, **account_context.to_policy_fields()})
 
     except ServicePrincipalNotAllowedError as e:

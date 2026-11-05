@@ -70,8 +70,7 @@ def test_admin_policy_preserves_explicit_operator_grants(
     from nemo_helix_plugin.authz_discovery import _derive_service_contribution
     from nemo_helix_plugin.authz_merge import merge_authz_contributions
     from nemo_scaled_evals_plugin.authz import ADMIN
-    from nhx.core.auth.app.embedded_pdp import OPAPolicy
-    from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
+    from nhx.core.auth.app.embedded_pdp import RegoPolicy
     from nhx.core.auth.app.scope_families import with_scope_families
 
     contribution, errors, _warnings = _derive_service_contribution(ScaledEvalsService())
@@ -87,7 +86,7 @@ def test_admin_policy_preserves_explicit_operator_grants(
 
     data["authz"]["roles"]["ScaledEvalsOperator"] = {"permissions": [ADMIN.id]}
     data["authz"]["principals"] = {"operator@example.com": {"workspaces": {workspace: roles}}}
-    policy = OPAPolicy(str(ensure_embedded_policy_wasm()))
+    policy = RegoPolicy()
     policy.set_data(with_scope_families(data))
 
     result = policy.evaluate(

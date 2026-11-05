@@ -9,7 +9,8 @@ package authz
 import future.keywords.if
 import future.keywords.in
 
-import data.common
+# Fully qualified shared-rule references preserve nested `with` overrides in
+# OPA; importing the namespace can resolve its documents early.
 
 # API to check if principal has specific permissions in a workspace (called by services)
 # Input format:
@@ -26,7 +27,7 @@ import data.common
 # }
 has_permissions := result if {
 	# Platform admin bypass - has access to everything
-	applicable_principals := common.get_applicable_principals
+	applicable_principals := data.common.get_applicable_principals
 	count(applicable_principals) > 0
 
 	# Check if any principal is a platform admin
@@ -39,13 +40,13 @@ has_permissions := result if {
 	required_permissions := input.permissions
 
 	# Get all applicable principals
-	applicable_principals := common.get_applicable_principals
+	applicable_principals := data.common.get_applicable_principals
 	count(applicable_principals) > 0
 
 	# Check if any principal has all required permissions in the workspace
 	# Note: has_permissions also checks wildcard principal "*" as fallback
 	some principal in applicable_principals
-	common.has_permissions(principal, workspace, required_permissions)
+	data.common.has_permissions(principal, workspace, required_permissions)
 
 	result := {"allowed": true}
 } else := result if {

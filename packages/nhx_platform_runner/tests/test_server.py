@@ -455,21 +455,19 @@ def test_build_platform_app_accepts_platform_app_config(monkeypatch):
     assert captured["access_key_lifecycle_http_client"] is None
 
 
-def test_embedded_auth_preflight_invokes_policy_wasm_helper(monkeypatch):
-    calls: list[bool] = []
-    auth_cfg = AuthConfig(
-        enabled=True,
-        policy_decision_point_provider="embedded",
-        embedded_pdp_auto_build_wasm=False,
-    )
+def test_embedded_auth_preflight_checks_without_starting_policy(monkeypatch):
+    calls: list[None] = []
+    auth_cfg = AuthConfig(enabled=True, policy_decision_point_provider="embedded")
 
-    from nhx.core.auth.app.embedded_pdp import policy_wasm
+    from nhx.core.auth.app import embedded_pdp
 
-    monkeypatch.setattr(policy_wasm, "ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build))
+    monkeypatch.setattr(embedded_pdp, "get_policy", lambda: pytest.fail("preflight got a live policy"))
+    monkeypatch.setattr(embedded_pdp, "start_policy", lambda: pytest.fail("preflight spawned child"))
+    monkeypatch.setattr(embedded_pdp, "check_policy", lambda: calls.append(None))
 
-    server.preflight_embedded_auth_policy_wasm(auth_cfg)
+    server.preflight_embedded_auth_policy(auth_cfg)
 
-    assert calls == [False]
+    assert calls == [None]
 
 
 @pytest.mark.parametrize(
@@ -480,33 +478,88 @@ def test_embedded_auth_preflight_invokes_policy_wasm_helper(monkeypatch):
     ],
 )
 def test_embedded_auth_preflight_skips_when_not_needed(auth_cfg, monkeypatch):
-    calls: list[bool] = []
+    calls: list[None] = []
 
-    from nhx.core.auth.app.embedded_pdp import policy_wasm
+    from nhx.core.auth.app import embedded_pdp
 
-    monkeypatch.setattr(policy_wasm, "ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build))
+    monkeypatch.setattr(embedded_pdp, "check_policy", lambda: calls.append(None))
 
-    server.preflight_embedded_auth_policy_wasm(auth_cfg)
+    server.preflight_embedded_auth_policy(auth_cfg)
 
     assert calls == []
 
 
-def test_run_server_runs_embedded_auth_preflight():
+def test_embedded_auth_preflight_preserves_missing_package_guidance(monkeypatch):
+    import builtins
+
+    original_import = builtins.__import__
+
+    def missing_auth(name, *args, **kwargs):
+        if name == "nhx.core.auth.app.embedded_pdp":
+            raise ImportError("nhx-auth absent")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", missing_auth)
+    with pytest.raises(RuntimeError, match="nhx-auth package is not installed"):
+        server.preflight_embedded_auth_policy(AuthConfig(enabled=True))
+
+
+@pytest.mark.parametrize("include_auth", [False, True])
+def test_build_platform_app_preflights_only_selected_auth(monkeypatch, include_auth):
+    from nhx.platform_runner import config as runner_config
+
+    selected = [AuthService()] if include_auth else [PluginService()]
+    resolved = SimpleNamespace(
+        services={service.name for service in selected},
+        available_services={service.name: service for service in selected},
+        controllers=set(),
+        sidecars=set(),
+        available_controllers={},
+    )
+    monkeypatch.setattr(runner_config, "resolve_run_configuration", lambda cfg: resolved)
+    monkeypatch.setattr(runner_config, "apply_run_environment", lambda *args, **kwargs: None)
+    monkeypatch.setattr(server, "order_services_by_dependencies", lambda services: services)
+    monkeypatch.setattr(server, "create_app", lambda *args, **kwargs: FastAPI())
+    calls = []
+    monkeypatch.setattr(server, "preflight_embedded_auth_policy", lambda cfg: calls.append(cfg))
+    server.build_platform_app()
+    assert len(calls) == int(include_auth)
+
+
+@pytest.mark.parametrize("include_auth", [False, True])
+def test_reload_app_factory_preflights_only_selected_auth(monkeypatch, include_auth):
+    selected = AuthService() if include_auth else PluginService()
+    monkeypatch.setenv("NHX_SERVICES", selected.name)
+    monkeypatch.setenv("NHX_CONTROLLERS", "")
+    monkeypatch.setattr(server, "_obs_initialized", True)
+    monkeypatch.setattr(server, "get_available_services", lambda: {selected.name: selected})
+    monkeypatch.setattr(server, "get_available_controllers", lambda: {})
+    monkeypatch.setattr(server, "order_services_by_dependencies", lambda services: services)
+    monkeypatch.setattr(server, "create_app", lambda *args, **kwargs: FastAPI())
+    calls = []
+    monkeypatch.setattr(server, "preflight_embedded_auth_policy", lambda cfg: calls.append(cfg))
+    server.create_default_app()
+    assert len(calls) == int(include_auth)
+
+
+@pytest.mark.parametrize("service_names", [[], ["models"], ["auth"]])
+def test_run_server_preflights_only_selected_auth(service_names):
     auth_cfg = _make_auth_config(enabled=True)
     calls: list[AuthConfig] = []
+    services: list[Service] = [PluginService() for _ in service_names]
+    for service, name in zip(services, service_names):
+        service.name = name
     with (
         patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch(
-            "nhx.platform_runner.server.preflight_embedded_auth_policy_wasm", side_effect=lambda cfg: calls.append(cfg)
-        ),
+        patch("nhx.platform_runner.server.preflight_embedded_auth_policy", side_effect=lambda cfg: calls.append(cfg)),
         patch("nhx.platform_runner.server.create_app", return_value=FastAPI()) as create_app,
         patch("nhx.platform_runner.server.setup_fastapi_instrumentations"),
         patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
     ):
-        server.run_server(services=[], host="127.0.0.1", port=9999, keep_alive_timeout_seconds=12)
+        server.run_server(services=services, host="127.0.0.1", port=9999, keep_alive_timeout_seconds=12)
 
-    assert calls == [auth_cfg]
-    create_app.assert_called_once_with([])
+    assert calls == ([auth_cfg] if "auth" in service_names else [])
+    create_app.assert_called_once_with(services)
     uvicorn_run.assert_called_once()
     assert uvicorn_run.call_args.kwargs["timeout_keep_alive"] == 12
 
@@ -515,7 +568,7 @@ def test_run_server_can_bind_tcp_and_unix_domain_socket():
     auth_cfg = _make_auth_config(enabled=True)
     with (
         patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch("nhx.platform_runner.server.preflight_embedded_auth_policy_wasm"),
+        patch("nhx.platform_runner.server.preflight_embedded_auth_policy"),
         patch("nhx.platform_runner.server.create_app", return_value=FastAPI()),
         patch("nhx.platform_runner.server.setup_fastapi_instrumentations"),
         patch("nhx.platform_runner.server._run_server_on_bound_sockets") as run_bound_sockets,
@@ -569,7 +622,7 @@ def test_run_server_with_reload_sets_keep_alive_timeout():
     auth_cfg = _make_auth_config(enabled=True)
     with (
         patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch("nhx.platform_runner.server.preflight_embedded_auth_policy_wasm"),
+        patch("nhx.platform_runner.server.preflight_embedded_auth_policy") as preflight,
         patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
     ):
         server.run_server_with_reload(
@@ -581,6 +634,7 @@ def test_run_server_with_reload_sets_keep_alive_timeout():
 
     uvicorn_run.assert_called_once()
     assert uvicorn_run.call_args.kwargs["timeout_keep_alive"] == 12
+    preflight.assert_not_called()
 
 
 def test_server_default_keep_alive_matches_runner_config_default():
@@ -798,7 +852,7 @@ def test_non_get_root_still_requires_auth():
 def test_run_server_owns_docker_and_loopback_listener_together(monkeypatch):
     monkeypatch.setattr(server, "docker_listener_host", lambda host: "172.17.0.1")
     with (
-        patch.object(server, "preflight_embedded_auth_policy_wasm"),
+        patch.object(server, "preflight_embedded_auth_policy"),
         patch.object(server, "create_app", return_value=FastAPI()),
         patch.object(server, "setup_fastapi_instrumentations"),
         patch.object(server, "_run_server_on_bound_sockets") as serve,

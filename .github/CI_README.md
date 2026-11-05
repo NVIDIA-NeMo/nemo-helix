@@ -14,15 +14,15 @@ reusable actions, and supporting docs.
   handling, and releases.
 
 - `actions/`
-  Local composite actions shared across workflows: change detection, policy
-  WASM builds, disk cleanup, and self-hosted runner metadata.
+  Local composite actions shared across workflows: change detection,
+  disk cleanup, and self-hosted runner metadata.
 
 ## Workflow Overview
 
 ### CI Check Workflows
 
 - `ci.yaml`
-  Main source validation workflow. It runs linting, OPA policy WASM build,
+  Main source validation workflow. It runs linting,
   Python unit tests, Python integration tests, OPA policy tests, Studio web
   checks for relevant web changes, and PR coverage comments. It runs on pushes
   to `main`, pull requests to `main` or `release/*`, merge queue checks, and

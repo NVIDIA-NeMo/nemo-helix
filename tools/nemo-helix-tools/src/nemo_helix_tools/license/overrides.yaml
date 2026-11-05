@@ -281,7 +281,6 @@ overrides:
   uuid-utils: BSD-3-Clause
 
   # Auth service
-  wasmtime: APACHE-2.0 WITH LLVM-EXCEPTION
 
   # MCP Server
   beartype: MIT

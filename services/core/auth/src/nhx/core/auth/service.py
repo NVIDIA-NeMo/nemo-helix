@@ -16,8 +16,13 @@ from nhx.core.auth.api.v2 import workload_token_exchange
 from nhx.core.auth.api.v2.bundle import endpoints as bundle
 from nhx.core.auth.api.v2.discovery import endpoints as discovery
 from nhx.core.auth.api.v2.iam import endpoints as iam
+from nhx.core.auth.app.embedded_pdp import (
+    close_policy,
+    invalidate_policy_data,
+    is_policy_ready,
+    start_policy,
+)
 from nhx.core.auth.app.embedded_pdp.data import apply_embedded_policy_document
-from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.oidc_broker import routes as oidc_broker
 
@@ -39,6 +44,7 @@ class AuthService(Service[AuthServiceConfig]):
         self._refresh_task: Optional[asyncio.Task[None]] = None
         self._refresh_stop = asyncio.Event()
         self._policy_refresh_healthy: bool = False
+        self._owns_policy: bool = False
 
     def get_routers(self) -> List[RouterConfig]:
         """Return routers for the auth service."""
@@ -78,7 +84,17 @@ class AuthService(Service[AuthServiceConfig]):
             logger.info("Auth disabled - skipping embedded policy engine initialization")
             return
         if config.policy_decision_point_provider == "embedded":
-            ensure_embedded_policy_wasm(auto_build=config.embedded_pdp_auto_build_wasm)
+            # Cancellation cannot stop a worker thread. Wait for its bounded
+            # startup and clean up explicitly if ASGI startup is cancelled before
+            # the service can acquire ownership/shutdown callbacks are installed.
+            starting = asyncio.create_task(asyncio.to_thread(start_policy))
+            try:
+                await asyncio.shield(starting)
+            except asyncio.CancelledError:
+                await starting
+                await asyncio.to_thread(close_policy)
+                raise
+            self._owns_policy = True
 
     async def _start_refresh_loop(self) -> asyncio.Task:
         """Start background task to periodically refresh policy data."""
@@ -99,7 +115,7 @@ class AuthService(Service[AuthServiceConfig]):
                     logger.debug("Refreshing auth policy data")
                     # Bootstrap static YAML only when we do not yet have a successful full
                     # refresh (cold start or recovery after failure). On steady-state refreshes
-                    # we skip this: the WASM already holds the last document, so entity fetches
+                    # we skip this: the interpreter already holds the last document, so entity fetches
                     # stay authorized without briefly replacing dynamic principals with bootstrap-only
                     # data. Same loader as ``load_policy_data`` / ``apply_embedded_policy_document``.
                     data = await apply_embedded_policy_document(
@@ -118,6 +134,7 @@ class AuthService(Service[AuthServiceConfig]):
                         refresh_interval,
                     )
                     self._policy_refresh_healthy = False
+                    await asyncio.to_thread(invalidate_policy_data)
                     await wait_for_next_refresh()
 
         self._refresh_stop.clear()
@@ -145,23 +162,28 @@ class AuthService(Service[AuthServiceConfig]):
         config = get_service_config(AuthServiceConfig)
         if not config.enabled or config.policy_decision_point_provider != "embedded":
             return True
-        return self._policy_refresh_healthy
+        return self._policy_refresh_healthy and await asyncio.to_thread(is_policy_ready)
 
     async def on_shutdown(self) -> None:
         """Cleanup on service shutdown."""
-        config = get_service_config(AuthServiceConfig)
-        if config.enabled and config.policy_decision_point_provider == "embedded":
+        # Cleanup follows resources actually acquired, not mutable configuration.
+        self._refresh_stop.set()
+        try:
             if self._refresh_task and not self._refresh_task.done():
-                # Let an in-flight refresh finish: cancelling it mid-request cancels the entity
-                # store query it is waiting on, and SQLAlchemy cannot reliably return a connection
-                # whose cleanup is itself cancelled.
-                self._refresh_stop.set()
+                # Drain entity requests before closing the policy child they depend on.
                 try:
                     await asyncio.wait_for(asyncio.shield(self._refresh_task), timeout=_REFRESH_STOP_TIMEOUT_SECONDS)
                 except TimeoutError:
                     self._refresh_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await self._refresh_task
+        finally:
             self._refresh_task = None
-            logger.info("Policy data refresh loop stopped")
-        await super().on_shutdown()
+            self._policy_refresh_healthy = False
+            try:
+                if self._owns_policy:
+                    await asyncio.to_thread(close_policy)
+                    self._owns_policy = False
+            finally:
+                await super().on_shutdown()
+        logger.info("Policy data refresh loop stopped")

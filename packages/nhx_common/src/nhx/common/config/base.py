@@ -467,9 +467,38 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
         default="embedded",
         description=(
             "Policy Decision Point provider: "
-            "'embedded' for auth service's built-in WASM engine, "
-            "'opa' for external OPA sidecar."
+            "'embedded' for the auth service's managed native OPA child, "
+            "'opa' for an externally managed OPA server."
         ),
+    )
+
+    opa_binary_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional operator-provisioned OPA executable for the managed provider. "
+            "Otherwise use a compatible PATH binary or the verified release cache/download."
+        ),
+    )
+
+    opa_startup_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        le=300,
+        description="Timeout for managed OPA source validation and child readiness, excluding binary provisioning.",
+    )
+
+    opa_request_timeout_seconds: float = Field(
+        default=3.0,
+        gt=0,
+        le=300,
+        description="Timeout for local managed OPA decision and data-update HTTP requests.",
+    )
+
+    opa_shutdown_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        le=60,
+        description="Timeout for managed OPA termination before forced kill and reap.",
     )
 
     policy_decision_point_request_timeout_seconds: int = Field(
@@ -493,15 +522,6 @@ class AuthConfig(create_service_config_class("auth")):  # ty: ignore[unsupported
         description=(
             "Allow unsigned JWTs (`alg=none`) for local development/testing. "
             "Disabled by default and should not be enabled in production."
-        ),
-    )
-
-    embedded_pdp_auto_build_wasm: bool = Field(
-        default=True,
-        description=(
-            "When auth is enabled with the embedded PDP and policy.wasm is missing, "
-            "build it automatically from a local NeMo Helix source checkout. Packaged deployments "
-            "should include policy.wasm at build time and can disable this for fail-fast startup."
         ),
     )
 

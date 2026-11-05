@@ -1,301 +1,233 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""OPA WASM Policy Engine using wasmtime."""
+"""Service-owned native OPA runtime shared by request threads."""
 
 import json
-import logging
+import os
 import threading
-from functools import cache
-from typing import Any, Dict, List, Optional, cast
+from typing import Any
 
-from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
+from nhx.common.config import get_service_config
+from nhx.core.auth.app.embedded_pdp.rego_engine import (
+    ENTRYPOINTS,
+    PolicyEngineError,
+    RegoPolicy,
+)
+from nhx.core.auth.app.embedded_pdp.rego_engine import (
+    check_policy as _check_policy,
+)
 from nhx.core.auth.app.scope_families import with_scope_families
-from wasmtime import Config, Engine, Func, FuncType, Instance, Limits, Memory, MemoryType, Module, Store, ValType
+from nhx.core.auth.config import AuthServiceConfig
 
-logger = logging.getLogger(__name__)
-
-# Entrypoint IDs (order of -e flags in: opa build -e authz/allow -e authz/has_permissions -e authz/has_role)
-ENTRYPOINT_MAP = {"allow": 0, "has_permissions": 1, "has_role": 2}
-
-DATA_LOADING_FUEL = 10_000_000_000
-
-
-class PolicyEngineError(Exception):
-    """Error during policy evaluation."""
-
-
-@cache
-def _get_engine() -> Engine:
-    """Return the process-wide wasmtime Engine.
-
-    Engine setup is the heavyweight step in wasmtime — JIT code generation and process-wide
-    trap/signal-handling registration — and wasmtime's own guidance is one Engine per process with
-    many cheap Stores created from it. Creating a fresh Engine per thread-local OPAPolicy would
-    churn through many Engines over an xdist worker's lifetime; that churn, not any single test, is
-    what was crashing workers with no traceback ("node down: Not properly terminated").
-    """
-    config = Config()
-    config.consume_fuel = True
-    return Engine(config)
-
-
-class OPAPolicy:
-    """Wrapper for OPA WASM policy evaluation."""
-
-    def __init__(self, wasm_path: str, *, fuel_limit: int = 1_500_000_000, memory_limit_mb: int = 256):
-        self._owner_thread_id = threading.get_ident()
-        engine = _get_engine()
-
-        self.fuel_limit = fuel_limit
-        self.store = Store(engine)
-        self.store.set_fuel(DATA_LOADING_FUEL)
-        self.store.set_limits(memory_size=memory_limit_mb * 1024 * 1024)
-        module = Module.from_file(engine, wasm_path)
-
-        # OPA requires these imports (in order they appear in the module)
-        # env::opa_builtin0..4, env::opa_abort, env::memory
-        self.memory = Memory(self.store, MemoryType(Limits(16, memory_limit_mb * 16)))
-
-        imports = [
-            Func(self.store, FuncType([ValType.i32(), ValType.i32()], [ValType.i32()]), lambda a, b: 0),  # builtin0
-            Func(
-                self.store, FuncType([ValType.i32(), ValType.i32(), ValType.i32()], [ValType.i32()]), lambda a, b, c: 0
-            ),  # builtin1
-            Func(
-                self.store,
-                FuncType([ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32()], [ValType.i32()]),
-                lambda a, b, c, d: 0,
-            ),  # builtin2
-            Func(
-                self.store,
-                FuncType([ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32()], [ValType.i32()]),
-                lambda a, b, c, d, e: 0,
-            ),  # builtin3
-            Func(
-                self.store,
-                FuncType(
-                    [ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32(), ValType.i32()],
-                    [ValType.i32()],
-                ),
-                lambda a, b, c, d, e, f: 0,
-            ),  # builtin4
-            Func(self.store, FuncType([ValType.i32()], []), lambda addr: None),  # opa_abort
-            self.memory,
-        ]
-
-        self.instance = Instance(self.store, module, imports)
-        self.exports = self.instance.exports(self.store)
-        self._base_heap = self._export_func("opa_heap_ptr_get")(self.store)
-        self._data_heap = self._base_heap
-        self._data_addr: Optional[int] = None
-
-    def _assert_owner_thread(self) -> None:
-        current_thread_id = threading.get_ident()
-        if current_thread_id != self._owner_thread_id:
-            raise RuntimeError(
-                f"OPAPolicy used from a different thread (owner={self._owner_thread_id}, current={current_thread_id})"
-            )
-
-    def _export_func(self, name: str) -> Func:
-        self._assert_owner_thread()
-        return cast(Func, self.exports[name])
-
-    def _write_json(self, data: Any) -> int:
-        """Write JSON to WASM memory, return OPA value address."""
-        self._assert_owner_thread()
-        json_bytes = json.dumps(data).encode("utf-8")
-        addr = self._export_func("opa_malloc")(self.store, len(json_bytes))
-        self.memory.write(self.store, json_bytes, addr)
-        return self._export_func("opa_json_parse")(self.store, addr, len(json_bytes))
-
-    def _read_json(self, addr: int) -> Any:
-        """Read OPA value as JSON from WASM memory."""
-        self._assert_owner_thread()
-        json_addr = self._export_func("opa_json_dump")(self.store, addr)
-        mem = self.memory.data_ptr(self.store)
-        end = json_addr
-        while mem[end] != 0:
-            end += 1
-        return json.loads(bytes(mem[json_addr:end]).decode("utf-8"))
-
-    def set_data(self, data: Dict[str, Any]) -> None:
-        """Set the base data document."""
-        self._assert_owner_thread()
-        self.store.set_fuel(DATA_LOADING_FUEL)
-        self._export_func("opa_heap_ptr_set")(self.store, self._base_heap)
-        self._data_addr = self._write_json(data)
-        self._data_heap = self._export_func("opa_heap_ptr_get")(self.store)
-
-    def evaluate(self, input_data: Dict[str, Any], entrypoint: int = 0) -> Any:
-        """Evaluate policy with given input."""
-        self._assert_owner_thread()
-        if self._data_addr is None:
-            raise PolicyEngineError("Policy data not loaded — refusing to evaluate (fail-closed)")
-
-        self.store.set_fuel(self.fuel_limit)
-
-        heap_base = getattr(self, "_data_heap", self._base_heap)
-        self._export_func("opa_heap_ptr_set")(self.store, heap_base)
-
-        ctx = self._export_func("opa_eval_ctx_new")(self.store)
-        self._export_func("opa_eval_ctx_set_input")(self.store, ctx, self._write_json(input_data))
-        self._export_func("opa_eval_ctx_set_data")(self.store, ctx, self._data_addr)
-        self._export_func("opa_eval_ctx_set_entrypoint")(self.store, ctx, entrypoint)
-
-        self._export_func("eval")(self.store, ctx)
-        return self._read_json(self._export_func("opa_eval_ctx_get_result")(self.store, ctx))
+ENTRYPOINT_MAP = {name: index for index, name in enumerate(ENTRYPOINTS)}
+OPAPolicy = RegoPolicy
 
 
 class _PolicyRuntimeManager:
-    """Owns policy data snapshots and thread-local WASM policy runtimes."""
+    """Own one child per service process, never one child per request thread."""
 
     def __init__(self) -> None:
-        self._local = threading.local()
-        self._lock = threading.Lock()
-        self._data: Dict[str, Any] = {}
+        self._lock = threading.RLock()
+        self._owner_pid = os.getpid()
+        self._policy: RegoPolicy | None = None
+        self._data: dict[str, Any] = {}
+        self._data_json: str | None = None
         self._data_loaded = False
-        self._data_version = 0
-        self._generation = 0
+        self._stopped = False
 
-    def _clear_thread_policy(self) -> None:
-        for attr in ("policy", "policy_generation", "policy_data_version"):
-            if hasattr(self._local, attr):
-                delattr(self._local, attr)
+    def _after_fork(self) -> None:
+        if self._owner_pid != os.getpid():
+            # Inherited clients, locks and data belong to the parent. Runtime
+            # finalizers also check ownership before touching its child/socket.
+            self._lock = threading.RLock()
+            self._owner_pid = os.getpid()
+            self._policy = None
+            self._data = {}
+            self._data_json = None
+            self._data_loaded = False
+            self._stopped = False
 
-    def _create_policy(self) -> OPAPolicy:
-        from nhx.common.config import get_service_config
-        from nhx.core.auth.config import AuthServiceConfig
-
-        cfg = get_service_config(AuthServiceConfig)
-        path = ensure_embedded_policy_wasm(auto_build=cfg.embedded_pdp_auto_build_wasm)
-        return OPAPolicy(
-            str(path),
-            fuel_limit=cfg.embedded_pdp_cpu_limit * 1_000_000,
-            memory_limit_mb=cfg.embedded_pdp_memory_limit_mb,
+    def _create_policy(self) -> RegoPolicy:
+        config = get_service_config(AuthServiceConfig)
+        return RegoPolicy(
+            binary_path=config.opa_binary_path,
+            startup_timeout_seconds=config.opa_startup_timeout_seconds,
+            request_timeout_seconds=config.opa_request_timeout_seconds,
+            shutdown_timeout_seconds=config.opa_shutdown_timeout_seconds,
         )
 
-    def _data_snapshot(self) -> tuple[Dict[str, Any], int, bool]:
+    def get_policy(self) -> RegoPolicy:
+        self._after_fork()
         with self._lock:
-            return self._data, self._data_version, self._data_loaded
+            if self._stopped:
+                raise PolicyEngineError("Managed OPA has been stopped")
+            if self._policy is None:
+                self._policy = self._create_policy()
+            return self._policy
 
-    def _generation_snapshot(self) -> int:
+    def start(self) -> RegoPolicy:
+        self._after_fork()
         with self._lock:
-            return self._generation
+            self._stopped = False
+            if self._policy is not None and not self._policy.is_running():
+                self._policy.close()
+                self._policy = None
+                self._data = {}
+                self._data_json = None
+                self._data_loaded = False
+            return self.get_policy()
 
-    def _get_thread_policy(self) -> Optional[OPAPolicy]:
-        return cast(Optional[OPAPolicy], getattr(self._local, "policy", None))
-
-    def _sync_data_if_needed(self, policy: OPAPolicy) -> None:
-        while True:
-            local_version = cast(int, getattr(self._local, "policy_data_version", -1))
-            data, data_version, data_loaded = self._data_snapshot()
-            if local_version == data_version:
+    def set_data(self, data: dict[str, Any]) -> None:
+        self._after_fork()
+        with self._lock:
+            try:
+                content = json.dumps(data, allow_nan=False, sort_keys=True, separators=(",", ":"))
+                document = json.loads(content)
+            except Exception:
+                self.invalidate_data()
+                raise
+            policy = self.get_policy()
+            if self._data_loaded and self._data_json == content and policy.is_ready():
                 return
-
-            if data_loaded:
-                policy.set_data(data)
-
-            _, current_data_version, _ = self._data_snapshot()
-            if data_version == current_data_version:
-                self._local.policy_data_version = data_version
-                return
-
-    def get_policy(self) -> OPAPolicy:
-        """Get or create the current thread's policy runtime."""
-        while True:
-            generation = self._generation_snapshot()
-            policy = self._get_thread_policy()
-            policy_generation = cast(int, getattr(self._local, "policy_generation", -1))
-            if policy is None or policy_generation != generation:
-                policy = self._create_policy()
-                self._local.policy = policy
-                self._local.policy_generation = generation
-                self._local.policy_data_version = -1
-
-            self._sync_data_if_needed(policy)
-            if generation == self._generation_snapshot():
-                return policy
-
-    def set_data(self, data: Dict[str, Any]) -> None:
-        """Set policy data (principals, roles, etc.)."""
-        with self._lock:
-            self._data = data
+            self._data_loaded = False
+            policy.invalidate_data()
+            try:
+                policy.set_data(document)
+            except Exception:
+                self._data = {}
+                self._data_json = None
+                raise
+            self._data = document
+            self._data_json = content
             self._data_loaded = True
-            self._data_version += 1
 
-        policy = self._get_thread_policy()
-        if policy is not None and getattr(self._local, "policy_generation", -1) == self._generation_snapshot():
-            self._sync_data_if_needed(policy)
+    def invalidate_data(self) -> None:
+        self._after_fork()
+        with self._lock:
+            self._data_loaded = False
+            self._data = {}
+            self._data_json = None
+            if self._policy is not None:
+                self._policy.invalidate_data()
+
+    def is_ready(self) -> bool:
+        self._after_fork()
+        with self._lock:
+            return not self._stopped and self._data_loaded and self._policy is not None and self._policy.is_ready()
 
     def reload(self) -> None:
-        """Force each thread to rebuild its policy runtime on next access."""
+        self._after_fork()
         with self._lock:
-            self._generation += 1
-        self._clear_thread_policy()
-        self.get_policy()
+            if self._stopped:
+                raise PolicyEngineError("Managed OPA has been stopped")
+            data, data_loaded = self._data, self._data_loaded
+            self._data_loaded = False
+            if self._policy is not None:
+                self._policy.invalidate_data()
+                self._policy.close()
+                self._policy = None
+            candidate = None
+            try:
+                candidate = self._create_policy()
+                if data_loaded:
+                    candidate.set_data(data)
+            except Exception:
+                self._data = {}
+                self._data_json = None
+                if candidate is not None:
+                    # Retain ownership if bounded cleanup itself needs a retry.
+                    self._policy = candidate
+                    candidate.close()
+                    self._policy = None
+                raise
+            self._policy = candidate
+            self._data_loaded = data_loaded
+
+    def close(self) -> None:
+        self._after_fork()
+        with self._lock:
+            self._stopped = True
+            self._data_loaded = False
+            self._data = {}
+            self._data_json = None
+            if self._policy is not None:
+                self._policy.close()
+            self._policy = None
 
     def reset_for_testing(self) -> None:
-        """Reset policy runtime state between tests."""
+        self.close()
         with self._lock:
-            self._data = {}
-            self._data_loaded = False
-            self._data_version += 1
-            self._generation += 1
-        self._clear_thread_policy()
+            self._stopped = False
 
 
 _policy_runtime = _PolicyRuntimeManager()
 
 
-def get_policy() -> OPAPolicy:
-    """Get or create the current thread's policy runtime."""
+def get_policy() -> RegoPolicy:
+    """Return the service process's shared managed OPA instance."""
     return _policy_runtime.get_policy()
 
 
-def set_policy_data(data: Dict[str, Any]) -> None:
-    """Set policy data (principals, roles, etc.), deriving ``authz.scope_families`` for scopes.rego."""
-    _policy_runtime.set_data(with_scope_families(data))
+def start_policy() -> RegoPolicy:
+    """Start native OPA during the owning auth service's startup."""
+    return _policy_runtime.start()
+
+
+def close_policy() -> None:
+    """Stop the child and prohibit implicit restart after shutdown."""
+    _policy_runtime.close()
+
+
+def is_policy_ready() -> bool:
+    return _policy_runtime.is_ready()
+
+
+def invalidate_policy_data() -> None:
+    _policy_runtime.invalidate_data()
+
+
+def check_policy() -> None:
+    """One-shot preflight, without leaking a daemon outside service lifespan."""
+    config = get_service_config(AuthServiceConfig)
+    _check_policy(config.opa_binary_path, config.opa_startup_timeout_seconds)
+
+
+def set_policy_data(data: dict[str, Any]) -> None:
+    """Replace authorization data, deriving the same shared scope families."""
+    try:
+        document = with_scope_families(data)
+    except Exception:
+        invalidate_policy_data()
+        raise
+    _policy_runtime.set_data(document)
 
 
 def reload_policy() -> None:
-    """Force each thread to rebuild its policy runtime on next access."""
     _policy_runtime.reload()
 
 
 def _reset_policy_state_for_testing() -> None:
-    """Reset module policy state between tests."""
     _policy_runtime.reset_for_testing()
 
 
-def evaluate(entrypoint: str, input_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Evaluate a policy entrypoint."""
+def evaluate(entrypoint: str, input_data: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate only public entrypoints, failing closed on runtime errors."""
     if entrypoint not in ENTRYPOINT_MAP:
-        raise PolicyEngineError(f"Invalid entrypoint: {entrypoint}. Valid: {list(ENTRYPOINT_MAP.keys())}")
-
+        raise PolicyEngineError(f"Invalid entrypoint: {entrypoint}. Valid: {list(ENTRYPOINT_MAP)}")
     try:
         result = get_policy().evaluate(input_data, ENTRYPOINT_MAP[entrypoint])
     except Exception as exc:
-        msg = str(exc)
-        if "all fuel consumed" in msg:
-            raise PolicyEngineError(f"Policy evaluation exceeded fuel limit for entrypoint '{entrypoint}'") from exc
-        if "memory" in msg.lower():
-            raise PolicyEngineError(f"Policy evaluation exceeded memory limit for entrypoint '{entrypoint}'") from exc
-        raise PolicyEngineError(f"WASM execution error: {msg}") from exc
-
-    # OPA returns [[{result: ...}]] - unwrap it
+        raise PolicyEngineError(f"OPA execution error: {exc}") from exc
     if isinstance(result, list) and result:
         result = result[0]
     if isinstance(result, dict) and "result" in result:
         result = result["result"]
-
-    if not result:
-        return {
-            "allow": {"allowed": False, "headers": {"X-NHX-Authorized": "false"}},
-            "has_permissions": {"allowed": False},
-            "has_role": {"has_role": False},
-        }.get(entrypoint, {})
-
+    if not isinstance(result, dict):
+        raise PolicyEngineError(f"Unexpected OPA result for '{entrypoint}'")
+    verdict = "has_role" if entrypoint == "has_role" else "allowed"
+    if type(result.get(verdict)) is not bool:
+        raise PolicyEngineError(f"Unexpected OPA '{verdict}' decision for '{entrypoint}'")
     return result
 
 
@@ -303,5 +235,5 @@ def validate_entrypoint(entrypoint: str) -> bool:
     return entrypoint in ENTRYPOINT_MAP
 
 
-def get_valid_entrypoints() -> List[str]:
-    return list(ENTRYPOINT_MAP.keys())
+def get_valid_entrypoints() -> list[str]:
+    return list(ENTRYPOINT_MAP)

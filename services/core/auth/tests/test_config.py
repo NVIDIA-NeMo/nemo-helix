@@ -3,6 +3,9 @@
 
 """Tests for auth service configuration."""
 
+import pytest
+from pydantic import ValidationError
+
 
 def test_auth_config_defaults():
     """Test default auth config."""
@@ -17,10 +20,12 @@ def test_auth_config_defaults():
     # Auth service specific defaults
     assert cfg.policy_decision_point_provider == "embedded"
     assert cfg.policy_decision_point_request_timeout_seconds == 5
-    assert cfg.embedded_pdp_auto_build_wasm is True
     assert cfg.bundle_cache_seconds == 5
     assert cfg.admin_email is None
     assert cfg.default_workspace == "default"
+    assert cfg.opa_startup_timeout_seconds == 15
+    assert cfg.opa_request_timeout_seconds == 3
+    assert cfg.opa_shutdown_timeout_seconds == 5
 
 
 def test_default_workspace_custom():
@@ -30,3 +35,14 @@ def test_default_workspace_custom():
     cfg = AuthServiceConfig(default_workspace="my-workspace")
 
     assert cfg.default_workspace == "my-workspace"
+
+
+@pytest.mark.parametrize(
+    "field", ["opa_startup_timeout_seconds", "opa_request_timeout_seconds", "opa_shutdown_timeout_seconds"]
+)
+@pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan"), 301])
+def test_managed_opa_timeouts_are_positive_and_bounded(field, value):
+    from nhx.core.auth.config import AuthServiceConfig
+
+    with pytest.raises(ValidationError):
+        AuthServiceConfig(**{field: value})

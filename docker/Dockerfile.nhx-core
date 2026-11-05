@@ -7,16 +7,16 @@
 ARG NHX_PYTHON_BASE=nhx-python-base
 ARG NHX_CORE_RUNTIME_BASE=nhx-python-base
 
+# Official native release; no custom Go build or Python binding pipeline.
+FROM openpolicyagent/opa:1.22.0-static@sha256:906bfc9904b2693733e7959d71773dd073e6c135cf06f26d955abe94603e82b3 AS opa
+
 FROM ${NHX_PYTHON_BASE} AS builder
+COPY --from=opa /opa /usr/local/bin/opa
 COPY --from=nhx-workspace . .
-# Put the generated authorization policy into the source package before uv
-# installs it. This keeps the artifact aligned with the venv's actual Python
-# version instead of assuming a hard-coded site-packages path.
-COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --only-group core-services --no-editable
-# Fail the image build if the installed auth package cannot see its generated policy.
-RUN /app/.venv/bin/python -c 'from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm; ensure_embedded_policy_wasm(auto_build=False)'
+# Validate packaged Rego with the provisioned native binary, without starting a service.
+RUN /usr/local/bin/opa check /app/.venv/lib/python3.13/site-packages/nhx/core/auth/app/policies
 # Pre-install DuckDB aws + httpfs so OTLP log ingestion works without outbound network.
 # Download the extension artifacts directly over HTTPS and install from local files
 # because DuckDB's default remote INSTALL path can be blocked or flaky in some build environments.
@@ -49,6 +49,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ${NHX_CORE_RUNTIME_BASE} AS runtime
 WORKDIR /app
+COPY --from=opa /opa /usr/local/bin/opa
 
 # Local subprocess jobs need a small POSIX command surface; distroless does not
 # include these by default.

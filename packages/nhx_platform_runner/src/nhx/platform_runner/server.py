@@ -115,20 +115,20 @@ class PyleakMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-def preflight_embedded_auth_policy_wasm(auth_config) -> None:
-    """Ensure local embedded auth PDP has a loadable policy.wasm before serving traffic."""
+def preflight_embedded_auth_policy(auth_config) -> None:
+    """Check sources/binary once, never start a child outside the ASGI lifespan."""
     if not auth_config.enabled or auth_config.policy_decision_point_provider != "embedded":
         return
 
     try:
-        from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
+        from nhx.core.auth.app.embedded_pdp import check_policy
     except ImportError as exc:
         raise RuntimeError(
             "Auth is enabled with the embedded PDP, but the nhx-auth package is not installed. "
             "Install nhx-auth or set auth.policy_decision_point_provider='opa'."
         ) from exc
 
-    ensure_embedded_policy_wasm(auto_build=getattr(auth_config, "embedded_pdp_auto_build_wasm", True))
+    check_policy()
 
 
 def create_platform_openapi_app() -> FastAPI:
@@ -366,6 +366,8 @@ def build_platform_app(
             service_value if isinstance(service_value, Service) else load_service(service_name, service_value)
         )
     service_instances = order_services_by_dependencies(service_instances)
+    if any(service.name == "auth" for service in service_instances):
+        preflight_embedded_auth_policy(get_auth_config())
 
     # Fail before loading colliding functions; create_app() checks direct callers.
     check_no_controller_sidecar_collision(resolved.controllers, resolved.sidecars)
@@ -389,7 +391,8 @@ def run_server(
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
     """Run the platform API server."""
-    preflight_embedded_auth_policy_wasm(get_auth_config())
+    if any(service.name == "auth" for service in services or []):
+        preflight_embedded_auth_policy(get_auth_config())
     app = create_app(services or [])
     setup_fastapi_instrumentations(app)
     docker_host = docker_listener_host(host)
@@ -450,7 +453,8 @@ def run_server_with_reload(
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
     """Run the platform API server with uvicorn reload enabled."""
-    preflight_embedded_auth_policy_wasm(get_auth_config())
+    # The app factory resolves service selection and performs one-shot preflight
+    # in the worker; the reload supervisor must not provision/start auth itself.
     reload_dirs = [
         "packages/nhx_platform/src",
         "services/core",
@@ -532,6 +536,8 @@ def create_default_app() -> FastAPI:
         else:
             services.append(load_service(service_name, service_value))
     services = order_services_by_dependencies(services)
+    if any(service.name == "auth" for service in services):
+        preflight_embedded_auth_policy(get_auth_config())
 
     controller_run_funcs: dict[str, ControllerRunFunc] = {}
     for controller_name in controller_names:

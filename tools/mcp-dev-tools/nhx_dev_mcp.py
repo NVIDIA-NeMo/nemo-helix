@@ -716,7 +716,6 @@ def create_server(working_dir: str | None = None) -> FastMCP:
                    SDK/CLI: refresh-openapi, update-sdk, update-cli,
                             generate-cli-reference-docs, generate-config-reference-docs
                    Vendoring: vendor
-                   Policy: build-policy, check-policy
                    Licenses: update-licenses, check-licenses
                    Build: build-jobs-launcher
                    Lint: lint
@@ -763,9 +762,6 @@ def create_server(working_dir: str | None = None) -> FastMCP:
             "generate-config-reference-docs",
             # Vendoring
             "vendor",
-            # Policy operations
-            "build-policy",
-            "check-policy",
             # License management
             "update-licenses",
             "check-licenses",

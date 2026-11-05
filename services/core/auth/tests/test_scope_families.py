@@ -9,9 +9,17 @@ import pytest
 import yaml
 from nhx.core.auth.app.bundle import build_authorization_data
 from nhx.core.auth.app.embedded_pdp import evaluate, set_policy_data
+from nhx.core.auth.app.embedded_pdp.engine import _reset_policy_state_for_testing
 from nhx.core.auth.app.scope_families import derive_scope_families, scope_family, with_scope_families
 
 STATIC_AUTHZ = Path(__file__).parent.parent / "src/nhx/core/auth/assets/static-authz.yaml"
+
+
+@pytest.fixture(autouse=True)
+def reset_runtime():
+    _reset_policy_state_for_testing()
+    yield
+    _reset_policy_state_for_testing()
 
 
 def test_scope_family_matches_rego_rules():

@@ -1,7 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# OPA Authorization Policies
+# Shared Rego Authorization Policies
+
+Both the embedded PDP's managed native OPA child and external OPA evaluate
+these same sources. No compiled policy artifact or custom OPA build is needed.
+The runtime requires OPA >=1.22.0,<2; automatic binary provisioning pins v1.22.0.
 
 ## Entry Points
 
@@ -94,6 +98,29 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ## Testing
 
 ```bash
-make test-policy
+make test-policy      # Native OPA corpus + strict runner self-tests (>=1.22.0,<2)
+make test-policy-opa  # Direct OPA CLI corpus execution (requires opa on PATH)
 ```
+
+The shared Rego tests use native `with` modifiers to install request and
+authorization-data fixtures. `script/test_opa_policies.py` uses `opa parse` for
+rule discovery and `opa test --format=json --fail-on-empty` to execute unchanged
+sources. There is no binding, source rewriting, or custom lowering layer.
+`services/core/auth/tests/test_opa_compatibility.py` checks the shared corpus
+and self-tests the runner against failing, undefined, skipped, empty, and
+parameterized synthetic assertions. Indexed tests require exhaustive expected
+case keys; literal `cases` tables are cross-checked with that manifest. Missing
+cases, skipped tests, empty reports and nonzero OPA exit status fail validation.
+
+For a provisioned binary, run:
+
+```bash
+uv run script/test_opa_policies.py --opa-binary-path /opt/opa/opa
+```
+
+Without that argument, `NHX_AUTH_OPA_BINARY_PATH` can select a provisioned binary
+for the CLI and pytest runner. Otherwise the standard resolver uses compatible
+OPA on PATH, a validated cache, or official pinned release downloads. Do not silently skip
+these tests when OPA is unavailable. A passing CLI corpus does not replace
+managed-child lifecycle/API tests; run the auth unit suite as well.
 

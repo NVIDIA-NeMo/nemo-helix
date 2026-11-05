@@ -32051,16 +32051,6 @@
         },
         {
           "package": {
-            "name": "wasmtime",
-            "version": "47.0.1",
-            "ecosystem": "PyPI"
-          },
-          "licenses": [
-            "Apache-2.0 WITH LLVM-exception"
-          ]
-        },
-        {
-          "package": {
             "name": "watchfiles",
             "version": "1.2.0",
             "ecosystem": "PyPI"

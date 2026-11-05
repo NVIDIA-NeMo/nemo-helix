@@ -70,7 +70,6 @@
 {"name": "docker", "license": "APACHE-2.0", "compatible": true}
 {"name": "docstring-parser", "license": "MIT", "compatible": true}
 {"name": "duckdb", "license": "MIT", "compatible": true}
-{"name": "dulwich", "license": "APACHE-2.0", "compatible": true}
 {"name": "durationpy", "license": "MIT", "compatible": true}
 {"name": "email-validator", "license": "UNLICENSE", "compatible": true}
 {"name": "exceptiongroup", "license": "MIT", "compatible": true}
@@ -452,7 +451,6 @@
 {"name": "uvloop", "license": "MIT", "compatible": true}
 {"name": "validators", "license": "MIT", "compatible": true}
 {"name": "wandb", "license": "MIT", "compatible": true}
-{"name": "wasmtime", "license": "APACHE-2.0 WITH LLVM-EXCEPTION", "compatible": true}
 {"name": "watchfiles", "license": "MIT", "compatible": true}
 {"name": "wcmatch", "license": "MIT", "compatible": true}
 {"name": "wcwidth", "license": "MIT", "compatible": true}

@@ -14,7 +14,6 @@ do not exercise.
 ## One command
 
 ```sh
-make build-policy   # once per rego change — policy.wasm is gitignored
 uv run pytest e2e/authz_oidc -v --run-e2e
 ```
 

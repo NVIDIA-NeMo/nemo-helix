@@ -23,11 +23,11 @@ For each request, the authorization middleware:
 
 ## Embedded PDP (Default)
 
-The embedded PDP uses a WASM-compiled Rego policy engine built into the auth service. No external OPA sidecar is required.
+The embedded PDP evaluates Rego sources with native OPA, started and stopped as a managed child of the auth service. No separately managed OPA sidecar or policy build step is required.
 
 ### How It Works
 
-- Rego policy files are compiled into the `policy.wasm` artifact loaded by the auth service
+- Rego policy sources are shipped in the auth package's `app/policies` directory and loaded by the embedded evaluator
 - Policy data (role bindings, workspace visibility, endpoint permissions) is served by the auth service
 - Data is refreshed on a configurable interval (default: 30 seconds)
 
@@ -38,8 +38,47 @@ auth:
  enabled: true
  policy_decision_point_provider: "embedded"
  policy_decision_point_base_url: "http://auth:8000"
- embedded_pdp_auto_build_wasm: true
  policy_data_refresh_interval: 30 # seconds
+```
+
+### Runtime and Resource Boundaries
+
+Native OPA runs in a child process rather than a Python binding or WASM sandbox.
+Auth-service container resource limits cover both processes. Use external OPA
+in a separately limited container for an independent resource boundary.
+
+### Binary Provisioning
+
+Core/API Docker images include official OPA v1.22.0. Wheel installations remain
+platform-independent: no native binary is hidden inside the universal wheel.
+The resolver prefers `auth.opa_binary_path` (`NHX_AUTH_OPA_BINARY_PATH`), then
+`opa` on PATH, then a validated per-user cache. Otherwise it downloads the pinned
+v1.22.0 official GitHub asset and its published SHA256 over HTTPS. Automatic
+downloads support Linux and macOS on amd64/arm64. The downloaded checksum is not
+a source-pinned hash or signature.
+
+For restricted/offline environments, provision OPA before starting auth:
+
+```yaml
+auth:
+ opa_binary_path: /opt/opa/opa
+```
+
+Explicit/PATH binaries are operator-trusted. The resolver requires OPA >=1.22.0,<2
+via a bounded version probe, but does not verify provenance. An invalid or
+incompatible explicit path fails startup; an incompatible PATH binary is skipped. Downloads
+fail closed on checksum mismatch, network failure, or unsupported platform.
+The cache is under `${XDG_CACHE_HOME:-~/.cache}/nemo-helix/opa/` and must be
+writable and executable by the service user. Valid cache hits require no network.
+The resolver does not download anything during wheel installation.
+
+Managed-child timeouts are configurable:
+
+```yaml
+auth:
+ opa_startup_timeout_seconds: 15.0 # source validation/readiness; excludes binary provisioning
+ opa_request_timeout_seconds: 3.0 # local decision and data-update HTTP calls
+ opa_shutdown_timeout_seconds: 5.0 # graceful termination before forced kill/reap
 ```
 
 ### PDP URL Format
