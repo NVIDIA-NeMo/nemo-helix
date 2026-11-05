@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as DataView from '@nemo/common/src/components/DataView/internal';
-import { ComponentProps, useCallback } from 'react';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
+import { type ComponentProps, useCallback } from 'react';
 
 const INTERACTIVE_ELEMENT_SELECTOR =
   'button, a, input, select, textarea, [role="button"], [data-no-row-click]';

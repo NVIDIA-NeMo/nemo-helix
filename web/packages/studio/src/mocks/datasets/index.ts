@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CommitOutput } from '@huggingface/hub';
-import { FilesetOutput, FilesetOutputsPage } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput, FilesetOutputsPage } from '@nemo/sdk/generated/platform/schema';
 
 const mockFileset = (id: string, name: string, workspace: string): FilesetOutput => ({
   id,

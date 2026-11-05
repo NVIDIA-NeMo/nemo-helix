@@ -3,7 +3,7 @@
 
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 import { ToastProvider } from './ToastProvider';
 import { useToast } from './useToast';

@@ -3,7 +3,7 @@
 
 import { createContext, useContext } from 'react';
 
-import { ToastContextValue } from './types';
+import type { ToastContextValue } from './types';
 
 export const ToastContext = createContext<ToastContextValue | null>(null);
 export const useToast = () => {

@@ -3,11 +3,11 @@
 
 import {
   ControlledSearchableSelect,
-  SelectItemOption,
+  type SelectItemOption,
 } from '@nemo/common/src/components/form/ControlledSearchableSelect/index';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 
 const defaultOptions: SelectItemOption[] = [

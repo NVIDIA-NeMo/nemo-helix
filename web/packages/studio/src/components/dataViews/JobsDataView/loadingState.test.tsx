@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  HelixJobResponse,
-  HelixJobResponsesPage,
+  type HelixJobResponse,
+  type HelixJobResponsesPage,
   HelixJobStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { JobsDataView } from '@studio/components/dataViews/JobsDataView';

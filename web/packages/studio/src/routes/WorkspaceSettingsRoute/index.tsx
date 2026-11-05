@@ -25,7 +25,7 @@ import {
 import { MEMBERS_ROUTE_HEADER_DESCRIPTION } from '@studio/routes/WorkspaceMembersRoute/constants';
 import { DeleteWorkspaceModal } from '@studio/routes/WorkspaceSettingsRoute/DeleteWorkspaceModal';
 import { EditDescriptionModal } from '@studio/routes/WorkspaceSettingsRoute/EditDescriptionModal';
-import { FC, ReactNode, useState } from 'react';
+import { type FC, type ReactNode, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface SettingsSectionProps {

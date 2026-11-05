@@ -80,7 +80,10 @@ def compile_dpo_config(
     logger.info(
         f"Prepared dataset: train={prepared.train_samples} samples, validation={prepared.validation_samples} samples"
     )
-    validator = DatasetValidator(training_type=customizer_config.training.training_type)
+    validator = DatasetValidator(
+        training_type=customizer_config.training.training_type,
+        reject_multimodal=bool(customizer_config.model.has_vision_tower),
+    )
     validator.validate_dataset(str(prepared.train_file))
     validator.validate_dataset(str(prepared.validation_file))
     logger.info("Validated datasets successfully")

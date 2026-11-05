@@ -12,7 +12,7 @@ import {
   TabsRoot,
   TabsTrigger,
 } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface UploadPickerBodyProps {
   workspace: string;

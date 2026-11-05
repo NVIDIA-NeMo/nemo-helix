@@ -20,7 +20,7 @@ import { featureFlags, flagDefaults } from '@studio/constants/featureFlags';
 import { flagDefinitions } from '@studio/constants/featureFlags/featureFlags';
 import {
   NON_OVERRIDABLE_FLAGS,
-  OverrideBlob,
+  type OverrideBlob,
   readStoredOverrides,
   writeStoredOverrides,
 } from '@studio/constants/featureFlags/overrides';

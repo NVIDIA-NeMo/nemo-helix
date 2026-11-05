@@ -549,6 +549,44 @@ rules:
   # Mostly symptoms: a peer times out or loses its connection after another rank fails.
   # ===========================================================================
 
+  # The raylet shuts down when runtime_env_agent or dashboard_agent dies, and prints a hint that names
+  # grpcio, a port conflict, and an out-of-memory kill all at once. That hint is not the cause. NeMo-RL
+  # reads the agent log and appends one of the lines below. The fate-share notice is a symptom, so a
+  # training error printed before it (a GPU running out of memory, for example) still wins.
+  - id: ray_agent_port_conflict
+    rerunnable: true
+    contains: "Ray agent failed to start because its port is already in use"
+    exception: DistributedError
+    error_details: "Ray's runtime or dashboard agent could not bind its port because the address was already in use, so the raylet shut down. This is usually a leftover Ray process. Rerun the job. If it repeats, contact your administrator with the agent log from the job output."
+
+  - id: ray_agent_grpcio_mismatch
+    rerunnable: false
+    contains: "Ray agent crashed during startup because grpcio does not match Ray's requirement"
+    exception: DistributedError
+    error_details: "Ray's agent crashed at startup and the raylet shut down with it. Ray reports this when grpcio does not match the version Ray requires (the agent can segfault). A rerun of the same image would crash again. Contact your administrator; the agent log in the job output and `pip freeze | grep grpcio` name the version."
+
+  - id: ray_agent_killed
+    rerunnable: false
+    contains: "Ray agent was killed by the operating system during startup"
+    exception: NodeResourceError
+    error_details: "Ray's agent was killed by the operating system, usually because the node ran out of host memory, and the raylet shut down with it. A rerun with the same settings would be killed again. Reduce batch_size or max_seq_length, or contact your administrator about the node's memory limit."
+
+  - id: ray_agent_startup_error
+    rerunnable: true
+    contains: "Ray agent failed during startup:"
+    exception: DistributedError
+    error_details: "Ray's agent exited while the cluster was starting, so the raylet shut down. The job output includes the agent log. Rerun the job. If it repeats, contact your administrator with that log."
+
+  - id: ray_agent_fate_share
+    rerunnable: true
+    symptom: true
+    or:
+      - contains: "runtime_env_agent failed and raylet fate-shares with it"
+      - contains: "dashboard_agent failed and raylet fate-shares with it"
+      - contains: "Ray agent failed and the raylet shut down with it"
+    exception: DistributedError
+    error_details: "Ray's runtime or dashboard agent exited, and the raylet shut down with it. The job output includes the agent log. This is often a port conflict, a grpcio version mismatch, or the agent being killed. Rerun the job if the log does not name one of those."
+
   - id: cluster_resources_unavailable
     rerunnable: true
     or:

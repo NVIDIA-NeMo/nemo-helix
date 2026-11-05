@@ -1,7 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { MODE_DEFAULT, MODE_EXPERIMENT } from '@studio/components/evaluation/submitEvaluationJob';
+import {
+  MODE_DEFAULT,
+  type MODE_EXPERIMENT,
+} from '@studio/components/evaluation/submitEvaluationJob';
 
 /** One screen of the Run Evaluation wizard. */
 export type WizardStep = 'start' | 'experiment' | 'configuration' | 'evaluation';

@@ -20,7 +20,7 @@ import { SAFE_SYNTHESIZER_POLLING_INTERVAL_MS } from '@studio/routes/SafeSynthes
 import { getSafeSynthesizerRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful, isJobTerminated } from '@studio/util/safeSynthesizer';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 
 export const GenerateJobDetailsRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

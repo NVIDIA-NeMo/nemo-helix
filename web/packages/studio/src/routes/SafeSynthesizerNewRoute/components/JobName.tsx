@@ -4,7 +4,7 @@
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { InfoCircle } from '@nemo/icons/icons';
 import { Stack } from '@nvidia/foundations-react-core';
-import { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
+import type { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useFormContext } from 'react-hook-form';
 
 export const JobName = () => {

@@ -43,6 +43,8 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
+      # Keep container builds and deployed/process e2e out of PRs and the merge queue.
+      post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
@@ -191,7 +193,7 @@ jobs:
     name: Build CPU smoke images
     needs: [changes]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
@@ -355,7 +357,7 @@ jobs:
     name: Build garak test image
     needs: [changes]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true'
       )
@@ -418,7 +420,7 @@ jobs:
     name: Build Safe Synthesizer test image
     needs: [changes]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true'
       )
@@ -485,7 +487,7 @@ jobs:
     name: Kind CPU e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -560,7 +562,7 @@ jobs:
     name: Kind Gym agent-evaluate e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -635,7 +637,7 @@ jobs:
     name: Kind customizer auth e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
       (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
@@ -691,7 +693,7 @@ jobs:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
         github.event_name == 'workflow_dispatch' ||
@@ -1322,9 +1324,14 @@ jobs:
             packages/nhx_evals_sdk/tests/test_lazy_public_api.py::test_agent_eval_import_does_not_pull_the_execution_stack -v
 
   python-integration-test:
-    name: Python integration tests
+    name: Python integration tests (${{ matrix.group }})
     needs: [policy-wasm]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Whole-package allocation based on JUnit durations; see tests/integration_groups.py.
+        group: [services, platform]
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1364,22 +1371,25 @@ jobs:
           NHX_FILES_HF_RETRY_MAX_DELAY_SECONDS: "30"
           PYTEST_WORKERS: "4"
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+          PYTEST_EXTRA: --integration-group=${{ matrix.group }}
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-integration-test-results
+          name: python-integration-test-results-${{ matrix.group }}
           retention-days: 30
+          include-hidden-files: true
           path: |
             report.xml
             coverage.xml
             coverage.json
+            .coverage
       - name: Upload worker crash dumps
         # Separate artifact so coverage-comment keeps receiving exactly the files it expects.
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-integration-crash-dumps
+          name: python-integration-crash-dumps-${{ matrix.group }}
           retention-days: 30
           if-no-files-found: ignore
           path: crash-dumps/
@@ -1520,7 +1530,7 @@ jobs:
         python-auth-idp-static-test,
       ]
     if: >
-      !cancelled() && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
@@ -1755,7 +1765,10 @@ jobs:
   # suite against the real process.
   python-e2e-test:
     name: Python e2e tests
-    needs: [policy-wasm]
+    needs: [changes, policy-wasm]
+    if: >
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      needs.policy-wasm.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1810,9 +1823,9 @@ jobs:
   # NHX_E2E_IMAGE_REGISTRY / NHX_E2E_IMAGE_TAG are unset there.
   python-e2e-image-test:
     name: Python e2e tests (prebuilt image)
-    needs: [policy-wasm, build-cpu-smoke-images]
+    needs: [changes, policy-wasm, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -1875,6 +1888,45 @@ jobs:
           path: |
             report.xml
             ${{ runner.temp }}/e2e-services-logs/
+
+  post-merge-image-e2e-status:
+    name: Post-merge image and e2e status
+    needs:
+      - changes
+      - policy-wasm
+      - python-auth-idp-static-test
+      - build-cpu-smoke-images
+      - build-garak-test-image
+      - build-safe-synthesizer-test-image
+      - kind-cpu-e2e
+      - kind-gym-e2e
+      - kind-customizer-auth-e2e
+      - kind-network-policy-smoke
+      - python-auth-idp-e2e-test
+      - python-e2e-test
+      - python-e2e-image-test
+    # Independent of ci-status: image builds and auth/image e2e are not all in
+    # that gate's needs list. Still report when a prerequisite prevents e2e.
+    if: >
+      always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout notification helper
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Report results and alert on failure
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          NEEDS_JSON: ${{ toJson(needs) }}
+          SLACK_ALERTS_WEBHOOK: ${{ secrets.SLACK_ALERTS_WEBHOOK }}
+        with:
+          script: |
+            const { reportPostMergeResults } = require("./.github/scripts/ci-post-merge-notification.cjs");
+            await reportPostMergeResults({ core, context, env: process.env, fetchImpl: fetch });
 
   github-scripts:
     name: GitHub JavaScript checks
@@ -2396,6 +2448,10 @@ jobs:
       pull-requests: write
       contents: read
     steps:
+      - name: Checkout sources for combined coverage reporting
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
       - name: Download unit test coverage
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -2409,8 +2465,24 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: python-integration-test-results
-          path: integration-coverage
+          pattern: python-integration-test-results-*
+          path: integration-coverage/groups
+      - name: Install uv for coverage reporting
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.13"
+          enable-cache: false
+      - name: Combine integration coverage
+        # Never report one group's coverage as coverage of the whole suite.
+        continue-on-error: true
+        shell: bash
+        run: |
+          for group in services platform; do
+            test -s "integration-coverage/groups/python-integration-test-results-${group}/.coverage"
+          done
+          uvx --from coverage==7.15.3 coverage combine --keep integration-coverage/groups/*/.coverage
+          uvx --from coverage==7.15.3 coverage xml -o integration-coverage/coverage.xml
       - name: Prepare coverage table
         run: |
           extract_coverage() {

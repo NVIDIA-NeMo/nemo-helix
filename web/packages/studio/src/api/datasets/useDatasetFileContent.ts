@@ -13,7 +13,12 @@ import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { EntityIdentifier } from '@studio/api/common/types';
 import { getDatasetFileContentQueryKey } from '@studio/api/datasets/invalidateDatasetCaches';
 import { isBinaryExtension } from '@studio/util/binaryFile';
-import { queryOptions, useQuery, UseQueryOptions, useSuspenseQuery } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useQuery,
+  type UseQueryOptions,
+  useSuspenseQuery,
+} from '@tanstack/react-query';
 
 /**
  * Parse a Content-Length header into a byte count, accepting only a strict

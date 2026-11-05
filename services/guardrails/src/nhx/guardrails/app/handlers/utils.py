@@ -3,11 +3,12 @@
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
 
-from nemoguardrails import LLMRails
 from nemoguardrails import RailsConfig as InternalSdkRailsConfig
 from nhx.guardrails.app.constants import NIM_CHAT, NIM_LLM
+from nhx.guardrails.app.services.rails.engine import RailsEngine, uses_iorails
 from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
     set_request_default_headers_into_context,
@@ -184,7 +185,7 @@ def get_main_model_from_rails_config(rails_config: RailsConfig) -> Model | None:
 
 
 def _run_generate_in_new_loop(
-    llm_rails: LLMRails,
+    llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
     prompt: Optional[str] = None,
     options: Optional[Any] = None,
@@ -235,7 +236,7 @@ def _run_generate_in_new_loop(
 
 
 async def run_generate_async(
-    llm_rails: LLMRails,
+    llm_rails: RailsEngine,
     messages: Optional[List[dict]] = None,
     prompt: Optional[str] = None,
     options: Optional[Any] = None,
@@ -246,7 +247,14 @@ async def run_generate_async(
     asyncio.to_thread copies the current contextvars context before entering
     the thread, so context variables set prior to this call remain accessible
     inside the guardrails pipeline.
+
+    IORails engines run on the server loop instead: their HTTP clients and queue workers are bound to
+    the loop that first used them, and the registry shares one engine across requests, so the
+    per-request loop below would strand them and hang the next request.
     """
+    if uses_iorails(llm_rails):
+        return await llm_rails.generate_async(messages=messages, prompt=prompt, options=options, state=state)
+
     return await asyncio.to_thread(
         _run_generate_in_new_loop,
         llm_rails,
@@ -255,3 +263,23 @@ async def run_generate_async(
         options=options,
         state=state,
     )
+
+
+def stream_rails_async(
+    llm_rails: RailsEngine,
+    prompt: Optional[str] = None,
+    messages: Optional[List[dict]] = None,
+    options: Optional[Any] = None,
+    state: Optional[Any] = None,
+) -> AsyncIterator[Union[str, dict]]:
+    """Stream a guarded response from either rails engine.
+
+    IORails is stateless and only honors ``options``, so ``state`` would be silently dropped. Reject
+    it instead, as the non-streaming IORails path does.
+    """
+    if uses_iorails(llm_rails):
+        if state is not None:
+            raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
+        return llm_rails.stream_async(prompt=prompt, messages=messages, options=options)
+
+    return llm_rails.stream_async(prompt=prompt, messages=messages, options=options, state=state)

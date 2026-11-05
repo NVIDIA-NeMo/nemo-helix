@@ -183,6 +183,7 @@ def test_policy_model_interpolations_match_what_nemo_rl_injects() -> None:
     assert server["base_url"] == "${policy_base_url}"
     assert server["api_key"] == "${policy_api_key}"
     assert server["model"] == "${policy_model_name}"
+    assert server["inline_tool_output_images"] is True
 
 
 def test_bootstrap_adapter_wheels_validate_only(tmp_path: Path) -> None:

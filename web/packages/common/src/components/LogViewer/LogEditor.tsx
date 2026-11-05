@@ -20,7 +20,7 @@ import type { HelixJobLog } from '@nemo/sdk/generated/platform/schema';
 import { useTheme } from '@nvidia/foundations-react-core';
 import CodeMirror from '@uiw/react-codemirror';
 import classNames from 'classnames';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 
 // Focusable for keyboard scrolling and Cmd+F search without making the editor editable.
 // The label names the textbox role CodeMirror gives the content.

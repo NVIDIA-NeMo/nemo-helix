@@ -4,7 +4,7 @@
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { RadioCard } from '@nemo/common/src/components/RadioCard';
-import { type DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
+import type { DatasetQualityReport } from '@nemo/common/src/utils/datasetQuality';
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import {
   Flex,
@@ -24,10 +24,10 @@ import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { DatasetQualityReportView } from '@studio/routes/FilesetNewRoute/components/DatasetQualityReportView';
 import { PURPOSE_OPTIONS } from '@studio/routes/FilesetNewRoute/constants';
 import { toFileList } from '@studio/routes/FilesetNewRoute/helpers';
-import { DatasetFormFields } from '@studio/routes/FilesetNewRoute/types';
+import type { DatasetFormFields } from '@studio/routes/FilesetNewRoute/types';
 import { SecretSearchableSelect } from '@studio/routes/SecretsListRoute/SecretSearchableSelect';
-import { FC, FormEventHandler, RefObject } from 'react';
-import { Control, Controller, FieldErrors, UseFormSetValue } from 'react-hook-form';
+import type { FC, FormEventHandler, RefObject } from 'react';
+import { type Control, Controller, type FieldErrors, type UseFormSetValue } from 'react-hook-form';
 
 interface CustomFilesetFormProps {
   control: Control<DatasetFormFields>;

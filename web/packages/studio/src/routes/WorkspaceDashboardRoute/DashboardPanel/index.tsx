@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Panel, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 import { Link } from 'react-router';
 
 export interface DashboardPanelAction {

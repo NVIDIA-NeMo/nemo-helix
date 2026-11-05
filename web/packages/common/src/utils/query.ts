@@ -4,7 +4,7 @@
 import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
-import * as DataView from '../components/DataView/internal';
+import type * as DataView from '../components/DataView/internal';
 import { JOB_POLLING_INTERVAL_MS } from '../constants';
 
 export const getJobRefetchInterval = (status?: HelixJobStatus): number | false => {

@@ -312,11 +312,13 @@ def test_create_prints_the_dataset_flag_and_the_ref_last(cli, monkeypatch):
     result = cli(FakeBuilds(), "create", "--harbor-hub", "datacurve/deep-swe@latest", "--workspace", "ac9")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines() == [
-        f"Dataset for Intake: --dataset datacurve/deep-swe@sha256:{'a' * 64}",
+        f"Intake label: --intake-dataset datacurve/deep-swe@sha256:{'a' * 64}",
         created.ref,
     ]
     as_json = json.loads(cli(FakeBuilds(), "create", "--harbor-hub", "x/y@1", "--json").output)
-    assert as_json["taskset_ref"] == created.ref and as_json["dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    assert (
+        as_json["taskset_ref"] == created.ref and as_json["intake_dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    )
 
 
 def test_create_needs_exactly_one_source(cli, tmp_path: Path):

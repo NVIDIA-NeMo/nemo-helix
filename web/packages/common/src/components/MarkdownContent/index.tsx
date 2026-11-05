@@ -4,7 +4,7 @@
 import { markdownComponents } from '@nemo/common/src/components/MarkdownContent/components/markdownComponents';
 import { remarkCallouts } from '@nemo/common/src/components/MarkdownContent/remarkCallouts';
 import cn from 'classnames';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 

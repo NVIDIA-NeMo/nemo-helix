@@ -234,6 +234,9 @@ nemo jobs results download agent-eval-results \
 The queryable `agent_eval_results` record stores aggregates, coverage, target identity, and the
 bundle reference. Individual trials remain in `trials.jsonl` inside the bundle.
 
+A [Kubernetes taskset run](/documentation/evaluate-models/agent-eval/harbor-kubernetes) merges its
+tasks' bundles into one bundle with `report.html`; download it with `nemo evals runs download`.
+
 ## Related
 
 <Cards>

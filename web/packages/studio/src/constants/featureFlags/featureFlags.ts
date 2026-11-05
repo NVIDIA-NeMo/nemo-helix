@@ -10,8 +10,12 @@
  * its affiliates is strictly prohibited.
  */
 
-import { booleanFlag, FlagDescriptor, previewFlag } from '@studio/constants/featureFlags/utils';
-import { z } from 'zod';
+import {
+  booleanFlag,
+  type FlagDescriptor,
+  previewFlag,
+} from '@studio/constants/featureFlags/utils';
+import type { z } from 'zod';
 
 // ============================================================================
 // FEATURE FLAGS CONFIGURATION

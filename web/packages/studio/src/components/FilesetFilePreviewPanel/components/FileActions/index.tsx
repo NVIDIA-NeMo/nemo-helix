@@ -16,11 +16,11 @@ import {
 import { useDatasetFileDelete } from '@studio/api/datasets/useDatasetFileDelete';
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
-import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useOidcBearerToken } from '@studio/providers/auth/useOidcBearerToken';
 import { useWorkers } from '@studio/providers/workers/useWorkers';
 import LargeFileWorker from '@studio/workers/LargeFileWorker?worker';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 type ModalType = 'createSplit' | 'rename' | 'delete';
 
