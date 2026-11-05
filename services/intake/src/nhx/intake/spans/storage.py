@@ -24,6 +24,17 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def to_unix_micros(value: datetime) -> int:
+    """Datetime to Unix microseconds, as consumed by ``fromUnixTimestamp64Micro``.
+
+    Naive values read as UTC: entity-store timestamps are UTC, and a local-time reading would
+    silently shift an Evaluation lifetime bound by the server's offset.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return int(value.timestamp() * 1_000_000)
+
+
 def stable_id(*parts: str, prefix: str | None = None) -> str:
     hasher = hashlib.sha256()
     for part in parts:

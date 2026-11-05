@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +24,16 @@ def _ensure_group(client: TestClient, name: str = "rollup-test-group") -> str:
         response = client.get(f"{EXPERIMENTS}/{name}")
     response.raise_for_status()
     return response.json()["id"]
+
+
+def _session_started_at() -> datetime:
+    """A session start strictly after the evaluation entities created above.
+
+    Rollups and session lists are bounded to each evaluation's created_at (inclusive), so a
+    root span that starts before its entity was created would be excluded from the read.
+    The +1s margin keeps the truncated timestamp after entities created in the same second.
+    """
+    return (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
 
 
 def test_evaluation_response_hydrates_clickhouse_rollups(client: TestClient) -> None:
@@ -45,7 +56,7 @@ def test_evaluation_response_hydrates_clickhouse_rollups(client: TestClient) -> 
         ("run-2", "case-2", 0.8, 0.20, 2000),
         ("run-3", "case-3", 1.0, 0.30, 3000),
     ]
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     for index, (run_id, test_case_id, score, cost_usd, latency_ms) in enumerate(rows):
         response = client.post(
             ATIF_INGEST,
@@ -128,7 +139,7 @@ def test_evaluation_rollups_aggregate_per_test_case_before_pooling(client: TestC
         ("run-2", "case-b", 1.0, 0.20, 2000),
         ("run-3", "case-b", 1.0, 0.30, 3000),
     ]
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     for index, (run_id, test_case_id, score, cost_usd, latency_ms) in enumerate(rows):
         response = client.post(
             ATIF_INGEST,
@@ -188,7 +199,7 @@ def test_evaluation_rollups_exclude_sessions_without_test_case_id(client: TestCl
         ("run-1", "", 0.0, 0.10, 1000),
         ("run-2", "", 1.0, 0.30, 3000),
     ]
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     for index, (run_id, test_case_id, score, cost_usd, latency_ms) in enumerate(rows):
         response = client.post(
             ATIF_INGEST,
@@ -232,7 +243,7 @@ def test_atif_ingest_rejects_deleted_evaluation(client: TestClient) -> None:
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
-            started_at=datetime.now(timezone.utc).replace(microsecond=0),
+            started_at=_session_started_at(),
             evaluation_id=evaluation_id,
             run_id="run-1",
             test_case_id="case-1",
@@ -250,7 +261,7 @@ def test_atif_ingest_rejects_unknown_evaluation_context(client: TestClient) -> N
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
-            started_at=datetime.now(timezone.utc).replace(microsecond=0),
+            started_at=_session_started_at(),
             evaluation_id="missing-exp",
             run_id="run-1",
             test_case_id="case-1",
@@ -283,7 +294,7 @@ def test_deprecated_evaluation_context_hydrates_evaluation_rollups(client: TestC
         ATIF_INGEST,
         json={
             **_atif_body(
-                started_at=datetime.now(timezone.utc).replace(microsecond=0),
+                started_at=_session_started_at(),
                 evaluation_id=evaluation_id,
                 run_id="run-1",
                 test_case_id="case-1",
@@ -321,7 +332,7 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
     )
     assert created.status_code == 201, created.text
 
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     # (run_id, test_case_id, score, errored) — error state is irrelevant to scoring; it's varied only to
     # show an errored and a successful unscored run both count as 0.
     seeds: list[tuple[str, str, float | None, bool]] = [
@@ -356,6 +367,111 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
     assert reward["count"] == 4
     assert reward["sum"] == pytest.approx(1.8)
     assert reward["mean"] == pytest.approx(0.45)
+
+
+def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: TestClient) -> None:
+    """GH #3183: deleting an Evaluation frees its name, and a recreated Evaluation must not
+    inherit the deleted one's runs. Its rollup and session list are bounded to its own
+    created_at: empty before its own publish, a row started before created_at stays out,
+    and a row started after it is counted alone.
+    """
+    evaluation_name = f"rollup-recreate-{uuid4().hex}"
+    group_id = _ensure_group(client)
+    body = {
+        "name": evaluation_name,
+        "experiment_group_id": group_id,
+        "dataset_name": "rollup-dataset",
+        "dataset_version": "v1",
+    }
+    first = client.post(EVALUATIONS, json=body)
+    assert first.status_code == 201, first.text
+
+    # The deleted evaluation's lifetime: one run, started strictly inside that lifetime —
+    # full-precision now() is after the first entity's created_at and, because the delete
+    # and recreate happen after this line, strictly before the recreated entity's created_at.
+    old_started_at = datetime.now(timezone.utc)
+    response = client.post(
+        ATIF_INGEST,
+        json=_atif_body(
+            started_at=old_started_at,
+            evaluation_id=evaluation_name,
+            run_id="old-run",
+            test_case_id="old-case",
+            score=0.4,
+            cost_usd=0.05,
+            latency_ms=500,
+            offset_seconds=0,
+        ),
+    )
+    assert response.status_code == 201, response.text
+    assert client.get(f"{EVALUATIONS}/{evaluation_name}").json()["run_count"] == 1
+
+    deleted = client.delete(f"{EVALUATIONS}/{evaluation_name}")
+    assert deleted.status_code == 204, deleted.text
+
+    second = client.post(EVALUATIONS, json=body)
+    assert second.status_code == 201, second.text
+    assert second.json()["id"] != first.json()["id"]
+    recreated_created_at = datetime.fromisoformat(second.json()["created_at"])
+
+    # Before its own publish: no runs and no sessions — the deleted lifetime's row is invisible.
+    fetched = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["run_count"] == 0
+    sessions = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert sessions.status_code == 200, sessions.text
+    assert sessions.json()["pagination"]["total_results"] == 0
+    assert sessions.json()["data"] == []
+
+    # A run started before the recreated entity's created_at stays out, even when ingested
+    # after the recreation (e.g. backfilled telemetry from the deleted lifetime).
+    before_created_at = (recreated_created_at - timedelta(seconds=60)).replace(microsecond=0)
+    response = client.post(
+        ATIF_INGEST,
+        json=_atif_body(
+            started_at=before_created_at,
+            evaluation_id=evaluation_name,
+            run_id="backfill-run",
+            test_case_id="backfill-case",
+            score=0.9,
+            cost_usd=0.30,
+            latency_ms=300,
+            offset_seconds=0,
+        ),
+    )
+    assert response.status_code == 201, response.text
+    assert client.get(f"{EVALUATIONS}/{evaluation_name}").json()["run_count"] == 0
+    assert client.get(f"{EVALUATIONS}/{evaluation_name}/sessions").json()["pagination"]["total_results"] == 0
+
+    # A run started after created_at is counted alone — neither run from before it leaks in.
+    after_created_at = recreated_created_at + timedelta(seconds=60)
+    response = client.post(
+        ATIF_INGEST,
+        json=_atif_body(
+            started_at=after_created_at,
+            evaluation_id=evaluation_name,
+            run_id="own-run",
+            test_case_id="own-case",
+            score=1.0,
+            cost_usd=0.10,
+            latency_ms=100,
+            offset_seconds=0,
+        ),
+    )
+    assert response.status_code == 201, response.text
+
+    fetched = client.get(f"{EVALUATIONS}/{evaluation_name}")
+    assert fetched.status_code == 200, fetched.text
+    recreated = fetched.json()
+    assert recreated["run_count"] == 1
+    assert recreated["test_case_count"] == 1
+    assert recreated["aggregate_scores"]["reward"]["count"] == 1
+    assert recreated["aggregate_scores"]["reward"]["mean"] == pytest.approx(1.0)
+
+    sessions = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
+    assert sessions.status_code == 200, sessions.text
+    assert sessions.json()["pagination"]["total_results"] == 1
+    assert [row["test_case_name"] for row in sessions.json()["data"]] == ["own-case"]
 
 
 def _atif_body(
@@ -438,7 +554,7 @@ def test_failed_evaluator_results_are_counted_not_inferred(client: TestClient) -
     )
     assert created.status_code == 201, created.text
 
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     seeds: list[tuple[str, str, float | None]] = [
         ("run-ok", "case-ok", 1.0),  # scored -> 1.0
         ("run-judge-down", "case-judge-down", None),  # no reward; the judge records a FAILED row below
@@ -504,7 +620,7 @@ def test_an_evaluator_that_failed_everywhere_still_appears_in_the_rollup(client:
         },
     )
     assert created.status_code == 201, created.text
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
@@ -559,7 +675,7 @@ def _create_named_evaluation(client: TestClient, evaluation_id: str) -> None:
 
 def _body_with_context_in_extra(*, evaluation_id: str, test_case_id: str = "case-1") -> dict[str, Any]:
     body = _atif_body(
-        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        started_at=_session_started_at(),
         evaluation_id=evaluation_id,
         run_id="run-1",
         test_case_id=test_case_id,
@@ -588,7 +704,7 @@ def test_top_level_evaluation_context_still_hydrates_rollups(client: TestClient)
     evaluation_id = "top-level-eval-context-exp"
     _create_named_evaluation(client, evaluation_id)
     body = _atif_body(
-        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        started_at=_session_started_at(),
         evaluation_id=evaluation_id,
         run_id="run-1",
         test_case_id="case-1",
@@ -607,7 +723,7 @@ def test_matching_top_level_and_extra_evaluation_context_hydrates_rollups(client
     evaluation_id = "matching-eval-context-exp"
     _create_named_evaluation(client, evaluation_id)
     body = _atif_body(
-        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        started_at=_session_started_at(),
         evaluation_id=evaluation_id,
         run_id="run-1",
         test_case_id="case-1",
@@ -627,7 +743,7 @@ def test_conflicting_evaluation_context_locations_are_rejected(client: TestClien
     evaluation_id = "conflict-eval-context-exp"
     _create_named_evaluation(client, evaluation_id)
     body = _atif_body(
-        started_at=datetime.now(timezone.utc).replace(microsecond=0),
+        started_at=_session_started_at(),
         evaluation_id=evaluation_id,
         run_id="run-1",
         test_case_id="case-1",

@@ -25,6 +25,16 @@ def _ensure_group(client: TestClient, name: str = "sessions-test-group") -> str:
     return response.json()["id"]
 
 
+def _session_started_at() -> datetime:
+    """A session start strictly after the evaluation entities created above.
+
+    Rollups and session lists are bounded to each evaluation's created_at (inclusive), so a
+    root span that starts before its entity was created would be excluded from the read.
+    The +1s margin keeps the truncated timestamp after entities created in the same second.
+    """
+    return (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
+
+
 def test_list_evaluation_sessions_returns_joined_session_rows(client: TestClient) -> None:
     evaluation_name = "sessions-exp"
     group_id = _ensure_group(client)
@@ -39,7 +49,7 @@ def test_list_evaluation_sessions_returns_joined_session_rows(client: TestClient
     )
     assert created.status_code == 201, created.text
 
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     seeds = [
         ("case-a", 1.0, 0.05, 1000, 100, 10, 0),
         ("case-b", 0.5, 0.10, 2000, 200, 20, 5),
@@ -167,7 +177,7 @@ def test_list_evaluation_sessions_filter_by_test_case(client: TestClient) -> Non
     )
     assert created.status_code == 201, created.text
 
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    started_at = _session_started_at()
     adversarial_test_case_id = "alpha') OR 1 = 1 --"
     for index, test_case_id in enumerate([adversarial_test_case_id, "beta"]):
         response = client.post(
@@ -235,7 +245,7 @@ def test_list_evaluation_sessions_filter_by_status(client: TestClient) -> None:
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
-            started_at=datetime.now(timezone.utc).replace(microsecond=0),
+            started_at=_session_started_at(),
             evaluation_name=evaluation_name,
             test_case_id="case-1",
             score=1.0,

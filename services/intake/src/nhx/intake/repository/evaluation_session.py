@@ -60,10 +60,17 @@ class EvaluationSessionRepository(ABC):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
+        created_after: datetime | None = None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
         sort_keys: list[tuple[str, bool]] | None = None,
     ) -> EvaluationSessionPage:
-        """Return one page of sessions for an Evaluation."""
+        """Return one page of sessions for an Evaluation.
+
+        ``created_after`` bounds the sessions to those whose ``root_started_at`` is at or after that
+        instant (inclusive). ``None`` keeps the name-only match. Callers pass the Evaluation entity's
+        ``created_at`` so an Evaluation recreated under a deleted Evaluation's name does not list the
+        deleted one's sessions.
+        """
         pass

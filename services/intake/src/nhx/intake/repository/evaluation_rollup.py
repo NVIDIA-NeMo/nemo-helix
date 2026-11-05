@@ -5,6 +5,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,13 @@ class EvaluationRollupRepository(ABC):
         *,
         workspace: str,
         evaluation_names: list[str],
+        created_after_by_name: dict[str, datetime | None],
     ) -> dict[str, EvaluationRollup]:
-        """Return rollups keyed by Evaluation name."""
+        """Return rollups keyed by Evaluation name.
+
+        ``created_after_by_name`` must carry one entry per requested name; a missing entry raises.
+        ``None`` keeps the name-only match, while a datetime bounds the rollup to sessions whose
+        ``root_started_at`` is at or after that instant — so an Evaluation recreated under a deleted
+        Evaluation's name does not inherit the deleted one's runs.
+        """
         pass

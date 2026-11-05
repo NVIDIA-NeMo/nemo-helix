@@ -59,10 +59,15 @@ def test_list_sorts_by_cost_metric_missing_last(client: TestClient) -> None:
     # Unique per run so reruns/shared integration state can't collide on group or evaluation names.
     suffix = uuid.uuid4().hex
     group_id = _ensure_group(client, name=f"metric-sort-group-{suffix}")
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
     cheap, pricey, mid = f"exp-cheap-{suffix}", f"exp-pricey-{suffix}", f"exp-mid-{suffix}"
-    for index, (name, cost) in enumerate([(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]):
+    for name, cost in [(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]:
         _create_evaluation(client, group_id, name)
+    # Sessions start after the evaluation entities exist: rollups are bounded to each
+    # evaluation's created_at (inclusive), so a root span starting before its entity was
+    # created would be excluded from the rollup. The +1s and truncation guarantee the
+    # first root span is strictly after every created_at above.
+    started_at = (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
+    for index, (name, cost) in enumerate([(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]):
         response = client.post(
             ATIF_INGEST,
             json=_atif_body(started_at=started_at, evaluation_id=name, cost_usd=cost, offset_seconds=index * 10),
@@ -89,10 +94,13 @@ def test_list_filters_by_cost_metric(client: TestClient) -> None:
     # deterministic by value rather than by creation time.
     suffix = uuid.uuid4().hex
     group_id = _ensure_group(client, name=f"metric-filter-group-{suffix}")
-    started_at = datetime.now(timezone.utc).replace(microsecond=0)
     cheap, pricey, mid = f"exp-cheap-{suffix}", f"exp-pricey-{suffix}", f"exp-mid-{suffix}"
-    for index, (name, cost) in enumerate([(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]):
+    for name, cost in [(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]:
         _create_evaluation(client, group_id, name)
+    # Sessions start after the evaluation entities exist: rollups are bounded to each
+    # evaluation's created_at (inclusive). See test_list_sorts_by_cost_metric_missing_last.
+    started_at = (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
+    for index, (name, cost) in enumerate([(cheap, 0.10), (pricey, 0.90), (mid, 0.50)]):
         response = client.post(
             ATIF_INGEST,
             json=_atif_body(started_at=started_at, evaluation_id=name, cost_usd=cost, offset_seconds=index * 10),

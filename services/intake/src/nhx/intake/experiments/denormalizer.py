@@ -111,19 +111,35 @@ class EvaluationDenormalizer(BackgroundWorker):
                     self.mark_dirty(workspace=workspace, evaluation_name=evaluation_name)
 
     async def _refresh_workspace(self, workspace: str, evaluation_names: list[str]) -> None:
-        rollups = await self._rollup_repository.get_rollups(workspace=workspace, evaluation_names=evaluation_names)
+        # Load the live entities first: the rollup must be bounded to each evaluation's own
+        # created_at, so a name freed by a delete and recreated does not inherit the deleted
+        # evaluation's facets. A missing (or deleted) entity is skipped — it writes no facets
+        # and must not trigger an unbounded rollup. created_at is None for legacy rows; that
+        # keeps the name-only match.
+        live_evaluations: list[Experiment] = []
         for evaluation_name in evaluation_names:
-            rollup = rollups.get(evaluation_name)
+            try:
+                evaluation = await self._entity_client.get(Experiment, name=evaluation_name, workspace=workspace)
+            except EntityNotFoundError:
+                # Deleted between ingest and refresh; nothing to update.
+                continue
+            if evaluation.is_deleted:
+                continue
+            live_evaluations.append(evaluation)
+        if not live_evaluations:
+            return
+        rollups = await self._rollup_repository.get_rollups(
+            workspace=workspace,
+            evaluation_names=[evaluation.name for evaluation in live_evaluations],
+            created_after_by_name={evaluation.name: evaluation.created_at for evaluation in live_evaluations},
+        )
+        for evaluation in live_evaluations:
+            rollup = rollups.get(evaluation.name)
             if rollup is None:
                 continue
-            await self._write_names(workspace, evaluation_name, rollup)
+            await self._write_names(evaluation, rollup)
 
-    async def _write_names(self, workspace: str, evaluation_name: str, rollup: EvaluationRollup) -> None:
-        try:
-            evaluation = await self._entity_client.get(Experiment, name=evaluation_name, workspace=workspace)
-        except EntityNotFoundError:
-            # Deleted between ingest and refresh; nothing to update.
-            return
+    async def _write_names(self, evaluation: Experiment, rollup: EvaluationRollup) -> None:
         # Skip the write when nothing changed, so a burst of re-ingests that add no new names doesn't
         # churn the entity store (and doesn't lose an optimistic-lock race for no reason).
         if (
@@ -139,4 +155,4 @@ class EvaluationDenormalizer(BackgroundWorker):
             await self._entity_client.update(evaluation)
         except EntityConflictError:
             # A concurrent user edit won the optimistic lock; re-queue for the next cycle.
-            self.mark_dirty(workspace=workspace, evaluation_name=evaluation_name)
+            self.mark_dirty(workspace=evaluation.workspace, evaluation_name=evaluation.name)

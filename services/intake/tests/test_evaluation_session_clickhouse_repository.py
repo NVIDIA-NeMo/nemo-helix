@@ -82,6 +82,7 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
         evaluation_name=evaluation_name,
         status=SpanStatus.ERROR,
         test_case_name=test_case_id,
+        created_after=None,
         page=2,
         page_size=5,
         mode="preview",
@@ -125,6 +126,70 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
     assert executor.queries[2].parameters["page_storage_keys"] == [
         (1767225600000000, "trace-session-a", "root-session-a")
     ]
+    # No created_after bound: no clause, no parameter, in any query shape.
+    for query in executor.queries:
+        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" not in query.statement
+        assert "created_after_us" not in query.parameters
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_binds_every_query_shape_to_created_after() -> None:
+    created_after = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+    executor = _Executor(
+        [
+            [{"count()": 2}],
+            [_page_ref("session-a"), _page_ref("session-b")],
+            [_session_record("session-a"), _session_record("session-b")],
+        ]
+    )
+
+    page = await _repository(executor).list_sessions(
+        workspace="default",
+        evaluation_name="evaluation-a",
+        created_after=created_after,
+        page=1,
+        page_size=2,
+        mode="summary",
+        sort_keys=[("cost_total_usd", True)],
+    )
+
+    assert page.total == 2
+    assert [query.name for query in executor.queries] == [
+        "evaluation_sessions.count",
+        "evaluation_sessions.metric_sort.page",
+        "evaluation_sessions.hydrate",
+    ]
+    created_after_us = int(created_after.timestamp() * 1_000_000)
+    for query in executor.queries:
+        # The inclusive lower bound appears on every session query shape that lists this
+        # evaluation: the count, the metric-sort page query, and the hydration re-read.
+        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
+        assert query.parameters["created_after_us"] == created_after_us
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_bound_applies_to_plain_page_query() -> None:
+    created_after = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+    executor = _Executor([[{"count()": 1}], [_page_ref("session-a")], [_session_record("session-a")]])
+
+    await _repository(executor).list_sessions(
+        workspace="default",
+        evaluation_name="evaluation-a",
+        created_after=created_after,
+        page=1,
+        page_size=10,
+        mode="summary",
+    )
+
+    # The plain page query (no metric sort) carries the same bound as count and hydrate.
+    assert [query.name for query in executor.queries] == [
+        "evaluation_sessions.count",
+        "evaluation_sessions.page",
+        "evaluation_sessions.hydrate",
+    ]
+    for query in executor.queries:
+        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
+        assert query.parameters["created_after_us"] == int(created_after.timestamp() * 1_000_000)
 
 
 @pytest.mark.asyncio
@@ -140,6 +205,7 @@ async def test_metric_sort_uses_bounded_page_then_restores_hydration_order() -> 
     page = await _repository(executor).list_sessions(
         workspace="default",
         evaluation_name="evaluation-a",
+        created_after=None,
         page=1,
         page_size=2,
         mode="summary",
@@ -166,6 +232,7 @@ async def test_empty_result_stops_after_count() -> None:
     page = await _repository(executor).list_sessions(
         workspace="default",
         evaluation_name="evaluation-a",
+        created_after=None,
         page=1,
         page_size=100,
         mode="detailed",
@@ -184,6 +251,7 @@ async def test_metric_sort_rejects_unbounded_session_set_after_count() -> None:
         await _repository(executor).list_sessions(
             workspace="default",
             evaluation_name="evaluation-a",
+            created_after=None,
             page=1,
             page_size=100,
             mode="summary",
