@@ -237,13 +237,30 @@ def test_what_the_chart_refuses(args: tuple[str, ...], refusal: str) -> None:
     assert refusal in refused.value.stderr
 
 
-def test_a_controller_list_with_the_queue_renders() -> None:
-    documents = _helm_template(*ENABLED, "--set", "core.controller.controllers={jobs,builder-queue}")
-    args = [
-        arg
-        for document in documents
-        if document.get("kind") == "Deployment"
-        for container in document["spec"]["template"]["spec"]["containers"]
-        for arg in container.get("args", [])
-    ]
-    assert "--controllers=jobs,builder-queue" in args
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        pytest.param(["--controllers=jobs"], id="controllers"),
+        pytest.param(["--controllers", "jobs"], id="controllers-as-two-args"),
+        pytest.param(["--controller-group=core"], id="group"),
+    ],
+)
+def test_a_selection_in_extra_args_without_the_queue_is_refused_too(extra_args: list[str]) -> None:
+    """It replaces core.controller's own selection, so the chart reads it instead."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(values={"builder": {"enabled": True}, "core": {"controller": {"extraArgs": extra_args}}})
+    assert "needs the builder-queue controller" in refused.value.stderr
+
+
+@pytest.mark.parametrize(
+    "controller",
+    [
+        pytest.param({"controllers": ["jobs", "builder-queue"]}, id="controllers"),
+        pytest.param({"extraArgs": ["--controllers=jobs,builder-queue"]}, id="extra-args"),
+        pytest.param({"extraArgs": ["--controllers", "jobs, builder-queue"]}, id="extra-args-as-two-args"),
+        pytest.param({"extraArgs": ["--controller-group=all"]}, id="extra-args-group"),
+    ],
+)
+def test_a_selection_with_the_queue_renders(controller: dict) -> None:
+    documents = _helm_template(values={"builder": {"enabled": True}, "core": {"controller": controller}})
+    assert any(document.get("kind") == "Namespace" for document in documents)

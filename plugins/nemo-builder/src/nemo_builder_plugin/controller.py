@@ -159,12 +159,21 @@ class BuildQueueController(NemoController):
         return job.status not in _ENDED
 
     async def _start(self, build: QueuedBuild) -> bool:
-        """Create ``build``'s job and move its images to ``pending``. False if the job was refused for good."""
+        """Create ``build``'s job and move its images to ``pending``.
+
+        False if the job was refused for good, or if none of its images still waits for it.
+        """
         assert self._jobs is not None and self._entities is not None
         try:
             request = CreateHelixJobRequest.model_validate(build.request)
         except ValidationError as exc:
             await self._refuse(build, f"not built: the queued job request is invalid ({exc.error_count()} error(s))")
+            return False
+        if not any(row.status == "queued" for row in await self._rows(build)):
+            # Every image settled first, as a retry's do when the orphan check fails them just before the retry
+            # queues their build: a job now could publish none of them.
+            logger.info("dropping queued build %s: none of its images is still queued", _label(build))
+            await self._forget(build)
             return False
         async with self._jobs_as(_submitter(build)) as jobs:
             try:

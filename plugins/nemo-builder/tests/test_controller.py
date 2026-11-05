@@ -270,3 +270,18 @@ async def test_the_orphan_check_runs_every_ten_minutes_and_survives_a_failed_lis
     clock[0] += ORPHAN_CHECK_SECONDS
     await controller.reconcile()
     assert entities.entities[image].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_build_none_of_whose_images_still_waits_is_dropped_not_started() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: None)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    # A retry queued it again just after the orphan check failed its image.
+    _queue(entities, "retried")
+    entities.entities["retried.img"].status = "failed"
+    entities.entities["retried.img"].status_detail = ORPHANED
+
+    await controller.reconcile()
+    assert jobs.jobs == {} and "retried" not in entities.entities
+    assert entities.entities["retried.img"].status == "failed"

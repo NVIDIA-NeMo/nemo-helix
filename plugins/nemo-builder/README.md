@@ -627,7 +627,8 @@ Every platform image includes the builder, and the platform's chart deploys what
 
 The chart refuses `builder.enabled` with a controller list or group that leaves out `builder-queue`, the
 controller that creates every build's job: `core.controller.controllers` must name it, or
-`core.controller.controllerGroup` be `all`, the default.
+`core.controller.controllerGroup` be `all`, the default. A selection in `core.controller.extraArgs`
+replaces those, and is checked the same way.
 
 The chart doesn't copy image pull secrets. Jobs gives the step pods the platform's `imagePullSecrets`
 and their profile's by name, and `build` gives its sandboxes the same ones as its own pod, so create
