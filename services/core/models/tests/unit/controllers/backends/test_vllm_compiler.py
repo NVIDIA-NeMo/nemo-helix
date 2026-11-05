@@ -344,10 +344,20 @@ def test_compile_vllm_args_underscore_spelling_counts_as_user_flag(raw: list[str
 
 
 def _super_vl(
-    *, base_model=None, finetuning_type=None, tool_call_config=None, architecture="NemotronH_Omni_Reasoning_V3"
+    *,
+    base_model=None,
+    finetuning_type=None,
+    tool_call_config=None,
+    architecture="NemotronH_Omni_Reasoning_V3",
+    mtp_layers=1,
 ) -> SimpleNamespace:
     """The spec the model spec task records: language-model dims plus the top-level architecture."""
-    spec = _spec(num_kv_heads=2, architectures=[architecture], tool_call_config=tool_call_config)
+    spec = _spec(
+        num_kv_heads=2,
+        architectures=[architecture],
+        tool_call_config=tool_call_config,
+        num_nextn_predict_layers=mtp_layers,
+    )
     return _model_entity(spec=spec, trust_remote_code=True, base_model=base_model, finetuning_type=finetuning_type)
 
 
@@ -383,7 +393,7 @@ _MTP = ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}'
             {"lora_enabled": True},
             _super_vl(),
             [*_TP4, *_QWEN3_CODER, "--enable-lora", "--trust-remote-code", *_SUPER_VL_DEFAULTS]
-            + ["--max-lora-rank", "64", "--max-loras", "4"],
+            + ["--max-lora-rank", "64", "--max-loras", "2"],
             id="lora",
         ),
         # A fine-tuned checkpoint may lack the MTP layer; the model API accepts finetuning_type
@@ -399,6 +409,17 @@ _MTP = ["--speculative-config", '{"method": "mtp", "num_speculative_tokens": 3}'
             _super_vl(finetuning_type="all_weights"),
             [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS],
             id="fine-tuned-finetuning-type-only",
+        ),
+        # Nemotron 3.5 Bolt shares the architecture but has no MTP layer; a model registered
+        # before the spec recorded the layer count is treated the same way.
+        *(
+            pytest.param(
+                {},
+                _super_vl(mtp_layers=mtp_layers),
+                [*_TP4, *_QWEN3_CODER, "--trust-remote-code", *_SUPER_VL_DEFAULTS],
+                id=f"no-mtp-layer-{mtp_layers}",
+            )
+            for mtp_layers in (0, None)
         ),
         pytest.param(
             {},

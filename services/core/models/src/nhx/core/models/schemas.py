@@ -223,6 +223,10 @@ class ModelSpec(BaseModel):
         "checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'), while the other fields "
         "describe its language model.",
     )
+    num_nextn_predict_layers: Optional[int] = Field(
+        default=None,
+        description="Multi-token prediction depth declared by the checkpoint. None when the config has no such field.",
+    )
 
     # Architecture dimensions
     num_layers: int = Field(description="Number of transformer layers")

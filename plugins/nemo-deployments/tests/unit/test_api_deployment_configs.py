@@ -42,6 +42,8 @@ def test_create_deployment_config_201(client: TestClient, mock_entity_client: As
     )
     assert resp.status_code == 201
     assert resp.json()["name"] == "cfg1"
+    # The runtime default of 64Mi is too small for multi-process workloads.
+    assert mock_entity_client.create.await_args.args[0].shm_size == "8Gi"
 
 
 def test_create_deployment_config_accepts_camel_case_restart_policy(
@@ -114,8 +116,22 @@ def test_create_deployment_config_accepts_snake_case_top_level_fields(
 
 @pytest.mark.parametrize(
     "invalid",
-    [{"backoff_limit": 0}, {"shmSize": "32GB"}, {"shm_size": "lots"}],
-    ids=["zero-backoff-limit", "shm-size-unit", "shm-size-text"],
+    [
+        {"backoff_limit": 0},
+        {"shmSize": "32GB"},
+        {"shm_size": "lots"},
+        {"shmSize": " 32Gi "},
+        {"shmSize": "0"},
+        {"shmSize": "0.5"},
+    ],
+    ids=[
+        "zero-backoff-limit",
+        "shm-size-unit",
+        "shm-size-text",
+        "shm-size-spaces",
+        "shm-size-zero",
+        "shm-size-sub-byte",
+    ],
 )
 def test_create_deployment_config_rejects_invalid_fields(
     client: TestClient,

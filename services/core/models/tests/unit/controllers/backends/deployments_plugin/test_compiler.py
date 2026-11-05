@@ -894,6 +894,7 @@ def test_gpu_server_gets_shared_memory_per_gpu(engine: str, gpu: int, expected: 
     resolved.view.gpu = gpu
     compiled = compile_model_deployment(resolved, DeploymentsPluginConfig())
     assert compiled.server_config.shm_size == expected
-    # The controller sends the plugin a request DTO, which must carry the field.
-    assert deployment_config_create_request(compiled.server_config).shm_size == expected
+    # The controller sends the plugin a request DTO, which must carry the field. Unset takes the
+    # plugin's 8Gi default.
+    assert deployment_config_create_request(compiled.server_config).shm_size == (expected or "8Gi")
     assert compiled.puller_config is not None and compiled.puller_config.shm_size is None

@@ -115,9 +115,13 @@ class CreateDeploymentConfigRequest(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
     shm_size: str | None = Field(
-        default=None,
+        default="8Gi",
         alias="shmSize",
-        description="Size of /dev/shm in the main containers (e.g. '32Gi'). Unset keeps the runtime default of 64Mi.",
+        description=(
+            "Size of /dev/shm in the main containers (e.g. '32Gi'). Defaults to 8Gi because the runtime default "
+            "of 64Mi is too small for multi-process workloads. Memory is used only as files are written. "
+            "Null keeps the runtime default."
+        ),
     )
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 

@@ -344,7 +344,7 @@ class CreateDeploymentConfigRequest(_AliasModel):
     drift_recovery: DriftRecoveryPolicy | None = Field(default=None, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
-    shm_size: str | None = Field(default=None, alias="shmSize")
+    shm_size: str | None = Field(default="8Gi", alias="shmSize")
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
 

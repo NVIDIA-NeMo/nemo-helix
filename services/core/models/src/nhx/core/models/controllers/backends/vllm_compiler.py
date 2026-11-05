@@ -86,6 +86,11 @@ def _is_nemotron_super_vl(model_entity: Optional[ModelEntity]) -> bool:
     return any(arch in NEMOTRON_SUPER_VL_ARCHITECTURES for arch in architectures)
 
 
+def _declares_mtp(model_entity: Optional[ModelEntity]) -> bool:
+    layers = getattr(getattr(model_entity, "spec", None), "num_nextn_predict_layers", None)
+    return isinstance(layers, int) and layers > 0
+
+
 def _nemotron_super_vl_args(
     view: DeploymentConfigView, model_entity: Optional[ModelEntity], user_flags: set[str]
 ) -> list[str]:
@@ -99,11 +104,16 @@ def _nemotron_super_vl_args(
     ]
     if view.lora_enabled:
         # Recipe adapters are rank 64; vLLM defaults to rank 16 and one adapter per batch.
-        defaults += [("--max-lora-rank", "64"), ("--max-loras", "4")]
-    elif not (getattr(model_entity, "base_model", None) or getattr(model_entity, "finetuning_type", None)):
-        # Speculative decoding drafts with the checkpoint's MTP layer. A fine-tuned checkpoint may
+        # vLLM reserves GPU memory for every expert in each adapter slot at startup, so
+        # keep two slots: one batch can still mix two adapters.
+        defaults += [("--max-lora-rank", "64"), ("--max-loras", "2")]
+    elif _declares_mtp(model_entity) and not (
+        getattr(model_entity, "base_model", None) or getattr(model_entity, "finetuning_type", None)
+    ):
+        # Speculative decoding drafts with the checkpoint's MTP layer. Not every checkpoint has one
+        # (Nemotron 3.5 Bolt shares this architecture and declares none). A fine-tuned checkpoint may
         # lack it (Automodel's Super VL recipes train with num_nextn_predict_layers: 0), and adapters
-        # are served without it, so only the released base model gets it.
+        # are served without it, so only a released base model with the layer gets it.
         defaults.append(("--speculative-config", json.dumps({"method": "mtp", "num_speculative_tokens": 3})))
     args: list[str] = []
     for flag, value in defaults:

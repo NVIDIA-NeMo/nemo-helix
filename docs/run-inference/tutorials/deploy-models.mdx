@@ -835,13 +835,14 @@ The platform adds these `vllm serve` flags:
 | `--tool-call-parser`, `--enable-auto-tool-choice` | `qwen3_coder` | No tool-call parser is configured on the model or deployment | Turns the model's tool calls into OpenAI `tool_calls`. |
 | `--mamba-ssm-cache-dtype` | `float32` | Always | Precision of the state the Mamba layers carry between tokens. |
 | `--limit-mm-per-prompt` | `{"image": 1, "video": 1}` | Always | At most one image and one video per request. |
-| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model without LoRA | Faster generation; see below. |
-| `--max-lora-rank`, `--max-loras` | `64`, `4` | LoRA enabled | Recipe adapters are rank 64, and vLLM otherwise loads rank 16 and one adapter per batch. |
+| `--speculative-config` | `{"method": "mtp", "num_speculative_tokens": 3}` | Base model with an MTP layer, without LoRA | Faster generation; see below. |
+| `--max-lora-rank`, `--max-loras` | `64`, `2` | LoRA enabled | Recipe adapters are rank 64, and vLLM otherwise loads rank 16 and one adapter per batch. Two slots let one batch use two adapters; vLLM swaps any other adapter in when a request names it. vLLM reserves GPU memory for every expert in each slot at startup, so a higher `--max-loras` needs more GPU memory. |
 
 The speculative config turns on multi-token prediction (MTP). The released checkpoint includes an extra layer trained to predict the next few tokens. At each step vLLM uses that layer to guess the next 3 tokens, then runs the full model once to check all of them, and keeps every guess that matches what the full model would have generated. Responses are the same as without MTP; they arrive faster because one step can produce several tokens.
 
-The platform turns MTP on only for the released base model with LoRA disabled:
+The platform turns MTP on only for a released base model whose checkpoint has the MTP layer, with LoRA disabled:
 
+- Not every checkpoint with this architecture has the layer. The model's spec records the count the checkpoint declares (`num_nextn_predict_layers`); Nemotron 3.5 Bolt declares 0, so it is served without MTP. A model registered before the spec recorded this field gets MTP only after its model spec task runs again.
 - A fine-tuned checkpoint may not have the MTP layer. Automodel's Nemotron 3.5 Super VL recipes set `num_nextn_predict_layers: 0`, which builds the model without that layer, so a checkpoint saved from that training contains no MTP weights.
 - With LoRA, the MTP layer comes from the base model and does not include the adapter's changes. NVIDIA's finance cookbook serves its adapters without MTP.
 

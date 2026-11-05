@@ -27,9 +27,16 @@ _QUANTITY = re.compile(r"([0-9]+(?:\.[0-9]+)?)(Ki|Mi|Gi|Ti|Pi|Ei|k|M|G|T|P|E)?")
 
 
 def quantity_bytes(quantity: str) -> int:
-    """Bytes in a Kubernetes quantity such as ``32Gi`` or ``8G``; raises ``ValueError`` otherwise."""
-    match = _QUANTITY.fullmatch(quantity.strip())
+    """Bytes in a Kubernetes quantity such as ``32Gi`` or ``8G``; raises ``ValueError`` otherwise.
+
+    The size must be a positive whole number of bytes, written without surrounding spaces,
+    because the value is passed unchanged to Kubernetes and Docker reads it in bytes.
+    """
+    match = _QUANTITY.fullmatch(quantity)
     if match is None:
         raise ValueError(f"{quantity!r} is not a Kubernetes quantity such as '32Gi' or '512Mi'")
     number, suffix = match.groups()
-    return int(Decimal(number) * _FACTORS[suffix or ""])
+    size = Decimal(number) * _FACTORS[suffix or ""]
+    if size <= 0 or size != size.to_integral_value():
+        raise ValueError(f"{quantity!r} must be a positive whole number of bytes")
+    return int(size)
