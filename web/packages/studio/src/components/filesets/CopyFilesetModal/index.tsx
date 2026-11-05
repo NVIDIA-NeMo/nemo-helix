@@ -6,7 +6,7 @@ import { getErrorMessage, isConflictError } from '@nemo/common/src/api/common/ut
 import { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { toValidFilesetName } from '@nemo/common/src/utils/filesetName';
+import { toCopyName } from '@nemo/common/src/utils/entityName';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Stack, Text } from '@nvidia/foundations-react-core';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
@@ -20,7 +20,7 @@ import { filesetNameTakenMessage } from '@studio/components/filesets/filesetName
 import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
 import type { NameCheckStatus } from '@studio/components/form/entityNameCheck';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useState } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 
 export interface CopyFilesetModalProps {
@@ -38,6 +38,14 @@ export const CopyFilesetModal: FC<CopyFilesetModalProps> = ({ source, onClose, o
   const [progress, setProgress] = useState<{ copied: number; total: number }>();
   const [isPending, setIsPending] = useState(false);
 
+  // Closing the tab mid-copy skips the rollback and leaves a partial fileset behind.
+  useEffect(() => {
+    if (!isPending) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [isPending]);
+
   const {
     control,
     handleSubmit,
@@ -46,7 +54,7 @@ export const CopyFilesetModal: FC<CopyFilesetModalProps> = ({ source, onClose, o
   } = useForm<FilesetCreateFormData>({
     resolver: zodResolver(filesetCreateFormSchema),
     defaultValues: {
-      name: toValidFilesetName(`${source.name}-copy`),
+      name: toCopyName(source.name),
       description: source.description,
     },
     mode: 'onChange',

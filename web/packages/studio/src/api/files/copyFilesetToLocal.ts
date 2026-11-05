@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { filesCreateFileset, filesDeleteFileset } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { copyFilesetFiles } from '@studio/api/files/uploadFilesetEntries';
@@ -13,7 +14,8 @@ export interface CopyFilesetToLocalParams {
 }
 
 /** Creates a local-storage fileset in the source's workspace and copies every file into it,
- *  deleting the new fileset if any file fails to copy. */
+ *  deleting the new fileset if any file fails to copy. If that cleanup also fails, the thrown
+ *  error names the leftover fileset. */
 export const copyFilesetToLocal = async ({
   source,
   name,
@@ -30,7 +32,13 @@ export const copyFilesetToLocal = async ({
   try {
     await copyFilesetFiles(source, fileset, onProgress);
   } catch (error) {
-    await filesDeleteFileset(fileset.workspace, fileset.name).catch(() => undefined);
+    const message = getErrorMessage(error as Error, 'Failed to copy fileset');
+    await filesDeleteFileset(fileset.workspace, fileset.name).catch(() => {
+      throw new Error(
+        `${message}. The partial fileset ${fileset.workspace}/${fileset.name} could not be removed; delete it manually.`,
+        { cause: error }
+      );
+    });
     throw error;
   }
   return fileset;

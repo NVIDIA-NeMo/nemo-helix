@@ -23,7 +23,7 @@ const source: FilesetOutput = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-const setup = ({ failUpload = false } = {}) => {
+const setup = ({ failUpload = false, failDelete = false } = {}) => {
   const created: unknown[] = [];
   const uploaded: string[] = [];
   const deleted: string[] = [];
@@ -50,6 +50,7 @@ const setup = ({ failUpload = false } = {}) => {
       return HttpResponse.json({});
     }),
     http.delete(`${BASE}/:name`, ({ params }) => {
+      if (failDelete) return HttpResponse.json({ detail: 'nope' }, { status: 500 });
       deleted.push(String(params.name));
       return new HttpResponse(null, { status: 200 });
     })
@@ -79,5 +80,13 @@ describe('copyFilesetToLocal', () => {
 
     await expect(copyFilesetToLocal({ source, name: 'hf-data-copy' })).rejects.toBeDefined();
     expect(deleted).toEqual(['hf-data-copy']);
+  });
+
+  it('names the leftover fileset when the rollback also fails', async () => {
+    setup({ failUpload: true, failDelete: true });
+
+    await expect(copyFilesetToLocal({ source, name: 'hf-data-copy' })).rejects.toThrow(
+      /ws\/hf-data-copy could not be removed/
+    );
   });
 });

@@ -59,7 +59,7 @@ export const copyFilesetFiles = async (
   onProgress?.(copied, files.length);
   await forEachBounded(files, async ({ path }) => {
     const data = await filesDownloadFile(source.workspace, source.name, path);
-    await filesUploadFile(target.workspace, target.name, path, await asOctetStream(data));
+    await filesUploadFile(target.workspace, target.name, path, data);
     onProgress?.(++copied, files.length);
   });
 };
