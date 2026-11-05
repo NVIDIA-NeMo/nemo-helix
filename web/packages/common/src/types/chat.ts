@@ -6,18 +6,12 @@ import {
   ChatCompletionChunk,
   ChatCompletionFunctionMessageParam,
   ChatCompletionMessageParam,
-  ChatCompletionRole,
 } from 'openai/resources/index.mjs';
 import { Stream } from 'openai/streaming.mjs';
 
 export type ChatCompletionRequestReturn = Stream<ChatCompletionChunk> | ChatCompletion;
 export type ChatCompletionRequestReturnData = ChatCompletionChunk | ChatCompletion;
 
-/**
- * An extension of the OpenAI's ChatCompletionRole type that excludes the function parameter
- * because it's deprecated and would add extra boilerplate.
- */
-export type ExcludedChatCompletionRole = Exclude<ChatCompletionRole, 'function'>;
 /**
  * An extension of the OpenAI's ChatCompletionMessageParam type that excludes the function parameter
  * because it's deprecated and would add extra boilerplate.

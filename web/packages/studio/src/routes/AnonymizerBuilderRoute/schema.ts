@@ -39,13 +39,13 @@ import {
   REWRITE_DEFAULT_MAX_REPAIR_ROUNDS,
   REWRITE_MIN_MAX_REPAIR_ROUNDS,
   REWRITE_ROLES,
-  REWRITE_STRATEGY,
   RISK_TOLERANCE_DEFAULT,
   RISK_TOLERANCE_ORDER,
   SOURCE_TYPE_DATASET,
   STRATEGY_ANNOTATE,
   STRATEGY_HASH,
   STRATEGY_REDACT,
+  STRATEGY_REWRITE,
   STRATEGY_SUBSTITUTE,
   supportsSamplingParams,
 } from '@studio/routes/AnonymizerBuilderRoute/constants';
@@ -257,7 +257,7 @@ export const buildAnonymizerJobRequest = (
   defaultEntityLabels: string[] = []
 ): RunJobRequest => {
   const config: AnonymizerConfig =
-    form.strategy === REWRITE_STRATEGY
+    form.strategy === STRATEGY_REWRITE
       ? { rewrite: buildRewriteConfig(form) }
       : { replace: buildReplaceConfig(form) };
 
@@ -301,10 +301,10 @@ export const buildAnonymizerJobRequest = (
     );
 
   const selectedModels: SelectedModelsOverrides = { detection: toRoleMap(DETECTION_ROLES) };
-  if (form.strategy === REWRITE_STRATEGY) {
+  if (form.strategy === STRATEGY_REWRITE) {
     selectedModels.rewrite = toRoleMap(REWRITE_ROLES);
   }
-  if (form.strategy === REWRITE_STRATEGY || form.strategy === STRATEGY_SUBSTITUTE) {
+  if (form.strategy === STRATEGY_REWRITE || form.strategy === STRATEGY_SUBSTITUTE) {
     selectedModels.replace = { [REPLACE_ROLE]: aliasForRole[REPLACE_ROLE] };
   }
 

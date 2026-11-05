@@ -78,7 +78,7 @@ export type UploadModalAction =
 /**
  * Initial state for the UploadModal
  */
-export const initialState: UploadModalState = {
+export const uploadModalInitialState: UploadModalState = {
   files: [],
   dataset: undefined,
   selectedFiles: [],
@@ -104,7 +104,7 @@ export const uploadModalReducer = (
     case 'RESET':
       // Preserve configuration props that were passed as props to UploadModal
       return {
-        ...initialState,
+        ...uploadModalInitialState,
         acceptableFileTypes: state.acceptableFileTypes,
         acceptableFileSize: state.acceptableFileSize,
         allowMultipleFileSelection: state.allowMultipleFileSelection,
@@ -241,11 +241,6 @@ export const uploadModalReducer = (
       return state;
   }
 };
-
-/**
- * Initial state for the UploadModal reducer
- */
-export const uploadModalInitialState: UploadModalState = initialState;
 
 /**
  * Custom hook that provides the UploadModal reducer

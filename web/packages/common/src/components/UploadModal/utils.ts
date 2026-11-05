@@ -22,11 +22,6 @@ export const isFilesetFileOutput = (
 };
 
 /**
- * @deprecated Use isFilesetFileOutput instead
- */
-export const isListFileEntry = isFilesetFileOutput;
-
-/**
  * Type guard to check if a value is a browser File object
  */
 export const isBrowserFile = (file: FilesetFileOutput | File | undefined): file is File => {

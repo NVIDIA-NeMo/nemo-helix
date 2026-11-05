@@ -28,8 +28,6 @@ import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
 
-export type FileType = 'training' | 'testing' | 'validation';
-
 /** Training/finetuning type for display (e.g. training.training_type / training.finetuning_type). */
 export const getFormattedTrainingType = (type?: string) => {
   if (type === undefined) {
