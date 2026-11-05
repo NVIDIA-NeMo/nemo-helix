@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
@@ -44,6 +45,25 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # the fixed version, so inherit its compatible locked version as well.
 RUN /opt/gym-host-venv/bin/python -c \
     'from importlib.metadata import version; from pathlib import Path; Path("/opt/gym-host-overrides.txt").write_text("".join(f"{name}=={version(name)}\n" for name in ("urllib3", "fsspec", "datasets")))'
+
+# Gym 0.5.0's component --override flag takes precedence over UV_OVERRIDE.
+# Preserve the component file and pass the host pins explicitly as well. This
+# patches the host command builder used by both prefetch and runtime setup;
+# fail the build if an upstream change makes this backport no longer applicable.
+RUN /opt/gym-host-venv/bin/python - <<'PY'
+from importlib.metadata import distribution
+
+path = distribution("nemo-gym").locate_file("nemo_gym/cli/setup_command.py")
+source = path.read_text()
+old = 'override_flag = "--override overrides.txt " if has_overrides_txt else ""'
+new = (
+    'override_flag = ("--override overrides.txt " if has_overrides_txt else "") '
+    '+ "--override /opt/gym-host-overrides.txt "'
+)
+if source.count(old) != 1:
+    raise SystemExit("Unexpected Gym setup command; review the host-override backport")
+path.write_text(source.replace(old, new))
+PY
 
 # Build the per-server venvs now rather than on first run. Gym creates one venv per agent, model and
 # resources server the config selects, which is ~3 GB and several minutes -- paid once here instead
