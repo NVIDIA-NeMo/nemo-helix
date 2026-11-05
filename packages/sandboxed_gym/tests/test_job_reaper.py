@@ -13,6 +13,9 @@ from __future__ import annotations
 import asyncio
 import atexit
 import signal
+import subprocess
+import sys
+import textwrap
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -151,6 +154,31 @@ def test_reap_completes_when_called_inside_a_running_event_loop(
     assert removed == ("gym-host-1",)
     assert provider.destroyed == ["rl-1"]
     assert "failed to reap" not in caplog.text
+
+
+def test_reap_resolves_the_control_plane_from_a_real_atexit_hook() -> None:
+    """Thread pools refuse work before atexit hooks run, and DNS resolution runs on the loop's pool.
+
+    A subprocess, because only a real interpreter exit puts the pools in that state.
+    """
+    script = textwrap.dedent(
+        """
+        import asyncio, atexit
+        import sandboxed_gym.job_reaper as job_reaper
+
+        class _Provider:
+            async def destroy_job_sandboxes(self, job_id):
+                await asyncio.get_running_loop().getaddrinfo("localhost", 80)
+                return ("gym-host-1",)
+
+        job_reaper.get_host_provider = lambda name, options=None: _Provider()
+        atexit.register(lambda: print("removed", job_reaper.reap_job_sandboxes("rl-1", host_provider="opensandbox")))
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60, check=True)
+
+    assert "removed ('gym-host-1',)" in result.stdout
+    assert "failed to reap" not in result.stderr
 
 
 def test_exit_and_cancel_both_reap(monkeypatch: pytest.MonkeyPatch, restore_process_state) -> None:
