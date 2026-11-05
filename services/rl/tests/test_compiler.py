@@ -410,6 +410,44 @@ async def test_compiler_emits_four_steps(
 
 
 @pytest.mark.asyncio
+async def test_dpo_text_moe_compiles_with_the_default_expert_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(num_experts=8, has_vision_tower=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(DPOTraining(type="dpo", parallelism=ParallelismParams(num_gpus_per_node=4)))
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[1]["name"] == "dpo-training"
+
+
+@pytest.mark.asyncio
+async def test_grpo_text_moe_keeps_the_default_expert_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+    platform_clients: AsyncCustomizationHelixClients,
+    sandbox_capable: None,
+) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+
+    entity = _make_model_entity()
+    entity.spec = ModelSpec.model_construct(num_experts=8, has_vision_tower=False)
+    monkeypatch.setattr("nhx.rl.app.jobs.compiler.fetch_model_entity", AsyncMock(return_value=entity))
+    job = _make_job_output(
+        GRPOTraining(type="grpo", parallelism=ParallelismParams(num_gpus_per_node=4)),
+        environment="default/env",
+    )
+
+    spec = await platform_job_config_compiler("default", job, platform_clients)
+
+    assert _steps(spec)[1]["name"] == "grpo-training"
+
+
+@pytest.mark.asyncio
 async def test_compiler_rejects_model_without_fileset(
     monkeypatch: pytest.MonkeyPatch,
     platform_clients: AsyncCustomizationHelixClients,
@@ -428,6 +466,31 @@ def test_grpo_download_includes_environment() -> None:
     dests = [item.dest for item in cfg.download]
     assert "/var/run/scratch/job/environment" in dests
     assert len(cfg.download) == 3
+
+
+def test_grpo_training_step_copies_recorded_vision_traits(sandbox_capable: None) -> None:
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.customization_common.schemas.checkpoint import traits_from_model_spec
+
+    spec = ModelSpec.model_construct(
+        has_vision_tower=True,
+        has_audio_tower=True,
+        num_experts=16,
+        num_nextn_predict_layers=1,
+        checkpoint_model_name="NemotronH_Omni",
+        head_type="causal_lm",
+    )
+    sc = _build_training_step_config(
+        _make_job_output(GRPOTraining(type="grpo"), environment="default/env"),
+        trust_remote_code=False,
+        traits=traits_from_model_spec(spec),
+    )
+
+    assert sc.model.has_vision_tower is True
+    assert sc.model.has_audio_tower is True
+    assert sc.model.num_experts == 16
+    assert sc.model.num_nextn_predict_layers == 1
+    assert sc.model.checkpoint_model_name == "NemotronH_Omni"
 
 
 def test_grpo_training_step_config_sandboxed(sandbox_capable: None) -> None:

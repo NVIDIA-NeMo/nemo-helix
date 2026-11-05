@@ -199,18 +199,18 @@ WHEEL_LATEST = "LATEST"
 #: ``WORKDIR`` of every rendered agent image.
 _IMAGE_WORKDIR = "/workspace"
 
-# Unreleased Hermes main with Relay 0.9 (NousResearch/hermes-agent#115343); pin a release once one includes it.
-PINNED_HERMES_COMMIT = "dccb84b92401234db294667ec203d3ac3dc1b87f"
+# Fabric 0.6's tested Hermes revision; its isolated adapter requires Relay 0.10.
+PINNED_HERMES_COMMIT = "bf0203a794a07aac3ff764972ab9087baa4e4f4e"
 
 # Pi harness (nvidia.fabric.pi) is a Node/npm adapter: the image installs Node + the
 # npm adapter + Pi SDK peers additively, alongside the Python/Rust Fabric stack.
 # Pi 1.x requires Node >= 22.19.0.
 PINNED_NODE_MAJOR = "22"
-PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.5.0"
+PI_ADAPTER_NPM_SPEC = "nemo-fabric-adapters-pi@^0.6.0"
 # The adapter declares the Pi SDK as OPTIONAL peers, so they are installed explicitly.
-# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.5.0 requires
-# ^1.0.0) so the explicitly-installed SDK matches what the adapter was built against.
-PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@^1.0.0 @earendil-works/pi-coding-agent@^1.0.0 @earendil-works/pi-mcp@^1.0.0"
+# Pin to the adapter's declared peer range (nemo-fabric-adapters-pi@0.6.0 requires
+# 1.0.3) so the explicitly-installed SDK matches what the adapter was built against.
+PI_SDK_NPM_SPECS = "@earendil-works/pi-ai@1.0.3 @earendil-works/pi-coding-agent@1.0.3 @earendil-works/pi-mcp@1.0.3 @earendil-works/pi-codemode@1.0.3"
 
 
 def _pi_sdk_package_names(specs: str = PI_SDK_NPM_SPECS) -> list[str]:
@@ -232,13 +232,13 @@ def _pi_sdk_package_names(specs: str = PI_SDK_NPM_SPECS) -> list[str]:
 # The build-time ESM resolution probe imports exactly these packages, derived from
 # PI_SDK_NPM_SPECS so the probe cannot drift from the installed set.
 _PI_SDK_IMPORT_PROBE = "; ".join(f'await import("{name}")' for name in _pi_sdk_package_names())
-# NeMo Relay 0.9 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
-PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.9.0,<0.10.0"
+# NeMo Relay 0.11 CLI must be on PATH for Relay-enabled Pi telemetry (ATIF/OTEL/OpenInference).
+PI_RELAY_CLI_SPEC = "nemo-relay-cli-bin>=0.11.0,<0.12.0"
 # The Relay Pi extension is shipped only in the NeMo-Relay source tree (not the
 # nemo-relay-cli-bin wheel or the npm adapter), so the image fetches it from a
-# pinned Relay 0.9 ref. Kept in lockstep with PI_RELAY_CLI_SPEC's 0.9.x range so
+# pinned Relay 0.11 ref. Kept in lockstep with PI_RELAY_CLI_SPEC's 0.11.x range so
 # the gateway CLI and the extension it loads cannot drift.
-PI_RELAY_EXTENSION_REF = "0.9.0"
+PI_RELAY_EXTENSION_REF = "0.11.0"
 PI_RELAY_EXTENSION_REPO = "https://github.com/NVIDIA/NeMo-Relay.git"
 # Path to the Pi extension package WITHIN the Relay source tree.
 _PI_RELAY_EXTENSION_SRC_SUBDIR = "crates/cli/assets/pi-extension"
@@ -443,12 +443,8 @@ RUN --mount=type=cache,id=uv_cache,target=/root/.cache/uv,sharing=locked \\
     git -C /opt/hermes-agent remote add origin https://github.com/NousResearch/hermes-agent.git && \\
     git -C /opt/hermes-agent fetch --depth 1 origin {{ pinned_hermes_commit }} && \\
     git -C /opt/hermes-agent checkout --quiet --detach FETCH_HEAD && \\
-    FABRIC_VERSION="$(/workspace/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("nemo-fabric"))')" && \\
-    uv pip install --no-sources --prerelease=allow --python /opt/hermes-venv/bin/python \\
-      "nemo-fabric[relay]==${FABRIC_VERSION}" \\
-      "nemo-fabric-adapters-hermes==${FABRIC_VERSION}" \\
-      --editable /opt/hermes-agent && \\
-    uv pip check --python /opt/hermes-venv/bin/python && \\
+    /workspace/.venv/bin/python -m nemo_agents_plugin.container.install_hermes \\
+      --checkout /opt/hermes-agent --python /opt/hermes-venv/bin/python && \\
     chmod -R a+rX /opt/hermes-agent /opt/hermes-venv
 ENV ADAPTER_PYTHON=/opt/hermes-venv/bin/python
 {% endif %}

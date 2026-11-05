@@ -8,7 +8,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { getModelVersion, TagLabel, tagToIcon } from '@nemo/common/src/constants/modelMetadata';
 import { kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { isDefined } from '@nemo/common/src/utils/list';
-import { ChatMulti, Eye, EyeOff, Layers, HAlignLeft, IconWindow } from '@nemo/icons/icons';
+import { ChatMulti, Eye, EyeOff, Layers, TextAlignLeft, IconWindow } from '@nemo/icons/icons';
 import {
   ModelDeploymentStatus,
   type Adapter,
@@ -96,7 +96,7 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
         {parameters != null && (
           <Tooltip slotContent="Parameters">
             <Flex align="center" gap="1">
-              <HAlignLeft />
+              <TextAlignLeft />
               <Text kind="body/regular/sm">
                 {parametersToString(parameters, { format: 'short' })}
               </Text>

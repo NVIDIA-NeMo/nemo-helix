@@ -4,7 +4,8 @@
 import asyncio
 import copy
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Generator
+from contextlib import contextmanager
 from typing import Any
 
 from nemo_guardrails_plugin.constants import (
@@ -12,6 +13,7 @@ from nemo_guardrails_plugin.constants import (
     PROCESS_REQUEST_RAIL_TYPES,
     PROCESS_RESPONSE_RAIL_TYPES,
 )
+from nemo_guardrails_plugin.iorails_runtime import IORailsRuntime, iorails_enabled
 from nemo_guardrails_plugin.llm_clients import platform_headers_context, register_header_aware_nim_provider
 from nemo_guardrails_plugin.llmrails_cache import (
     DefaultLLMRailsBuilder,
@@ -32,6 +34,7 @@ from nemo_guardrails_plugin.rails import (
     build_generate_async_options,
     build_guardrails_data,
     build_main_llm,
+    require_request_model,
     run_generate_in_new_loop,
 )
 from nemo_guardrails_plugin.requests import (
@@ -142,7 +145,7 @@ def handle_streaming_output_check(
     request_body: dict[str, Any],
     messages: list[dict[str, Any]],
 ) -> AsyncIterator[dict[str, Any]]:
-    """Run streaming output rails; yields OpenAI chat-completion chunks.
+    """Run streaming output rails on LLMRails; yields OpenAI chat-completion chunks.
 
     Blocks emit a blocked final chunk; streaming errors emit an error chunk.
     """
@@ -152,9 +155,37 @@ def handle_streaming_output_check(
         generator=token_stream,
         messages=list(messages),
     )
+    return _to_output_chunks(output_rails_stream, response_result, request_body, metadata)
+
+
+def handle_streaming_output_check_on_iorails(
+    runtime: IORailsRuntime,
+    stable: StableRailsConfig,
+    response_result: AsyncIterator[dict[str, Any]],
+    request_body: dict[str, Any],
+    messages: list[dict[str, Any]],
+) -> AsyncIterator[dict[str, Any]]:
+    """Run streaming output rails on IORails; same chunks and error behavior as the LLMRails path."""
+    # Reduce the upstream chunks to plain tokens, keeping their metadata for the way back.
+    metadata = ChatCompletionChunkMetadata()
+    token_stream = chunks_to_strings(response_result, metadata)
+
+    output_rails_stream = runtime.stream_output_rails(stable, token_stream, messages=list(messages))
+
+    return _to_output_chunks(output_rails_stream, response_result, request_body, metadata)
+
+
+def _to_output_chunks(
+    output_rails_stream: AsyncIterator[str],
+    response_result: AsyncIterator[dict[str, Any]],
+    request_body: dict[str, Any],
+    metadata: ChatCompletionChunkMetadata,
+) -> AsyncIterator[dict[str, Any]]:
+    """Turn a guarded token stream, from either engine, into chat-completion chunks."""
 
     async def _stream_output_chunks() -> AsyncIterator[dict[str, Any]]:
         try:
+            # Rebuild chat-completion chunks from the guarded tokens; a block arrives as an error token.
             async for chunk in strings_to_chunks(
                 output_rails_stream,
                 metadata=metadata,
@@ -162,9 +193,11 @@ def handle_streaming_output_check(
             ):
                 yield chunk
         except Exception as exc:
+            # The response has already started, so report the failure to the client as an error chunk.
             logger.error("Exception while streaming output rails: %s", exc, exc_info=True)
             yield build_streaming_error_response(exc)
         finally:
+            # Release both streams even if the client disconnects.
             await close_async_iterator(output_rails_stream)
             await close_async_iterator(response_result)
 
@@ -180,6 +213,8 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
     # Memoization of ``HelixRailsConfig`` to ``StableRailsConfig``
     # transform by entity identity ``(workspace, name, updated_at)``.
     _stable_cache: StabilizedRailsConfigCache | None = None
+    # ``None`` unless ``NEMO_GUARDRAILS_IORAILS_ENGINE`` is set; every request then uses LLMRails.
+    _iorails_runtime: IORailsRuntime | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle hooks
@@ -195,14 +230,29 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         self._rails_cache = LLMRailsCache(builder=DefaultLLMRailsBuilder())
         self._stable_cache = StabilizedRailsConfigCache()
 
+        # Opt-in: the runtime exists only when the operator enabled IORails.
+        if iorails_enabled():
+            logger.info(
+                "IORails engine enabled; configs it supports run their input and output rails on IORails, "
+                "all other requests stay on LLMRails"
+            )
+            self._iorails_runtime = IORailsRuntime()
+
     async def on_shutdown(self) -> None:
         # Detach attributes before awaiting close so a partial close can't
         # leave a half-torn-down cache visible to a later request.
         cache, self._rails_cache = self._rails_cache, None
+        iorails_runtime, self._iorails_runtime = self._iorails_runtime, None
         self._client = None
         self._stable_cache = None
-        if cache is not None:
-            await cache.close()
+
+        # Stop the IORails engines first, but always close the LLMRails cache even if that fails.
+        try:
+            if iorails_runtime is not None:
+                await iorails_runtime.close()
+        finally:
+            if cache is not None:
+                await cache.close()
 
     async def on_virtual_model_upserted(self, virtual_model: VirtualModel) -> None:
         """Warm the cache for each guardrails config the VM references.
@@ -517,6 +567,38 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
                     status_code=400,
                 )
 
+            # IORails serves the guarded stream without a lease when the config supports it.
+            iorails_runtime = self._iorails_runtime
+            with self._map_setup_errors("Failed to run streaming output rails"):
+                iorails_stable = self._stable_config_for_iorails(
+                    source, request_body, rail_types=PROCESS_RESPONSE_RAIL_TYPES
+                )
+                iorails_client = (ctx.request_nemo_client or self._ensure_client()) if iorails_stable else None
+
+            if iorails_runtime is not None and iorails_stable is not None and iorails_client is not None:
+                # Copy what the generator needs: it runs after this method has returned.
+                iorails_messages = copy.deepcopy(_latest_user_message(messages))
+                iorails_request_body = dict(request_body)
+
+                async def _streaming_on_iorails() -> AsyncIterator[dict[str, Any]]:
+                    inner = handle_streaming_output_check_on_iorails(
+                        iorails_runtime, iorails_stable, response_result, iorails_request_body, iorails_messages
+                    )
+                    try:
+                        # The rail-model calls happen while the stream is consumed, so the request's
+                        # headers must be in scope here and not only when the stream was created.
+                        with platform_headers_context(iorails_client):
+                            async for chunk in inner:
+                                yield chunk
+                    finally:
+                        await close_async_iterator(inner)
+
+                return InferenceResponse(
+                    result=_streaming_on_iorails(),
+                    headers=response.headers,
+                    response_body_annotations=dict(response.response_body_annotations),
+                )
+
             # Lease setup is split eager vs lazy.
             #
             # Eager: cache null-check, stabilize, build_main_llm. Failures
@@ -723,38 +805,100 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
           propagated so caller-set ``status_code`` survives.
         - Anything else below the lease → 503 with ``error_msg``.
         """
+        # Pick the engine first, so setup errors map to the same statuses whichever one serves the request.
+        iorails_runtime = self._iorails_runtime
+        with self._map_setup_errors(error_msg):
+            iorails_stable = self._stable_config_for_iorails(source, request_body, rail_types=rail_types)
+            iorails_client = (ctx.request_nemo_client or self._ensure_client()) if iorails_stable else None
+
+        # IORails when the request and config allow it; the LLMRails path below is the fallback.
+        if iorails_runtime is not None and iorails_stable is not None and iorails_client is not None:
+            iorails_runtime.warn_ignored_log_options(user_log_options)
+            with self._map_rails_errors(error_msg), platform_headers_context(iorails_client):
+                return await iorails_runtime.check(iorails_stable, messages=messages, rail_types=rail_types)
+
         cache, stable, provenance, main_llm, client = await self._prepare_lease_with_503(
             ctx, source, request_body, request_headers, error_msg
         )
+        with self._map_rails_errors(error_msg), platform_headers_context(client):
+            async with cache.lease(stable, main_llm=main_llm, provenance=provenance) as llm_rails:
+                raw_generation_response = await asyncio.to_thread(
+                    run_generate_in_new_loop,
+                    llm_rails,
+                    messages=messages,
+                    options=build_generate_async_options(rail_types, user_log_options),
+                )
+        return GenerationResponseMapper.parse(raw_generation_response)
+
+    def _stable_config_for_iorails(
+        self,
+        source: GuardrailConfigSource,
+        request_body: dict[str, Any],
+        *,
+        rail_types: list[str],
+    ) -> StableRailsConfig | None:
+        """The stabilized config to run on IORails, or ``None`` when the request needs LLMRails.
+
+        That is when IORails is off, the request runs more than one rail family, or the config has
+        rails IORails doesn't support. What the caller put in the request, such as log options, never
+        changes the engine.
+        Raises like :meth:`_prepare_lease`, so call it under :meth:`_map_setup_errors`.
+        """
+        runtime = self._iorails_runtime
+        stable_cache = self._stable_cache
+
+        # IORails is off, or the middleware isn't started.
+        if runtime is None or stable_cache is None:
+            return None
+
+        # IORails checks one rail family at a time.
+        if len(rail_types) != 1:
+            return None
+
+        # The checks need no main model, but a request LLMRails would reject must not succeed here.
+        require_request_model(request_body)
+        stable = stable_cache.get_or_compute(source, self.get_openai_compatible_inference_url_and_model)
+
+        # Stay on LLMRails when IORails can't serve this config (the reason is logged once).
+        return None if runtime.unsupported_reason(stable) is not None else stable
+
+    @contextmanager
+    def _map_setup_errors(self, error_msg: str) -> Generator[None, None, None]:
+        """Map failures while preparing a rails run to the plugin's wire statuses.
+
+        - ``ValueError`` → 400 (caller-shape: missing ``model``, malformed inline config).
+        - :class:`InferenceMiddlewareError` → propagated unchanged.
+        - Anything else → 503 with ``error_msg``, original as ``__cause__``.
+        """
         try:
-            with platform_headers_context(client):
-                async with cache.lease(stable, main_llm=main_llm, provenance=provenance) as llm_rails:
-                    raw_generation_response = await asyncio.to_thread(
-                        run_generate_in_new_loop,
-                        llm_rails,
-                        messages=messages,
-                        options=build_generate_async_options(rail_types, user_log_options),
-                    )
+            yield
         except InferenceMiddlewareError:
-            # Preserves the caller's explicit ``status_code``; wrapping to
-            # 503 here would clobber it.
+            # Already carries its own status code.
             raise
+        except ValueError as exc:
+            raise InferenceMiddlewareError(str(exc), status_code=400) from exc
         except Exception as exc:
-            # Rail-task LLM calls (e.g. a vision-safety judge) can fail with
-            # a real upstream status code (bad request shape, unsupported
-            # parameter, provider outage, etc.) that nemoguardrails otherwise
-            # buries inside a generic exception. Recover and propagate it
-            # verbatim so callers see the actual upstream status instead of
-            # our own middleware's fallback.
-            if upstream_error := extract_upstream_error(exc):
-                raise upstream_error from exc
-            # ``ValueError`` from below the lease boundary is a library bug,
-            # not caller-shape (caller-shape ValueErrors are caught and
-            # converted to 400 in ``_prepare_lease_with_503`` before we
-            # ever reach the lease), so it correctly wraps to 503.
             raise InferenceMiddlewareUnavailableError(error_msg) from exc
 
-        return GenerationResponseMapper.parse(raw_generation_response)
+    @contextmanager
+    def _map_rails_errors(self, error_msg: str) -> Generator[None, None, None]:
+        """Map failures while running rails to the plugin's wire statuses, for every engine.
+
+        - :class:`InferenceMiddlewareError` → propagated so the caller's ``status_code`` survives.
+        - An upstream status buried in the library's exception (e.g. a rail-model call that got a bad
+          request or hit a provider outage) → that status, verbatim.
+        - Anything else → 503 with ``error_msg``. A ``ValueError`` here is a library bug, since
+          caller-shape errors already became 400s during setup.
+        """
+        try:
+            yield
+        except InferenceMiddlewareError:
+            # Already carries its own status code.
+            raise
+        except Exception as exc:
+            if upstream_error := extract_upstream_error(exc):
+                raise upstream_error from exc
+            raise InferenceMiddlewareUnavailableError(error_msg) from exc
 
     async def _prepare_lease_with_503(
         self,
@@ -779,16 +923,10 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         - :class:`InferenceMiddlewareError` → propagated unchanged.
         - Anything else → 503 with ``error_msg``, original as ``__cause__``.
         """
-        try:
+        with self._map_setup_errors(error_msg):
             cache, stable, provenance, main_llm = await self._prepare_lease(source, request_body, request_headers)
             client = ctx.request_nemo_client or self._ensure_client()
             return cache, stable, provenance, main_llm, client
-        except InferenceMiddlewareError:
-            raise
-        except ValueError as exc:
-            raise InferenceMiddlewareError(str(exc), status_code=400) from exc
-        except Exception as exc:
-            raise InferenceMiddlewareUnavailableError(error_msg) from exc
 
     async def _prepare_lease(
         self,

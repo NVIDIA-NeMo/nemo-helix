@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import os
 import subprocess
@@ -29,6 +30,7 @@ pytest.importorskip("nhx_sandbox")
 from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
+from nhx_sandbox import egress
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
 from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.core.termination import TERMINATION_GLOB
@@ -260,6 +262,32 @@ async def test_allowlist_task_narrows_the_trusted_allowlist(tmp_path: Path, serv
 
     allowed = {rule["target"] for rule in _policy_sent(server)["egress"] if rule["action"] == "allow"}
     assert allowed == {"*.NVIDIA.com", "10.96.0.10"}
+
+
+async def test_allowlist_task_narrows_a_trusted_wildcard_and_cidr(tmp_path: Path, server: Server) -> None:
+    """A task may ask for a subdomain of a trusted wildcard and an address inside a trusted CIDR."""
+    environment = _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["docs.nvidia.com", "2001:db8::1"])
+
+    await environment._create_sandbox()
+
+    allowed = {rule["target"] for rule in _policy_sent(server)["egress"] if rule["action"] == "allow"}
+    assert allowed == {"docs.nvidia.com", "2001:db8::1", "10.96.0.10"}
+
+
+@pytest.mark.parametrize("address", ["10.0.0.51", "169.254.169.254"])
+async def test_a_host_narrowed_from_a_wildcard_keeps_the_private_denies(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch, address: str
+) -> None:
+    """A task host admitted through ``*.nvidia.com`` can't carve its private answer out of the deny ranges."""
+    monkeypatch.setattr(egress, "_resolve_host", lambda target: (ipaddress.ip_network(address),))
+    environment = _environment(tmp_path, server, NetworkMode.ALLOWLIST, ["internal.nvidia.com"])
+
+    await environment._create_sandbox()
+
+    rules = _policy_sent(server)["egress"]
+    assert {"target": "internal.nvidia.com", "action": "allow"} in rules
+    denied = [ipaddress.ip_network(rule["target"]) for rule in rules if rule["action"] == "deny"]
+    assert any(ipaddress.ip_address(address) in network for network in denied if network.version == 4)
 
 
 def test_allowlist_task_cannot_extend_the_trusted_allowlist(tmp_path: Path, server: Server) -> None:

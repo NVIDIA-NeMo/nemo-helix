@@ -8,7 +8,6 @@ from typing import List, Optional, Type, Union
 
 import yaml
 from fastapi import HTTPException, Request, status
-from nemoguardrails import LLMRails
 from nhx.guardrails.api.schemas import ChatCompletionResponseChoice, CompletionResponseChoice
 from nhx.guardrails.app.constants import X_MODEL_AUTHORIZATION_HEADER
 from nhx.guardrails.app.handlers.utils import (
@@ -18,6 +17,7 @@ from nhx.guardrails.app.handlers.utils import (
     get_model_config_object,
     run_generate_async,
     set_main_model_merged_custom_headers_into_context,
+    stream_rails_async,
     to_internal_rails_config,
 )
 from nhx.guardrails.app.schemas.utils.request_converters import (
@@ -32,6 +32,7 @@ from nhx.guardrails.app.schemas.utils.stream_resonse_transformers import (
     create_guardrail_chat_completion_stream_response_from_chunk,
     create_guardrail_completion_stream_response_from_chunk,
 )
+from nhx.guardrails.app.services.rails.engine import create_rails_engine, retire_rails_engine
 from nhx.guardrails.app.services.rails.service import RailsService
 from nhx.guardrails.app.services.utils import normalize_config_ids
 from nhx.guardrails.app.utils.config_utils import configure_rails_config
@@ -86,6 +87,8 @@ class CompletionRequestHandler:
     ):
         self.request_body = request_body
         self.llm_rails = None
+        # True when this request built its own engine (inline config) and must shut it down.
+        self._inline_engine = False
         self.normal_response_model = normal_response_model
         self.streaming_response_model = streaming_response_model
         self.request = request
@@ -104,6 +107,25 @@ class CompletionRequestHandler:
         self._raw_request_body = request_body.model_dump(exclude_unset=True)  # type: ignore
 
     async def handle_request(self):
+        try:
+            response = await self._handle_request()
+        except BaseException:
+            self._retire_inline_engine()
+            raise
+
+        # A streamed response shuts the engine down itself once the stream has been consumed.
+        if not isinstance(response, StreamingResponse):
+            self._retire_inline_engine()
+
+        return response
+
+    def _retire_inline_engine(self) -> None:
+        """Shut down the engine an inline config built for this request; registry engines are shared."""
+        if self._inline_engine and self.llm_rails is not None:
+            retire_rails_engine(self.llm_rails)
+        self._inline_engine = False
+
+    async def _handle_request(self):
         log.info("Got request for config(s) %s", getattr(self.body, "config_ids", None))
 
         self.set_api_request_headers()
@@ -161,12 +183,14 @@ class CompletionRequestHandler:
             try:
                 # Run LLMRails init in a thread to avoid blocking the event loop.
                 # LLMRails.__init__ has blocking file I/O and a blocking thread.join() for KB init.
-                self.llm_rails = await asyncio.to_thread(LLMRails, to_internal_rails_config(rails_config))
+                self.llm_rails = await asyncio.to_thread(create_rails_engine, to_internal_rails_config(rails_config))
             except Exception as e:
                 log.error(
                     f"Failed to instantiate LLMRails instance for config {config_ids} and model {main_model_name}"
                 )
                 raise e
+
+            self._inline_engine = True
 
         else:
             raise ValueError("No config_id or config provided in the request")
@@ -306,9 +330,15 @@ class CompletionRequestHandler:
                 error_data = ErrorData(error=ErrorDetails(message=str(e), type=type(e).__name__, param="", code="500"))
                 yield f"data: {error_data.model_dump_json()}\n\n"
 
-        generator = streaming_handler(messages=messages, prompt=prompt)
+        async def retire_when_done(stream):
+            try:
+                async for chunk in stream:
+                    yield chunk
+            finally:
+                await stream.aclose()
+                self._retire_inline_engine()
 
-        return generator
+        return retire_when_done(streaming_handler(messages=messages, prompt=prompt))
 
     def _stream_async(
         self,
@@ -317,12 +347,7 @@ class CompletionRequestHandler:
         options=None,
         state=None,
     ):
-        return self.llm_rails.stream_async(
-            prompt=prompt,
-            messages=messages,
-            options=options,
-            state=state,
-        )
+        return stream_rails_async(self.llm_rails, prompt=prompt, messages=messages, options=options, state=state)
 
     def _get_prompt_or_messages(self, body):
         prompt = getattr(body, "prompt", None)

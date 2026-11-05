@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Plugin, Workstation } from '@nemo/icons/icons';
+import { PlugReceptacle, DriveNetwork } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
 import { ROUTES } from '@studio/constants/routes';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -51,14 +51,14 @@ export const ChatEmptyState: FC<ChatEmptyStateProps> = ({ hasModels }) => {
                   navigate(generatePath(ROUTES.workspace.inferenceProviders, { workspace }))
                 }
               >
-                <Plugin size="16" />
+                <PlugReceptacle size="16" />
                 Connect inference provider
               </Button>
               <Button
                 kind="secondary"
                 onClick={() => navigate(generatePath(ROUTES.workspace.deployments, { workspace }))}
               >
-                <Workstation size="16" />
+                <DriveNetwork size="16" />
                 Create deployment
               </Button>
             </div>

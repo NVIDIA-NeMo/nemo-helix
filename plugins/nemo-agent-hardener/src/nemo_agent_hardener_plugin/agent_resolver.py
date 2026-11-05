@@ -38,6 +38,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, derive_binaries, dockerfile_env
 from nemo_agents_plugin.sdk import AgentsResource
 from nemo_helix_plugin.client.client import NemoClient
 
@@ -383,6 +384,7 @@ def build_manifest_dict(
     relay_artifacts: str | None = None,
     harness: str | None = None,
     env: dict[str, str] | None = None,
+    binaries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the ``agent-hardener.yaml`` mapping (mirrors ``agent_hardener.manifest.build_manifest``).
 
@@ -398,7 +400,7 @@ def build_manifest_dict(
         "harness": harness,
         "dockerfile": DOCKERFILE_FILENAME,
         "start_command": fabric_start_command(port),
-        "binaries": list(VICTIM_BINARIES),
+        "binaries": list(VICTIM_BINARIES) if binaries is None else binaries,
         "port": port,
         "secrets": secrets,
         "secrets_file": secrets_file,
@@ -653,6 +655,7 @@ def resolve_agent_to_manifest(
     port: int | None = None,
     secrets: list[str] | None = None,
     backends: list[dict[str, Any]] | None = None,
+    env: dict[str, str] | None = None,
 ) -> ResolvedManifest:
     """Resolve a deployed-agent reference into a ready Agent Hardener manifest.
 
@@ -712,6 +715,19 @@ def resolve_agent_to_manifest(
         dockerfile_override=shipped_dockerfile(client, name, workspace),
         bundle=lambda destination: download_agent_bundle(client, name, workspace, destination),
     )
+    runtime_env = {**derive_agent_env(agent_config), **(env or {})}
+    binaries = list(VICTIM_BINARIES)
+    if harness == "hermes":
+        image_env = dockerfile_env((project_path / DOCKERFILE_FILENAME).read_text(encoding="utf-8"))
+        runtime_env = {**{key: image_env[key] for key in HERMES_RUNTIME_ENV if key in image_env}, **runtime_env}
+        interpreter_binaries = derive_binaries("", runtime_env)
+        if not interpreter_binaries:
+            raise AgentResolutionError(
+                "Cannot determine the Hermes runtime paths. Supply literal absolute paths for ADAPTER_PYTHON, "
+                "UV_PYTHON_INSTALL_DIR and HERMES_NEMO_RELAY_PLUGINS_TOML where configured, "
+                "or use --project-dir with --binary for an interpreter installed elsewhere."
+            )
+        binaries.extend(interpreter_binaries)
     # The deployment's secret-backed env vars are victim secrets too, even if the config never names them.
     secrets = list(dict.fromkeys([*(secrets or derive_secret_names(agent_config)), *deployed_secret_refs]))
 
@@ -726,7 +742,8 @@ def resolve_agent_to_manifest(
         egress=egress,
         backends=[*([gw_backend] if gw_backend else []), *(backends or [])],
         harness=harness,
-        env=derive_agent_env(agent_config),
+        env=runtime_env,
+        binaries=binaries,
     )
 
     return ResolvedManifest(

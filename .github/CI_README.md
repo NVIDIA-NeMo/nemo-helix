@@ -30,6 +30,17 @@ reusable actions, and supporting docs.
   On successful `main` pushes, it also sends a completion event to an external
   CI consumer.
 
+  Python integration tests run in two duration-balanced, whole-package groups
+  with four xdist workers each. `services` covers services except core secrets;
+  `platform` covers secrets, plugins, packages, and root tests. Both retain normal
+  discovery and `loadgroup` scheduling. Reports and crash dumps are separate per
+  group; the coverage comment combines raw data from both groups.
+
+  Local `make test-integration` still runs the entire suite. To select a group,
+  use `make test-integration PYTEST_EXTRA=--integration-group=services` (or
+  `platform`). Allocation lives in `tests/integration_groups.py`. Grouping does
+  not change whether integration tests block merges or introduce retries.
+
   The final `ci-status` job is the merge gate for this workflow. Repository
   branch protection or rulesets should require `CI status`, not the individual
   test jobs. The job checks every job listed in its `needs` and passes only

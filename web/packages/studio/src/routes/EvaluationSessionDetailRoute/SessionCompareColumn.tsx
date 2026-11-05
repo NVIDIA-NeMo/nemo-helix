@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { ChevronUpDown, IconError } from '@nemo/icons/icons';
+import { Collapse, ChevronUpDown, IconError } from '@nemo/icons/icons';
 import { useListAnnotations } from '@nemo/sdk/generated/platform/annotations';
 import {
   AnnotationSortField,
@@ -149,7 +149,7 @@ export const SessionCompareColumn: FC<SessionCompareColumnProps> = ({
             onClick={collapseAll}
             disabled={spanRows.length === 0}
           >
-            <ChevronUpDown size="14" aria-hidden />
+            <Collapse size="14" aria-hidden />
           </Button>
           <Button
             kind="tertiary"

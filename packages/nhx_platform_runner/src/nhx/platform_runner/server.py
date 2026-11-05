@@ -27,6 +27,7 @@ from nhx.common.observability import initialize_obs, setup_fastapi_instrumentati
 from nhx.common.observability.context import create_app_context_dependency
 from nhx.common.pyleak import detect_blocking
 from nhx.common.service import Service
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS, HelixAppConfig
 from nhx.platform_runner.controller_threads import (
     join_and_untrack_runner_threads,
@@ -260,7 +261,7 @@ def create_app(
     app = QueryParamSchemaFastAPI(
         title="NeMo Helix API",
         description="API for NeMo Helix services",
-        version="0.0.1",
+        version=OPENAPI_SPEC_VERSION,
         lifespan=lifespan,
     )
     app.add_middleware(ConflictRetryMiddleware)

@@ -3,7 +3,7 @@
 
 import { toScientificNotation } from '@nemo/common/src/utils/formatters';
 import { clamp } from '@nemo/common/src/utils/math';
-import { InfoCircle, Retry } from '@nemo/icons/icons';
+import { InfoCircle, Reset } from '@nemo/icons/icons';
 import {
   Block,
   Button,
@@ -26,6 +26,8 @@ export type SliderWithTextInputProps = {
   field: FieldValues;
   defaultValue?: number;
   unsetPlaceholder?: string;
+  /** Where the thumb rests while the field is unset, when that is not `defaultValue`. */
+  unsetValue?: number;
   max: number;
   min: number;
   step?: number;
@@ -47,6 +49,7 @@ export const SliderWithTextInput = ({
   field,
   defaultValue,
   unsetPlaceholder,
+  unsetValue,
   formFieldProps,
   max,
   min,
@@ -100,7 +103,7 @@ export const SliderWithTextInput = ({
     // Nothing numeric to forward when the field resets to unset.
     if (defaultValue !== undefined) attributes?.Slider?.onValueChange?.(defaultValue);
   };
-  const fallback = defaultValue ?? min;
+  const fallback = defaultValue ?? unsetValue ?? min;
   const isFieldValueNumber = typeof field.value === 'number' && !Number.isNaN(field.value);
   const safeFieldValue = isFieldValueNumber ? field.value : fallback;
   const textInputValue = draftValue ?? (isFieldValueNumber ? field.value.toString() : '');
@@ -198,7 +201,7 @@ export const SliderWithTextInput = ({
           className="shrink-0"
           type="button"
         >
-          <Retry />
+          <Reset />
         </Button>
       )}
       {slotEnd}

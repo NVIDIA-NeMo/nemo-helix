@@ -397,6 +397,7 @@ def _materialize_legacy_agent_manifest(
         manifest_dir=manifest_dir,
         egress=data.get("egress") or None,
         secrets=data.get("secrets") or None,
+        env=data.get("env") or None,
     )
     _persist_upgraded_bundle(sdk, manifest_id, ctx, record, resolved)
     _apply_manifest_overrides(resolved.manifest, data)

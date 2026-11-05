@@ -5,9 +5,9 @@ import asyncio
 import logging
 from typing import List, Union
 
-from nemoguardrails import LLMRails
 from nhx.guardrails.app.handlers.utils import get_main_model_from_rails_config, to_internal_rails_config
 from nhx.guardrails.app.services.configs.registry import ConfigRegistry
+from nhx.guardrails.app.services.rails.engine import RailsEngine, create_rails_engine
 from nhx.guardrails.app.services.rails.registry import RailsRegistry
 from nhx.guardrails.app.utils.config_utils import configure_rails_config
 from nhx.guardrails.app.utils.context_utils import set_main_model_into_context
@@ -30,7 +30,7 @@ class RailsService:
         config_ids: List[str],
         model: Model,
         req_headers_cache_key: str | None = None,
-    ) -> LLMRails:
+    ) -> RailsEngine:
         """Returns the rails instance for the given config id."""
 
         engine = model.engine or "nim"
@@ -56,7 +56,7 @@ class RailsService:
         try:
             # Run LLMRails init in a thread to avoid blocking the event loop.
             # LLMRails.__init__ has blocking file I/O and a blocking thread.join() for KB init.
-            llm_rails = await asyncio.to_thread(LLMRails, config=to_internal_rails_config(rails_config))
+            llm_rails = await asyncio.to_thread(create_rails_engine, to_internal_rails_config(rails_config))
         except Exception as e:
             logger.error(f"Failed to instantiate LLMRails instance for config {config_ids} and model {model_name}")
             raise e

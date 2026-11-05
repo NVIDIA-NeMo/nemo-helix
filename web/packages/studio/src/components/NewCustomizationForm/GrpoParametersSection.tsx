@@ -21,7 +21,12 @@ import { ControlledStringListInput } from '@studio/components/NewCustomizationFo
 import { FormSection } from '@studio/components/NewCustomizationForm/FormSection';
 import { GrpoAdvancedSection } from '@studio/components/NewCustomizationForm/GrpoAdvancedSection';
 import type { CustomizationFormFields } from '@studio/util/forms/customization';
-import { GRPO_SPEC_DEFAULTS, specSliderProps } from '@studio/util/forms/specDefaults';
+import {
+  GRPO_SPEC_DEFAULTS,
+  LEARNING_RATE_UNSET_HINT,
+  learningRateSliderProps,
+  specSliderProps,
+} from '@studio/util/forms/specDefaults';
 import { useFormContext } from 'react-hook-form';
 
 /** GRPO supports full-weight and LoRA only — lora_merged is rejected by the backend. */
@@ -355,10 +360,9 @@ export const GrpoParametersSection = () => {
             useControllerProps={{ name: 'rl.training.learning_rate', control }}
             formFieldProps={{
               slotLabel: 'Learning Rate',
-              slotInfo:
-                "Peak learning rate. RL fine-tuning runs far lower than SFT: the platform GRPO examples train at 5e-6. Above roughly 2e-5 a full-weight policy typically collapses within a few dozen steps. LoRA needs no separate value — the adapter's effective rate is scaled by alpha / rank, so the default rank 16 / alpha 32 trains at an effective 1e-5.",
+              slotInfo: `Peak learning rate. RL fine-tuning runs far lower than SFT: above roughly 2e-5 a full-weight policy typically collapses within a few dozen steps. ${LEARNING_RATE_UNSET_HINT}`,
             }}
-            {...specSliderProps(GRPO_SPEC_DEFAULTS, 'learning_rate')}
+            {...learningRateSliderProps({ backend: 'rl', method: 'grpo', finetuningType })}
             min={1e-7}
             max={1e-4}
             step={1e-7}

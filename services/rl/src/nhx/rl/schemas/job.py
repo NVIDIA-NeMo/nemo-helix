@@ -10,7 +10,12 @@ from typing import Annotated, Any, Literal, Self, Union
 from nemo_helix_plugin.deployment import DEPLOYMENT_CONFIG_DESCRIPTION, DeploymentParams
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH
 from nemo_helix_plugin.integrations import IntegrationsSpec
-from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.schema import (
+    LearningRateDefault,
+    NamespacedModel,
+    learning_rate_defaults_schema_extra,
+    match_learning_rate_default,
+)
 from nhx.customization_common.schemas.values import OutputNameType
 from nhx.customization_common.training.reporting import ProgressReportingConfig
 from nhx.rl.app.jobs.training.schemas import BatchingStrategy, OptimizerType, PolicyBackend
@@ -312,6 +317,10 @@ _VLLM_KWARGS_RESERVED = frozenset(
         "worker_extension_cls",
     }
 )
+# Applied by ``GRPOTraining._lora_learning_rate_default`` and published on its schema for Studio.
+GRPO_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
+    {"when": {"finetuning_type": "lora"}, "value": 1e-5},
+]
 
 
 class GRPOTraining(_TrainingBase):
@@ -320,6 +329,8 @@ class GRPOTraining(_TrainingBase):
     ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
     ``lora_merged`` is not supported for GRPO on the Automodel path.
     """
+
+    model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(GRPO_LEARNING_RATE_DEFAULTS))
 
     # No default: ``TrainingMethod`` is a discriminated union, so the tag has to be
     # present in the submitted JSON (same as DPOTraining.type).
@@ -618,9 +629,10 @@ class GRPOTraining(_TrainingBase):
     @classmethod
     def _lora_learning_rate_default(cls, data: Any) -> Any:
         """Default a LoRA run's learning rate before ``min_learning_rate`` is checked against it."""
-        if isinstance(data, dict) and data.get("finetuning_type") == "lora" and "learning_rate" not in data:
-            return {**data, "learning_rate": 1e-5}
-        return data
+        if not isinstance(data, dict) or "learning_rate" in data:
+            return data
+        learning_rate = match_learning_rate_default(GRPO_LEARNING_RATE_DEFAULTS, data)
+        return data if learning_rate is None else {**data, "learning_rate": learning_rate}
 
     @model_validator(mode="after")
     def _reject_reserved_vllm_kwargs(self) -> Self:

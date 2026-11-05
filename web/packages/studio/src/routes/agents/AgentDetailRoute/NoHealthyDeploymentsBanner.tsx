@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { HourglassMid } from '@nemo/icons/icons';
+import { CircleTick } from '@nemo/icons/icons';
 import { Banner, Button, Flex, Text } from '@nvidia/foundations-react-core';
 import { NO_CONFIG_DEPLOY_MESSAGE } from '@studio/api/agents/hasAgentConfig';
 import type { FC } from 'react';
@@ -30,7 +30,7 @@ export const NoHealthyDeploymentsBanner: FC<NoHealthyDeploymentsBannerProps> = (
     slotActions={
       isDeploying ? (
         <Flex align="center" className="h-full" gap="2">
-          <HourglassMid size="14" className="animate-spin" aria-label="Deploying agent" />
+          <CircleTick size="14" className="animate-spin" aria-label="Deploying agent" />
           <Text kind="label/regular/sm">Deploying…</Text>
         </Flex>
       ) : (

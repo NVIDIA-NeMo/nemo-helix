@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { logger } from '@nemo/common/src/utils/logger';
-import { TrashDelete } from '@nemo/icons/icons';
+import { IconDocument } from '@nemo/icons/icons';
 import { Flex, PageHeader, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { ComponentProps, FC, ReactNode, useEffect } from 'react';
 import { useRouteError, isRouteErrorResponse } from 'react-router';
@@ -90,7 +90,7 @@ export const ErrorPanel: FC<ErrorPanelProps> = ({ title, errorMessage, attribute
           data-testid="error-panel"
         >
           <ErrorMessage
-            slotMedia={<TrashDelete className="size-16" />}
+            slotMedia={<IconDocument className="size-16" />}
             header={<Text kind="title/md">Error{errorCode ? `: ${errorCode}` : ''}</Text>}
             message={message}
             {...attributes?.ErrorMessage}

@@ -17,6 +17,7 @@ from nemo_deployments_plugin.reconciler.drift_recovery import DriftRecoveryCache
 from nemo_deployments_plugin.reconciler.prerequisite import PrerequisiteResult, prerequisites_met
 from nemo_deployments_plugin.reconciler.volume_mounts import VolumeMountResult, volume_mounts_ready
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.openshell.types import GatewayWorkload, ProviderAccessRevoked
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,10 @@ class DeploymentReconciler:
         if backend is None:
             return
 
+        if config.gateway_providers and not backend.supports_gateway_providers:
+            await self._update_deployment_status_failure(deployment, "Gateway providers require an OpenShell executor.")
+            return
+
         if deployment.status == "PENDING":
             await self._reconcile_create(deployment, config, backend)
             return
@@ -169,6 +174,28 @@ class DeploymentReconciler:
                     return
             if status_update.status in ("READY", "SUCCEEDED"):
                 self._drift_cache.remove(deployment_id(deployment))
+            if config.gateway_providers and status_update.status in ("STARTING", "READY"):
+                try:
+                    await backend.renew_gateway_credentials(
+                        workload=GatewayWorkload(
+                            kind="deployment", workspace=deployment.workspace, name=deployment.name, id=deployment.id
+                        ),
+                        bindings=config.gateway_providers,
+                        auth_context=deployment.auth_context,
+                    )
+                except ProviderAccessRevoked:
+                    status_update.status_message = (
+                        "Gateway provider access was removed. Start a new workload to restore access."
+                    )
+                except Exception:
+                    # Do not expose RPC errors containing registration tickets.
+                    # Preserve observed workload state and retry on the next poll.
+                    logger.warning(
+                        "Gateway credential renewal failed for deployment %s; retrying.", deployment_id(deployment)
+                    )
+                    status_update.status_message = (
+                        "Gateway credential renewal failed; retrying. Credentials may expire."
+                    )
             await self._update_deployment_status(deployment, status_update)
             return
 
@@ -220,6 +247,12 @@ class DeploymentReconciler:
                 await self._update_deleting_message(deployment, str(exc))
                 return
             if status_update.status not in _DELETE_COMPLETE_STATUSES:
+                if (
+                    status_update.status == "DELETING"
+                    and status_update.error_details
+                    and status_update.error_details.get("reason") == "provider_cleanup_pending"
+                ):
+                    await self._update_deployment_status(deployment, status_update)
                 logger.debug(
                     "Backend delete not complete for %s: %s — %s",
                     dep_id,
@@ -392,6 +425,9 @@ class DeploymentReconciler:
         )
 
     def _check_deleting_timeout(self, deployment: Deployment) -> BackendStatusUpdate | None:
+        # Provider-backed resource cleanup must remain retryable after restart.
+        if deployment.error_details and deployment.error_details.get("reason") == "provider_cleanup_pending":
+            return None
         timeout = self._controller_config.deleting_timeout_seconds
         if timeout <= 0:
             return None
