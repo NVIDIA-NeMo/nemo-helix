@@ -5,6 +5,8 @@
 instead of scanning ``data.authz.endpoints`` on every evaluation."""
 
 import copy
+import hashlib
+import json
 from typing import Any
 
 
@@ -21,20 +23,21 @@ def scope_family(scope: Any) -> str | None:
 def derive_scope_families(authz: dict[str, Any]) -> dict[str, bool]:
     """Every scope family configured on any endpoint/method. Skips malformed entries rather than raising."""
     families: set[str] = set()
-    endpoints = authz.get("endpoints")
-    if not isinstance(endpoints, dict):
-        return {}
-    for methods in endpoints.values():
-        if not isinstance(methods, dict):
-            continue
-        for rule in methods.values():
-            scopes = rule.get("scopes") if isinstance(rule, dict) else None
-            if not isinstance(scopes, list):
-                continue
+    endpoints = authz.get("endpoints", {})
+    operations = authz.get("operations", {})
+    rules: list[Any] = list(operations.values()) if isinstance(operations, dict) else []
+    if isinstance(endpoints, dict):
+        for methods in endpoints.values():
+            if isinstance(methods, dict):
+                rules.extend(methods.values())
+    for rule in rules:
+        scopes = rule.get("scopes") if isinstance(rule, dict) else None
+        if isinstance(scopes, list):
             for scope in scopes:
                 family = scope_family(scope)
                 if family is not None:
                     families.add(family)
+
     return {family: True for family in sorted(families)}
 
 
@@ -46,3 +49,19 @@ def with_scope_families(data: dict[str, Any]) -> dict[str, Any]:
     result = copy.copy(data)
     result["authz"] = {**authz, "scope_families": derive_scope_families(authz)}
     return result
+
+
+def with_policy_revision(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate the evaluator contract and identify the exact normalized policy snapshot."""
+    authz = data.get("authz")
+    if (
+        not isinstance(authz, dict)
+        or type(authz.get("decision_contract_version")) is not int
+        or authz["decision_contract_version"] != 2
+    ):
+        raise ValueError("Policy data requires decision contract version 2")
+    document = with_scope_families(data)
+    config = {key: value for key, value in authz.get("config", {}).items() if key != "policy_revision"}
+    document = {**document, "authz": {**document["authz"], "config": config}}
+    revision = hashlib.sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return {**document, "authz": {**document["authz"], "config": {**config, "policy_revision": revision}}}

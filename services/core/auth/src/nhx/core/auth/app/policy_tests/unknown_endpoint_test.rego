@@ -188,18 +188,18 @@ test_workspace_creation_denied_with_wrong_scope if {
 # --- Bypass rules are unaffected ---
 
 # Service principals can still access any endpoint, including unknown ones.
-test_service_principal_bypasses_unknown_endpoint if {
+test_service_principal_denied_unknown_endpoint if {
 	result := authz.allow with input as {
 		"principal_id": "service:entity-store",
 		"method": "POST",
 		"path": "/apis/entities/v2/workspaces/test-ns/unknown-resource",
 	}
 
-	result.allowed == true
+	result.allowed == false
 }
 
 # Platform admins can still access any endpoint, including unknown ones.
-test_platform_admin_bypasses_unknown_endpoint if {
+test_platform_admin_denied_unknown_endpoint if {
 	result := authz.allow with input as {
 		"principal_id": "admin@test.com",
 		"method": "DELETE",
@@ -210,7 +210,7 @@ test_platform_admin_bypasses_unknown_endpoint if {
 		with data.authz.workspaces as unknown_endpoint_test_data.workspaces
 		with data.authz.principals as unknown_endpoint_test_data.principals
 
-	result.allowed == true
+	result.allowed == false
 }
 
 # --- Known endpoints still work as before ---

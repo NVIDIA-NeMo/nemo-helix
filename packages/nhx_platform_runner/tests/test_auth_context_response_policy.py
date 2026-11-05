@@ -11,10 +11,13 @@ from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api.response_policy import PolicyRoute, PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
+from nemo_helix_plugin.auth.decisions import DecisionEvaluationInput
+from nhx.common.auth.client import AuthClient
 from nhx.common.auth.middleware import AuthorizationMiddleware
 from nhx.common.config import AuthConfig
 from nhx.common.service import RouterConfig, Service
 from nhx.platform_runner import server
+from nhx.testing.policy import PolicyHarness
 from pydantic import BaseModel
 
 
@@ -57,6 +60,7 @@ def _registered_count(app: FastAPI) -> int:
 )
 def test_platform_projects_registered_response(monkeypatch, auth_enabled, headers, visible) -> None:
     auth_config = AuthConfig(enabled=auth_enabled)
+    policy = PolicyHarness()
     platform_config = SimpleNamespace(seed_on_startup=False, redirect_root_to_studio=False, services="")
     monkeypatch.setattr(server, "get_platform_config", lambda: platform_config)
     monkeypatch.setattr(server, "get_auth_config", lambda: auth_config)
@@ -66,6 +70,14 @@ def test_platform_projects_registered_response(monkeypatch, auth_enabled, header
         return None
 
     monkeypatch.setattr(AuthorizationMiddleware, "_call_pdp", allow_request)
+    original_evaluate = AuthClient._evaluate_decision
+
+    async def evaluate(self: AuthClient, context: DecisionEvaluationInput):
+        if not self.auth_enabled:
+            return await original_evaluate(self, context)
+        return policy.decide(context)
+
+    monkeypatch.setattr(AuthClient, "_evaluate_decision", evaluate)
     service = SnapshotService()
     assert _registered_count(service.app) == 1
     app = server.create_app(services=[service])

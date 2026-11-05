@@ -5,18 +5,18 @@
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Dict, Generator, Optional
+from typing import Dict, Generator, Optional
 
 from fastapi import HTTPException, Request
 
-if TYPE_CHECKING:
-    from .client import AuthClient
+from .client import AuthClient
+from .models import Principal
 
 # Context variable to store the current auth client (set by middleware or tasks runtime)
-auth_client_context: ContextVar[Optional["AuthClient"]] = ContextVar("auth_client_context", default=None)
+auth_client_context: ContextVar[Optional[AuthClient]] = ContextVar("auth_client_context", default=None)
 
 
-def get_auth_client(request: Request) -> "AuthClient":
+def get_auth_client(request: Request) -> AuthClient:
     """Get the authorization client for the current request.
 
     This is the primary FastAPI dependency for all auth-related needs.
@@ -108,11 +108,15 @@ def get_principal_auth_headers() -> Dict[str, str]:
     return headers
 
 
-def build_service_principal_headers(service_name: str) -> Dict[str, str]:
+def build_service_principal_headers(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> Dict[str, str]:
     """Build NeMo Helix auth headers for outbound service-to-service calls.
 
     In workload token-exchange mode, this returns a service workload Bearer
-    token, optionally issued on behalf of the current effective user. In
+    token, issued directly unless on_behalf_of is explicitly supplied. In
     trusted-header mode, it returns `X-NHX-Principal-*` headers.
 
     Args:
@@ -123,14 +127,18 @@ def build_service_principal_headers(service_name: str) -> Dict[str, str]:
     """
     from nhx.common.platform_client_context import service_principal_auth_headers
 
-    return service_principal_auth_headers(service_name)
+    return service_principal_auth_headers(service_name, on_behalf_of=on_behalf_of)
 
 
-async def build_service_principal_headers_async(service_name: str) -> Dict[str, str]:
+async def build_service_principal_headers_async(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> Dict[str, str]:
     """Async variant of ``build_service_principal_headers`` for request handlers."""
     from nhx.common.platform_client_context import service_principal_auth_headers_async
 
-    return await service_principal_auth_headers_async(service_name)
+    return await service_principal_auth_headers_async(service_name, on_behalf_of=on_behalf_of)
 
 
 @contextmanager

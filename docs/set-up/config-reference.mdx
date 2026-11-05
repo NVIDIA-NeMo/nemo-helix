@@ -207,12 +207,6 @@ entities:
   workspace_cleanup_interval: 10
   # Interval in seconds for the background database health ping (used for readiness). | default: 10.0
   db_health_check_interval_seconds: 10.0
-  # Enable in-process caching of per-principal role-binding list queries. Set via NHX_ENTITIES_PRINCIPAL_BINDINGS_CACHE_ENABLED. | default: True
-  principal_bindings_cache_enabled: true
-  # TTL in seconds for principal role-binding cache entries (NHX_ENTITIES_PRINCIPAL_BINDINGS_CACHE_TTL_SEC). | default: 60.0
-  principal_bindings_cache_ttl_sec: 60.0
-  # Max distinct principal keys in the role-binding cache before LRU eviction (NHX_ENTITIES_PRINCIPAL_BINDINGS_CACHE_MAX_SIZE). | default: 256
-  principal_bindings_cache_max_size: 256
 ```
 
 ### `files`

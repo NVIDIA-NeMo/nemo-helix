@@ -40,7 +40,7 @@ class ResponsePolicy[DTO: BaseModel](ABC):
     field: str
 
     @abstractmethod
-    def can_read(self, auth_client: RuntimeAuthClient) -> bool: ...
+    async def can_read(self, auth_client: RuntimeAuthClient) -> bool: ...
 
 
 def wire_field_for[DTO: BaseModel](policy: ResponsePolicy[DTO]) -> str:
@@ -170,7 +170,7 @@ def bind_read_access[DTO: BaseModel](
     policy: ResponsePolicy[DTO], auth_dependency: Callable[..., RuntimeAuthClient]
 ) -> Callable[..., AsyncIterator[None]]:
     async def dependency(auth_client: RuntimeAuthClient = Depends(auth_dependency)) -> AsyncIterator[None]:
-        token = read_allowed.set(policy.can_read(auth_client))
+        token = read_allowed.set(await policy.can_read(auth_client))
         try:
             yield
         finally:

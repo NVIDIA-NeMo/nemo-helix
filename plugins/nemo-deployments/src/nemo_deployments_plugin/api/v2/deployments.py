@@ -10,7 +10,7 @@ from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_deployments_plugin.api.v2._perms import DeploymentPerms
-from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
+from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, get_service_entity_client
 from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, DeploymentStatus
 from nemo_deployments_plugin.reconciler.entity_client import list_all_pages
@@ -83,6 +83,7 @@ async def create_deployment(
     body: CreateDeploymentRequest,
     request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    service_entities: NemoEntitiesClient = Depends(get_service_entity_client),
 ) -> Deployment:
     config_workspace, config_name = _parse_deployment_config_ref(body.deployment_config, workspace)
     try:
@@ -115,7 +116,7 @@ async def create_deployment(
         status="PENDING",
     ).with_auth_context(current_auth_context())
     try:
-        return await entity_client.create(deployment)
+        return await service_entities.create(deployment)
     except NemoEntityConflictError as exc:
         raise HTTPException(
             status_code=409,

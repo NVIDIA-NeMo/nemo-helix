@@ -17,6 +17,7 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, Self
 
+from nemo_helix_plugin.auth.decisions import DecisionRequest, PolicyDecision
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 
@@ -89,6 +90,10 @@ class RuntimeAuthClient(Protocol):
 
     @property
     def principal(self) -> RuntimeAuthPrincipal: ...
+
+    async def decide(self, request: DecisionRequest) -> PolicyDecision: ...
+
+    async def has_operation(self, request: DecisionRequest) -> bool: ...
 
 
 def current_auth_client(request: Request) -> RuntimeAuthClient:

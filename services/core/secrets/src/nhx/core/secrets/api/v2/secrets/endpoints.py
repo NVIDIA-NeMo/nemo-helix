@@ -8,7 +8,6 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from nhx.common.api.common import ErrorResponse, Page, PaginationData
-from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.common.observability import scoped_app_ctx
@@ -280,22 +279,10 @@ async def access_secret(
     name: str,
     workspace: str,
     entity_store: EntityClient = Depends(get_entity_client),
-    auth_client: AuthClient = Depends(get_auth_client),
     platform_config: HelixConfig = Depends(get_platform_config),
 ) -> schemas.HelixSecretAccessResponse | JSONResponse:
     """Access the value of a secret."""
     with scoped_app_ctx(SecretsContext(name=name, namespace=workspace)):
-        # Additional authorization check.
-        # we need to check if we are validating a delegated user here, or the caller is the actual accessor.
-        # Create auth client with the on-behalf-of principal for authorization check
-        if auth_client.principal.on_behalf_of is not None and not await auth_client.on_behalf_of_has_permissions(
-            workspace, ["secrets.read"]
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Forbidden",
-            )
-
         # If the secret is the default NGC API key secret, return its value directly
         if is_default_ngc_api_key(platform_config, workspace, name):
             return schemas.HelixSecretAccessResponse(

@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_agents_plugin.api.v2 import deployments as deployments_router_module
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client, get_service_entity_client
 from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
     NAT_WORKFLOW_CONFIG_FORMAT,
@@ -43,13 +43,18 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.files.storage_config import GithubStorageConfig, LocalStorageConfig, StorageConfig
 from nemo_helix_plugin.refs import FilesetRef
+from nhx.testing.policy import auth_disabled_client
 
 NOW = datetime.now(timezone.utc)
 
 
 @pytest.fixture(autouse=True)
 def policy_auth_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(response_policy, "current_auth_client", lambda request: SimpleNamespace(auth_enabled=False))
+    monkeypatch.setattr(
+        response_policy,
+        "current_auth_client",
+        lambda request: auth_disabled_client(),
+    )
 
 
 def _fabric_agent_config() -> dict[str, Any]:
@@ -129,6 +134,7 @@ def _test_client(mock_entity_client: AsyncMock, mock_files_client: AsyncMock | N
         prefix="/apis/agents/v2/workspaces/{workspace}",
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
+    app.dependency_overrides[get_service_entity_client] = lambda: mock_entity_client
     app.dependency_overrides[get_files_client] = lambda: mock_files_client or _files_client()
 
     return TestClient(app, raise_server_exceptions=False)

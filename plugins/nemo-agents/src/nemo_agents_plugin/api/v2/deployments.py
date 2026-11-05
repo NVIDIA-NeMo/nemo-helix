@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
-from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
+from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client, get_service_entity_client
 from nemo_agents_plugin.authz import scope
 from nemo_agents_plugin.config import AgentsConfig
 from nemo_agents_plugin.entities import (
@@ -99,6 +99,7 @@ async def create_deployment(
     body: CreateDeploymentRequest,
     request: Request,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
+    service_entities: NemoEntitiesClient = Depends(get_service_entity_client),
     files_client: AsyncFilesClient = Depends(get_files_client),
 ) -> AgentDeployment:
     """Create a new deployment for an existing agent.
@@ -220,7 +221,7 @@ async def create_deployment(
         plugin_deployment=deployment_name if is_container_deployment_mode(body.deployment_mode) else "",
     ).with_auth_context(current_auth_context())
     try:
-        saved = await entity_client.create(deployment)
+        saved = await service_entities.create(deployment)
     except NemoEntityConflictError as exc:
         raise HTTPException(
             status_code=409,

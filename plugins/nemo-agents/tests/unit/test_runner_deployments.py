@@ -35,9 +35,19 @@ from nemo_agents_plugin.runner.fabric_artifact_staging import FabricArtifactStag
 from nemo_deployments_plugin.entities import ConfigFile, Deployment, DeploymentConfig
 from nemo_deployments_plugin.types import Endpoint as PluginEndpoint
 from nemo_helix_plugin.auth import AuthContext
+from nemo_helix_plugin.deployments.client import AsyncDeploymentsClient
+from nemo_helix_plugin.deployments.types import CreateDeploymentRequest
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError
 from nemo_helix_plugin.refs import FilesetRef
 from pydantic import ValidationError
+
+
+@pytest.fixture(autouse=True)
+def deployment_api(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    api = AsyncMock(spec=AsyncDeploymentsClient)
+    monkeypatch.setattr(AsyncDeploymentsClient, "from_client", lambda client: api)
+    return api
+
 
 # The hermes adapter is not installed on Python 3.14 (see this plugin's pyproject.toml).
 requires_hermes_adapter = pytest.mark.skipif(
@@ -1098,7 +1108,9 @@ async def test_get_logs_raises_when_executor_resolution_fails(caplog: pytest.Log
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_writes_config_and_deployment() -> None:
+async def test_create_deployment_writes_config_and_deployment(
+    deployment_api: AsyncMock,
+) -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
     backend._entities = entities
@@ -1114,11 +1126,11 @@ async def test_create_deployment_writes_config_and_deployment() -> None:
 
     assert info.status == "starting"
     assert info.endpoint == ""
-    assert entities.create.await_count == 2
+    assert entities.create.await_count == 1
     created_config = entities.create.await_args_list[0].args[0]
-    created_dep = entities.create.await_args_list[1].args[0]
+    created_dep = deployment_api.create_deployment.await_args.kwargs["body"]
     assert isinstance(created_config, DeploymentConfig)
-    assert isinstance(created_dep, Deployment)
+    assert isinstance(created_dep, CreateDeploymentRequest)
     assert created_config.name == "hello-dep"
     assert created_dep.deployment_config == "hello-dep"
     assert created_dep.executor == "local-docker"
@@ -1201,7 +1213,9 @@ async def test_create_deployment_k8s_without_internal_url_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_deployment_openshell_rebases_onto_platform_egress(
+    deployment_api: AsyncMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from nemo_deployments_plugin.config import DeploymentsConfig
 
     cfg = _executors(
@@ -1228,7 +1242,7 @@ async def test_create_deployment_openshell_rebases_onto_platform_egress(monkeypa
         )
     assert info.status == "starting"
     created_config = entities.create.await_args_list[0].args[0]
-    created_dep = entities.create.await_args_list[1].args[0]
+    created_dep = deployment_api.create_deployment.await_args.kwargs["body"]
     baked = yaml.safe_load(created_config.config_files[0].content)
     assert baked["llms"]["llm"]["base_url"] == (
         "http://host.docker.internal:8080/apis/inference-gateway/v2/workspaces/default/openai/-/v1"
@@ -1716,10 +1730,13 @@ async def test_create_deployment_missing_image_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_cleans_config_on_deployment_failure() -> None:
+async def test_create_deployment_cleans_config_on_deployment_failure(
+    deployment_api: AsyncMock,
+) -> None:
     backend = _backend(default_image="nat:latest")
     entities = AsyncMock()
-    entities.create = AsyncMock(side_effect=[None, RuntimeError("boom")])
+    entities.create = AsyncMock(return_value=None)
+    deployment_api.create_deployment.side_effect = RuntimeError("boom")
     entities.delete = AsyncMock()
     backend._entities = entities
 
@@ -2017,7 +2034,9 @@ async def test_create_deployment_fabric_staging_error_fails_before_entity_create
 
 
 @pytest.mark.asyncio
-async def test_create_deployment_enables_workload_identity_with_auth_context() -> None:
+async def test_create_deployment_enables_workload_identity_with_auth_context(
+    deployment_api: AsyncMock,
+) -> None:
     backend = _backend(default_image="nat:latest", default_executor="local-docker")
     entities = AsyncMock()
     backend._entities = entities
@@ -2046,9 +2065,32 @@ async def test_create_deployment_enables_workload_identity_with_auth_context() -
 
     assert info.status == "starting"
     created_config = entities.create.await_args_list[0].args[0]
-    created_dep = entities.create.await_args_list[1].args[0]
+    created_dep = deployment_api.create_deployment.await_args.kwargs["body"]
     assert created_config.workload_identity is not None
     assert created_config.workload_identity.enabled is True
     assert created_config.workload_identity.workload_id == "hello-dep"
     assert created_config.workload_identity.token_audience == "agent-audience"
-    assert created_dep.auth_context == auth_context
+    assert "auth_context" not in created_dep.model_fields
+
+
+@pytest.mark.asyncio
+async def test_derived_deployment_uses_agents_credential_with_the_verified_creator(deployment_api: AsyncMock) -> None:
+    backend = _backend(default_image="nat:latest", default_executor="local-docker")
+    backend._entities = AsyncMock()
+    creator = AuthContext(principal_id="alice", principal_email="alice@example.com", principal_groups=["team"])
+    with (
+        patch("nemo_agents_plugin.runner.deployments_backend.get_async_nemo_client") as factory,
+        patch("nemo_agents_plugin.runner.deployments_backend.get_base_url", return_value="http://127.0.0.1:8080"),
+    ):
+        info = await backend.create_deployment(
+            workspace="default",
+            name="owned",
+            config={"workflow": {"_type": "react_agent"}},
+            port=0,
+            deployment_mode="docker",
+            auth_context=creator,
+        )
+    assert info.status == "starting"
+    factory.assert_called_once_with(as_service="agents", internal=True, on_behalf_of=creator.to_principal())
+    deployment_api.create_deployment.assert_awaited_once()
+    assert deployment_api.create_deployment.await_args.kwargs["workspace"] == "default"

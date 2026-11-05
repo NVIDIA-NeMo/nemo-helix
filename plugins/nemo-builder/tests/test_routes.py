@@ -14,14 +14,15 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
-from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
 from nemo_builder_plugin.service import BuilderService
 from nemo_builder_plugin.submit import SubmitResult
+from nemo_helix_plugin.auth import current_auth_client
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
+from policy_helpers import Caller, allows, authorizer
 
 
 def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
@@ -29,7 +30,8 @@ def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
     app.dependency_overrides[get_entity_client] = lambda: entities
-    app.dependency_overrides[current_caller] = lambda: caller
+    app.dependency_overrides[service.get_service_entity_client] = lambda: entities
+    app.dependency_overrides[current_auth_client] = lambda: authorizer(caller)
     return app
 
 
@@ -234,7 +236,7 @@ class TestReadingOneImage:
         """The policy admits any service on its own permissions, so the handler holds it to acting for a person."""
         response = self._get(caller)
         assert response.status_code == 403
-        assert "acting for a person" in response.json()["detail"]
+        assert "denied" in response.json()["detail"].lower()
 
     def test_an_image_that_does_not_exist_is_a_404(self) -> None:
         entities = AsyncMock()
@@ -257,7 +259,7 @@ class TestSubmitting:
         app.dependency_overrides[get_nemo_client] = lambda: client
         response = TestClient(app).post(self.BUILDS, json=self.BODY)
         assert response.status_code == 403
-        assert "acting for a person" in response.json()["detail"]
+        assert "denied" in response.json()["detail"].lower()
         assert entities.mock_calls == client.mock_calls == []
 
     @pytest.mark.parametrize(
@@ -270,7 +272,7 @@ class TestSubmitting:
         ids=["auth-off", "a-person", "a-service-acting-for-a-person"],
     )
     def test_anyone_else_may(self, caller: Caller) -> None:
-        assert submit_refusal(caller) is None
+        assert allows(caller, "builder.build.submit")
 
 
 class TestWhoTheRoutesAdmit:

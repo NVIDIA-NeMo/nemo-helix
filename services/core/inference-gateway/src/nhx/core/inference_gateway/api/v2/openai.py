@@ -12,10 +12,6 @@ from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nhx.common.api.common import ErrorResponse
 from nhx.common.entities.utils import parse_adapters_suffix
 from nhx.common.service.dependencies import get_nemo_client
-from nhx.core.inference_gateway.api.authz import (
-    OPENAI_EXEC_PERMISSION,
-    enforce_delegated_workspace_access,
-)
 from nhx.core.inference_gateway.api.dependencies import (
     global_http_client,
     global_middleware_registry,
@@ -120,7 +116,6 @@ async def openai_get_models(
     VirtualModels scoped to the request workspace.
     """
     validate_entity_name(workspace, field_name="workspace")
-    await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
 
     all_oai_models: list[OpenAIModelResp] = []
 
@@ -156,7 +151,6 @@ async def openai_get_model(
 
     validate_entity_name(workspace, field_name="workspace")
     validate_model_entity_name(model_name, field_name="model")
-    await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
     if resolve_vm_for_model(virtual_model_cache, workspace, model_name) is None:
         raise_virtual_model_not_found(workspace, model_name)
 
@@ -231,7 +225,6 @@ async def openai_proxy(
     # workspace before any routing — including the mock short-circuit — so a
     # delegated workload cannot reach a workspace its creator cannot.
     validate_entity_name(workspace, field_name="workspace")
-    await enforce_delegated_workspace_access(workspace, OPENAI_EXEC_PERMISSION)
 
     # If mock mode enabled and request has explicit mock response, skip model lookup
     if is_mock_request(request):

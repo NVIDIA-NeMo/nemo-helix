@@ -3,6 +3,8 @@
 
 package common
 
+import future.keywords.every
+import future.keywords.in
 import future.keywords.if
 
 import data.authz.extract_actor_account_id
@@ -94,6 +96,14 @@ endpoint_denied(path, method) if {
 #   - Use the workspace (existing behavior)
 #   - Falls back to checking wildcard principal "*" for workspace access
 has_specific_permission(principal, workspace, required_perm) if {
+    has_permission_for_side(principal, workspace, required_perm, false)
+}
+
+has_specific_actor_permission(principal, workspace, required_perm) if {
+    has_permission_for_side(principal, workspace, required_perm, true)
+}
+
+has_permission_for_side(principal, workspace, required_perm, actor_side) if {
 	# Check if permission has explicit workspace (format: workspace/permission)
 	contains(required_perm, "/")
 	parts := split(required_perm, "/")
@@ -102,20 +112,20 @@ has_specific_permission(principal, workspace, required_perm) if {
 	base_permission := parts[1]
 
 	some role in effective_roles(principal, target_workspace)
-	role_permissions := get_role_permissions_for_principal(role, principal)
+	role_permissions := get_role_permissions_for_side(role, principal, actor_side)
 	permission_satisfied(role_permissions, base_permission)
 } else if {
 	# No explicit workspace - use context workspace (existing behavior)
 	not contains(required_perm, "/")
 	some role in effective_roles(principal, workspace)
-	role_permissions := get_role_permissions_for_principal(role, principal)
+	role_permissions := get_role_permissions_for_side(role, principal, actor_side)
 	permission_satisfied(role_permissions, required_perm)
 } else if {
 	# Fallback: check if wildcard principal "*" has this permission in the workspace
 	# This enables public/shared access via role bindings for "*"
 	not contains(required_perm, "/")
 	some role in data.authz.principals["*"].workspaces[workspace]
-	role_permissions := get_role_permissions_for_principal(role, "*")
+	role_permissions := get_role_permissions_for_side(role, "*", actor_side)
 	permission_satisfied(role_permissions, required_perm)
 }
 
@@ -131,23 +141,30 @@ all_permissions_satisfied(required_permissions, role_permissions) if {
 	count(satisfied) == count(required_permissions)
 }
 
-role_applies_to_principal(role_name, principal) if {
-	not object.get(data.authz.roles[role_name], "service_only", false)
+role_applies_to_side(role_name, principal, actor_side) if {
+    not object.get(data.authz.roles[role_name], "service_only", false)
 } else if {
-	valid_service_principal(principal)
-	principal == extract_principal_id
-	request_caller_kind == "service_principal"
-	extract_on_behalf_of_principal_id == ""
+    valid_service_principal(principal)
+    principal == extract_principal_id
+    request_caller_kind == "service_principal"
+    actor_side
+} else if {
+    valid_service_principal(principal)
+    principal == extract_principal_id
+    request_caller_kind == "service_principal"
+    extract_on_behalf_of_principal_id == ""
 }
 
-get_role_permissions_for_principal(role_name, principal) := permissions if {
-	all_roles := get_all_roles_in_chain(role_name)
-	permissions := {permission |
-		some inherited_role in all_roles
-		role_applies_to_principal(inherited_role, principal)
-		role := data.authz.roles[inherited_role]
-		some permission in object.get(role, "permissions", [])
-	}
+get_role_permissions_for_principal(role_name, principal) := get_role_permissions_for_side(role_name, principal, false)
+
+get_role_permissions_for_side(role_name, principal, actor_side) := permissions if {
+    all_roles := get_all_roles_in_chain(role_name)
+    permissions := {permission |
+        some inherited_role in all_roles
+        role_applies_to_side(inherited_role, principal, actor_side)
+        role := data.authz.roles[inherited_role]
+        some permission in object.get(role, "permissions", [])
+    }
 }
 
 # Get all permissions for a role (including inherited)
@@ -219,59 +236,9 @@ request_caller_kind := caller_kind if {
 
 # Get all applicable principals (id, actor account/aliases, email, groups, subject identity/account/aliases)
 # Returns a set of all principal identifiers that should be checked
-get_applicable_principals := principals if {
-	# Start with empty set
-	base := set()
-
-	# Add principal ID if present and non-empty
-	principal_id := extract_principal_id
-	id_set := {principal_id | principal_id != ""}
-
-	# Add stable actor account ID if present and non-empty
-	actor_account_id := extract_actor_account_id
-	actor_account_set := {actor_account_id | actor_account_id != ""}
-
-	# Add trusted actor authorization aliases if present
-	actor_aliases_set := {alias |
-		aliases := extract_actor_aliases
-		alias := aliases[_]
-		alias != ""
-		alias != "*"
-	}
-
-	# Add email if present and non-empty
-	email_set := {email |
-		email := extract_principal_email
-		email != ""
-	}
-
-	# Add groups if present (filter out empty strings)
-	groups_set := {g |
-		groups := extract_principal_groups
-		g := groups[_]
-		g != ""
-	}
-
-	# Add delegated identity context when acting on behalf of another principal.
-	on_behalf_of := extract_on_behalf_of_principal_id
-	obo_id_set := {on_behalf_of | on_behalf_of != ""}
-
-	subject_account_id := extract_subject_account_id
-	subject_account_set := {subject_account_id | subject_account_id != ""}
-
-	subject_aliases_set := {alias |
-		aliases := extract_subject_aliases
-		alias := aliases[_]
-		alias != ""
-		alias != "*"
-	}
-
-	# Combine all sets
-	principals := ((((((base | id_set) | actor_account_set) | actor_aliases_set) | email_set) | groups_set) | obo_id_set) | (subject_account_set | subject_aliases_set)
-
-	# Ensure we have at least one principal
-	count(principals) > 0
-} else := set()
+# Raw permission/role queries resolve the represented subject when delegated.
+# Complete operations separately evaluate actor requirements in authz_decision.rego.
+get_applicable_principals := data.authz.subject_principals
 
 # PATH MATCHING HELPERS
 
@@ -438,3 +405,25 @@ req_deny if data.authz.endpoints[endpoint_scan][req_method_lower].deny == true
 format_bool(value) := "true" if value
 
 else := "false"
+
+# Resolve a whole identity set, keeping actor and represented-subject grants separate.
+principal_set_admin(principals) if {
+    some principal in principals
+    "HelixAdmin" in data.authz.principals[principal].workspaces.system
+}
+
+principal_set_permission(principals, workspace, permission, actor_side, additional) if principal_set_admin(principals)
+principal_set_permission(principals, workspace, permission, actor_side, additional) if {
+    some principal in principals
+    has_permission_for_side(principal, workspace, permission, actor_side)
+}
+principal_set_permission(principals, workspace, permission, actor_side, additional) if {
+    permission in additional
+}
+
+principal_set_permissions(principals, workspace, required, actor_side, additional) if {
+    count(principals) > 0
+    every permission in required {
+        principal_set_permission(principals, workspace, permission, actor_side, additional)
+    }
+}

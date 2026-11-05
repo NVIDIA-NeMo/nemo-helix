@@ -95,7 +95,7 @@ def test_authenticated_workload_delegation_store_uses_sync_service_client() -> N
     request = requests[0]
     assert request.method == "POST"
     assert str(request.url) == "http://127.0.0.1:8000/apis/entities/v2/workspaces/system/entities/workload_delegation"
-    assert request.headers["Authorization"] == "Bearer controller-token"
+    assert "Authorization" not in request.headers
     assert request.headers["X-NHX-Principal-Id"] == "service:jobs"
     assert request.headers["X-NHX-Actor-Aliases"] == "service:jobs"
     assert request.headers["X-NHX-Principal-On-Behalf-Of"] == ""

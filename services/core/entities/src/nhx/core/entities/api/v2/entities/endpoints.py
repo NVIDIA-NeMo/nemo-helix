@@ -23,10 +23,12 @@ import textwrap
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi.openapi.models import Example
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
+from nhx.common.auth.principal_identifier import is_service_principal
 from nhx.common.entities.client import EntityValidationError
 from nhx.core.entities.api.dependencies import (
     AuthClientDep,
@@ -40,9 +42,7 @@ from nhx.core.entities.api.v2.entity_access import (
     require_relationship_access,
 )
 from nhx.core.entities.api.v2.utils import (
-    ROLE_BINDING_ENTITY_TYPE,
     add_workspace_filtering,
-    bindings_cache_delete,
     get_accessible_workspaces,
     require_workspace_access,
 )
@@ -71,7 +71,7 @@ _ENTITY_WRITE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 PROJECT_ENTITY_TYPE = "project"
 
-_ENTITY_CREATE_OPENAPI_EXAMPLES = {
+_ENTITY_CREATE_OPENAPI_EXAMPLES: dict[str, Example] = {
     "entity": {
         "summary": "Create an entity with required data",
         "value": {
@@ -84,7 +84,7 @@ _ENTITY_CREATE_OPENAPI_EXAMPLES = {
     }
 }
 
-_ENTITY_UPDATE_OPENAPI_EXAMPLES = {
+_ENTITY_UPDATE_OPENAPI_EXAMPLES: dict[str, Example] = {
     "entity": {
         "summary": "Update an entity with required data",
         "value": {
@@ -184,42 +184,15 @@ async def validate_workspace_not_deleting(
             raise _workspace_does_not_exist(workspace)
         raise HTTPException(status_code=missing_workspace_status, detail=f"Workspace '{workspace}' not found")
 
-    # Service principals can access workspaces being deleted (for cleanup)
-    if ws._deletion_stage is not None and auth_client.principal.caller_kind != "service_principal":
+    # Lifecycle state is a resource invariant. Only a direct internal cleanup
+    # request can operate on a deleting workspace, regardless of auth mode.
+    if ws._deletion_stage is not None and (
+        not is_service_principal(auth_client.principal.id) or auth_client.principal.is_delegated
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workspace '{workspace}' not found",
         )
-
-
-async def _invalidate_role_binding_cache_if_present(
-    repository: EntityRepository,
-    workspace: str,
-    entity_type: str,
-    name: str,
-    parent: str | None = None,
-) -> None:
-    """For ``role_binding`` rows, evict the principal's cached bindings before an update or delete.
-
-    No-op for other entity types. If the type is ``role_binding`` and no row
-    exists at the given name, raises 404.
-    """
-    if entity_type != ROLE_BINDING_ENTITY_TYPE:
-        return
-
-    entity = await repository.get_entity_by_name(
-        workspace=workspace,
-        entity_type=entity_type,
-        name=name,
-        parent=parent,
-    )
-
-    if entity is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entity not found")
-
-    principal = entity.data.get("principal")
-    if principal is not None:
-        await bindings_cache_delete(principal)
 
 
 @router.post(
@@ -277,7 +250,6 @@ async def create_entity(
     await validate_project_exists(repository, workspace, entity.project)
 
     accessible = await require_workspace_access(
-        repository,
         workspace,
         detail=f"Not allowed to create entities in workspace '{workspace}'",
     )
@@ -294,10 +266,6 @@ async def create_entity(
             project=entity.project,
             created_by=auth_client.principal.effective_id,
         )
-        if entity_type == ROLE_BINDING_ENTITY_TYPE:
-            principal = entity.data.get("principal")
-            if principal is not None:
-                await bindings_cache_delete(str(principal))
         return new_entity
     except IntegrityError as e:
         error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
@@ -407,13 +375,12 @@ async def list_entities(
     await require_relationship_access(auth_client, filter)
     # Handle cross-workspace query (workspace = "*")
     if workspace == ALL_WORKSPACES:
-        accessible_workspaces = await get_accessible_workspaces(repository)
+        accessible_workspaces = await get_accessible_workspaces()
         # Build combined filter for workspace access and user's filter
         query_workspace = ALL_WORKSPACES
         effective_filter = add_workspace_filtering(accessible_workspaces, filter, field="workspace")
     else:
         accessible_workspaces = await require_workspace_access(
-            repository,
             workspace,
             detail=f"Not allowed to list entities in workspace '{workspace}'",
         )
@@ -493,7 +460,6 @@ async def get_entity_by_name(
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
 
     await require_workspace_access(
-        repository,
         workspace,
         detail=f"Not allowed to read entities in workspace '{workspace}'",
     )
@@ -554,12 +520,9 @@ async def update_entity_by_name(
     )
 
     await require_workspace_access(
-        repository,
         workspace,
         detail=f"Not allowed to update entities in workspace '{workspace}'",
     )
-
-    await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
 
     # Validate project exists if specified
     await validate_project_exists(repository, workspace, entity_data.project)
@@ -668,12 +631,9 @@ async def delete_entity_by_name(
     # Check if workspace is being deleted (404 for user requests)
     await validate_workspace_not_deleting(workspace_repository, auth_client, workspace)
     await require_workspace_access(
-        repository,
         workspace,
         detail=f"Not allowed to delete entities in workspace '{workspace}'",
     )
-
-    await _invalidate_role_binding_cache_if_present(repository, workspace, entity_type, name, parent)
 
     try:
         deleted_count = await repository.delete_entity_by_name(

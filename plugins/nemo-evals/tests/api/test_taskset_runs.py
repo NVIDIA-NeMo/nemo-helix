@@ -26,6 +26,7 @@ from nemo_evals.taskset_runs.store import PlanStorageError, TasksetRunStore
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entities.types import Entity
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
@@ -256,7 +257,11 @@ async def test_taskset_run_lost_create_reply_through_production_store(
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(request_handler)) as http_client:
         async with AsyncNemoClient(base_url="http://entities.test", http_client=http_client) as client:
-            service._store = TasksetRunStore(AsyncEntitiesClient.from_client(client), files_client)
+            service._store = TasksetRunStore(
+                AsyncEntitiesClient.from_client(client),
+                files_client,
+                service_entities=EntityClient(AsyncEntitiesClient.from_client(client)),
+            )
             first = await run_client.post(PATH, json=request_body)
             assert first.status_code == (201 if mode == "recover" else 500), first.text
             assert len(files_service.filesets) == 2

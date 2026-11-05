@@ -34,7 +34,7 @@ from .exceptions import AuthorizationError, InvalidPermissionFormatError, Invali
 from .headers import AUTHENTICATION_CONTEXT_HEADERS, AUTHORIZATION_HEADER, TRUSTED_IDENTITY_HEADERS
 from .middleware import AuthorizationMiddleware
 from .models import NHX_PRINCIPAL_ENVVAR, AuthContext, Principal
-from .permissions import ALL_WORKSPACES, compute_accessible_workspaces
+from .permissions import ALL_WORKSPACES
 from .principal_identifier import (
     InvalidPrincipalIdentifier,
     PrincipalIdentifier,
@@ -167,7 +167,6 @@ __all__ = [
     "parse_bearer_token_source",
     "reference_delegation_name",
     "subject_token_type_for_exchange",
-    "compute_accessible_workspaces",
     "get_auth_client",
     "get_principal_auth_headers",
     "is_service_principal",

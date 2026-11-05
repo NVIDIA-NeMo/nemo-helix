@@ -5,6 +5,7 @@
 
 import logging
 
+from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.api.filter import FilterOperation
 from nhx.common.auth import AuthContext
@@ -94,8 +95,19 @@ def _entity_to_schema(entity: ModelProviderEntity) -> ModelProvider:
 class ModelProviderService:
     """Service layer for ModelProvider operations."""
 
-    def __init__(self, entity_client: EntityClient):
+    def __init__(self, entity_client: EntityClient, *, service_entities: EntityClient):
         self.entity_client = entity_client
+        self.service_entities = service_entities
+
+    async def _require_active_creator_workspace(self, workspace: str, auth_context: AuthContext | None) -> None:
+        # Lifecycle visibility must be checked before choosing direct persistence credentials.
+        # Background calls with no creator and direct internal cleanup retain their existing access.
+        if auth_context is None:
+            return
+        principal = auth_context.to_principal()
+        if principal.is_privileged() and not principal.is_delegated:
+            return
+        await AsyncWorkspacesClient.from_client(self.entity_client._client).get_workspace(name=workspace)
 
     async def create_model_provider(
         self,
@@ -106,6 +118,7 @@ class ModelProviderService:
         """Create a new model provider."""
         logger.debug("Creating model provider", extra={"workspace": workspace, "provider_name": request.name})
 
+        await self._require_active_creator_workspace(workspace, auth_context)
         _validate_extra_headers(request.default_extra_headers, "default_extra_headers")
         _validate_extra_headers(request.required_extra_headers, "required_extra_headers")
 
@@ -140,7 +153,7 @@ class ModelProviderService:
         ).with_auth_context(auth_context)
 
         try:
-            created = await self.entity_client.create(entity)
+            created = await self.service_entities.create(entity)
             logger.info("Model provider created", extra={"workspace": created.workspace, "provider_name": created.name})
             return _entity_to_schema(created)
         except EntityConflictError as e:
@@ -217,6 +230,7 @@ class ModelProviderService:
         """Create or update a model provider."""
         logger.debug("Upserting model provider", extra={"workspace": workspace, "provider_name": name})
 
+        await self._require_active_creator_workspace(workspace, auth_context)
         _validate_extra_headers(request.default_extra_headers, "default_extra_headers")
         _validate_extra_headers(request.required_extra_headers, "required_extra_headers")
 
@@ -272,7 +286,9 @@ class ModelProviderService:
             if auth_context:
                 existing_entity.with_auth_context(auth_context)
 
-            updated = await self.entity_client.update(existing_entity)
+            updated = await (self.service_entities if auth_context is not None else self.entity_client).update(
+                existing_entity
+            )
             logger.info("Model provider updated", extra={"workspace": updated.workspace, "provider_name": updated.name})
             return _entity_to_schema(updated)
         else:
@@ -295,7 +311,7 @@ class ModelProviderService:
                 status_message=status_message,
             ).with_auth_context(auth_context)
 
-            created = await self.entity_client.create(entity)
+            created = await self.service_entities.create(entity)
             logger.info("Model provider created", extra={"workspace": created.workspace, "provider_name": created.name})
             return _entity_to_schema(created)
 

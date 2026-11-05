@@ -6,9 +6,11 @@
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from nhx.common.auth.client import AuthClient
+from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
 from nhx.core.entities.api.v2.entities.endpoints import _validate_parent_access, create_entity, get_entity_by_id
@@ -16,21 +18,27 @@ from nhx.core.entities.api.v2.entities.schemas import EntityCreateInput
 from nhx.core.entities.api.v2.entity_access import (
     EntityOperation,
     require_control_entity_access,
+    require_entity_read_access,
     require_relationship_access,
 )
 from nhx.core.entities.app.repository import EntityRepositoryInterface, WorkspaceRepositoryInterface
 from nhx.core.entities.entities import Entity
 from nhx.core.entities.utils.filter import RelationshipFilterOperation
 from nhx.core.entities.utils.relationships import Relationship
+from nhx.testing.policy import PolicyHarness
 
 
 @pytest.fixture
-def storage_auth(monkeypatch: pytest.MonkeyPatch) -> AuthClient:
-    async def check_permissions(self: AuthClient, workspace: str, permissions: list[str]) -> bool:
-        return all(permission.startswith("entities.") for permission in permissions)
-
-    monkeypatch.setattr(AuthClient, "has_permissions", check_permissions)
-    return AuthClient(principal=Principal(id="service:scaled-evals"), config=AuthConfig(enabled=True))
+def storage_auth() -> AuthClient:
+    policy = PolicyHarness()
+    policy.document["authz"]["principals"]["service:scaled-evals"] = {"workspaces": {"private": ["ServiceEntityStore"]}}
+    policy.install(policy.document)
+    return AuthClient(
+        principal=Principal(id="service:scaled-evals"),
+        config=AuthConfig(enabled=True, policy_decision_point_base_url="http://pdp.invalid"),
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(policy.respond)),
+        service_name="entities",
+    )
 
 
 def control_entity() -> Entity:
@@ -64,16 +72,18 @@ async def test_operational_entities_need_no_iam_grant(storage_auth: AuthClient) 
 
 
 @pytest.mark.asyncio
-async def test_explicit_iam_grants_and_auth_disabled_access_remain_supported(monkeypatch: pytest.MonkeyPatch) -> None:
-    allowed = AsyncMock(return_value=True)
-    monkeypatch.setattr(AuthClient, "has_permissions", allowed)
-    auth_client = AuthClient(principal=Principal(id="service:auth"), config=AuthConfig(enabled=True))
-    await require_control_entity_access(auth_client, "private", "role_binding", "create")
-    allowed.assert_awaited_once_with("private", ["iam.create"])
-    allowed.reset_mock()
+async def test_explicit_iam_grants_and_auth_disabled_access_remain_supported() -> None:
+    policy = PolicyHarness()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(policy.respond)) as transport:
+        auth_client = AuthClient(
+            principal=Principal(id="service:auth"),
+            config=AuthConfig(enabled=True, policy_decision_point_base_url="http://pdp.invalid"),
+            http_client=transport,
+            service_name="entities",
+        )
+        await require_control_entity_access(auth_client, "private", "role_binding", "create")
     disabled = AuthClient(principal=Principal(id="user"), config=AuthConfig(enabled=False))
     await require_control_entity_access(disabled, "private", "role_binding", "create")
-    allowed.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -121,3 +131,34 @@ async def test_control_relationship_filters_require_iam_access(storage_auth: Aut
     with pytest.raises(HTTPException) as caught:
         await require_relationship_access(storage_auth, operation)
     assert caught.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "workspace,actor_role,allowed",
+    [("private", "ServiceEntityStore", True), ("private", "Viewer", False), ("other", "ServiceEntityStore", False)],
+)
+async def test_id_read_uses_subject_workspace_bounds_without_requiring_storage_grants(workspace, actor_role, allowed):
+    policy = PolicyHarness()
+    policy.document["authz"]["principals"]["service:jobs"] = {
+        "workspaces": {"private": [actor_role], "other": ["ServiceEntityStore"]}
+    }
+    policy.document["authz"]["roles"]["JobReader"] = {"permissions": ["jobs.read"]}
+    policy.document["authz"]["principals"]["job-reader"] = {"workspaces": {"private": ["JobReader"]}}
+    policy.install(policy.document)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(policy.respond)) as transport:
+        auth_client = AuthClient(
+            principal=Principal(id="service:jobs", on_behalf_of="job-reader"),
+            config=AuthConfig(enabled=True, policy_decision_point_base_url="http://pdp.invalid"),
+            http_client=transport,
+            service_name="entities",
+        )
+        token = auth_client_context.set(auth_client)
+        try:
+            if allowed:
+                await require_entity_read_access(auth_client, workspace, "helix_job")
+            else:
+                with pytest.raises(HTTPException) as caught:
+                    await require_entity_read_access(auth_client, workspace, "helix_job")
+                assert caught.value.status_code == 403
+        finally:
+            auth_client_context.reset(token)

@@ -374,3 +374,23 @@ async def test_delegated_fallback_does_not_assign_subject_email_to_actor(fake_st
     assert fake_store.calls[0]["display_name"] == "actor-subject"
     assert fake_store.calls[1]["subject"] == "delegated-subject"
     assert fake_store.calls[1]["primary_email"] == "delegated@example.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("actor", ["job-step:example", "deployment:example"])
+async def test_verified_delegation_changes_request_kind_without_retyping_account(fake_store: _FakeStore, actor: str):
+    resolver = AccountResolver(AuthServiceConfig())
+    query = {
+        "principal_id": actor,
+        "on_behalf_of_principal_id": "alice",
+        "verified_workload_delegation": True,
+    }
+    delegated = await resolver.resolve_authz_input(query)
+    assert delegated.caller_kind == "service_principal"
+    assert delegated.actor_account_id == f"account-for-{actor}"
+    assert delegated.subject_account_id == "account-for-alice"
+    assert all(call["account_type"] == "user" for call in fake_store.calls)
+    assert all("service:" not in alias for alias in delegated.actor_aliases)
+    direct = await resolver.resolve_authz_input({"principal_id": actor})
+    assert direct.caller_kind == "principal"
+    assert direct.actor_account_id == delegated.actor_account_id

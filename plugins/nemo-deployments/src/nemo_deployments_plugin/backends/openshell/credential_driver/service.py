@@ -14,12 +14,12 @@ from typing import Any
 import grpc
 from google.protobuf.message import Message
 from nemo_deployments_plugin.entities import Deployment
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
-from nemo_helix_plugin.iam.client import AsyncIAMClient
-from nemo_helix_plugin.iam.types import AuthzRequest
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.openshell.authorization import require_creator_secret_access
 from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from openshell._proto import credential_driver_pb2_grpc as driver_grpc  # ty: ignore[unresolved-import]
@@ -93,25 +93,26 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
         if self.auth_enabled != (principal_id is not None):
             raise RegistrationDenied("Binding authentication mode does not match this driver.")
 
-    async def _require_creator_access(self, principal_id: str | None, workspace: str) -> None:
+    async def _require_creator_access(
+        self, principal_id: str | None, workspace: str, creator: AuthContext | None
+    ) -> None:
         if principal_id is None:
             return  # Explicit auth-disabled bindings do not query the PDP.
-        if principal_id.startswith("service:"):
-            raise RegistrationDenied("A binding requires a user or service-account creator.")
-        response = await AsyncIAMClient.from_client(self.secrets_client).evaluate_authorization(
-            entrypoint="has_permissions",
-            body=AuthzRequest(
-                input={
-                    "principal_id": principal_id,
-                    "workspace": workspace,
-                    "permissions": ["secrets.read"],
-                }
-            ),
-        )
-        if response.data().result.get("allowed") is not True:
-            raise RegistrationDenied("The workload creator cannot use this secret.")
+        creator = creator if creator is not None else AuthContext(principal_id=principal_id)
+        if (creator.principal_on_behalf_of or creator.principal_id) != principal_id:
+            raise RegistrationDenied("Creator snapshot does not match the signed binding.")
+        try:
+            await require_creator_secret_access(
+                workspace=workspace,
+                name="",
+                creator=creator,
+                actor_service="deployments",
+                secrets_client=self.secrets_client,
+            )
+        except PermissionError as exc:
+            raise RegistrationDenied(str(exc)) from exc
 
-    async def _require_active_workload(self, workload: GatewayWorkload | None) -> None:
+    async def _require_active_workload(self, workload: GatewayWorkload | None) -> AuthContext | None:
         if workload is None:
             return  # Standalone tickets retain their bounded binding lifetime.
         if workload.kind == "job":
@@ -119,18 +120,25 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 raise RegistrationDenied("Missing job execution identity.")
             jobs = AsyncJobsClient.from_client(self.secrets_client)
             job = (await jobs.get_job(workspace=workload.workspace, name=workload.name)).data()
-            step = (
-                await jobs.get_job_step(workspace=workload.workspace, job=workload.name, name=workload.step_name)
-            ).data()
             active = {"created", "pending", "active"}
-            if (
-                step.id != workload.id
-                or job.attempt_id != workload.attempt_id
-                or step.attempt_id != workload.attempt_id
-                or job.status not in active
-                or step.status not in active
-            ):
+            if job.attempt_id != workload.attempt_id or job.status not in active:
                 raise RegistrationDenied("Job execution is no longer active.")
+            steps = await jobs.list_steps(workspace=workload.workspace, name=workload.name)
+            async for step in steps.items():
+                if step.id != workload.id:
+                    continue
+                if (
+                    step.name != workload.step_name
+                    or step.attempt_id != workload.attempt_id
+                    or step.status not in active
+                ):
+                    raise RegistrationDenied("Job execution is no longer active.")
+                return (
+                    AuthContext.model_validate(step.auth_context.model_dump())
+                    if step.auth_context is not None
+                    else None
+                )
+            raise RegistrationDenied("Job execution no longer exists.")
         else:
             entities = NemoEntitiesClient(AsyncEntitiesClient.from_client(self.secrets_client))
             try:
@@ -149,6 +157,7 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 }
             ):
                 raise RegistrationDenied("Deployment is no longer active.")
+            return deployment.auth_context
 
     async def dispatch(self, method: str, request: Message, context: grpc.aio.ServicerContext) -> Message:
         try:
@@ -237,8 +246,12 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
                 # The bearer token authenticates the driver. The signed creator
                 # is checked explicitly by the PDP, never through identity headers.
                 async with asyncio.timeout(15):
-                    await self._require_active_workload(binding.claims.workload)
-                    await self._require_creator_access(binding.claims.principal_id, binding.claims.secret_workspace)
+                    creator = await self._require_active_workload(binding.claims.workload)
+                    if self.auth_enabled and binding.claims.workload is not None and creator is None:
+                        raise RegistrationDenied("Workload creator snapshot is missing.")
+                    await self._require_creator_access(
+                        binding.claims.principal_id, binding.claims.secret_workspace, creator
+                    )
                     response = await self.secrets_client.access_secret(
                         workspace=binding.claims.secret_workspace,
                         name=binding.claims.secret_name,

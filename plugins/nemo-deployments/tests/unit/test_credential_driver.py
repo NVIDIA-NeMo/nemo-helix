@@ -28,8 +28,10 @@ from nemo_deployments_plugin.backends.openshell.credential_driver.tickets import
     RegistrationDenied,
     RegistrationTickets,
 )
+from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.openshell.types import GatewayWorkload
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
+from nhx.testing.policy import mock_operation_response
 from pydantic import SecretStr
 from sqlalchemy.exc import OperationalError
 
@@ -61,6 +63,7 @@ class Harness:
         self.step_status = "active"
         self.attempt = "attempt-1"
         self.step_id = "step-1"
+        self.creator: AuthContext | None = AuthContext(principal_id="user-1", principal_groups=["creators"])
         self.client = AsyncSecretsClient(
             base_url="https://helix.example",
             http_client=httpx.AsyncClient(
@@ -73,25 +76,41 @@ class Harness:
         self.calls.append(request)
         if self.status != 200:
             return httpx.Response(self.status, json={"detail": self.secret})
-        if request.url.path == "/apis/auth/v2/authz/has_permissions":
-            assert json.loads(request.content)["input"] == {
-                "principal_id": self.scope.principal_id,
-                "workspace": "helix-team",
-                "permissions": ["secrets.read"],
-            }
-            return httpx.Response(200, json={"result": {"allowed": True}})
+        if request.url.path == "/apis/auth/v2/authz/decision":
+            payload = json.loads(request.content)["input"]
+            assert payload["operation"] == "secrets.binding.authorize"
+            assert payload["target"]["workspace"] == "helix-team"
+            assert payload["facts"]["principal_id"] == self.scope.principal_id
+            if self.scope.workload is not None:
+                assert payload["on_behalf_of_principal_id"] == "user-1"
+                assert payload["subject_groups"] == ["creators"]
+            return mock_operation_response(payload, allowed=True)
         if "/apis/jobs/" in request.url.path:
-            if request.url.path.endswith("/steps/run"):
+            if request.url.path.endswith("/steps"):
                 return httpx.Response(
                     200,
                     json={
-                        "id": self.step_id,
-                        "entity_id": self.step_id,
-                        "parent": self.attempt,
-                        "attempt_id": self.attempt,
-                        "name": "run",
-                        "workspace": "helix-team",
-                        "status": self.step_status,
+                        "data": [
+                            {
+                                "id": self.step_id,
+                                "job": "job-1",
+                                "attempt_id": self.attempt,
+                                "name": "run",
+                                "fileset": "results",
+                                "auth_context": self.creator.model_dump(mode="json")
+                                if self.creator is not None
+                                else None,
+                                "workspace": "helix-team",
+                                "status": self.step_status,
+                            }
+                        ],
+                        "pagination": {
+                            "page": 1,
+                            "page_size": 100,
+                            "current_page_size": 1,
+                            "total_pages": 1,
+                            "total_results": 1,
+                        },
                     },
                 )
             return httpx.Response(
@@ -588,7 +607,18 @@ def test_invalid_credential_lifetime(harness: Harness, lifetime: int) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "change", ["completed", "cancelling", "paused", "step-error", "new-attempt", "new-step", "active"]
+    "change",
+    [
+        "completed",
+        "cancelling",
+        "paused",
+        "step-error",
+        "new-attempt",
+        "new-step",
+        "missing-creator",
+        "changed-creator",
+        "active",
+    ],
 )
 async def test_job_binding_tracks_live_execution_identity(harness: Harness, change: str) -> None:
     from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
@@ -616,6 +646,10 @@ async def test_job_binding_tracks_live_execution_identity(harness: Harness, chan
         harness.attempt = "attempt-2"
     elif change == "new-step":
         harness.step_id = "step-2"
+    elif change == "missing-creator":
+        harness.creator = None
+    elif change == "changed-creator":
+        harness.creator = AuthContext(principal_id="other-user")
     driver = CredentialDriver(harness.registry, harness.client)
     request = {
         "credentials": [

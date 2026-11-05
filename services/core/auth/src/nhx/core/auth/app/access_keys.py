@@ -22,6 +22,7 @@ from nemo_helix_plugin.auth.access_keys.types import (
     AccessKeyStatus,
     AccessKeyWorkspaceGrant,
 )
+from nemo_helix_plugin.auth.decisions import AccessKeyFacts, DecisionRequest, ResourceTarget
 from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceMemberRequest, UpdateWorkspaceMemberRequest
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
@@ -31,6 +32,7 @@ from nhx.common.auth.access_keys import (
     AccessKeyIssuerService,
     AccessKeyValidationError,
 )
+from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.common.auth.token_claims import TokenClaims
 from nhx.common.config import AuthConfig
@@ -103,6 +105,9 @@ class AccessKeyStateConflictError(Exception):
     """Raised when an irreversible lifecycle state prevents a transition."""
 
 
+KeyAuthorization = Callable[[str, AccessKeyEntity], Awaitable[bool]]
+
+
 class AccessKeyRegistry:
     """Durable access-key lifecycle records with a legacy entity fallback."""
 
@@ -110,7 +115,10 @@ class AccessKeyRegistry:
         self,
         entity_client: EntityClient,
         credential_adapter: AccessKeyCredentialAdapter | None = None,
+        *,
+        authorize_record: KeyAuthorization,
     ) -> None:
+        self._authorize_record = authorize_record
         self._entity_client = entity_client
         self._credential_adapter = credential_adapter
 
@@ -241,12 +249,11 @@ class AccessKeyRegistry:
                     raise
         raise AssertionError("unreachable: loop always returns or raises")
 
-    async def revoke(self, jti: str, principal: str, *, admin_override: AdminOverride | None = None) -> bool:
+    async def revoke(self, jti: str, principal: str) -> bool:
         # Note: unlike is_active, revoke has no backfill path for legacy v1 keys that have
         # never authenticated after migration. Without the original JWT claims we cannot
         # construct a valid entity, so callers receive 404 until the key authenticates once.
-        admin_override = _memoize_admin_override(admin_override)
-        record = await self._get_owned(jti, principal, admin_override=admin_override)
+        record = await self._get_owned(jti, principal)
         if record.status == "REVOKED":
             return False
 
@@ -257,7 +264,7 @@ class AccessKeyRegistry:
         async def handle_conflict() -> bool | _Retry:
             nonlocal record
             try:
-                record = await self._get_owned(jti, principal, admin_override=admin_override)
+                record = await self._get_owned(jti, principal)
             except AccessKeyNotFoundError:
                 # The key was concurrently hard-deleted between our update and this
                 # read. Treat as already-revoked (idempotent outcome).
@@ -268,9 +275,7 @@ class AccessKeyRegistry:
 
         return await self._retry_on_conflict(do_attempt, handle_conflict)
 
-    async def get_for_rotation(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> AccessKeyEntity:
+    async def get_for_rotation(self, jti: str, principal: str) -> AccessKeyEntity:
         """Check the rotation target (the key `rotates` points to) before minting its replacement.
 
         Raises AccessKeyValidationError (400), not AccessKeyNotFoundError, so an invalid target
@@ -278,7 +283,7 @@ class AccessKeyRegistry:
         keys have no stable non-admin owner to rotate against.
         """
         try:
-            record = await self._get_owned(jti, principal, admin_override=admin_override)
+            record = await self._get_owned(jti, principal)
         except AccessKeyNotFoundError as exc:
             raise AccessKeyValidationError(
                 f"rotates references a Scoped Access Key that does not exist or is not owned by the caller: {jti}"
@@ -289,15 +294,11 @@ class AccessKeyRegistry:
             )
         return record
 
-    async def suspend(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> tuple[bool, AccessKeyReversibleStatus]:
-        return await self._set_suspension(jti, principal, suspended=True, admin_override=admin_override)
+    async def suspend(self, jti: str, principal: str) -> tuple[bool, AccessKeyReversibleStatus]:
+        return await self._set_suspension(jti, principal, suspended=True)
 
-    async def unsuspend(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> tuple[bool, AccessKeyReversibleStatus]:
-        return await self._set_suspension(jti, principal, suspended=False, admin_override=admin_override)
+    async def unsuspend(self, jti: str, principal: str) -> tuple[bool, AccessKeyReversibleStatus]:
+        return await self._set_suspension(jti, principal, suspended=False)
 
     async def _set_suspension(
         self,
@@ -305,12 +306,10 @@ class AccessKeyRegistry:
         principal: str,
         *,
         suspended: bool,
-        admin_override: AdminOverride | None = None,
     ) -> tuple[bool, AccessKeyReversibleStatus]:
         target_status: Literal["ACTIVE", "SUSPENDED"] = "SUSPENDED" if suspended else "ACTIVE"
         completed_action = "suspended" if suspended else "unsuspended"
-        admin_override = _memoize_admin_override(admin_override)
-        record = await self._get_owned(jti, principal, admin_override=admin_override)
+        record = await self._get_owned(jti, principal)
         self._ensure_not_rotating(jti, record, action=completed_action)
         if record.status == "REVOKED":
             raise AccessKeyStateConflictError(f"Revoked Scoped Access Key {jti} cannot be {completed_action}")
@@ -327,7 +326,7 @@ class AccessKeyRegistry:
 
         async def handle_conflict() -> tuple[bool, AccessKeyReversibleStatus] | _Retry:
             nonlocal record
-            record = await self._get_owned(jti, principal, admin_override=admin_override)
+            record = await self._get_owned(jti, principal)
             self._ensure_not_rotating(jti, record, action=completed_action)
             if record.status == "REVOKED":
                 raise AccessKeyStateConflictError(f"Revoked Scoped Access Key {jti} cannot be {completed_action}")
@@ -338,23 +337,19 @@ class AccessKeyRegistry:
 
         return await self._retry_on_conflict(do_attempt, handle_conflict)
 
-    async def get_rotatable(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> AccessKeyEntity:
+    async def get_rotatable(self, jti: str, principal: str) -> AccessKeyEntity:
         """Return `jti`'s current record if it is eligible to be rotated, else raise.
 
         Read-only: callers mint the successor key from the returned record's
         attributes, then call `begin_rotation` to transition this record to ROTATING.
         """
-        record = await self._get_owned(jti, principal, admin_override=admin_override)
+        record = await self._get_owned(jti, principal)
         self._ensure_rotatable(jti, record)
         return record
 
-    async def get_status(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> AccessKeyEntity:
+    async def get_status(self, jti: str, principal: str) -> AccessKeyEntity:
         """Return an owned key record without requiring a particular lifecycle state."""
-        return await self._get_owned(jti, principal, admin_override=admin_override)
+        return await self._get_owned(jti, principal)
 
     async def begin_rotation(
         self,
@@ -363,11 +358,9 @@ class AccessKeyRegistry:
         *,
         grace_period_seconds: int,
         successor_jti: str,
-        admin_override: AdminOverride | None = None,
     ) -> AccessKeyEntity:
-        admin_override = _memoize_admin_override(admin_override)
         try:
-            record = await self._get_owned(jti, principal, admin_override=admin_override)
+            record = await self._get_owned(jti, principal)
         except Exception as exc:
             # No update has been attempted in this rotation iteration yet.
             exc.__dict__["write_attempted"] = False
@@ -401,7 +394,7 @@ class AccessKeyRegistry:
             # last_used_at update) — retry against the fresh db_version instead of
             # failing the rotation.
             try:
-                record = await self._get_owned(jti, principal, admin_override=admin_override)
+                record = await self._get_owned(jti, principal)
             except Exception as exc:
                 # The conflict proves the preceding update was rejected, so this
                 # re-read can also fail only before a rotation write commits.
@@ -506,17 +499,9 @@ class AccessKeyRegistry:
             raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found")
         return record
 
-    async def _get_owned(
-        self, jti: str, principal: str, *, admin_override: AdminOverride | None = None
-    ) -> AccessKeyEntity:
+    async def _get_owned(self, jti: str, principal: str) -> AccessKeyEntity:
         record = await self._get(jti)
-        if record.is_service_account():
-            # Service-bound keys belong to the platform, not to the administrator who
-            # created them. Require the caller to be a *current* HelixAdmin for every
-            # lifecycle operation, including when that caller is the recorded creator.
-            if admin_override is not None and await admin_override():
-                return record
-        elif record.principal == principal:
+        if await self._authorize_record(principal, record):
             return record
         raise AccessKeyNotFoundError(f"Scoped Access Key {jti} was not found")
 
@@ -697,13 +682,34 @@ class AccessKeyRegistry:
         return None
 
 
-async def get_access_key_registry(entity_client: EntityClient = Depends(get_entity_client)) -> AccessKeyRegistry:
+async def get_access_key_registry(
+    entity_client: EntityClient = Depends(get_entity_client),
+) -> AccessKeyRegistry:
     session_maker = await get_account_session_maker()
     adapter = AccessKeyCredentialAdapter(
         AccountCredentialStore(session_maker),
         AccountIdentityStore(session_maker),
     )
-    return AccessKeyRegistry(entity_client.as_service("auth", internal=True), adapter)
+
+    async def authorize_record(principal: str, record: AccessKeyEntity) -> bool:
+        # Validation also needs this registry before a request is authenticated.
+        # Lifecycle decisions require the verified request context when invoked.
+        auth_client = auth_client_context.get()
+        if auth_client is None or principal != auth_client.principal.effective_id:
+            return False
+        if not auth_client.auth_enabled:
+            return not record.is_service_account() and record.principal == principal
+        return await auth_client.has_operation(
+            DecisionRequest(
+                operation="auth.access-key.lifecycle",
+                target=ResourceTarget(workspace=record.workspace, resource_type="access_key", name=record.name),
+                facts=AccessKeyFacts(owner=record.principal, service_bound=record.is_service_account()),
+            )
+        )
+
+    return AccessKeyRegistry(
+        entity_client.as_service("auth", internal=True), adapter, authorize_record=authorize_record
+    )
 
 
 class PersistentAccessKeyIssuer:
@@ -780,9 +786,7 @@ class PersistentAccessKeyIssuer:
         inherited_service_attributes = None
         if request.rotates is not None:
             # Fail fast on an invalid rotation target instead of minting an orphan key.
-            old_record = await self._registry.get_for_rotation(
-                request.rotates, self.principal, admin_override=self._admin_override
-            )
+            old_record = await self._registry.get_for_rotation(request.rotates, self.principal)
             inherited_service_attributes = old_record.service_attributes
             if request.scope is None:
                 # No --scope given: inherit the predecessor's scope instead of widening to unscoped.
@@ -979,7 +983,7 @@ class PersistentAccessKeyIssuer:
 
     async def revoke_async(self, jti: str) -> bool:
         self._ensure_enabled()
-        revoked = await self._registry.revoke(jti, self.principal, admin_override=self._admin_override)
+        revoked = await self._registry.revoke(jti, self.principal)
         audit_event = "access_key.revoked" if revoked else "access_key.revoke_noop"
         logger.info(
             "Scoped Access Key revoked" if revoked else "Scoped Access Key revoke requested for already-revoked key",
@@ -994,17 +998,13 @@ class PersistentAccessKeyIssuer:
 
     async def suspend_async(self, jti: str) -> tuple[bool, AccessKeyReversibleStatus]:
         self._ensure_enabled()
-        suspended, effective_status = await self._registry.suspend(
-            jti, self.principal, admin_override=self._admin_override
-        )
+        suspended, effective_status = await self._registry.suspend(jti, self.principal)
         self._log_suspension(jti, changed=suspended, action="suspend")
         return suspended, effective_status
 
     async def unsuspend_async(self, jti: str) -> tuple[bool, AccessKeyReversibleStatus]:
         self._ensure_enabled()
-        unsuspended, effective_status = await self._registry.unsuspend(
-            jti, self.principal, admin_override=self._admin_override
-        )
+        unsuspended, effective_status = await self._registry.unsuspend(jti, self.principal)
         self._log_suspension(jti, changed=unsuspended, action="unsuspend")
         return unsuspended, effective_status
 
@@ -1031,7 +1031,7 @@ class PersistentAccessKeyIssuer:
         # Read-validate before minting: fail fast on an ineligible key (already
         # revoked/suspended/rotating/expired) instead of issuing a successor JWT we'd
         # then have to discard.
-        old_record = await self._registry.get_rotatable(jti, self.principal, admin_override=self._admin_override)
+        old_record = await self._registry.get_rotatable(jti, self.principal)
         allow_service_account = old_record.entity_type == "SERVICE_ACCOUNT"
         if allow_service_account:
             # Mirrors create_async's defense-in-depth re-check: don't rely solely on
@@ -1083,7 +1083,6 @@ class PersistentAccessKeyIssuer:
                 await self._registry.get_status(
                     new_key.jti,
                     self.principal,
-                    admin_override=self._admin_override,
                 )
             except AccessKeyNotFoundError:
                 pass
@@ -1113,7 +1112,6 @@ class PersistentAccessKeyIssuer:
                 self.principal,
                 grace_period_seconds=grace_period_seconds,
                 successor_jti=new_key.jti,
-                admin_override=self._admin_override,
             )
         except (AccessKeyStateConflictError, EntityConflictError, AccessKeyNotFoundError):
             await self._discard_orphaned_successor(
@@ -1133,7 +1131,6 @@ class PersistentAccessKeyIssuer:
                 reconciled_record = await self._registry.get_status(
                     jti,
                     self.principal,
-                    admin_override=self._admin_override,
                 )
             except Exception:
                 logger.warning(

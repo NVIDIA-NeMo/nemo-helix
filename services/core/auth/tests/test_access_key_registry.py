@@ -3,14 +3,18 @@
 
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateResponse, AccessKeyEntityType
 from nhx.common.auth.token_claims import TokenClaims
-from nhx.common.entities import EntityConflictError, EntityNotFoundError
+from nhx.common.entities import EntityClient, EntityConflictError, EntityNotFoundError
 from nhx.core.auth.app.access_keys import AccessKeyNotFoundError, AccessKeyRegistry, AccessKeyStateConflictError
 from nhx.core.auth.entities import AccessKeyEntity
+from nhx.testing.policy import PolicyHarness
+
+_policy = PolicyHarness()
+
 
 NOW = datetime(2026, 8, 4, 18, 0, tzinfo=UTC)
 
@@ -117,7 +121,7 @@ def test_access_key_entity_rejects_inconsistent_identity_binding(
 @pytest.mark.asyncio
 async def test_registry_persists_created_key_metadata() -> None:
     entity_client = AsyncMock()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
     key = AccessKeyCreateResponse(
         jti="ak_example",
         name="ci-build",
@@ -147,7 +151,7 @@ async def test_registry_persists_created_key_metadata() -> None:
 @pytest.mark.asyncio
 async def test_registry_separates_service_key_owner_from_token_subject() -> None:
     entity_client = AsyncMock()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
     key = AccessKeyCreateResponse(
         jti="ak_service",
         name="otel",
@@ -174,7 +178,7 @@ async def test_registry_separates_service_key_owner_from_token_subject() -> None
 @pytest.mark.asyncio
 async def test_registry_discards_unreturned_key() -> None:
     entity_client = AsyncMock()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     await registry.discard_unreturned("ak_orphaned")
 
@@ -189,7 +193,7 @@ async def test_registry_discards_unreturned_key() -> None:
 async def test_registry_discard_unreturned_is_idempotent_when_record_is_missing() -> None:
     entity_client = AsyncMock()
     entity_client.delete.side_effect = EntityNotFoundError("missing")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     await registry.discard_unreturned("ak_missing")
 
@@ -213,7 +217,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
         ],
         pagination=SimpleNamespace(total_pages=2),
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=1, page_size=2)
 
@@ -234,7 +238,7 @@ async def test_registry_lists_principals_keys_with_status_across_pages() -> None
 async def test_registry_lists_all_service_accounts_when_include_service_accounts() -> None:
     entity_client = AsyncMock()
     entity_client.list.return_value = SimpleNamespace(data=[], pagination=SimpleNamespace(total_pages=1))
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     await registry.list_for_principal("admin@example.com", page=1, page_size=100, include_service_accounts=True)
 
@@ -253,7 +257,7 @@ async def test_registry_can_retrieve_later_list_page() -> None:
     entity_client.list.return_value = SimpleNamespace(
         data=[_record(jti="ak_later")], pagination=SimpleNamespace(total_pages=12)
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=11, page_size=25)
 
@@ -269,7 +273,7 @@ async def test_registry_reports_expired_status() -> None:
     entity_client.list.return_value = SimpleNamespace(
         data=[_expired_record()], pagination=SimpleNamespace(total_pages=1)
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
 
@@ -282,7 +286,7 @@ async def test_registry_reports_expired_at_timestamp_while_authentication_allows
     entity_client = AsyncMock()
     entity_client.list.return_value = SimpleNamespace(data=[record], pagination=SimpleNamespace(total_pages=1))
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
 
@@ -295,7 +299,7 @@ async def test_registry_revokes_owned_key_without_deleting_audit_record() -> Non
     entity_client = AsyncMock()
     original = _record()
     entity_client.get.return_value = original
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.revoke("ak_example", "alice@example.com")
 
@@ -311,7 +315,7 @@ async def test_registry_concurrent_revoke_reports_existing_revocation() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), _record(revoked=True)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.revoke("ak_example", "alice@example.com")
 
@@ -325,7 +329,7 @@ async def test_registry_concurrent_revoke_with_hard_delete_treats_as_already_rev
     # First get succeeds; update conflicts; second get raises not-found (key deleted).
     entity_client.get.side_effect = [_record(), EntityNotFoundError("gone")]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.revoke("ak_example", "alice@example.com")
 
@@ -338,7 +342,7 @@ async def test_registry_concurrent_suspend_with_hard_delete_reports_not_found() 
     # First get succeeds; update conflicts; second get raises not-found (key deleted).
     entity_client.get.side_effect = [_record(), EntityNotFoundError("gone")]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyNotFoundError, match="Scoped Access Key ak_example was not found"):
         await registry.suspend("ak_example", "alice@example.com")
@@ -350,7 +354,7 @@ async def test_registry_concurrent_suspend_with_hard_delete_reports_not_found() 
 async def test_registry_can_newly_revoke_expired_key() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _expired_record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.revoke("ak_expired", "alice@example.com")
 
@@ -362,7 +366,7 @@ async def test_registry_can_newly_revoke_expired_key() -> None:
 async def test_registry_active_authentication_updates_last_used_at() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_example", "alice@example.com")
 
@@ -380,7 +384,7 @@ async def test_registry_rotating_authentication_updates_last_used_at() -> None:
             "grace_period_expires_at": datetime.now(tz=UTC) + timedelta(minutes=5),
         }
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_rotating", "alice@example.com")
 
@@ -402,7 +406,7 @@ async def test_registry_rotating_authentication_bypasses_last_used_at_coalescing
             "last_used_at": datetime.now(tz=UTC) - timedelta(seconds=5),
         }
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_rotating", "alice@example.com")
 
@@ -417,7 +421,7 @@ async def test_registry_last_used_at_update_retries_transient_conflict() -> None
     entity_client = AsyncMock()
     entity_client.get.side_effect = [stale, fresh]
     entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_example", "alice@example.com")
 
@@ -436,7 +440,7 @@ async def test_registry_last_used_at_update_stops_when_conflict_reveals_revocati
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), _record(revoked=True)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active("ak_example", "alice@example.com")
 
@@ -457,7 +461,7 @@ async def test_registry_last_used_at_update_stops_when_conflict_reveals_revocati
 async def test_registry_rejected_authentication_does_not_update_last_used_at(record: AccessKeyEntity) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active(record.name, "alice@example.com")
 
@@ -473,7 +477,7 @@ async def test_registry_last_used_at_update_failure_does_not_reject_authenticati
     entity_client = AsyncMock()
     entity_client.get.return_value = _record()
     entity_client.update.side_effect = failure
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_example", "alice@example.com")
 
@@ -482,7 +486,7 @@ async def test_registry_last_used_at_update_failure_does_not_reject_authenticati
 async def test_registry_reports_revoked_key_as_inactive() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record(revoked=True)
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active("ak_example", "alice@example.com")
 
@@ -491,7 +495,7 @@ async def test_registry_reports_revoked_key_as_inactive() -> None:
 async def test_registry_hides_missing_and_other_principals_keys() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record(principal="bob@example.com")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyNotFoundError):
         await registry.revoke("ak_example", "alice@example.com")
@@ -501,86 +505,22 @@ async def test_registry_hides_missing_and_other_principals_keys() -> None:
 
 
 @pytest.mark.asyncio
-async def test_registry_admin_override_lets_a_different_admin_revoke_a_service_bound_key() -> None:
+@pytest.mark.parametrize("allowed", [False, True])
+@pytest.mark.parametrize("service_bound", [False, True])
+async def test_registry_enforces_policy_decision_for_the_loaded_record(allowed: bool, service_bound: bool) -> None:
     entity_client = AsyncMock()
-    entity_client.get.return_value = _record(principal="admin-a@example.com", service_account=True)
-    registry = AccessKeyRegistry(entity_client)
-
-    assert await registry.revoke("ak_example", "admin-b@example.com", admin_override=AsyncMock(return_value=True))
-
-    updated = entity_client.update.await_args.args[0]
-    assert updated.status == "REVOKED"
-
-
-@pytest.mark.asyncio
-async def test_registry_admin_override_is_not_consulted_for_a_personal_key() -> None:
-    entity_client = AsyncMock()
-    entity_client.get.return_value = _record(principal="alice@example.com")
-    registry = AccessKeyRegistry(entity_client)
-    admin_override = AsyncMock(return_value=True)
-
-    with pytest.raises(AccessKeyNotFoundError):
-        await registry.revoke("ak_example", "bob@example.com", admin_override=admin_override)
-
-    admin_override.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_registry_admin_override_denied_still_hides_a_service_bound_key() -> None:
-    entity_client = AsyncMock()
-    entity_client.get.return_value = _record(principal="admin-a@example.com", service_account=True)
-    registry = AccessKeyRegistry(entity_client)
-
-    with pytest.raises(AccessKeyNotFoundError):
-        await registry.revoke("ak_example", "admin-b@example.com", admin_override=AsyncMock(return_value=False))
-
-
-@pytest.mark.asyncio
-async def test_registry_service_key_creator_must_still_pass_admin_override() -> None:
-    entity_client = AsyncMock()
-    entity_client.get.return_value = _record(principal="admin-a@example.com", service_account=True)
-    registry = AccessKeyRegistry(entity_client)
-    admin_override = AsyncMock(return_value=False)
-
-    with pytest.raises(AccessKeyNotFoundError):
-        await registry.revoke("ak_example", "admin-a@example.com", admin_override=admin_override)
-
-    admin_override.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_registry_admin_override_is_not_consulted_when_the_caller_already_owns_the_key() -> None:
-    entity_client = AsyncMock()
-    entity_client.get.return_value = _record(principal="alice@example.com")
-    registry = AccessKeyRegistry(entity_client)
-    admin_override = AsyncMock(return_value=True)
-
-    assert await registry.revoke("ak_example", "alice@example.com", admin_override=admin_override)
-
-    admin_override.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_registry_admin_override_lets_a_different_admin_suspend_and_unsuspend_a_service_bound_key() -> None:
-    entity_client = AsyncMock()
-    entity_client.get.side_effect = [
-        _record(principal="admin-a@example.com", service_account=True),
-        _record(principal="admin-a@example.com", service_account=True).model_copy(update={"status": "SUSPENDED"}),
-    ]
-    registry = AccessKeyRegistry(entity_client)
-    admin_override = AsyncMock(return_value=True)
-
-    suspend_changed, suspend_status = await registry.suspend(
-        "ak_example", "admin-b@example.com", admin_override=admin_override
-    )
-    assert suspend_changed
-    assert suspend_status == "SUSPENDED"
-
-    unsuspend_changed, unsuspend_status = await registry.unsuspend(
-        "ak_example", "admin-b@example.com", admin_override=admin_override
-    )
-    assert unsuspend_changed
-    assert unsuspend_status == "ACTIVE"
+    record = _record(principal="alice@example.com", service_account=service_bound)
+    entity_client.get.return_value = record
+    authorize = AsyncMock(return_value=allowed)
+    registry = AccessKeyRegistry(entity_client, authorize_record=authorize)
+    if allowed:
+        assert await registry.revoke("ak_example", "bob@example.com")
+        entity_client.update.assert_awaited_once()
+    else:
+        with pytest.raises(AccessKeyNotFoundError):
+            await registry.revoke("ak_example", "bob@example.com")
+        entity_client.update.assert_not_awaited()
+    authorize.assert_awaited_once_with("bob@example.com", record)
 
 
 @pytest.mark.asyncio
@@ -590,7 +530,7 @@ async def test_registry_is_active_for_service_bound_key_checks_subject_not_owner
         update={"subject_principal": "service-account:otel-collector"}
     )
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     # Authenticating as the service-account subject succeeds...
     assert await registry.is_active("ak_example", "service-account:otel-collector")
@@ -603,7 +543,7 @@ async def test_registry_backfills_missing_legacy_access_key_from_validated_claim
     entity_client = AsyncMock()
     entity_client.get.side_effect = EntityNotFoundError("missing")
     entity_client.create.side_effect = lambda record: record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
     claims = TokenClaims(
         subject="alice@example.com",
         email=None,
@@ -641,7 +581,7 @@ async def test_registry_reports_suspended_key_in_list() -> None:
     entity_client.list.return_value = SimpleNamespace(
         data=[_suspended_record()], pagination=SimpleNamespace(total_pages=1)
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
 
@@ -656,7 +596,7 @@ async def test_registry_expiration_prevents_suspension_state_changes() -> None:
         data=[suspended_expired], pagination=SimpleNamespace(total_pages=1)
     )
     entity_client.get.side_effect = [suspended_expired, _expired_record()]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     listed = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
     assert listed.data[0].status == "EXPIRED"
@@ -674,7 +614,7 @@ async def test_registry_expiration_prevents_suspension_state_changes() -> None:
 async def test_registry_revoke_transitions_suspended_key_to_revoked() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _suspended_record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.revoke("ak_suspended", "alice@example.com")
 
@@ -693,7 +633,7 @@ async def test_registry_revoke_retries_transient_conflict_when_key_is_only_suspe
     entity_client = AsyncMock()
     entity_client.get.side_effect = [stale, fresh]
     entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.revoke("ak_suspended", "alice@example.com")
 
@@ -709,7 +649,7 @@ async def test_registry_revoke_gives_up_after_persistent_conflict_when_key_is_on
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), *([_suspended_record()] * 3)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(EntityConflictError, match="entity version changed"):
         await registry.revoke("ak_suspended", "alice@example.com")
@@ -722,7 +662,7 @@ async def test_registry_revoke_gives_up_after_persistent_conflict_when_key_is_on
 async def test_registry_reports_suspended_key_as_inactive() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _suspended_record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active("ak_suspended", "alice@example.com")
 
@@ -731,7 +671,7 @@ async def test_registry_reports_suspended_key_as_inactive() -> None:
 async def test_registry_suspends_and_unsuspends_key() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), _suspended_record()]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     suspend_changed, suspend_status = await registry.suspend("ak_example", "alice@example.com")
     assert suspend_changed
@@ -747,7 +687,7 @@ async def test_registry_suspends_and_unsuspends_key() -> None:
 async def test_registry_suspension_operations_are_idempotent() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_suspended_record(), _record()]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     suspend_changed, suspend_status = await registry.suspend("ak_suspended", "alice@example.com")
     assert not suspend_changed
@@ -763,7 +703,7 @@ async def test_registry_suspension_operations_are_idempotent() -> None:
 async def test_registry_rejects_suspension_transition_for_revoked_key(operation: str) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record(revoked=True)
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyStateConflictError, match=f"cannot be {operation}ed"):
         await getattr(registry, operation)("ak_example", "alice@example.com")
@@ -783,7 +723,7 @@ async def test_registry_concurrent_suspension_transition_reports_target_state(
     entity_client = AsyncMock()
     entity_client.get.side_effect = [initial, current]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     changed, effective_status = await getattr(registry, operation)(initial.name, initial.principal)
     assert not changed
@@ -798,7 +738,7 @@ async def test_registry_concurrent_suspension_transition_reports_expiration() ->
     expired = _expired_record().model_copy(update={"name": "ak_example"})
     entity_client.get.side_effect = [_record(), expired]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     changed, effective_status = await registry.suspend("ak_example", "alice@example.com")
 
@@ -813,7 +753,7 @@ async def test_registry_concurrent_suspension_transition_rejects_revocation() ->
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), _record(revoked=True)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyStateConflictError, match="cannot be suspended"):
         await registry.suspend("ak_example", "alice@example.com")
@@ -830,7 +770,7 @@ async def test_registry_suspend_retries_transient_conflict_from_unrelated_write(
     entity_client = AsyncMock()
     entity_client.get.side_effect = [stale, fresh]
     entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     changed, effective_status = await registry.suspend("ak_example", "alice@example.com")
 
@@ -848,7 +788,7 @@ async def test_registry_suspend_gives_up_after_persistent_conflict() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record() for _ in range(4)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(EntityConflictError, match="entity version changed"):
         await registry.suspend("ak_example", "alice@example.com")
@@ -861,7 +801,7 @@ async def test_registry_suspend_gives_up_after_persistent_conflict() -> None:
 async def test_registry_rejects_missing_current_access_key_record() -> None:
     entity_client = AsyncMock()
     entity_client.get.side_effect = EntityNotFoundError("missing")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
     claims = TokenClaims(
         subject="alice@example.com",
         email=None,
@@ -888,7 +828,7 @@ async def test_registry_rejects_missing_current_access_key_record() -> None:
 async def test_registry_reports_rotating_key_as_active_during_grace_period() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _rotating_record(grace_period_expires_at=datetime(2999, 1, 1, tzinfo=UTC))
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert await registry.is_active("ak_rotating", "alice@example.com")
 
@@ -897,7 +837,7 @@ async def test_registry_reports_rotating_key_as_active_during_grace_period() -> 
 async def test_registry_reports_rotated_key_as_inactive_after_grace_period() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _rotating_record(grace_period_expires_at=datetime(2000, 1, 1, tzinfo=UTC))
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active("ak_rotating", "alice@example.com")
 
@@ -911,7 +851,7 @@ async def test_registry_is_active_does_not_extend_grace_deadline_by_auth_leeway(
     entity_client.get.return_value = _rotating_record(
         grace_period_expires_at=datetime.now(tz=UTC) - timedelta(seconds=5)
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     assert not await registry.is_active("ak_rotating", "alice@example.com")
 
@@ -923,7 +863,7 @@ async def test_registry_reports_rotating_key_status_in_listing() -> None:
         data=[_rotating_record(grace_period_expires_at=datetime(2999, 1, 1, tzinfo=UTC))],
         pagination=SimpleNamespace(total_pages=1),
     )
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.list_for_principal("alice@example.com", page=1, page_size=100)
 
@@ -956,7 +896,7 @@ def test_registry_metadata_hides_stale_grace_expiry_when_not_rotating(status: st
 async def test_registry_get_rotatable_returns_active_record() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     record = await registry.get_rotatable("ak_example", "alice@example.com")
 
@@ -973,7 +913,7 @@ async def test_registry_get_rotatable_returns_active_record() -> None:
 async def test_registry_get_rotatable_rejects_non_active_key(record: AccessKeyEntity) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyStateConflictError):
         await registry.get_rotatable(record.name, record.principal)
@@ -983,7 +923,7 @@ async def test_registry_get_rotatable_rejects_non_active_key(record: AccessKeyEn
 async def test_registry_begin_rotation_transitions_active_key_to_rotating() -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = _record()
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.begin_rotation(
         "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
@@ -1009,7 +949,7 @@ async def test_registry_begin_rotation_transitions_active_key_to_rotating() -> N
 async def test_registry_begin_rotation_rejects_non_active_key(record: AccessKeyEntity) -> None:
     entity_client = AsyncMock()
     entity_client.get.return_value = record
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyStateConflictError):
         await registry.begin_rotation(
@@ -1027,7 +967,7 @@ async def test_registry_begin_rotation_caps_grace_deadline_at_natural_expiry() -
     soon_expiring = _record().model_copy(update={"expires_at": datetime.now(tz=UTC) + timedelta(minutes=10)})
     entity_client = AsyncMock()
     entity_client.get.return_value = soon_expiring
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.begin_rotation(
         "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
@@ -1047,7 +987,7 @@ async def test_registry_begin_rotation_retries_transient_conflict_from_unrelated
     entity_client = AsyncMock()
     entity_client.get.side_effect = [stale, fresh]
     entity_client.update.side_effect = [EntityConflictError("entity version changed"), None]
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     result = await registry.begin_rotation(
         "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
@@ -1066,7 +1006,7 @@ async def test_registry_begin_rotation_gives_up_after_persistent_conflict() -> N
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record() for _ in range(4)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(EntityConflictError):
         await registry.begin_rotation(
@@ -1082,9 +1022,38 @@ async def test_registry_begin_rotation_concurrent_conflict_surfaces_state_confli
     entity_client = AsyncMock()
     entity_client.get.side_effect = [_record(), _record(revoked=True)]
     entity_client.update.side_effect = EntityConflictError("entity version changed")
-    registry = AccessKeyRegistry(entity_client)
+    registry = AccessKeyRegistry(entity_client, authorize_record=_policy.authorize_key)
 
     with pytest.raises(AccessKeyStateConflictError):
         await registry.begin_rotation(
             "ak_example", "alice@example.com", grace_period_seconds=3600, successor_jti="ak_successor"
         )
+
+
+@pytest.mark.parametrize(
+    "owner,service_bound,allowed",
+    [("alice@example.com", False, True), ("bob@example.com", False, False), ("alice@example.com", True, False)],
+)
+async def test_auth_disabled_registry_keeps_ownership_without_a_pdp(monkeypatch, owner, service_bound, allowed):
+    from nhx.common.auth.client import AuthClient
+    from nhx.common.auth.dependencies import auth_client_context
+    from nhx.common.auth.models import Principal
+    from nhx.common.config import AuthConfig
+    from nhx.core.auth.app import access_keys
+
+    monkeypatch.setattr(access_keys, "get_account_session_maker", AsyncMock(return_value=AsyncMock()))
+    auth_client = AuthClient(principal=Principal(id="alice@example.com"), config=AuthConfig(enabled=False))
+    monkeypatch.setattr(
+        AuthClient, "has_operation", AsyncMock(side_effect=AssertionError("auth off must not query PDP"))
+    )
+    token = auth_client_context.set(auth_client)
+    try:
+        registry = await access_keys.get_access_key_registry(Mock(spec=EntityClient))
+        assert (
+            await registry._authorize_record(
+                "alice@example.com", _record(principal=owner, service_account=service_bound)
+            )
+            is allowed
+        )
+    finally:
+        auth_client_context.reset(token)

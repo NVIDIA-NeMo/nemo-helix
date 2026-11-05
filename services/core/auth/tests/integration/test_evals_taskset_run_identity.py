@@ -6,12 +6,9 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
-from nemo_evals.api import dependencies
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunEntity, TasksetRunMemberEntity
 from nemo_helix_ext.auth.helpers import generate_unsigned_jwt
-from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
@@ -67,7 +64,7 @@ async def _seed_run(client: AsyncNemoClient, workspace: str) -> None:
     await entities.create(member)
 
 
-def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path) -> None:
     issuer = "https://identity.example.test/evals"
     subject = "evals-user-subject"
     email = "evals-user@example.test"
@@ -113,15 +110,6 @@ def test_run_reads_preserve_email_group_and_account_grants(tmp_path: Path, monke
         assert ctx.test_client.get("/apis/entities/v2/workspaces", headers=user).status_code == 200
         account_id = portal.call(_resolved_account_id, issuer, subject)
         policy_entities = ServiceEntityClient(AsyncEntitiesClient.from_client(ctx.async_client))
-        factory = dependencies.get_async_nemo_client
-
-        def provide(*, as_service: str, internal: bool, on_behalf_of: str | RuntimePrincipal) -> AsyncNemoClient:
-            client = factory(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
-            # Keep production client/header construction; route its HTTP transport to the test platform.
-            monkeypatch.setattr(client._http, "_transport_for_url", ctx.async_client._http._transport_for_url)
-            return client
-
-        monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
         for kind, principal in [
             ("email", email),
             ("group", group),

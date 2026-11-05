@@ -34,6 +34,7 @@ from typing import Any, Protocol
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
+from nemo_helix_plugin.auth.decisions import OPERATION_PREDICATE_ADAPTER, DelegatedRequirements, OperationRule
 from nemo_helix_plugin.authz import (
     AuthzContribution,
     AuthzEndpointMethod,
@@ -87,6 +88,8 @@ class _AuthzRouteSurface(Protocol):
 
     def extra_role_permissions(self) -> dict[str, list[Permission]]: ...
 
+    def authorization_operations(self) -> dict[str, OperationRule]: ...
+
 
 def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:
     """Parse a serialized endpoint-method dict back into :class:`AuthzEndpointMethod`.
@@ -100,6 +103,8 @@ def _method_from_dict(spec: dict[str, Any]) -> AuthzEndpointMethod:
         scopes=list(spec["scopes"]) if spec.get("scopes") is not None else None,
         callers=list(spec["callers"]) if spec.get("callers") is not None else None,
         deny=bool(spec.get("deny", False)),
+        predicate=OPERATION_PREDICATE_ADAPTER.validate_python(spec.get("predicate", "permissions")),
+        on_behalf_of=DelegatedRequirements.model_validate(spec["on_behalf_of"]) if "on_behalf_of" in spec else None,
     )
 
 
@@ -321,7 +326,9 @@ def _derive_service_contribution(service: _AuthzRouteSurface) -> tuple[AuthzCont
                 # permission rules, and read straight off the (identity-preserved) endpoint.
                 scopes = get_path_scope(route.endpoint)
                 binding = AuthzEndpointMethod(
-                    permissions=[perm.id for perm in permissions], scopes=scopes, callers=callers
+                    permissions=[perm.id for perm in permissions],
+                    scopes=scopes,
+                    callers=callers,
                 )
 
         for http_method in methods:
@@ -401,9 +408,26 @@ def _derive_service_contribution(service: _AuthzRouteSurface) -> tuple[AuthzCont
         path: {method: (binding if binding is not None else _deny_binding()) for method, binding in methods.items()}
         for path, methods in bindings.items()
     }
+    operations = service.authorization_operations()
+    for operation_id, rule in operations.items():
+        if not operation_id.startswith(service.name + ".") or rule.owner != service.name:
+            errors.append(f"operation {operation_id!r} is outside service {service.name!r}")
+        required = list(rule.permissions)
+        if rule.on_behalf_of is not None:
+            required.extend(rule.on_behalf_of.actor_permissions)
+            required.extend(rule.on_behalf_of.permissions)
+        for permission in required:
+            if permission not in catalog:
+                errors.append(f"operation {operation_id!r} references undeclared permission {permission!r}")
+
+    if errors and operations:
+        operations = {}
+        endpoints = {path: {method: _deny_binding() for method in methods} for path, methods in endpoints.items()}
     permissions = {perm.id: perm.description for perm in catalog.values()}
     return (
-        AuthzContribution(permissions=permissions, endpoints=endpoints, role_permissions=role_grants),
+        AuthzContribution(
+            permissions=permissions, endpoints=endpoints, role_permissions=role_grants, operations=operations
+        ),
         errors,
         warnings,
     )

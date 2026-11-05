@@ -16,7 +16,7 @@ from nemo_evals.api.service.taskset_run_service import TasksetRunService, normal
 from nemo_evals.entities import TasksetEntity
 from nemo_evals.taskset_runs.identifiers import derive_run_id
 from nemo_helix_plugin.auth import AuthContext
-from nemo_helix_plugin.dependencies import get_effective_principal_id, get_request_authorizer
+from nemo_helix_plugin.dependencies import get_effective_principal_id, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entities.types import Entity
@@ -38,7 +38,10 @@ async def test_taskset_run_dependency_closes_factory_client(monkeypatch):
     factory = dependencies.get_async_nemo_client
 
     def provide(**kwargs):
-        assert kwargs == {"as_service": "evals", "internal": True, "on_behalf_of": "user:alice"}
+        assert kwargs["as_service"] == "evals"
+        assert kwargs["internal"] is True
+        assert kwargs.get("on_behalf_of") in (None, "user:alice")
+        assert kwargs["http_client"] is request_client._http
         client = factory(**kwargs)
         clients.append(client)
         close = AsyncMock(wraps=client.close)
@@ -47,7 +50,9 @@ async def test_taskset_run_dependency_closes_factory_client(monkeypatch):
         return client
 
     monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
+    request_client = factory()
     app = FastAPI()
+    app.dependency_overrides[get_nemo_client] = lambda: request_client
     app.dependency_overrides[get_effective_principal_id] = lambda: "user:alice"
     app.dependency_overrides[get_request_authorizer] = lambda: AsyncMock()
 
@@ -63,11 +68,11 @@ async def test_taskset_run_dependency_closes_factory_client(monkeypatch):
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/probe")).json() == {"alive": True}
-        assert len(clients) == 1
-        close_calls[0].assert_awaited_once()
+        assert len(clients) == 2
+        for close in close_calls:
+            close.assert_awaited_once()
     finally:
-        for client in clients:
-            await client._http.aclose()
+        await request_client.close()
 
 
 @pytest.mark.parametrize("caller", ["user:alice", "service:runner", ""])
@@ -101,7 +106,8 @@ async def test_taskset_run_delegation_matches_stamped_creator(monkeypatch, calle
             return client
 
         monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
-        dependency = get_taskset_run_service(caller, AsyncMock())
+        request_client = factory()
+        dependency = get_taskset_run_service(caller, AsyncMock(), request_client)
         service = await anext(dependency)
         try:
             created = await service._entities.create(TasksetEntity(name="creator-probe", workspace="default"))
@@ -112,7 +118,7 @@ async def test_taskset_run_delegation_matches_stamped_creator(monkeypatch, calle
             assert derive_run_id("default", created.created_by, "key") == derive_run_id("default", expected, "key")
         finally:
             await dependency.aclose()
-            await service._async_client._http.aclose()
+            await request_client.close()
 
 
 async def test_taskset_run_dependency_delegates_the_callers_full_principal(monkeypatch):
@@ -138,7 +144,8 @@ async def test_taskset_run_dependency_delegates_the_callers_full_principal(monke
 
         monkeypatch.setattr(dependencies, "get_async_nemo_client", provide)
         monkeypatch.setattr(dependencies, "current_auth_context", lambda: principal)
-        dependency = get_taskset_run_service("user:bob", AsyncMock())
+        request_client = factory()
+        dependency = get_taskset_run_service("user:bob", AsyncMock(), request_client)
         service = await anext(dependency)
         try:
             assert service._auth_context == principal  # stored on each new run for the controller
@@ -149,4 +156,4 @@ async def test_taskset_run_dependency_delegates_the_callers_full_principal(monke
             assert headers["X-NHX-Principal-On-Behalf-Of-Groups"] == "ac9-users"
         finally:
             await dependency.aclose()
-            await service._async_client._http.aclose()
+            await request_client.close()

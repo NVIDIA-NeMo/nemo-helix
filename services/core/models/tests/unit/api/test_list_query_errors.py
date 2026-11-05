@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError, UnprocessableEntityError
-from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.config import AuthConfig
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.dependencies import (
@@ -46,7 +47,7 @@ def _list_client(endpoint, monkeypatch):
     service_method = AsyncMock()
     service = Mock(spec=[method])
     setattr(service, method, service_method)
-    auth_client = Mock(spec=AuthClient, auth_enabled=False)
+    auth_client = AuthClient(principal=Principal(), config=AuthConfig(enabled=False))
     monkeypatch.setattr(response_policy, "current_auth_client", lambda request: auth_client)
     app = FastAPI()
     register_sdk_exception_handlers(app)

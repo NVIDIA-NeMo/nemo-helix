@@ -504,7 +504,7 @@ class TasksetRunReconciler:
     async def _settle(self, run: TasksetRunEntity, now: datetime, breaker: JobsBreaker) -> _RunState:
         """Settle one run. Raises only when its members can't all be listed; every other exit reports a tally."""
         members = await self.store.list_all_members(run)
-        state = _RunState(run=run, creator=run.created_by or DEVELOPMENT_CALLER, members=members)
+        state = _RunState(run=run, creator=run.creator_id or DEVELOPMENT_CALLER, members=members)
         try:
             await self._settle_run(state, now, breaker)
         except MemberListingIncompleteError:
@@ -1464,7 +1464,7 @@ def on_behalf_of(run: TasksetRunEntity) -> str | RuntimePrincipal:
     """Whom the controller creates for: the run's stored principal snapshot, else (auth off) its creator id."""
     if run.auth_context is not None:
         return run.auth_context.to_principal()  # id, email, account id, groups, aliases
-    return run.created_by or DEVELOPMENT_CALLER
+    return run.creator_id or DEVELOPMENT_CALLER
 
 
 @asynccontextmanager
@@ -1509,7 +1509,10 @@ class EvaluatorRunController(NemoController):
             timeout=READ_TIMEOUT_SECONDS, retry=NO_RETRY
         )
         store = TasksetRunStore(
-            AsyncEntitiesClient.from_client(self._service), AsyncFilesClient.from_client(self._service), retry=NO_RETRY
+            AsyncEntitiesClient.from_client(self._service),
+            AsyncFilesClient.from_client(self._service),
+            service_entities=EntityClient(AsyncEntitiesClient.from_client(self._service)),
+            retry=NO_RETRY,
         )
         self._reconciler = TasksetRunReconciler(store, self._jobs_for, self.config, stop_requested=self.stop_requested)
 

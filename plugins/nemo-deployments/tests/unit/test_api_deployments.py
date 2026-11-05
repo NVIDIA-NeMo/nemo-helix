@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from helpers import list_response, make_deployment, make_deployment_config
 from nemo_deployments_plugin.api.v2 import deployments as deployments_module
-from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
+from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, get_service_entity_client
 from nemo_deployments_plugin.entities import Deployment, DeploymentConfig, Prerequisite
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.auth import AuthContext
@@ -20,6 +19,7 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityNotFoundError,
     NemoEntityValidationError,
 )
+from nhx.testing.policy import auth_disabled_client
 
 
 @pytest.fixture
@@ -29,7 +29,11 @@ def mock_entity_client() -> AsyncMock:
 
 @pytest.fixture(autouse=True)
 def policy_auth_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(response_policy, "current_auth_client", lambda request: SimpleNamespace(auth_enabled=False))
+    monkeypatch.setattr(
+        response_policy,
+        "current_auth_client",
+        lambda request: auth_disabled_client(),
+    )
 
 
 @pytest.fixture
@@ -40,6 +44,7 @@ def client(mock_entity_client: AsyncMock) -> TestClient:
         prefix="/apis/deployments/v2/workspaces/{workspace}",
     )
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
+    app.dependency_overrides[get_service_entity_client] = lambda: mock_entity_client
 
     return TestClient(app, raise_server_exceptions=False)
 

@@ -6,7 +6,12 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path
-from nemo_helix_plugin.iam.types import AuthzErrorResponse, AuthzRequest, AuthzResponse
+from nemo_helix_plugin.auth.decisions import POLICY_DECISION_ADAPTER, DecisionEvaluationInput
+from nemo_helix_plugin.iam.types import (
+    AuthzErrorResponse,
+    AuthzRequest,
+    AuthzResponse,
+)
 from nhx.common.config import get_service_config
 from nhx.common.entities import EntityClient
 from nhx.common.service.dependencies import get_entity_client
@@ -23,6 +28,7 @@ from nhx.core.auth.app.embedded_pdp import (
     validate_entrypoint,
 )
 from nhx.core.auth.config import AuthServiceConfig
+from pydantic import ValidationError
 
 router = APIRouter(tags=["Authorization"])
 logger = logging.getLogger(__name__)
@@ -44,6 +50,7 @@ Evaluate an authorization policy entrypoint with the provided input.
 - `allow` - Main request authorization (checks permissions, scopes, path)
 - `has_permissions` - Check if principal has specific permissions in a workspace
 - `has_role` - Check if principal has a specific role in a workspace
+- `decision` - Typed registered operation, collection or protected-field decision
 
 **Example request for `allow`:**
 ```json
@@ -91,14 +98,28 @@ async def evaluate_policy(
         # If bundle_cache_seconds is 0, refresh policy data before each evaluation.
         # This enables instant permission changes in tests without waiting for propagation.
         config = get_service_config(AuthServiceConfig)
-        if config.bundle_cache_seconds == 0:
-            await load_policy_data(entity_client)
+        bootstrap_read = False
+        if entrypoint == "decision":
+            # Trusted service facts are typed; policy owns bootstrap eligibility too.
+            envelope = DecisionEvaluationInput.model_validate(request.input)
+            request = AuthzRequest(input=envelope.model_dump(mode="json"))
+            bootstrap = evaluate("decision", {**request.input, "operation": "auth.policy-data.read"})
+            bootstrap_read = bootstrap.get("allowed") is True
+
+        if config.bundle_cache_seconds == 0 and not bootstrap_read:
+            if not await load_policy_data(entity_client):
+                raise HTTPException(status_code=503, detail="Policy data could not be refreshed")
 
         account_context = await resolve_authz_account_context(request.input, config)
         enriched_input = {**request.input, **account_context.to_policy_fields()}
 
         result = evaluate(entrypoint, enriched_input)
+        if entrypoint == "decision":
+            return AuthzResponse(result=POLICY_DECISION_ADAPTER.validate_python(result).model_dump(mode="json"))
         return AuthzResponse(result={**result, **account_context.to_policy_fields()})
+
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail="Invalid policy decision request") from exc
 
     except ServicePrincipalNotAllowedError as e:
         logger.warning("Service principal resolution failed closed: %s", e)

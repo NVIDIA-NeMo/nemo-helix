@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -147,7 +147,7 @@ async def create_provider(
             )
         logger.warning(f"Model provider creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except PermissionDeniedError:
+    except (NotFoundError, PermissionDeniedError):
         raise
     except Exception as e:
         logger.exception("Failed to create model provider")
@@ -219,7 +219,7 @@ async def upsert_provider(
     except ValueError as e:
         logger.warning(f"Model provider upsert validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except PermissionDeniedError:
+    except (NotFoundError, PermissionDeniedError):
         raise
     except Exception as e:
         logger.exception("Failed to upsert model provider")

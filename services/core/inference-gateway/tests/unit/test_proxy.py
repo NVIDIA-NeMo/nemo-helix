@@ -22,6 +22,7 @@ from aiohttp import ClientError
 from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from multidict import CIMultiDict, CIMultiDictProxy
+from nemo_helix_plugin.auth.decisions import DecisionRequest, ResourceTarget
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.inference_middleware import (
     BackendFormat,
@@ -36,7 +37,6 @@ from nemo_helix_plugin.inference_middleware_models import VirtualModel
 from nemo_helix_plugin.models.types import ModelProvider, ModelProviderStatus, ServedModelMapping
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
-from nhx.core.inference_gateway.api.authz import MODEL_EXEC_PERMISSION
 from nhx.core.inference_gateway.api.metrics import (
     UpstreamRequestLabels,
 )
@@ -1258,7 +1258,12 @@ def _caller_with_access_to(*workspaces: str) -> Iterator[MagicMock]:
     auth_client = MagicMock()
     auth_client.auth_enabled = True
     auth_client.principal = Principal(id="user:carol", email="carol@example.com")
-    auth_client.has_permissions = AsyncMock(side_effect=lambda workspace, _permissions: workspace in workspaces)
+
+    async def allow_operation(request: DecisionRequest) -> bool:
+        assert isinstance(request.target, ResourceTarget)
+        return request.target.workspace in workspaces
+
+    auth_client.has_operation = AsyncMock(side_effect=allow_operation)
     token = auth_client_context.set(auth_client)
     try:
         yield auth_client
@@ -1301,7 +1306,12 @@ async def test_virtual_model_proxy_denies_cross_workspace_model_without_permissi
 
     assert exc_info.value.status_code == 403
     assert "default" in exc_info.value.detail
-    auth_client.has_permissions.assert_awaited_once_with("default", [MODEL_EXEC_PERMISSION])
+    auth_client.has_operation.assert_awaited_once_with(
+        DecisionRequest(
+            operation="inference-gateway.model.exec",
+            target=ResourceTarget(workspace="default", resource_type="inference_target", name=""),
+        )
+    )
     mock_proxy_client.request.assert_not_called()
 
 
@@ -1310,12 +1320,18 @@ async def test_virtual_model_proxy_denies_lora_adapter_from_inaccessible_workspa
     model_entity_id = "carol-ws/base&adapters/secret-ws/private-adapter"
     model_cache = _model_cache_with(_serving_provider("carol-ws", "nim", model_entity_id))
 
-    with _caller_with_access_to() as auth_client, pytest.raises(HTTPException) as exc_info:
+    with _caller_with_access_to("carol-ws") as auth_client, pytest.raises(HTTPException) as exc_info:
         await _proxy_to_model_entity(mock_proxy_client, model_cache, "carol-ws", model_entity_id)
 
     assert exc_info.value.status_code == 403
     assert "secret-ws" in exc_info.value.detail
-    auth_client.has_permissions.assert_awaited_once_with("secret-ws", [MODEL_EXEC_PERMISSION])
+    assert auth_client.has_operation.await_count == 2
+    auth_client.has_operation.assert_any_await(
+        DecisionRequest(
+            operation="inference-gateway.model.exec",
+            target=ResourceTarget(workspace="secret-ws", resource_type="inference_target", name=""),
+        )
+    )
     mock_proxy_client.request.assert_not_called()
 
 

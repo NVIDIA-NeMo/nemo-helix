@@ -3,11 +3,16 @@
 
 """Header utilities for internal NeMo Helix service-to-service HTTP calls."""
 
+from nhx.common.auth.models import Principal
 from nhx.common.observability.otel import get_otel_headers
 from nhx.common.platform_client_context import service_principal_auth_headers, service_principal_auth_headers_async
 
 
-def build_downstream_service_headers(service_name: str) -> dict[str, str]:
+def build_downstream_service_headers(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> dict[str, str]:
     """Build the full set of headers for HTTP requests to downstream NeMo Helix services.
 
     This is used when constructing service-to-service clients and raw HTTP
@@ -27,22 +32,26 @@ def build_downstream_service_headers(service_name: str) -> dict[str, str]:
 
     Example::
 
-        headers = build_downstream_service_headers("guardrails")
+        headers = build_downstream_service_headers("guardrails", on_behalf_of=verified_user)
         # headers == {
         #   "traceparent": "...",
         #   "X-NHX-Principal-Id": "service:guardrails",
-        #   "X-NHX-Principal-On-Behalf-Of": "<user-id>",   # if user in context
+        #   "X-NHX-Principal-On-Behalf-Of": "<user-id>",   # when explicitly supplied
         # }
     """
     return {
         **get_otel_headers(),
-        **service_principal_auth_headers(service_name),
+        **service_principal_auth_headers(service_name, on_behalf_of=on_behalf_of),
     }
 
 
-async def build_downstream_service_headers_async(service_name: str) -> dict[str, str]:
+async def build_downstream_service_headers_async(
+    service_name: str,
+    *,
+    on_behalf_of: str | Principal | None = None,
+) -> dict[str, str]:
     """Async variant of ``build_downstream_service_headers`` for request handlers."""
     return {
         **get_otel_headers(),
-        **(await service_principal_auth_headers_async(service_name)),
+        **(await service_principal_auth_headers_async(service_name, on_behalf_of=on_behalf_of)),
     }

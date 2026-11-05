@@ -46,7 +46,7 @@ async def async_client():
 
 @pytest.fixture
 def run_store(entity_store, files_client):
-    return TasksetRunStore._with_entity_adapter(entity_store, files_client)
+    return TasksetRunStore._with_entity_adapter(entity_store, files_client, service_entities=entity_store)
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ from contextvars import ContextVar
 import httpx
 from nhx.common.auth.headers import AUTHENTICATION_CONTEXT_HEADERS
 from nhx.common.observability.otel import get_otel_headers
-from nhx.common.platform_client_context import service_principal_auth_headers_async
+from nhx.common.platform_client_context import request_service_principal_auth_headers_async
 from nhx.common.platform_endpoint import resolve_platform_endpoint
 from nhx.guardrails.app.utils.context_utils import (
     get_request_default_headers_from_context,
@@ -64,7 +64,7 @@ async def publish_downstream_request_headers(custom_headers: dict[str, str]) -> 
     """Publish trace and caller headers, and mint platform auth into a separate context."""
     propagated = strip_platform_auth_headers(custom_headers)
     set_request_default_headers_into_context({**propagated, **get_otel_headers()})
-    set_platform_auth_headers_into_context(await service_principal_auth_headers_async("guardrails"))
+    set_platform_auth_headers_into_context(await request_service_principal_auth_headers_async("guardrails"))
 
 
 def apply_platform_auth_headers(config: RailsConfig) -> RailsConfig:

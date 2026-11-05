@@ -33,6 +33,7 @@ from nemo_helix_plugin.auth import AuthContext, RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.client_provider import get_async_nemo_client, get_forwarding_headers
+from nemo_helix_plugin.entities import EntityClient
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
 from nemo_helix_plugin.files.client import AsyncFilesClient
@@ -59,7 +60,11 @@ async def _controller_client(
 
 
 def _store(client: AsyncNemoClient) -> TasksetRunStore:
-    return TasksetRunStore(AsyncEntitiesClient.from_client(client), AsyncFilesClient.from_client(client))
+    return TasksetRunStore(
+        AsyncEntitiesClient.from_client(client),
+        AsyncFilesClient.from_client(client),
+        service_entities=EntityClient(AsyncEntitiesClient.from_client(client)),
+    )
 
 
 #: Sets up workspaces and bindings (users can't create workspaces; unknown service names are refused).

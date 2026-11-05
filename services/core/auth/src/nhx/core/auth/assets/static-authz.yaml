@@ -4,6 +4,146 @@
 # Static authorization data - roles, permissions, and endpoint definitions
 # This is bundled with the policy and served by Entity Store
 authz:
+  decision_contract_version: 2
+  operations:
+    auth.policy-data.read:
+      owner: auth
+      predicate: policy_bootstrap
+      permissions: []
+      callers:
+      - service_principal
+      scopes: []
+    entities.auth_context.access:
+      owner: entities
+      predicate: auth_context
+      permissions: []
+      callers:
+      - service_principal
+      scopes: []
+    entities.workspaces.visible:
+      owner: entities
+      predicate: workspace_visibility
+      permissions: []
+      callers:
+      - principal
+      - service_principal
+      scopes: []
+    entities.workspace.deletion-status:
+      owner: entities
+      predicate: workspace_deletion
+      permissions: []
+      callers:
+      - principal
+      - service_principal
+      scopes: []
+    entities.control.access:
+      owner: entities
+      predicate: control_entity
+      permissions: []
+      callers:
+      - principal
+      - service_principal
+      scopes: []
+    secrets.binding.authorize:
+      owner: secrets
+      predicate: secret_binding
+      permissions:
+      - secrets.read
+      callers:
+      - service_principal
+      scopes: []
+      on_behalf_of:
+        actor_permissions:
+        - secrets.read
+        permissions:
+        - secrets.read
+    auth.access-key.lifecycle:
+      owner: auth
+      predicate: access_key
+      permissions: []
+      callers:
+      - principal
+      - service_principal
+      scopes: []
+    auth.iam.create:
+      owner: auth
+      predicate: iam
+      permissions:
+      - iam.create
+      callers:
+      - service_principal
+      scopes: []
+      on_behalf_of:
+        actor_permissions:
+        - iam.create
+        permissions:
+        - iam.create
+    auth.iam.read:
+      owner: auth
+      predicate: iam
+      permissions:
+      - iam.read
+      callers:
+      - service_principal
+      scopes: []
+      on_behalf_of:
+        actor_permissions:
+        - iam.read
+        permissions:
+        - iam.read
+    auth.iam.list:
+      owner: auth
+      predicate: iam
+      permissions:
+      - iam.list
+      callers:
+      - service_principal
+      scopes: []
+      on_behalf_of:
+        actor_permissions:
+        - iam.list
+        permissions:
+        - iam.list
+    auth.iam.delete:
+      owner: auth
+      predicate: iam
+      permissions:
+      - iam.delete
+      callers:
+      - service_principal
+      scopes: []
+      on_behalf_of:
+        actor_permissions:
+        - iam.delete
+        permissions:
+        - iam.delete
+    inference-gateway.model.exec:
+      owner: inference-gateway
+      predicate: permissions
+      permissions:
+      - inference.gateway.model.exec
+      callers:
+      - principal
+      - service_principal
+      scopes:
+      - inference:read
+      - inference:write
+      - platform:read
+      - platform:write
+  auth_context_writers:
+    service:builder:
+    - builder_queued_build
+    service:jobs:
+    - platform_job
+    service:deployments:
+    - deployments_deployment
+    service:agents:
+    - agent_deployment
+    service:models:
+    - model_deployment
+    - model_provider
+    service:evals:
+    - taskset_run
   # Permission registry — single source of truth for all permissions
   # Each permission has has_endpoint: true by default. Set to false for permissions
   # checked in policy/code that are not mapped to any API endpoint.
@@ -257,7 +397,7 @@ authz:
       list:
         description: "List secrets"
       read:
-        description: "Read secrets"
+        description: "Read secret metadata and authorize eligible service-OBO value retrieval"
       rotate:
         description: "Rotate encryption keys"
       update:
@@ -427,6 +567,10 @@ authz:
       description: "Runtime permissions for job workload containers"
       permissions:
       - jobs.logs.create
+    DelegatedService:
+      description: "Actor-only capability for verified delegated workload operations"
+      permissions:
+      - secrets.access
     ServiceSystem:
       description: >-
         Internal Helix service principal (principal IDs matching service:*). Used when no
@@ -541,12 +685,26 @@ authz:
         scopes:
         - auth:read
         - platform:read
+        callers:
+        - service_principal
+        predicate: internal_service
+        on_behalf_of:
+          actor_permissions:
+          - iam.list
+          permissions: []
       post:
         permissions:
         - iam.create
         scopes:
         - auth:write
         - platform:write
+        callers:
+        - service_principal
+        predicate: internal_service
+        on_behalf_of:
+          actor_permissions:
+          - iam.create
+          permissions: []
     /apis/auth/v2/iam/role-bindings/{name}:
       delete:
         permissions:
@@ -554,12 +712,26 @@ authz:
         scopes:
         - auth:write
         - platform:write
+        callers:
+        - service_principal
+        predicate: internal_service
+        on_behalf_of:
+          actor_permissions:
+          - iam.delete
+          permissions: []
       get:
         permissions:
         - iam.read
         scopes:
         - auth:read
         - platform:read
+        callers:
+        - service_principal
+        predicate: internal_service
+        on_behalf_of:
+          actor_permissions:
+          - iam.read
+          permissions: []
     /apis/entities/v2/entities/{id}:
       get:
         permissions:
@@ -567,6 +739,11 @@ authz:
         scopes:
         - entities:read
         - platform:read
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.read
+          permissions: []
     /apis/entities/v2/workspace-deletions/{name}:
       get:
         permissions:
@@ -613,12 +790,22 @@ authz:
         scopes:
         - entities:read
         - platform:read
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.read
+          permissions: []
       post:
         permissions:
         - entities.create
         scopes:
         - entities:write
         - platform:write
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.create
+          permissions: []
     /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/{name}:
       delete:
         permissions:
@@ -626,18 +813,33 @@ authz:
         scopes:
         - entities:write
         - platform:write
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.delete
+          permissions: []
       get:
         permissions:
         - entities.read
         scopes:
         - entities:read
         - platform:read
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.read
+          permissions: []
       put:
         permissions:
         - entities.update
         scopes:
         - entities:write
         - platform:write
+        predicate: entity_storage
+        on_behalf_of:
+          actor_permissions:
+          - entities.update
+          permissions: []
     /apis/entities/v2/workspaces/{workspace}/members:
       get:
         permissions:
@@ -774,6 +976,10 @@ authz:
         permissions:
         - jobs.logs.create
         scopes: []
+        on_behalf_of:
+          actor_permissions:
+          - jobs.logs.create
+          permissions: []
     /apis/files/v2/workspaces/{workspace}/filesets/{name}/otlp/v1/logs/query:
       post:
         permissions:
@@ -1762,5 +1968,12 @@ authz:
         scopes:
         - platform:read
         - secrets:read
+        callers:
+        - service_principal
+        on_behalf_of:
+          actor_permissions:
+          - secrets.access
+          permissions:
+          - secrets.read
   workspaces: {}
   principals: {}

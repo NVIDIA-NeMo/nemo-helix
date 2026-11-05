@@ -4,7 +4,7 @@
 """Tests for ModelProvider API endpoints."""
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import FastAPI, Request, Response
@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from nhx.common.api.common import Page, PaginationData
 from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.auth.dependencies import auth_client_context
+from nhx.common.config import AuthConfig
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
 from nhx.core.models.api.v2.providers import router
@@ -36,11 +37,10 @@ def mock_model_provider_service():
 @pytest.fixture
 def mock_auth_client():
     """Create a mock AuthClient with auth disabled and a test principal."""
-    client = MagicMock(spec=AuthClient)
-    client.auth_enabled = False
-    client.is_service_principal = False
-    client.principal = Principal(id="test-principal", email="test@example.com", groups=[])
-    return client
+    return AuthClient(
+        config=AuthConfig(enabled=False),
+        principal=Principal(id="test-principal", email="test@example.com", groups=[]),
+    )
 
 
 @pytest.fixture

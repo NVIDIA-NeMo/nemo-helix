@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.auth.decisions import DecisionEvaluationInput, RequestTarget
 
 # Test principals for authenticated requests
 TEST_USER_EMAIL = "test-user@example.com"
@@ -118,7 +119,7 @@ class TestAuthorizationMiddleware:
         assert response.json() == {
             "detail": {
                 "error": "Invalid entrypoint: missing",
-                "valid_entrypoints": ["allow", "has_permissions", "has_role"],
+                "valid_entrypoints": ["allow", "has_permissions", "has_role", "decision"],
             }
         }
 
@@ -170,3 +171,51 @@ class TestAuthorizationMiddleware:
             headers=headers,
         )
         assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"
+
+
+@pytest.mark.parametrize(
+    "headers,status",
+    [
+        ({"X-NHX-Principal-Id": SERVICE_PRINCIPAL}, 200),
+        ({}, 401),
+        ({"X-NHX-Principal-Id": TEST_USER_EMAIL}, 403),
+        (
+            {
+                "X-NHX-Principal-Id": SERVICE_PRINCIPAL,
+                "X-NHX-Principal-On-Behalf-Of": TEST_USER_EMAIL,
+            },
+            200,
+        ),
+    ],
+)
+def test_generic_evaluator_handles_typed_decisions_with_existing_trust_boundary(
+    http_client: TestClient, headers: dict[str, str], status: int
+) -> None:
+    document = DecisionEvaluationInput(
+        protocol_version=2,
+        operation="route",
+        target=RequestTarget(method="GET", path=WORKSPACES_PATH),
+        method="GET",
+        path=WORKSPACES_PATH,
+        principal_id=SERVICE_PRINCIPAL,
+        caller_kind="service_principal",
+        principal_context_digest="trusted",
+    )
+    response = http_client.post(
+        "/apis/auth/v2/authz/decision", json={"input": document.model_dump(mode="json")}, headers=headers
+    )
+    assert response.status_code == status, response.text
+    if status == 200:
+        result = response.json()["result"]
+        assert result["decision_type"] == "operation"
+        assert result["allowed"] is True
+        assert result["principal_context_digest"] == "trusted"
+
+
+def test_generic_evaluator_rejects_unsupported_decision_protocol(http_client: TestClient) -> None:
+    response = http_client.post(
+        "/apis/auth/v2/authz/decision",
+        json={"input": {"protocol_version": 1}},
+        headers={"X-NHX-Principal-Id": SERVICE_PRINCIPAL},
+    )
+    assert response.status_code == 400

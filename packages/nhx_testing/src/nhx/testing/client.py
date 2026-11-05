@@ -27,7 +27,6 @@ from nemo_helix_plugin.projects.types import CreateProjectRequest
 from nemo_helix_plugin.workspaces.client import WorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from nhx.common import platform_client_context
-from nhx.common.auth import Principal
 from nhx.common.config.base import AuthConfig, Configuration, DatabaseConfig, HelixConfig, ServiceConfig
 from nhx.common.entities.client import EntityClient
 from nhx.common.service import Service
@@ -712,7 +711,15 @@ def create_test_client(
             def _get_entity_client_on_behalf_of() -> EntityClient:
                 app_ctx = get_app_ctx()
                 service_name = app_ctx.service_name if app_ctx is not None and app_ctx.service_name else "platform"
-                headers = build_downstream_service_headers(service_name)
+                from nhx.common.auth.dependencies import auth_client_context
+
+                current = auth_client_context.get()
+                represented = (
+                    current.principal.effective_principal if current is not None and current.principal.id else None
+                )
+                if represented is not None and represented.caller_kind == "service_principal":
+                    represented = None
+                headers = build_downstream_service_headers(service_name, on_behalf_of=represented)
                 return EntityClient(AsyncEntitiesClient.from_client(async_client.with_headers(headers)))
 
             all_overrides[get_entity_client] = _get_entity_client_on_behalf_of
@@ -760,13 +767,12 @@ def create_test_client(
             if auth_enabled:
 
                 def _seed_auth_role_bindings() -> None:
+                    # Use service principal so entity store accepts role binding creation
+                    from nhx.common.platform_client_context import service_principal_auth_headers
                     from nhx.core.auth.app.embedded_pdp import load_policy_data
                     from nhx.core.auth.app.seeding import run_seeding
 
-                    # Use service principal so entity store accepts role binding creation
-                    seeding_client = async_client.with_headers(
-                        Principal(id="service:auth", authz_aliases=["service:auth"]).get_headers()
-                    )
+                    seeding_client = async_client.with_headers(service_principal_auth_headers("auth"))
                     seeding_entity_client = EntityClient(AsyncEntitiesClient.from_client(seeding_client))
 
                     async def _run() -> None:
@@ -795,6 +801,10 @@ def create_test_client(
             # Create workspaces (with auth headers if auth is enabled)
             if auth_enabled:
                 auth_headers = {"X-NHX-Principal-Id": TEST_USER_EMAIL}
+                if Configuration.get_service_config(AuthConfig).oidc.workload is not None:
+                    from nhx.common.platform_client_context import service_principal_auth_headers
+
+                    auth_headers = service_principal_auth_headers("auth", on_behalf_of=TEST_USER_EMAIL)
                 for ws_id in sorted(workspaces_to_create):
                     # Skip role propagation. The PDP refresh can still 403 the
                     # first call, so that denial is retried until the seed is visible.

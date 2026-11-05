@@ -72,6 +72,8 @@ from nemo_helix_plugin.auth.workload_identity import get_workload_identity_token
 from nemo_helix_plugin.capabilities import CapabilityUnavailableError, require_docker
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.config import LOOPBACK_ADDRESSES
+from nemo_helix_plugin.deployments.client import AsyncDeploymentsClient
+from nemo_helix_plugin.deployments.types import CreateDeploymentRequest
 from nemo_helix_plugin.entities.base import parse_qualified_name
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import NemoEntitiesClient, NemoEntityNotFoundError
@@ -920,15 +922,20 @@ class DeploymentsRunnerBackend(RunnerBackend):
         deployment_config.gateway_providers = providers or {}
         await entities.create(deployment_config)
         try:
-            deployment = Deployment(
-                name=name,
+            # The owning API authorizes the effective creator and captures its
+            # context using the Deployments service's registered writer.
+            client = get_async_nemo_client(
+                as_service="agents",
+                internal=True,
+                on_behalf_of=auth_context.to_principal() if auth_context is not None else created_by,
+            )
+            deployments_client = AsyncDeploymentsClient.from_client(client)
+            await deployments_client.create_deployment(
                 workspace=workspace,
-                deployment_config=name,
-                executor=executor,
-                desired_state="READY",
-                status="PENDING",
-            ).with_auth_context(auth_context)
-            await entities.create(deployment)
+                body=CreateDeploymentRequest(
+                    name=name, deployment_config=name, executor=executor, desired_state="READY"
+                ),
+            )
         except Exception:
             # Avoid orphaning the config if Deployment create fails.
             try:

@@ -3,34 +3,21 @@
 
 """Integration tests for workspace deletion behavior in entity API."""
 
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
-from httpx import AsyncClient
+from httpx import AsyncClient, MockTransport
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.common.auth import get_auth_client
 from nhx.common.auth.client import AuthClient
 from nhx.common.auth.models import Principal
+from nhx.common.config import AuthConfig
 from nhx.core.entities.api.server import app
 from nhx.core.entities.app.repository import WorkspaceRepositoryInterface
 from nhx.core.entities.entities import WorkspaceDeletionStage
+from nhx.testing.policy import PolicyHarness
 
 
 def _create_service_principal_auth_client() -> AuthClient:
-    """Create a mock AuthClient for service principal testing."""
-    principal = Principal(
-        id="service:entities",
-        email=None,
-        groups=[],
-        on_behalf_of=None,
-    )
-    auth_client = MagicMock(spec=AuthClient)
-    auth_client.principal = principal
-    auth_client.auth_enabled = False
-    auth_client.wait_role = AsyncMock(return_value=True)
-    auth_client.has_permissions = AsyncMock(return_value=True)
-    auth_client.on_behalf_of_has_permissions = AsyncMock(return_value=True)
-    return auth_client
+    return AuthClient(principal=Principal(id="service:entities"), config=AuthConfig(enabled=False))
 
 
 @pytest.mark.integration
@@ -451,13 +438,19 @@ class TestCreateReportsInProgressDeletion:
         assert conflict.json()["detail"] == "Workspace 'create-live-duplicate' already exists"
 
 
-def _status_auth_client(*, principal_id: str, auth_enabled: bool, has_role: bool) -> MagicMock:
-    principal = Principal(id=principal_id, email=principal_id, groups=[], on_behalf_of=None)
-    auth_client = MagicMock(spec=AuthClient)
-    auth_client.principal = principal
-    auth_client.auth_enabled = auth_enabled
-    auth_client.has_role = AsyncMock(return_value=has_role)
-    return auth_client
+_DELETION_POLICY = PolicyHarness()
+
+
+def _status_auth_client(*, principal_id: str, auth_enabled: bool, has_role: bool) -> AuthClient:
+    _DELETION_POLICY.document["authz"]["principals"][principal_id] = {
+        "workspaces": {"system": ["HelixAdmin"] if has_role else []}
+    }
+    return AuthClient(
+        principal=Principal(id=principal_id, email=principal_id),
+        config=AuthConfig(enabled=auth_enabled, policy_decision_point_base_url="http://pdp.invalid"),
+        http_client=AsyncClient(transport=MockTransport(_DELETION_POLICY.respond)),
+        service_name="entities",
+    )
 
 
 @pytest.mark.integration
@@ -557,3 +550,47 @@ class TestWorkspaceDeletionStatus:
         service = await client.get(f"/apis/entities/v2/workspace-deletions/{workspace_name}")
         assert service.status_code == 200
         assert service.json()["deletion_error"] == reason
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("auth_enabled", [False, True])
+@pytest.mark.parametrize(
+    "actor,subject,allowed",
+    [
+        ("alice", None, False),
+        ("service:entities", None, True),
+        ("service:entities", "alice", False),
+        ("job-step:example", "alice", False),
+        ("deployment:example", "admin", False),
+    ],
+)
+async def test_deleting_workspace_domain_rule_uses_actual_actor(
+    repos,
+    auth_enabled: bool,
+    actor: str,
+    subject: str | None,
+    allowed: bool,
+) -> None:
+    from fastapi import HTTPException
+    from nhx.core.entities.api.v2.entities.endpoints import validate_workspace_not_deleting
+
+    repository = repos["workspace"]
+    await repository.create_workspace(name="domain-rule")
+    await repository.mark_workspace_for_deletion(name="domain-rule", deletion_stage=WorkspaceDeletionStage.PENDING)
+
+    def no_pdp(request):
+        raise AssertionError("Resource invariants must not call the PDP")
+
+    async with AsyncClient(transport=MockTransport(no_pdp)) as transport:
+        auth_client = AuthClient(
+            principal=Principal(id=actor, on_behalf_of=subject, verified_workload_delegation=bool(subject)),
+            config=AuthConfig(enabled=auth_enabled, policy_decision_point_base_url="http://pdp.invalid"),
+            http_client=transport,
+        )
+        if allowed:
+            await validate_workspace_not_deleting(repository, auth_client, "domain-rule")
+        else:
+            with pytest.raises(HTTPException) as error:
+                await validate_workspace_not_deleting(repository, auth_client, "domain-rule")
+            assert error.value.status_code == 404

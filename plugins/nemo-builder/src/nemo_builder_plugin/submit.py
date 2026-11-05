@@ -10,7 +10,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, TypeVar
+from typing import Any, Literal, Protocol
 
 from nemo_builder_plugin.backend import Backend, BackendRejectedError
 from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild, UpstreamImage
@@ -30,11 +30,8 @@ logger = logging.getLogger(__name__)
 JOB_SOURCE = "builder.build"
 
 
-_Row = TypeVar("_Row", ContainerImage, QueuedBuild)
-
-
 class _EntityWriter(Protocol):
-    async def create(self, entity: _Row) -> _Row: ...
+    async def create(self, entity: ContainerImage) -> ContainerImage: ...
 
     async def get(self, entity_type: type[ContainerImage], *, name: str, workspace: str) -> ContainerImage: ...
 
@@ -171,6 +168,7 @@ async def submit_build_set(
     backend: Backend,
     workspace: str,
     entity_client: _EntityWriter,
+    create_queued_build: Callable[[QueuedBuild], Awaitable[QueuedBuild]],
     create_job: CreateJob,
     get_job_fields: GetJobFields,
     secret_readable: SecretReadable,
@@ -245,7 +243,7 @@ async def submit_build_set(
             )
             queued._auth_context = current_auth_context()
             try:
-                await entity_client.create(queued)
+                await create_queued_build(queued)
             except EntityConflictError:
                 logger.info("build %s is already queued", sanitize_for_log(plan.job_name))
         return SubmitResult(job=plan.job_name, images=images)

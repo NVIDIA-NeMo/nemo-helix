@@ -1818,3 +1818,92 @@ def test_kubernetes_subject_token_decoder_rejects_ambiguous_pod_uid_reference(
         asyncio.run(
             exchange._decode_kubernetes_subject_token(exchange_config, "kubernetes-subject-token", "nemo-helix")
         )
+
+
+@pytest.mark.parametrize("kind", ["job", "deployment"])
+@pytest.mark.parametrize("outcome", ["allowed", "missing-grant", "cross-workspace", "scope-denied", "tampered"])
+def test_exchanged_workloads_retrieve_secrets_through_real_authentication_and_policy(
+    client: TestClient,
+    exchange_config: AuthConfig,
+    exchange_service: exchange.WorkloadTokenExchangeService,
+    entity_client: _FakeEntityClient,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    outcome: str,
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from nemo_helix_plugin.auth.decisions import DecisionEvaluationInput, PolicyDecision
+    from nhx.common.auth.client import AuthClient
+    from nhx.common.auth.middleware import AuthorizationMiddleware
+    from nhx.common.config import HelixConfig
+    from nhx.common.secrets.encryption import SecretKeyEncryptor, envelope_encrypt
+    from nhx.common.service.dependencies import get_entity_client, get_platform_config
+    from nhx.core.secrets.api.v2.secrets import endpoints as secret_endpoints
+    from nhx.core.secrets.entities import HelixSecret
+    from nhx.testing.policy import PolicyHarness
+
+    _workload(exchange_config).scope = "secrets:read jobs:read"
+    delegation = _delegation_entity() if kind == "job" else _deployment_delegation_entity()
+    proof, proof_hash = create_opaque_docker_proof_token(delegation.name)
+    delegation.opaque_subject_token_hash = proof_hash
+    entity_client.entities[delegation.name] = delegation
+    exchanged = client.post(
+        "/token",
+        data=_exchange_form(
+            proof,
+            subject_token_type=DOCKER_OPAQUE_WORKLOAD_PROOF_TOKEN_TYPE,
+            scope="jobs:read" if outcome == "scope-denied" else "secrets:read",
+        ),
+    )
+    assert exchanged.status_code == 200
+    token = exchanged.json()["access_token"]
+    if outcome == "tampered":
+        parts = token.split(".")
+        parts[2] = ("A" if parts[2][0] != "A" else "B") + parts[2][1:]
+        token = ".".join(parts)
+
+    policy = PolicyHarness()
+    if outcome != "missing-grant":
+        policy.document["authz"]["principals"]["workspace-editors"] = {"workspaces": {"default": ["Viewer"]}}
+    policy.install(policy.document)
+
+    async def evaluate(self: AuthClient, document: DecisionEvaluationInput) -> PolicyDecision:
+        # Everything before this point uses the production signed-token resolver.
+        assert document.principal_id == delegation.name
+        assert document.on_behalf_of_principal_id == "creator@example.com"
+        assert document.caller_kind == "service_principal"
+        assert document.verified_workload_delegation
+        return policy.decide(document)
+
+    monkeypatch.setattr(AuthClient, "_evaluate_decision", evaluate)
+    # This test has no external IdP. Invalid platform signatures must also be
+    # refused by the unrelated subject/OIDC providers rather than reaching the network.
+    from nhx.common.auth.jwt import JWTValidator
+
+    monkeypatch.setattr("nhx.common.auth.middleware.resolve_workload_subject_token", AsyncMock(return_value=None))
+    monkeypatch.setattr(JWTValidator, "validate_token", AsyncMock(return_value=None))
+    encryptor = SecretKeyEncryptor(name="test", key=b"a" * 32)
+    secret = HelixSecret(name="credential", workspace="default")
+    secret._data, secret._encrypted_dek, secret._secret_provider = envelope_encrypt(encryptor, "test-value")
+    store = AsyncMock()
+    store.get.return_value = secret
+    monkeypatch.setattr(secret_endpoints, "get_encryptor_by_name", lambda name: encryptor)
+    app = FastAPI()
+    app.include_router(secret_endpoints.router, prefix="/apis/secrets")
+    app.dependency_overrides[get_entity_client] = lambda: store
+    app.dependency_overrides[get_platform_config] = lambda: HelixConfig()
+    app.add_middleware(AuthorizationMiddleware, service_name="secrets")
+    workspace = "other" if outcome == "cross-workspace" else "default"
+    with TestClient(app) as resource_client:
+        response = resource_client.get(
+            f"/apis/secrets/v2/workspaces/{workspace}/secrets/credential/access",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+    expected = 200 if outcome == "allowed" else 401 if outcome == "tampered" else 403
+    assert response.status_code == expected, response.text
+    if expected == 200:
+        assert response.json()["value"] == "test-value"
+        store.get.assert_awaited_once()
+    else:
+        store.get.assert_not_awaited()

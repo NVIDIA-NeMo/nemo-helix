@@ -5,7 +5,7 @@
 title: "Plugin Authorization"
 description: ""
 ---
-Plugin authorization is derived *entirely from your routes*. You attach an authorization rule to each HTTP route handler — referencing typed permissions and declaring the route's OAuth scope — and the platform reads those rules back to build the permission catalog, the per-endpoint bindings, and the plugin's namespace when it compiles the OPA bundle. There is no separate permission list to keep in sync with your routes.
+Plugin route authorization is derived from route declarations. You attach an authorization rule to each HTTP route handler — referencing typed permissions and declaring the route's OAuth scope — and the platform reads those rules back to build the permission catalog, the per-endpoint bindings, and the plugin's namespace when it compiles the OPA bundle. There is no separate permission list to keep in sync with your routes.
 
 This page is for plugin authors. For the platform-wide RBAC model see [Roles & Permissions](/documentation/access-control/authorization/roles-and-permissions); for how decisions are evaluated see [Policy Engine](/documentation/access-control/authorization/policy-engine); for token-level scopes see [API Scopes](/documentation/access-control/authorization/api-scopes).
 
@@ -19,7 +19,7 @@ The rule references `Permission` objects; the platform derives the normalized po
 - the **per-endpoint bindings** (method + path → permissions, scope, caller kinds),
 - the plugin **namespace**.
 
-The permission *is* the object referenced on the route, and it carries its own description — so there is nothing to declare twice. The only authz a plugin declares apart from its routes is the optional escape hatch for permissions that have no 1:1 route (see [Permissions Without a Route](#permissions-without-a-route)).
+The permission *is* the object referenced on the route, and it carries its own description — so there is nothing to declare twice. Plugins can also declare permissions without routes and named operations for decisions that require resolved resource facts.
 
 ## The Authorization Model
 
@@ -75,7 +75,7 @@ scope.child("deployments").permission("create", description="Create a deployment
 
 ### Caller kinds — PRINCIPAL and SERVICE_PRINCIPAL
 
-`CallerKind` is a subject attribute enforced in Rego, not a permission. A route is intended for a normal authenticated user (`CallerKind.PRINCIPAL`) or a caller whose id is prefixed `service:` — e.g. a controller writing observed status (`CallerKind.SERVICE_PRINCIPAL`). There is intentionally no anonymous kind; the only genuinely public routes are core infrastructure, hardcoded as a bypass in the enforcement point.
+`CallerKind` is a subject attribute enforced in Rego, not a permission. A route is intended for a normal authenticated user (`CallerKind.PRINCIPAL`) or an authenticated service caller (`CallerKind.SERVICE_PRINCIPAL`). Verified delegated workloads also have the service caller kind; they do not acquire internal platform-service privileges. There is intentionally no anonymous kind; the only genuinely public routes are core infrastructure, hardcoded as a bypass in the enforcement point.
 
 ## Declaring Authz on a Route
 

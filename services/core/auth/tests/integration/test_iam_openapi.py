@@ -52,6 +52,7 @@ class TestIAMOpenAPI:
         assert response.status_code == 200
 
         spec = response.json()
+        assert "/apis/auth/v2/authz/decision" not in spec["paths"]
         operation = spec["paths"]["/apis/auth/v2/authz/{entrypoint}"]["post"]
         assert operation["responses"]["400"]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/AuthzErrorResponse"

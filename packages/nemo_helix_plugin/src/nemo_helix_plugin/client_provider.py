@@ -39,6 +39,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import httpx
 from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.auth import AsyncFromSyncTokenProvider, EnvAccessToken, TokenProvider
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
@@ -74,6 +75,7 @@ class NemoClientProvider(Protocol):
         internal: bool = False,
         on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
+        http_client: httpx.Client | None = None,
     ) -> NemoClient:
         """Build a sync NemoClient for the current service context."""
 
@@ -84,6 +86,7 @@ class NemoClientProvider(Protocol):
         internal: bool = False,
         on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> AsyncNemoClient:
         """Build an async NemoClient for the current service context."""
 
@@ -286,16 +289,28 @@ class DefaultNemoClientProvider:
         internal: bool = False,
         on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
+        http_client: httpx.Client | None = None,
     ) -> NemoClient:
         base_url = _base_url()
         if as_service is None and on_behalf_of is None and is_workload_identity_token_file_set():
             headers = {_INTERNAL_REQUEST_HEADER: "true"} if internal else None
             return NemoClient(
-                base_url=base_url, workspace=workspace, auth=_workload_identity_auth(base_url), default_headers=headers
+                base_url=base_url,
+                workspace=workspace,
+                auth=_workload_identity_auth(base_url),
+                default_headers=headers,
+                http_client=http_client,
+                owns_http_client=http_client is None,
             )
 
         headers = _build_headers(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
-        return NemoClient(base_url=base_url, workspace=workspace, default_headers=headers or None)
+        return NemoClient(
+            base_url=base_url,
+            workspace=workspace,
+            default_headers=headers or None,
+            http_client=http_client,
+            owns_http_client=http_client is None,
+        )
 
     def get_async_nemo_client(
         self,
@@ -304,6 +319,7 @@ class DefaultNemoClientProvider:
         internal: bool = False,
         on_behalf_of: str | RuntimePrincipal | None = None,
         workspace: str | None = None,
+        http_client: httpx.AsyncClient | None = None,
     ) -> AsyncNemoClient:
         base_url = _base_url()
         if as_service is None and on_behalf_of is None and is_workload_identity_token_file_set():
@@ -313,10 +329,18 @@ class DefaultNemoClientProvider:
                 workspace=workspace,
                 auth=AsyncFromSyncTokenProvider(_workload_identity_auth(base_url)),
                 default_headers=headers,
+                http_client=http_client,
+                owns_http_client=http_client is None,
             )
 
         headers = _build_headers(as_service=as_service, internal=internal, on_behalf_of=on_behalf_of)
-        return AsyncNemoClient(base_url=base_url, workspace=workspace, default_headers=headers or None)
+        return AsyncNemoClient(
+            base_url=base_url,
+            workspace=workspace,
+            default_headers=headers or None,
+            http_client=http_client,
+            owns_http_client=http_client is None,
+        )
 
     def get_task_nemo_client(
         self,
@@ -456,6 +480,7 @@ def get_nemo_client(
     internal: bool = False,
     on_behalf_of: str | RuntimePrincipal | None = None,
     workspace: str | None = None,
+    http_client: httpx.Client | None = None,
 ) -> NemoClient:
     """Build a sync NemoClient for the current service context.
 
@@ -470,6 +495,7 @@ def get_nemo_client(
             If ``None``, propagate the principal read from ``NHX_PRINCIPAL``.
         internal: Mark requests as internal (service-to-service).
         on_behalf_of: Principal ID, or full principal (identity, email, groups), to act on behalf of.
+        http_client: Borrow this transport; credential selection remains independent.
         workspace: Default workspace used to fill ``{workspace}`` path params.
     """
     return _resolve_provider().get_nemo_client(
@@ -477,6 +503,7 @@ def get_nemo_client(
         internal=internal,
         on_behalf_of=on_behalf_of,
         workspace=workspace,
+        http_client=http_client,
     )
 
 
@@ -486,6 +513,7 @@ def get_async_nemo_client(
     internal: bool = False,
     on_behalf_of: str | RuntimePrincipal | None = None,
     workspace: str | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> AsyncNemoClient:
     """Async counterpart of :func:`get_nemo_client`.
 
@@ -497,6 +525,7 @@ def get_async_nemo_client(
         internal=internal,
         on_behalf_of=on_behalf_of,
         workspace=workspace,
+        http_client=http_client,
     )
 
 

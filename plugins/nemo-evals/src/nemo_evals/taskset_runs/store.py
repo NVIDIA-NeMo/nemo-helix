@@ -38,6 +38,12 @@ from nemo_helix_plugin.schema import Page, PaginationData
 # answer that no retry can change. Retrying it only adds backoff before ``accept`` settles the
 # conflict. 5xx and timeouts are still retried; those retries are what turn a committed create
 # whose reply was lost into a 409 for our own record, which ``accept`` recognizes by ``plan_ref``.
+class RunRecordWriter(Protocol):
+    """The acceptance path may create only a TasksetRun record."""
+
+    async def create(self, entity: TasksetRunEntity) -> TasksetRunEntity: ...
+
+
 class RunEntityClient(EntityClientProtocol[TasksetRunEntity], EntityUpdateClientProtocol[TasksetRunEntity], Protocol):
     """Run-record reads and writes, including the run controller's versioned updates."""
 
@@ -80,6 +86,7 @@ class RunAcceptance:
     never resolves anything again and a retry cannot extend the deadlines.
 
     Attributes:
+        creator: Verified submitting principal, independent of the storage writer.
         plan: Resolved plan to store; ``plan.run_id`` comes from ``derive_run_id``
             and ``plan.taskset_ref`` is already pinned.
         idempotency_key: Retry key, the caller's or one submit generated. Stored on
@@ -101,6 +108,7 @@ class RunAcceptance:
             can create its task Jobs on the caller's behalf; None with auth off.
     """
 
+    creator: str
     plan: TasksetRunPlan
     idempotency_key: str
     request_digest: str
@@ -231,6 +239,7 @@ class TasksetRunStore:
         entities_client: AsyncEntitiesClient,
         files_client: AsyncFilesClient,
         *,
+        service_entities: EntityClient,
         retry: RetryPolicy = _ACCEPT_RETRY_POLICY,
     ) -> None:
         """Production constructor: applies ``retry``, by default ``_ACCEPT_RETRY_POLICY`` (no 409 retries).
@@ -243,12 +252,15 @@ class TasksetRunStore:
         Args:
             entities_client: Raw authorized client; its own retry policy is not mutated.
             files_client: Authorized client for the same workspace's plan files.
+            service_entities: Direct owning-service client for protected creator snapshots.
             retry: Entity Store retries; the run controller passes none, so one hung call can't hold a cycle.
         """
-        self._bind(EntityClient(entities_client.with_retry(retry)), files_client)
+        self._bind(EntityClient(entities_client.with_retry(retry)), files_client, service_entities.with_retry(retry))
 
     @classmethod
-    def _with_entity_adapter(cls, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> Self:
+    def _with_entity_adapter(
+        cls, entity_client: RunEntityClient, files_client: AsyncFilesClient, *, service_entities: RunRecordWriter
+    ) -> Self:
         """Test seam: build a store over an injected entity adapter, skipping ``__init__``.
 
         Applies no retry policy, so it is for tests with an in-memory fake such as
@@ -262,16 +274,19 @@ class TasksetRunStore:
             A store that talks to ``entity_client`` directly.
         """
         store = cls.__new__(cls)
-        store._bind(entity_client, files_client)
+        store._bind(entity_client, files_client, service_entities)
         return store
 
-    def _bind(self, entity_client: RunEntityClient, files_client: AsyncFilesClient) -> None:
+    def _bind(
+        self, entity_client: RunEntityClient, files_client: AsyncFilesClient, service_entities: RunRecordWriter
+    ) -> None:
         """Set the two clients every store method uses; shared by both constructors.
 
         Args:
             entity_client: Typed run-record adapter.
             files_client: Files client for plan writes, reads, and cleanup.
         """
+        self.service_entities = service_entities
         self.entity_client = entity_client
         self.files_client = files_client
 
@@ -299,7 +314,7 @@ class TasksetRunStore:
         plan = acceptance.plan
         stored = await store_plan(self.files_client, plan)
         try:
-            run = await self.entity_client.create(self._new_run(acceptance, plan, stored))
+            run = await self.service_entities.create(self._new_run(acceptance, plan, stored))
             return AcceptedRun(run=run, created=True)
         except NemoEntityConflictError:
             existing = await self.entity_client.get(TasksetRunEntity, name=plan.run_id, workspace=plan.workspace)
@@ -339,6 +354,7 @@ class TasksetRunStore:
         """
         return TasksetRunEntity(
             name=plan.run_id,
+            creator=acceptance.creator,
             workspace=plan.workspace,
             plan_ref=stored.ref,
             plan_digest=stored.digest,
@@ -435,7 +451,29 @@ class TasksetRunStore:
         """
         conditions: list[FilterOperation] = []
         if caller is not None:
-            conditions.append(ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller))
+            conditions.append(
+                LogicalOperation(
+                    operator=FilterOperator.OR,
+                    operations=[
+                        ComparisonOperation(field="data.creator", operator=FilterOperator.EQ, value=caller),
+                        LogicalOperation(
+                            operator=FilterOperator.AND,
+                            operations=[
+                                LogicalOperation(
+                                    operator=FilterOperator.OR,
+                                    operations=[
+                                        ComparisonOperation(
+                                            field="data.creator", operator=FilterOperator.EQ, value=None
+                                        ),
+                                        ComparisonOperation(field="data.creator", operator=FilterOperator.EQ, value=""),
+                                    ],
+                                ),
+                                ComparisonOperation(field="created_by", operator=FilterOperator.EQ, value=caller),
+                            ],
+                        ),
+                    ],
+                )
+            )
         if active:
             conditions.append(
                 ComparisonOperation(

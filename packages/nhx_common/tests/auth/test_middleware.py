@@ -1489,7 +1489,17 @@ class TestPrincipalHeadersAuth:
 
         assert response.status_code == 400
 
-    def test_token_exchange_mode_accepts_service_bearer_on_pdp_entrypoint(self, auth_config_token_exchange):
+    @pytest.mark.parametrize(
+        "actor,subject,expected_status",
+        [
+            ("service:models", None, 200),
+            ("service:models", "alice", 200),
+            ("job-step:example", "alice", 401),
+        ],
+    )
+    def test_token_exchange_mode_preserves_evaluator_service_trust(
+        self, auth_config_token_exchange, actor, subject, expected_status
+    ):
         """PDP entrypoints accept NeMo workload bearer tokens for internal PDP calls."""
         app = FastAPI()
 
@@ -1502,10 +1512,11 @@ class TestPrincipalHeadersAuth:
         client = TestClient(app, raise_server_exceptions=False)
         resolved = ResolvedBearerToken(
             claims=TokenClaims(
-                subject="service:models",
+                subject=subject or actor,
                 email=None,
                 groups=[],
                 scopes=[],
+                actor=ActorClaims(subject=actor, groups=[]) if subject else None,
                 raw_claims={"iss": "https://nemo.example.test/apis/auth"},
             ),
             token_kind="workload_access_token",
@@ -1521,8 +1532,9 @@ class TestPrincipalHeadersAuth:
                 json={"input": {}},
             )
 
-        assert response.status_code == 200
-        assert response.json() == {"principal": "service:models"}
+        assert response.status_code == expected_status
+        if expected_status == 200:
+            assert response.json() == {"principal": actor}
         resolver.assert_awaited_once()
 
     def test_principal_headers_auth_disabled(self, auth_config_disabled):

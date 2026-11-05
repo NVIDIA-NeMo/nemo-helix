@@ -83,7 +83,12 @@ func writeStepConfigFromAPI(ctx context.Context) error {
 	}
 	httpClient := *endpoint.HTTPClient()
 	httpClient.Timeout = stepConfigFetchTimeout
-	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), &httpClient)
+	session, err := nhxclient.SessionFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	authenticatedClient := session.HTTPClient(&httpClient)
+	client := nhxclient.NewJobStepClientWithHTTPClient(endpoint.ConnectBaseURL, nhxclient.PrincipalFromEnv(), authenticatedClient)
 
 	workspace, job, step := required["NEMO_JOB_WORKSPACE"], required["NEMO_JOB_ID"], required["NEMO_JOB_STEP"]
 	logger.Printf("Fetching step config for %s/%s/%s...\n", workspace, job, step)
@@ -188,12 +193,17 @@ func parseSecretReferences(secretsEnv string) ([]secretReference, error) {
 
 // fetchSecrets retrieves secrets using the NeMo Helix API client and returns them as environment variables
 func fetchSecrets(apiBaseURL string, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
-	return fetchSecretsWithClient(nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
+	return fetchSecretsWithClient(context.Background(), nhxclient.NewSecretClient(apiBaseURL, principal), secretRefs)
 }
 
-func fetchSecretsWithEndpoint(endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithEndpoint(ctx context.Context, endpoint nhxclient.Endpoint, principal *nhxclient.Principal, secretRefs []secretReference) ([]string, error) {
+	session, err := nhxclient.SessionFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return fetchSecretsWithClient(
-		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, secretEndpointHTTPClient(endpoint)),
+		ctx,
+		nhxclient.NewSecretClientWithHTTPClient(endpoint.ConnectBaseURL, principal, session.HTTPClient(secretEndpointHTTPClient(endpoint))),
 		secretRefs,
 	)
 }
@@ -204,7 +214,7 @@ func secretEndpointHTTPClient(endpoint nhxclient.Endpoint) *http.Client {
 	return &httpClient
 }
 
-func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
+func fetchSecretsWithClient(ctx context.Context, client nhxclient.SecretClient, secretRefs []secretReference) ([]string, error) {
 	if len(secretRefs) == 0 {
 		return nil, nil
 	}
@@ -213,7 +223,7 @@ func fetchSecretsWithClient(client nhxclient.SecretClient, secretRefs []secretRe
 
 	for _, ref := range secretRefs {
 		logger.Printf("Fetching secret %s from workspace %s...\n", ref.secretName, ref.workspace)
-		secret, err := client.GetSecret(ref.workspace, ref.secretName)
+		secret, err := client.GetSecret(ctx, ref.workspace, ref.secretName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch secret %s/%s: %w", ref.workspace, ref.secretName, err)
 		}
@@ -244,6 +254,11 @@ func workloadEnvFromParent() []string {
 func runExecWithStdin(args []string) (exitCode int, err error) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	session, err := nhxclient.NewSession(ctx)
+	if err != nil {
+		return 1, err
+	}
+	ctx = nhxclient.WithSession(ctx, session)
 
 	otelShutdown, _, err := setupOTELSDK(ctx)
 	if err != nil {
@@ -259,6 +274,11 @@ func runExecWithStdin(args []string) (exitCode int, err error) {
 
 // runExec runs the specified command with arguments, injecting secrets as environment variables if specified
 func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, error) {
+	session, err := nhxclient.SessionFromContext(ctx)
+	if err != nil {
+		return 1, err
+	}
+	ctx = nhxclient.WithSession(ctx, session)
 	// Command and arguments
 	cmdName := args[0]
 	cmdArgs := []string{}
@@ -298,7 +318,7 @@ func runExec(ctx context.Context, args []string, stdinReader io.Reader) (int, er
 			// Build auth context from NHX_PRINCIPAL JSON env var set by the jobs controller
 			principal := nhxclient.PrincipalFromEnv()
 
-			secretEnvVars, err := fetchSecretsWithEndpoint(secretEndpoint, principal, secretRefs)
+			secretEnvVars, err := fetchSecretsWithEndpoint(ctx, secretEndpoint, principal, secretRefs)
 			if err != nil {
 				logger.Printf("Error fetching secrets: %v\n", err)
 				return 1, err

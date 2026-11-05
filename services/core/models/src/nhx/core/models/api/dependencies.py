@@ -47,7 +47,7 @@ def get_model_provider_service(
     entity_client: EntityClient = Depends(get_entity_client),
 ) -> ModelProviderService:
     """Dependency to get ModelProviderService instance."""
-    return ModelProviderService(entity_client)
+    return ModelProviderService(entity_client, service_entities=entity_client.as_service("models", internal=True))
 
 
 def get_prompt_service(
@@ -68,4 +68,4 @@ def get_model_deployment_service(
     entity_client: EntityClient = Depends(get_entity_client),
 ) -> ModelDeploymentService:
     """Dependency to get ModelDeploymentService instance."""
-    return ModelDeploymentService(entity_client)
+    return ModelDeploymentService(entity_client, service_entities=entity_client.as_service("models", internal=True))

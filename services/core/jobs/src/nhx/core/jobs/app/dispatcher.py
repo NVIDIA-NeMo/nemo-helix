@@ -384,7 +384,7 @@ class JobDispatcher:
                 fileset_name = fileset_resp.data().name
 
             # Create job (ID is assigned by entity store)
-            job = await self.store.create(
+            job = await self.system_store.create(
                 HelixJob(
                     name=job_name,
                     workspace=workspace,
@@ -425,6 +425,7 @@ class JobDispatcher:
             job.current_attempt_id = attempt.id
             job.with_auth_context(auth_context)
             job = await self.store.update(job)
+            job.with_auth_context(auth_context)
             result = create_platform_job_response(job, attempt)
             logger.info("Created new job", extra={"job": job.name, "workspace": job.workspace})
             await self._start_attempt(job, attempt)
@@ -503,7 +504,9 @@ class JobDispatcher:
 
             if auth_context is not None:
                 job.with_auth_context(auth_context)
-            job = await self.store.update(job)
+                job = await self.system_store.update(job)
+            else:
+                job = await self.store.update(job)
             if auth_context is not None:
                 job.with_auth_context(auth_context)
             operations_counter.add(1, attributes={"operation": "update_job"})
@@ -1755,13 +1758,17 @@ class JobDispatcher:
         # same way create does, so the rerun runs as the person who requested it.
         job_entity.current_attempt_id = next_attempt.id
         job_entity.status = next_attempt.status
+        recapture = auth_context is not None
         if auth_context is None:
             # The caller's reads strip the stored auth context, and an update replaces the
             # job's data, so without a caller's context, write back the job's own.
             stored = await self.store.as_service("jobs", internal=True).get_by_id(HelixJob, job_entity.id)
             auth_context = stored.auth_context
         job_entity.with_auth_context(auth_context)
-        job_entity = await self.store.update(job_entity)
+        if recapture:
+            job_entity = await self.system_store.update(job_entity)
+        else:
+            job_entity = await self.store.update(job_entity)
         job_entity.with_auth_context(auth_context)
         await self._start_attempt(job_entity, next_attempt)
         operations_counter.add(1, attributes={"operation": "rerun_job"})

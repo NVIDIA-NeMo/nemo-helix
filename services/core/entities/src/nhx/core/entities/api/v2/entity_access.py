@@ -4,11 +4,14 @@
 """Additional authorization for core control entities and resolved references."""
 
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import HTTPException, status
+from nemo_helix_plugin.auth.decisions import DecisionRequest, EntityFacts, RequestTarget, ResourceTarget
 from nhx.common.api.filter import FilterOperation, LogicalOperation
 from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.client import AuthClient
+from nhx.core.entities.api.v2.utils import require_workspace_access
 from nhx.core.entities.utils.filter import RelationshipFilterOperation
 
 CONTROL_ENTITY_TYPES = frozenset({"role_binding", "access_key"})
@@ -23,14 +26,13 @@ async def require_control_entity_access(
 ) -> None:
     if entity_type not in CONTROL_ENTITY_TYPES or not auth_client.auth_enabled:
         return
-    permissions = {
-        "create": ["iam.create"],
-        "read": ["iam.read"],
-        "list": ["iam.list"],
-        "update": ["iam.create", "iam.delete"],
-        "delete": ["iam.delete"],
-    }[operation]
-    if not await auth_client.has_permissions(workspace, permissions):
+    if not await auth_client.has_operation(
+        DecisionRequest(
+            operation="entities.control.access",
+            target=ResourceTarget(workspace=workspace, resource_type=entity_type, name=""),
+            facts=EntityFacts(action=operation),
+        )
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not allowed to {operation} control entities in workspace '{workspace}'",
@@ -38,11 +40,20 @@ async def require_control_entity_access(
 
 
 async def require_entity_read_access(auth_client: AuthClient, workspace: str, entity_type: str) -> None:
-    if auth_client.auth_enabled and not await auth_client.has_permissions(workspace, ["entities.read"]):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not allowed to read entities in workspace '{workspace}'",
+    # The by-ID route has no workspace. Reuse the workspace-scoped read
+    # contract against the resolved row so the actor's storage grant is scoped
+    # correctly, without requiring the represented user to have that grant.
+    if not await auth_client.has_operation(
+        DecisionRequest(
+            operation="route",
+            target=RequestTarget(
+                method="GET",
+                path=f"/apis/entities/v2/workspaces/{quote(workspace, safe='')}/entities/{quote(entity_type, safe='')}",
+            ),
         )
+    ):
+        raise HTTPException(status_code=403, detail=f"Not allowed to read entities in workspace '{workspace}'")
+    await require_workspace_access(workspace)
     await require_control_entity_access(auth_client, workspace, entity_type, "read")
 
 

@@ -5,20 +5,23 @@
 
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
-from nemo_helix_plugin.auth import is_service_principal_id
-from nemo_helix_plugin.entity_client import get_entity_client
+from collections.abc import AsyncIterator
 
-__all__ = ["get_entity_client", "require_service_principal"]
+from fastapi import Depends
+from nemo_helix_plugin.client.client import AsyncNemoClient
+from nemo_helix_plugin.client_provider import get_async_nemo_client
+from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
+from nemo_helix_plugin.entity_client import NemoEntitiesClient, get_entity_client
 
-_PRINCIPAL_ID_HEADER = "X-NHX-Principal-Id"
+__all__ = ["get_entity_client"]
 
 
-def require_service_principal(request: Request) -> None:
-    """Restrict controller-only status writes to service principals."""
-    principal_id = request.headers.get(_PRINCIPAL_ID_HEADER, "")
-    if not is_service_principal_id(principal_id):
-        raise HTTPException(
-            status_code=403,
-            detail="Status updates require a service principal.",
-        )
+async def get_service_entity_client(
+    request_client: AsyncNemoClient = Depends(get_nemo_client),
+) -> AsyncIterator[NemoEntitiesClient]:
+    """Use deployments credentials for records containing the verified creator snapshot."""
+    async with get_async_nemo_client(
+        as_service="deployments", internal=True, http_client=request_client._http
+    ) as client:
+        yield NemoEntitiesClient(AsyncEntitiesClient.from_client(client))

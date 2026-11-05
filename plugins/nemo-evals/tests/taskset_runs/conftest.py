@@ -60,6 +60,7 @@ def acceptance(plan: TasksetRunPlan) -> RunAcceptance:
     """
     accepted_at = datetime(2026, 10, 5, tzinfo=timezone.utc)
     return RunAcceptance(
+        creator="user:alice",
         plan=plan,
         idempotency_key="key",
         request_digest="request-digest",
@@ -73,7 +74,7 @@ def acceptance(plan: TasksetRunPlan) -> RunAcceptance:
 @pytest.fixture
 def store(entity_store, files_client: AsyncFilesClient) -> TasksetRunStore:
     """Return a store over the entity and Files fixtures without production retries."""
-    return TasksetRunStore._with_entity_adapter(entity_store, files_client)
+    return TasksetRunStore._with_entity_adapter(entity_store, files_client, service_entities=entity_store)
 
 
 @pytest.fixture

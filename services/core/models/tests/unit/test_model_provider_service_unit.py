@@ -51,7 +51,7 @@ def mock_entity_client() -> AsyncMock:
 @pytest.fixture
 def model_provider_service(mock_entity_client):
     """Create a ModelProviderService with mocked EntityClient."""
-    return ModelProviderService(mock_entity_client)
+    return ModelProviderService(mock_entity_client, service_entities=mock_entity_client)
 
 
 @pytest.fixture

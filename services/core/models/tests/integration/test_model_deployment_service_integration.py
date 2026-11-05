@@ -45,7 +45,7 @@ def deployment_config_service(client_context):
 @pytest.fixture
 def deployment_service(client_context):
     """Create a ModelDeploymentService with test EntityClient."""
-    return ModelDeploymentService(client_context.entity_client)
+    return ModelDeploymentService(client_context.entity_client, service_entities=client_context.entity_client)
 
 
 @pytest.fixture

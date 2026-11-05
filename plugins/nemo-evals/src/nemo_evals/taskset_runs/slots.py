@@ -21,7 +21,7 @@ class RunTally:
     """What the settle phase learned about one open run."""
 
     run: TasksetRunEntity
-    creator: str  # run.created_by or DEVELOPMENT_CALLER
+    creator: str  # run.creator or run.created_by or DEVELOPMENT_CALLER
     held: int  # registered + image_ready with task_job (create intents)
     queued: int  # image_ready without task_job; 0 for a run that gets no grant this cycle
     cap: int | None  # run_cap(plan, config); 0 for a run that gets no grant this cycle

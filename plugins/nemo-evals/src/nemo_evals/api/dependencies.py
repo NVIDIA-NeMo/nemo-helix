@@ -40,6 +40,7 @@ _EVALS_SERVICE = "evals"
 async def get_taskset_run_service(
     caller: str = Depends(get_effective_principal_id),
     authorize: RequestAuthorizer = Depends(get_request_authorizer),
+    request_client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> AsyncGenerator[TasksetRunService, None]:
     """Bind run acceptance to one caller-delegated platform client per request.
 
@@ -53,16 +54,25 @@ async def get_taskset_run_service(
 
     With auth on, the client delegates the caller's full principal (id, email, account id, groups, aliases):
     the Entity Store finds a caller's workspaces through all of them, so a member only through a group would
-    otherwise be refused. The normalized ``caller`` id stays the idempotency scope and ``created_by``.
+    otherwise be refused. The normalized ``caller`` id stays the idempotency scope and business creator.
     """
     caller = normalize_run_caller(caller)
     principal = current_auth_context()
     on_behalf_of = principal.to_principal() if principal is not None else caller
-    async with get_async_nemo_client(as_service="evals", internal=True, on_behalf_of=on_behalf_of) as async_client:
+    async with (
+        get_async_nemo_client(
+            as_service="evals", internal=True, on_behalf_of=on_behalf_of, http_client=request_client._http
+        ) as async_client,
+        get_async_nemo_client(as_service="evals", internal=True, http_client=request_client._http) as service_client,
+    ):
         entities_client = AsyncEntitiesClient.from_client(async_client)
         files_client = AsyncFilesClient.from_client(async_client)
         yield TasksetRunService(
-            TasksetRunStore(entities_client, files_client),
+            TasksetRunStore(
+                entities_client,
+                files_client,
+                service_entities=EntityClient(AsyncEntitiesClient.from_client(service_client)),
+            ),
             EntityClient(entities_client),
             async_client,
             authorize,
@@ -79,7 +89,11 @@ async def get_service_run_store() -> AsyncGenerator[TasksetRunStore, None]:
     one workspace.
     """
     async with get_async_nemo_client(as_service="evals", internal=True) as async_client:
-        yield TasksetRunStore(AsyncEntitiesClient.from_client(async_client), AsyncFilesClient.from_client(async_client))
+        yield TasksetRunStore(
+            AsyncEntitiesClient.from_client(async_client),
+            AsyncFilesClient.from_client(async_client),
+            service_entities=EntityClient(AsyncEntitiesClient.from_client(async_client)),
+        )
 
 
 def get_metric_service(

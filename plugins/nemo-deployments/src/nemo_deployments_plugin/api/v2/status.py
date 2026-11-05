@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from nemo_deployments_plugin.api.v2._perms import DeploymentPerms, VolumePerms
-from nemo_deployments_plugin.api.v2.dependencies import get_entity_client, require_service_principal
+from nemo_deployments_plugin.api.v2.dependencies import get_entity_client
 from nemo_deployments_plugin.authz import scope
 from nemo_deployments_plugin.entities import Deployment, Volume
 from nemo_deployments_plugin.schema import UpdateDeploymentStatusRequest, UpdateVolumeStatusRequest
@@ -27,7 +27,6 @@ async def update_deployment_status(
     workspace: str,
     name: str,
     body: UpdateDeploymentStatusRequest,
-    _: None = Depends(require_service_principal),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> Deployment:
     try:
@@ -61,7 +60,6 @@ async def update_volume_status(
     workspace: str,
     name: str,
     body: UpdateVolumeStatusRequest,
-    _: None = Depends(require_service_principal),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> Volume:
     try:

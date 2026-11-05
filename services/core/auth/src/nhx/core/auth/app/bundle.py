@@ -11,6 +11,8 @@ import json
 import logging
 import tarfile
 import time
+from collections.abc import Iterable
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -19,7 +21,7 @@ from nhx.common.auth import ALL_WORKSPACES
 from nhx.common.auth.authz_format import validate_static_authz_data
 from nhx.common.config import get_service_config
 from nhx.common.entities import EntityClient
-from nhx.core.auth.app.scope_families import with_scope_families
+from nhx.core.auth.app.scope_families import with_policy_revision
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.entities import RoleBindingEntity
 
@@ -180,7 +182,7 @@ def merge_plugin_authz_contributions(static_data: dict) -> dict:
         contributions.append(contribution_dict)
 
     _degraded_plugins = degraded
-    contributions = [c for c in contributions if c.get("permissions") or c.get("endpoints")]
+    contributions = [c for c in contributions if c.get("permissions") or c.get("endpoints") or c.get("operations")]
     if contributions:
         logger.debug("Merging %d plugin authz contribution(s)", len(contributions))
     merged = merge_authz_contributions(static_data, contributions) if contributions else static_data
@@ -191,6 +193,34 @@ def merge_plugin_authz_contributions(static_data: dict) -> dict:
         existing_prefixes = existing if isinstance(existing, list) else []
         config["denied_plugin_prefixes"] = sorted(set(existing_prefixes) | set(denied_prefixes))
     return merged
+
+
+def with_role_binding_facts(data: dict, bindings: Iterable[RoleBindingEntity]) -> dict:
+    """Assemble a policy snapshot from trusted persisted bindings; Rego resolves grants."""
+    result = deepcopy(data)
+    # Filter to only active bindings (revoked_at is None)
+    active_bindings = [b for b in bindings if b.revoked_at is None]
+
+    # Group role bindings by principal and workspace
+    # This includes wildcard principal "*" which grants access to all authenticated users
+    for binding in active_bindings:
+        principal = binding.principal
+        # The workspace field is both where the binding is stored and what it grants access to
+        workspace = binding.workspace
+        role = binding.role
+
+        # Initialize principal if not exists
+        if principal not in result["authz"]["principals"]:
+            result["authz"]["principals"][principal] = {"workspaces": {}}
+
+        # Initialize workspace roles list if not exists
+        if workspace not in result["authz"]["principals"][principal]["workspaces"]:
+            result["authz"]["principals"][principal]["workspaces"][workspace] = []
+
+        # Add role if not already present
+        if role not in result["authz"]["principals"][principal]["workspaces"][workspace]:
+            result["authz"]["principals"][principal]["workspaces"][workspace].append(role)
+    return result
 
 
 async def _build_authorization_data_internal(entities_client: Optional[EntityClient] = None) -> dict:
@@ -245,31 +275,10 @@ async def _build_authorization_data_internal(entities_client: Optional[EntityCli
                 break
             page += 1
 
-        # Filter to only active bindings (revoked_at is None)
-        active_bindings = [b for b in all_bindings if b.revoked_at is None]
-
-        # Group role bindings by principal and workspace
-        # This includes wildcard principal "*" which grants access to all authenticated users
-        for binding in active_bindings:
-            principal = binding.principal
-            # The workspace field is both where the binding is stored and what it grants access to
-            workspace = binding.workspace
-            role = binding.role
-
-            # Initialize principal if not exists
-            if principal not in static_data["authz"]["principals"]:
-                static_data["authz"]["principals"][principal] = {"workspaces": {}}
-
-            # Initialize workspace roles list if not exists
-            if workspace not in static_data["authz"]["principals"][principal]["workspaces"]:
-                static_data["authz"]["principals"][principal]["workspaces"][workspace] = []
-
-            # Add role if not already present
-            if role not in static_data["authz"]["principals"][principal]["workspaces"][workspace]:
-                static_data["authz"]["principals"][principal]["workspaces"][workspace].append(role)
+        static_data = with_role_binding_facts(static_data, all_bindings)
 
     # Return the authorization data structure
-    return with_scope_families(static_data)
+    return with_policy_revision(static_data)
 
 
 async def build_authorization_data(entities_client: Optional[EntityClient] = None) -> dict:

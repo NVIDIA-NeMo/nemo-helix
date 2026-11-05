@@ -46,7 +46,7 @@ def _service_principal_headers(service_name: str, *, internal: bool) -> dict[str
     return headers
 
 
-def _service_workload_token_headers(existing_headers: dict[str, str], *, internal: bool) -> dict[str, str]:
+def _without_authentication_context(existing_headers: dict[str, str], *, internal: bool) -> dict[str, str]:
     headers = {
         name: value for name, value in existing_headers.items() if name.lower() not in AUTHENTICATION_CONTEXT_HEADERS
     }
@@ -69,11 +69,15 @@ def _async_client_as_service(
     from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
 
     config = get_auth_config()
+    bearer = _uses_service_workload_token()
+    headers = _without_authentication_context(client.default_headers, internal=internal)
+    if not bearer:
+        headers.update(_service_principal_headers(service_name, internal=internal))
     return client.__class__(
         base_url=client.base_url,
         workspace=client.workspace,
-        auth=ServiceWorkloadAccessTokenProvider(config, service_name),
-        default_headers=_service_workload_token_headers(client.default_headers, internal=internal) or None,
+        auth=ServiceWorkloadAccessTokenProvider(config, service_name) if bearer else None,
+        default_headers=headers or None,
         timeout=client._timeout,
         retry=client._retry,
         http_client=client._http,
@@ -91,11 +95,15 @@ def _sync_client_as_service(
     from nhx.common.auth.workload_tokens import ServiceWorkloadAccessTokenProvider
 
     config = get_auth_config()
+    bearer = _uses_service_workload_token()
+    headers = _without_authentication_context(client.default_headers, internal=internal)
+    if not bearer:
+        headers.update(_service_principal_headers(service_name, internal=internal))
     return client.__class__(
         base_url=client.base_url,
         workspace=client.workspace,
-        auth=ServiceWorkloadAccessTokenProvider(config, service_name),
-        default_headers=_service_workload_token_headers(client.default_headers, internal=internal) or None,
+        auth=ServiceWorkloadAccessTokenProvider(config, service_name) if bearer else None,
+        default_headers=headers or None,
         timeout=client._timeout,
         retry=client._retry,
         http_client=client._http,
@@ -126,14 +134,7 @@ class EntityClient(_PluginEntityClient):
         Returns:
             A new EntityClient backed by an SDK with service principal headers.
         """
-        if _uses_service_workload_token():
-            service_client = _async_client_as_service(self._client, service_name, internal=internal)
-            return EntityClient(service_client)
-
-        # with_options merges headers into the client's defaults and shares the
-        # underlying httpx transport (connection pool, auth), so this is cheap.
-        # It clones via copy.copy, so the platform URL resolver carries over.
-        service_client = self._client.with_options(headers=_service_principal_headers(service_name, internal=internal))
+        service_client = _async_client_as_service(self._client, service_name, internal=internal)
         return EntityClient(service_client)
 
 
@@ -142,9 +143,5 @@ class SyncEntityClient(_PluginSyncEntityClient):
 
     def as_service(self, service_name: str, *, internal: bool = False) -> "SyncEntityClient":
         """Return a copy with service principal credentials baked in."""
-        if _uses_service_workload_token():
-            service_client = _sync_client_as_service(self._client, service_name, internal=internal)
-            return SyncEntityClient(service_client)
-
-        service_client = self._client.with_options(headers=_service_principal_headers(service_name, internal=internal))
+        service_client = _sync_client_as_service(self._client, service_name, internal=internal)
         return SyncEntityClient(service_client)

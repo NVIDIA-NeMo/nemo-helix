@@ -100,7 +100,7 @@ def mock_entity_client() -> AsyncMock:
 
 @pytest.fixture
 def deployment_service(mock_entity_client: AsyncMock) -> ModelDeploymentService:
-    return ModelDeploymentService(mock_entity_client)
+    return ModelDeploymentService(mock_entity_client, service_entities=mock_entity_client)
 
 
 def test_entity_to_schema_status_history_empty():

@@ -4,15 +4,31 @@
 """Auth client for NeMo Helix services."""
 
 import asyncio
+import hashlib
+import json
 import logging
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
 import httpx
+from fastapi import HTTPException
+from nemo_helix_plugin.auth.decisions import (
+    CollectionTarget,
+    DecisionEvaluationInput,
+    DecisionRequest,
+    FieldDecision,
+    FieldTarget,
+    OperationDecision,
+    PolicyDecision,
+    RequestTarget,
+    UnrestrictedWorkspaces,
+    WorkspaceDecision,
+    validate_decision_result,
+)
 from nhx.common.config import AuthConfig
 from nhx.common.platform_endpoint import parse_platform_endpoint, require_authorization_header_endpoint
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from .authz_format import validate_permission_strings
 from .exceptions import InvalidPermissionFormatError
@@ -100,6 +116,8 @@ class AuthClient(BaseModel):
 
     model_config = {"arbitrary_types_allowed": True, "validate_assignment": False}
 
+    _request_scopes: list[str] = PrivateAttr(default_factory=list)
+
     @property
     def auth_enabled(self) -> bool:
         """Whether authentication is enabled."""
@@ -150,6 +168,20 @@ class AuthClient(BaseModel):
         principal: Principal,
         include_identity_resolution: bool,
     ) -> None:
+        auth_input.update(
+            {
+                "actor_email": principal.email or "",
+                "actor_groups": list(principal.groups),
+                "subject_email": principal.on_behalf_of_email or "",
+                "subject_groups": list(principal.on_behalf_of_groups or []),
+                "verified_workload_delegation": (
+                    principal.verified_workload_delegation
+                    and self.resolved_bearer_token is not None
+                    and self.resolved_bearer_token.token_kind == "workload_access_token"
+                    and self.resolved_bearer_token.claims.actor is not None
+                ),
+            }
+        )
         if principal.account_id:
             auth_input["actor_account_id"] = principal.account_id
         if principal.authz_aliases:
@@ -160,6 +192,119 @@ class AuthClient(BaseModel):
             auth_input["subject_aliases"] = list(principal.on_behalf_of_authz_aliases)
         if include_identity_resolution and self.identity_resolution:
             auth_input["identity_resolution"] = self.identity_resolution
+
+    def _decision_input(self, request: DecisionRequest, restrictions: list[str]) -> DecisionEvaluationInput:
+        principal = self.principal
+        context = DecisionEvaluationInput.model_validate(
+            {
+                **request.model_dump(),
+                "principal_id": principal.id,
+                "principal_context_digest": "",
+                "actor_email": principal.email or "",
+                "actor_groups": principal.groups,
+                "actor_account_id": principal.account_id or "",
+                "actor_aliases": principal.authz_aliases,
+                "on_behalf_of_principal_id": principal.on_behalf_of or "",
+                "subject_email": principal.on_behalf_of_email or "",
+                "subject_groups": principal.on_behalf_of_groups or [],
+                "subject_account_id": principal.on_behalf_of_account_id or "",
+                "subject_aliases": principal.on_behalf_of_authz_aliases,
+                "caller_kind": principal.caller_kind,
+                "verified_workload_delegation": (
+                    principal.verified_workload_delegation
+                    and self.resolved_bearer_token is not None
+                    and self.resolved_bearer_token.token_kind == "workload_access_token"
+                    and self.resolved_bearer_token.claims.actor is not None
+                ),
+                "scopes": restrictions,
+                "identity_resolution": self.identity_resolution or {},
+                **(
+                    {"method": request.target.method, "path": request.target.path}
+                    if isinstance(request.target, RequestTarget)
+                    else {}
+                ),
+            }
+        )
+        binding = context.model_dump(
+            exclude={
+                "principal_context_digest",
+                "identity_resolution",
+                "protocol_version",
+                "operation",
+                "target",
+                "facts",
+                "method",
+                "path",
+            }
+        )
+        digest = hashlib.sha256(json.dumps(binding, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return context.model_copy(update={"principal_context_digest": digest})
+
+    async def decide(self, request: DecisionRequest) -> PolicyDecision:
+        """Evaluate one registered operation; never accept caller-authored requirements."""
+        restrictions = self.resolved_bearer_token.scopes if self.resolved_bearer_token else self._request_scopes
+        try:
+            return await self._evaluate_decision(self._decision_input(request, restrictions))
+        except (httpx.HTTPError, ValueError, KeyError, RuntimeError) as exc:
+            raise HTTPException(status_code=503, detail="Policy decision service unavailable") from exc
+
+    async def has_operation(self, request: DecisionRequest) -> bool:
+        """Translate an operation decision without resolving permissions locally."""
+        decision = await self.decide(request)
+        if not isinstance(decision, OperationDecision):
+            raise ValueError("Operation authorization returned a non-operation decision")
+        return decision.allowed
+
+    async def _evaluate_decision(self, context: DecisionEvaluationInput) -> PolicyDecision:
+        request = context
+        if not self.auth_enabled:
+            if isinstance(request.target, FieldTarget):
+                return FieldDecision(
+                    protocol_version=2,
+                    operation=request.operation,
+                    target=request.target,
+                    principal_context_digest=context.principal_context_digest,
+                    policy_revision="auth_disabled",
+                    reason="auth_disabled",
+                    decision_type="field",
+                    field="auth_context",
+                    read=True,
+                    write=True,
+                )
+            if isinstance(request.target, CollectionTarget):
+                return WorkspaceDecision(
+                    protocol_version=2,
+                    operation=request.operation,
+                    target=request.target,
+                    principal_context_digest=context.principal_context_digest,
+                    policy_revision="auth_disabled",
+                    reason="auth_disabled",
+                    decision_type="workspaces",
+                    access=UnrestrictedWorkspaces(kind="unrestricted"),
+                )
+            return OperationDecision(
+                protocol_version=2,
+                operation=request.operation,
+                target=request.target,
+                principal_context_digest=context.principal_context_digest,
+                policy_revision="auth_disabled",
+                reason="auth_disabled",
+                decision_type="operation",
+                allowed=True,
+            )
+        if not self.policy_decision_point_base_url:
+            raise RuntimeError("Policy Decision Point URL not configured")
+        url = self.config.get_pdp_url("decision")
+        headers = await self._pdp_request_headers()
+        if self.http_client is not None:
+            response = await self.http_client.post(
+                url, json={"input": context.model_dump(mode="json")}, headers=headers
+            )
+        else:
+            async with self._new_pdp_http_client() as client:
+                response = await client.post(url, json={"input": context.model_dump(mode="json")}, headers=headers)
+        response.raise_for_status()
+        return validate_decision_result(context, response.json()["result"])
 
     async def authorize_request(
         self,
@@ -194,71 +339,22 @@ class AuthClient(BaseModel):
                 raise HTTPException(status_code=403, detail="Forbidden")
             ```
         """
-        if not self.auth_enabled:
-            logger.debug("Auth disabled, allowing request %s %s", method, path)
-            return AuthorizationResult(allowed=True, reason="auth_disabled")
-
-        if not self.policy_decision_point_base_url:
-            raise RuntimeError("Policy Decision Point URL not configured")
-
-        # Build authorization input (email/groups reflect the acting user when delegating)
-        auth_input = {
-            "principal_id": self.principal.id,
-            "method": method,
-            "path": path,
-        }
-        if self.principal.effective_email:
-            auth_input["principal_email"] = self.principal.effective_email
-        if self.principal.effective_groups:
-            auth_input["principal_groups"] = self.principal.effective_groups
-        if self.principal.on_behalf_of:
-            auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
-        if scopes:
-            auth_input["scopes"] = scopes
-        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=True)
-
-        auth_url = self.config.get_pdp_url("allow")
-
-        logger.debug("Calling PDP: url=%s, input=%s", auth_url, auth_input)
-
-        pdp_headers = await self._pdp_request_headers()
-
-        # Use provided http_client, instance http_client (from middleware), or create a new one
-        # See architecture/docs/http-client-injection.md for injection patterns.
-        client = http_client or self.http_client
-        if client:
-            response = await client.post(auth_url, json={"input": auth_input}, headers=pdp_headers)
-        else:
-            async with self._new_pdp_http_client() as temp_client:
-                response = await temp_client.post(auth_url, json={"input": auth_input}, headers=pdp_headers)
-
-        response.raise_for_status()
-
-        result = response.json().get("result", {})
-        allowed = result.get("allowed", False)
-        reason = result.get("reason")
-        actor_aliases = result.get("actor_aliases", [])
-        if not isinstance(actor_aliases, list):
-            actor_aliases = []
-        subject_aliases = result.get("subject_aliases", [])
-        if not isinstance(subject_aliases, list):
-            subject_aliases = []
-
-        logger.debug(
-            "PDP response: method=%s, path=%s, allowed=%s, reason=%s",
-            method,
-            path,
-            allowed,
-            reason,
+        request = DecisionRequest(operation="route", target=RequestTarget(method=method, path=path))
+        restrictions = (
+            self.resolved_bearer_token.scopes if self.resolved_bearer_token is not None else list(scopes or [])
         )
-
+        self._request_scopes = restrictions
+        client = self.model_copy(update={"http_client": http_client}) if http_client is not None else self
+        decision = await client._evaluate_decision(client._decision_input(request, restrictions))
+        if not isinstance(decision, OperationDecision):
+            raise ValueError("Route authorization returned a non-operation decision")
         return AuthorizationResult(
-            allowed=allowed,
-            reason=reason,
-            actor_account_id=result.get("actor_account_id"),
-            actor_aliases=[str(alias) for alias in actor_aliases if isinstance(alias, str)],
-            subject_account_id=result.get("subject_account_id"),
-            subject_aliases=[str(alias) for alias in subject_aliases if isinstance(alias, str)],
+            allowed=decision.allowed,
+            reason=decision.reason,
+            actor_account_id=decision.actor_account_id or None,
+            actor_aliases=decision.actor_aliases,
+            subject_account_id=decision.subject_account_id or None,
+            subject_aliases=decision.subject_aliases,
         )
 
     async def _pdp_check(self, pdp_endpoint: str, auth_input: dict, result_key: str, check_name: str) -> bool:
@@ -287,7 +383,10 @@ class AuthClient(BaseModel):
                 headers=await self._pdp_request_headers(),
             )
             response.raise_for_status()
-            return bool(response.json().get("result", {}).get(result_key, False))
+            value = response.json().get("result", {}).get(result_key, False)
+            if type(value) is not bool:
+                raise ValueError("PDP query returned a non-boolean result")
+            return value
         except httpx.HTTPError as exc:
             logger.error("Failed to contact auth endpoint for %s: %s", check_name, str(exc))
             raise HTTPException(status_code=503, detail=f"{check_name.capitalize()} service unavailable") from exc
@@ -373,7 +472,7 @@ class AuthClient(BaseModel):
 
         effective_principal = self.principal.effective_principal
         auth_input = {
-            "principal_id": effective_principal.id,
+            "principal_id": self.principal.id,
             "workspace": workspace_id,
             "role": role,
         }
@@ -383,33 +482,9 @@ class AuthClient(BaseModel):
             auth_input["principal_groups"] = effective_principal.groups
         if self.principal.on_behalf_of:
             auth_input["on_behalf_of_principal_id"] = self.principal.on_behalf_of
-        self._add_principal_context(auth_input, principal=effective_principal, include_identity_resolution=False)
+        self._add_principal_context(auth_input, principal=self.principal, include_identity_resolution=False)
 
         return await self._pdp_check("has_role", auth_input, "has_role", "role check")
-
-    async def on_behalf_of_has_permissions(self, workspace_id: str, permissions: List[str]) -> bool:
-        """Check if the on-behalf-of principal has specific permissions in a workspace.
-
-        This is a convenience method to check permissions for delegated users
-        when the current principal has an on-behalf-of principal field set.
-
-        Args:
-            workspace_id: The workspace to check permissions in
-            permissions: List of permission strings to check
-        Returns:
-            True if auth not enabled, or on-behalf-of principal has all required permissions, False otherwise
-        """
-        validate_permission_strings(permissions, context="AuthClient.on_behalf_of_has_permissions")
-
-        # If auth is disabled, allow all permissions
-        if not self.auth_enabled:
-            logger.debug("Auth disabled, allowing all permissions on behalf of principal")
-            return True
-
-        delegated_auth_client = AuthClient(
-            principal=self.principal.to_on_behalf_of(), config=self.config, http_client=self.http_client
-        )
-        return await delegated_auth_client.has_permissions(workspace_id, permissions)
 
     async def wait_permissions(
         self,

@@ -16,6 +16,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import FilesetOutput
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth import AuthClient, Principal, get_auth_client
+from nhx.common.config import AuthConfig
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.dependencies import (
     get_adapter_entity_service,
@@ -216,8 +217,7 @@ def app() -> Iterator[FastAPI]:
     ):
         app.include_router(router)
 
-    auth = Mock(spec=AuthClient, auth_enabled=False, principal=Principal(id="former-member"))
-    auth.has_permissions = AsyncMock(return_value=True)
+    auth = AuthClient(config=AuthConfig(enabled=False), principal=Principal(id="former-member"))
     app.dependency_overrides[get_auth_client] = lambda: auth
     files = AsyncMock(spec=AsyncFilesClient)
     files.get_fileset.return_value = Mock(data=Mock(return_value=Mock(spec=FilesetOutput)))

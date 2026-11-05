@@ -7,29 +7,35 @@ Provides async HTTP client fixtures for testing the v2 API endpoints.
 """
 
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import AsyncGenerator, Dict
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from nemo_helix_plugin.auth.decisions import DecisionEvaluationInput, PolicyDecision
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.auth.dependencies import auth_client_context
 from nhx.common.auth.models import Principal
 from nhx.common.config import AuthConfig
+from nhx.core.auth.app.bundle import with_role_binding_facts
+from nhx.core.auth.entities import RoleBindingEntity
 from nhx.core.entities.api.dependencies import (
     dep_entity_repository_with_session,
     dep_workspace_repository_with_session,
 )
 from nhx.core.entities.api.server import app
 from nhx.core.entities.app.repository import (
+    EntityRepositoryInterface,
     SQLAlchemyEntityRepository,
     SQLAlchemyWorkspaceRepository,
 )
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity, DBWorkspace  # noqa: F401
+from nhx.testing.policy import PolicyHarness
+from pydantic import Field
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -97,65 +103,72 @@ def repos(request, session_maker):
 
 
 def _create_mock_auth_client() -> AuthClient:
-    """Create a mock AuthClient for testing.
-
-    TODO: Remove this once tests are updated to use create_test_client() from nhx.testing.
-    The mock is only needed because these tests use the raw FastAPI app directly
-    (nhx.core.entities.api.server.app) which doesn't include AuthorizationMiddleware.
-    Using create_test_client() would go through the full middleware stack and properly
-    set up auth_client_context, eliminating the need for this mock.
-    """
-    principal = Principal(id=TEST_PRINCIPAL, email=TEST_PRINCIPAL, groups=[], on_behalf_of=None)
-    config = MagicMock(spec=AuthConfig)
-    config.enabled = False  # Disable auth checks in tests
-
-    auth_client = MagicMock(spec=AuthClient)
-    auth_client.principal = principal
-    auth_client.auth_enabled = False
-    auth_client.wait_role = AsyncMock(return_value=True)
-    auth_client.has_permissions = AsyncMock(return_value=True)
-    auth_client.on_behalf_of_has_permissions = AsyncMock(return_value=True)
-    return auth_client
+    return AuthClient(principal=Principal(id=TEST_PRINCIPAL, email=TEST_PRINCIPAL), config=AuthConfig(enabled=False))
 
 
-def _create_auth_client_enabled() -> AuthClient:
-    """AuthClient with config.enabled True so get_accessible_workspaces enforces role bindings.
+class RepositoryPolicyAuthClient(AuthClient):
+    repository: EntityRepositoryInterface = Field(exclude=True)
+    policy: PolicyHarness = Field(exclude=True)
+    static_document: dict = Field(exclude=True)
 
-    The entities app is mounted without AuthorizationMiddleware; this matches production
-    behavior for authz data scope only when :func:`nhx.common.auth.auth_client_context`
-    is set per request (see ``client_with_auth``).
-    """
-    principal = Principal(id=TEST_PRINCIPAL, email=TEST_PRINCIPAL, groups=[], on_behalf_of=None)
-    return AuthClient(
-        principal=principal, config=AuthConfig(enabled=True), http_client=None, service_name="test-entities-int"
-    )
+    async def _prepare(self) -> None:
+        bindings = []
+        page = 1
+        while True:
+            entities, total = await self.repository.list_entities(
+                workspace="-",
+                entity_type="role_binding",
+                page=page,
+                page_size=1000,
+            )
+            bindings.extend(
+                RoleBindingEntity.model_validate(
+                    {
+                        "name": entity.name,
+                        "workspace": entity.workspace,
+                        "granted_by": entity.created_by or "test-fixture",
+                        "granted_at": entity.created_at,
+                        **entity.data,
+                    }
+                )
+                for entity in entities
+            )
+            if len(entities) < 1000 or len(bindings) >= total:
+                break
+            page += 1
+        self.policy.install(with_role_binding_facts(self.static_document, bindings))
+
+    async def _evaluate_decision(self, document: DecisionEvaluationInput) -> PolicyDecision:
+        await self._prepare()
+        return self.policy.decide(document)
+
+    async def _pdp_check(self, pdp_endpoint: str, auth_input: dict, result_key: str, check_name: str) -> bool:
+        await self._prepare()
+        return self.policy.evaluate(pdp_endpoint, auth_input).get(result_key) is True
 
 
-def _create_auth_client_service_principal() -> AuthClient:
-    """Auth enabled, principal is service:* so compute_accessible_workspaces grants all workspaces."""
-    principal = Principal(id=TEST_SERVICE_PRINCIPAL, email=None, groups=[], on_behalf_of=None)
-    return AuthClient(
+def _policy_auth_client(repository: EntityRepositoryInterface, principal: Principal) -> AuthClient:
+    policy = PolicyHarness()
+    return RepositoryPolicyAuthClient(
         principal=principal,
         config=AuthConfig(enabled=True),
-        http_client=None,
-        service_name="test-entities-sp",
+        repository=repository,
+        policy=policy,
+        static_document=deepcopy(policy.document),
+        service_name="entities",
     )
 
 
-def _create_auth_client_service_on_behalf_of() -> AuthClient:
-    """Auth enabled: service principal with X-NHX-Principal-On-Behalf-Of to the test user (delegated scope)."""
-    principal = Principal(
-        id=TEST_SERVICE_PRINCIPAL,
-        email=None,
-        groups=[],
-        on_behalf_of=TEST_PRINCIPAL,
-    )
-    return AuthClient(
-        principal=principal,
-        config=AuthConfig(enabled=True),
-        http_client=None,
-        service_name="test-entities-obo",
-    )
+def _create_auth_client_enabled(repository: EntityRepositoryInterface) -> AuthClient:
+    return _policy_auth_client(repository, Principal(id=TEST_PRINCIPAL, email=TEST_PRINCIPAL))
+
+
+def _create_auth_client_service_principal(repository: EntityRepositoryInterface) -> AuthClient:
+    return _policy_auth_client(repository, Principal(id=TEST_SERVICE_PRINCIPAL))
+
+
+def _create_auth_client_service_on_behalf_of(repository: EntityRepositoryInterface) -> AuthClient:
+    return _policy_auth_client(repository, Principal(id=TEST_SERVICE_PRINCIPAL, on_behalf_of=TEST_PRINCIPAL))
 
 
 class _SetAuthContextMiddleware(BaseHTTPMiddleware):
@@ -184,7 +197,7 @@ async def client_with_auth(repos) -> AsyncGenerator[AsyncClient, None]:
 
     workspace_repo = repos["workspace"]
     entity_repo = repos["entity"]
-    auth_client = _create_auth_client_enabled()
+    auth_client = _create_auth_client_enabled(entity_repo)
 
     overrides = app.dependency_overrides.copy()
     try:
@@ -210,7 +223,7 @@ async def client_with_auth_service_principal(repos) -> AsyncGenerator[AsyncClien
 
     workspace_repo = repos["workspace"]
     entity_repo = repos["entity"]
-    auth_client = _create_auth_client_service_principal()
+    auth_client = _create_auth_client_service_principal(entity_repo)
 
     overrides = app.dependency_overrides.copy()
     try:
@@ -238,7 +251,7 @@ async def client_with_auth_service_on_behalf_of(
 
     workspace_repo = repos["workspace"]
     entity_repo = repos["entity"]
-    auth_client = _create_auth_client_service_on_behalf_of()
+    auth_client = _create_auth_client_service_on_behalf_of(entity_repo)
     overrides = app.dependency_overrides.copy()
     try:
         app.dependency_overrides[dep_workspace_repository_with_session] = lambda: workspace_repo

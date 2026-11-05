@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package cmd
+package nhxclient
 
 import (
 	"context"
@@ -70,7 +70,7 @@ func (t workloadAccessToken) needsRefresh(now time.Time) bool {
 	return t.value == "" || !now.Before(t.refreshAt)
 }
 
-type workloadAuthTokenSource struct {
+type WorkloadTokenSource struct {
 	subjectTokenFile string
 	tokenEndpoint    string
 	clientID         string
@@ -81,15 +81,7 @@ type workloadAuthTokenSource struct {
 	now   func() time.Time
 }
 
-func getOTLPLogWorkloadAuthHeaders(ctx context.Context) (map[string]string, error) {
-	tokenSource, err := newOTLPLogWorkloadAuthTokenSource(ctx)
-	if err != nil || tokenSource == nil {
-		return nil, err
-	}
-	return tokenSource.authHeaders(ctx)
-}
-
-func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenSource, error) {
+func NewWorkloadTokenSource(ctx context.Context) (*WorkloadTokenSource, error) {
 	subjectTokenFile := os.Getenv(workloadIdentityTokenFileEnv)
 	if subjectTokenFile == "" {
 		return nil, nil
@@ -98,6 +90,10 @@ func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenS
 	baseURL := strings.TrimRight(os.Getenv(nhxBaseURLEnv), "/")
 	if baseURL == "" {
 		return nil, fmt.Errorf("%s is required when %s is set", nhxBaseURLEnv, workloadIdentityTokenFileEnv)
+	}
+
+	if err := validateAuthenticationEndpoint(baseURL); err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, workloadAuthRequestTimeoutSeconds*time.Second)
@@ -119,6 +115,10 @@ func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenS
 		return nil, fmt.Errorf("auth discovery did not return workload_token_endpoint or token_endpoint")
 	}
 
+	if err := validateAuthenticationEndpoint(tokenEndpoint); err != nil {
+		return nil, err
+	}
+
 	clientID := discovery.OIDC.WorkloadClientID
 	if clientID == "" {
 		clientID = discovery.OIDC.ClientID
@@ -127,7 +127,7 @@ func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenS
 		return nil, fmt.Errorf("auth discovery did not return workload_client_id or client_id")
 	}
 
-	return &workloadAuthTokenSource{
+	return &WorkloadTokenSource{
 		subjectTokenFile: subjectTokenFile,
 		tokenEndpoint:    tokenEndpoint,
 		clientID:         clientID,
@@ -136,7 +136,7 @@ func newOTLPLogWorkloadAuthTokenSource(ctx context.Context) (*workloadAuthTokenS
 	}, nil
 }
 
-func (s *workloadAuthTokenSource) authHeaders(ctx context.Context) (map[string]string, error) {
+func (s *WorkloadTokenSource) authHeaders(ctx context.Context) (map[string]string, error) {
 	authHeader, err := s.AuthorizationHeader(ctx)
 	if err != nil {
 		return nil, err
@@ -144,11 +144,11 @@ func (s *workloadAuthTokenSource) authHeaders(ctx context.Context) (map[string]s
 	return map[string]string{"Authorization": authHeader}, nil
 }
 
-func (s *workloadAuthTokenSource) Headers(ctx context.Context) (map[string]string, error) {
+func (s *WorkloadTokenSource) Headers(ctx context.Context) (map[string]string, error) {
 	return s.authHeaders(ctx)
 }
 
-func (s *workloadAuthTokenSource) AuthorizationHeader(ctx context.Context) (string, error) {
+func (s *WorkloadTokenSource) AuthorizationHeader(ctx context.Context) (string, error) {
 	accessToken, err := s.accessToken(ctx)
 	if err != nil {
 		return "", err
@@ -156,7 +156,7 @@ func (s *workloadAuthTokenSource) AuthorizationHeader(ctx context.Context) (stri
 	return "Bearer " + accessToken, nil
 }
 
-func (s *workloadAuthTokenSource) accessToken(ctx context.Context) (string, error) {
+func (s *WorkloadTokenSource) accessToken(ctx context.Context) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -187,7 +187,7 @@ func discoverAuthConfig(ctx context.Context, baseURL string) (*authDiscoveryResp
 		return nil, err
 	}
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := workloadAuthHTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -251,19 +251,18 @@ func exchangeWorkloadToken(
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	response, err := http.DefaultClient.Do(request)
+	response, err := workloadAuthHTTPClient().Do(request)
 	if err != nil {
 		return workloadAccessToken{}, err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(response.Body)
-		return workloadAccessToken{}, fmt.Errorf("workload token exchange failed: status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return workloadAccessToken{}, fmt.Errorf("workload token exchange failed: status %d", response.StatusCode)
 	}
 
 	var tokenResponse tokenExchangeResponse
-	if err := json.NewDecoder(response.Body).Decode(&tokenResponse); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxAuthResponseBodyBytes)).Decode(&tokenResponse); err != nil {
 		return workloadAccessToken{}, fmt.Errorf("decode workload token exchange response: %w", err)
 	}
 	if strings.TrimSpace(tokenResponse.AccessToken) == "" {
@@ -273,4 +272,10 @@ func exchangeWorkloadToken(
 		return workloadAccessToken{}, fmt.Errorf("workload token exchange response did not include a positive expires_in")
 	}
 	return newWorkloadAccessToken(tokenResponse.AccessToken, tokenResponse.ExpiresIn, issuedAt), nil
+}
+
+func workloadAuthHTTPClient() *http.Client {
+	client := *http.DefaultClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &client
 }
