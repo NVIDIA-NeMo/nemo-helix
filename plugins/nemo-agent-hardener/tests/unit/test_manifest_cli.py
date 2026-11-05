@@ -384,3 +384,50 @@ def test_cli_init_rejects_an_unusable_model(monkeypatch: pytest.MonkeyPatch) -> 
 
     assert result.exit_code == 1
     assert "not usable" in result.output
+
+
+@pytest.mark.parametrize("image", ["reg.example/victim:1", ""])
+def test_manifest_set_records_or_clears_the_victim_image(monkeypatch: pytest.MonkeyPatch, image: str) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    captured: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace(update=lambda _name, **kw: captured.update(kw) or {}))
+
+    result = CliRunner().invoke(app, ["manifest", "set", "finance", "--victim-image", image])
+
+    assert result.exit_code == 0, result.output
+    assert captured == {"workspace": "default", "victim_image": image}
+
+
+def _patch_stage(cli_main: Any, monkeypatch: pytest.MonkeyPatch, result: dict[str, Any]) -> Any:
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace())
+    fake = SimpleNamespace(stage_victim_context=lambda **_kw: result)
+    monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake))
+    return app
+
+
+def test_stage_prints_the_build_push_and_record_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    app = _patch_stage(
+        cli_main, monkeypatch, {"status": "completed", "context_archive": "/tmp/job dir/finance-victim-context.tar.gz"}
+    )
+
+    result = CliRunner().invoke(app, ["stage", "--manifest-id", "finance", "--workspace", "team"])
+
+    assert result.exit_code == 0, result.output
+    assert "docker build -t <registry>/<image>:<tag> - < '/tmp/job dir/finance-victim-context.tar.gz'" in result.output
+    assert "nemo agent-hardener manifest set finance --workspace team --victim-image" in result.output
+
+
+def test_stage_failure_shows_the_cause_and_its_remedy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    error = {"message": "agent-hardener is not provisioned", "remediation": "Run `nemo agent-hardener setup`."}
+    app = _patch_stage(cli_main, monkeypatch, {"status": "failed", "error": error})
+
+    result = CliRunner().invoke(app, ["stage", "--manifest-id", "finance"])
+
+    assert result.exit_code == 1
+    assert "agent-hardener is not provisioned" in result.output
+    assert "Run `nemo agent-hardener setup`." in result.output

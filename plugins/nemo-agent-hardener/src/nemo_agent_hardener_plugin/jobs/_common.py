@@ -26,6 +26,7 @@ from nemo_agent_hardener_plugin.config import (
     read_env_file,
     write_env_file,
 )
+from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.jobs.errors import (
     CATEGORY_MISSING_CREDENTIAL,
     CATEGORY_PROVISIONING,
@@ -36,6 +37,7 @@ from nemo_agent_hardener_plugin.model_config import ModelChoice, WarGameModels
 from nemo_helix_plugin.client.adapter import client_from_platform
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.entities.base import parse_qualified_name
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import EnvironmentVariable, ExecutorSpec, SubprocessExecutionProviderSpec
 from nemo_helix_plugin.jobs.constants import DEFAULT_JOB_STORAGE_PATH, PERSISTENT_JOB_STORAGE_PATH_ENVVAR
@@ -46,6 +48,7 @@ from nemo_helix_plugin.secrets.client import SecretsClient
 logger = logging.getLogger(__name__)
 
 TASK_IMAGE = "nhx-agent-hardener-tasks"
+WAR_GAME_TASK = "nemo_agent_hardener_plugin.tasks.war_game"
 # The subprocess executor forwards only PATH/VIRTUAL_ENV, but on the host `setup` provisioned, openshell reads
 # its gateway registration from $HOME/.config/openshell (or $XDG_CONFIG_HOME) and reaches Docker via $DOCKER_HOST.
 _HOST_ENVVARS = ("HOME", "DOCKER_HOST", "XDG_CONFIG_HOME")
@@ -82,10 +85,9 @@ async def task_step_executor(
     plugin_config = AgentHardenerConfig.get()
     if not plugin_config.container_jobs:
         raise HelixJobCompilationError(
-            f"The agent-hardener {step} step cannot run on this deployment yet: it registers no subprocess "
-            "profile, and container jobs are off because OpenShell 0.1.0 and later create sandboxes only from a "
-            "registry image while agent-hardener still builds the victim from a Dockerfile. Run it from a host "
-            "provisioned with `nemo agent-hardener setup`."
+            f"The agent-hardener {step} step cannot run on this deployment: it registers no subprocess profile "
+            "and container jobs are off. Set `agent_hardener.container_jobs: true` with an OpenShell gateway "
+            "endpoint, or run it from a host provisioned with `nemo agent-hardener setup`."
         )
     environment += [
         EnvironmentVariable(name=f"{_CONFIG_ENV_PREFIX}{field.upper()}", value=str(value))
@@ -93,6 +95,38 @@ async def task_step_executor(
         if (value := getattr(plugin_config, field))
     ]
     return executor, environment
+
+
+async def victim_image_required(*, async_sdk: object, profile: str | None = None) -> bool:
+    """Whether a war-game submitted here would run in the task image, and so need each manifest's victim image.
+
+    Asks the same question ``compile`` does. A deployment that cannot run war-games at all reports ``False``:
+    there is no image to ask for, and submitting explains what is missing.
+    """
+    try:
+        executor, _ = await task_step_executor(WAR_GAME_TASK, step="war-game", profile=profile, async_sdk=async_sdk)
+    except HelixJobCompilationError:
+        return False
+    return not isinstance(executor, SubprocessExecutionProviderSpec)
+
+
+async def require_victim_image(
+    executor: ExecutorSpec, *, step: str, workspace: str, manifest_id: str | None, entity_client: NemoEntitiesClient
+) -> None:
+    """Fail at submit, not at sandbox creation, when a container job's manifest has no pre-built victim image.
+
+    A container job has no Docker to build the victim, and OpenShell only creates a sandbox from an image the
+    cluster can pull. A host (subprocess) job still builds it locally.
+    """
+    if isinstance(executor, SubprocessExecutionProviderSpec) or not manifest_id:
+        return
+    manifest = await entity_client.get(AgentHardenerManifest, name=manifest_id, workspace=workspace)
+    if not manifest.victim_image:
+        raise HelixJobCompilationError(
+            f"The agent-hardener {step} step runs in a container here, so manifest {manifest_id!r} needs a victim "
+            "image: run `agent-hardener stage` on it, build and push the printed context to a registry the "
+            "OpenShell gateway can pull from, then set the image on the manifest."
+        )
 
 
 def require_provisioned(plugin_config: AgentHardenerConfig) -> None:

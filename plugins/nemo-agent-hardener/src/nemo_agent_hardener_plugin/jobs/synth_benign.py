@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, cast
 
 from nemo_agent_hardener_plugin.config import AgentHardenerConfig
 from nemo_agent_hardener_plugin.jobs import _common
@@ -41,6 +41,7 @@ from nemo_agent_hardener_plugin.jobs.manifest import (
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
+from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job import NemoJob
 from nemo_helix_plugin.job_context import JobContext
 from nemo_helix_plugin.jobs.api_factory import (
@@ -80,10 +81,17 @@ class AgentHardenerSynthBenignJob(NemoJob):
         runtime by ``_run_service_driven`` (as the war-game ``stop_after_synth`` path does), so no pre-creation
         is needed here.
         """
-        del workspace, entity_client, job_name, options
+        del job_name, options
         synth = SynthBenignSpec.model_validate(spec)
         executor, environment = await _common.task_step_executor(
             "nemo_agent_hardener_plugin.tasks.synth_benign", step="synth", profile=profile, async_sdk=async_sdk
+        )
+        await _common.require_victim_image(
+            executor,
+            step="synth",
+            workspace=workspace,
+            manifest_id=synth.manifest_id,
+            entity_client=cast(NemoEntitiesClient, entity_client),
         )
         return HelixJobSpec(
             steps=[

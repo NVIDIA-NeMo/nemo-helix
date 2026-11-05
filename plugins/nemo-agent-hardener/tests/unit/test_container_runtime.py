@@ -15,6 +15,7 @@ from nemo_agent_hardener_plugin.jobs import _common
 from nemo_agent_hardener_plugin.jobs import openshell_gateway as gateway_module
 from nemo_agent_hardener_plugin.jobs import run as run_module
 from nemo_agent_hardener_plugin.jobs import synth_benign as synth_module
+from nemo_agent_hardener_plugin.jobs import victim_context as victim_context_module
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_helix_plugin.jobs import executor as executor_module
 from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
@@ -102,7 +103,7 @@ async def test_container_jobs_are_refused_until_enabled(tmp_path: Path, monkeypa
         pytest.fail("a refused war-game must not leave a run record behind")
 
     spec = run_module.WarGameSpec(manifest_id="m1", driver="service")
-    with pytest.raises(HelixJobCompilationError, match="registry image"):
+    with pytest.raises(HelixJobCompilationError, match="container jobs are off"):
         await run_module.AgentHardenerRunJob.compile(
             workspace="default",
             spec=spec,
@@ -117,12 +118,58 @@ async def test_container_jobs_are_refused_until_enabled(tmp_path: Path, monkeypa
 async def test_synth_runs_in_the_task_image_without_a_subprocess_profile() -> None:
     spec = synth_module.SynthBenignSpec(manifest_id="m1")
     job_spec = await synth_module.AgentHardenerSynthBenignJob.compile(
-        workspace="default", spec=spec, entity_client=None, job_name=None, async_sdk=None
+        workspace="default", spec=spec, entity_client=_manifests("reg.example/victim:1"), job_name=None, async_sdk=None
     )
 
     (step,) = list(job_spec["steps"])
     assert step["executor"]["provider"] == "cpu"
     assert step["executor"]["container"]["command"] == ["nemo_agent_hardener_plugin.tasks.synth_benign"]
+
+
+@pytest.mark.usefixtures("api_config")
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_a_container_war_game_needs_the_manifests_victim_image() -> None:
+    entities = _manifests("")
+    spec = run_module.WarGameSpec(manifest_id="m1", driver="service")
+
+    with pytest.raises(HelixJobCompilationError, match="needs a victim image"):
+        await run_module.AgentHardenerRunJob.compile(
+            workspace="default", spec=spec, entity_client=entities, job_name="job-1", async_sdk=None
+        )
+    assert entities.created == []
+
+
+@pytest.mark.usefixtures("api_config")
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_a_container_synth_needs_the_manifests_victim_image() -> None:
+    spec = synth_module.SynthBenignSpec(manifest_id="m1")
+
+    with pytest.raises(HelixJobCompilationError, match="needs a victim image"):
+        await synth_module.AgentHardenerSynthBenignJob.compile(
+            workspace="default", spec=spec, entity_client=_manifests(""), job_name=None, async_sdk=None
+        )
+
+
+@pytest.mark.usefixtures("api_config")
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_staging_the_victim_context_needs_no_victim_image() -> None:
+    spec = victim_context_module.VictimContextSpec(manifest_id="m1")
+    job_spec = await victim_context_module.AgentHardenerVictimContextJob.compile(
+        workspace="default", spec=spec, entity_client=_manifests(""), job_name=None, async_sdk=None
+    )
+
+    (step,) = list(job_spec["steps"])
+    assert step["executor"]["container"]["command"] == ["nemo_agent_hardener_plugin.tasks.victim_context"]
+
+
+async def test_a_host_job_builds_the_victim_without_an_image() -> None:
+    spec = synth_module.SynthBenignSpec(manifest_id="m1")
+    job_spec = await synth_module.AgentHardenerSynthBenignJob.compile(
+        workspace="default", spec=spec, entity_client=_manifests(""), job_name=None, async_sdk=None
+    )
+
+    (step,) = list(job_spec["steps"])
+    assert step["executor"]["provider"] == "subprocess"
 
 
 async def test_subprocess_step_forwards_the_hosts_openshell_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,6 +199,25 @@ async def test_no_matching_profile_fails_before_precreating_a_run() -> None:
             job_name="job-1",
             async_sdk=None,
         )
+
+
+class _Manifests:
+    """Entity client stub serving one manifest with the given victim image, and recording creates."""
+
+    def __init__(self, victim_image: str) -> None:
+        self._victim_image = victim_image
+        self.created: list[Any] = []
+
+    async def get(self, entity_type: Any, *, name: str, workspace: str) -> Any:
+        return entity_type(name=name, workspace=workspace, victim_image=self._victim_image)
+
+    async def create(self, entity: Any) -> Any:
+        self.created.append(entity)
+        return entity
+
+
+def _manifests(victim_image: str) -> _Manifests:
+    return _Manifests(victim_image)
 
 
 def _config(tmp_path: Path, **overrides: Any) -> AgentHardenerConfig:
@@ -357,3 +423,22 @@ def test_an_https_gateway_requires_the_mtls_secrets(tmp_path: Path) -> None:
 def test_the_gateway_endpoint_must_be_http_or_https(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="http:// or https://"):
         _config(tmp_path, openshell_gateway_endpoint="ssh://ops@gateway:8080")
+
+
+async def test_a_host_platform_needs_no_victim_image() -> None:
+    assert await _common.victim_image_required(async_sdk=None) is False
+
+
+@pytest.mark.usefixtures("api_config")
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_a_container_platform_needs_a_victim_image() -> None:
+    assert await _common.victim_image_required(async_sdk=None) is True
+
+
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_a_platform_that_cannot_run_war_games_asks_for_no_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(_common.AgentHardenerConfig, "get", lambda: _config(tmp_path))
+
+    assert await _common.victim_image_required(async_sdk=None) is False

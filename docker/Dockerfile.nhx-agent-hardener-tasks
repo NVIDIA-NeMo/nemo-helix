@@ -74,7 +74,7 @@ FROM runtime AS smoke-test
 # warns), and the per-run state dir is writable.
 USER 1000
 RUN set -eux; \
-    python -c "import nemo_agent_hardener_plugin.tasks.war_game.__main__, nemo_agent_hardener_plugin.tasks.synth_benign.__main__"; \
+    python -c "import nemo_agent_hardener_plugin.tasks.war_game.__main__, nemo_agent_hardener_plugin.tasks.synth_benign.__main__, nemo_agent_hardener_plugin.tasks.victim_context.__main__"; \
     /opt/agent-hardener/venv/bin/agent-hardener --help >/dev/null; \
     /opt/agent-hardener/garak-venv/bin/python -c "import garak"; \
     cfg="$(mktemp -d)"; \

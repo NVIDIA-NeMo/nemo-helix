@@ -99,6 +99,11 @@ class AgentHardenerManifest(NemoEntity, entity_type=AGENT_HARDENER_MANIFEST_TYPE
         description="In-container glob patterns scoping which processes may egress; agent-hardener requires them "
         "because the layout of an image it did not write cannot be inferred.",
     )
+    victim_image: str = Field(
+        default="",
+        description="Registry image built from this manifest's `agent-hardener stage` context. Required where the "
+        "job cannot build the victim itself (Kubernetes); empty means the run builds it with Docker.",
+    )
     manifest_yaml: str = Field(default="", description="The resolved agent-hardener.yaml content (for display).")
     port: int = Field(default=0, description="Victim port the war-game will target.")
     secrets: list[str] = Field(default_factory=list, description="Secret names the victim agent requires.")

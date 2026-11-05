@@ -35,6 +35,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
 )
 from nemo_agent_hardener_plugin.api.v2._filters import make_filter_dep
 from nemo_agent_hardener_plugin.api.v2.schemas import (
+    ExecutionSettings,
     InspectAgentRequest,
     InspectAgentResponse,
     InspectProjectRequest,
@@ -49,20 +50,21 @@ from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
 from nemo_agent_hardener_plugin.filesets import delete_fileset, download_and_extract_project, upload_project_dir
-from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
+from nemo_agent_hardener_plugin.jobs._common import resolve_model_key, victim_image_required
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
 from nemo_agent_hardener_plugin.model_config import ModelConfigDefaults, WarGameModels, model_config_defaults
 from nemo_agent_hardener_plugin.model_preflight import validate_choice
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, build_project_manifest_dict, inspect_project
 from nemo_helix_plugin.authz import CallerKind, path_rule
-from nemo_helix_plugin.client_provider import get_nemo_client
+from nemo_helix_plugin.client_provider import get_async_nemo_client, get_nemo_client
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
     NemoEntityNotFoundError,
     get_entity_client,
 )
+from nemo_helix_plugin.jobs.exceptions import HelixJobDependencyUnavailableError
 from nemo_helix_plugin.jobs.openapi_utils import generate_openapi_extra_params
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from starlette.concurrency import run_in_threadpool
@@ -164,6 +166,19 @@ async def get_manifest(
 async def get_model_config_defaults(workspace: str) -> ModelConfigDefaults:
     """The built-in per-group model defaults (attack/analysis) the create/run forms pre-fill."""
     return model_config_defaults()
+
+
+@router.get("/execution", response_model=ExecutionSettings, tags=["Agent Hardener Manifests"])
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[AgentHardenerManifestPerms.INSPECT])
+async def get_execution_settings(workspace: str) -> ExecutionSettings:
+    """How war-games run on this deployment, so Studio asks for a victim image only where a run needs one."""
+    try:
+        async with get_async_nemo_client(as_service="agent-hardener", internal=True, workspace=workspace) as client:
+            required = await victim_image_required(async_sdk=client)
+    except HelixJobDependencyUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return ExecutionSettings(victim_image_required=required)
 
 
 @router.post("/model-config/validate", response_model=ValidateModelResponse, tags=["Agent Hardener Manifests"])
@@ -532,6 +547,8 @@ async def update_manifest(
         existing.env = body.env
     if body.port is not None:
         existing.port = body.port
+    if body.victim_image is not None:
+        existing.victim_image = body.victim_image
     existing.manifest_yaml = _yaml_with_agent_settings(existing.manifest_yaml, existing)
     try:
         return await entity_client.update(existing)

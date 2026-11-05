@@ -139,6 +139,7 @@ class AgentHardenerManifest(BaseModel):
     launch_mode: str = Field(default="", description="Victim launch mode ('workflow'|'byo').")
     dockerfile: str = Field(default="", description="Project-relative Dockerfile the victim image is built from.")
     binaries: list[str] = Field(default_factory=list, description="In-container glob patterns allowed to egress.")
+    victim_image: str = Field(default="", description="Registry image built from `agent-hardener stage`.")
     manifest_yaml: str = Field(default="", description="The resolved agent-hardener.yaml content.")
     port: int = Field(default=0, description="Victim port the war-game will target.")
     secrets: list[str] = Field(default_factory=list, description="Secret names the victim agent requires.")
@@ -235,6 +236,12 @@ class SynthBenignSpec(BaseModel):
     interview: str = "interactive"
     run_name: str | None = None
     source_run: str | None = None
+
+
+class VictimContextSpec(BaseModel):
+    """Inputs for staging a saved manifest's victim build context (the shape ``run()``/``compile()`` see)."""
+
+    manifest_id: str = Field(min_length=1, pattern=r"\S")
 
 
 class WarGameJobRequest(BaseModel):
@@ -470,10 +477,24 @@ class ManifestUpdate(BaseModel):
     models: WarGameModels | None = Field(
         default=None, description="Replace the stored default model selection (attack/analysis/agent groups)."
     )
+    victim_image: str | None = Field(
+        default=None,
+        pattern=r"^\S*$",
+        description="Registry image built from this manifest's `agent-hardener stage` context; empty clears it.",
+    )
 
 
 CreateManifestRequest = ManifestInit
 UpdateManifestRequest = ManifestUpdate
+
+
+class ExecutionSettings(BaseModel):
+    """Response for ``GET /v2/workspaces/{workspace}/execution`` — how this deployment runs war-games."""
+
+    victim_image_required: bool = Field(
+        description="War-games run in a container here, so each manifest needs a victim image built from "
+        "`agent-hardener stage`. False where a host builds the victim itself."
+    )
 
 
 class ValidateModelRequest(BaseModel):
