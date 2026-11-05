@@ -3,9 +3,8 @@
 
 import type { PluginContract } from '@nemo/common/src/pluginContract/types';
 
-// singleton: the plugin must resolve to Studio's instance (identity matters).
-// provided: only API compatibility matters. Studio serves a separate vendor build of
-// Common's source, so state crosses via the `host` prop, not module identity.
+// Common is `provided`, not a singleton: Studio serves a separate vendor build of Common's
+// source, so state crosses the boundary via the `host` prop, not module identity.
 export const PLUGIN_CONTRACT: PluginContract = {
   version: '1.0.0',
   entries: [
