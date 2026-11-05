@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional, Type, Union
 
 from nemoguardrails import RailsConfig as InternalSdkRailsConfig
+from nemoguardrails.rails.llm.config import _get_flow_name
 from nemoguardrails.rails.llm.options import (
     ActivatedRail,
     GenerationLog,
@@ -273,6 +274,32 @@ async def run_generate_async(
     )
 
 
+def _text_of_content_parts(parts: List[Any]) -> str:
+    """Join the text parts of OpenAI-style message content with newlines, dropping non-text parts."""
+    texts = []
+    for part in parts:
+        if isinstance(part, str):
+            texts.append(part)
+        elif isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            texts.append(part["text"])
+    return "\n".join(texts)
+
+
+def _text_only_messages(messages: List[dict]) -> List[dict]:
+    """Copy of ``messages`` with list-valued ``content`` flattened to its text.
+
+    IORails reads a message only when ``content`` is a string, so content parts would look empty and the
+    rail would be skipped, passing the request unchecked. Parts a text rail cannot inspect (images,
+    audio, files) are dropped; a message made only of those is therefore not checked.
+    """
+    return [
+        {**message, "content": _text_of_content_parts(message["content"])}
+        if isinstance(message.get("content"), list)
+        else message
+        for message in messages
+    ]
+
+
 def _last_text_by_role(messages: List[dict], role: str) -> str:
     """Text of the last message with ``role``, or "" when there is none or it is not plain text."""
     for message in reversed(messages):
@@ -297,8 +324,9 @@ def _rails_result_to_generation_response(
     blocked = result.status is RailStatus.BLOCKED
     for rail_type, flows in flows_by_type.items():
         for flow in flows:
-            # IORails names the blocking rail without the ``$model=...`` suffix its flow carries.
-            is_blocking_rail = blocked and flow.split(" $")[0] == result.rail
+            # IORails names the blocking rail without the ``$model=...`` / ``(...)`` suffix its flow
+            # carries, using this same helper.
+            is_blocking_rail = blocked and _get_flow_name(flow) == result.rail
             activated_rails.append(ActivatedRail(type=rail_type.value, name=flow, stop=is_blocking_rail))
             if is_blocking_rail:
                 return GenerationResponse(
@@ -337,6 +365,7 @@ async def run_check_async(
     if state is not None:
         raise ValueError("state is not supported by IORails; it is a stateless input/output rails engine")
 
+    messages = _text_only_messages(messages)
     rails_config = rails_engine.config
     flows_by_type: Dict[RailType, List[str]] = {}
     for rail_type in (RailType.INPUT, RailType.OUTPUT):
