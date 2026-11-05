@@ -87,11 +87,14 @@ def run(parent_stop_signal: threading.Event | None = None):
         if cleanup_loop is not None:
             cleanup_loop.stop()
             cleanup_loop.join(timeout=10)
-            if cleanup_loop.is_alive():
-                logger.warning("Workspace cleanup loop did not stop in time")
-        # This loop owns its own engine; dispose it so shutdown does not leak the pool.
-        loop.run_until_complete(dispose_async_engine())
-        loop.close()
+        if cleanup_loop is not None and cleanup_loop.is_alive():
+            # The cleanup thread is still running on `loop`; disposing or closing it here would race it.
+            logger.warning("Workspace cleanup loop did not stop in time; leaving its event loop open")
+        else:
+            try:
+                loop.run_until_complete(dispose_async_engine())
+            finally:
+                loop.close()
         logger.info("Entities controller stopped")
 
 

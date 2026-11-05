@@ -43,14 +43,8 @@ class _LoopEngineBinding:
     session_maker: async_sessionmaker[AsyncSession]
 
 
-# One engine per event loop. In local single-process mode the uvicorn lifespan and the
-# entities controller thread each run their own loop, and SQLAlchemy's async pool binds
-# its queue to the loop that first uses it; sharing one engine across loops raises
-# "Queue is bound to a different event loop" under pool pressure. Each loop therefore
-# owns its own engine. Weakly keyed so a loop whose engine never opened a pooled
-# connection does not pin its entry once the loop is dropped; once a connection is
-# pooled the binding keeps its loop alive, so every loop that initializes an engine
-# must dispose_async_engine() before it goes away.
+# One engine per event loop: SQLAlchemy's async pool binds to the loop that first uses it.
+# Every loop that initializes an engine must call dispose_async_engine() before it ends.
 _async_engines: WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopEngineBinding] = WeakKeyDictionary()
 
 
@@ -62,9 +56,7 @@ def _binding_for_current_loop() -> _LoopEngineBinding | None:
 async def initialize_async_engine(config: EntitiesConfig) -> None:
     """Initialize the async engine for the current event loop with the given config.
 
-    This should be called once per event loop during service startup. Every loop that
-    queries the entity store needs its own engine: the uvicorn lifespan loop and the
-    entities controller thread's loop in local single-process mode.
+    Call once per event loop that queries the entity store.
 
     Args:
         config: Entities service configuration
@@ -88,11 +80,6 @@ async def initialize_async_engine(config: EntitiesConfig) -> None:
 
 async def get_async_engine() -> AsyncEngine:
     """Get the async engine for the current event loop.
-
-    Note: initialize_async_engine() must have been called on this event loop first.
-
-    Returns:
-        The async engine owned by the running event loop
 
     Raises:
         RuntimeError: If called before initialize_async_engine() on this event loop
@@ -143,11 +130,7 @@ async def ping_database() -> bool:
 
 
 async def dispose_async_engine() -> None:
-    """Dispose the current event loop's async engine, closing its connections.
-
-    Should be called during shutdown of each event loop that initialized an engine.
-    Other event loops' engines are untouched: each loop owns its own engine.
-    """
+    """Dispose the current event loop's async engine, closing its connections."""
     binding = _async_engines.pop(asyncio.get_running_loop(), None)
     if binding is not None:
         await binding.engine.dispose()

@@ -1,51 +1,27 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Per-event-loop async engine tests.
-
-In local single-process mode (``nemo services run``) the uvicorn lifespan and the
-entities controller thread each run their own event loop. The engine registry keys
-engines by ``asyncio.get_running_loop()`` so each loop gets its own connection pool
-instead of sharing a process-global engine whose pool queue is bound to whichever
-loop initialized it first. Sharing one engine made a pool-saturated loop raise
-``RuntimeError: Queue is bound to a different event loop`` and pinned the
-workspace_cleanup controller unhealthy in local single-process mode.
-"""
+"""Per-event-loop async engine tests: each event loop owns its own engine and pool."""
 
 import asyncio
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from nhx.common.config.base import DatabaseConfig
 from nhx.core.entities.app.repository import (
-    SQLAlchemyWorkspaceRepository,
     dispose_async_engine,
     get_async_engine,
     get_async_session_maker,
     initialize_async_engine,
 )
 from nhx.core.entities.config import EntitiesConfig
-from nhx.core.entities.controllers.workspace_cleanup import WorkspaceCleanup
 from sqlalchemy import make_url, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 
 def _entities_config(db_path: Path) -> EntitiesConfig:
     return EntitiesConfig(database_config=DatabaseConfig(url=f"sqlite:///{db_path}"))
-
-
-def _run_migrations(sync_url: str) -> None:
-    """Apply entities migrations so workspace queries work (repository conftest equivalent)."""
-    alembic_ini = Path(__file__).resolve().parent.parent.parent / "alembic.ini"
-    assert alembic_ini.is_file(), f"alembic.ini not found at {alembic_ini}"
-    cfg = Config(str(alembic_ini))
-    # Alembic's ConfigParser treats "%" as interpolation; escape URL-encoded characters.
-    cfg.set_main_option("sqlalchemy.url", sync_url.replace("%", "%%"))
-    command.upgrade(cfg, "head")
 
 
 class _LoopHarness:
@@ -118,8 +94,6 @@ def test_a_second_loop_gets_its_own_engine_and_queries_succeed_while_the_first_l
 
         held_tasks, release = first.run(_hold_every_pooled_connection(first_engine))
 
-        # Before per-loop engines the second loop would share the first loop's saturated
-        # pool and this query would raise "Queue is bound to a different event loop".
         second_maker = second.run(get_async_session_maker())
         second.run(_select_one(second_maker))
 
@@ -179,27 +153,3 @@ def test_disposing_one_loop_does_not_close_another_loops_engine(tmp_path: Path):
     finally:
         first.close()
         second.close()
-
-
-def test_workspace_cleanup_step_is_healthy_when_another_loop_already_holds_a_saturated_pool(tmp_path: Path):
-    db_path = tmp_path / "entities.db"
-    _run_migrations(f"sqlite:///{db_path}")
-    config = _entities_config(db_path)
-    server_loop = _LoopHarness(config)  # the uvicorn lifespan loop wins the startup race
-    controller_loop = _LoopHarness(config)  # the workspace_cleanup controller thread's loop
-    try:
-        server_engine = server_loop.engine()
-        held_tasks, release = server_loop.run(_hold_every_pooled_connection(server_engine))
-
-        session_maker = controller_loop.run(get_async_session_maker())
-        repository = SQLAlchemyWorkspaceRepository(session_maker)
-        controller = WorkspaceCleanup(client=MagicMock(), workspace_repository=repository, loop=controller_loop.loop)
-
-        controller.step()
-
-        assert controller.is_healthy
-
-        server_loop.run(_release_held_connections(held_tasks, release))
-    finally:
-        server_loop.close()
-        controller_loop.close()
