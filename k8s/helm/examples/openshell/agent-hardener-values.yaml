@@ -15,3 +15,15 @@ platformConfig:
     container_jobs: true
     openshell_gateway_endpoint: http://openshell.openshell.svc.cluster.local:8080
     events_dir: /vol/files/.agent-hardener/run-events
+# Rendered only with networkPolicies.enabled: the default job egress policy blocks private ranges, so this
+# lets war-game pods reach the gateway Service. Match the namespace and port to your gateway.
+networkPolicies:
+  jobs:
+    extraEgress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: openshell
+        ports:
+          - protocol: TCP
+            port: 8080
