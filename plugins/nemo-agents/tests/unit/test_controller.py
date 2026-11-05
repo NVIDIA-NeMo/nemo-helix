@@ -376,7 +376,7 @@ class TestReconcileOne:
 
         ctrl.entities.delete.assert_awaited_once()
         if expected:
-            remove.assert_awaited_once_with(ctrl.backend.image_store.return_value, ctrl.entities, image)
+            remove.assert_awaited_once_with(ctrl.backend.image_store.return_value, ctrl.entities, image, dep.workspace)
         else:
             remove.assert_not_awaited()
 

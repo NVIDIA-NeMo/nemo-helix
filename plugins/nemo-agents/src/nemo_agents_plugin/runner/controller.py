@@ -812,7 +812,7 @@ class AgentDeploymentController(NemoController):
         except Exception:
             logger.warning("No image store to remove %s from", dep.image, exc_info=True)
             return
-        await remove_unused_image(store, self.entities, dep.image)
+        await remove_unused_image(store, self.entities, dep.image, dep.workspace)
 
     async def _save(self, dep: AgentDeployment) -> None:
         try:

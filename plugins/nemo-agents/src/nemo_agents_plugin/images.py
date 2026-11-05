@@ -27,8 +27,8 @@ TAG_NAMESPACE = "nemo-agents"
 _DEPLOYMENT_PAGE_SIZE = 100
 
 
-def is_platform_built(reference: str) -> bool:
-    return reference.startswith(f"{TAG_NAMESPACE}/")
+def is_platform_built(reference: str, workspace: str) -> bool:
+    return reference.startswith(f"{TAG_NAMESPACE}/{workspace}/")
 
 
 async def list_all_deployments(entities: NemoEntitiesClient) -> list[AgentDeployment]:
@@ -57,12 +57,14 @@ async def remove_tags(store: DeploymentBackend, tags: Iterable[str]) -> bool:
     return True
 
 
-async def remove_unused_image(store: DeploymentBackend, entities: NemoEntitiesClient, reference: str) -> bool:
-    """Remove the platform-built *reference* unless a container or deployment still uses it.
+async def remove_unused_image(
+    store: DeploymentBackend, entities: NemoEntitiesClient, reference: str, workspace: str
+) -> bool:
+    """Remove *reference* if the platform built it for *workspace* and no container or deployment uses it.
 
     Best effort: failures are logged and reported as ``False``, never raised.
     """
-    if not is_platform_built(reference):
+    if not is_platform_built(reference, workspace):
         return False
     try:
         if reference in _referenced_images(await list_all_deployments(entities)):

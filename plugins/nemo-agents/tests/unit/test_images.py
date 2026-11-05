@@ -48,43 +48,46 @@ class TestRemoveUnusedImage:
     async def test_removes_an_unused_platform_image(self) -> None:
         store = _store()
 
-        assert await remove_unused_image(store, _entities([]), _TAG) is True
+        assert await remove_unused_image(store, _entities([]), _TAG, "default") is True
         store.remove_image.assert_awaited_once_with(_TAG)
 
-    @pytest.mark.parametrize("reference", ["alpine:latest", "nvcr.io/nim/meta/llama:1", "my-agent-abc:0.1"])
+    @pytest.mark.parametrize(
+        "reference",
+        ["alpine:latest", "nvcr.io/nim/meta/llama:1", "my-agent-abc:0.1", "nemo-agents/other/calc-abc:0.1"],
+    )
     async def test_never_touches_images_the_platform_did_not_build(self, reference: str) -> None:
         store = _store()
 
-        assert await remove_unused_image(store, _entities([]), reference) is False
+        assert await remove_unused_image(store, _entities([]), reference, "default") is False
         store.remove_image.assert_not_awaited()
 
     async def test_keeps_an_image_another_deployment_uses(self) -> None:
         store = _store()
 
-        assert await remove_unused_image(store, _entities([_dep(workspace="other")]), _TAG) is False
+        assert await remove_unused_image(store, _entities([_dep(workspace="other")]), _TAG, "default") is False
         store.remove_image.assert_not_awaited()
 
     async def test_a_deployment_deleting_with_its_image_does_not_hold_it(self) -> None:
         store = _store()
         entities = _entities([_dep(status="deleting", remove_image_on_delete=True)])
 
-        assert await remove_unused_image(store, entities, _TAG) is True
+        assert await remove_unused_image(store, entities, _TAG, "default") is True
 
     async def test_a_deployment_deleting_without_its_image_still_holds_it(self) -> None:
         store = _store()
         entities = _entities([_dep(status="deleting", remove_image_on_delete=False)])
 
-        assert await remove_unused_image(store, entities, _TAG) is False
+        assert await remove_unused_image(store, entities, _TAG, "default") is False
         store.remove_image.assert_not_awaited()
 
     async def test_keeps_an_image_a_container_uses(self) -> None:
         store = _store()
         store.remove_image.side_effect = ImageInUseError("conflict")
 
-        assert await remove_unused_image(store, _entities([]), _TAG) is False
+        assert await remove_unused_image(store, _entities([]), _TAG, "default") is False
 
     async def test_failures_are_swallowed(self) -> None:
         store = _store()
         store.remove_image.side_effect = RuntimeError("daemon gone")
 
-        assert await remove_unused_image(store, _entities([]), _TAG) is False
+        assert await remove_unused_image(store, _entities([]), _TAG, "default") is False
