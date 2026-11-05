@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getCompassGetInsightQueryKey } from '@nemo/sdk/generated/compass/compass-insights';
-import { getListEvaluationsQueryKey } from '@nemo/sdk/generated/platform/evaluations';
+import {
+  getCompareEvaluationsQueryKey,
+  getListEvaluationsQueryKey,
+} from '@nemo/sdk/generated/platform/evaluations';
 import { getGetExperimentQueryKey } from '@nemo/sdk/generated/platform/experiments';
 import type { ExperimentResponse } from '@nemo/sdk/generated/platform/schema';
 import { ROUTES } from '@studio/constants/routes';
@@ -53,7 +56,25 @@ const mockGroup = (overrides?: Partial<ExperimentResponse>, evaluations: object[
     http.get(mockApiUrl(getCompassGetInsightQueryKey, ':workspace', ':insightId'), () => {
       insightRequest();
       return HttpResponse.json({});
-    })
+    }),
+    http.get(mockApiUrl(getCompareEvaluationsQueryKey, ':workspace'), () =>
+      HttpResponse.json({
+        workspace: WORKSPACE,
+        baseline: 'first',
+        candidate: 'second',
+        metric: 'evaluators.judge',
+        higher_is_better: true,
+        n_pairs: 1,
+        better: 0,
+        same: 1,
+        worse: 0,
+        mean_paired_difference: 0,
+        interval_low: 0,
+        interval_high: 0,
+        p_candidate_better: 0.5,
+        interval_caveat: 'Only 1 paired test case: this 95% bootstrap interval is a weak estimate.',
+      })
+    )
   );
 
   renderRoute(<ExperimentDetailRoute />, {
