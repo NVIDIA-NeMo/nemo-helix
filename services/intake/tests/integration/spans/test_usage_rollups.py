@@ -270,7 +270,7 @@ def test_unreported_field_stays_absent(client: TestClient, make_otlp_request) ->
     assert session.get("cost_usd") is None
 
 
-def test_explicit_zero_cost_on_calls_blocks_the_root_total(client: TestClient, make_otlp_request) -> None:
+def test_explicit_zero_cost_on_calls_does_not_hide_recorded_parent_cost(client: TestClient, make_otlp_request) -> None:
     session_id = "zero-cost"
     _ingest(
         client,
@@ -287,7 +287,107 @@ def test_explicit_zero_cost_on_calls_blocks_the_root_total(client: TestClient, m
 
     trace = _trace(client, session_id)
     assert trace["input_tokens"] == 10
-    assert trace["cost_usd"] == pytest.approx(0)
+    assert trace["cost_usd"] == pytest.approx(0.012)
+
+
+@pytest.mark.parametrize(
+    ("parent", "nested", "calls", "expected"),
+    [
+        (300, 300, [100, 200], 300),  # Duplicate aggregates are not added.
+        (500, 400, [100, 200], 500),  # Partial calls do not hide the parent.
+        (100, 200, [100, 200], 300),  # Conflicting smaller parent is not preferred.
+        (None, 400, [100, 200], 400),  # Nested aggregate with no root measurement.
+        (0, 0, [0, 0], 0),  # Explicit zero is a measurement.
+        (None, None, [None, None], None),  # Missing is not zero.
+    ],
+)
+def test_partial_and_conflicting_usage_estimate(
+    client: TestClient, make_otlp_request, parent, nested, calls, expected
+) -> None:
+    session_id = "partial-conflicting"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(20),
+        spans=[
+            _span(name="trial", span_id=1, session_id=session_id, input_tokens=parent),
+            _span(name="agent", span_id=2, parent_span_id=1, session_id=session_id, kind="AGENT", input_tokens=nested),
+            *[
+                _span(
+                    name=f"call-{i}",
+                    span_id=i + 3,
+                    parent_span_id=2,
+                    session_id=session_id,
+                    kind="LLM",
+                    input_tokens=value,
+                )
+                for i, value in enumerate(calls)
+            ],
+        ],
+    )
+    for usage in (_trace(client, session_id), _session(client, session_id)):
+        assert usage.get("input_tokens") == expected
+        assert usage.get("output_tokens") is None
+
+
+@pytest.mark.parametrize("on_call", [False, True])
+def test_sole_negative_cost_measurement_is_not_replaced_by_missing_tier_zero(
+    client: TestClient, make_otlp_request, on_call: bool
+) -> None:
+    session_id = "negative-cost"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(21),
+        spans=[
+            _span(name="root", span_id=1, session_id=session_id, cost_usd=None if on_call else -0.01),
+            _span(
+                name="chat",
+                span_id=2,
+                parent_span_id=1,
+                session_id=session_id,
+                kind="LLM",
+                cost_usd=-0.01 if on_call else None,
+            ),
+        ],
+    )
+    assert _trace(client, session_id)["cost_usd"] == pytest.approx(-0.01)
+
+
+def test_conflicting_metrics_choose_independent_maxima_per_trace_before_session_sum(
+    client: TestClient, make_otlp_request
+) -> None:
+    # These are inspectable estimates, not a claim that incompatible sources reconcile.
+    session_id = "per-metric-max"
+    for trace_number, root_input, root_output, call_input, call_output in (
+        (22, 100, 10, 10, 100),
+        (23, 10, 100, 100, 10),
+    ):
+        _ingest(
+            client,
+            make_otlp_request,
+            session_id=session_id,
+            trace_id=_trace_id(trace_number),
+            spans=[
+                _span(
+                    name="root", span_id=1, session_id=session_id, input_tokens=root_input, output_tokens=root_output
+                ),
+                _span(
+                    name="chat",
+                    span_id=2,
+                    parent_span_id=1,
+                    session_id=session_id,
+                    kind="LLM",
+                    input_tokens=call_input,
+                    output_tokens=call_output,
+                ),
+            ],
+        )
+    session = _session(client, session_id)
+    assert session["input_tokens"] == 200
+    assert session["output_tokens"] == 200
 
 
 def test_mixed_session_sums_each_trace_on_its_own_tier(client: TestClient, make_otlp_request) -> None:
@@ -813,7 +913,7 @@ def test_direct_span_ingest_stores_both_attributes_where_the_usage_rule_reads_th
 
 
 def test_evaluation_session_token_sort_uses_deduped_totals(client: TestClient, make_otlp_request) -> None:
-    """A parent total must not push a small call ahead of a larger one."""
+    """Sorting uses the interim maximum, including recorded parent totals."""
     evaluation_name = "usage-rollup-sort"
     _create_evaluation(client, evaluation_name)
     _ingest(
@@ -863,7 +963,7 @@ def test_evaluation_session_token_sort_uses_deduped_totals(client: TestClient, m
         params={"sort": "tokens", "page_size": 10},
     )
     assert listed.status_code == 200, listed.text
-    assert [row["test_case_name"] for row in listed.json()["data"]] == ["case-small", "case-large"]
+    assert [row["test_case_name"] for row in listed.json()["data"]] == ["case-large", "case-small"]
 
 
 def _create_evaluation(client: TestClient, name: str) -> None:

@@ -47,6 +47,7 @@ from nemo_helix_plugin.intake.types import (
     EvaluatorResultDataType,
 )
 from nhx_evals_sdk.agent_eval.scores import AgentEvalScoreStatus, AgentEvalTaskScore
+from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, TrialMeasurements
 from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from nhx_evals_sdk.values.otlp import (
@@ -59,6 +60,7 @@ from nhx_evals_sdk.values.otlp import (
 )
 from nhx_evals_sdk.values.protocol import OUTPUT_DETAIL
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue
 from opentelemetry.proto.trace.v1.trace_pb2 import ResourceSpans, ScopeSpans, Span
 from pydantic import RootModel
 
@@ -184,6 +186,7 @@ async def otlp_ingest_for_trial(
     agent_name: str | None = None,
     agent_version: str = DEFAULT_AGENT_VERSION,
     model_name: str | None = None,
+    task: AgentEvalTask | None = None,
 ) -> tuple[bytes, str] | None:
     """Return the trial's OTLP payload stamped with evaluation identity, and its root span id.
 
@@ -197,7 +200,10 @@ async def otlp_ingest_for_trial(
     rollup does not read 0 for a run whose duration is known. ``usage_superseded`` marks the root as a trace whose
     model calls the Inference Gateway recorded in the session (``USAGE_SUPERSEDED_ATTRIBUTE``).
 
-    Identity is written onto spans rather than resource attributes because Intake merges the
+    Nested agents retain their own attribution. Explicit root payloads win over the recorded task instruction and retained
+    final answer. Without those, only agreeing recorded descendant agent payloads are used.
+
+    Evaluation identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
     would otherwise win, and the session id is what Intake's ``ReplacingMergeTree`` is keyed on,
     so a re-publish would insert duplicates instead of replacing.
@@ -236,6 +242,7 @@ async def otlp_ingest_for_trial(
         )
         return None
 
+    _enrich_trial_boundary(resource_spans, trial=trial, task=task)
     set_span_attributes(
         resource_spans,
         {
@@ -421,6 +428,87 @@ def _caller_identity(*, agent_name: str | None, agent_version: str, model_name: 
     return identity
 
 
+def _enrich_trial_boundary(
+    resource_spans: list[ResourceSpans],
+    *,
+    trial: AgentEvalTrial,
+    task: AgentEvalTask | None,
+) -> None:
+    """Fill only missing boundary fields, never select a model/tool's intermediate answer.
+
+    Resource attributes count as explicit root attributes too. Descendant fallback is limited
+    to connected agent spans and requires agreement across every recorded candidate. Missing
+    or conflicting boundaries remain absent with a persisted diagnostic, not fabricated text.
+    """
+    spans = [
+        (span, {attribute.key: attribute.value for attribute in resource.resource.attributes})
+        for resource in resource_spans
+        for scope in resource.scope_spans
+        for span in scope.spans
+    ]
+    root, resource_attributes = next((span, attrs) for span, attrs in spans if not span.parent_span_id)
+    root_attributes = {**resource_attributes, **{attribute.key: attribute.value for attribute in root.attributes}}
+    # Follow actual parent links, rather than treating unrelated spans as descendants.
+    connected = {bytes(root.span_id)}
+    while True:
+        children = {
+            bytes(span.span_id)
+            for span, _ in spans
+            if span.trace_id == root.trace_id and bytes(span.parent_span_id) in connected
+        }
+        if children <= connected:
+            break
+        connected.update(children)
+
+    instruction = task.inputs.get("instruction") if task is not None else None
+    output = trial.output.output_text if trial.output is not None else None
+    for direction, authoritative, aliases in (
+        ("input", instruction, ("input.value", "gen_ai.input.messages")),
+        ("output", output, ("output.value", "gen_ai.output.messages", "final_result")),
+    ):
+        native_prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+        if (
+            any(key in root_attributes for key in aliases)
+            or any(key.startswith(f"llm.{direction}_messages.") for key in root_attributes)
+            or any(key == native_prefix or key.startswith(f"{native_prefix}.") for key in root_attributes)
+        ):
+            continue
+        value = AnyValue(string_value=authoritative) if isinstance(authoritative, str) else None
+        source = "task.instruction" if direction == "input" else "trial.output"
+        if value is None:
+            candidates: dict[bytes, AnyValue] = {}
+            for span, resource_attrs in spans:
+                if span is root or span.trace_id != root.trace_id or bytes(span.span_id) not in connected:
+                    continue
+                attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in span.attributes}}
+                kind = attrs.get("openinference.span.kind", AnyValue()).string_value.upper()
+                operation = attrs.get("gen_ai.operation.name", AnyValue()).string_value
+                relay_scope = attrs.get("nemo_relay.scope_type", AnyValue()).string_value
+                is_agent = kind == "AGENT" or (not kind and operation == "invoke_agent")
+                if not kind and not operation:
+                    is_agent = relay_scope == "agent"
+                if not is_agent:
+                    continue
+                candidate = next((attrs[key] for key in aliases if key in attrs), None)
+                # A direct native payload can be forwarded losslessly. Flattened Relay
+                # arguments need framework-specific reconstruction; leave those unknown.
+                if candidate is None and relay_scope == "agent":
+                    native_key = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+                    candidate = attrs.get(native_key)
+                if candidate is not None:
+                    candidates[candidate.SerializeToString(deterministic=True)] = candidate
+            if len(candidates) == 1:
+                value = next(iter(candidates.values()))
+                source = "unambiguous_descendant"
+            else:
+                source = "unknown:ambiguous_descendants" if candidates else "unknown:not_recorded"
+                logger.warning("Trial %s %s boundary %s", trial.id, direction, source)
+        if value is not None:
+            attribute = root.attributes.add(key=f"{direction}.value")
+            attribute.value.CopyFrom(value)
+        set_root_span_attributes(resource_spans, {f"nemo.evaluation.boundary.{direction}": source})
+
+
 def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dict[str, str | int | float]:
     """The trial-level totals and error that ATIF conveyed outside the step list."""
     # Read as numbers by Intake. ATIF carried these as ``final_metrics``; under OTLP they go on
@@ -429,6 +517,7 @@ def _trial_totals(trial: AgentEvalTrial, measurements: TrialMeasurements) -> dic
     for value, attribute in (
         (measurements.prompt_tokens, "gen_ai.usage.input_tokens"),
         (measurements.completion_tokens, "gen_ai.usage.output_tokens"),
+        (measurements.total_tokens, "gen_ai.usage.total_tokens"),
         (measurements.cache_read_tokens, "gen_ai.usage.cached_tokens"),
         (measurements.cost_usd, "gen_ai.usage.cost"),
     ):

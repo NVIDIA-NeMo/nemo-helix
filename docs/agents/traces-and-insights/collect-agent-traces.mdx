@@ -68,6 +68,35 @@ Studio reads the same Intake APIs to provide trace lists, span lists, trace deta
 annotation review pages. The UI is a human review surface; Intake is the ingestion and storage
 service.
 
+### Native Relay Full Captures
+
+Intake interprets native `nemo_relay.*` fields from Relay full OTLP exports, verified against
+`nemo-relay==0.9.3`. This includes recorded scope kinds, input/output, LangChain response messages,
+model identity, usage, tools, and errors. Explicit OpenInference and GenAI semantic attributes take
+precedence. Raw native attributes, span IDs, timestamps, and parent relationships remain available.
+Missing providers, usage, or reasoning are not inferred.
+
+Evaluator OTLP publication fills missing root input/output from the recorded task instruction and
+retained trial final answer. Without those, it uses only unambiguous recorded agent descendants;
+otherwise `nemo.evaluation.boundary.input` or `.output` records an unknown-boundary diagnostic.
+Explicit root payloads and nested agent identities are preserved. Republishing retained captures does
+not require rerunning agents or judges.
+
+### Usage Estimates
+
+For usage not covered by the Inference Gateway ledger, OTLP rollups are **interim estimates, not
+verified reconciliation**. For each trace and each metric independently, Intake takes the maximum of
+summed model-call counters and the largest recorded parent/agent aggregate, then sums the trace
+estimates. It never adds parent and child representations of the same usage or sums nested aggregate
+representations. Gateway call coverage and superseded-trace handling still take precedence so the
+same gateway-served calls are not counted again from agent captures. ATIF retains its ingest-reconciled ledger.
+
+Explicit zero is a measurement; a metric with no reported measurements remains unknown. Partial
+captures can undercount usage, and conflicting sources can produce inconsistent input/output/total
+metrics because each metric is estimated independently. Separate sibling aggregates without model-call
+counters are not reconciled into an additive ledger. Inspect the original span measurements to assess
+coverage and conflicts; these rollups do not certify completeness or billing accuracy.
+
 ### When to Use It
 
 Use Intake when you need to:

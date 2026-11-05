@@ -19,7 +19,7 @@ import {
   targetNameForEvalJob,
   toEvalJobRow,
 } from '@studio/api/evaluation/utils';
-import { RECENT_EVAL_LIMIT } from '@studio/routes/agents/AgentDetailRoute/constants';
+import { AGENT_EVALUATIONS_PAGE_SIZE } from '@studio/routes/agents/AgentDetailRoute/constants';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
@@ -110,7 +110,7 @@ export const useAgentDetails = ({
     workspace,
     {
       filter: { agent_name: agentName ?? '' },
-      page_size: RECENT_EVAL_LIMIT,
+      page_size: AGENT_EVALUATIONS_PAGE_SIZE,
       sort: '-created_at',
     },
     {
@@ -125,11 +125,8 @@ export const useAgentDetails = ({
 
   const { data: agentJobsData } = useQuery({
     queryKey: ['evaluator-jobs', workspace, 'agent-panel', agentName] as const,
-    queryFn: ({ signal }) =>
-      fetchEvaluatorJobs(workspace, signal, (all) => {
-        const matched = all.filter((job) => targetNameForEvalJob(job) === agentName).length;
-        return matched >= RECENT_EVAL_LIMIT;
-      }),
+    // Fetch every job page: a preview-sized prefix cannot resolve older Evaluation rows.
+    queryFn: ({ signal }) => fetchEvaluatorJobs(workspace, signal),
     enabled: evalsEnabled && !!agentName && !!workspace,
     refetchInterval: (query) => {
       const rows = (query.state.data ?? []).map(toEvalJobRow);
@@ -227,7 +224,6 @@ export const useAgentDetails = ({
     if (!agentName) return [];
     return (agentJobsData ?? [])
       .filter((job) => targetNameForEvalJob(job) === agentName)
-      .slice(0, RECENT_EVAL_LIMIT)
       .map(toEvalJobRow);
   }, [agentJobsData, agentName]);
 

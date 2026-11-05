@@ -3,6 +3,7 @@
 
 """OTLP/HTTP trace ingest for ClickHouse-backed Intake spans."""
 
+import json
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
@@ -41,6 +42,20 @@ _SPAN_KIND_BY_GEN_AI_OPERATION = {
     "embeddings": SpanKind.EMBEDDING,
     "invoke_agent": SpanKind.AGENT,
 }
+
+# Relay 0.9.3 full exporter: crates/core/src/observability/otel.rs::scope_type_name.
+_SPAN_KIND_BY_RELAY_SCOPE = {
+    "agent": SpanKind.AGENT,
+    "function": SpanKind.CHAIN,
+    "tool": SpanKind.TOOL,
+    "llm": SpanKind.LLM,
+    "retriever": SpanKind.RETRIEVER,
+    "embedder": SpanKind.EMBEDDING,
+    "reranker": SpanKind.RERANKER,
+    "guardrail": SpanKind.GUARDRAIL,
+    "evaluator": SpanKind.EVALUATOR,
+}
+_RELAY_RESPONSE_KEY = "__nemo_relay_integrations_langchain_model_response"
 
 # Ordered by precedence. Keep direct input.value/output.value first so existing
 # OpenInference/LangChain payloads continue to win over framework-specific fallbacks.
@@ -221,6 +236,10 @@ def _span_to_domain(
 
     attribute_bags = semantic_attributes.to_bags()
     attribute_bags.put_unhandled_source_attributes(source_attributes, consumed_keys=normalized_attributes.consumed_keys)
+    # Native captures remain usable for replay/debugging even when a catalog alias consumed a key.
+    for key, value in source_attributes.items():
+        if key.startswith("nemo_relay."):
+            attribute_bags.put_unhandled_source_attribute(key, value)
 
     session_id = _first_str(
         source_attributes.get("gen_ai.conversation.id"),
@@ -236,13 +255,23 @@ def _span_to_domain(
         operation = _as_str(source_attributes.get("gen_ai.operation.name"))
         if operation is not None:
             kind = _SPAN_KIND_BY_GEN_AI_OPERATION.get(operation, SpanKind.UNKNOWN)
+    if original_kind is None and "gen_ai.operation.name" not in source_attributes:
+        kind = _SPAN_KIND_BY_RELAY_SCOPE.get(source_attributes.get("nemo_relay.scope_type"), kind)
+    for field, value in _relay_semantic_fields(attributes, kind=kind, name=span.name).items():
+        if attribute_bags.get_field(field) is None:
+            attribute_bags.put_field(field, value)
     status_message = _as_str(getattr(span.status, "message", None))
-    if status_message and "exception.message" not in attribute_bags.string:
+    if status_message and not _as_str(source_attributes.get("exception.message")):
         attribute_bags.put_field(SpanAttributeField.ERROR_MESSAGE, status_message)
     if events:
         attribute_bags.put_json("otel.events", events)
     if any(value is not None for value in scope_data.values()):
         attribute_bags.put_json("otel.scope", scope_data)
+
+    # Resource-level payloads describe the task boundary, not every child call.
+    # At that boundary use the same span-over-resource layering as semantic fields;
+    # a child's missing payload must not become a copy of the root request/answer.
+    payload_attributes = source_attributes if not parent_span_id else attributes
 
     # TODO: After the POC lands, switch non-openinference/non-gen_ai spans from UNKNOWN rows to hard drops.
     span_domain = IntakeSpan(
@@ -260,8 +289,8 @@ def _span_to_domain(
         attributes_string=attribute_bags.string,
         attributes_number=attribute_bags.number,
         attributes_bool=attribute_bags.boolean,
-        input=_input_payload(attributes, events, kind=kind.value) or "",
-        output=_output_payload(attributes, events, kind=kind.value) or "",
+        input=_input_payload(payload_attributes, events, kind=kind.value) or "",
+        output=_output_payload(payload_attributes, events, kind=kind.value) or "",
         event_ts=ingested_at,
     )
     return span_domain
@@ -279,10 +308,8 @@ def _input_payload(attributes: dict[str, Any], events: list[dict[str, Any]], *, 
         messages_payload = _message_payload(attributes, prefix="llm.input_messages")
         if messages_payload is not None:
             return messages_payload
-    return _first_payload_value(
-        attributes,
-        keys=OTLP_INPUT_PAYLOAD_ATTRIBUTE_KEYS,
-    )
+    payload = _first_payload_value(attributes, keys=OTLP_INPUT_PAYLOAD_ATTRIBUTE_KEYS)
+    return payload if payload is not None else _relay_payload(attributes, direction="input", kind=kind)
 
 
 def _output_payload(attributes: dict[str, Any], events: list[dict[str, Any]], *, kind: str) -> str | None:
@@ -290,10 +317,139 @@ def _output_payload(attributes: dict[str, Any], events: list[dict[str, Any]], *,
         messages_payload = _message_payload(attributes, prefix="llm.output_messages")
         if messages_payload is not None:
             return messages_payload
-    return _first_payload_value(
-        attributes,
-        keys=OTLP_OUTPUT_PAYLOAD_ATTRIBUTE_KEYS,
-    )
+    payload = _first_payload_value(attributes, keys=OTLP_OUTPUT_PAYLOAD_ATTRIBUTE_KEYS)
+    return payload if payload is not None else _relay_payload(attributes, direction="output", kind=kind)
+
+
+def _relay_value(attributes: dict[str, Any], prefix: str) -> Any:
+    """Read Relay 0.9.3 full export's *top-level-only* JSON projection.
+
+    Nested objects/arrays are JSON strings, not recursively dotted paths. Never
+    interpret dots in user keys as ancestry or mutate the recorded attributes.
+    """
+    if prefix in attributes:
+        return _relay_json(attributes[prefix])
+    fields = {
+        key.removeprefix(prefix + "."): _relay_json(value)
+        for key, value in attributes.items()
+        if key.startswith(prefix + ".")
+    }
+    return fields or None
+
+
+def _relay_json(value: Any) -> Any:
+    if isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+        try:
+            return json.loads(value)
+        except ValueError:
+            pass
+    return value
+
+
+def _relay_messages(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        return None
+    messages = []
+    for item in value:
+        if isinstance(item.get("data"), dict) and "type" in item:
+            # LangChain messages_to_dict: preserve recorded content blocks,
+            # tool calls, IDs, metadata and any application-specific fields.
+            message = dict(item["data"])
+            message_type = item["type"]
+            if isinstance(message_type, str):
+                role = {"human": "user", "ai": "assistant"}.get(message_type, message_type)
+                message.setdefault("role", role)
+            messages.append(message)
+        else:
+            messages.append(dict(item))
+    return messages
+
+
+def _relay_payload(attributes: dict[str, Any], *, direction: str, kind: str) -> str | None:
+    if "nemo_relay.scope_type" not in attributes:
+        return None
+    prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+    value = _relay_value(attributes, prefix)
+    if value is None:
+        return None
+    if kind == "LLM" and isinstance(value, dict):
+        content = value.get("content", value) if direction == "input" else value.get(_RELAY_RESPONSE_KEY, value)
+        if isinstance(content, dict):
+            messages = _relay_messages(content.get("messages"))
+            if messages is not None:
+                return json_dumps_preserve({**content, "messages": messages})
+    return value if isinstance(value, str) else json_dumps_preserve(value)
+
+
+def _relay_semantic_fields(attributes: dict[str, Any], *, kind: SpanKind, name: str) -> dict[SpanAttributeField, Any]:
+    """Only recorded native values; no provider, token-total or reasoning inference."""
+    fields: dict[SpanAttributeField, Any] = {}
+    scope = attributes.get("nemo_relay.scope_type")
+    if scope == "agent" and kind is SpanKind.AGENT:
+        fields[SpanAttributeField.AGENT_NAME] = name
+    if scope == "tool" and kind is SpanKind.TOOL:
+        fields[SpanAttributeField.TOOL_NAME] = name
+    if scope != "llm" or kind is not SpanKind.LLM:
+        return fields
+    output = _relay_value(attributes, "nemo_relay.end.output")
+    if not isinstance(output, dict):
+        return fields
+    response = output.get(_RELAY_RESPONSE_KEY)
+    if not isinstance(response, dict):
+        return fields
+    messages = _relay_messages(response.get("messages"))
+    if not messages:
+        return fields
+    # Matches Relay 0.9.3 LangChain _model_response_to_annotated selection.
+    message = next((item for item in reversed(messages) if item.get("role") == "assistant"), messages[-1])
+    metadata = message.get("response_metadata")
+    if isinstance(metadata, dict):
+        fields[SpanAttributeField.MODEL] = next(
+            (
+                metadata[key]
+                for key in ("model_name", "model", "model_id")
+                if isinstance(metadata.get(key), str) and metadata[key]
+            ),
+            None,
+        )
+        provider = metadata.get("model_provider")
+        if isinstance(provider, str) and provider:
+            fields[SpanAttributeField.PROVIDER] = provider
+    usage = message.get("usage_metadata")
+    if not isinstance(usage, dict):
+        return fields
+    for key, field in (
+        ("input_tokens", SpanAttributeField.INPUT_TOKENS),
+        ("output_tokens", SpanAttributeField.OUTPUT_TOKENS),
+        ("total_tokens", SpanAttributeField.TOTAL_TOKENS),
+    ):
+        value = usage.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            fields[field] = value
+    for key, mappings in (
+        (
+            "input_token_details",
+            (
+                ("cache_read", SpanAttributeField.CACHED_TOKENS),
+                ("cache_creation", SpanAttributeField.PROMPT_CACHE_WRITE_TOKENS),
+                ("audio", SpanAttributeField.PROMPT_AUDIO_TOKENS),
+            ),
+        ),
+        (
+            "output_token_details",
+            (
+                ("reasoning", SpanAttributeField.COMPLETION_REASONING_TOKENS),
+                ("audio", SpanAttributeField.COMPLETION_AUDIO_TOKENS),
+            ),
+        ),
+    ):
+        details = usage.get(key)
+        if isinstance(details, dict):
+            for detail, field in mappings:
+                value = details.get(detail)
+                if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+                    fields[field] = value
+    return fields
 
 
 def _attributes_to_dict(attributes: Any) -> dict[str, Any]:
@@ -338,6 +494,10 @@ def _span_status(span: Any, attributes: dict[str, Any]) -> SpanStatus:
     code = getattr(span.status, "code", 0)
     if code == 2:
         return SpanStatus.ERROR
+    if code == 0 and not status_value:
+        relay_status = attributes.get("nemo_relay.end.metadata.otel.status_code")
+        if relay_status == "ERROR":
+            return SpanStatus.ERROR
     return SpanStatus.SUCCESS
 
 
