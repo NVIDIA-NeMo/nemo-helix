@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Anchor, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
-import { type ComponentProps, FC, useState } from 'react';
+import { type ComponentProps, type FC, useState } from 'react';
 
 const DEFAULT_CHARACTER_LIMIT = 300;
 

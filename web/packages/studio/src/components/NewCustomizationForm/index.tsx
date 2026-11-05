@@ -75,7 +75,7 @@ import {
   resolveTrainingType,
   type CustomizationFormFields,
 } from '@studio/util/forms/customization';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import { type FieldErrors, FormProvider, type Resolver, useForm, useWatch } from 'react-hook-form';
 import { useNavigate } from 'react-router';
 

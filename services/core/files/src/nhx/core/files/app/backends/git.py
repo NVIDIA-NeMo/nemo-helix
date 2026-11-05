@@ -167,7 +167,7 @@ def _classify_failure(stderr: str, subject: str) -> Exception:
     if any(marker in stderr for marker in _SERVER_FAULTS):
         return GitServerFault(f"git could not write its files on this server reading {subject}: {detail}")
     if any(marker in stderr for marker in _MISSING_FROM_REMOTE):
-        return GitConfigError(f"{subject} does not exist, or the key cannot see it: {detail}")
+        return GitConfigError(f"{subject} does not exist, or the key does not have access: {detail}")
     if any(marker in stderr for marker in _NETWORK_FAILURES):
         return GitUnavailableError(f"Could not reach {subject}: {detail}")
     return GitBackendError(f"git failed reading {subject}: {detail}")

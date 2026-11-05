@@ -4,7 +4,7 @@
 import { Trash } from '@nemo/icons/icons';
 import { Badge, Button, Flex, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
 import { columnReference, type CustomTemplateRow } from '@studio/components/transform/template';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface CustomTemplateRowsProps {
   rows: readonly CustomTemplateRow[];

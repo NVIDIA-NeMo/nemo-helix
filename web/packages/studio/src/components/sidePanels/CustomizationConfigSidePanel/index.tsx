@@ -17,7 +17,7 @@ import {
   getFormattedTrainingType,
   getTrainingOptionBadges,
 } from '@studio/util/customizations';
-import { ComponentProps, FC, ReactNode } from 'react';
+import type { ComponentProps, FC, ReactNode } from 'react';
 
 /** Hyperparameter rows specific to each backend. */
 const HyperparameterRows: FC<{ job: CustomizationJob }> = ({ job }) => {

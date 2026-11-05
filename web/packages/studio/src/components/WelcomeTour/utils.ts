@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { TooltipCoords } from '@studio/components/WelcomeTour/types';
+import type { TooltipCoords } from '@studio/components/WelcomeTour/types';
 import type { TooltipPosition } from 'modern-tour';
 
 const TOOLTIP_OFFSET = 16;

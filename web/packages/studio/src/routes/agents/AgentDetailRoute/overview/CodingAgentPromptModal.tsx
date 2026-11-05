@@ -3,7 +3,7 @@
 
 import { Button, Modal, Stack, Text } from '@nvidia/foundations-react-core';
 import { CodingAgentPromptEditor } from '@studio/components/CodingAgentPromptEditor';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface CodingAgentPromptModalProps {
   open: boolean;

@@ -3,6 +3,7 @@
 
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
+import { getAgentsListRoute } from '@studio/routes/utils';
 import { getQuickstartDismissedKey } from '@studio/routes/WorkspaceDashboardHomeRoute/quickstartDismissedStorage';
 import { QuickstartSection } from '@studio/routes/WorkspaceDashboardHomeRoute/QuickstartSection';
 import { renderRoute } from '@studio/tests/util/render';
@@ -70,6 +71,19 @@ describe('QuickstartSection', () => {
     expect(screen.getByText('Connect an Agent')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Optimize' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Upload an Agent' })).toBeInTheDocument();
+  });
+
+  it('opens agent registration on the matching tab', () => {
+    renderQuickstartSection();
+
+    expect(screen.getByRole('link', { name: 'Upload an Agent' })).toHaveAttribute(
+      'href',
+      getAgentsListRoute('my-workspace', { register: 'upload' })
+    );
+    expect(screen.getByRole('link', { name: 'Import from GitHub' })).toHaveAttribute(
+      'href',
+      getAgentsListRoute('my-workspace', { register: 'github' })
+    );
   });
 
   it('renders nothing when every panel flag is disabled', () => {

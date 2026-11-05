@@ -14,7 +14,7 @@ import {
 } from '@studio/components/evaluation/ModelEvaluationWizard/types';
 import { useDatasetBindings } from '@studio/components/evaluation/ModelEvaluationWizard/useDatasetBindings';
 import { useJudgePromptVariables } from '@studio/components/evaluation/ModelEvaluationWizard/useJudgePromptVariables';
-import { FC, useRef, useState } from 'react';
+import { type FC, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 
 /**

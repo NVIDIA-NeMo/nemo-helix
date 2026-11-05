@@ -26,6 +26,7 @@ from nhx.core.entities.api.v2.projects.schemas import (
 from nhx.core.entities.app.repository.exceptions import (
     EntityNotFoundError,
     EntityVersionConflictError,
+    InvalidFilterError,
 )
 from nhx.core.entities.utils.filter import FilterDep
 from sqlalchemy.exc import IntegrityError
@@ -142,14 +143,17 @@ async def list_projects(
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Project]:
     """List projects in the workspace."""
-    entities, total = await repository.list_entities(
-        workspace=workspace,
-        entity_type=PROJECT_ENTITY_TYPE,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=filter,
-    )
+    try:
+        entities, total = await repository.list_entities(
+            workspace=workspace,
+            entity_type=PROJECT_ENTITY_TYPE,
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            filter_op=filter,
+        )
+    except InvalidFilterError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     projects = [_entity_to_project(e) for e in entities]
 

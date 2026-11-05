@@ -3,7 +3,7 @@
 
 import { OpenExternal } from '@nemo/icons/icons';
 import { Anchor, Badge } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface ChangesetBadgeProps {
   /** The experiment's `source_link` URL. */

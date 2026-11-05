@@ -17,7 +17,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { CreateSecretModal } from '@studio/routes/SecretsListRoute/CreateSecretModal';
 import { getSecretsRoute } from '@studio/routes/utils';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 export const SecretsListRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

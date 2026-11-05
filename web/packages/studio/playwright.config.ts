@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STUDIO_URL } from '@e2e-tests/utils/environment';
-import { defineConfig, devices, ViewportSize } from '@playwright/test';
+import { defineConfig, devices, type ViewportSize } from '@playwright/test';
 
 const DESKTOP_VIEWPORT_SIZE: ViewportSize = { width: 1920, height: 1080 };
 

@@ -38,7 +38,10 @@ import {
 } from '@nvidia/foundations-react-core';
 import { BaseModelCard } from '@studio/components/BaseModelCard';
 import { CustomizeModelButton } from '@studio/components/dataViews/CustomModelsDataView/CustomizeModelButton';
-import { ModelPanel, ModelPanelTab } from '@studio/components/sidePanels/ModelPanels/ModelPanel';
+import {
+  ModelPanel,
+  type ModelPanelTab,
+} from '@studio/components/sidePanels/ModelPanels/ModelPanel';
 import { VirtualizedCardGrid } from '@studio/components/VirtualizedCardGrid';
 import { CUSTOMIZER_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

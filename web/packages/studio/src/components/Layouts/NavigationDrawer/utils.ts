@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { NavGroup, NavInputItem, NavItem } from '@studio/components/Layouts/NavigationDrawer/types';
+import type {
+  NavGroup,
+  NavInputItem,
+  NavItem,
+} from '@studio/components/Layouts/NavigationDrawer/types';
 
 export const isGroup = (item: NavInputItem): item is { group?: string; items: NavItem[] } => {
   return Array.isArray((item as { items?: NavItem[] }).items);

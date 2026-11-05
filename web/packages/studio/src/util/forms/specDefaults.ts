@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
-import {
-  type AutomodelJobInput,
-  type RlJobInput,
-  type UnslothJobInput,
+import type {
+  AutomodelJobInput,
+  RlJobInput,
+  UnslothJobInput,
 } from '@nemo/sdk/generated/customizer/schema';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';

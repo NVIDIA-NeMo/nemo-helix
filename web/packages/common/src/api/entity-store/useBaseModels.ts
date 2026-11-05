@@ -4,10 +4,10 @@
 import type { WithFilterOperators } from '@nemo/common/src/api/filterOperators';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import {
-  ModelEntity,
-  ModelEntityFilter,
+  type ModelEntity,
+  type ModelEntityFilter,
   ModelEntitySortField,
-  ModelEntitysPage,
+  type ModelEntitysPage,
 } from '@nemo/sdk/generated/platform/schema';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';

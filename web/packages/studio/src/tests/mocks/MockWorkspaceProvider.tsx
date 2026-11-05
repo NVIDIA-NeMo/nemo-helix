@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { WorkspaceContext } from '@studio/providers/workspace/WorkspaceContext';
-import { FC, ReactNode, useState } from 'react';
+import { type FC, type ReactNode, useState } from 'react';
 
 interface MockWorkspaceProviderProps {
   children: ReactNode;

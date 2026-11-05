@@ -17,7 +17,7 @@ import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
 import OpenAi from '@nemo/common/src/svgs/model_icon_openai.svg?react';
 import OpenRouter from '@nemo/common/src/svgs/model_icon_openrouter.svg?react';
 import { PlugReceptacle, ChartFlow } from '@nemo/icons/icons';
-import { FC, SVGProps } from 'react';
+import type { FC, SVGProps } from 'react';
 
 export type InferenceProviderPresetId =
   | 'build'

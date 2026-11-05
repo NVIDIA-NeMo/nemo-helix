@@ -6,7 +6,7 @@ import {
   Button,
   Divider,
   DropdownContent,
-  DropdownDividerItemEntry,
+  type DropdownDividerItemEntry,
   DropdownItem,
   DropdownRoot,
   DropdownTrigger,
@@ -27,8 +27,17 @@ export interface ActionMenuItem {
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
 }
 
+export type DeleteActionLabel = 'Delete' | 'Remove' | `Delete ${string}` | `Remove ${string}`;
+
+export interface DeleteAction {
+  onSelect: () => void;
+  label?: DeleteActionLabel;
+  disabled?: boolean;
+}
+
 interface ActionsMenuProps {
   actions: ActionMenuItem[];
+  deleteAction?: DeleteAction;
   /** Trigger label. Omit for an icon-only trigger. */
   label?: ReactNode;
   /** Trigger icon. Defaults to a sparkles icon when a label is shown. */
@@ -46,6 +55,7 @@ interface ActionsMenuProps {
  */
 export const ActionsMenu: FC<ActionsMenuProps> = ({
   actions,
+  deleteAction,
   label,
   icon,
   kind = 'tertiary',
@@ -55,6 +65,14 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
 }) => {
   const triggerIcon = icon ?? (label ? <Sparkle /> : undefined);
   const hasDescriptions = actions.some((action) => action.description);
+  const deleteItem: ActionMenuItem | undefined = deleteAction && {
+    label: deleteAction.label ?? 'Delete',
+    onSelect: deleteAction.onSelect,
+    disabled: deleteAction.disabled,
+    danger: true,
+  };
+  const items = deleteItem ? [...actions, deleteItem] : actions;
+  const showDeleteDivider = actions.length > 0 && !actions.at(-1)?.divider;
 
   return (
     <DropdownRoot>
@@ -75,8 +93,9 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
         data-testid={`${testId}-content`}
         className={hasDescriptions ? 'w-[260px] min-w-[260px]' : 'w-[180px] min-w-[180px]'}
       >
-        {actions.map((action, key) => (
+        {items.map((action, key) => (
           <React.Fragment key={`action-${key}`}>
+            {action === deleteItem && showDeleteDivider && <Divider />}
             <DropdownItem
               data-testid={`${testId}-item`}
               disabled={action.disabled}

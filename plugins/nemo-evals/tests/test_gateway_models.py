@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from types import SimpleNamespace
+from types import MappingProxyType, SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from harbor.agents.model_connection import ModelConnectionSpec, ProviderAccess
 from nemo_agents_plugin.config import AgentsConfig, DeploymentsRunnerConfig
+from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_API_KEY_ENV
 from nemo_agents_plugin.runner.deployments_backend import UnreachableGatewayURLError
 from nemo_evals.api.fields import AgentRef
 from nemo_evals.harbor.trial_credentials import TrialCredentialIssuer
@@ -31,7 +32,6 @@ from nemo_evals.jobs.agent_spec import (
 from nemo_evals.jobs.gateway_agents import GATEWAY_PLACEHOLDER_KEY
 from nemo_evals.jobs.gateway_models import (
     AGENT_CHANNEL_HOSTS_KWARG,
-    FABRIC_GATEWAY_KEY_ENV,
     GATEWAY_CA_FILE_KWARG,
     GATEWAY_URL_OVERRIDE_ENVVAR,
     TrialRoute,
@@ -41,6 +41,7 @@ from nemo_evals.jobs.gateway_models import (
     check_gateway_model,
     check_tasks_reach_the_gateway,
     fabric_gateway_key_envs,
+    fabric_gateway_models,
     fabric_gateway_route,
     point_agent_at_gateway_model,
     require_closed_book_route,
@@ -743,6 +744,14 @@ async def test_a_no_network_run_whose_agents_default_model_is_off_the_gateway_is
         await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
 
 
+def test_a_read_only_fabric_config_is_read_like_a_dict() -> None:
+    model = MappingProxyType({"base_url": f"{_IGW}/openai/-/v1", "model": "cb"})
+    config = MappingProxyType({"models": MappingProxyType({"default": model})})
+
+    assert fabric_gateway_route(config) == (ModelRef("ws/cb"), PLATFORM_IGW_API_KEY_ENV)
+    assert fabric_gateway_models(config) == [ModelRef("ws/cb")]
+
+
 async def test_a_registered_agent_with_a_harness_model_that_is_not_closed_book_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -990,4 +999,4 @@ def test_a_registered_agents_gateway_models_each_name_the_variable_they_read_the
         },
     }
 
-    assert fabric_gateway_key_envs(config) == [FABRIC_GATEWAY_KEY_ENV, "OTHER_KEY", "HARNESS_KEY"]
+    assert fabric_gateway_key_envs(config) == [PLATFORM_IGW_API_KEY_ENV, "OTHER_KEY", "HARNESS_KEY"]

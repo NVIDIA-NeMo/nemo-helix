@@ -5,11 +5,11 @@ import { Banner, Block, Flex, Spinner, Stack, Text } from '@nvidia/foundations-r
 import { AutoSplitNotice } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel/AutoSplitNotice';
 import {
   ChecklistRow,
-  ChecklistStatus,
+  type ChecklistStatus,
 } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel/ChecklistRow';
 import { SchemaBlock } from '@studio/components/customizer/CustomizationFilesetSelect/FileValidationPanel/SchemaBlock';
-import { CustomizationDatasetValidationResult } from '@studio/hooks/useCustomizationDatasetValidation';
-import { FC } from 'react';
+import type { CustomizationDatasetValidationResult } from '@studio/hooks/useCustomizationDatasetValidation';
+import type { FC } from 'react';
 
 export interface FileValidationPanelProps {
   validation: CustomizationDatasetValidationResult;

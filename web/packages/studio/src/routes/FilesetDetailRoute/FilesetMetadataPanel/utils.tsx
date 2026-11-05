@@ -8,7 +8,7 @@ import { getModelSource } from '@studio/routes/FilesetDetailRoute/utils';
 import { getWorkspaceDeploymentsRoute } from '@studio/routes/utils';
 import { getFormattedTrainingType } from '@studio/util/customizations';
 import { formatStorageBackendLabel } from '@studio/util/storageBackend';
-import { type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 interface MetadataRow {
   label: string;

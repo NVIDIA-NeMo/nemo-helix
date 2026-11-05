@@ -3,7 +3,7 @@
 
 import { FolderOpen } from '@nemo/icons/icons';
 import { StatusMessage, Flex } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   className?: string;

@@ -5,7 +5,7 @@ import { ScoreGauge } from '@nemo/common/src/components/ScoreGauge';
 import { InfoCircle } from '@nemo/icons/icons';
 import { Flex, Table, Tooltip } from '@nvidia/foundations-react-core';
 import { tooltipClassName } from '@studio/styles/common';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface ScoreTableProps {
   scores: {

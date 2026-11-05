@@ -32,7 +32,7 @@ import {
   type ExperimentCreateFormFields,
 } from '@studio/components/ExperimentCreateModal/constants';
 import { AxiosError } from 'axios';
-import { type FC } from 'react';
+import type { FC } from 'react';
 import { useController, useForm, type SubmitHandler } from 'react-hook-form';
 
 export interface ExperimentCreateModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
