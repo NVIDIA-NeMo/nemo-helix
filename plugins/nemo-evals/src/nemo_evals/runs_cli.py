@@ -55,7 +55,7 @@ _NAME_UNSAFE = re.compile(r"[^a-z0-9-]+")
 
 
 class SelectionError(ValueError):
-    """``--tasks`` names a task that isn't there, or the same task twice."""
+    """``--tasks`` has an invalid index/range, an unknown or ambiguous name, or a repeated task."""
 
 
 @dataclass(frozen=True)
@@ -68,10 +68,10 @@ class Candidate:
 
 
 def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Candidate]:
-    """Pick tasks by index (``0,5``) or name (``hello/sum-three`` or ``sum-three``); all when ``tokens`` is None.
+    """Pick tasks by zero-based index, inclusive range (``0-5``), or name; all when ``tokens`` is None.
 
     Raises:
-        SelectionError: An index is out of range, a name is unknown or ambiguous, or a task repeats.
+        SelectionError: An index/range is invalid, a name is unknown or ambiguous, or a task repeats.
     """
     if tokens is None:
         return list(candidates)
@@ -83,7 +83,19 @@ def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Ca
             index = int(token)
             if index >= len(candidates):
                 raise SelectionError(f"task index {index} is out of range 0..{len(candidates) - 1}")
-            match = candidates[index]
+            matches = [candidates[index]]
+        elif bounds := re.fullmatch(r"([0-9]+)-([0-9]+)", token):
+            try:
+                start, end = map(int, bounds.groups())
+            except ValueError as exc:
+                raise SelectionError(
+                    f"invalid task range {token!r}: numeric endpoint exceeds the integer limit"
+                ) from exc
+            if start > end:
+                raise SelectionError(f"task range {token!r} is reversed; start must not exceed end")
+            if end >= len(candidates):
+                raise SelectionError(f"task range {token!r} is out of range 0..{len(candidates) - 1}")
+            matches = candidates[start : end + 1]
         else:
             matches = [
                 c
@@ -96,10 +108,10 @@ def select_tasks(candidates: Sequence[Candidate], tokens: str | None) -> list[Ca
                 raise SelectionError(f"no task named {token!r}; run with --list-tasks to see the names")
             if len({c.index for c in matches}) > 1:
                 raise SelectionError(f"{token!r} matches several tasks: {', '.join(c.native_id for c in matches)}")
-            match = matches[0]
-        if match in selected:
-            raise SelectionError(f"task {match.native_id} is selected twice")
-        selected.append(match)
+        for match in matches:
+            if match in selected:
+                raise SelectionError(f"task {match.native_id} is selected twice")
+            selected.append(match)
     if not selected:
         raise SelectionError("--tasks selects no task")
     return selected
@@ -577,7 +589,11 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             "With --taskset and --experiment only; `tasksets create` prints it. --harbor-hub and --harbor-git set "
             "it themselves.",
         ),
-        tasks: str | None = typer.Option(None, "--tasks", help="Indexes or names, comma-separated; default all."),
+        tasks: str | None = typer.Option(
+            None,
+            "--tasks",
+            help="Zero-based indexes, inclusive ranges, or names, comma-separated (e.g. 0-4,7,anko-example); default all.",
+        ),
         agent: str = typer.Option("oracle", "--agent", help="Harbor built-in agent (without --spec-file)."),
         sandbox_profile: str | None = typer.Option(
             None, "--sandbox-profile", help="Operator sandbox profile; default: the operator's (without --spec-file)."
