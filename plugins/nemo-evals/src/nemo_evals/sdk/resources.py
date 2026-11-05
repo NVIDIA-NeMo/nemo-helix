@@ -39,6 +39,10 @@ from nemo_evals.sdk.taskset_resources import (
     AsyncEvaluatorTasksetsResource,
     EvaluatorTasksetsResource,
 )
+from nemo_evals.sdk.taskset_run_resources import (
+    AsyncEvaluatorTasksetRunsResource,
+    EvaluatorTasksetRunsResource,
+)
 from nemo_evals.sdk.types import (
     PluginDatasetInput,
     RunConfig,
@@ -76,6 +80,7 @@ class Evaluator:
         self.eval_results = EvaluatorEvalResultsResource(self._client)
         self.tasks = EvaluatorTasksResource(self._client)
         self.tasksets = EvaluatorTasksetsResource(self._client)
+        self.taskset_runs = EvaluatorTasksetRunsResource(self._client)
 
     @classmethod
     def from_client(cls, client: NemoClient) -> Evaluator:
@@ -270,6 +275,7 @@ class AsyncEvaluator:
         self.eval_results = AsyncEvaluatorEvalResultsResource(self._client)
         self.tasks = AsyncEvaluatorTasksResource(self._client)
         self.tasksets = AsyncEvaluatorTasksetsResource(self._client)
+        self.taskset_runs = AsyncEvaluatorTasksetRunsResource(self._client)
 
     @classmethod
     def from_client(cls, async_client: AsyncNemoClient) -> AsyncEvaluator:

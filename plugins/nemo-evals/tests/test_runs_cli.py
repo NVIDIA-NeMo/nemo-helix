@@ -17,25 +17,21 @@ import httpx
 import pytest
 import typer
 from nemo_evals import runs_cli
-from nemo_evals.api.fields import TasksetRef
+from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult
+from nemo_evals.api.taskset_run_schemas import TasksetRunStatus, TasksetRunTask
 from nemo_evals.harbor.remote.profile import SandboxSelection
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
-    SUBMIT_CONNECT_TIMEOUT_SECONDS,
-    SUBMIT_TIMEOUT_SECONDS,
     BundleJobView,
     Candidate,
     CreatedTaskset,
     ScoreRollup,
     SelectionError,
-    TaskJobView,
-    TaskStateView,
     _progress_line,
     _results_table,
     _select_from_spec,
     _status_table,
-    _view_json,
     _workspace_flag,
     add_runs_commands,
     check_git_source,
@@ -45,15 +41,20 @@ from nemo_evals.runs_cli import (
     publish_tasks,
     rollup_scores,
     run_request,
-    run_task_jobs,
     select_tasks,
     selection_suffix,
-    submit_run,
     task_state,
 )
 from nemo_evals.sdk.resources import Evaluator
+from nemo_evals.sdk.taskset_run_resources import (
+    NamedTask,
+    TaskResult,
+    TasksetRunResults,
+    TasksetRunSubmitError,
+)
+from nemo_evals.taskset_runs.progress import TasksetRunProgress
 from nemo_helix_plugin.client.client import NemoClient
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, NotFoundError, raise_for_status
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 from typer.testing import CliRunner
 
@@ -114,24 +115,25 @@ def submitting(monkeypatch):
         get_image_build=builds.get_image_build,
     )
     tasksets = SimpleNamespace(
-        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=MEMBERS),
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(m) for m in MEMBERS]),
         replace=lambda name, taskset, workspace: seen.published.append(name),
         list_revisions=lambda name, workspace, page_size: SimpleNamespace(
             data=[SimpleNamespace(content_hash="3" * 64)]
         ),
     )
-    fake = SimpleNamespace(tasks=tasks, tasksets=tasksets)
+    seen.taskset_runs = SimpleNamespace(submit=lambda request, workspace: seen.submit(request, workspace=workspace))
+    fake = SimpleNamespace(tasks=tasks, tasksets=tasksets, taskset_runs=seen.taskset_runs)
     monkeypatch.setattr("nemo_evals.runs_cli.Evaluator", SimpleNamespace(from_client=lambda _: fake))
 
-    def submit(client, body, *, workspace, echo):
-        seen.bodies.append(body)
-        if seen.refuse:
-            raise RuntimeError('submit failed (422): "tasks without images: ac9/deep-swe-b#..."')
-        return {"run_id": "run-1", "phase": seen.phase, "warnings": []}
+    def submit(request, *, workspace):
+        seen.bodies.append(request.model_dump(mode="json", exclude_none=True))
+        if seen.refuse is not None:
+            raise seen.refuse
+        return SimpleNamespace(run_id="run-1", phase=seen.phase, warnings=[])
 
-    seen.refuse = False
+    seen.refuse = None
     seen.phase = "accepted"
-    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", submit)
+    seen.submit = submit
     client = SimpleNamespace(resolve_workspace=lambda workspace=None: workspace or "ac9")
 
     def invoke(*args: str):
@@ -141,6 +143,19 @@ def submitting(monkeypatch):
 
     seen.invoke = invoke
     return seen
+
+
+def submit_error(status: int, detail: str, key: str = "k-1") -> TasksetRunSubmitError:
+    response = httpx.Response(status, json={"detail": detail}, request=httpx.Request("POST", "http://platform.test"))
+    return TasksetRunSubmitError(raise_error(response), key)
+
+
+def raise_error(response: httpx.Response) -> NemoHTTPError:
+    try:
+        raise_for_status(response)
+    except NemoHTTPError as exc:
+        return exc
+    raise AssertionError("not an error status")
 
 
 def _image_build(build_id: str = "1", status: str = "ready") -> ImageBuild:
@@ -196,7 +211,7 @@ def test_submit_narrows_a_taskset_by_publishing_a_selection_without_uploading_ta
 @pytest.mark.parametrize("workspace", ["ac9", "team"], ids=["configured", "other"])
 def test_a_refused_taskset_submit_says_how_to_check_the_builds(submitting, workspace):
     """The suggested command must run as printed: build-images reads the workspace from the ref."""
-    submitting.refuse = True
+    submitting.refuse = submit_error(422, "tasks without images: ac9/deep-swe-b#...")
     result = submitting.invoke("--taskset", "deep-swe-162c7ea7#" + "2" * 64, "--workspace", workspace)
     assert result.exit_code == 1
     stored = f"{workspace}/deep-swe-162c7ea7#" + "2" * 64
@@ -237,7 +252,9 @@ def test_the_wrapper_follows_one_retry_and_never_submits_after_a_failed_build(
     )
     monkeypatch.setattr(
         "nemo_evals.runs_cli.Evaluator",
-        SimpleNamespace(from_client=lambda _: SimpleNamespace(tasks=submitting_tasks)),
+        SimpleNamespace(
+            from_client=lambda _: SimpleNamespace(tasks=submitting_tasks, taskset_runs=submitting.taskset_runs)
+        ),
     )
     result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--experiment", "m4", "--poll-seconds", "0")
     assert bool(submitting.bodies) is submitted, result.output
@@ -362,13 +379,13 @@ def test_submit_reads_the_spec_file_once(submitting, monkeypatch, tmp_path):
     monkeypatch.setattr(
         "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
     )
-    submit = runs_cli.submit_run
+    submit = submitting.submit
 
     def consumed(*args, **kwargs):
         spec.unlink()  # like a stream already read
         return submit(*args, **kwargs)
 
-    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", consumed)
+    submitting.submit = consumed
     result = submitting.invoke(
         "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--spec-file", str(spec)
     )
@@ -407,7 +424,7 @@ def test_ctrl_c_during_the_submit_says_to_retry_the_published_taskset_with_the_s
     monkeypatch.setattr(
         "nemo_evals.runs_cli.create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS[:1], 1, None)
     )
-    monkeypatch.setattr("nemo_evals.runs_cli.submit_run", interrupted)
+    submitting.submit = interrupted
     result = submitting.invoke(
         "--harbor-hub", "datacurve/deep-swe@latest", "--no-build-images", "--idempotency-key", "k-$USER"
     )
@@ -696,108 +713,24 @@ def _runs_app() -> typer.Typer:
     return app
 
 
-def test_submit_retries_a_503_with_the_same_body():
-    bodies = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        bodies.append(request.content)
-        if len(bodies) == 1:
-            return httpx.Response(503, json={"detail": "task Jobs not created"})
-        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    status = submit_run(
-        client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
-    )
-    assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
-
-
-def test_a_failed_submit_names_its_key_so_a_rerun_finishes_the_run():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(503, json={"detail": "task Jobs of run run-1 not created"})
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    with pytest.raises(RuntimeError, match="rerun the same command with --idempotency-key k-123$"):
-        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
-
-
-def test_a_submit_that_stops_connecting_after_a_503_says_an_earlier_attempt_may_have_landed():
-    answers = iter([httpx.Response(503, json={"detail": "busy"})])
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if (response := next(answers, None)) is not None:
-            return response
-        raise httpx.ConnectError("Connection refused")
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    with pytest.raises(RuntimeError, match="an earlier one reached the platform.*--idempotency-key k-1$"):
-        submit_run(client, {"idempotency_key": "k-1"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
-
-
-def test_a_submit_connects_with_a_short_timeout_and_reads_with_the_long_one():
-    seen: list[dict[str, float | None]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.extensions["timeout"])
-        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    submit_run(client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
-    assert seen[0]["connect"] == SUBMIT_CONNECT_TIMEOUT_SECONDS and seen[0]["read"] == SUBMIT_TIMEOUT_SECONDS
-
-
-@pytest.mark.parametrize("error", [httpx.ReadTimeout(""), httpx.RemoteProtocolError("Server disconnected")])
-def test_a_submit_with_no_answer_says_the_run_may_be_accepted_and_names_its_key(error):
-    timeouts = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        timeouts.append(request.extensions["timeout"]["read"])
-        raise error
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    with pytest.raises(RuntimeError, match="the run may still be accepted.*--idempotency-key k-123$"):
-        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
-    assert timeouts == [SUBMIT_TIMEOUT_SECONDS]  # sent once, with the long timeout
-
-
-@pytest.mark.parametrize("error", [httpx.ConnectError("Connection refused"), httpx.ConnectTimeout("")])
-def test_a_submit_that_never_connected_is_resent_with_the_same_body(error):
-    bodies = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        bodies.append(request.content)
-        if len(bodies) == 1:
-            raise error
-        return httpx.Response(200, json={"run_id": "run-1", "warnings": []})
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    status = submit_run(
-        client, {"idempotency_key": "k"}, workspace="default", echo=lambda _: None, sleep=lambda _: None
-    )
-    assert status["run_id"] == "run-1" and len(bodies) == 2 and bodies[0] == bodies[1]
-
-
-def test_a_submit_that_never_connects_names_its_key():
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("Connection refused")
-
-    client = NemoClient(
-        base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler))
-    )
-    with pytest.raises(RuntimeError, match="nothing was sent.*--idempotency-key k-123$"):
-        submit_run(client, {"idempotency_key": "k-123"}, workspace="default", echo=lambda _: None, sleep=lambda _: None)
+@pytest.mark.parametrize(
+    ("status", "advised"),
+    [(403, True), (500, True), (None, True), (409, False), (422, False)],
+    ids=["403", "5xx", "transport", "409", "422"],
+)
+def test_a_failed_submit_names_its_key_and_advises_a_rerun_only_when_the_run_may_be_accepted(
+    submitting, status, advised
+):
+    if status is None:
+        cause = NemoTransportError(httpx.ReadTimeout("t", request=httpx.Request("POST", "http://platform.test")))
+        submitting.refuse = TasksetRunSubmitError(cause, "k-1")
+    else:
+        submitting.refuse = submit_error(status, "nope")
+    result = submitting.invoke("--taskset", STORED, "--idempotency-key", "k-1")
+    assert result.exit_code == 1
+    assert "Error: " in result.output and "this submit used idempotency_key=k-1" in result.output
+    retry = f"submit with the same key: nemo evals runs submit --taskset {shlex.quote(STORED)} --idempotency-key k-1"
+    assert (retry in result.output) is advised, result.output
 
 
 @pytest.fixture
@@ -881,7 +814,7 @@ def test_spec_selection_ignores_a_publication_that_experiment_replaces(tmp_path)
     tasks = SimpleNamespace(
         retrieve=lambda name, revision, workspace: SimpleNamespace(revision=1, spec=SimpleNamespace())
     )
-    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[member]))
+    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(member)]))
     evaluator = cast(Evaluator, SimpleNamespace(tasks=tasks, tasksets=tasksets))
     assert _select_from_spec(evaluator, spec, None, "default") == ([member], 1, "suite")
 
@@ -902,9 +835,34 @@ RUN = {
     "workspace": "default",
     "taskset_ref": "default/debug-1f9c2a7e#" + "e" * 64,
     "phase": "accepted",
+    "result_state": "pending",
     "accepted_at": "2026-10-16T12:00:00Z",
+    "timeout_seconds": 3600,
+    "execution_deadline_at": "2026-10-16T13:00:00Z",
+    "finalization_deadline_at": "2026-10-16T14:00:00Z",
 }
 NOW = "2026-10-16T12:00:00Z"
+RUN_ID = "run-0123456789abcdef"
+
+
+def run_status(**overrides) -> TasksetRunStatus:
+    return TasksetRunStatus.model_validate(RUN | overrides)
+
+
+def named(index, name, phase=None, job=None, job_status=None, error=None, publication=None) -> NamedTask:
+    """A task of a run; with no ``phase`` its ``/tasks`` row doesn't exist yet."""
+    row = None
+    if phase is not None:
+        row = TasksetRunTask(
+            task=f"task-{index}",
+            task_index=index,
+            phase=phase,
+            job=job,
+            job_status=job_status,
+            error=error,
+            publication=publication,
+        )
+    return NamedTask(index=index, name=name, task=row)
 
 
 def score(name, mean, count, nan=0):
@@ -947,16 +905,29 @@ def page(items):
     return {"data": items, "pagination": pagination}
 
 
-@pytest.fixture
-def platform():
-    jobs = {
-        "run-0123456789abcdef-task-0": job("run-0123456789abcdef-task-0", "completed", "hello/greet-universe")
-        | {"status_details": {"publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2}}},
-        "run-0123456789abcdef-task-1": job("run-0123456789abcdef-task-1", "active", "hello/sum-three"),
-    }
-    results = {  # keyed and filtered by the Job's name, as the platform stores them
-        "run-0123456789abcdef-task-0": result_record(
-            "run-0123456789abcdef-task-0",
+def results_platform(*, run=None, rows=None, taskset_status=200):
+    """A 3-task run: its pinned taskset, its ``/tasks`` rows and task 0's result record. Jobs is never read."""
+    run = run if run is not None else RUN | {"phase": "running"}
+    if rows is None:
+        rows = [
+            {
+                "task": "task-0",
+                "task_index": 0,
+                "phase": "succeeded",
+                "job": f"{RUN_ID}-task-0",
+                "job_status": "completed",
+            },
+            {
+                "task": "task-1",
+                "task_index": 1,
+                "phase": "registered",
+                "job": f"{RUN_ID}-task-1",
+                "job_status": "active",
+            },
+        ]
+    results = {
+        f"{RUN_ID}-task-0": result_record(
+            f"{RUN_ID}-task-0",
             [score("harbor_reward.reward", 1.0, 2), score("harbor_reward.style", 0.5, 2, nan=1)],
             trials=2,
         )
@@ -965,7 +936,7 @@ def platform():
         "id": "ts",
         "name": "debug-1f9c2a7e",
         "workspace": "default",
-        "tasks": ["default/a#" + "1" * 64, "default/b#" + "2" * 64, "default/c#" + "3" * 64],
+        "tasks": ["default/greet#" + "1" * 64, "default/sum#" + "2" * 64, "default/sort#" + "3" * 64],
         "revision": 1,
         "tags": {},
         "created_at": NOW,
@@ -974,37 +945,117 @@ def platform():
 
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if path.endswith("/agent-evaluate/runs/run-0123456789abcdef"):
-            return httpx.Response(200, json=RUN)
+        if path.endswith(f"/agent-evaluate/runs/{RUN_ID}"):
+            return httpx.Response(200, json=run)
+        if path.endswith(f"/agent-evaluate/runs/{RUN_ID}/tasks"):
+            return httpx.Response(200, json=page(rows))
         if "/tasksets/debug-1f9c2a7e" in path:
-            return httpx.Response(200, json=taskset)
-        if "/jobs/" in path:
-            name = path.rsplit("/", 1)[1]
-            return httpx.Response(200, json=jobs[name]) if name in jobs else httpx.Response(404, json={"detail": "x"})
+            return httpx.Response(taskset_status, json=taskset if taskset_status == 200 else {"detail": "x"})
         if path.endswith("/agent-eval-results"):
             found = [r for r in results.values() if request.url.params.get("filter[job_id]") == r["job_id"]]
             return httpx.Response(200, json=page(found))
+        if path.endswith(f"/agent-eval-results/{RUN_ID}"):  # the run's merged record
+            return httpx.Response(404, json={"detail": f"Result not found: default/{RUN_ID}"})
+        if "/jobs/" in path and "-bundle-" in path:
+            return httpx.Response(404, json={"detail": "x"})  # no bundle Job yet
         raise AssertionError(f"unexpected {request.method} {request.url}")
 
     return NemoClient(base_url="http://platform.test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
 
 
-def test_task_jobs_are_derived_from_the_pinned_taskset(platform):
-    views = run_task_jobs(platform, RUN, workspace="default")
-    assert [(v.index, v.task, v.status) for v in views] == [
-        (0, "hello/greet-universe", "completed"),
-        (1, "hello/sum-three", "active"),
-        (2, None, "missing"),
+def invoke_on(client, *args):
+    app = typer.Typer()
+    add_runs_commands(app, lambda: client)
+    return CliRunner().invoke(app, ["runs", *args, RUN_ID, "--workspace", "default"])
+
+
+def test_results_show_completed_tasks_scores_by_their_taskset_names():
+    result = invoke_on(results_platform(), "results")
+    assert result.exit_code == 0, result.output
+    lines = result.output.splitlines()
+    assert lines[0].split() == [
+        "#",
+        "task",
+        "status",
+        "trials",
+        "errors",
+        "harbor_reward.reward",
+        "harbor_reward.style",
     ]
+    assert lines[1].split() == ["0", "greet", "succeeded", "2", "0", "1.00", "0.50"]
+    assert lines[2].split() == ["1", "sum", "registered", "(active)", "-", "-"]
+    assert lines[3].split() == ["2", "sort", "waiting", "-", "-"]
+    assert "1/3 tasks with results, 2 trials" in result.output
 
 
-def test_results_read_completed_jobs_only_and_keep_every_reward(platform):
-    views = run_task_jobs(platform, RUN, workspace="default", with_results=True)
-    assert views[0].result is not None and views[1].result is None
-    names = [s.name for s in views[0].result.scores.scores]
-    assert names == ["harbor_reward.reward", "harbor_reward.style"]
-    table = "\n".join(_results_table(views))
-    assert "harbor_reward.style" in table and "1/3 tasks with results, 2 trials" in table
+def test_results_name_what_is_missing():
+    """A missing run reads as one; a missing merged record of a run that exists reads as the server says."""
+    gone = httpx.MockTransport(lambda request: httpx.Response(404, json={"detail": "Taskset run not found"}))
+    result = invoke_on(NemoClient(base_url="http://platform.test", http_client=httpx.Client(transport=gone)), "results")
+    assert result.exit_code == 1 and result.output == f"Error: run default/{RUN_ID} not found\n"
+
+    ready = RUN | {"phase": "completed", "result_state": "ready"}
+    result = invoke_on(results_platform(run=ready), "results")
+    assert result.exit_code == 1
+    assert result.output == f"Error: HTTP 404: Result not found: default/{RUN_ID}\n"
+
+
+def test_results_json_shares_the_status_task_shape():
+    result = invoke_on(results_platform(), "results", "--json")
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.output)
+    assert set(body) == {"run", "tasks"}  # no merged record yet
+    assert [(t["index"], t["name"], t["state"]) for t in body["tasks"]] == [
+        (0, "greet", "succeeded"),
+        (1, "sum", "registered (active)"),
+        (2, "sort", "waiting"),
+    ]
+    assert body["tasks"][0]["task"]["job_status"] == "completed" and "result" in body["tasks"][0]
+    assert "task" not in body["tasks"][2] and "result" not in body["tasks"][2]
+
+
+@pytest.mark.parametrize("command", ["status", "results"])
+def test_an_active_run_without_rows_shows_every_task_waiting(command):
+    result = invoke_on(results_platform(rows=[]), command)
+    assert result.exit_code == 0, result.output
+    rows = [line.split() for line in result.output.splitlines() if line[:3].strip().isdigit()]
+    assert [(r[1], r[2]) for r in rows] == [("greet", "waiting"), ("sum", "waiting"), ("sort", "waiting")]
+    assert ("0/3 done" if command == "status" else "0/3 tasks with results") in result.output
+
+
+@pytest.mark.parametrize("command", ["status", "results"])
+def test_a_run_without_rows_or_a_readable_taskset_has_no_tasks_yet(command):
+    result = invoke_on(results_platform(rows=[], taskset_status=403), command)
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines()[-1] == "no tasks yet"
+
+
+@pytest.mark.parametrize(
+    ("rows", "states"),
+    [
+        ([], ["not run", "not run", "not run"]),
+        ([{"task": "task-1", "task_index": 1, "phase": "failed", "error": "plan"}], ["not run", "failed", "not run"]),
+    ],
+    ids=["no-rows", "one-row"],
+)
+def test_a_finished_run_shows_tasks_without_rows_as_not_run(rows, states):
+    result = invoke_on(results_platform(run=RUN | {"phase": "failed", "result_state": "none"}, rows=rows), "status")
+    assert result.exit_code == 0, result.output
+    table = [line for line in result.output.splitlines() if line[:3].strip().isdigit()]
+    assert [_state_of(line) for line in table] == states
+
+
+def _state_of(line: str) -> str:
+    cells = [cell for cell in line.split("  ") if cell.strip()]
+    return cells[2].strip()
+
+
+@pytest.mark.parametrize("command", ["status", "results"])
+def test_a_reader_who_cannot_read_the_taskset_sees_member_names(command):
+    result = invoke_on(results_platform(taskset_status=403), command)
+    assert result.exit_code == 0, result.output
+    names = [line.split()[1] for line in result.output.splitlines() if line[:3].strip().isdigit()]
+    assert names == ["task-0", "task-1"]
 
 
 def test_rollup_weights_task_means_by_count():
@@ -1018,36 +1069,35 @@ def test_rollup_weights_task_means_by_count():
 
 
 def test_status_shows_what_each_task_published():
-    views = [
-        TaskStateView(0, "a", "succeeded", "j0", publication={"status": "completed", "trial_count": 2}),
-        TaskStateView(1, "b", "succeeded", "j1", publication={"status": "error", "error": "intake 503"}),
-        TaskStateView(2, "c", "registered (active)", "j2"),
+    done = {"evaluation_id": "e"}
+    tasks = [
+        named(0, "a", "succeeded", "j0", publication=done | {"status": "completed", "trial_count": 2}),
+        named(1, "b", "succeeded", "j1", publication=done | {"status": "error", "error": "intake 503"}),
+        named(2, "c", "registered", "j2", job_status="active"),
     ]
-    lines = _status_table(RUN, views)
+    lines = _status_table(run_status(), tasks)
     assert lines[-5].endswith("published")
     assert lines[-4].endswith("✓ 2 trials") and lines[-3].endswith("✗ intake 503") and lines[-2].endswith("  -")
-    failed = TaskJobView(1, "j1", "b", "completed", publication={"status": "error", "error": "intake 503"})
-    assert _view_json(failed)["publication"] == {"status": "error", "error": "intake 503"}  # runs results --json
 
 
 def test_status_counts_done_failed_and_expired_apart():
-    views = [
-        TaskStateView(0, "a", "succeeded", "j0"),
-        TaskStateView(1, "b", "failed", "j1", "job_failed: exit 1"),
-        TaskStateView(2, "c", "expired", None),
-        TaskStateView(3, "d", "registered (active)", "j3"),
-        TaskStateView(4, "e", "queued", None),
+    tasks = [
+        named(0, "a", "succeeded", "j0"),
+        named(1, "b", "failed", "j1", error="job_failed: exit 1"),
+        named(2, "c", "expired"),
+        named(3, "d", "registered", "j3", job_status="active"),
+        named(4, "e", "image_ready"),
     ]
-    assert _status_table(RUN, views)[-1] == "3/5 done (1 succeeded, 1 failed, 1 expired)"
+    assert _status_table(run_status(), tasks)[-1] == "3/5 done (1 succeeded, 1 failed, 1 expired)"
 
 
 def test_status_counts_settled_tasks_whose_state_shows_an_unexpected_job_status():
-    views = [
-        TaskStateView(0, "a", "succeeded", "j0"),
-        TaskStateView(1, "b", "failed (completed)", "j1", "no_result"),
-        TaskStateView(2, "c", "cancelled (completed)", "j2"),
+    tasks = [
+        named(0, "a", "succeeded", "j0"),
+        named(1, "b", "failed", "j1", job_status="completed", error="no_result"),
+        named(2, "c", "cancelled", "j2", job_status="completed"),
     ]
-    lines = _status_table(RUN | {"result_state": "failed"}, views)
+    lines = _status_table(run_status(result_state="failed"), tasks)
     assert lines[-1] == "3/3 done (1 succeeded, 1 failed, 1 cancelled)"
     assert any(line.startswith("  completed tasks' scores:") for line in lines)
 
@@ -1073,7 +1123,7 @@ def test_status_counts_settled_tasks_whose_state_shows_an_unexpected_job_status(
     ],
 )
 def test_task_state_names_the_queue_and_the_jobs_status(task, state):
-    assert task_state(task) == state
+    assert task_state(TasksetRunTask.model_validate({"task": "task-0", "task_index": 0} | task)) == state
 
 
 @pytest.mark.parametrize(
@@ -1100,12 +1150,22 @@ def test_task_state_names_the_queue_and_the_jobs_status(task, state):
     ],
 )
 def test_progress_line_counts_queued_creating_running_and_settled(progress, line):
-    assert _progress_line(progress) == line
+    assert _progress_line(progress and TasksetRunProgress.model_validate(progress)) == line
+
+
+def results_of(*tasks: TaskResult, record: AgentEvalResult | None = None) -> TasksetRunResults:
+    return TasksetRunResults(run=run_status(phase="completed"), tasks=list(tasks), result=record)
+
+
+def completed_task(name: str = "a") -> TaskResult:
+    task = named(0, name, "succeeded", "run-x-task-0", job_status="completed")
+    return TaskResult(index=task.index, name=task.name, task=task.task)
 
 
 def test_completed_job_without_a_record_is_flagged():
-    views = [TaskJobView(0, "run-x-task-0", "a", "completed")]
-    assert _results_table(views)[-2] == "warning: completed without a result record: run-x-task-0"
+    assert _results_table(results_of(completed_task()))[-2] == (
+        "warning: completed without a result record: run-x-task-0"
+    )
 
 
 def test_results_use_the_runs_own_record_when_ready():
@@ -1115,11 +1175,11 @@ def test_results_use_the_runs_own_record_when_ready():
         )
         | {"name": "run-x", "bundle_ref": "default/job-fileset-run-x-bundle-1#results/a/agent-eval-results"}
     )
-    lines = _results_table([TaskJobView(0, "run-x-task-0", "a", "completed")], record)
+    lines = _results_table(results_of(completed_task(), record=record))
     assert lines[-5].startswith("run (merged bundle default/job-fileset-run-x-bundle-1#")
     assert lines[-4] == "  harbor_reward.reward: 0.500 (n=4, nan=0)"
     assert lines[-1] == "Download the merged bundle: nemo evals runs download run-x"
-    lines = _results_table([TaskJobView(0, "run-x-task-0", "a", "completed")], record, workspace_flag=" --workspace b")
+    lines = _results_table(results_of(completed_task(), record=record), workspace_flag=" --workspace b")
     assert lines[-1] == "Download the merged bundle: nemo evals runs download run-x --workspace b"
 
 
@@ -1129,9 +1189,9 @@ def test_printed_commands_name_the_workspace_only_when_it_is_not_the_configured_
 
 
 def test_status_shows_result_state_and_bundle():
-    run = RUN | {"phase": "completed", "result_state": "ready"}
+    run = run_status(phase="completed", result_state="ready")
     bundle = BundleJobView("run-x-bundle-1", 1, "completed")
-    lines = _status_table(run, [TaskStateView(0, "a", "succeeded", "j0")], bundle)
+    lines = _status_table(run, [named(0, "a", "succeeded", "j0")], bundle)
     assert lines[3] == "  status    completed; the run's result is ready (phase completed, result ready)"
     assert lines[5] == "  bundle    run-x-bundle-1 (attempt 1 of 3): completed"
 
@@ -1142,9 +1202,9 @@ MODULE_ERROR = "/app/.venv/bin/python: No module named nemo_evals.tasks.taskset_
 def test_a_failed_bundle_says_tasks_finished_and_shows_its_own_error():
     progress = {"tasks": 1, "members": {"succeeded": 1}, "queued": 0, "task_jobs": {}}
     error = "bundle Job run-x-bundle-3 ended error"
-    run = {**RUN, "phase": "completed", "result_state": "failed", "error": error, "progress": progress}
+    run = run_status(phase="completed", result_state="failed", error=error, progress=progress)
     bundle = BundleJobView("run-x-bundle-3", 3, "error", MODULE_ERROR)
-    lines = _status_table(run, [TaskStateView(0, "a", "succeeded", "j0")], bundle)
+    lines = _status_table(run, [named(0, "a", "succeeded", "j0")], bundle)
     assert lines[3:9] == [
         "  status    tasks finished, but merging their results into the run's result failed"
         " (phase completed, result failed)",
@@ -1160,19 +1220,19 @@ def test_a_failed_bundle_says_tasks_finished_and_shows_its_own_error():
 @pytest.mark.parametrize("status", ["active", "cancelled"])
 def test_a_deadline_error_shows_whatever_the_bundle_did(status):
     error = "finalization deadline passed before the result was saved"
-    run = RUN | {"phase": "completed", "result_state": "failed", "error": error}
-    lines = _status_table(run, [TaskStateView(0, "a", "succeeded", "j0")], BundleJobView("run-x-bundle-1", 1, status))
+    run = run_status(phase="completed", result_state="failed", error=error)
+    lines = _status_table(run, [named(0, "a", "succeeded", "j0")], BundleJobView("run-x-bundle-1", 1, status))
     assert f"  error     {error}" in lines
     assert not any("no error reported" in line for line in lines)
     assert any(line.strip().startswith("logs:") for line in lines) is (status == "cancelled")
 
 
 def test_the_status_screen_shows_how_long_the_run_queued():
-    started = RUN | {"phase": "running", "started_at": "2026-10-16T12:50:12Z"}
+    started = run_status(phase="running", started_at="2026-10-16T12:50:12Z")
     assert "  started   2026-10-16 12:50:12 (queued 50m12s)" in _status_table(started, [])
-    waiting = _status_table(RUN, [], now=datetime(2026, 10, 16, 13, 10, 5, tzinfo=UTC))
+    waiting = _status_table(run_status(), [], now=datetime(2026, 10, 16, 13, 10, 5, tzinfo=UTC))
     assert waiting[3] == "  queued    1h10m so far"
-    never_started = RUN | {"phase": "expired", "error": "no task started within the queue timeout (48 h)"}
+    never_started = run_status(phase="expired", error="no task started within the queue timeout (48 h)")
     assert not any(line.startswith(("  started", "  queued")) for line in _status_table(never_started, []))
 
 
@@ -1186,15 +1246,15 @@ def test_the_status_screen_shows_how_long_the_run_queued():
     ],
 )
 def test_a_stopped_run_says_whether_its_finished_tasks_have_a_result(phase, result, words):
-    run = RUN | {"phase": phase, "result_state": result, "started_at": RUN["accepted_at"]}
+    run = run_status(phase=phase, result_state=result, started_at=RUN["accepted_at"])
     state = f"{phase}; {words}" if words else phase
     assert f"  status    {state} (phase {phase}, result {result})" in _status_table(run, [])
 
 
 def test_a_running_run_whose_bundle_job_runs_reads_as_merging():
-    run = RUN | {"phase": "running", "started_at": RUN["accepted_at"]}
-    lines = _status_table(run, [TaskStateView(0, "a", "succeeded", "j0")], BundleJobView("run-x-bundle-1", 1, "active"))
-    assert "  status    merging task results (phase running, result -)" in lines
+    run = run_status(phase="running", started_at=RUN["accepted_at"])
+    lines = _status_table(run, [named(0, "a", "succeeded", "j0")], BundleJobView("run-x-bundle-1", 1, "active"))
+    assert "  status    merging task results (phase running, result pending)" in lines
 
 
 FAILED_POD = {
@@ -1291,7 +1351,6 @@ def test_an_sdk_error_exits_with_a_message_not_a_traceback(command):
     assert result.output.startswith("Error: ")
 
 
-RUN_ID = "run-0123456789abcdef"
 RECORDED_TASKS = [  # GET …/runs/{id}/tasks, as the API returns it (nulls omitted)
     {
         "task": "task-0",
@@ -1299,7 +1358,13 @@ RECORDED_TASKS = [  # GET …/runs/{id}/tasks, as the API returns it (nulls omit
         "phase": "succeeded",
         "job": f"{RUN_ID}-task-0",
         "job_status": "completed",
-        "publication": {"status": "completed", "evaluation_id": "e", "trial_count": 2},
+        "publication": {
+            "status": "completed",
+            "evaluation_id": "e",
+            "trial_count": 2,
+            "evaluator_result_count": 0,
+            "skipped": [],
+        },
     },
     {"task": "task-1", "task_index": 1, "phase": "registered", "job": f"{RUN_ID}-task-1", "job_status": "active"},
     {"task": "task-2", "task_index": 2, "phase": "image_ready", "job": f"{RUN_ID}-task-2"},
@@ -1367,7 +1432,7 @@ def test_status_reads_the_run_and_its_tasks_with_no_jobs_call_per_task():
     assert result.exit_code == 0, result.output
     lines = result.output.splitlines()
     assert lines[3:5] == [
-        "  status    running (phase running, result -)",
+        "  status    running (phase running, result pending)",
         "  progress  5 tasks: 1 queued, 1 creating, 1 running (1 active), 1 succeeded, 1 failed",
     ]
     assert [line.split() for line in lines[6:12]] == [
@@ -1394,8 +1459,8 @@ def test_status_json_lists_each_tasks_state():
     assert result.exit_code == 0, result.output
     body = json.loads(result.output)
     assert body["run"]["progress"] == RECORDED_PROGRESS
-    assert body["tasks"][1]["job_status"] == "active"  # the raw status, beside the state cell
-    assert [(t["index"], t["task"], t["state"]) for t in body["tasks"]] == [
+    assert body["tasks"][1]["task"]["job_status"] == "active"  # the raw status, beside the state cell
+    assert [(t["index"], t["name"], t["state"]) for t in body["tasks"]] == [
         (0, "greet", "succeeded"),
         (1, "sum", "registered (active)"),
         (2, "sort", "queued (creating)"),
@@ -1463,6 +1528,7 @@ def listed_run(run_id, phase="running", created_by="user:alice"):
         "phase": phase,
         "result_state": "none",
         "accepted_at": "2026-10-17T12:04:11.123456Z",
+        "timeout_seconds": 3600,
         "execution_deadline_at": "2026-10-17T13:04:11Z",
         "finalization_deadline_at": "2026-10-17T14:04:11Z",
         "created_by": created_by,
@@ -1540,7 +1606,7 @@ def test_list_json_prints_the_api_page_unchanged():
 def test_list_failure_exits_with_the_api_detail():
     result, _ = invoke_list([], httpx.Response(500, json={"detail": "Internal server error"}))
     assert result.exit_code == 1
-    assert 'listing runs failed (500): "Internal server error"' in result.output
+    assert "Error: HTTP 500: Internal server error" in result.output
 
 
 def invoke_cancel(args, response):
@@ -1566,7 +1632,7 @@ def test_cancel_posts_the_intent_and_says_how_to_follow_the_run():
     assert request.method == "POST"
     assert request.url.path == "/apis/evals/v2/workspaces/ac9/agent-evaluate/runs/run-aaaa/cancel"
     assert result.output.splitlines() == [
-        "Cancel requested for run-aaaa at 2026-10-17T12:30:00Z (phase running).",
+        "Cancel requested for run-aaaa at 2026-10-17T12:30:00+00:00 (phase running).",
         "Follow it with: nemo evals runs status run-aaaa --workspace ac9",
     ]
     result, _ = invoke_cancel(["--json"], httpx.Response(200, json=run))
@@ -1579,7 +1645,7 @@ def test_cancel_posts_the_intent_and_says_how_to_follow_the_run():
         (httpx.Response(404, json={"detail": "Taskset run not found"}), "run ac9/run-aaaa not found"),
         (
             httpx.Response(409, json={"detail": "run run-aaaa already finished: completed"}),
-            'cancelling run run-aaaa failed (409): "run run-aaaa already finished: completed"',
+            "Error: HTTP 409: run run-aaaa already finished: completed",
         ),
     ],
 )
