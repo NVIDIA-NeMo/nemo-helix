@@ -26,6 +26,7 @@ import { formatStorageBackendLabel } from '@studio/util/storageBackend';
 import type { ComponentProps, Dispatch, SetStateAction } from 'react';
 
 interface MakeDatasetsTableColumnsArgs {
+  variant: NonNullable<DatasetsTableProps['variant']>;
   enableSelection: DatasetsTableProps['enableSelection'];
   selectionType: DatasetsTableProps['selectionType'];
   enableFilters: DatasetsTableProps['enableFilters'];
@@ -37,6 +38,7 @@ interface MakeDatasetsTableColumnsArgs {
 }
 
 export function makeDatasetsTableColumns({
+  variant,
   enableSelection,
   selectionType,
   enableFilters,
@@ -48,6 +50,9 @@ export function makeDatasetsTableColumns({
 }: MakeDatasetsTableColumnsArgs): ComponentProps<
   typeof DataView.Root<DatasetWithId>
 >['makeColumns'] {
+  // The datasets listing is fixed to one purpose and keeps to the columns that tell datasets apart.
+  const showFilesetColumns = variant === 'filesets';
+
   // Column definitions
   const makeColumns: ComponentProps<typeof DataView.Root<DatasetWithId>>['makeColumns'] = (
     { accessor },
@@ -72,7 +77,8 @@ export function makeDatasetsTableColumns({
       }),
       accessor((row) => getStorageBackend(row.storage), {
         id: 'storage_type',
-        header: 'Storage Backend',
+        header: variant === 'datasets' ? 'Storage Type' : 'Storage Backend',
+        enableSorting: enableFilters,
         size: 130,
         meta: {
           filter: {
@@ -105,73 +111,77 @@ export function makeDatasetsTableColumns({
           );
         },
       }),
-      accessor((row) => row.purpose, {
-        id: 'purpose',
-        header: 'Purpose',
-        size: 110,
-        meta: {
-          filter: {
-            label: 'Purpose',
-            type: 'multi-select',
-            options: [
-              { value: FilesetPurpose.dataset, label: 'Dataset' },
-              { value: FilesetPurpose.environment, label: 'Environment' },
-              { value: FilesetPurpose.model, label: 'Model' },
-              { value: FilesetPurpose.generic, label: 'Generic' },
-            ],
+      showFilesetColumns &&
+        accessor((row) => row.purpose, {
+          id: 'purpose',
+          header: 'Purpose',
+          size: 110,
+          meta: {
+            filter: {
+              label: 'Purpose',
+              type: 'multi-select',
+              options: [
+                { value: FilesetPurpose.dataset, label: 'Dataset' },
+                { value: FilesetPurpose.environment, label: 'Environment' },
+                { value: FilesetPurpose.model, label: 'Model' },
+                { value: FilesetPurpose.generic, label: 'Generic' },
+              ],
+            },
           },
-        },
-        cell({ row }) {
-          const purpose = row.original?.purpose;
-          if (!purpose) return null;
-          const color = PURPOSE_TAG_COLORS[purpose];
-          return (
-            <Tag
-              color={color}
-              kind="outline"
-              density="compact"
-              readOnly
-              data-testid={`purpose-pill-${purpose}`}
-            >
-              {PURPOSE_LABELS[purpose] ?? purpose}
-            </Tag>
-          );
-        },
-      }),
-      accessor((row) => getStoragePath(row.storage), {
-        id: 'path',
-        header: 'Path',
-        size: 200,
-        cell({ row }) {
-          const path = getStoragePath(row.original?.storage);
-          return path ? (
-            <Text className="whitespace-normal break-all" title={path}>
-              {path}
-            </Text>
-          ) : null;
-        },
-      }),
-      accessor('description', {
-        header: 'Description',
-        cell({ row }) {
-          return (
-            <Text className="truncate" title={row.original?.description}>
-              {row.original?.description}
-            </Text>
-          );
-        },
-      }),
-      accessor('created_by', {
-        header: 'Created By',
-        size: 150,
-        cell({ row }) {
-          return (
-            <Text className="truncate" title={row.original?.created_by ?? undefined}>
-              {row.original?.created_by ?? EMPTY_FIELD_VALUE}
-            </Text>
-          );
-        },
-      }),
+          cell({ row }) {
+            const purpose = row.original?.purpose;
+            if (!purpose) return null;
+            const color = PURPOSE_TAG_COLORS[purpose];
+            return (
+              <Tag
+                color={color}
+                kind="outline"
+                density="compact"
+                readOnly
+                data-testid={`purpose-pill-${purpose}`}
+              >
+                {PURPOSE_LABELS[purpose] ?? purpose}
+              </Tag>
+            );
+          },
+        }),
+      showFilesetColumns &&
+        accessor((row) => getStoragePath(row.storage), {
+          id: 'path',
+          header: 'Path',
+          size: 200,
+          cell({ row }) {
+            const path = getStoragePath(row.original?.storage);
+            return path ? (
+              <Text className="whitespace-normal break-all" title={path}>
+                {path}
+              </Text>
+            ) : null;
+          },
+        }),
+      showFilesetColumns &&
+        accessor('description', {
+          header: 'Description',
+          cell({ row }) {
+            return (
+              <Text className="truncate" title={row.original?.description}>
+                {row.original?.description}
+              </Text>
+            );
+          },
+        }),
+      showFilesetColumns &&
+        accessor('created_by', {
+          header: 'Created By',
+          size: 150,
+          cell({ row }) {
+            return (
+              <Text className="truncate" title={row.original?.created_by ?? undefined}>
+                {row.original?.created_by ?? EMPTY_FIELD_VALUE}
+              </Text>
+            );
+          },
+        }),
       accessor('created_at', {
         id: 'created_at',
         header: 'Created',

@@ -150,6 +150,9 @@ export const getWorkspaceBaseModelsRoute = (
   return query ? `${path}?${query}` : path;
 };
 
+export const getWorkspaceDatasetsRoute = (workspace: string) =>
+  generatePath(ROUTES.workspace.datasets, { workspace });
+
 export const getWorkspaceFilesetsRoute = (workspace: string) => {
   const searchParams = new URLSearchParams(window.location.search);
   const baseUrl = generatePath(ROUTES.workspace.filesets, { workspace });
