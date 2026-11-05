@@ -751,8 +751,9 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
-            # 409: the key belongs to a different request; 422: nothing was accepted. Anything else may have been.
-            if isinstance(exc, TasksetRunSubmitError) and exc.status_code not in (409, 422) and taskset_ref:
+            # May be accepted: no answer, a 5xx, or a 403 from a downstream check partway through the submit.
+            # Any other status (400, 401, 404, 409, 422, 429) means the server refused it.
+            if isinstance(exc, TasksetRunSubmitError) and taskset_ref and _may_be_accepted(exc.status_code):
                 echo(
                     "The run may already be accepted. To check or finish it without starting a second run, submit "
                     f"with the same key: {rerun(taskset_ref, idempotency_key=exc.idempotency_key)}",
@@ -935,6 +936,11 @@ def _published(publication: PublicationOutcome | None) -> str:
     if _text(publication.status) == "completed":
         return f"✓ {publication.trial_count} trials"
     return f"✗ {publication.error or 'failed'}"
+
+
+def _may_be_accepted(status_code: int | None) -> bool:
+    """Whether a failed submit may still have been accepted: no answer, a 5xx, or a downstream 403."""
+    return status_code is None or status_code == 403 or status_code >= 500
 
 
 def _not_found(workspace: str, run_id: str) -> SelectionError:
@@ -1347,9 +1353,9 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
         workspace = client.resolve_workspace(workspace)
         taskset_runs = Evaluator.from_client(client).taskset_runs
         try:
-            run = taskset_runs.retrieve(run_id, workspace=workspace)
             while True:
-                tasks = list(taskset_runs.iter_tasks(run_id, workspace=workspace))
+                run = taskset_runs.retrieve(run_id, workspace=workspace)  # once per refresh: header and rows agree
+                tasks = list(taskset_runs.iter_tasks(run))
                 bundle = newest_bundle_job(client, run_id, workspace=workspace)
                 if output_json:
                     body = {
@@ -1365,7 +1371,6 @@ def add_progress_commands(runs: typer.Typer, client_factory: Callable[[], NemoCl
                     return
                 time.sleep(poll_seconds)
                 typer.echo("")
-                run = taskset_runs.retrieve(run_id, workspace=workspace)
         except NotFoundError as exc:
             typer.echo(f"Error: {_not_found(workspace, run_id)}", err=True)
             raise typer.Exit(code=1) from exc

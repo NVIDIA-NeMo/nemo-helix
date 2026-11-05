@@ -822,8 +822,8 @@ def _runs_app() -> typer.Typer:
 
 @pytest.mark.parametrize(
     ("status", "advised"),
-    [(403, True), (500, True), (None, True), (409, False), (422, False)],
-    ids=["403", "5xx", "transport", "409", "422"],
+    [(403, True), (500, True), (None, True), (400, False), (404, False), (409, False), (422, False), (429, False)],
+    ids=["403", "5xx", "transport", "400", "404", "409", "422", "429"],
 )
 def test_a_failed_submit_names_its_key_and_advises_a_rerun_only_when_the_run_may_be_accepted(
     submitting, status, advised

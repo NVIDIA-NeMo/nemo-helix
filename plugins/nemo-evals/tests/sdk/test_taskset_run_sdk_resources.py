@@ -47,6 +47,7 @@ from nemo_helix_plugin.client.errors import (
     PermissionDeniedError,
     UnprocessableEntityError,
 )
+from nemo_helix_plugin.client.retry import retry_delay
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.evals.client import AsyncEvaluatorClient, EvaluatorClient
 
@@ -170,6 +171,16 @@ def make_runs(request: pytest.FixtureRequest) -> Callable[..., Runs]:
     return make
 
 
+REAL_SUBMIT_RETRY = taskset_run_resources.SUBMIT_RETRY  # captured before no_backoff zeroes its backoff
+
+
+def test_submit_retries_for_about_30_seconds():
+    """2, 4, 8, 16 s: long enough to ride out an API pod restart after minutes of image builds."""
+    failure = httpx.ConnectError("down")
+    delays = [retry_delay(REAL_SUBMIT_RETRY, attempt, failure) for attempt in range(REAL_SUBMIT_RETRY.max_retries)]
+    assert delays == [2, 4, 8, 16]
+
+
 @pytest.fixture(autouse=True)
 def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
@@ -262,21 +273,21 @@ def test_submit_resends_when_nothing_was_sent(make_runs, error):
 
 
 @pytest.mark.parametrize("error", [httpx.ConnectError, httpx.ConnectTimeout])
-def test_submit_gives_up_after_three_unsent_attempts(make_runs, error):
+def test_submit_gives_up_after_five_unsent_attempts(make_runs, error):
     handler = Sequence(fail(error))
     with pytest.raises(TasksetRunSubmitError) as raised:
         make_runs(handler).submit(harbor_request(key=None))
-    assert len(handler.requests) == 3
+    assert len(handler.requests) == 5
     assert raised.value.status_code is None
     assert raised.value.idempotency_key == json.loads(handler.requests[0].content)["idempotency_key"]
 
 
 @pytest.mark.parametrize("status", [503, 429])
-def test_submit_gives_up_after_three_retryable_answers(make_runs, status):
+def test_submit_gives_up_after_five_retryable_answers(make_runs, status):
     handler = Sequence(error_response(status))
     with pytest.raises(TasksetRunSubmitError) as raised:
         make_runs(handler).submit(harbor_request())
-    assert len(handler.requests) == 3
+    assert len(handler.requests) == 5
     assert raised.value.status_code == status
 
 
@@ -523,6 +534,13 @@ def test_iter_tasks_is_an_async_iterator():
         return [t.name async for t in tasks]
 
     assert asyncio.run(names()) == ["hello", "sum", "sort"]
+
+
+def test_iter_tasks_takes_a_fetched_run_without_reading_it_again(make_runs):
+    platform = Platform()
+    run = TasksetRunStatus.model_validate(run_status())
+    assert [t.name for t in make_runs(platform).iter_tasks(run)] == ["hello", "sum", "sort"]
+    assert platform.count(f"{RUNS}/{RUN_ID}") == 0
 
 
 def test_iter_tasks_reads_a_pinned_taskset_once_per_resource(make_runs):

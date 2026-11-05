@@ -37,7 +37,9 @@ from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict
 
 SUBMIT_RETRY = RetryPolicy(
-    max_retries=2,
+    # 2, 4, 8, 16 s (about 30 s): a submit can follow minutes of image builds, so ride out an API pod restart.
+    max_retries=4,
+    backoff_base=2.0,
     # A gateway 502/504 without x-should-retry may come after the server took the body: not resent.
     retryable_status_codes=(429, 503),
     respect_retry_decision_headers=True,
@@ -241,10 +243,11 @@ class EvaluatorTasksetRunsResource:
         )
         return self._client.send(request).data()
 
-    def iter_tasks(self, run_id: str, *, workspace: str | None = None) -> Iterator[NamedTask]:
+    def iter_tasks(self, run: str | TasksetRunStatus, *, workspace: str | None = None) -> Iterator[NamedTask]:
         """Every task of the run in task-index order, with its name in the pinned taskset.
 
-        Fetches the run, the pinned taskset revision (once per resource) and every ``/tasks`` page. A task whose
+        ``run`` is a run ID, or a run you already fetched, so its rows match what you show from it.
+        Fetches the run (unless given), the pinned taskset revision (once per resource) and every ``/tasks`` page. A task whose
         row the controller hasn't created yet has ``task=None``. If the taskset can't be read (403/404), each
         task falls back to its member name (``task-<i>``) and only existing rows are yielded.
 
@@ -253,7 +256,7 @@ class EvaluatorTasksetRunsResource:
 
         Every page is read before the first task is yielded, so a failed read raises before any task.
         """
-        yield from self._iter_tasks(self.retrieve(run_id, workspace=workspace))
+        yield from self._iter_tasks(self.retrieve(run, workspace=workspace) if isinstance(run, str) else run)
 
     def results(self, run_id: str, *, workspace: str | None = None) -> TasksetRunResults:
         """The run, each task with its result record, and the run's merged record once it's ready.
@@ -388,10 +391,13 @@ class AsyncEvaluatorTasksetRunsResource:
         )
         return (await self._client.send(request)).data()
 
-    async def iter_tasks(self, run_id: str, *, workspace: str | None = None) -> AsyncIterator[NamedTask]:
+    async def iter_tasks(
+        self, run: str | TasksetRunStatus, *, workspace: str | None = None
+    ) -> AsyncIterator[NamedTask]:
         """Every task of the run in task-index order, with its name in the pinned taskset.
 
-        Fetches the run, the pinned taskset revision (once per resource) and every ``/tasks`` page. A task whose
+        ``run`` is a run ID, or a run you already fetched, so its rows match what you show from it.
+        Fetches the run (unless given), the pinned taskset revision (once per resource) and every ``/tasks`` page. A task whose
         row the controller hasn't created yet has ``task=None``. If the taskset can't be read (403/404), each
         task falls back to its member name (``task-<i>``) and only existing rows are yielded.
 
@@ -400,7 +406,8 @@ class AsyncEvaluatorTasksetRunsResource:
 
         Every page is read before the first task is yielded, so a failed read raises before any task.
         """
-        for named in await self._iter_tasks(await self.retrieve(run_id, workspace=workspace)):
+        fetched = await self.retrieve(run, workspace=workspace) if isinstance(run, str) else run
+        for named in await self._iter_tasks(fetched):
             yield named
 
     async def results(self, run_id: str, *, workspace: str | None = None) -> TasksetRunResults:
