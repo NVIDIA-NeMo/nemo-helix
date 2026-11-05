@@ -51,18 +51,14 @@ def _onto_proxy(url: str, origin: str) -> str:
     return urlsplit(url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
 
 
-def _gateway_onto_proxy(url: str, origin: str) -> str:
-    """The proxy forwards onto ``NHX_BASE_URL``, which carries any ingress prefix itself, so drop the URL's."""
-    parsed = urlsplit(url)
-    return _onto_proxy(
-        parsed._replace(path=parsed.path[parsed.path.index(PLATFORM_IGW_PATH_MARKER) :]).geturl(), origin
-    )
+def _routes_through_proxy(url: object) -> bool:
+    return is_gateway_url(url) and urlsplit(url).path.startswith(PLATFORM_IGW_PATH_MARKER)
 
 
 def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
     models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
     for model in models:
-        if is_gateway_url(model.base_url or model.settings.get("base_url")):
+        if _routes_through_proxy(model.base_url or model.settings.get("base_url")):
             yield model
 
 
@@ -104,14 +100,14 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
 
     runtime_config = config.model_copy(deep=True)
     for model in _gateway_models(runtime_config):
-        model.base_url = _gateway_onto_proxy(model.base_url or model.settings["base_url"], origin)
+        model.base_url = _onto_proxy(model.base_url or model.settings["base_url"], origin)
         model.settings.pop("base_url", None)
     return runtime_config
 
 
 def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
     """:func:`routes_inference_through_gateway` for a translated Fabric config."""
-    return bool(gateway_models(config))
+    return any(_routes_through_proxy(model.base_url) for model in gateway_models(config))
 
 
 def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) -> dict[str, Any]:
@@ -121,9 +117,9 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
 
     runtime_config = copy.deepcopy(config)
     for model in gateway_models(runtime_config):
-        if not isinstance(model.config, dict):
+        if not isinstance(model.config, dict) or not _routes_through_proxy(model.base_url):
             continue
-        model.config["base_url"] = _gateway_onto_proxy(model.base_url, origin)
+        model.config["base_url"] = _onto_proxy(model.base_url, origin)
         settings = model.config.get("settings")
         if isinstance(settings, dict):
             settings.pop("base_url", None)
