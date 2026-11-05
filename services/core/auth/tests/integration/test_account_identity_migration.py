@@ -90,7 +90,9 @@ def _identity_rows(client: TestClient, *, issuer: str, subject: str) -> list[Ide
     # Read on the platform's portal loop: the per-loop engine registry only knows the
     # loop the service initialized on, so a fresh asyncio.run() loop would raise.
     assert client.portal is not None
-    return client.portal.call(_read_identity_rows, issuer=issuer, subject=subject)
+    # BlockingPortal.call() forwards positional args only, so wrap in a lambda
+    # to pass the keyword arguments to the async helper.
+    return client.portal.call(lambda: _read_identity_rows(issuer=issuer, subject=subject))
 
 
 def _create_workspace(client: TestClient, workspace: str) -> None:
