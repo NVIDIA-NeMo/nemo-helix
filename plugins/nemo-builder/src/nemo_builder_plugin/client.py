@@ -21,7 +21,7 @@ _IMAGES = "/apis/builder/v2/workspaces/{workspace}/container-images"
 
 class ListContainerImagesQueryParams(TypedDict, total=False):
     job: str
-    status: Literal["queued", "pending", "ready", "failed"]
+    status: Literal["pending", "ready", "failed"]
     page: int
     page_size: int
 

@@ -102,6 +102,20 @@ def test_the_build_steps_profiles_and_config() -> None:
         assert profile.config.ttl_seconds_before_active == 60 * 60
     # Build pods run in another namespace, so the platform's URL must name its own.
     assert config["platform"]["base_url"] == "http://nemo-helix-api.nhx.svc:8080"
+    # Builder has nothing to set: the dev registry is off.
+    assert "builder" not in config
+
+
+def test_jobs_caps_the_builds_on_each_build_profile() -> None:
+    profiles = _profiles(_platform_config(_helm_template(*ENABLED, "--set", "builder.maxConcurrentBuilds=5")))
+    assert {name: profiles[name].config.max_active_jobs for name in BUILD_PROFILES} == dict.fromkeys(BUILD_PROFILES, 5)
+
+
+def test_no_cap_leaves_the_build_profiles_at_the_jobs_default() -> None:
+    values = {"builder": {"enabled": True, "maxConcurrentBuilds": None}}
+    profiles = _profiles(_platform_config(_helm_template(values=values)))
+    default = KubernetesJobExecutionProfile.model_validate({"profile": "x", "config": {}}).config.max_active_jobs
+    assert {profiles[name].config.max_active_jobs for name in BUILD_PROFILES} == {default}
 
 
 def test_a_users_profiles_keep_the_builders() -> None:
