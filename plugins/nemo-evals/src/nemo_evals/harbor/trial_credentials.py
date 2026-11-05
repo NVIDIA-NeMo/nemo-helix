@@ -31,6 +31,7 @@ from harbor.trial.hooks import TrialHookEvent
 from nemo_evals.gateway.policy import ModelAccess, ModelPolicy
 from nemo_evals.gateway.spans import export_request, trial_root_span
 from nemo_evals.gateway.tokens import TOKEN_LIFETIME_SEC, TrialClaims, unsigned_token
+from nemo_evals.harbor.trial_progress import will_retry
 from nemo_evals.intake.mapping import session_id_for
 from nemo_helix_plugin.auth.access_keys.client import AsyncAccessKeysClient
 from nemo_helix_plugin.auth.access_keys.types import AccessKeyCreateRequest
@@ -206,14 +207,7 @@ class _JobTrials:
 
     def _will_retry(self, event: TrialHookEvent) -> bool:
         """Whether Harbor will run the trial again, by the rule its trial queue applies after each attempt."""
-        error = event.result.exception_info
-        if error is None:
-            return False
-        if self._retry.exclude_exceptions and error.exception_type in self._retry.exclude_exceptions:
-            return False
-        if self._retry.include_exceptions and error.exception_type not in self._retry.include_exceptions:
-            return False
-        return self._ends[event.config.trial_name] <= self._retry.max_retries
+        return will_retry(self._retry, event.result.exception_info, self._ends[event.config.trial_name])
 
     async def finish(self) -> None:
         """Record a failed root span for each trial the job stopped mid-attempt, then revoke every live key.
