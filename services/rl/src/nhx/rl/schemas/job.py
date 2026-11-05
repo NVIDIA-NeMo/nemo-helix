@@ -157,7 +157,7 @@ class RewardScalingParams(RlSchema):
 
 
 class LoRAParams(RlSchema):
-    """LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No merge-at-export."""
+    """LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). Merge-at-export follows ``finetuning_type``."""
 
     rank: int = Field(default=16, gt=0, description="LoRA rank (r); maps to NeMo-RL lora_cfg.dim.")
     alpha: int = Field(default=32, gt=0, description="LoRA scaling factor (effective lr multiplier = alpha/rank).")
@@ -340,7 +340,10 @@ class GRPOTraining(_TrainingBase):
     learning_rate: float = Field(
         default=5e-6,
         gt=0.0,
-        description="Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights' and 1e-5 for 'lora'.",
+        description=(
+            "Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights' "
+            "and 1e-5 for 'lora' and 'lora_merged'."
+        ),
     )
     finetuning_type: Literal["all_weights", "lora", "lora_merged"] = Field(
         default="all_weights",

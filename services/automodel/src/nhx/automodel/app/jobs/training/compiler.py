@@ -188,6 +188,8 @@ def compile_training_step(
             expert_parallel_size=p.expert_parallel_size,
             num_gpus_per_node=p.num_gpus_per_node,
             num_nodes=p.num_nodes,
+            # ModelRegistry-backed MoE architectures are checked in _configure_moe_backend.
+            enforce_text_moe_expert_parallel=False,
         )
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc

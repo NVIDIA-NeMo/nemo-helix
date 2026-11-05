@@ -354,6 +354,40 @@ def test_compile_training_step_copies_recorded_vision_traits() -> None:
     assert cfg["model"]["checkpoint_model_name"] == "Qwen2_5_VLForConditionalGeneration"
 
 
+def test_compile_training_step_allows_text_moe_without_expert_parallel() -> None:
+    """Unregistered text MoE keeps the standard Hugging Face path.
+
+    Expert parallel above 1 is required only for architectures in ModelRegistry,
+    and that check stays in ``_configure_moe_backend``.
+    """
+    from nemo_helix_plugin.models.types import ModelSpec
+    from nhx.automodel.app.jobs.training.compiler import compile_training_step
+
+    me = _make_mock_model_entity()
+    me.spec = ModelSpec.model_construct(
+        has_vision_tower=False,
+        has_audio_tower=False,
+        num_experts=8,
+        checkpoint_model_name="MixtralForCausalLM",
+        head_type="causal_lm",
+        chat_template=None,
+        moe_config=None,
+        is_embedding_model=False,
+    )
+    job_output = CustomizationJobOutput(
+        model="default/test-target",
+        dataset="default/my-dataset",
+        training=SFTTraining(recipe="sft", parallelism={"num_gpus_per_node": 8}),
+        output=_output(output_type=OutputNameType.MODEL),
+    )
+
+    step = compile_training_step(job_output, base_env=[], me=me)
+    cfg = step.config if hasattr(step, "config") else step["config"]
+
+    assert cfg["model"]["num_experts"] == 8
+    assert cfg["parallelism"]["expert_parallel_size"] is None
+
+
 def test_compile_training_step_rejects_distillation_on_a_vision_checkpoint() -> None:
     from nemo_helix_plugin.models.types import ModelSpec
     from nhx.automodel.app.jobs.training.compiler import compile_training_step

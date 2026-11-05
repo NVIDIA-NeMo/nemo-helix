@@ -4386,7 +4386,7 @@ components:
           exclusiveMinimum: 0.0
           title: Learning Rate
           description: Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights'
-            and 1e-5 for 'lora'.
+            and 1e-5 for 'lora' and 'lora_merged'.
           default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
@@ -5288,8 +5288,8 @@ components:
       additionalProperties: false
       type: object
       title: RlLoRAParams
-      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No
-        merge-at-export.
+      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). Merge-at-export
+        follows ``finetuning_type``.
     RlOutputRequest:
       properties:
         name:

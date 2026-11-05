@@ -63,7 +63,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` `1e-5` | Peak LR. |
+| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` or `"lora_merged"` `1e-5` | Peak LR. |
 | `min_learning_rate` | `null` | Floor for cosine decay. |
 | `weight_decay` | `0.01` | |
 | `adam_beta1` / `adam_beta2` | `0.9` / `0.999` | Adam betas. |
