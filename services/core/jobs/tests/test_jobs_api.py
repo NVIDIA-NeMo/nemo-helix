@@ -623,33 +623,43 @@ def test_create_job_secret_validation_error_returns_safe_guidance():
 
 
 @pytest.mark.asyncio
-async def test_create_job_conflict_sanitizes_log_fields(
-    test_client: AsyncClient,
-    mock_dispatcher: JobDispatcher,
-    caplog,
-):
-    with patch.object(mock_dispatcher, "create_job", new=AsyncMock(side_effect=ValueError("conflict"))):
-        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
-            response = await test_client.post(
-                "/apis/jobs/v2/workspaces/default%0Aforged/jobs",
-                json={
-                    "name": "dup-job",
-                    "source": "test-source",
-                    "spec": {},
-                    "platform_spec": {
-                        "steps": [
-                            {
-                                "name": "valid-step",
-                                "executor": TestConstants.TEST_EXECUTOR.model_dump(mode="json"),
-                                "config": {},
-                            }
-                        ]
-                    },
-                },
-            )
+async def test_create_job_conflict_sanitizes_log_fields(monkeypatch, caplog):
+    """Keep defense-in-depth logging safe even when a direct caller bypasses HTTP validation."""
+    from nhx.common.auth.models import Principal
+    from nhx.core.jobs.api.v2.jobs import endpoints
 
-    assert response.status_code == 409
+    dispatcher = AsyncMock()
+    dispatcher.create_job.side_effect = ValueError("conflict")
+    auth_client = MagicMock()
+    auth_client.principal = Principal(id="user:example")
+    request = CreateHelixJobRequest(
+        name="dup-job",
+        source="test-source",
+        spec={},
+        platform_spec=HelixJobSpec(
+            steps=[
+                HelixJobStepSpec(
+                    name="valid-step",
+                    executor=SubprocessExecutionProvider(provider="subprocess", profile="default", command=["true"]),
+                )
+            ]
+        ),
+    )
+    # Logging safety must not depend on the host's configured execution profiles.
+    monkeypatch.setattr(endpoints, "validate_job_spec", lambda *args: None)
+    with (
+        caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
+        pytest.raises(HTTPException) as error,
+    ):
+        await endpoints.create_job(
+            workspace="default\nforged", request=request, auth_client=auth_client, dispatcher=dispatcher
+        )
+
+    assert error.value.status_code == 409
+    dispatcher.create_job.assert_awaited_once()
     message = next(record.getMessage() for record in caplog.records if "Failed to create job" in record.msg)
+    assert "defaultforged" in message
+    assert "default\nforged" not in message
     assert "\r" not in message
     assert "\n" not in message
 

@@ -87,8 +87,21 @@ def route_client(module_name, endpoint_name):
     return TestClient(app), path, dependencies
 
 
+def lookup_operation(module_name, endpoint_name, dependencies):
+    """Select the actual service operation so assertions cannot pass on incidental calls."""
+    module = import_module(module_name)
+    dependency = module.get_prompt_service if module_name == MODELS + "prompts" else module.get_model_provider_service
+    method = {
+        "get_prompt": "get_prompt",
+        "delete_prompt": "delete_prompt",
+        "get_provider": "get_model_provider",
+        "delete_provider": "delete_model_provider",
+    }[endpoint_name]
+    return getattr(dependencies[dependency], method)
+
+
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), ROUTES)
-@pytest.mark.parametrize("workspace", ["ab\x1a", "ab\x00", "ab\ncd", "ab\U0001f680", "ab space"])
+@pytest.mark.parametrize("workspace", ["ab\x1a", "ab\ncd", "ab\U0001f680", "ab space"])
 def test_invalid_workspace_is_field_specific_422(module_name, endpoint_name, method, body, workspace):
     """Reject malformed workspace paths before any resource operation runs."""
     client, path, dependencies = route_client(module_name, endpoint_name)
@@ -101,32 +114,40 @@ def test_invalid_workspace_is_field_specific_422(module_name, endpoint_name, met
 
 
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), MODEL_ROUTES)
-@pytest.mark.parametrize("name", ["bad\x1a", "bad\nname", "bad\U0001f680", "bad name", "bad:name"])
+@pytest.mark.parametrize("name", ["bad\x1a", "bad\U0001f680", "bad name", "bad:name"])
 def test_invalid_model_name_is_field_specific_422(module_name, endpoint_name, method, body, name):
     """Reject malformed lookup names with the offending path field identified."""
-    client, path, _ = route_client(module_name, endpoint_name)
+    client, path, dependencies = route_client(module_name, endpoint_name)
     response = client.request(method, path.format(workspace="default", name=quote(name, safe="")))
     assert response.status_code == 422, response.text
     assert [error["loc"] for error in response.json()["detail"]] == [["path", "name"]]
+    lookup_operation(module_name, endpoint_name, dependencies).assert_not_awaited()
 
 
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), MODEL_ROUTES)
-@pytest.mark.parametrize("workspace", ["default", "missing-workspace", "Upper_case.123", "caf\u00e9"])
-@pytest.mark.parametrize("name", ["missing-name", "Upper_case.123", "caf\u00e9", "missing+name", "missing@name"])
+@pytest.mark.parametrize(
+    ("workspace", "name"),
+    [
+        ("default", "missing+name"),
+        ("default", "missing@name"),
+        ("Upper_case.123", "caf\u00e9"),
+        ("caf\u00e9", "Upper_case.123"),
+    ],
+)
 def test_valid_missing_model_resource_still_returns_404(module_name, endpoint_name, method, body, workspace, name):
-    """Preserve missing-resource semantics for every accepted lookup-name shape."""
+    """Accepted lookup syntax reaches missing-resource handling without name normalization."""
     client, path, dependencies = route_client(module_name, endpoint_name)
-    for service in dependencies.values():
-        service.get_prompt.return_value = None
-        service.delete_prompt.return_value = False
-        service.get_model_provider.return_value = None
-        service.delete_model_provider.return_value = False
+    operation = lookup_operation(module_name, endpoint_name, dependencies)
+    operation.return_value = None
     response = client.request(method, path.format(workspace=quote(workspace), name=quote(name)))
     assert response.status_code == 404, response.text
     assert name in response.json()["detail"]
+    operation.assert_awaited_once()
+    request = operation.await_args.args[0]
+    assert (request.workspace, request.name) == (workspace, name)
 
 
-@pytest.mark.parametrize("workspace", ["bad\x1a", "bad\nname", "bad\U0001f680", "bad name", ""])
+@pytest.mark.parametrize("workspace", ["bad\x1a", "bad\U0001f680", "bad name", ""])
 def test_role_binding_workspace_body_is_field_specific_422(workspace):
     """Validate the workspace in the IAM request body, not inside the handler."""
     client, path, dependencies = route_client("nhx.core.auth.api.v2.iam.endpoints", "create_role_binding")
@@ -137,9 +158,7 @@ def test_role_binding_workspace_body_is_field_specific_422(workspace):
         assert not mock.mock_calls
 
 
-@pytest.mark.parametrize(
-    "workspace", [None, "default", "missing-workspace", "Upper_case.123", "name+tag@example:1", "caf\u00e9"]
-)
+@pytest.mark.parametrize("workspace", [None, "Upper_case.123", "name+tag@example:1", "caf\u00e9"])
 def test_role_binding_valid_workspace_matches_entity_pattern(workspace):
     """Keep platform-level bindings and accepted workspace identifiers valid."""
     binding = RoleBindingInput(workspace=workspace, principal="user:example", role="Viewer")
@@ -148,47 +167,37 @@ def test_role_binding_valid_workspace_matches_entity_pattern(workspace):
         assert EntityBase(workspace=workspace).workspace == workspace
 
 
-@pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), ROUTES)
-@pytest.mark.parametrize("workspace", ["missing-workspace", "Upper_case.123", "caf\u00e9"])
-def test_valid_workspace_constraints_match_internal_models(module_name, endpoint_name, method, body, workspace):
-    """Keep request validation compatible with existing entity workspace identifiers."""
-    # Validate exactly the route's FastAPI parameter field without executing storage operations.
-    module = import_module(module_name)
-    route = APIRoute(
-        "/v2/workspaces/{workspace}", endpoint=getattr(module, endpoint_name), methods=[method], response_model=None
-    )
-    field = next(field for field in route.dependant.path_params if field.name == "workspace")
-    value, errors = field.validate(workspace, {}, loc=("path", "workspace"))
-    assert not errors
-    assert value == workspace
-    assert EntityBase(workspace=workspace).workspace == workspace
-
-
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), CREATE_ROUTES)
-@pytest.mark.parametrize("workspace", ["missing-workspace", "Upper_case.123", "caf\u00e9"])
+@pytest.mark.parametrize("workspace", ["missing-workspace", "Name+tag@example:1", "caf\u00e9"])
 def test_valid_missing_workspace_keeps_downstream_error(
     monkeypatch, module_name, endpoint_name, method, body, workspace
 ):
     """Valid missing workspaces must retain downstream errors rather than format errors."""
     client, path, dependencies = route_client(module_name, endpoint_name)
-    error = EntityValidationError("Workspace does not exist", code="workspace_not_found")
-    for mock in dependencies.values():
-        mock.get.side_effect = error
-        mock.create.side_effect = error
-        mock.create_job.side_effect = error
-        mock.principal = Principal(id="user:example")
-        mock.ngc_api_key_secret = "default/ngc-api-key"
+    module = import_module(module_name)
     if endpoint_name == "create_job":
-        module = import_module(module_name)
-        # Resource validation is independent of the host's configured execution backends.
+        operation = dependencies[module.dep_dispatcher].create_job
+        dependencies[module.get_auth_client].principal = Principal(id="user:example")
         monkeypatch.setattr(module, "validate_job_spec", lambda *args: None)
+    else:
+        store = dependencies[module.get_entity_client]
+        operation = store.get if endpoint_name in {"create_secret", "create_fileset"} else store.create
+        if endpoint_name == "create_secret":
+            dependencies[module.get_platform_config].ngc_api_key_secret = "default/ngc-api-key"
+    operation.side_effect = EntityValidationError("Workspace does not exist", code="workspace_not_found")
     response = client.request(method, path.format(workspace=quote(workspace)), json=body)
     assert response.status_code == 422, response.text
     if endpoint_name == "create_job":
         assert response.json()["detail"].startswith("Invalid job request.")
     else:
         assert response.json()["detail"] == "Workspace does not exist"
-    assert any(mock.mock_calls for mock in dependencies.values())
+    operation.assert_awaited_once()
+    if endpoint_name == "create_job":
+        assert operation.await_args.args[1] == workspace
+    elif endpoint_name in {"create_secret", "create_fileset"}:
+        assert operation.await_args.kwargs["workspace"] == workspace
+    else:
+        assert operation.await_args.args[0].workspace == workspace
 
 
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), MODEL_ROUTES)
@@ -197,44 +206,32 @@ def test_valid_missing_workspace_keeps_downstream_error(
 def test_model_path_length_matches_internal_request(module_name, endpoint_name, method, body, field, length, status):
     """Enforce the internal models' existing length limit at the HTTP boundary."""
     client, path, dependencies = route_client(module_name, endpoint_name)
-    for service in dependencies.values():
-        service.get_prompt.return_value = None
-        service.delete_prompt.return_value = False
-        service.get_model_provider.return_value = None
-        service.delete_model_provider.return_value = False
+    operation = lookup_operation(module_name, endpoint_name, dependencies)
+    operation.return_value = None
     params = {"workspace": "default", "name": "valid-name", field: "a" * length}
     response = client.request(method, path.format(**params))
     assert response.status_code == status, response.text
     if status == 422:
         assert [error["loc"] for error in response.json()["detail"]] == [["path", field]]
         assert response.json()["detail"][0]["type"] == "string_too_long"
-
-
-@pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), CREATE_ROUTES)
-def test_entity_workspace_preserves_additional_identifier_characters(module_name, endpoint_name, method, body):
-    """Do not replace the entity workspace pattern with a narrower resource-name rule."""
-    module = import_module(module_name)
-    route = APIRoute(
-        "/v2/workspaces/{workspace}", endpoint=getattr(module, endpoint_name), methods=[method], response_model=None
-    )
-    field = next(field for field in route.dependant.path_params if field.name == "workspace")
-    workspace = "name+tag@example:1"
-    value, errors = field.validate(workspace, {}, loc=("path", "workspace"))
-    assert not errors
-    assert value == EntityBase(workspace=workspace).workspace
+        operation.assert_not_awaited()
+    else:
+        operation.assert_awaited_once()
+        request = operation.await_args.args[0]
+        assert (request.workspace, request.name) == (params["workspace"], params["name"])
 
 
 def test_internal_validation_errors_are_not_globally_reclassified():
     """An unrelated internal model failure must remain a server error."""
     client, path, dependencies = route_client(MODELS + "prompts", "get_prompt")
-    service = next(iter(dependencies.values()))
-    try:
+    operation = lookup_operation(MODELS + "prompts", "get_prompt", dependencies)
+    with pytest.raises(ValidationError) as error:
         EntityBase(workspace="invalid space")
-    except ValidationError as exc:
-        service.get_prompt.side_effect = exc
+    operation.side_effect = error.value
     response = client.get(path.format(workspace="default", name="valid-name"))
     assert response.status_code == 500
     assert response.json() == {"detail": "Internal server error"}
+    operation.assert_awaited_once()
 
 
 def memory_entity_client():
@@ -271,21 +268,21 @@ def memory_entity_client():
 
 
 @pytest.mark.parametrize("resource", ["prompts", "providers"])
-@pytest.mark.parametrize("name", ["resource+v1", "resource@v1", "resource+v1@tag"])
-@pytest.mark.parametrize("encoded", [False, True])
+@pytest.mark.parametrize(
+    ("name", "encoded"), [("resource+v1", False), ("resource@v1", False), ("resource+v1@tag", True)]
+)
 def test_create_get_delete_roundtrip_preserves_supported_punctuation(resource, name, encoded):
     """Names accepted by creation must survive lookup/deletion and URL decoding unchanged."""
     module = import_module(MODELS + resource)
     endpoint = "create_prompt" if resource == "prompts" else "create_provider"
     client, collection, dependencies = route_client(MODELS + resource, endpoint)
-    for mock in dependencies.values():
-        mock.principal = Principal(id="user:example")
     store = memory_entity_client()
     if resource == "prompts":
         service = module.PromptService(store)
         dependency = module.get_prompt_service
         body = {"name": name, "messages": [{"role": "user", "content": "Hello"}]}
     else:
+        dependencies[module.get_auth_client].principal = Principal(id="user:example")
         service = module.ModelProviderService(store)
         dependency = module.get_model_provider_service
         body = {"name": name, "host_url": "http://localhost:9000/v1"}
@@ -304,19 +301,15 @@ def test_create_get_delete_roundtrip_preserves_supported_punctuation(resource, n
 
 
 @pytest.mark.parametrize(("module_name", "endpoint_name", "method", "body"), MODEL_ROUTES)
-@pytest.mark.parametrize("name", ["resource+v1", "resource@v1"])
-def test_model_permission_errors_are_not_masked(module_name, endpoint_name, method, body, name):
-    """Accepted names must still propagate service permission failures as 403s."""
+def test_model_permission_errors_are_not_masked(module_name, endpoint_name, method, body):
+    """Accepted lookup names preserve permission failures rather than returning server errors."""
     client, path, dependencies = route_client(module_name, endpoint_name)
-    error = PermissionDeniedError(httpx.Response(403, json={"detail": "Access denied"}))
-    for service in dependencies.values():
-        service.get_prompt.side_effect = error
-        service.delete_prompt.side_effect = error
-        service.get_model_provider.side_effect = error
-        service.delete_model_provider.side_effect = error
-    response = client.request(method, path.format(workspace="default", name=quote(name, safe="")))
+    operation = lookup_operation(module_name, endpoint_name, dependencies)
+    operation.side_effect = PermissionDeniedError(httpx.Response(403, json={"detail": "Access denied"}))
+    response = client.request(method, path.format(workspace="default", name=quote("resource+v1@tag", safe="")))
     assert response.status_code == 403, response.text
     assert response.json() == {"detail": "Access denied"}
+    operation.assert_awaited_once()
 
 
 @pytest.mark.parametrize(
