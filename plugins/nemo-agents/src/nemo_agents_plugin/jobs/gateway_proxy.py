@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 
 import uvicorn
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
-from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_PATH_MARKER, gateway_models, is_gateway_url
+from nemo_agents_plugin.fabric.gateway_models import gateway_models, is_gateway_url
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.auth import EnvAccessToken, TokenProviderAuth
 from nemo_helix_plugin.client.auth_proxy import build_auth_proxy_app
@@ -51,14 +51,10 @@ def _onto_proxy(url: str, origin: str) -> str:
     return urlsplit(url)._replace(scheme=proxy.scheme, netloc=proxy.netloc).geturl()
 
 
-def _routes_through_proxy(url: object) -> bool:
-    return is_gateway_url(url) and urlsplit(url).path.startswith(PLATFORM_IGW_PATH_MARKER)
-
-
 def _gateway_models(config: AgentConfig) -> Iterator[ModelConfig]:
     models = [*config.models.values(), *(h.model for h in config.harnesses.values() if h.model is not None)]
     for model in models:
-        if _routes_through_proxy(model.base_url or model.settings.get("base_url")):
+        if is_gateway_url(model.base_url or model.settings.get("base_url")):
             yield model
 
 
@@ -107,7 +103,7 @@ def rewrite_gateway_models(config: AgentConfig, origin: str | None) -> AgentConf
 
 def routes_fabric_inference_through_gateway(config: dict[str, Any]) -> bool:
     """:func:`routes_inference_through_gateway` for a translated Fabric config."""
-    return any(_routes_through_proxy(model.base_url) for model in gateway_models(config))
+    return bool(gateway_models(config))
 
 
 def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) -> dict[str, Any]:
@@ -117,7 +113,7 @@ def rewrite_fabric_gateway_models(config: dict[str, Any], origin: str | None) ->
 
     runtime_config = copy.deepcopy(config)
     for model in gateway_models(runtime_config):
-        if not isinstance(model.config, dict) or not _routes_through_proxy(model.base_url):
+        if not isinstance(model.config, dict):
             continue
         model.config["base_url"] = _onto_proxy(model.base_url, origin)
         settings = model.config.get("settings")

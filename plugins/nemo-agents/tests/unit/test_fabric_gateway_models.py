@@ -5,7 +5,7 @@ from types import MappingProxyType
 from typing import Any
 
 import pytest
-from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_API_KEY_ENV, gateway_models
+from nemo_agents_plugin.fabric.gateway_models import PLATFORM_IGW_API_KEY_ENV, gateway_models, is_gateway_url
 
 IGW = "http://platform/apis/inference-gateway/v2/workspaces/ws"
 
@@ -54,16 +54,24 @@ def test_the_virtual_model_comes_from_the_route(model: dict[str, Any], virtual_m
         pytest.param(
             {"model": "vm", "base_url": "", "settings": {"base_url": f"{IGW}/openai/-/v1"}}, id="empty-base-url"
         ),
-        pytest.param(
-            {"model": "vm", "base_url": "https://helix.test/nemo/apis/inference-gateway/v2/workspaces/ws/openai/-/v1"},
-            id="path-prefix",
-        ),
     ],
 )
 def test_a_gateway_url_is_found_where_the_runtime_reads_it(model: dict[str, Any]) -> None:
     [found] = gateway_models(_config(default=model))
 
     assert found.virtual_model == "ws/vm"
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        pytest.param("https://helix.test/nemo/apis/inference-gateway/v2/workspaces/ws/openai/-/v1", id="path-prefix"),
+    ],
+)
+def test_a_gateway_route_behind_a_path_prefix_is_not_a_gateway_url(base_url: str) -> None:
+    """Prefixed ingress is unsupported: the job proxy would forward the prefix on top of ``NHX_BASE_URL``'s."""
+    assert not is_gateway_url(base_url)
+    assert gateway_models(_config(default={"model": "vm", "base_url": base_url})) == []
 
 
 @pytest.mark.parametrize(

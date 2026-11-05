@@ -16,7 +16,7 @@ PLATFORM_IGW_PATH_MARKER = "/apis/inference-gateway/"
 PLATFORM_IGW_API_KEY_ENV = "NEMO_AGENTS_IGW_API_KEY"
 
 _VIRTUAL_MODEL_ROUTE = re.compile(
-    r"/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/(?:model/(?P<name>[^/]+)/-|openai/-)(?:/|$)"
+    r"^/apis/inference-gateway/v2/workspaces/(?P<workspace>[^/]+)/(?:model/(?P<name>[^/]+)/-|openai/-)(?:/|$)"
 )
 
 
@@ -36,8 +36,8 @@ class GatewayModel:
 
 
 def is_gateway_url(url: object) -> TypeGuard[str]:
-    """Whether ``url`` calls the Inference Gateway, behind any host and path prefix."""
-    return isinstance(url, str) and PLATFORM_IGW_PATH_MARKER in urlsplit(url).path
+    """Whether ``url`` calls the Inference Gateway, behind any host; a path prefix in front of the route is unsupported."""
+    return isinstance(url, str) and urlsplit(url).path.startswith(PLATFORM_IGW_PATH_MARKER)
 
 
 def model_base_url(model: Mapping[str, Any]) -> str | None:
