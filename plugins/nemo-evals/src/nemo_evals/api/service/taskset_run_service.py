@@ -22,6 +22,7 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    TasksetRunTaskDetail,
     request_digest,
     to_status,
     to_task,
@@ -73,6 +74,7 @@ from nemo_evals.taskset_runs.specs import PlannedAgentLayers, RunIntakePublicati
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
 from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs
+from nemo_evals.taskset_runs.trials import count_trials, reported_trials
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
@@ -228,7 +230,7 @@ class TasksetRunService:
             clock: Aware acceptance clock, invoked after resolution.
             platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
             preparer: Checks every task, then reads each one's images, before acceptance.
-            task_jobs: Jobs operations submit's checks need; defaults to the Jobs service as the caller.
+            task_jobs: Jobs reads for submit's checks and task trials; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
             auth_context: The caller's full principal, stored on each new run for the run controller to
                 create on the caller's behalf; None with auth off.
@@ -423,6 +425,41 @@ class TasksetRunService:
             return None
         wait = timedelta(seconds=harbor.agent_layer_wait_seconds)
         return PlannedAgentLayers(key=agent_layer_key(agent), wait_until=self._clock() + wait)
+
+    async def get_task(self, workspace: str, run_id: str, task_index: int) -> TasksetRunTaskDetail | None:
+        """Read one task of a run, with its trials read from its task Job on this request.
+
+        The Job is read as the caller. If the caller can't read it, the Job no longer exists or can't be reached,
+        or it reported no trials, the task is returned without ``trials``.
+
+        Returns:
+            The task with its trials, or None when the run or that task's member doesn't exist.
+        """
+        run = await self._store.find(workspace, run_id)
+        if run is None:
+            return None
+
+        member = await self._store.find_member(run, task_index)
+        if member is None:
+            return None
+
+        task = TasksetRunTaskDetail.model_validate(to_task(member).model_dump())
+        if member.task_job is None:
+            return task
+
+        try:
+            details = await self._task_jobs.status_details(workspace, member.task_job)
+        except NemoClientError as exc:
+            # Trials are display-only: a Jobs read that fails mustn't fail a read of the stored task.
+            logger.info("Can't read the trials of task Job %s: %s", member.task_job, type(exc).__name__)
+            return task
+
+        trials = reported_trials(details)
+        if not trials:
+            return task
+
+        # Count from the list just read, so the counts agree with it instead of the controller's last copy.
+        return task.model_copy(update={"trials": trials, "trial_counts": count_trials(trials)})
 
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
         """Authorize, freeze and atomically accept a run, or replay its stored status.

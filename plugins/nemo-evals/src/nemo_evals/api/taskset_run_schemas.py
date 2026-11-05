@@ -22,7 +22,7 @@ from nemo_evals.taskset_runs.entities import (
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
 from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
-from nemo_evals.taskset_runs.trials import TrialCounts
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialProgress
 from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -362,6 +362,18 @@ class TasksetRunTask(BaseModel):
         description=(
             "The task Job's trials counted by phase, as the controller last read them; every planned trial counts "
             "as pending until the Job reports."
+        ),
+    )
+
+
+class TasksetRunTaskDetail(TasksetRunTask):
+    """One task with each of its trials, as its task Job last reported them."""
+
+    trials: list[TrialProgress] | None = Field(
+        default=None,
+        description=(
+            "Each of the task's trials, read from its Job on this request; trial_counts is counted from this list. "
+            "Omitted before the task has a Job, when the Job reported no trials, or when the Job can't be read."
         ),
     )
 

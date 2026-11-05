@@ -454,13 +454,25 @@ def fake_preparer() -> FakePreparer:
 
 
 class FakeTaskJobs:
-    """In-memory ``TaskJobs``: ``subprocess_profiles`` are the profiles Jobs would run as host subprocesses."""
+    """In-memory ``TaskJobs``.
+
+    - ``subprocess_profiles``: the profiles Jobs would run as host subprocesses.
+    - ``details``: status details by Job name; a missing name is a missing Job.
+    - ``failures``: what reading a Job's status details raises, by Job name.
+    """
 
     def __init__(self) -> None:
         self.subprocess_profiles: set[str] = set()
+        self.details: dict[str, dict[str, Any]] = {}
+        self.failures: dict[str, Exception] = {}
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         return profile in self.subprocess_profiles
+
+    async def status_details(self, workspace: str, name: str) -> dict[str, Any] | None:
+        if name in self.failures:
+            raise self.failures[name]
+        return self.details.get(name)
 
 
 def _http_error[ErrorT: NemoHTTPError](cls: type[ErrorT], status: int) -> ErrorT:
