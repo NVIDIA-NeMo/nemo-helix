@@ -145,6 +145,27 @@ class S3StorageImpl(StorageImpl):
             return f"{self.config.prefix.rstrip('/')}/{path}"
         return path
 
+    def _storage_boundary(self) -> str:
+        """Get the S3 key prefix that scopes this fileset's directory.
+
+        For a configured prefix ``foo`` this is ``foo/``; for ``foo/`` it stays
+        ``foo/`` (``_full_key`` already strips one trailing slash). For an empty
+        prefix it is empty, meaning the whole bucket. Keys under this boundary
+        (plus the prefix object itself) belong to this fileset; raw string
+        prefix neighbors such as ``foo-bar`` or ``foo.txt`` do not.
+        """
+        return self._full_key("")
+
+    def _owns_key(self, key: str) -> bool:
+        """Whether an S3 key belongs to this fileset's storage.
+
+        S3 prefix matching is a raw string match, so a listing for ``foo`` also
+        returns ``foo-bar`` and ``foo.txt``. A key is owned only when it equals
+        the configured prefix (the file-like object itself) or starts with the
+        directory boundary (``foo/``).
+        """
+        return key == self.config.prefix or key.startswith(self._storage_boundary())
+
     @asynccontextmanager
     async def _client(self) -> AsyncIterator[S3Client]:
         """Create an S3 client context manager."""
@@ -154,20 +175,18 @@ class S3StorageImpl(StorageImpl):
     async def list_files(self, path: str | None = None) -> list[FileInfo]:
         """List files in the S3 bucket under the given path.
 
-        The path parameter is used as a prefix filter. S3 prefix matching will
-        return all objects whose keys start with the prefix, so:
+        The query prefix is the fileset's storage boundary (``prefix/``) plus
+        the optional path filter, so a fileset stored at ``foo`` never lists
+        objects of the neighboring ``foo-bar`` fileset. The path filter itself
+        is a raw S3 prefix match within the fileset:
         - path="dir" matches "dir/file.txt", "dir/subdir/file.txt", etc.
-        - path="file.txt" matches "file.txt" (exact match)
+        - path="file.txt" matches "file.txt", "file.txt/a.txt", and "file.txt.bak"
 
-        Note: We don't add a trailing slash to the prefix because that would
-        prevent matching files (e.g., "file.txt/" won't match "file.txt").
+        Note: We don't add a trailing slash to the path filter because that
+        would prevent matching files (e.g., "file.txt/" won't match "file.txt").
         """
-        prefix = self.config.prefix
-        if path:
-            if prefix:
-                prefix = f"{prefix.rstrip('/')}/{path}"
-            else:
-                prefix = path
+        boundary = self._storage_boundary()
+        prefix = boundary + (path or "")
 
         files = []
         async with self._client() as client:
@@ -175,15 +194,12 @@ class S3StorageImpl(StorageImpl):
                 paginator = client.get_paginator("list_objects_v2")
                 async for page in paginator.paginate(
                     Bucket=self.config.bucket,
-                    Prefix=prefix or "",
+                    Prefix=prefix,
                 ):
                     for obj in page.get("Contents", []):
                         key = obj["Key"]
-                        # Make path relative to prefix
-                        if self.config.prefix:
-                            relative_path = key[len(self.config.prefix.rstrip("/")) + 1 :]
-                        else:
-                            relative_path = key
+                        # Make path relative to the fileset's storage boundary
+                        relative_path = key[len(boundary) :]
 
                         # Skip "directory" markers (keys ending with /)
                         if relative_path and not relative_path.endswith("/"):
@@ -311,20 +327,28 @@ class S3StorageImpl(StorageImpl):
                 _raise_for_s3_error(e, f"deleting {path}")
 
     async def delete_all(self) -> None:
-        """Delete all files under the prefix in the S3 bucket."""
+        """Delete all files owned by this fileset's prefix in the S3 bucket.
+
+        S3 prefix matching is a raw string match, so listing with the configured
+        prefix also returns neighbor keys (``foo-bar``, ``foo.txt``, ``foobar``).
+        Only owned keys — the prefix object itself and everything under the
+        directory boundary — are deleted; neighboring filesets are never
+        touched. A failure after one page and before the next may leave some
+        owned keys deleted; a later retry lists again and deletes the rest.
+        """
         prefix = self.config.prefix or ""
 
         async with self._client() as client:
             try:
-                # List and delete all objects with the prefix
+                # List with the raw prefix, then delete only owned keys
                 paginator = client.get_paginator("list_objects_v2")
                 async for page in paginator.paginate(
                     Bucket=self.config.bucket,
                     Prefix=prefix,
                 ):
-                    objects = page.get("Contents", [])
-                    if objects:
-                        delete_request: dict[str, Any] = {"Objects": [{"Key": obj["Key"]} for obj in objects]}
+                    owned_keys = [obj["Key"] for obj in page.get("Contents", []) if self._owns_key(obj["Key"])]
+                    if owned_keys:
+                        delete_request: dict[str, Any] = {"Objects": [{"Key": key} for key in owned_keys]}
                         await client.delete_objects(
                             Bucket=self.config.bucket,
                             Delete=delete_request,
