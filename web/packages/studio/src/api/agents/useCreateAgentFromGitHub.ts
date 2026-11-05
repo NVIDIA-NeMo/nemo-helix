@@ -2,14 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import { FABRIC_CONFIG_FORMAT } from '@nemo/common/src/utils/agents';
 import { agentsRegisterAgent } from '@nemo/sdk/generated/agents/agents';
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import { filesCreateFileset, filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { claimFileset, rollbackFileset } from '@studio/api/agents/agentSpecFileset';
-import {
-  AGENT_CONFIG_FILENAME,
-  FABRIC_CONFIG_FORMAT,
-} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import { AGENT_CONFIG_FILENAME } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import {
   type GitHubAgentSource,
   formatGitHubSource,

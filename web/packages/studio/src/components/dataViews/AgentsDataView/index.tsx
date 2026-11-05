@@ -15,6 +15,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { JOB_POLLING_INTERVAL_LONG } from '@nemo/common/src/constants';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { type AgentConfig, getAgentModelNames } from '@nemo/common/src/utils/agents';
 import { getSortParamWithWhitelist } from '@nemo/common/src/utils/query';
 import { Trash } from '@nemo/icons/icons';
 import {
@@ -32,7 +33,6 @@ import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Button, type DropdownEntry, Text } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
-import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
@@ -41,39 +41,6 @@ import { type ComponentProps, type FC, useEffect, useMemo, useState } from 'reac
 import { useNavigate } from 'react-router';
 
 export type { Agent, AgentDeployment };
-
-/** A model entry in a `nemo-agents-spec-v1` config, under `models` or on a harness. */
-export interface AgentSpecModel {
-  provider?: string;
-  model?: string;
-  api_key_env?: string;
-  temperature?: number;
-  settings?: Record<string, unknown>;
-}
-
-export interface AgentConfig {
-  functions?: Record<string, { _type: string }>;
-  llms?: Record<
-    string,
-    {
-      _type: string;
-      model_name?: string;
-      api_key?: string;
-      temperature?: number;
-      base_url?: string;
-    }
-  >;
-  /** `nemo-agents-spec-v1` named models, e.g. `{ default: { model: 'nvidia-…' } }`. */
-  models?: Record<string, AgentSpecModel>;
-  harnesses?: Record<string, { kind?: string; model?: AgentSpecModel }>;
-  workflow?: {
-    _type: string;
-    tool_names?: string[];
-    llm_name?: string;
-    verbose?: boolean;
-    parse_agent_response_max_retries?: number;
-  };
-}
 
 export type AgentItem = Agent & { id: string };
 export type AgentEntity = AgentDeployment & { id: string };
