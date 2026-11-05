@@ -3567,8 +3567,8 @@ components:
         session_uuid:
           type: string
           title: Session Uuid
-          description: "Unique identifier for the session. Can be used to group and\
-            \ retrieve the session\u2019s traces in Intake."
+          description: Unique identifier for the session. Can be used to group and
+            retrieve the session's traces in Intake.
           readOnly: true
       type: object
       required:

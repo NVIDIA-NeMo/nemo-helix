@@ -458,7 +458,7 @@ class AgentSession(NemoEntity, entity_type="agent_session"):
     )
 
     @computed_field(
-        description="Unique identifier for the session. Can be used to group and retrieve the session’s traces in Intake."
+        description="Unique identifier for the session. Can be used to group and retrieve the session's traces in Intake."
     )
     @property
     def session_uuid(self) -> str:

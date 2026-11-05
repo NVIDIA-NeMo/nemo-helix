@@ -399,7 +399,7 @@ class AgentSession(EntityMetadata):
 
     session_uuid: str = Field(
         default="",
-        description="Unique identifier for the session. Can be used to group and retrieve the session’s traces in Intake.",
+        description="Unique identifier for the session. Can be used to group and retrieve the session's traces in Intake.",
         json_schema_extra={"readOnly": True},
     )
 

@@ -62,7 +62,7 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.fabric.session_manager import DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_uuid_to_id
 from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
@@ -470,6 +470,11 @@ async def _resolve_request_session(
         return None
     if not session_id:
         raise HTTPException(status_code=400, detail=f"Header '{SESSION_ID_HEADER}' must not be empty.")
+
+    try:
+        session_id = session_uuid_to_id(session_id)
+    except ValueError:
+        pass  # Preserve entity-ID headers and existing not-found behavior.
 
     session = await get_owned_session_by_id(
         entity_client,

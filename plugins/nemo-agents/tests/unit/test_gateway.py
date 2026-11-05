@@ -49,6 +49,8 @@ from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 
 OWNER_PRINCIPAL_ID = "session-owner"
+SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -504,8 +506,11 @@ class TestSessionAwareRouting:
             timestamp + timedelta(seconds=30 * 60) for timestamp in timestamps
         ]
 
-    def test_agent_route_uses_session_bound_deployment(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        session = _make_session(session_id="session-2", deployment_id="deployment-2")
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
+    def test_agent_route_uses_session_bound_deployment(
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-2")
         bound_deployment = _make_deployment(
             name="calc-v2",
             agent="calc",
@@ -518,7 +523,7 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-2"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"messages": []},
             )
 
@@ -527,7 +532,7 @@ class TestSessionAwareRouting:
             call(
                 AgentSession,
                 workspace="default",
-                filter_obj={"id": "session-2", "created_by": OWNER_PRINCIPAL_ID},
+                filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
             ),
             call(AgentDeployment, workspace="default", filter_obj={"id": "deployment-2"}),
         ]
@@ -535,7 +540,7 @@ class TestSessionAwareRouting:
         mock_entity_client.list.assert_not_awaited()
         stream_call = httpx_mock.__aenter__.return_value.stream.call_args
         assert stream_call.kwargs["url"] == "http://localhost:9002/v1/chat/completions"
-        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == "session-2"
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
 
     def test_noauth_route_resolves_service_owned_session_without_owner_filter(
         self, client: TestClient, test_app: FastAPI, mock_entity_client: AsyncMock
@@ -760,11 +765,12 @@ class TestSessionAwareRouting:
         assert updated.expires_at == expires_at
         mock_entity_client.update.assert_not_awaited()
 
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_direct_route_accepts_session_for_same_deployment(
-        self, client: TestClient, mock_entity_client: AsyncMock
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
     ) -> None:
         deployment = _make_deployment(deployment_id="deployment-1")
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         mock_entity_client.get = AsyncMock(return_value=deployment)
         mock_entity_client.find_one = AsyncMock(return_value=session)
         httpx_mock = _make_httpx_mock(200, b'{"ok": true}')
@@ -772,7 +778,7 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             resp = client.post(
                 "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"messages": []},
             )
 
@@ -780,10 +786,10 @@ class TestSessionAwareRouting:
         mock_entity_client.find_one.assert_awaited_once_with(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-1", "created_by": OWNER_PRINCIPAL_ID},
+            filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
         )
         stream_call = httpx_mock.__aenter__.return_value.stream.call_args
-        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == "session-1"
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
 
     def test_unknown_session_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.find_one = AsyncMock(side_effect=NemoEntityNotFoundError("not found"))
@@ -799,12 +805,15 @@ class TestSessionAwareRouting:
         mock_entity_client.get.assert_not_awaited()
         mock_entity_client.list.assert_not_awaited()
 
-    def test_cross_workspace_session_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
-        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id="session-1", workspace="other"))
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
+    def test_cross_workspace_session_returns_404(
+        self, header_session_id: str, client: TestClient, mock_entity_client: AsyncMock
+    ) -> None:
+        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id=SESSION_ID, workspace="other"))
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={},
         )
 
@@ -819,8 +828,10 @@ class TestSessionAwareRouting:
             ("POST", "/apis/agents/v2/workspaces/default/deployments/calc-dep/-/invoke"),
         ],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_foreign_owned_session_returns_404_on_every_gateway_route(
         self,
+        header_session_id: str,
         client: TestClient,
         mock_entity_client: AsyncMock,
         method: str,
@@ -828,44 +839,48 @@ class TestSessionAwareRouting:
     ) -> None:
         mock_entity_client.get = AsyncMock(return_value=_make_deployment(deployment_id="deployment-id"))
         mock_entity_client.find_one = AsyncMock(
-            return_value=_make_session(session_id="session-1", created_by="other-principal")
+            return_value=_make_session(session_id=SESSION_ID, created_by="other-principal")
         )
 
         resp = client.request(
             method,
             path,
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={} if method == "POST" else None,
         )
 
         assert resp.status_code == 404
-        assert resp.json()["detail"] == "Session ID 'session-1' not found in workspace 'default'."
+        assert resp.json()["detail"] == f"Session ID '{SESSION_ID}' not found in workspace 'default'."
         mock_entity_client.find_one.assert_awaited_once_with(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-1", "created_by": OWNER_PRINCIPAL_ID},
+            filter_obj={"id": SESSION_ID, "created_by": OWNER_PRINCIPAL_ID},
         )
 
     @pytest.mark.parametrize(
         "status",
         [SessionStatus.EXPIRED, SessionStatus.LOST, SessionStatus.CLOSED],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_non_active_session_returns_409(
         self,
+        header_session_id: str,
         status: SessionStatus,
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id="session-1", status=status))
+        mock_entity_client.find_one = AsyncMock(return_value=_make_session(session_id=SESSION_ID, status=status))
 
         resp = client.post(
             "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-            headers={SESSION_ID_HEADER: "session-1"},
+            headers={SESSION_ID_HEADER: header_session_id},
             json={},
         )
 
         assert resp.status_code == 409
-        assert resp.json()["detail"] == (f"Session ID 'session-1' has status '{status.value}' and cannot be invoked.")
+        assert resp.json()["detail"] == (
+            f"Session ID '{SESSION_ID}' has status '{status.value}' and cannot be invoked."
+        )
 
     def test_active_session_at_expiration_deadline_returns_409(
         self,
