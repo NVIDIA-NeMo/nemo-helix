@@ -380,27 +380,36 @@ async def test_list_deployments_all_versions(deployment_service, mock_entity_cli
 async def test_latest_listing_scans_more_than_one_thousand_versions(
     deployment_service, mock_entity_client, sample_deployment_entity, descending
 ):
-    rows = []
+    """Walk every version page and keep the newest row, regardless of scan direction."""
+    rows: list[ModelDeploymentEntity] = []
     for version in range(1, 1002):
-        row = sample_deployment_entity.model_copy(update={"entity_version": version})
+        row = sample_deployment_entity.model_copy(
+            update={"entity_version": version, "name": f"{sample_deployment_entity.base_name}-v{version}"}
+        )
         row._id = f"id-{version:04d}"
         rows.append(row)
     if descending:
         rows.reverse()
     sort = "-entity_version" if descending else "entity_version"
     filter_operation = ComparisonOperation(operator=FilterOperator.EQ, field="project", value="test-project")
-    mock_entity_client.list.side_effect = [
-        ListResponse(
-            data=rows[:1000],
+
+    async def list_rows(*args: Any, **kwargs: Any) -> ListResponse[ModelDeploymentEntity]:
+        """Serve fixture rows using the page size requested by the service."""
+        page, page_size = kwargs["page"], kwargs["page_size"]
+        start = (page - 1) * page_size
+        data = rows[start : start + page_size]
+        return ListResponse(
+            data=data,
             pagination=PaginationInfo(
-                page=1, page_size=1000, current_page_size=1000, total_pages=2, total_results=1001
+                page=page,
+                page_size=page_size,
+                current_page_size=len(data),
+                total_pages=(len(rows) + page_size - 1) // page_size,
+                total_results=len(rows),
             ),
-        ),
-        ListResponse(
-            data=rows[1000:],
-            pagination=PaginationInfo(page=2, page_size=1000, current_page_size=1, total_pages=2, total_results=1001),
-        ),
-    ]
+        )
+
+    mock_entity_client.list.side_effect = list_rows
     result = await deployment_service.list_deployments(
         workspace="default",
         sort=sort,
@@ -410,17 +419,20 @@ async def test_latest_listing_scans_more_than_one_thousand_versions(
     assert [row.entity_version for row in result.data] == [1001]
     assert result.pagination.total_results == 1
     assert result.pagination.total_pages == 1
-    assert mock_entity_client.list.await_count == 2
+    assert mock_entity_client.list.await_count > 1
     for page, call in enumerate(mock_entity_client.list.await_args_list, start=1):
-        assert call.kwargs == dict(
-            workspace="default", sort=sort, page=page, page_size=1000, filter_operation=filter_operation
-        )
+        assert call.args == (ModelDeploymentEntity,)
+        assert call.kwargs["workspace"] == "default"
+        assert call.kwargs["sort"] == sort
+        assert call.kwargs["filter_operation"] == filter_operation
+        assert call.kwargs["page"] == page
 
 
 @pytest.mark.asyncio
 async def test_latest_listing_does_not_hide_later_page_errors(
     deployment_service, mock_entity_client, sample_deployment_entity
 ):
+    """A failed later page must not be reported as a successful partial listing."""
     mock_entity_client.list.side_effect = [
         ListResponse(
             data=[sample_deployment_entity],

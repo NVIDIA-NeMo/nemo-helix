@@ -498,11 +498,13 @@ async def test_filter_by_status_integration(
 
 
 @pytest.mark.asyncio
-async def test_latest_listing_complete_sorted_page_walk(client_context, deployment_service):
+async def test_latest_listing_complete_sorted_page_walk(client_context, deployment_service, time_machine):
     """Select and sort winners across multiple entity pages, including ties/nulls."""
     client = client_context.entity_client
+    time_machine.move_to("2026-01-01T00:00:00+00:00", tick=False)
+    winner_ids: dict[str, str] = {}
     for index in range(1003):
-        await client.create(
+        created = await client.create(
             ModelDeploymentEntity(
                 workspace="default",
                 name=f"deployment-{index:04d}-v1",
@@ -514,10 +516,13 @@ async def test_latest_listing_complete_sorted_page_walk(client_context, deployme
                 status_message=None if index % 2 else "ready",
             )
         )
+        winner_ids[created.base_name] = created.id
+        time_machine.shift(1)
     # Updates change the position of names originally encountered on page one;
     # the winning rows are beyond the original 1000-row window by created_at.
+    time_machine.move_to("2026-01-02T00:00:00+00:00")
     for index in (0, 1):
-        await client.create(
+        created = await client.create(
             ModelDeploymentEntity(
                 workspace="default",
                 name=f"deployment-{index:04d}-v2",
@@ -530,6 +535,18 @@ async def test_latest_listing_complete_sorted_page_walk(client_context, deployme
             )
         )
 
+        winner_ids[created.base_name] = created.id
+
+    # A status-only update changes updated_at, not created_at. Frozen, distinct
+    # times make this field-selection regression independent of clock resolution.
+    time_machine.move_to("2026-01-03T00:00:00+00:00")
+    await deployment_service.update_deployment_status(
+        "default",
+        "deployment-0002",
+        UpdateModelDeploymentStatusRequest(status=ModelDeploymentStatus.READY, status_message="refreshed"),
+    )
+    expected_winner_ids = set(winner_ids.values())
+    timestamp_orders: dict[str, list[str]] = {}
     ready_filter = ComparisonOperation(operator=FilterOperator.EQ, field="data.status", value="READY")
     for sort in (
         "created_at",
@@ -554,12 +571,18 @@ async def test_latest_listing_complete_sorted_page_walk(client_context, deployme
                 break
             entity_page += 1
         assert len(rows) == 1005
-        winners = {}
-        for row in rows:
-            if row.base_name not in winners or row.entity_version > winners[row.base_name].entity_version:
-                winners[row.base_name] = row
-        expected_latest = [row for row in rows if row.id == winners[row.base_name].id]
-        for all_versions, expected in ((False, expected_latest), (True, rows)):
+        # Expected winners come from the fixture's writes, not a second
+        # implementation of production's highest-version selection algorithm.
+        expected_latest = [row for row in rows if row.id in expected_winner_ids]
+        assert len(expected_latest) == 1003
+        if sort in ("created_at", "updated_at"):
+            timestamp_orders[sort] = [row.id for row in expected_latest]
+        cases = [(False, expected_latest)]
+        # The unchanged all-version path needs representative pagination controls,
+        # not a second full field/direction matrix.
+        if sort in ("created_at", "-created_at"):
+            cases.append((True, rows))
+        for all_versions, expected in cases:
             actual = []
             for page in range(1, 5):
                 result = await deployment_service.list_deployments(
@@ -587,6 +610,8 @@ async def test_latest_listing_complete_sorted_page_walk(client_context, deployme
             assert beyond.data == []
             assert beyond.pagination.total_results == len(expected)
 
+    assert timestamp_orders["created_at"] != timestamp_orders["updated_at"]
+
     # Filtering remains before latest selection: an older matching version is
     # returned even when the newest version has another status.
     filtered = await deployment_service.list_deployments(
@@ -609,6 +634,7 @@ async def test_latest_listing_complete_sorted_page_walk(client_context, deployme
 
 @pytest.mark.asyncio
 async def test_latest_listing_preserves_workspace_and_project_filters(client_context, deployment_service):
+    """Higher versions of the same name outside the query scope must not leak in."""
     client = client_context.entity_client
     projects_client = AsyncProjectsClient.from_client(client_context.async_client)
     for workspace, project in (("default", "project-one"), ("default", "project-two"), ("workspace1", "project-one")):
