@@ -748,7 +748,9 @@ volume and `node_selector`, so the profiles must agree with each other:
   builds take. The controller has to run: without it no build starts, and its rows stay `queued`. A
   submit that dies between writing its rows and queuing the build leaves them `queued` too. Submitting the
   same request again queues it; otherwise `builder-queue` fails them once they're ten minutes old,
-  checking every ten minutes. Once a request's rows have failed, submit the next `revision`.
+  checking every ten minutes. It holds the build's name while it fails them, so a resubmit at that
+  moment either queues the build first and keeps them, or finds them failed. Once a request's rows have
+  failed, submit the next `revision`.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.

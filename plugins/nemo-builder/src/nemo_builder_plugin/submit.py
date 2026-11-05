@@ -247,7 +247,9 @@ async def submit_build_set(
             try:
                 await entity_client.create(queued)
             except EntityConflictError:
-                logger.info("build %s is already queued", sanitize_for_log(plan.job_name))
+                # Queued already, or held by the queue controller's placeholder while it fails these images as a
+                # stopped submit's: either way, nothing more to queue, and the rows say which.
+                logger.info("build %s is already queued, or being failed", sanitize_for_log(plan.job_name))
         return SubmitResult(job=plan.job_name, images=images)
 
     try:

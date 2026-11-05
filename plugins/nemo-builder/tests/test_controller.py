@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -16,7 +17,7 @@ import pytest
 from nemo_builder_plugin.controller import ORPHAN_CHECK_SECONDS, ORPHAN_GRACE, ORPHANED, BuildQueueController
 from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError, PermissionDeniedError
-from nemo_helix_plugin.entities import EntityNotFoundError
+from nemo_helix_plugin.entities import EntityConflictError, EntityNotFoundError
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
@@ -24,6 +25,10 @@ from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
 DIGEST = "sha256:" + "a" * 64
 OTHER = "sha256:" + "b" * 64
+
+
+async def _nothing(_entity: Any) -> None:
+    return None
 
 
 def _response(code: int) -> httpx.Response:
@@ -35,6 +40,14 @@ class FakeEntities:
         self.entities: dict[str, Any] = {}
         self.fail_update: set[str] = set()
         self.fail_list: set[type] = set()
+        #: Awaited at the start of every update, to change the store while the controller writes to it.
+        self.on_update: Callable[[Any], Awaitable[None]] = _nothing
+
+    async def create(self, entity):
+        if entity.name in self.entities:
+            raise EntityConflictError(entity.name)
+        self.entities[entity.name] = entity.model_copy(deep=True)
+        return entity
 
     async def list(self, entity_type, *, workspace, sort, page, filter_obj=None):
         if entity_type in self.fail_list:
@@ -50,6 +63,7 @@ class FakeEntities:
         return self.entities[name].model_copy(deep=True)
 
     async def update(self, entity):
+        await self.on_update(entity)
         if entity.name in self.fail_update:
             self.fail_update.discard(entity.name)
             raise RuntimeError("entity store down")
@@ -231,17 +245,28 @@ async def test_queued_images_no_queued_build_holds_fail_once_old() -> None:
 
     await controller.reconcile()
     assert (entities.entities[old].status, entities.entities[old].status_detail) == ("failed", ORPHANED)
+    # Its placeholder goes once its images have failed.
+    assert "stopped" not in entities.entities
     assert entities.entities[young].status == "queued"
     assert entities.entities["waiting.img"].status == "queued" and "waiting" in entities.entities
 
 
 @pytest.mark.asyncio
-async def test_an_orphan_whose_build_was_queued_since_is_kept() -> None:
-    entities = FakeEntities()
-    controller = _held(entities, "requeued")
-    # The pass read no queued build for it, but a submit of the same request has queued it since.
+async def test_a_retry_that_queued_the_build_first_keeps_its_images() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: None)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    _queue(entities, "requeued")
+    entities.entities["requeued.img"]._created_at = datetime.now(UTC) - ORPHAN_GRACE * 3
+
+    # The pass read no queued build for it, but a retry queued it before the check could claim its name.
     await controller._fail_orphans(set())
     assert entities.entities["requeued.img"].status == "queued"
+    assert entities.entities["requeued"].state == "queued"
+
+    # And the retry's build starts.
+    await controller.reconcile()
+    assert set(jobs.jobs) == {"requeued"} and entities.entities["requeued.img"].status == "pending"
 
 
 @pytest.mark.asyncio
@@ -285,3 +310,48 @@ async def test_a_build_none_of_whose_images_still_waits_is_dropped_not_started()
     await controller.reconcile()
     assert jobs.jobs == {} and "retried" not in entities.entities
     assert entities.entities["retried.img"].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_retry_after_the_check_claims_the_build_cannot_queue_images_being_failed() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: None)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    image = _orphan(entities, "stopped", age=ORPHAN_GRACE * 2)
+    retry: list[str] = []
+
+    async def retry_while_failing(entity: Any) -> None:
+        # A retry of the stopped submit queues the build after the check has claimed its name, while it fails the
+        # image: the retry's create must conflict, not queue an image that is about to fail.
+        if isinstance(entity, ContainerImage) and not retry:
+            try:
+                await entities.create(QueuedBuild(name="stopped", workspace="default", request={}, images=[image]))
+                retry.append("queued")
+            except EntityConflictError:
+                retry.append("conflict")
+
+    entities.on_update = retry_while_failing
+    await controller._fail_orphans(set())
+    assert retry == ["conflict"]
+    assert (entities.entities[image].status, entities.entities[image].status_detail) == ("failed", ORPHANED)
+    assert "stopped" not in entities.entities
+
+    await controller.reconcile()
+    assert jobs.jobs == {}
+
+
+@pytest.mark.asyncio
+async def test_a_placeholder_an_unfinished_check_left_is_settled_and_holds_no_slot() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: 1)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    image = _orphan(entities, "stopped", age=ORPHAN_GRACE * 2)
+    entities.entities["stopped"] = QueuedBuild(
+        name="stopped", workspace="default", request={}, images=[image], state="orphaned"
+    )
+    _queue(entities, "other")
+
+    await controller.reconcile()
+    assert (entities.entities[image].status, entities.entities[image].status_detail) == ("failed", ORPHANED)
+    assert "stopped" not in entities.entities
+    assert set(jobs.jobs) == {"other"}

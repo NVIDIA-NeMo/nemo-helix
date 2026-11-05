@@ -108,15 +108,19 @@ class ContainerImage(NemoEntity, entity_type="container_image"):
 
 
 class QueuedBuild(NemoEntity, entity_type="builder_queued_build"):
-    """A build job waiting for a slot under ``max_concurrent_builds``. ``name`` is the job's name.
+    """A build job waiting for the queue controller to create it. ``name`` is the job's name.
 
     The submit writes it with its images ``queued``; the queue controller creates the job as ``created_by``,
     moves the images to ``pending`` and marks it ``started``, then deletes it once the job ends.
+
+    ``orphaned`` is the controller's own placeholder, held under a build's name while it fails the ``queued`` images a
+    stopped submit left with no queued build. A submit that queues the same build meanwhile conflicts with it, rather
+    than queuing images that are being failed.
     """
 
     request: dict = Field(description="The `CreateHelixJobRequest` the controller creates the job from, as JSON.")
     images: list[str] = Field(description="The `ContainerImage` rows the job builds.")
-    state: Literal["queued", "started"] = "queued"
+    state: Literal["queued", "started", "orphaned"] = "queued"
 
     # The submitter's full principal (id, email, account id, groups, aliases): the controller creates the job as
     # them, and the platform can't look a user's groups up later. The entity store gives it back only to a

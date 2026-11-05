@@ -9,7 +9,9 @@ or for all of them with no cap set, each as the user who submitted it, and moves
 to ``pending``.
 
 Every ten minutes it also fails the ``queued`` images no queued build holds, ten minutes after they were written: a
-submit stopped between writing them and queuing their build, and nothing else would ever start or fail them.
+submit stopped between writing them and queuing their build, and nothing else would ever start or fail them. It
+first claims the build's name with an ``orphaned`` placeholder, so that it and a retry queuing the same build can't
+both act: whichever creates its entry first wins, and the other's create conflicts.
 
 Every step is safe to repeat: a job that already exists for the same request is adopted, so a pass that dies
 between creating a job and marking its build started just finishes the work on the next pass.
@@ -117,7 +119,10 @@ class BuildQueueController(NemoController):
         running = 0
         waiting: list[QueuedBuild] = []
         for build in builds:
-            if build.state == "queued":
+            if build.state == "orphaned":
+                # A placeholder the orphan check couldn't finish with: fail its images, then forget it.
+                await self._settle(build, ORPHANED)
+            elif build.state == "queued":
                 waiting.append(build)
             elif await self._still_running(build):
                 running += 1
@@ -234,8 +239,11 @@ class BuildQueueController(NemoController):
     async def _fail_orphans(self, queued: set[tuple[str, str]]) -> None:
         """Fail the ``queued`` images older than :data:`ORPHAN_GRACE` that no queued build holds.
 
-        ``queued`` names the builds this pass read. A build queued since then is looked up before its images are
-        failed, so a submit of the same request that just queued them again keeps them.
+        ``queued`` names the builds this pass read. Before failing a build's images, it creates an ``orphaned``
+        placeholder under the build's name. If a retry has queued the build since this pass read the queue, that
+        create conflicts and the images are kept. If the placeholder comes first, a retry's create conflicts
+        instead, so the retry never queues images that are being failed. The placeholder goes once its images have
+        failed; one a check couldn't finish is settled by the next pass.
         """
         assert self._entities is not None
         try:
@@ -251,13 +259,19 @@ class BuildQueueController(NemoController):
                 orphans.setdefault(key, []).append(row)
         for (workspace, job), images in orphans.items():
             label = f"{sanitize_for_log(workspace)}/{sanitize_for_log(job)}"
+            placeholder = QueuedBuild(
+                name=job, workspace=workspace, request={}, images=[image.name for image in images], state="orphaned"
+            )
             try:
-                await self._entities.get(QueuedBuild, name=job, workspace=workspace)
-            except EntityNotFoundError:
-                logger.warning("failing %d queued image(s) of %s, which no queued build holds", len(images), label)
-                await fail_rows(self._entities, images, ORPHANED)
+                await self._entities.create(placeholder)
+            except EntityConflictError:
+                # A retry has queued the build since this pass read the queue: its images are held again.
+                continue
             except Exception:
-                logger.exception("could not look up build %s; retrying next check", label)
+                logger.exception("could not claim build %s; retrying next check", label)
+                continue
+            logger.warning("failing %d queued image(s) of %s, which no queued build holds", len(images), label)
+            await self._settle(placeholder, ORPHANED)
 
     async def _queued_rows(self) -> list[ContainerImage]:
         """Every ``queued`` image in every workspace."""
