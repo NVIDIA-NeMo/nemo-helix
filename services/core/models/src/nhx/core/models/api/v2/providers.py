@@ -19,6 +19,7 @@ from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_D
 from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
@@ -281,7 +282,7 @@ async def update_provider_status(
 )
 async def get_provider(
     workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
-    name: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: ModelProviderService = Depends(get_model_provider_service),
 ) -> ModelProvider:
     """
@@ -317,8 +318,8 @@ async def get_provider(
     status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_provider(
-    workspace: str,
-    name: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: ModelProviderService = Depends(get_model_provider_service),
 ):
     """

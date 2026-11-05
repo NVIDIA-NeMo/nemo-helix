@@ -10042,7 +10042,7 @@ paths:
         schema:
           type: string
           maxLength: 255
-          pattern: ^[\w\-.]+$
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10122,7 +10122,7 @@ paths:
         schema:
           type: string
           maxLength: 255
-          pattern: ^[\w\-.]+$
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':
@@ -10365,7 +10365,7 @@ paths:
         schema:
           type: string
           maxLength: 255
-          pattern: ^[\w\-.]+$
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '200':
@@ -10398,12 +10398,16 @@ paths:
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w\-.]+$
           title: Workspace
       - name: name
         in: path
         required: true
         schema:
           type: string
+          maxLength: 255
+          pattern: ^[\w.+@-]+$
           title: Name
       responses:
         '204':

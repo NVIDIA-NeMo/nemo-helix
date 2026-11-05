@@ -14,6 +14,7 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.common.entities.constants import MAX_LENGTH_255, REGEX_WORD_CHARACTER_DOT_DASH
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
+from nhx.core.models.constants import RESOURCE_LOOKUP_NAME_PATTERN
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -120,7 +121,7 @@ async def create_prompt(
 )
 async def get_prompt(
     workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
-    name: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ) -> Prompt:
     """Get a prompt by workspace and name."""
@@ -185,7 +186,7 @@ async def update_prompt(
 )
 async def delete_prompt(
     workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
-    name: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    name: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     service: PromptService = Depends(get_prompt_service),
 ):
     """Delete a prompt by workspace and name."""
