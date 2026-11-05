@@ -3,7 +3,7 @@
 
 """SQLAlchemy implementation of FilterRepository."""
 
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Any, List, NamedTuple, Optional, Set
 
 from nemo_helix_plugin.filter_ops import ElemMatchCondition
@@ -117,16 +117,24 @@ class SQLAlchemyFilterRepository(FilterRepository):
         handles formatting: PostgreSQL's psycopg2 sends it as a native TIMESTAMP,
         while SQLite's bind_processor formats it to a string with microseconds.
 
-        Timezone info is stripped because our columns are TIMESTAMP WITHOUT TIME ZONE;
-        a tz-aware datetime would cause type mismatches on PostgreSQL.
+        Stored timestamps are naive UTC. Normalize aware operands to UTC before
+        removing timezone info, and preserve naive operands' existing wall time.
         """
-        if isinstance(column.type, DateTime) and isinstance(value, str):
+        if not isinstance(column.type, DateTime) or value is None:
+            return value
+        if isinstance(value, str):
             try:
-                return datetime.fromisoformat(value).replace(tzinfo=None)
+                value = datetime.fromisoformat(value)
             except ValueError as exc:
                 raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
-
-        return value
+        if isinstance(value, datetime):
+            if value.tzinfo is not None:
+                return value.astimezone(timezone.utc).replace(tzinfo=None)
+            return value
+        # Preserve date operands already accepted by SQLAlchemy's DateTime binder.
+        if isinstance(value, date):
+            return value
+        raise InvalidFilterError(f"Invalid timestamp filter value '{value}'")
 
     def _cast_json_to_raw_text(self, column: Any) -> Any:
         """Cast a JSON column element to its raw serialized text, quotes and all.
