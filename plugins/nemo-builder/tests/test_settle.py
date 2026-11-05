@@ -10,7 +10,7 @@ from typing import Literal
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.settle import JOB_GRACE, NO_JOB, settle
+from nemo_builder_plugin.settle import JOB_GRACE, NO_JOB, QUEUE_GONE, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
@@ -21,7 +21,7 @@ DIGEST = "sha256:" + "d" * 64
 def _row(
     name: str = "demo-1.img0",
     *,
-    status: Literal["pending", "ready", "failed"] = "pending",
+    status: Literal["queued", "pending", "ready", "failed"] = "pending",
     job: str = "ws-a/builder-demo-1",
     age: timedelta | None = timedelta(minutes=1),
 ) -> ContainerImage:
@@ -163,3 +163,35 @@ class TestHowAReadWrites:
         rows.broken = True
         [image] = await _settle(rows, FakeJobs({"builder-demo-1": HelixJobStatus.ERROR}))
         assert image.status == "pending"
+
+
+class TestWhat010Queued:
+    """Deprecated: 0.10's builder wrote an image ``queued`` while its own queue held the build."""
+
+    @pytest.mark.asyncio
+    async def test_one_with_no_job_fails_once_the_grace_has_passed(self) -> None:
+        rows = FakeRows(_row(status="queued", age=JOB_GRACE))
+        [image] = await _settle(rows, FakeJobs({}))
+        assert (image.status, image.status_detail) == ("failed", QUEUE_GONE)
+
+    @pytest.mark.asyncio
+    async def test_one_with_no_job_within_the_grace_is_left(self) -> None:
+        """A 0.10 queue controller still running mid-upgrade may yet create its job."""
+        rows = FakeRows(_row(status="queued", age=JOB_GRACE - timedelta(seconds=1)))
+        [image] = await _settle(rows, FakeJobs({}))
+        assert image.status == "queued"
+        assert rows.updates == []
+
+    @pytest.mark.asyncio
+    async def test_one_whose_job_ended_fails_as_a_pending_one_does(self) -> None:
+        rows = FakeRows(_row(status="queued"))
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": HelixJobStatus.ERROR}))
+        assert image.status == "failed"
+        assert "ended (error)" in (image.status_detail or "")
+
+    @pytest.mark.asyncio
+    async def test_one_whose_job_runs_is_left_to_it(self) -> None:
+        rows = FakeRows(_row(status="queued"))
+        [image] = await _settle(rows, FakeJobs({"builder-demo-1": HelixJobStatus.ACTIVE}))
+        assert image.status == "queued"
+        assert rows.updates == []

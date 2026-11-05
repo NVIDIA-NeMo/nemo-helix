@@ -103,12 +103,22 @@ class TestListingOneJobsImages:
         TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images")
         assert entities.list.await_args.kwargs["filter_obj"] is None
 
-    @pytest.mark.parametrize("status", ["done", "queued"])
-    def test_an_unknown_status_is_refused(self, status: str) -> None:
+    def test_an_unknown_status_is_refused(self) -> None:
         entities = AsyncMock()
-        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": status})
+        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": "done"})
         assert response.status_code == 422
         entities.list.assert_not_awaited()
+
+    def test_the_deprecated_queued_status_still_filters(self) -> None:
+        """0.10's builder wrote it, and a 0.10 client may still ask for it."""
+        entities = AsyncMock()
+        page = MagicMock()
+        page.data = [_row().model_copy(update={"status": "queued"})]
+        entities.list.return_value = page
+        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": "queued"})
+        assert response.status_code == 200
+        assert entities.list.await_args.kwargs["filter_obj"] == {"status": "queued"}
+        assert [image["status"] for image in response.json()] == ["queued"]
 
     def test_listing_returns_the_stored_status_and_asks_jobs_nothing(self) -> None:
         """Settling as it lists would move rows out of a `status` filter between pages: builder-settle does it."""
