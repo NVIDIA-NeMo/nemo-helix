@@ -3,6 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { CustomizationCreateAutomodelJobBody } from '@nemo/sdk/generated/customizer/zod/automodel-jobs';
 import { CustomizationCreateRlJobBody } from '@nemo/sdk/generated/customizer/zod/rl-jobs';
 import { CustomizationCreateUnslothJobBody } from '@nemo/sdk/generated/customizer/zod/unsloth-jobs';
@@ -37,7 +38,6 @@ import {
   UNSLOTH_SEED,
   withoutLearningRate,
 } from '@studio/util/forms/specDefaults';
-import { isPlainObject } from '@studio/util/functions';
 import { z } from 'zod';
 
 export interface DraftDataset {

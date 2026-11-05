@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { RoutingStrategyId } from '@studio/routes/agents/AgentDetailRoute/optimizations/SwitchyardOptimizationForm/formValues';
 import {
   downloadText,
   locateJobResultFiles,
 } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
-import { isPlainObject } from '@studio/util/functions';
 import YAML from 'yaml';
 
 /** Written by the nemo-switchyard plugin's `switchyard` strategy beside one agent YAML per route. */
