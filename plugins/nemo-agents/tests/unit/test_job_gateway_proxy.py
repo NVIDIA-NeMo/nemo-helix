@@ -120,6 +120,34 @@ def test_rebases_translated_fabric_config_without_mutating_input() -> None:
     assert config == before
 
 
+def test_a_harness_model_on_the_gateway_is_routed_through_the_proxy() -> None:
+    """Otherwise, under platform auth, the harness would call the gateway without the job's identity."""
+    config = {
+        "harnesses": {
+            "codex": {"kind": "codex", "model": {"model": "test", "base_url": f"http://platform{GATEWAY_PATH}"}}
+        },
+        "models": {"default": {"model": "test", "base_url": "https://provider.test/v1"}},
+    }
+
+    assert gateway_proxy.routes_fabric_inference_through_gateway(config)
+    runtime = gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019")
+
+    assert runtime["harnesses"]["codex"]["model"]["base_url"] == f"http://127.0.0.1:9019{GATEWAY_PATH}"
+    assert runtime["models"]["default"]["base_url"] == "https://provider.test/v1"
+
+
+def test_a_gateway_url_behind_a_path_prefix_is_not_routed_through_the_proxy() -> None:
+    """Prefixed ingress is unsupported, and the proxy would forward the prefix on top of ``NHX_BASE_URL``'s."""
+    config = {"models": {"default": {"model": "test", "base_url": f"https://helix.test/nemo{GATEWAY_PATH}"}}}
+    agent_config = _config()
+    agent_config.models["default"].base_url = f"https://helix.test/nemo{GATEWAY_PATH}"
+
+    assert not gateway_proxy.routes_fabric_inference_through_gateway(config)
+    assert gateway_proxy.rewrite_fabric_gateway_models(config, "http://127.0.0.1:9019") is config
+    assert not gateway_proxy.routes_inference_through_gateway(agent_config)
+    assert gateway_proxy.rewrite_gateway_models(agent_config, "http://127.0.0.1:9019") is agent_config
+
+
 @pytest.mark.parametrize("models", [None, "not-a-mapping", {"default": "not-a-mapping", "bad": None}])
 def test_malformed_fabric_models_are_skipped_instead_of_crashing(models: object) -> None:
     config = {"harness": {"adapter_id": "nvidia.fabric.deepagents"}, "models": models}
