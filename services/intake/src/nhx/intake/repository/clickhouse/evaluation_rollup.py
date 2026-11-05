@@ -10,7 +10,12 @@ from typing import Any
 
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
-from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository, ScoreRollup
+from nhx.intake.repository.evaluation_rollup import (
+    EvaluationRollup,
+    EvaluationRollupRepository,
+    MissingCreatedAfterError,
+    ScoreRollup,
+)
 from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
 from nhx.intake.spans.span_rollups import USAGE_SUPERSEDED_EXPRESSION, USAGE_TIER_EXPRESSION, session_total, usage_sql
 from nhx.intake.spans.storage import created_after_bound_micros, float_or_none
@@ -115,14 +120,14 @@ def _require_created_after_entries(
 ) -> None:
     missing = [evaluation_name for evaluation_name in evaluation_names if evaluation_name not in created_after_by_name]
     if missing:
-        raise KeyError(f"created_after_by_name is missing entries for: {', '.join(missing)}")
+        raise MissingCreatedAfterError(f"created_after_by_name is missing entries for: {', '.join(missing)}")
 
 
 def _created_after_bound_sql(
     evaluation_names: list[str],
     created_after_by_name: dict[str, datetime | None],
 ) -> tuple[str, dict[str, int]]:
-    """Inclusive ``root_started_at`` lower bounds, one per name that carries a created_at.
+    """Inclusive ``event_ts`` lower bounds, one per name that carries a created_at.
 
     Deleting an Evaluation frees its name, so rows under one name can span more than one entity
     lifetime. A name with a bound only sees sessions at or after its Evaluation's creation; ``None``
@@ -139,14 +144,12 @@ def _created_after_bound_sql(
         f"created_after_{index}": created_after_bound_micros(created_after) for index, created_after in bounded
     }
     if len(bounded) == 1 and len(evaluation_names) == 1:
-        # One requested name: the name filter is already an equality, so a bare conjunct is
-        # equivalent — and unlike the OR form it lets ClickHouse prune partitions on
-        # root_started_at (the GET and denormalizer paths).
-        clauses = ["root_started_at >= fromUnixTimestamp64Micro(%(created_after_0)s)"]
+        # One requested name: the name filter is already an equality, so a bare conjunct is equivalent.
+        clauses = ["event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)"]
     else:
         clauses = [
             f"(evaluation_name != %(evaluation_name_{index})s"
-            f" OR root_started_at >= fromUnixTimestamp64Micro(%(created_after_{index})s))"
+            f" OR event_ts >= fromUnixTimestamp64Micro(%(created_after_{index})s))"
             for index, _created_after in bounded
         ]
     return "".join(f"\n            AND {clause}" for clause in clauses), parameters

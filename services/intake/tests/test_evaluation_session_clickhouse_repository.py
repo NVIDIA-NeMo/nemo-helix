@@ -128,7 +128,7 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
     ]
     # No created_after bound: no clause, no parameter, in any query shape.
     for query in executor.queries:
-        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" not in query.statement
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" not in query.statement
         assert "created_after_us" not in query.parameters
 
 
@@ -163,7 +163,7 @@ async def test_list_sessions_binds_every_query_shape_to_created_after() -> None:
     for query in executor.queries:
         # The inclusive lower bound appears on every session query shape that lists this
         # evaluation: the count, the metric-sort page query, and the hydration re-read.
-        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
         assert query.parameters["created_after_us"] == created_after_us
 
 
@@ -188,7 +188,7 @@ async def test_list_sessions_bound_applies_to_plain_page_query() -> None:
         "evaluation_sessions.hydrate",
     ]
     for query in executor.queries:
-        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
         assert query.parameters["created_after_us"] == int(created_after.timestamp() * 1_000_000)
 
 

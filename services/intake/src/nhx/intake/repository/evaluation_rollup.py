@@ -38,6 +38,10 @@ class EvaluationRollup:
         return sorted(self.evaluator_scores)
 
 
+class MissingCreatedAfterError(KeyError):
+    """A requested Evaluation name has no ``created_after_by_name`` entry."""
+
+
 class EvaluationRollupRepository(ABC):
     """Domain-facing interface for Evaluation rollup reads."""
 

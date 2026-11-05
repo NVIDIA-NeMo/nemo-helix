@@ -28,13 +28,12 @@ def _ensure_group(client: TestClient, name: str = "rollup-test-group") -> str:
 
 
 def _session_started_at() -> datetime:
-    """A session start strictly after the evaluation entities created above.
+    """A session start well before the evaluation entities created above.
 
-    Rollups and session lists are bounded to each evaluation's created_at (inclusive), so a
-    root span that starts before its entity was created would be excluded from the read.
-    The +1s margin keeps the truncated timestamp after entities created in the same second.
+    Runs are often published after they happened, so rollups and session lists bound each
+    evaluation's lifetime by ingest time; a historical span start must still be counted.
     """
-    return (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
+    return (datetime.now(timezone.utc) - timedelta(hours=1)).replace(microsecond=0)
 
 
 def test_evaluation_response_hydrates_clickhouse_rollups(client: TestClient) -> None:
@@ -372,9 +371,9 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
 
 def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: TestClient) -> None:
     """Deleting an Evaluation frees its name, and a recreated Evaluation must not
-    inherit the deleted one's runs. Its rollup and session list are bounded to its own
-    created_at: empty before its own publish, a row started before created_at stays out,
-    and a row started after it is counted alone.
+    inherit the deleted one's runs. Its rollup and session list are bounded by ingest time to
+    its own created_at: empty before its own publish, then counting only runs ingested into it,
+    including runs that started long before it was created.
     """
     evaluation_name = f"rollup-recreate-{uuid4().hex}"
     group_id = _ensure_group(client)
@@ -387,14 +386,11 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
     first = client.post(EVALUATIONS, json=body)
     assert first.status_code == 201, first.text
 
-    # The deleted evaluation's lifetime: one run, started strictly inside that lifetime —
-    # full-precision now() is after the first entity's created_at and, because the delete
-    # and recreate happen after this line, strictly before the recreated entity's created_at.
-    old_started_at = datetime.now(timezone.utc)
+    # The deleted evaluation's lifetime: one run, ingested before the delete.
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
-            started_at=old_started_at,
+            started_at=datetime.now(timezone.utc),
             evaluation_id=evaluation_name,
             run_id="old-run",
             test_case_id="old-case",
@@ -411,8 +407,7 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
     assert deleted.status_code == 204, deleted.text
 
     # The lifetime bound is floored to the whole second, so the recreate must land in a strictly
-    # later second than the deleted lifetime's run for the exclusion below to be deterministic
-    # even when delete and recreate happen within the same wall-clock second.
+    # later second than the deleted lifetime's ingest for the exclusion below to be deterministic.
     time.sleep(1.1)
 
     second = client.post(EVALUATIONS, json=body)
@@ -429,32 +424,12 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
     assert sessions.json()["pagination"]["total_results"] == 0
     assert sessions.json()["data"] == []
 
-    # A run started before the recreated entity's created_at stays out, even when ingested
-    # after the recreation (e.g. backfilled telemetry from the deleted lifetime).
-    before_created_at = (recreated_created_at - timedelta(seconds=60)).replace(microsecond=0)
+    # A run published after it happened, under the recreated Evaluation, is counted alone; the
+    # deleted lifetime's run stays out.
     response = client.post(
         ATIF_INGEST,
         json=_atif_body(
-            started_at=before_created_at,
-            evaluation_id=evaluation_name,
-            run_id="backfill-run",
-            test_case_id="backfill-case",
-            score=0.9,
-            cost_usd=0.30,
-            latency_ms=300,
-            offset_seconds=0,
-        ),
-    )
-    assert response.status_code == 201, response.text
-    assert client.get(f"{EVALUATIONS}/{evaluation_name}").json()["run_count"] == 0
-    assert client.get(f"{EVALUATIONS}/{evaluation_name}/sessions").json()["pagination"]["total_results"] == 0
-
-    # A run started after created_at is counted alone — neither run from before it leaks in.
-    after_created_at = recreated_created_at + timedelta(seconds=60)
-    response = client.post(
-        ATIF_INGEST,
-        json=_atif_body(
-            started_at=after_created_at,
+            started_at=(recreated_created_at - timedelta(hours=1)).replace(microsecond=0),
             evaluation_id=evaluation_name,
             run_id="own-run",
             test_case_id="own-case",

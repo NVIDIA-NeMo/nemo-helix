@@ -9,6 +9,7 @@ import pytest
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
+from nhx.intake.repository.evaluation_rollup import MissingCreatedAfterError
 
 
 class _Executor(ClickHouseExecutor):
@@ -177,7 +178,7 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     # An unbounded (None) created_at keeps today's name-only match: no lower-bound clause,
     # no created_after parameter, in any of the three rollup queries.
     for query in executor.queries:
-        assert "root_started_at >=" not in query.statement
+        assert "event_ts >=" not in query.statement
         assert not any(key.startswith("created_after_") for key in query.parameters)
     assert executor.queries[2].parameters["model_key"] == "gen_ai.request.model"
     assert "input_tokens_key" in executor.queries[2].parameters
@@ -207,7 +208,7 @@ async def test_evaluation_rollups_bound_sessions_to_created_after():
     # scores, metrics) sees it, with the instant as an inclusive lower bound. One requested
     # name emits a bare conjunct — the OR form would block partition pruning on root_started_at.
     for query in executor.queries:
-        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
         assert "evaluation_name !=" not in query.statement
         assert query.parameters["created_after_0"] == _CREATED_AFTER_US
 
@@ -243,7 +244,7 @@ async def test_evaluation_rollups_bound_only_names_with_created_after():
     # exp-a is bounded; exp-b keeps the name-only match. The bound for one name must not
     # leak onto the other.
     for query in executor.queries:
-        assert "root_started_at >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
+        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
         assert "%(created_after_1)s" not in query.statement
         assert "created_after_1" not in query.parameters
         assert query.parameters["created_after_0"] == _CREATED_AFTER_US
@@ -254,7 +255,7 @@ async def test_evaluation_rollups_bound_only_names_with_created_after():
 async def test_evaluation_rollups_missing_created_after_entry_raises():
     repository = _repository(_Executor(_empty_results()))
 
-    with pytest.raises(KeyError, match="exp-a"):
+    with pytest.raises(MissingCreatedAfterError, match="exp-a"):
         await repository.get_rollups(
             workspace="default",
             evaluation_names=["exp-a"],

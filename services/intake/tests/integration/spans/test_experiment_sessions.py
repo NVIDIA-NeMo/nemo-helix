@@ -26,13 +26,12 @@ def _ensure_group(client: TestClient, name: str = "sessions-test-group") -> str:
 
 
 def _session_started_at() -> datetime:
-    """A session start strictly after the evaluation entities created above.
+    """A session start well before the evaluation entities created above.
 
-    Rollups and session lists are bounded to each evaluation's created_at (inclusive), so a
-    root span that starts before its entity was created would be excluded from the read.
-    The +1s margin keeps the truncated timestamp after entities created in the same second.
+    Runs are often published after they happened, so rollups and session lists bound each
+    evaluation's lifetime by ingest time; a historical span start must still be counted.
     """
-    return (datetime.now(timezone.utc) + timedelta(seconds=1)).replace(microsecond=0)
+    return (datetime.now(timezone.utc) - timedelta(hours=1)).replace(microsecond=0)
 
 
 def test_list_evaluation_sessions_returns_joined_session_rows(client: TestClient) -> None:

@@ -17,7 +17,11 @@ from nhx.intake.experiments.read_service import (
     EvaluationReadService,
     EvaluationTelemetryUnavailableError,
 )
-from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
+from nhx.intake.repository.evaluation_rollup import (
+    EvaluationRollup,
+    EvaluationRollupRepository,
+    MissingCreatedAfterError,
+)
 from nhx.intake.repository.evaluation_session import EvaluationSessionPage, EvaluationSessionRepository
 from nhx.intake.spans.domain import IntakeResponseMode, SpanStatus
 
@@ -177,12 +181,29 @@ async def test_missing_created_after_entry_is_raised_not_masked_as_clickhouse_ou
     get_mock.return_value = _evaluation("eval-1")
     service = EvaluationReadService(
         entity_client=client,
-        rollup_repository=_RollupRepository(KeyError("created_after_by_name is missing entries for: eval-1")),
+        rollup_repository=_RollupRepository(
+            MissingCreatedAfterError("created_after_by_name is missing entries for: eval-1")
+        ),
         session_repository=None,
     )
 
-    with pytest.raises(KeyError, match="created_after_by_name"):
+    with pytest.raises(MissingCreatedAfterError, match="created_after_by_name"):
         await service.get_evaluation(workspace="default", name="eval-1")
+
+
+@pytest.mark.asyncio
+async def test_other_rollup_key_errors_still_read_as_rollups_unavailable() -> None:
+    client, _, _ = _entity_client()
+    service = EvaluationReadService(
+        entity_client=client,
+        rollup_repository=_RollupRepository(KeyError("run_count")),
+        session_repository=None,
+    )
+
+    batch = await service.attach_rollups(workspace="default", evaluations=[_evaluation("eval-1")])
+
+    assert batch.rollups_available is False
+    assert batch.evaluations[0].rollup is None
 
 
 @pytest.mark.asyncio

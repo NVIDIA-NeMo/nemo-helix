@@ -10,7 +10,11 @@ from datetime import datetime
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.intake.entities.experiments import Experiment as Evaluation
-from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
+from nhx.intake.repository.evaluation_rollup import (
+    EvaluationRollup,
+    EvaluationRollupRepository,
+    MissingCreatedAfterError,
+)
 from nhx.intake.repository.evaluation_session import (
     EvaluationSessionPage,
     EvaluationSessionRepository,
@@ -204,9 +208,8 @@ class EvaluationReadService:
                 ),
                 True,
             )
-        except KeyError:
-            # A missing created_after_by_name entry is a caller bug, not a ClickHouse outage;
-            # fail loudly instead of reporting every rollup as unavailable.
+        except MissingCreatedAfterError:
+            # A caller bug, not a ClickHouse outage: fail loudly instead of reporting rollups unavailable.
             raise
         except Exception:
             logger.exception("Skipping evaluation rollup hydration because ClickHouse is unavailable")

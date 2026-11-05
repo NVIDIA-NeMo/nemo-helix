@@ -37,12 +37,13 @@ def to_unix_micros(value: datetime) -> int:
 
 
 def created_after_bound_micros(created_after: datetime) -> int:
-    """Inclusive ``root_started_at`` lifetime lower bound, floored to the whole second.
+    """Inclusive ``event_ts`` lifetime lower bound, floored to the whole second.
 
-    Producers commonly truncate span start times to whole seconds, so a run starting in the same
-    second as the Evaluation's creation must not fall below the bound and silently vanish from
-    rollups and session lists. The delete/recreate cycles this bound exists to separate are
-    seconds-to-minutes apart, so the floor cannot pull the deleted namesake's runs back in.
+    The bound is on ingest time, not the producer's span start time: runs are often published after
+    they happened, under an Evaluation created after the run. Ingest requires the Evaluation to
+    exist, so a run's ``event_ts`` follows its ``created_at``; the floor absorbs sub-second clock
+    skew between the entity store and intake. Rows of a deleted namesake ingested in the same
+    second as the recreation still match.
     """
     return to_unix_micros(created_after.replace(microsecond=0))
 

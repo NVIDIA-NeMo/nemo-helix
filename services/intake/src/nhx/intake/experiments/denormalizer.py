@@ -142,16 +142,11 @@ class EvaluationDenormalizer(BackgroundWorker):
     async def _write_names(self, evaluation: Experiment, rollup: EvaluationRollup) -> None:
         # Skip the write when nothing changed, so a burst of re-ingests that add no new names doesn't
         # churn the entity store (and doesn't lose an optimistic-lock race for no reason).
-        if (
-            evaluation.agent_names == rollup.agent_names
-            and evaluation.agent_versions == rollup.agent_versions
-            and evaluation.model_names == rollup.model_names
-        ):
+        if _facets_match(evaluation, rollup):
             return
-        # The rollup took multiple ClickHouse round trips, so the entity read before it may be
-        # stale. update() resolves the row by name and only checks db_version, and a recreated
-        # namesake starts at the same db_version, so writing the stale object could stamp the
-        # deleted evaluation's payload onto the recreated entity. Re-read and verify identity.
+        # update() resolves the row by name and only checks db_version, and a recreated namesake
+        # starts at the same db_version, so writing the pre-rollup object could stamp the deleted
+        # evaluation's payload onto the recreated entity. Re-read, verify identity, write the fresh copy.
         try:
             current = await self._entity_client.get(Experiment, name=evaluation.name, workspace=evaluation.workspace)
         except EntityNotFoundError:
@@ -163,11 +158,21 @@ class EvaluationDenormalizer(BackgroundWorker):
             # the recreated entity with its own created_at bound.
             self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
             return
-        evaluation.agent_names = rollup.agent_names
-        evaluation.agent_versions = rollup.agent_versions
-        evaluation.model_names = rollup.model_names
+        if _facets_match(current, rollup):
+            return
+        current.agent_names = rollup.agent_names
+        current.agent_versions = rollup.agent_versions
+        current.model_names = rollup.model_names
         try:
-            await self._entity_client.update(evaluation)
+            await self._entity_client.update(current)
         except EntityConflictError:
             # A concurrent user edit won the optimistic lock; re-queue for the next cycle.
-            self.mark_dirty(workspace=evaluation.workspace, evaluation_name=evaluation.name)
+            self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
+
+
+def _facets_match(evaluation: Experiment, rollup: EvaluationRollup) -> bool:
+    return (
+        evaluation.agent_names == rollup.agent_names
+        and evaluation.agent_versions == rollup.agent_versions
+        and evaluation.model_names == rollup.model_names
+    )

@@ -254,6 +254,27 @@ async def test_recreated_namesake_during_rollup_is_requeued_not_written() -> Non
 
 
 @pytest.mark.asyncio
+async def test_facets_are_written_onto_the_entity_read_after_the_rollup() -> None:
+    # A user edit lands while the rollup runs; the write carries it rather than the pre-rollup copy.
+    before = Experiment(name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds")
+    before._id = "entity-id"
+    edited = Experiment(
+        name="eval-a", workspace="default", experiment_ids=["grp"], dataset_name="ds", description="edited"
+    )
+    edited._id = "entity-id"
+    entity_client = _FakeEntityClient(existing=before, replace_after_first_get=edited)
+    refresher = _refresher(_FakeRollupRepo(), entity_client)
+
+    refresher.mark_dirty(workspace="default", evaluation_name="eval-a")
+    await refresher.flush()
+
+    assert entity_client.updated == [edited]
+    assert edited.description == "edited"
+    assert edited.agent_names == ["agent-x"]
+    assert before.agent_names != ["agent-x"]
+
+
+@pytest.mark.asyncio
 async def test_evaluation_deleted_during_rollup_is_skipped() -> None:
     # Deleted between the rollup and the write: nothing to update, and nothing requeued —
     # the evaluation no longer exists.

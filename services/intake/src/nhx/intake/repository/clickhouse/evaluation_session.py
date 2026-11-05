@@ -106,10 +106,10 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         evaluator_results_table = self._executor.table(ClickHouseTable.EVALUATOR_RESULTS)
 
         scoped_filter_sql, scoped_filter_parameters = _scoped_filter(test_case_name=test_case_name, status=status)
-        # Inclusive lower bound on root_started_at: an Evaluation recreated under a freed name must
+        # Inclusive lower bound on event_ts: an Evaluation recreated under a freed name must
         # not list the deleted namesake's sessions. None keeps the name-only match.
         created_after_sql = (
-            "\n            AND root_started_at >= fromUnixTimestamp64Micro(%(created_after_us)s)"
+            "\n            AND event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)"
             if created_after is not None
             else ""
         )
