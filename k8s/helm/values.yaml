@@ -346,7 +346,7 @@ networkPolicies:
       - low: 3000
         high: 4999
 
-  # -- Ingress isolation for OpenSandbox sandbox pods, a second layer over the per-sandbox execd token Harbor evaluations set. It also covers ports other than execd, such as Compose services, and sandboxes from other clients, such as Gym and GRPO. OpenSandbox's egress sidecar filters only what leaves a sandbox, so without this policy any pod that can reach a sandbox's IP can connect to it. Needs a CNI that enforces NetworkPolicy.
+  # -- Ingress isolation for OpenSandbox sandbox pods, a second layer over the per-sandbox execd token Harbor evaluations set. It also covers ports other than execd, such as Compose services, and sandboxes from other clients. OpenSandbox's egress sidecar filters only what leaves a sandbox, so without this policy any pod that can reach a sandbox's IP can connect to it. Needs a CNI that enforces NetworkPolicy.
   # @default -- This object has the following default values for sandbox pod ingress isolation.
   sandboxes:
     # -- Create a NetworkPolicy in the sandbox namespace that admits sandbox pod ingress only from the OpenSandbox server namespace, `opensandbox.namespace`.

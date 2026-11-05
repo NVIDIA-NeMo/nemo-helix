@@ -7,7 +7,7 @@ SPDX-License-Identifier: Apache-2.0
 Ingress isolation for OpenSandbox sandbox pods. Each sandbox runs execd, which executes the commands it is sent, as the
 image's user, on the pod IP. Harbor evaluations give every sandbox they create its own execd token, which works on any
 cluster; this policy is the second layer, for clusters whose CNI enforces it. It also covers what the token doesn't:
-ports other than execd, such as Compose services, and sandboxes created by other clients, such as Gym and GRPO. OpenSandbox creates no NetworkPolicy, and its
+ports other than execd, such as Compose services, and sandboxes created by other clients. OpenSandbox creates no NetworkPolicy, and its
 egress sidecar filters only what leaves a sandbox. Platform clients reach sandboxes through the OpenSandbox server's
 proxy, so the server's namespace is the only source a sandbox needs to admit.
 */}}
