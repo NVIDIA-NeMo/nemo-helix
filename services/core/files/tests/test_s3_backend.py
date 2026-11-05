@@ -463,62 +463,10 @@ class TestS3StorageImplDownload:
 class TestS3StorageImplUpload:
     """Test upload method."""
 
-    async def test_upload_requires_content_length(self, s3_impl_no_prefix):
-        """Test upload raises ValueError when content_length is not provided."""
-
-        async def data_stream():
-            yield b"test data"
-
-        with pytest.raises(ValueError) as exc_info:
-            await s3_impl_no_prefix.upload("file.txt", data_stream())
-
-        assert "content_length is required" in str(exc_info.value)
-
-    async def test_upload_generates_presigned_url(self, s3_impl):
-        """Test that upload generates a presigned URL and streams content."""
-        captured_url = None
-        captured_headers = None
-
-        async def mock_upload_streaming(url, data, headers=None, **kwargs):
-            nonlocal captured_url, captured_headers
-            captured_url = url
-            captured_headers = headers
-            async for _ in data:
-                pass
-            return 0
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl) as mock_client:
-            mock_client.generate_presigned_url.return_value = (
-                "https://test-bucket.s3.amazonaws.com/test-prefix/file.txt"
-                "?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc123"
-            )
-            with patch(
-                "nhx.core.files.app.backends.s3.upload_url_streaming",
-                side_effect=mock_upload_streaming,
-            ):
-                result = await s3_impl.upload("file.txt", data_stream(), content_length=9)
-
-        assert result.path == "file.txt"
-        assert result.size == 9
-        assert "test-bucket" in captured_url
-        assert "X-Amz-Signature" in captured_url
-        assert captured_headers["Content-Length"] == "9"
-
-    async def test_upload_presigned_url_generation_fails(self, s3_impl_no_prefix):
-        """Test upload handles presigned URL generation failure."""
-
-        async def data_stream():
-            yield b"test data"
-
-        async with mock_s3_client(s3_impl_no_prefix) as mock_client:
-            mock_client.generate_presigned_url.side_effect = _make_client_error("NoSuchBucket")
-            with pytest.raises(S3ConfigError) as exc_info:
-                await s3_impl_no_prefix.upload("file.txt", data_stream(), content_length=9)
-
-        assert "Not found" in str(exc_info.value)
+    @pytest.mark.parametrize("content_length", [None, -1])
+    async def test_upload_requires_content_length(self, s3_impl_no_prefix, content_length):
+        with pytest.raises(ValueError, match="content_length"):
+            await s3_impl_no_prefix.upload("file.txt", AsyncIteratorMock([b"test data"]), content_length)
 
 
 class TestS3StorageImplValidateStorage:

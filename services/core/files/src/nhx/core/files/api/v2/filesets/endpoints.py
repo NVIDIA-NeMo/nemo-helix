@@ -959,6 +959,8 @@ async def upload_file(
             msg = f"Connection terminated due to inactivity: {path}"
             logger.error(msg)
             raise HTTPException(status_code=HTTP_408_REQUEST_TIMEOUT, detail=msg)
+        except StorageAccessError as e:
+            raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=str(e)) from e
         except OSError as e:
             logger.exception(f"Storage error for upload at {path}")
             raise HTTPException(
