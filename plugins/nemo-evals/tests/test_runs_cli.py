@@ -448,6 +448,113 @@ def test_ctrl_c_before_the_submit_names_the_taskset(submitting, monkeypatch):
     assert "Interrupted. Submit with: nemo evals runs submit --taskset " + shlex.quote(STORED) in result.output
 
 
+@pytest.mark.parametrize("interrupt_at", ["wait_for_builds", "run_request"])
+@pytest.mark.parametrize("spec_key", [None, "file-key"])
+@pytest.mark.parametrize("cli_key", [None, "cli key-$USER"])
+def test_ctrl_c_before_submit_keeps_the_effective_key(
+    submitting, monkeypatch, tmp_path, interrupt_at, spec_key, cli_key
+):
+    """A printed recovery command must not replace the CLI override with the file's key."""
+    spec = tmp_path / "run settings.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {},
+                "idempotency_key": spec_key,
+            }
+        )
+    )
+    monkeypatch.setattr(runs_cli, "create_taskset", lambda *a, **k: CreatedTaskset(STORED, MEMBERS, 2, None))
+    original = getattr(runs_cli, interrupt_at)
+
+    def interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runs_cli, interrupt_at, interrupted)
+    options = ["--idempotency-key", cli_key] if cli_key is not None else []
+    if interrupt_at == "run_request":
+        options.append("--no-build-images")
+    result = submitting.invoke("--harbor-hub", "datacurve/deep-swe@latest", "--spec-file", str(spec), *options)
+    assert result.exit_code == 130 and submitting.bodies == [], result.output
+    command = next(
+        line[line.index("nemo evals runs submit") :]
+        for line in result.output.splitlines()
+        if "nemo evals runs submit" in line
+    )
+    retry = shlex.split(command)
+    monkeypatch.setattr(runs_cli, interrupt_at, original)
+    resumed = submitting.invoke(*retry[4:])
+    assert resumed.exit_code == 0, resumed.output
+    (body,) = submitting.bodies
+    if cli_key is not None or spec_key is not None:
+        assert body["idempotency_key"] == (cli_key or spec_key)
+    else:
+        assert "--idempotency-key" not in retry and body["idempotency_key"]
+
+
+@pytest.mark.parametrize("key_source", ["cli", "spec", "generated"])
+def test_ctrl_c_during_submit_replays_the_original_request(submitting, monkeypatch, tmp_path, key_source):
+    """Recovery preserves the effective key and publication without rediscovering the source."""
+    spec = tmp_path / "run settings.json"
+    spec.write_text(
+        json.dumps(
+            {
+                "spec": {"target": {"kind": "harbor", "source": {"name": "openhands"}}},
+                "execution": {"sandbox": {"profile": "harbor-web", "cpus": 4}, "max_concurrent_task_jobs": 3},
+                "timeout_seconds": 7200,
+                "idempotency_key": "file-key" if key_source == "spec" else None,
+            }
+        )
+    )
+    created = CreatedTaskset(STORED, MEMBERS, 2, ("datacurve/deep-swe", "sha256:" + "a" * 64))
+    monkeypatch.setattr(runs_cli, "create_taskset", lambda *a, **k: created)
+    original_submit = submitting.submit
+    attempted = []
+
+    def interrupted(request, *, workspace):
+        attempted.append((workspace, request.model_dump(mode="json", exclude_none=True)))
+        raise KeyboardInterrupt
+
+    submitting.submit = interrupted
+    options = ["--idempotency-key", "cli key-$USER"] if key_source == "cli" else []
+    result = submitting.invoke(
+        "--harbor-hub",
+        "datacurve/deep-swe@latest",
+        "--no-build-images",
+        "--spec-file",
+        str(spec),
+        "--workspace",
+        "team",
+        "--experiment",
+        "my experiment",
+        *options,
+    )
+    assert result.exit_code == 130, result.output
+    command = next(
+        line[line.index("nemo evals runs submit") :]
+        for line in result.output.splitlines()
+        if "nemo evals runs submit" in line
+    )
+    retry = shlex.split(command)
+    assert retry.count("--idempotency-key") == 1
+    assert "--harbor-hub" not in retry
+    sent = []
+
+    def resumed_submit(request, *, workspace):
+        sent.append((workspace, request.model_dump(mode="json", exclude_none=True)))
+        return original_submit(request, workspace=workspace)
+
+    def changed_source(*args, **kwargs):
+        raise AssertionError("recovery must use the already published taskset")
+
+    monkeypatch.setattr(runs_cli, "create_taskset", changed_source)
+    submitting.submit = resumed_submit
+    resumed = submitting.invoke(*retry[4:])
+    assert resumed.exit_code == 0, resumed.output
+    assert sent == attempted
+
+
 def test_spec_file_keeps_its_settings_and_takes_the_selected_taskset(tmp_path):
     spec = tmp_path / "run.json"
     spec.write_text(

@@ -418,27 +418,24 @@ The Evaluation's dataset label depends on the task source:
 
 Use `--intake-dataset` so that runs on a stored taskset show the same dataset as runs from the source:
 
-1. Publish the taskset. For a Hub or Git source, it prints the `--intake-dataset` flag to use:
+1. Publish the taskset and save its reference and source Intake label (requires `jq`):
 
    ```bash
-   nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe \
-     --tasks anko-default-function-arguments,geo-shapeindex-serialization
+   TASKSET_INFO="$(nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe \
+     --tasks anko-default-function-arguments,geo-shapeindex-serialization --json)"
+   TASKSET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.taskset_ref')"
+   INTAKE_DATASET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.intake_dataset')"
    ```
 
-   ```console
-   …
-   Intake label: --intake-dataset datacurve/deep-swe@sha256:…
-   default/deep-swe-…#…
-   ```
-
-   `tasksets create --json` prints the same value as `intake_dataset`.
+   Without `--json`, copy the complete value after `Intake label: --intake-dataset` for a Hub or Git source.
+   It is the source label, not the taskset digest.
 
 2. Build its images, then submit with both flags:
 
    ```bash
    nemo evals tasksets build-images "$TASKSET" --wait
    nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --agent oracle \
-     --experiment harbor-runs --intake-dataset 'datacurve/deep-swe@sha256:…'
+     --experiment harbor-runs --intake-dataset "$INTAKE_DATASET"
    ```
 
 - `--intake-dataset` requires both `--taskset` and `--experiment`.
@@ -516,10 +513,12 @@ trials = read_trials("run-0123456789abcdef/agent-eval-results")
   ```bash
   nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed
   nemo evals runs status "$RUN_ID" --workspace "$WS" --json | jq -r .run.taskset_ref
-  nemo evals runs submit --workspace "$WS" --taskset '<taskset_ref>' --tasks 3,7 --spec-file openhands-run.json
+  nemo evals runs submit --workspace "$WS" --taskset '<taskset_ref>' --tasks '<failed task indexes>' --spec-file openhands-run.json
   ```
 
-  - A task's index is the `<i>` in its Job name, `<run-id>-task-<i>`.
+  - Replace `<failed task indexes>` with comma-separated zero-based indexes from the failed-task listing;
+    each is the `<i>` in the Job name, `<run-id>-task-<i>`, on this run's published taskset. If none failed, skip resubmission.
+  - This starts a new run. If the request file pins an `idempotency_key`, override it with a fresh key.
 
 ## Retry safely
 
@@ -529,14 +528,20 @@ An idempotency key is scoped to you and the workspace.
 - Same key, any change (agent, model, resources, Experiment, tasks) → HTTP 409.
 - New key, or no key → a new run.
 
-After a submit failed with an unclear result, such as a timeout, rerun the same command with `--idempotency-key` set to the key the error printed. To retry safely without reading the error, choose a key up front:
+After a submit fails with an unclear result, such as a timeout, retry the already-published taskset with the
+original settings and the key the error printed. Replace source and selection flags with `--taskset <published_ref>`;
+do not import the source again. Preserve the original source Intake label and Experiment when publishing.
+For the captured values from [Label the dataset](#label-the-dataset), recovery is:
 
 ```bash
-nemo evals runs submit --workspace "$WS" --harbor-dir "$SUITE_DIR" --tasks 0 --agent oracle \
-  --idempotency-key hello-world-1
+nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --agent oracle \
+  --experiment harbor-runs --intake-dataset "$INTAKE_DATASET" --idempotency-key '<original key>'
 ```
 
-- Keep the task inputs unchanged: the same `--harbor-dir` contents, the same pinned `@sha256` or the same `--taskset` digest.
+- Keep the original spec content and execution settings. If the spec came from stdin, supply the identical JSON again.
+- Ctrl-C during submit prints a full recovery command; transport/HTTP errors may print only a key. Retain the published
+  reference, settings and source label from the original submit; without them an identical replay is not guaranteed.
+- You can choose `--idempotency-key` up front on the initial submit and reuse it for recovery.
 - The key doesn't undo task uploads or image builds that ran before the run was accepted.
 
 ## Troubleshooting

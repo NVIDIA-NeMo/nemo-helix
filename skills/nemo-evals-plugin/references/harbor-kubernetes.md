@@ -17,6 +17,9 @@ commands with `uv run`.
 
 `oracle` applies each task's reference solution and calls no model. Run it first on a new deployment.
 
+Run this setup from the root of a source checkout. Without a checkout, set `SUITE_DIR` to an existing local
+Harbor suite and skip both the temporary-directory assignment and the copy below.
+
 ```bash
 SUITE_DIR="$(mktemp -d)/hello-world-suite"
 cp -R packages/nhx_evals_sdk/examples/harbor/hello_world_dataset "$SUITE_DIR"
@@ -122,14 +125,19 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 
 ## Publish once, run many times
 
+With `jq` installed, capture the published taskset and its source Intake label:
+
 ```bash
-nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe --tasks 0,1,2
+TASKSET_INFO="$(nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe --tasks 0,1,2 --json)"
+TASKSET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.taskset_ref')"
+INTAKE_DATASET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.intake_dataset')"
 nemo evals tasksets build-images "$TASKSET" --wait
 nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --spec-file harbor_taskset_run_openhands.json \
-  --experiment harbor-runs --intake-dataset 'datacurve/deep-swe@sha256:…'
+  --experiment harbor-runs --intake-dataset "$INTAKE_DATASET"
 ```
 
-- `tasksets create` prints the taskset ref last, and `Intake label: --intake-dataset …` for Hub and Git sources.
+- Keep these values for recovery. Without `--json`, `tasksets create` prints the taskset ref last and
+  `Intake label: --intake-dataset …` for Hub and Git sources; copy that complete label, not the taskset digest.
 - `--intake-dataset` is an Intake label on the run's Evaluation. It requires `--taskset` and `--experiment`.
 
 ## Experiment
@@ -151,10 +159,22 @@ trial appears when its task Job finishes.
   can't be read ends `failed` with a `plan_unreadable: …` error, even if tasks succeeded: ask the operator.
 - Trial errors (agent install fails, agent crashes) are stored on the trial; the task Job still succeeds.
   `max_retries` in the spec reruns an errored trial up to that many times, each in a new sandbox.
-- Failed task Jobs aren't rerun. Find them with `nemo evals runs tasks "$RUN_ID" --phase failed`, then
+- Failed task Jobs aren't rerun. Find them with `nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed`, then
   resubmit those indexes with `--taskset <taskset_ref>`; `runs status --json` has `taskset_ref`.
+  This starts a new run; use a fresh key if the spec pins an `idempotency_key`.
 - Same `--idempotency-key` and identical request → the existing run. Same key, changed request → HTTP 409.
-  After an unclear submit failure, rerun the same command with the key it printed.
+  After an unclear submit failure, use the already-published taskset, the original settings and publication
+  label, the same workspace, and the key it printed. For the publish-once example above:
+
+  ```bash
+  nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --spec-file harbor_taskset_run_openhands.json \
+    --experiment harbor-runs --intake-dataset "$INTAKE_DATASET" --idempotency-key '<original key>'
+  ```
+
+  For a direct-source submit, replace its source and selection flags with its published taskset reference;
+  do not import a source that may have changed. Keep the original spec content, including when resupplying
+  JSON that came from stdin. Ctrl-C during submit prints a full recovery command; transport/HTTP errors may
+  print only a key. Retain the original settings and source label: without them an identical replay is not guaranteed.
 
 ## Full example
 

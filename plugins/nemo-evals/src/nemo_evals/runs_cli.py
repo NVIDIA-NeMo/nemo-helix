@@ -657,8 +657,8 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
         spec: dict[str, Any] | None = None
         source: tuple[str, str | None] | None = parse_dataset(intake_dataset) if intake_dataset else None
 
-        def rerun(ref: str) -> str:
-            """This submit's command for ``ref``: the source flags become ``--taskset``, the run settings stay."""
+        def rerun(ref: str, *, idempotency_key: str | None = None) -> str:
+            """Keep this submit's settings on ``ref``; supply a key only to recover a submission."""
             kept: list[tuple[str, object]] = [
                 ("--spec-file", "<spec file>" if spec_file is not None and _is_stream(spec_file) else spec_file),
                 ("--agent", None if spec_file is not None or agent == "oracle" else agent),
@@ -669,6 +669,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 ("--dispatcher-profile", dispatcher_profile),
                 ("--experiment", experiment),
                 ("--intake-dataset", "@".join(p for p in source if p) if experiment and source else None),
+                ("--idempotency-key", idempotency_key),
             ]
             options = "".join(f" {name} {shlex.quote(str(value))}" for name, value in kept if value is not None)
             return f"nemo evals runs submit --taskset {shlex.quote(ref)}{options}{flag}"
@@ -732,7 +733,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                 echo(
                     "Interrupted during submit; the run may still be accepted. To check or finish it without starting "
                     # the published ref, not the source: a changed source would send a different request (409)
-                    f"a second run, submit with the same key: {rerun(taskset_ref)} --idempotency-key {shlex.quote(submitting_key)}"
+                    f"a second run, submit with the same key: {rerun(taskset_ref, idempotency_key=submitting_key)}"
                 )
                 raise typer.Exit(code=130) from None
             if waiting_for_builds and taskset_ref:  # --taskset doesn't wait: it rejects tasks still building
@@ -740,9 +741,13 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
                     "Stopped waiting; the image builds keep going. Check them with: "
                     f"nemo evals tasksets build-images {shlex.quote(taskset_ref)} --status"  # the ref names the workspace
                 )
-                echo(f"Once they're ready, submit with: {rerun(taskset_ref)}")
+                echo(f"Once they're ready, submit with: {rerun(taskset_ref, idempotency_key=idempotency_key)}")
             else:
-                echo(f"Interrupted. Submit with: {rerun(taskset_ref)}" if taskset_ref else "Interrupted.")
+                echo(
+                    f"Interrupted. Submit with: {rerun(taskset_ref, idempotency_key=idempotency_key)}"
+                    if taskset_ref
+                    else "Interrupted."
+                )
             raise typer.Exit(code=130) from None
         except (SelectionError, RuntimeError, NemoClientError, ValueError) as exc:
             echo(f"Error: {exc}", err=True)
@@ -750,7 +755,7 @@ def add_runs_commands(app: typer.Typer, client_factory: Callable[[], NemoClient]
             if isinstance(exc, TasksetRunSubmitError) and exc.status_code not in (409, 422) and taskset_ref:
                 echo(
                     "The run may already be accepted. To check or finish it without starting a second run, submit "
-                    f"with the same key: {rerun(taskset_ref)} --idempotency-key {shlex.quote(exc.idempotency_key)}",
+                    f"with the same key: {rerun(taskset_ref, idempotency_key=exc.idempotency_key)}",
                     err=True,
                 )
             if stored_ref is not None and "without images" in str(exc):
