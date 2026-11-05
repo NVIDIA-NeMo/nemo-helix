@@ -45,9 +45,11 @@ PRE_COMMIT_UV_HOOKS = (
 # `uv` in command position: line start, after a shell command separator, after
 # `(` (which covers command substitution like $(uv ...)), or after a command
 # keyword. Catches the bare-uv shapes without flagging prose or identifiers.
+# Each leading VAR=value assignment must be followed by whitespace, which keeps the
+# repetition unambiguous (no exponential backtracking).
 BARE_UV_COMMAND_RE = re.compile(
     r"""(?:^|[;&|(]|\b(?:exec|command|do|then|else)\s+)"""
-    r"""(?:\s|[A-Za-z_][A-Za-z_0-9]*=(?:"[^"]*"|'[^']*'|[^\s"']*)\s*)*"""
+    r"""\s*(?:[A-Za-z_][A-Za-z_0-9]*=(?:"[^"]*"|'[^']*'|[^\s"']*)\s+)*"""
     r"""\buv(?:\s|$)"""
 )
 
@@ -106,12 +108,12 @@ def make_stub_env(
             env.pop("FLOX_ENV_PROJECT", None)
         else:
             env["FLOX_ENV_PROJECT"] = flox_env_project
-        if not include_flox:
-            (bin_dir / "flox").unlink()
-        if not include_uv:
-            (bin_dir / "uv").unlink()
-            # Drop host tool locations so a real uv on PATH cannot leak in.
-            env["PATH"] = str(bin_dir) + os.pathsep + "/usr/bin:/bin"
+        # Drop every PATH entry that provides a tool under test as missing, so a host
+        # install cannot leak in; keep the rest so `env` still finds bash and python3.
+        for name, include in (("flox", include_flox), ("uv", include_uv)):
+            if not include:
+                (bin_dir / name).unlink()
+                env["PATH"] = os.pathsep.join(d for d in env["PATH"].split(os.pathsep) if not (Path(d) / name).exists())
         return env
 
     def record(name: str) -> list[str] | None:
@@ -261,6 +263,25 @@ def bare_uv_lines(text: str) -> list[int]:
         if BARE_UV_COMMAND_RE.search(line):
             offenders.append(lineno)
     return offenders
+
+
+@pytest.mark.parametrize(
+    "line,is_bare",
+    [
+        ("uv run pytest", True),
+        ("  uv sync", True),
+        ("foo && uv lock", True),
+        ("out=$(uv --version)", True),
+        ("then uv run x", True),
+        ('UV_FROZEN=1 FOO="a b" uv run x', True),
+        ('"${uv_shim}" run --frozen x', False),
+        ("echo use uv to install", False),
+        ("uv_shim=script/uv", False),
+        ("A=" + " A=" * 5000, False),
+    ],
+)
+def test_bare_uv_command_re(line: str, is_bare: bool) -> None:
+    assert bool(BARE_UV_COMMAND_RE.search(line)) is is_bare
 
 
 @pytest.mark.parametrize("relpath,reference", sorted(SHELL_SURFACES.items()))
