@@ -7,7 +7,11 @@ Offline: nothing here submits a run, builds an image or contacts a deployment.
 """
 
 import json
+import os
 import re
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -100,3 +104,81 @@ def test_guide_sizing_fragment_is_valid_in_a_request() -> None:
 def test_quickstart_suite_exists_with_one_task() -> None:
     suite = ROOT / "packages/nhx_evals_sdk/examples/harbor/hello_world_dataset"
     assert [task.parent.name for task in suite.glob("*/task.toml")] == ["hello-world"]
+
+
+@pytest.mark.parametrize("command", ["results", "tasks"])
+def test_troubleshooting_diagnostics_name_the_run_and_workspace(command: str) -> None:
+    """The copyable diagnostics must parse as a lookup of the user's run in their workspace."""
+    troubleshooting = (SKILL / "references/troubleshooting.md").read_text()
+    example = re.findall(rf"\x60(nemo evals runs {command}[^\x60]*)\x60", troubleshooting)[-1]
+    arguments = shlex.split(example.replace("$RUN_ID", "run-0123456789abcdef").replace("$WS", "team"))
+    runs = _cli().commands["runs"]
+    assert isinstance(runs, Group)
+    with runs.commands[command].make_context(command, arguments[4:]) as context:
+        assert context.params["run_id"] == "run-0123456789abcdef"
+        assert context.params["workspace"] == "team"
+        if command == "tasks":
+            assert context.params["phase"] == "failed"
+
+
+@pytest.mark.parametrize("path", [GUIDE, RECIPE], ids=["guide", "skill-recipe"])
+def test_publish_once_examples_use_the_created_taskset_and_source_label(path: Path, tmp_path: Path) -> None:
+    """Execute the shell example so stale variables and placeholder source versions cannot pass."""
+    blocks = _blocks(path, "bash")
+    start = max(
+        index
+        for index, block in enumerate(blocks)
+        if "nemo evals tasksets create" in block and "datacurve/deep-swe" in block
+    )
+    end = next(index for index in range(start, len(blocks)) if "nemo evals runs submit" in blocks[index])
+    snippet = "\n".join(blocks[start : end + 1])
+    published_ref = "team/example-taskset#" + "0" * 64
+    source_label = "datacurve/deep-swe@sha256:" + "a" * 64
+    created = {
+        "taskset_ref": published_ref,
+        "tasks": ["team/example-task#" + "b" * 64],
+        "total": 3,
+        "intake_dataset": source_label,
+    }
+    calls_path = tmp_path / "calls.jsonl"
+    fake_cli = tmp_path / "nemo"
+    fake_cli.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"created = {created!r}\n"
+        "arguments = sys.argv[1:]\n"
+        "with open(os.environ['TEST_NEMO_CALLS'], 'a') as calls:\n"
+        "    calls.write(json.dumps(arguments) + '\\n')\n"
+        "if arguments[:3] == ['evals', 'tasksets', 'create']:\n"
+        "    if '--json' in arguments:\n"
+        "        print(json.dumps(created))\n"
+        "    else:\n"
+        "        print('Intake label: --intake-dataset ' + created['intake_dataset'])\n"
+        "        print(created['taskset_ref'])\n"
+        "elif arguments[:3] not in [['evals', 'tasksets', 'build-images'], ['evals', 'runs', 'submit']]:\n"
+        "    raise SystemExit('unexpected CLI command in publish-once example')\n"
+    )
+    fake_cli.chmod(0o755)
+    subprocess.run(
+        ["bash", "-eu", "-c", snippet],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
+            "TEST_NEMO_CALLS": str(calls_path),
+            "WS": "team",
+            "TASKSET": "stale/taskset",
+            "INTAKE_DATASET": "stale/dataset@old",
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    (submission,) = [call for call in calls if call[:3] == ["evals", "runs", "submit"]]
+    runs = _cli().commands["runs"]
+    assert isinstance(runs, Group)
+    with runs.commands["submit"].make_context("submit", submission[3:]) as context:
+        assert context.params["workspace"] == "team"
+        assert context.params["taskset"] == published_ref
+        assert context.params["intake_dataset"] == source_label

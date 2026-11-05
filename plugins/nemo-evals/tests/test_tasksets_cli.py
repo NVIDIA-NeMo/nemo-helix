@@ -12,6 +12,7 @@ from typing import cast
 import httpx
 import pytest
 import typer
+from nemo_evals.api.fields import TaskRef
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
     BUILD_READ_FAILURES,
@@ -105,7 +106,9 @@ class FakeBuilds:
 
 def evaluator(builds: FakeBuilds, names=("a", "b")) -> Evaluator:
     members = [f"default/{name}#{DIGEST}" for name in names]
-    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=members))
+    tasksets = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(m) for m in members])
+    )
     return cast(Evaluator, SimpleNamespace(tasks=builds, tasksets=tasksets))
 
 
