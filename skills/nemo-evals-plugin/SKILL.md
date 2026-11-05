@@ -1,6 +1,6 @@
 ---
 name: nemo-evals-plugin
-description: Evaluate models, datasets, and agents with the NeMo Helix Evals plugin. Use for metric selection, SDK checks, platform jobs, and result retrieval.
+description: Evaluate models, datasets, and agents with the NeMo Helix Evals plugin. Use for metric selection, SDK checks, platform jobs, result retrieval, and Harbor taskset runs on Kubernetes (`nemo evals runs`).
 license: Apache-2.0
 metadata:
   owner: nemo-helix
@@ -39,7 +39,8 @@ Establish these inputs before building an evaluation:
    If the user wants the full embed/rerank fine-tune recipe, hand off to `nemo-retrieval-recipes`
    and use this skill only to run and debug retrieve-eval.
 2. Choose the simplest metric that measures the requested behavior. Prefer deterministic metrics when possible.
-3. Build a tiny smoke case with one expected pass and one expected failure.
+3. Build a tiny smoke case with one expected pass and one expected failure. For a Kubernetes taskset run,
+   the `oracle` run in [Harbor on Kubernetes](references/harbor-kubernetes.md) is the smoke case.
 4. Validate metric behavior with the standalone SDK. Inspect row-level output, aggregate `count` and
    `nan_count`, and coverage before interpreting a mean.
 5. Fix field mappings, prompts, parsers, or task definitions before scaling.
@@ -57,14 +58,16 @@ metric for a rubric, RAG workflow, or tool-calling evaluation.
 | Multiple inline/stored metric refs in one job | `nemo evals evaluate` with an `EvaluateInputSpec` |
 | Task-driven platform job | `evaluator.submit(tasks=..., target=<runner>)` or `nemo evals agent-evaluate` |
 | Retrieval-driven platform job | `nemo evals retrieve-eval` |
+| Harbor task suite on a Kubernetes deployment: one Job and OpenSandbox sandbox per task | `nemo evals runs submit`; read [Harbor on Kubernetes](references/harbor-kubernetes.md) |
 | Reusable platform definitions and result indexes | `evaluator.metrics`, `.tasks`, `.tasksets`, `.eval_results`, `.agent_eval_results` |
 
 Default to the plugin-specific job commands for durable platform evaluation:
 `nemo evals evaluate`, `nemo evals agent-evaluate`, and
 `nemo evals retrieve-eval`. The old `nemo evals ... run` and
 `nemo evals ... submit` CLI verbs are not part of the supported evaluator
-job surface. For fast metric iteration without the platform, use the
-standalone `nhx_evals_sdk.Evaluator` instead.
+job surface. The one exception is `nemo evals runs submit`, the supported path
+for Harbor taskset runs on Kubernetes. For fast metric iteration without the
+platform, use the standalone `nhx_evals_sdk.Evaluator` instead.
 
 - Read [SDK Execution](references/execution.md) for datasets, targets,
 configuration, field mapping, job lifecycle, and custom metric packaging.
@@ -121,6 +124,7 @@ under a different skills root.
 | `assets/specs/llm_as_judge.json` | Online generation + judge; local-first (`NVIDIA_API_KEY`) |
 | `assets/specs/fabric_agent_eval.json` | Task-driven Fabric runner spec |
 | `assets/specs/gym_agent_eval.json` | Task-driven sandboxed Gym FileSet spec |
+| `assets/specs/harbor_taskset_run_openhands.json` | `nemo evals runs submit --spec-file` request: openhands on a closed-book model |
 | `assets/examples/plugin_sdk_examples.py` | Copyable SDK snippets for each plugin surface |
 
 ## Available Scripts
@@ -185,6 +189,12 @@ so there is no model override.
 
 Submission accepts inline tasks or a stored `TasksetRef`. Stored tasksets are
 resolved in the target workspace.
+
+**Kubernetes taskset run**
+
+To run a Harbor task suite on a Kubernetes deployment, use `nemo evals runs submit`,
+not an `agent-evaluate` job. Read [Harbor on Kubernetes](references/harbor-kubernetes.md)
+for the oracle smoke run, openhands with a closed-book model, Experiments, results and retries.
 
 Read [Agent Evaluation](references/agent-evaluation.md) for inline tasks,
 `TasksetRef`, concurrency, fail-fast behavior, sparse-output denominators,
