@@ -830,7 +830,7 @@ uv run --frozen ruff check plugins/nemo-builder && uv run --frozen ty check plug
 The tests need no cluster, registry or running platform.
 
 `e2e/test_builder.py` does: CI's `kind-builder-e2e` job runs it on kind, once with platform auth off and once
-with it on. It builds two images, checks them with crane and cosign, and with auth on checks who may complete an
+with it on, after a merge to `main` or on a manual run of `ci.yaml`, not on pull requests. It builds two images, checks them with crane and cosign, and with auth on checks who may complete an
 image. Its docstring lists what it needs to run against another cluster.
 
 | File | What it holds |

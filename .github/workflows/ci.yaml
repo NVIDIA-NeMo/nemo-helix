@@ -695,7 +695,7 @@ jobs:
     name: Kind builder e2e (auth ${{ matrix.auth }})
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
       (github.event_name == 'workflow_dispatch' || needs.changes.outputs.builder-e2e == 'true')
@@ -2016,6 +2016,7 @@ jobs:
       - kind-cpu-e2e
       - kind-gym-e2e
       - kind-customizer-auth-e2e
+      - kind-builder-e2e
       - kind-network-policy-smoke
       - python-auth-idp-e2e-test
       - python-e2e-test
