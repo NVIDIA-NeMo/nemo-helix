@@ -6,14 +6,14 @@ import {
   UploadModalContext,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import {
-  UploadModalState,
+  type UploadModalState,
   uploadModalInitialState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { NewDataset } from '@nemo/common/src/components/UploadModal/DatasetUploader/NewDataset';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 vi.mock('@nemo/common/src/components/UploadModal/FileUpload', () => ({
   FileUpload: ({ error }: { error?: string }) => (

@@ -8,7 +8,7 @@ import {
   getExistingFileId,
   sanitizeFilenameForDatasetName,
 } from '@nemo/common/src/components/UploadModal/utils';
-import { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 
 describe('UploadModal utils', () => {
   describe('isFilesetFileOutput', () => {

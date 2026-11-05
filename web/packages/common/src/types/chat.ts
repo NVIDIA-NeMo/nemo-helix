@@ -1,13 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import {
+import type {
   ChatCompletion,
   ChatCompletionChunk,
   ChatCompletionFunctionMessageParam,
   ChatCompletionMessageParam,
 } from 'openai/resources/index.mjs';
-import { Stream } from 'openai/streaming.mjs';
+import type { Stream } from 'openai/streaming.mjs';
 
 export type ChatCompletionRequestReturn = Stream<ChatCompletionChunk> | ChatCompletion;
 export type ChatCompletionRequestReturnData = ChatCompletionChunk | ChatCompletion;

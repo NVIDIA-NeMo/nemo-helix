@@ -11,14 +11,14 @@
  */
 
 import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
-import { ButtonProps } from '@nvidia/foundations-react-core';
+import type { ButtonProps } from '@nvidia/foundations-react-core';
 import { CreateButton } from '@studio/components/common/CreateButton';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface Props extends Omit<ButtonProps, 'onClick'> {
   expanded?: boolean;

@@ -10,7 +10,7 @@ import { server } from '@studio/mocks/node';
 import { mockUseParams } from '@studio/tests/util/mockUseParams';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor, within } from '@testing-library/react';
-import userEvent, { UserEvent } from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 
 const JOB_NAME = 'test-job-abc123';

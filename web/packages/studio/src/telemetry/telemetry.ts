@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { LogRecord, logs } from '@opentelemetry/api-logs';
+import { type LogRecord, logs } from '@opentelemetry/api-logs';
 import { getWebAutoInstrumentations } from '@opentelemetry/auto-instrumentations-web';
 import { ZoneContextManager } from '@opentelemetry/context-zone';
 import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
@@ -14,7 +14,11 @@ import {
   ConsoleLogRecordExporter,
   SimpleLogRecordProcessor,
 } from '@opentelemetry/sdk-logs';
-import { BatchSpanProcessor, SpanProcessor, WebTracerProvider } from '@opentelemetry/sdk-trace-web';
+import {
+  BatchSpanProcessor,
+  type SpanProcessor,
+  WebTracerProvider,
+} from '@opentelemetry/sdk-trace-web';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import {
   OTEL_PROXY_URL,

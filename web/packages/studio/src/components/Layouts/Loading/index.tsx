@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Stack, Spinner, SpinnerProps } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import { Stack, Spinner, type SpinnerProps } from '@nvidia/foundations-react-core';
+import type { FC } from 'react';
 
 /**
  * A basic KUI Spinner centered in a full height container. It's most commonly

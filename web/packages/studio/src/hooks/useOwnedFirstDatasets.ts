@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
-import { type FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { ownedFirst } from '@studio/util/ownedFirst';
 import { useMemo } from 'react';

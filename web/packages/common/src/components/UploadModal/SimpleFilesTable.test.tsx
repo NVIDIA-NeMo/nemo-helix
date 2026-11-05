@@ -6,15 +6,15 @@ import {
   UploadModalContext,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import {
-  UploadModalState,
+  type UploadModalState,
   uploadModalInitialState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
-import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 const createWrapper = (
   stateOverrides?: Partial<UploadModalState>,

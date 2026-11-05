@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Cube, NeuralNetwork, Toolbox } from '@nemo/icons/icons';
-import { FinetuningType } from '@nemo/sdk/generated/platform/schema';
-import { ReactNode } from 'react';
+import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
+import type { ReactNode } from 'react';
 
 import DeepSeek from '../svgs/model_icon_deepseek.svg?react';
 import Google from '../svgs/model_icon_google.svg?react';

@@ -5,7 +5,7 @@ import { Blockquote } from '@nemo/common/src/components/MarkdownContent/componen
 import { CodeBlock } from '@nemo/common/src/components/MarkdownContent/components/CodeBlock';
 import { Anchor, Divider, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { type Components } from 'react-markdown';
+import type { Components } from 'react-markdown';
 
 // Map of HTML tag → React renderer used by react-markdown. Trivial markup
 // wrappers stay inline; non-trivial handlers (`code`, `blockquote`) are

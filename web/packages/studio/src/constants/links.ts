@@ -30,6 +30,8 @@ export const LINK_DOCS_CONCEPTS_CUSTOMIZATION = `${DOCS_BASE_URL}customizer-refe
 // Third party documentation links
 export const LINK_DOCS_OPENAI_FUNCTION_SCHEMA =
   'https://platform.openai.com/docs/guides/function-calling#defining-functions';
+export const LINK_GITHUB_NEW_FINE_GRAINED_TOKEN =
+  'https://github.com/settings/personal-access-tokens/new';
 
 // Support links
 export const LINK_GITHUB_ISSUES = `${GITHUB_REPO_URL}/issues`;

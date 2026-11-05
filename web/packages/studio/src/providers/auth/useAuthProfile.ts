@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { User } from 'oidc-client-ts';
+import type { User } from 'oidc-client-ts';
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
 

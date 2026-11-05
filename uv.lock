@@ -145,7 +145,7 @@ overrides = [
     { name = "cryptography", specifier = ">=50.0.0,<51" },
     { name = "datasets", specifier = ">=5.1.0,<6" },
     { name = "diskcache", marker = "sys_platform == 'never'" },
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "fschat", marker = "sys_platform == 'never'" },
     { name = "gitpython", specifier = ">=3.1.62" },
     { name = "grpcio", specifier = ">=1.71.0" },
@@ -5161,6 +5161,7 @@ all = [
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-guardrails" },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -5678,6 +5679,7 @@ nemo-evals-plugin = [
     { name = "nemo-builder-plugin" },
     { name = "nemo-helix-plugin" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
+    { name = "nhx-sandbox" },
     { name = "opentelemetry-proto" },
     { name = "pydantic" },
     { name = "typer" },
@@ -5838,6 +5840,9 @@ nhx-evals-sdk = [
     { name = "rouge-score" },
     { name = "sacrebleu" },
 ]
+nhx-sandbox = [
+    { name = "pydantic" },
+]
 platform-seed-service = [
     { name = "nemo-garak-plugin" },
     { name = "nhx-auth" },
@@ -5894,6 +5899,7 @@ plugins = [
     { name = "nhx-customization-common" },
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -6008,6 +6014,7 @@ services = [
     { name = "nhx-evals-sdk", extra = ["harbor"] },
     { name = "nhx-guardrails" },
     { name = "nhx-rl" },
+    { name = "nhx-sandbox" },
     { name = "nhx-unsloth" },
     { name = "nooa" },
     { name = "numpy" },
@@ -6660,6 +6667,10 @@ requires-dist = [
     { name = "nhx-rl", marker = "extra == 'nemo-rl-plugin'", editable = "services/rl" },
     { name = "nhx-rl", marker = "extra == 'plugins'", editable = "services/rl" },
     { name = "nhx-rl", marker = "extra == 'services'", editable = "services/rl" },
+    { name = "nhx-sandbox", marker = "extra == 'all'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'nemo-evals-plugin'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'plugins'", editable = "packages/nhx_sandbox" },
+    { name = "nhx-sandbox", marker = "extra == 'services'", editable = "packages/nhx_sandbox" },
     { name = "nhx-unsloth", marker = "extra == 'all'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'nemo-unsloth-plugin'", editable = "services/unsloth" },
     { name = "nhx-unsloth", marker = "extra == 'plugins'", editable = "services/unsloth" },
@@ -6844,6 +6855,7 @@ requires-dist = [
     { name = "pydantic", marker = "extra == 'nhx-common'", specifier = ">=2.10.3" },
     { name = "pydantic", marker = "extra == 'nhx-customization-common'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'nhx-evals-sdk'", specifier = ">=2.10.6" },
+    { name = "pydantic", marker = "extra == 'nhx-sandbox'", specifier = ">=2.10.0" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.10.6" },
     { name = "pydantic", marker = "extra == 'plugins'", specifier = ">=2.12.0" },
@@ -7062,7 +7074,7 @@ requires-dist = [
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.4" },
     { name = "yara-python", marker = "extra == 'services'", specifier = "==4.5.4" },
 ]
-provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
+provides-extras = ["all", "auth-service", "automodel-service", "core-service", "data-designer-nemo", "entities-service", "files-service", "filesets", "garak-service", "guardrails-service", "harbor", "hello-world-service", "inference-gateway-service", "intake-service", "jobs-service", "models-service", "nemo-agent-config-example-email-security-triage", "nemo-agent-optimization-plugin", "nemo-agents-plugin", "nemo-agents-plugin-claude", "nemo-agents-plugin-codex", "nemo-agents-plugin-deepagents", "nemo-agents-plugin-mini-swe-agent", "nemo-agents-plugin-nooa", "nemo-anonymizer-plugin", "nemo-automodel-plugin", "nemo-builder-plugin", "nemo-compass-plugin", "nemo-customizer-plugin", "nemo-data-designer-plugin", "nemo-deployments-plugin", "nemo-evals-plugin", "nemo-garak-plugin", "nemo-guardrails-plugin", "nemo-helix-ext", "nemo-helix-plugin", "nemo-optimization-plugin", "nemo-rl-plugin", "nemo-safe-synthesizer-plugin", "nemo-switchyard", "nemo-unsloth-plugin", "nhx-common", "nhx-customization-common", "nhx-evals-sdk", "nhx-sandbox", "platform-seed-service", "plugins", "rl-service", "secrets-service", "services", "studio-service", "unsloth-service"]
 
 [[package]]
 name = "nemo-helix-ext"
@@ -8553,7 +8565,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=3.2.0" },
+    { name = "fastmcp", specifier = ">=3.4.4" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
 ]

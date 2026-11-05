@@ -4,7 +4,7 @@
 import { getTextWithCount } from '@nemo/common/src/utils/formatters';
 import { Badge, Flex, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { tooltipClassName } from '@studio/styles/common';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 const aggregateMetricTooltip = (
   label: string,

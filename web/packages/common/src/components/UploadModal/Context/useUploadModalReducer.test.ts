@@ -4,9 +4,9 @@
 import {
   uploadModalReducer,
   uploadModalInitialState,
-  UploadModalState,
+  type UploadModalState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
-import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 
 describe('uploadModalReducer', () => {
   describe('SET_FILES with auto-select', () => {

@@ -3,7 +3,7 @@
 
 import { ContentType } from '@nemo/common/src/components/CodeEditor/constants';
 import { logger } from '@nemo/common/src/utils/logger';
-import { FileSystemDirectory, FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemDirectory, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { parseCSVTable } from '@studio/components/SafeSynthesizerFilesetPreview/util';
 import { getTextWithCount, parseCSV } from '@studio/util/strings';
 

@@ -46,6 +46,7 @@ from nhx.core.entities.api.v2.workspaces.schemas import (
     WorkspaceMemberUpdate,
     WorkspaceUpdate,
 )
+from nhx.core.entities.app.repository.exceptions import InvalidFilterError
 from nhx.core.entities.entities import Entity, Workspace, WorkspaceDeletionStage
 from nhx.core.entities.utils.filter import FilterDep
 from sqlalchemy.exc import IntegrityError
@@ -340,12 +341,15 @@ async def list_workspaces(
 
     combined_filter = _exclude_deleting_workspaces(add_workspace_filtering(accessible_workspaces, filter, field="name"))
 
-    workspaces, total = await repository.list_workspaces(
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=combined_filter,
-    )
+    try:
+        workspaces, total = await repository.list_workspaces(
+            page=page,
+            page_size=page_size,
+            sort=sort,
+            filter_op=combined_filter,
+        )
+    except InvalidFilterError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return Page(
         data=workspaces,

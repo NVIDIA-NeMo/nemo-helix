@@ -9,7 +9,7 @@ import { parquetBatchGroups } from '@studio/components/evaluation/AgentEvaluatio
 import { filesetNameOption } from '@studio/components/evaluation/utils';
 import { formatFromFileName } from '@studio/components/FileRowEditor/parse';
 import { MiddleTruncatedPath } from '@studio/components/MiddleTruncatedPath';
-import { type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import {
   type Control,
   type FieldValues,

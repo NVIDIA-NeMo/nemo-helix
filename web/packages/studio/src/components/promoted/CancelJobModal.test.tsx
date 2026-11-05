@@ -4,7 +4,7 @@
 import { CancelJobModal } from '@nemo/common/src/components/CancelJobModal';
 import { TestProviders } from '@studio/tests/util/TestProviders';
 import { render, screen, waitFor } from '@testing-library/react';
-import userEvent, { UserEvent } from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 
 const JOB_NAME = 'test-job-abc123';
 const BODY_COPY =

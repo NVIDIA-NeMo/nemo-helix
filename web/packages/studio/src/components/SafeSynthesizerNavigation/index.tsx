@@ -4,7 +4,7 @@
 import { PageHeader, Stack, TabsList, TabsRoot, TabsTrigger } from '@nvidia/foundations-react-core';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getGenerateJobRoute, getGenerateJobReportRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface SafeSynthesizerNavigationProps {

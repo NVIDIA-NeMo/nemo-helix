@@ -75,6 +75,7 @@ NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-
 - For built-in Harbor agents, replace `model_name` with `model: {"name": ...}`. The old field is still accepted in 0.10 with a deprecation warning, and stops being accepted in the release after 0.10.
 - Pass `--yes` to `nemo workspaces delete` in scripts and other non-interactive shells.
 - If you used the `SandboxedCodex` Harbor agent, switch to the built-in `codex` agent.
+- `nemo-mcp` no longer registers the `delete_workspace` tool unless started with `--enable-destructive-tools`. `nemo-mcp --transport streamable-http` now refuses to start without `NHX_MCP_AUTH_TOKEN`; clients send it as `Authorization: Bearer <token>`. For local debugging on a loopback host, pass `--allow-unauthenticated` instead.
 
 ## Current constraints
 

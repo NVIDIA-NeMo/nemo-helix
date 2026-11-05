@@ -12,6 +12,7 @@ image is built.
 from __future__ import annotations
 
 import json
+import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,11 +106,16 @@ def add_tasksets_commands(app: typer.Typer, client_factory: Callable[[], NemoCli
             raise typer.Exit(code=1) from exc
         dataset = dataset_flag(created.dataset) if created.dataset is not None else None
         if output_json:
-            body = {"taskset_ref": created.ref, "tasks": created.refs, "total": created.total, "dataset": dataset}
+            body = {
+                "taskset_ref": created.ref,
+                "tasks": created.refs,
+                "total": created.total,
+                "intake_dataset": dataset,
+            }
             typer.echo(json.dumps(body, indent=2))
             return
         if dataset is not None:
-            typer.echo(f"Dataset for Intake: --dataset {dataset}")
+            typer.echo(f"Intake label: --intake-dataset {dataset}")
         typer.echo(created.ref)
 
     @tasksets.command("build-images")
@@ -159,7 +165,7 @@ def _build_images(evaluator: Evaluator, ref: str, *, wait: bool, status: bool, p
     if failed_builds(builds) is not None:
         typer.echo("Rerun this command to retry the failed builds.")
         return 1
-    typer.echo(f"Submit with: nemo evals runs submit --taskset {ref}{flag}")
+    typer.echo(f"Submit with: nemo evals runs submit --taskset {shlex.quote(ref)}{flag}")
     return 0
 
 

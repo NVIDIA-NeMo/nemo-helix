@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
-import { Root as DataViewRoot } from '@nemo/common/src/components/DataView/internal';
+import type { Root as DataViewRoot } from '@nemo/common/src/components/DataView/internal';
 import {
   ROW_ACTIONS_COLUMN_SIZE,
   ROW_SELECTION_COLUMN_SIZE,
@@ -37,7 +37,7 @@ import { MODEL_COMPARE_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getModelCompareRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useEffect, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 export type { Agent, AgentDeployment };

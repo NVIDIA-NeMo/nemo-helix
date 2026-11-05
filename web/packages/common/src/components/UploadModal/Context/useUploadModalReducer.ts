@@ -10,7 +10,7 @@
  * its affiliates is strictly prohibited.
  */
 
-import { UploadFile, UploadDataset } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile, UploadDataset } from '@nemo/common/src/components/UploadModal/types';
 import {
   isFileTypeAllowed,
   sanitizeFilenameForDatasetName,

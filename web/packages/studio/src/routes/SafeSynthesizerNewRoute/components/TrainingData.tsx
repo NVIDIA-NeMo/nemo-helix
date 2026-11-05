@@ -4,7 +4,7 @@
 import { ControlledDatasetFileSelect } from '@nemo/common/src/components/DatasetFileSelect/ControlledDatasetFileSelect';
 import { Accordion, Text, Block } from '@nvidia/foundations-react-core';
 import { DataPreparationSettings } from '@studio/routes/SafeSynthesizerNewRoute/components/DataPreparationSettings';
-import { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
+import type { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 
