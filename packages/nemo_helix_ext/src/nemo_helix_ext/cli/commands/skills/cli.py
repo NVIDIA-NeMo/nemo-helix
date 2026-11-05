@@ -15,6 +15,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     get_installer,
     list_agent_names,
     load_skills,
+    load_skills_with_warnings,
 )
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.formatters import (
@@ -112,21 +113,25 @@ def _filter_skills_by_source(skills: dict[str, Skill], sources: list[str]) -> di
     return {name: skill for name, skill in skills.items() if _format_skill_source(skill).casefold() in requested}
 
 
-def _resolve_skills(skill_names: list[str] | None) -> dict[str, Skill]:
-    """Load skills, optionally filtering by name. Errors on unknown names."""
+def _resolve_skills(skill_names: list[str] | None) -> tuple[dict[str, Skill], list[str]]:
+    """Load skills, optionally filtering by name. Errors on unknown names.
+
+    Returns the selection plus any plugin-discovery warnings captured while
+    loading, so a degraded discovery never silently drives a prune.
+    """
     try:
-        all_skills = load_skills()
+        all_skills, discovery_warnings = load_skills_with_warnings()
     except DuplicateSkillError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(code=1) from e
     if not skill_names:
-        return all_skills
+        return all_skills, discovery_warnings
     unknown = set(skill_names) - set(all_skills.keys())
     if unknown:
         available = ", ".join(sorted(all_skills.keys()))
         typer.echo(f"Error: Unknown skill(s): {', '.join(sorted(unknown))}. Available: {available}", err=True)
         raise typer.Exit(code=1)
-    return {name: all_skills[name] for name in skill_names}
+    return {name: all_skills[name] for name in skill_names}, discovery_warnings
 
 
 @app.command("list")
@@ -306,9 +311,9 @@ def install(
     Use --skill to select specific skills, --user for user scope, or
     --project-dir to explicitly select a known agent's project directory.
 
-    A full install (no --skill) is a sync: it also removes skill directories
-    that a previous full install recorded and this build no longer ships.
-    A --skill install records what it wrote and removes nothing.
+    A full install (no --skill) also removes skill directories, in the same
+    skills directory, that a previous install recorded and this build no
+    longer ships. A --skill install records what it wrote and removes nothing.
 
     Examples:
       nemo skills install --agent claude
@@ -348,15 +353,26 @@ def install(
         )
         raise typer.Exit(code=1)
 
-    skills = _resolve_skills(skill)
+    skills, discovery_warnings = _resolve_skills(skill)
     project_root = path if path is not None else _find_project_root(project_dir)
-    # A full install (no --skill) is a sync: recorded skills this build no
-    # longer ships are removed. A subset install records what it wrote and
-    # deletes nothing.
-    result_paths = installer.install(scope, project_root, skills, prune=skill is None)
+    # A full install (no --skill) is a sync of the recorded directories in
+    # the roots it writes. Never prune from a degraded discovery: a plugin
+    # whose skills failed to load must not read as "no longer shipped".
+    if skill is None and discovery_warnings:
+        typer.echo(
+            "Plugin skill discovery reported warnings; skipping removal of previously installed skills:",
+            err=True,
+        )
+        for warning in discovery_warnings:
+            typer.echo(f"  {warning}", err=True)
+    result_paths = installer.install(scope, project_root, skills, prune=skill is None and not discovery_warnings)
     typer.echo(f"Installed {len(skills)} skill(s) for {installer.display_name}:")
     for path in result_paths:
         typer.echo(f"  {path}")
+    if installer.pruned_directories:
+        typer.echo(f"Removed {len(installer.pruned_directories)} skill(s) no longer shipped:")
+        for pruned in installer.pruned_directories:
+            typer.echo(f"  {pruned}")
 
 
 _SKILLS_COMMAND_ORDER = {

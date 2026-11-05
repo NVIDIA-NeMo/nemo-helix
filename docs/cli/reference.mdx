@@ -1009,9 +1009,9 @@ Use `--agent` for a known coding agent and `--path` for any other agent.
 Use `--skill` to select specific skills, `--user` for user scope, or
 `--project-dir` to explicitly select a known agent's project directory.
 
-A full install (no `--skill`) is a sync: it also removes skill directories
-that a previous full install recorded and this build no longer ships.
-A `--skill` install records what it wrote and removes nothing.
+A full install (no `--skill`) also removes skill directories, in the same
+skills directory, that a previous install recorded and this build no
+longer ships. A `--skill` install records what it wrote and removes nothing.
 
 **Examples:**
 

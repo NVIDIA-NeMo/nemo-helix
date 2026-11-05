@@ -4,11 +4,16 @@
 """Base agent installer with default install logic."""
 
 import json
+import logging
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 import yaml
 from nemo_helix_ext.cli.commands.skills.base import Scope, Skill, installed_skill_name, validate_skill_name
+
+logger = logging.getLogger(__name__)
 
 # Manifest file recording the skill directories this installer wrote, kept
 # beside the installed skills (one per skills root, so project scope, user
@@ -25,9 +30,14 @@ def _is_single_path_segment(name: str) -> bool:
 
 def _read_owned_directories(skills_root: Path) -> list[str]:
     """Return recorded owned directory names for ``skills_root``, tolerating a missing or corrupt manifest."""
+    manifest_path = skills_root / INSTALLED_SKILLS_MANIFEST_NAME
     try:
-        data = json.loads((skills_root / INSTALLED_SKILLS_MANIFEST_NAME).read_text())
-    except (OSError, ValueError):
+        data = json.loads(manifest_path.read_text())
+    except (OSError, ValueError) as exc:
+        if manifest_path.exists() or manifest_path.is_symlink():
+            logger.warning(
+                "Installed-skills manifest %s is unreadable (%s); treating as unrecorded", manifest_path, exc
+            )
         return []
     owned = data.get("owned") if isinstance(data, dict) else None
     if not isinstance(owned, list):
@@ -40,7 +50,18 @@ def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
     skills_root.mkdir(parents=True, exist_ok=True)
     manifest_path = skills_root / INSTALLED_SKILLS_MANIFEST_NAME
     # A kept name can also be one this call wrote (overwrite), so dedupe.
-    manifest_path.write_text(json.dumps({"owned": sorted(set(owned))}, indent=2) + "\n")
+    payload = json.dumps({"owned": sorted(set(owned))}, indent=2) + "\n"
+    # Write to a fresh file in the same directory, then rename it into place:
+    # a crash mid-write leaves the previous record intact, and a symlink
+    # planted at the manifest path is replaced rather than followed.
+    fd, tmp_name = tempfile.mkstemp(dir=skills_root, prefix=INSTALLED_SKILLS_MANIFEST_NAME, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+            tmp_file.write(payload)
+        os.replace(tmp_name, manifest_path)
+    except OSError:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def _remove_if_owned(skills_root: Path, name: str) -> bool:
@@ -85,6 +106,10 @@ class BaseAgentInstaller:
     display_name: str
     supported_scopes: list[Scope]
 
+    #: Skill directories removed by the most recent ``install`` call, so
+    #: callers can report the removals. Reset on every call.
+    pruned_directories: list[Path]
+
     def get_install_path(self, scope: Scope, project_root: Path, skill_name: str) -> Path:
         raise NotImplementedError
 
@@ -97,12 +122,13 @@ class BaseAgentInstaller:
 
         Writes the new skill files first (including overwriting a same-named
         skill), then, when ``prune`` is true, removes directories a previous
-        full install recorded that this install set no longer contains, and
+        install recorded that this install set no longer contains, and
         finally writes the manifest. Only full installs (no ``--skill``)
         pass ``prune=True``; subset installs record what they wrote and never
         remove anything.
         """
         paths: list[Path] = []
+        self.pruned_directories = []
         pending: list[tuple[Skill, Path]] = []
         destinations: dict[Path, str] = {}
         for skill_name, skill in skills.items():
@@ -127,13 +153,17 @@ class BaseAgentInstaller:
 
         for skills_root, installed_dirs in wrote.items():
             owned = _read_owned_directories(skills_root)
+            kept: list[str] = []
             if prune:
-                kept = [
-                    name
-                    for name in owned
-                    if name in installed_dirs  # Still shipped: overwrite, never remove.
-                    or not _remove_if_owned(skills_root, name)
-                ]
+                for name in owned:
+                    if name in installed_dirs:
+                        # Still shipped: overwrite, never remove.
+                        kept.append(name)
+                        continue
+                    if not _remove_if_owned(skills_root, name):
+                        kept.append(name)
+                    else:
+                        self.pruned_directories.append(skills_root / name)
             else:
                 kept = owned
             # Manifest last: a crash before this write leaves the previous

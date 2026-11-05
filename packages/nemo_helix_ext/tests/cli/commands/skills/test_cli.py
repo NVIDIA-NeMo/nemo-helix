@@ -13,6 +13,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     DuplicateSkillError,
     SkillProvider,
     _load_skills_cached,
+    load_skills,
 )
 from nemo_helix_ext.skills import skills_dir as platform_skills_dir
 from typer.testing import CliRunner
@@ -308,7 +309,7 @@ class TestInstall:
     def test_install_duplicate_skill_error_is_clean(self, tmp_path: Path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
-            "nemo_helix_ext.cli.commands.skills.cli.load_skills",
+            "nemo_helix_ext.cli.commands.skills.cli.load_skills_with_warnings",
             lambda: (_ for _ in ()).throw(DuplicateSkillError("duplicate skill")),
         )
         result = runner.invoke(app, "skills install --agent claude --skill inference")
@@ -437,9 +438,44 @@ class TestInstall:
         assert_exit_code(result, 0)
         assert not stale.exists()
         assert (user_skill / "SKILL.md").read_text() == "user skill"
+        # The removal is reported, not silent.
+        assert "Removed 1 skill(s) no longer shipped:" in result.stdout
+        assert "nemo-stale" in result.stdout
         owned = json.loads(manifest_path.read_text())["owned"]
         assert "nemo-stale" not in owned
         assert installed_skill_name("inference") in owned
+
+    def test_full_install_skips_prune_when_discovery_reports_warnings(self, tmp_path: Path, monkeypatch):
+        """A degraded plugin discovery must never read as "no longer shipped"."""
+        import json
+
+        monkeypatch.chdir(tmp_path)
+        skills_root = tmp_path / ".claude" / "skills"
+        manifest_path = skills_root / ".nemo-helix-installed-skills.json"
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        manifest = json.loads(manifest_path.read_text())
+        stale = skills_root / "nemo-stale"
+        stale.mkdir()
+        (stale / "SKILL.md").write_text("stale")
+        manifest["owned"].append("nemo-stale")
+        manifest_path.write_text(json.dumps(manifest))
+
+        # Simulate a plugin that failed to load: the loaded set shrinks and the
+        # registry emits a warning.
+        degraded = {name: skill for name, skill in load_skills().items() if name != "inference"}
+        monkeypatch.setattr(
+            "nemo_helix_ext.cli.commands.skills.cli.load_skills_with_warnings",
+            lambda: (degraded, ["Failed to load 'nemo.skills' entry point 'broken' - skipping"]),
+        )
+
+        result = runner.invoke(app, "skills install --agent claude")
+        assert_exit_code(result, 0)
+        assert stale.is_dir()
+        assert "skipping removal of previously installed skills" in result.output
+        assert "Failed to load 'nemo.skills' entry point" in result.output
+        assert "Removed" not in result.stdout
 
     def test_install_to_custom_path_writes_its_own_manifest(self, tmp_path: Path):
         """Each skills root keeps its own manifest file."""

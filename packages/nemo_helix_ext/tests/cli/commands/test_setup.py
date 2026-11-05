@@ -1615,7 +1615,7 @@ class TestLoadSkillsWithWarnings:
             skills_registry.logger.warning("Skipping plugin 'fake': boom")
             return {}
 
-        with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_stub):
+        with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_stub):
             skills, warnings = _load_skills_with_warnings()
         assert skills == {}
         assert any("Skipping plugin 'fake'" in msg for msg in warnings)
@@ -1626,7 +1626,7 @@ class TestLoadSkillsWithWarnings:
         def _boom() -> dict:
             raise RuntimeError("kaboom")
 
-        with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_boom):
+        with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_boom):
             with pytest.raises(RuntimeError):
                 _load_skills_with_warnings()
         # Even on exception, the capture handler is removed.
@@ -1643,7 +1643,7 @@ class TestLoadSkillsWithWarnings:
         original = skills_registry.logger.level
         skills_registry.logger.setLevel(logging.ERROR)
         try:
-            with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_stub):
+            with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_stub):
                 _, warnings = _load_skills_with_warnings()
             assert any("Skipping plugin 'quiet'" in m for m in warnings)
             # Logger level is restored to ERROR after the call.
@@ -1803,7 +1803,7 @@ class TestMaybeInstallSkills:
             )
 
         assert len(captured) == 1
-        assert "prune" not in captured[0]["kwargs"]
+        assert captured[0]["kwargs"].get("prune", False) is False
 
     @pytest.mark.parametrize(
         "call_kwargs",

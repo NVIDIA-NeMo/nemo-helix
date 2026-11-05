@@ -401,6 +401,40 @@ def load_skills() -> dict[str, Skill]:
     return dict(_load_skills_cached())
 
 
+def load_skills_with_warnings() -> tuple[dict[str, Skill], list[str]]:
+    """Load all CLI-visible skills while capturing plugin-discovery warnings.
+
+    The registry emits ``logger.warning`` records when a provider fails to
+    load or a skill directory is missing, malformed, or invalid. Callers that
+    act on the loaded set (especially anything that prunes recorded
+    directories) must treat a degraded discovery as incomplete rather than
+    as authority, so those records are captured here.
+
+    Defensive against (a) callers that raised the registry logger's level
+    above ``WARNING`` and (b) the ``@lru_cache`` on the underlying loader,
+    which would otherwise replay a cached dict with no warnings on repeat
+    calls.
+    """
+    captured: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            captured.append(record.getMessage())
+
+    handler = _Capture(level=logging.WARNING)
+    original_level = logger.level
+    logger.addHandler(handler)
+    if original_level > logging.WARNING or original_level == logging.NOTSET:
+        logger.setLevel(logging.WARNING)
+    clear_cache()
+    try:
+        skills = load_skills()
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(original_level)
+    return skills, captured
+
+
 def clear_cache() -> None:
     """Clear cached skill registry data so the next ``load_skills`` re-reads sources."""
     _load_skills_cached.cache_clear()

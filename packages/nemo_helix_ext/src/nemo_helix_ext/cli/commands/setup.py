@@ -53,7 +53,7 @@ from nemo_helix_ext.cli.commands.skills import registry as skills_registry
 from nemo_helix_ext.cli.commands.skills.agents.custom import CustomPathInstaller
 from nemo_helix_ext.cli.commands.skills.base import Scope, Skill
 from nemo_helix_ext.cli.commands.skills.installer import BaseAgentInstaller
-from nemo_helix_ext.cli.commands.skills.registry import get_installer, list_agent_names, load_skills
+from nemo_helix_ext.cli.commands.skills.registry import get_installer, list_agent_names
 from nemo_helix_ext.cli.core.context import CLIContext
 from nemo_helix_ext.cli.core.errors import handle_errors
 from nemo_helix_ext.cli.docker_preflight import DOCKER_PREFLIGHT_MESSAGE, require_docker_for_default_local
@@ -1503,30 +1503,8 @@ def _load_skills_with_warnings() -> tuple[dict[str, Skill], list[str]]:
     is missing, malformed, or invalid. We capture those records so they can be
     surfaced in the preview before any install happens, rather than scrolling
     past mid-install.
-
-    Defensive against (a) callers that raised the registry logger's level above
-    WARNING (e.g. a future ``--quiet`` flag) and (b) the ``@lru_cache`` on the
-    underlying loader, which would otherwise replay a cached dict with no
-    warnings on repeat calls.
     """
-    captured: list[str] = []
-
-    class _Capture(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            captured.append(record.getMessage())
-
-    handler = _Capture(level=logging.WARNING)
-    original_level = skills_registry.logger.level
-    skills_registry.logger.addHandler(handler)
-    if original_level > logging.WARNING or original_level == logging.NOTSET:
-        skills_registry.logger.setLevel(logging.WARNING)
-    skills_registry.clear_cache()
-    try:
-        skills = load_skills()
-    finally:
-        skills_registry.logger.removeHandler(handler)
-        skills_registry.logger.setLevel(original_level)
-    return skills, captured
+    return skills_registry.load_skills_with_warnings()
 
 
 def _print_plugin_warnings(plugin_warnings: list[str]) -> None:

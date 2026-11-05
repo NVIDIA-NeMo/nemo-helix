@@ -4,6 +4,7 @@
 """Tests for the base agent installer."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -244,11 +245,12 @@ class TestInstallManifest:
         assert "updated" in (skills_root / "nemo-alpha" / "SKILL.md").read_text()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
 
-    def test_prune_tolerates_corrupt_manifest(self, tmp_path: Path):
+    def test_prune_tolerates_corrupt_manifest(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
         """A corrupt manifest is treated as no record: nothing is pruned.
 
         Directories written before any manifest existed stay, and the next
-        install rewrites a valid manifest.
+        install rewrites a valid manifest. An existing-but-unreadable
+        manifest emits a warning so the discarded record is visible.
         """
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
@@ -256,9 +258,53 @@ class TestInstallManifest:
         (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text("not json")
         _write_skill_dir(skills_root, "nemo-orphan")
 
-        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+        with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
+            installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
 
         assert (skills_root / "nemo-orphan" / "SKILL.md").exists()
+        assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
+        assert any("unreadable" in record.message for record in caplog.records)
+
+    def test_prune_leaves_a_recorded_name_that_is_a_plain_file(self, tmp_path: Path):
+        """A recorded name that is now a regular file is not a directory this installer owns."""
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        (skills_root / "nemo-not-a-dir").write_text("user file")
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-not-a-dir"]}))
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "nemo-not-a-dir").read_text() == "user file"
+        assert "nemo-not-a-dir" in _read_manifest(tmp_path)["owned"]
+
+    def test_prune_leaves_a_recorded_name_that_resolves_to_the_skills_root(self, tmp_path: Path):
+        """A recorded name symlinked to the skills root itself never removes the root."""
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        (skills_root / "nemo-root-link").symlink_to(skills_root, target_is_directory=True)
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-root-link"]}))
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert (skills_root / "nemo-root-link").is_symlink()
+        assert (skills_root / "nemo-alpha" / "SKILL.md").exists()
+        assert "nemo-root-link" in _read_manifest(tmp_path)["owned"]
+
+    def test_manifest_write_does_not_follow_a_symlink_planted_at_the_manifest_path(self, tmp_path: Path):
+        """The manifest write replaces a symlink instead of truncating its target."""
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        victim = tmp_path / "victim.json"
+        victim.write_text("precious")
+        skills_root.mkdir(parents=True)
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).symlink_to(victim)
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")})
+
+        assert victim.read_text() == "precious"
+        assert not (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).is_symlink()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
 
     def test_prune_leaves_recorded_names_resolving_outside_skills_root(self, tmp_path: Path):
