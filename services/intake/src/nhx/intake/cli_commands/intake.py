@@ -45,6 +45,7 @@ from nemo_helix_plugin.intake.types import (
     ANNOTATION_INPUT_ADAPTER,
     AtifCreateRequest,
     ChatCompletionsIngestRequest,
+    CompareEvaluationsQueryParams,
     DirectSpansIngestRequest,
     EvaluatorResultCreateRequest,
     ListAnnotationsQueryParams,
@@ -66,6 +67,7 @@ from nhx.intake.cli_commands.transcript import (
 
 app = create_typer_app(name="intake", help="Intake operations")
 annotations_app = create_typer_app(name="annotations", help="Manage annotations")
+evaluations_app = create_typer_app(name="evaluations", help="Manage evaluations")
 evaluator_results_app = create_typer_app(name="evaluator_results", help="Manage evaluator_results")
 ingest_app = create_typer_app(name="ingest", help="Ingest operations")
 ingest_atif_app = create_typer_app(name="atif", help="Manage atif")
@@ -78,6 +80,7 @@ spans_groups_app = create_typer_app(name="groups", help="Manage groups")
 traces_app = create_typer_app(name="traces", help="Manage traces")
 
 app.add_typer(annotations_app, name="annotations")
+app.add_typer(evaluations_app, name="evaluations")
 app.add_typer(evaluator_results_app, name="evaluator-results")
 app.add_typer(ingest_app, name="ingest")
 app.add_typer(sessions_app, name="sessions")
@@ -757,6 +760,55 @@ def list_span_evaluator_results(
         timestamp_format=state.get_timestamp_format(),
         stream=stream,
     )
+
+
+# ---------------------------------------------------------------------------
+# evaluations
+# ---------------------------------------------------------------------------
+
+
+@evaluations_app.command("compare")
+@collect_warnings
+@handle_errors
+def compare_evaluations(
+    ctx: typer.Context,
+    baseline: Annotated[str, typer.Argument(help="Name of the baseline Evaluation.")],
+    candidate: Annotated[str, typer.Argument(help="Name of the candidate Evaluation.")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    metric: Annotated[
+        str,
+        typer.Option(
+            "--metric",
+            help=(
+                "Metric to compare: an evaluator as 'evaluators.<name>', or one of 'cost_usd', "
+                "'latency_ms', 'tokens'. Evaluator scores are higher-is-better; the rollup "
+                "metrics are lower-is-better."
+            ),
+        ),
+    ] = ...,  # ty: ignore[invalid-parameter-default]
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Compare two evaluations per test case on one metric.
+
+    Both runs' attempts are averaged per test case (a failed evaluator result scores 0;
+    an unscored attempt is omitted), the shared test cases are paired, and the result
+    reports the better/same/worse counts, the mean paired difference, a 95% bootstrap
+    interval over the paired mean differences, and P(candidate better).
+    """
+    state = cli_state(ctx)
+    resolved_output_format = state.get_output_format(output_format)
+
+    query_params: CompareEvaluationsQueryParams = {
+        "baseline": baseline,
+        "candidate": candidate,
+        "metric": metric,
+    }
+    kwargs = build_kwargs(workspace=workspace, query_params=query_params)
+    if handle_code_generation(IntakeClient, "compare_evaluations", kwargs, resolved_output_format, state):
+        return
+
+    result = state.typed_client(IntakeClient).compare_evaluations(workspace=workspace, query_params=query_params)
+    _format_entity(state, result, resolved_output_format)
 
 
 # ---------------------------------------------------------------------------
