@@ -158,7 +158,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 
 const openGitHubTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
-  await within(dialog).findByRole('textbox', { name: 'Repository' });
+  await within(dialog).findByRole('textbox', { name: 'Repository URL' });
 };
 
 const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
@@ -454,7 +454,7 @@ describe('NewAgentModal GitHub import', () => {
     user: ReturnType<typeof userEvent.setup>,
     spec = 'github.com/owner/repo'
   ) => {
-    await user.type(within(dialog).getByRole('textbox', { name: 'Repository' }), spec);
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository URL' }), spec);
     await user.tab();
   };
 
@@ -535,7 +535,7 @@ describe('NewAgentModal GitHub import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitHubTab(dialog);
     await user.type(
-      within(dialog).getByRole('textbox', { name: 'Repository' }),
+      within(dialog).getByRole('textbox', { name: 'Repository URL' }),
       'https://gitlab.com/owner/repo'
     );
 
@@ -677,7 +677,7 @@ describe('NewAgentModal initial tab', () => {
     expect(
       within(dialog).getByRole('tab', { name: 'Register from GitHub', selected: true })
     ).toBeInTheDocument();
-    expect(within(dialog).getByRole('textbox', { name: 'Repository' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Repository URL' })).toBeInTheDocument();
   });
 });
 

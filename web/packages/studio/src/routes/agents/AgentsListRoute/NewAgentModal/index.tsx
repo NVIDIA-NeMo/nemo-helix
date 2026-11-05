@@ -14,6 +14,7 @@ import {
 import type { Agent } from '@nemo/sdk/generated/agents/schema/Agent';
 import {
   Anchor,
+  Banner,
   Button,
   Flex,
   Label,
@@ -356,7 +357,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
     if (!tracedAgent) return;
     deployAfterCreate.current = null;
     await createTracedAgent({ workspace, data: { name: tracedAgent, config: {} } }).catch(() => {
-      // Rendered through errorText.
+      // Rendered in the error banner.
     });
   };
 
@@ -411,7 +412,6 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
               ? !tracedAgent
               : entries.length === 0 || awaitingDeployModes
         }
-        errorText={onCreateTab ? errorMessage : undefined}
         slotFooterRight={
           onCreateTab ? undefined : (
             <Button color="brand" type="button" onClick={resetAndClose}>
@@ -496,7 +496,8 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           <TabsContent value="github" className="items-stretch p-0 pt-density-lg">
             <Stack gap="density-md">
               <ControlledTextInput
-                label="Repository"
+                label="Repository URL"
+                placeholder="https://github.com/owner/repo"
                 disabled={isPending}
                 useControllerProps={{ control, name: 'repoUrl' }}
                 formFieldProps={{
@@ -580,6 +581,11 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
             />
           </TabsContent>
         </TabsRoot>
+        {onCreateTab && errorMessage && (
+          <Banner kind="inline" status="error">
+            {errorMessage}
+          </Banner>
+        )}
       </FormModal>
       {isSecretModalOpen ? (
         <CreateSecretModal
