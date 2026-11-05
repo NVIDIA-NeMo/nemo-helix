@@ -19,6 +19,7 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    TasksetRunTaskDetail,
     request_digest,
     to_status,
     to_task,
@@ -63,6 +64,7 @@ from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanStorageError, RunAcceptance, RunRequestConflict, TasksetRunStore
 from nemo_evals.taskset_runs.submission import check_timeout, resolve_deadlines
 from nemo_evals.taskset_runs.task_jobs import JobsServiceTaskJobs, TaskJobs
+from nemo_evals.taskset_runs.trials import count_trials, reported_trials
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import AuthenticationError, NemoClientError, PermissionDeniedError
@@ -82,6 +84,9 @@ logger = logging.getLogger(__name__)
 
 MAX_CONCURRENT_IMAGE_PREPARATIONS = 10
 """Image checks or preparations one submit runs at once (each reads a task archive or an image build)."""
+
+MAX_CONCURRENT_PROGRESS_READS = 10
+"""Runs whose members one run list reads at once when it counts their progress."""
 
 
 @dataclass(frozen=True)
@@ -211,7 +216,7 @@ class TasksetRunService:
             clock: Aware acceptance clock, invoked after resolution.
             platform: Platform configuration naming the OpenSandbox server and the default dispatcher image.
             preparer: Checks every task, then reads each one's images, before acceptance.
-            task_jobs: Jobs operations submit's checks need; defaults to the Jobs service as the caller.
+            task_jobs: Jobs reads for submit's checks and task trials; defaults to the Jobs service as the caller.
             evaluations: Intake operations for a run's Evaluation; defaults to Intake as the caller.
             auth_context: The caller's full principal, stored on each new run for the run controller to
                 create on the caller's behalf; None with auth off.
@@ -254,6 +259,7 @@ class TasksetRunService:
         mine: bool = False,
         page: int = 1,
         page_size: int = 100,
+        progress: bool = False,
     ) -> Page[TasksetRunStatus]:
         """Project one independently filtered workspace run page into public statuses.
 
@@ -264,6 +270,7 @@ class TasksetRunService:
             mine: Restrict to the effective caller's runs when True.
             page: One-based page number.
             page_size: Maximum records on the requested page.
+            progress: Count each listed run's progress from its members, as a GET of the run does.
 
         Returns:
             Newest-first status page preserving the store's pagination and sort.
@@ -276,8 +283,18 @@ class TasksetRunService:
             page=page,
             page_size=page_size,
         )
+        statuses = [to_status(run) for run in result.data]
+        if progress:
+            reads = asyncio.Semaphore(MAX_CONCURRENT_PROGRESS_READS)
+
+            async def with_progress(run: TasksetRunEntity, status: TasksetRunStatus) -> TasksetRunStatus:
+                async with reads:
+                    members = await self._store.list_all_members(run)
+                return status.model_copy(update={"progress": build_progress(members) if members else None})
+
+            statuses = await _all(with_progress(run, status) for run, status in zip(result.data, statuses, strict=True))
         return Page(
-            data=[to_status(run) for run in result.data],
+            data=statuses,
             pagination=result.pagination,
             sort=result.sort,
             filter=result.filter,
@@ -316,6 +333,37 @@ class TasksetRunService:
             sort=result.sort,
             filter=result.filter,
         )
+
+    async def get_task(self, workspace: str, run_id: str, task_index: int) -> TasksetRunTaskDetail | None:
+        """Read one stored member with each of its trials, read from its task Job now.
+
+        The trials come from the Job's status details, read as the caller: a caller who can read the run but not
+        its Jobs, a Job that's gone or can't be read now, or one that reported no trials gets the task without
+        ``trials``.
+
+        Returns:
+            The task with its trials, or None when the run or that task's member doesn't exist.
+        """
+        run = await self._store.find(workspace, run_id)
+        if run is None:
+            return None
+        member = await self._store.find_member(run, task_index)
+        if member is None:
+            return None
+        task = TasksetRunTaskDetail.model_validate(to_task(member).model_dump())
+        if member.task_job is None:
+            return task
+        try:
+            details = await self._task_jobs.status_details(workspace, member.task_job)
+        except NemoClientError as exc:
+            # Trials are display-only: a Jobs read that fails mustn't fail a read of the stored task.
+            logger.info("Can't read the trials of task Job %s: %s", member.task_job, type(exc).__name__)
+            return task
+        trials = reported_trials(details)
+        if not trials:
+            return task
+        # Count from the list just read, so the counts agree with it instead of the controller's last copy.
+        return task.model_copy(update={"trials": trials, "trial_counts": count_trials(trials)})
 
     async def submit(self, req: TasksetRunInput, *, workspace: str, caller: str) -> SubmitOutcome:
         """Authorize, freeze and atomically accept a run, or replay its stored status.

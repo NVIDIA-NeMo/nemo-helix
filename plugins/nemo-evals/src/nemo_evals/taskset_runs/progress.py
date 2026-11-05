@@ -7,6 +7,7 @@ from collections import Counter
 from collections.abc import Iterable
 
 from nemo_evals.taskset_runs.entities import MemberPhase, TasksetRunMemberEntity, is_queued
+from nemo_evals.taskset_runs.trials import TrialCounts, sum_trial_counts
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, Field
 
@@ -25,6 +26,14 @@ class TasksetRunProgress(BaseModel):
             'for example {"active": 18, "pending": 2}.'
         )
     )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "Every task's trials counted together, as their task Jobs last reported them (planned trials count "
+            "as pending until then). Unlike a task's, reward here is the mean of the tasks' mean rewards, so each "
+            "task weighs the same whatever its trial count, as Harbor scores a benchmark."
+        ),
+    )
 
 
 def build_progress(members: Iterable[TasksetRunMemberEntity]) -> TasksetRunProgress:
@@ -32,6 +41,7 @@ def build_progress(members: Iterable[TasksetRunMemberEntity]) -> TasksetRunProgr
 
     A queued member is ``image_ready`` with no ``task_job``; one with ``task_job`` set is a create intent
     and already holds a slot. A registered member with no ``job_status`` yet isn't in ``task_jobs``.
+    Trials sum the counts the controller copied onto each member from its task Job.
     """
     members = list(members)
     return TasksetRunProgress(
@@ -45,4 +55,5 @@ def build_progress(members: Iterable[TasksetRunMemberEntity]) -> TasksetRunProgr
                 if member.phase is MemberPhase.REGISTERED and member.job_status is not None
             )
         ),
+        trial_counts=sum_trial_counts(member.trial_counts for member in members if member.trial_counts is not None),
     )

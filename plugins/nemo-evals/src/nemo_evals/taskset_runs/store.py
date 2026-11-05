@@ -23,6 +23,7 @@ from nemo_evals.taskset_runs.plan_storage import PlanStorageError as PlanStorage
 from nemo_evals.taskset_runs.plan_storage import StoredPlan, delete_fileset_ref, load_plan, store_plan
 from nemo_evals.taskset_runs.specs import TasksetRunPlan
 from nemo_evals.taskset_runs.submission import resolve_deadlines
+from nemo_evals.taskset_runs.trials import TrialCounts
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.client.types import PLATFORM_DEFAULT_RETRY_POLICY, RetryPolicy
 from nemo_helix_plugin.entities import EntityBase, EntityClient, EntityClientProtocol, ListResponse
@@ -351,6 +352,7 @@ class TasksetRunStore:
             finalization_deadline_at=acceptance.finalization_deadline_at,
             phase=TasksetRunPhase.ACCEPTED,
             result_state=ResultState.PENDING,
+            experiment=plan.intake.experiment if plan.intake is not None else None,
         ).with_auth_context(acceptance.auth_context)
 
     async def load_plan(self, run: TasksetRunEntity) -> TasksetRunPlan:
@@ -605,6 +607,25 @@ class TasksetRunStore:
         )
         return _to_page(result, sort="task_index")
 
+    async def find_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
+        """Read the member of ``run`` for task ``task_index``; None when the controller hasn't created it.
+
+        No plan or Jobs reads occur; storage failures propagate.
+        """
+        conditions: list[FilterOperation] = [
+            ComparisonOperation(field="parent", operator=FilterOperator.EQ, value=run.id),
+            ComparisonOperation(field="data.task_index", operator=FilterOperator.EQ, value=task_index),
+        ]
+        member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)
+        result = await member_client.list(
+            TasksetRunMemberEntity,
+            workspace=run.workspace,
+            filter_operation=LogicalOperation(operator=FilterOperator.AND, operations=conditions),
+            page=1,
+            page_size=1,
+        )
+        return result.data[0] if result.data else None
+
     async def list_all_members(self, run: TasksetRunEntity) -> list[TasksetRunMemberEntity]:
         """Every member of ``run`` in task-index order, reading every page; any failed page raises.
 
@@ -621,8 +642,18 @@ class TasksetRunStore:
                 return members
             page += 1
 
-    async def create_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
+    async def create_member(
+        self,
+        run: TasksetRunEntity,
+        task_index: int,
+        task_name: str | None = None,
+        planned_trials: int | None = None,
+    ) -> TasksetRunMemberEntity | None:
         """Create task ``task_index``'s member under ``run``, queued (``image_ready``): its images are in the plan.
+
+        ``task_name`` is the task's id in the plan, kept so readers can name the task without loading the plan.
+        ``planned_trials`` starts the member's trial counts at the trials its task Job will run, so a run's trial
+        total is right before its task Jobs start, instead of growing as each one reports.
 
         A named create, so a repeat is harmless.
 
@@ -630,7 +661,12 @@ class TasksetRunStore:
             The new member, or None when it already exists.
         """
         member = TasksetRunMemberEntity(
-            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=MemberPhase.IMAGE_READY
+            name=member_name(task_index),
+            workspace=run.workspace,
+            task_index=task_index,
+            task_name=task_name,
+            phase=MemberPhase.IMAGE_READY,
+            trial_counts=TrialCounts(total=planned_trials, pending=planned_trials) if planned_trials else None,
         )
         member._parent = run.id
         member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)

@@ -20,6 +20,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialProgress
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -285,6 +286,13 @@ class TasksetRunStatus(BaseModel):
         default=None, description="When a caller requested cancellation; None if never requested."
     )
     error: str | None = Field(default=None, description="Why the run failed or expired; None otherwise.")
+    experiment: str | None = Field(
+        default=None,
+        description=(
+            "Intake Experiment the run publishes its trials to, as one Evaluation named after the run (run_id); "
+            "None when it publishes nowhere."
+        ),
+    )
     created_by: str | None = Field(
         default=None,
         description="Principal ID of the caller who created the run; None when creator metadata is unavailable.",
@@ -295,8 +303,8 @@ class TasksetRunStatus(BaseModel):
     progress: TasksetRunProgress | None = Field(
         default=None,
         description=(
-            "Counted from the run's members on each GET of this run; None before the controller creates them, "
-            "and in run lists and submit responses."
+            "Counted from the run's members on each GET of this run, and in run lists that ask for it; None before "
+            "the controller creates them, and in other run lists and submit responses."
         ),
     )
 
@@ -315,6 +323,10 @@ class TasksetRunTask(BaseModel):
 
     task: str = Field(description="Member name within the run, for example task-7.")
     task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    task_name: str | None = Field(
+        default=None,
+        description="The task's id in the run's taskset (a Harbor task's native id); omitted for runs from before it.",
+    )
     phase: MemberPhase = Field(description="Stored image preparation and execution progress of this task.")
     job: str | None = Field(
         default=None,
@@ -332,6 +344,26 @@ class TasksetRunTask(BaseModel):
             "reported nothing."
         ),
     )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "The task Job's trials counted by phase, with their mean reward, as the controller last read them. "
+            "Before the Job reports, the planned trials, all pending."
+        ),
+    )
+
+
+class TasksetRunTaskDetail(TasksetRunTask):
+    """One task with each of its trials, as its task Job last reported them."""
+
+    trials: list[TrialProgress] | None = Field(
+        default=None,
+        description=(
+            "Each trial of the task Job: phase, attempts, timing, reward, error and Intake session, read from the Job "
+            "now; trial_counts is then counted from this list. Omitted before the task has a Job, when the Job "
+            "reported no trials, or when it can't be read."
+        ),
+    )
 
 
 def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
@@ -347,11 +379,13 @@ def to_task(member: TasksetRunMemberEntity) -> TasksetRunTask:
     return TasksetRunTask(
         task=member.name,
         task_index=member.task_index,
+        task_name=member.task_name,
         phase=member.phase,
         job=member.task_job,
         job_status=member.job_status,
         error=member.error,
         publication=member.publication,
+        trial_counts=member.trial_counts,
     )
 
 

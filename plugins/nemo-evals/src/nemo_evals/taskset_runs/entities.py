@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import ClassVar, Self
 
 from nemo_evals.jobs.publication import PublicationOutcome
+from nemo_evals.taskset_runs.trials import TrialCounts
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -132,6 +133,13 @@ class TasksetRunEntity(EntityBase):
         description="When a caller requested cancellation; None if never requested.",
     )
     error: str | None = Field(default=None, description="Why the run failed or expired; None otherwise.")
+    experiment: str | None = Field(
+        default=None,
+        description=(
+            "Intake Experiment the run publishes its trials to, as one Evaluation named after the run; copied from "
+            "the plan at submit so readers can link the run's traces without loading the plan. None publishes nowhere."
+        ),
+    )
 
     # The submitter's full principal (id, email, account id, groups, aliases), for the run controller to create
     # task Jobs on the creator's behalf: the platform can't look a user's groups up later. Stored with the
@@ -187,6 +195,10 @@ class TasksetRunMemberEntity(EntityBase):
     __entity_type__: ClassVar[str] = "taskset_run_member"
 
     task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    task_name: str | None = Field(
+        default=None,
+        description="The task's id in the plan (a Harbor task's native id), copied when the member is created.",
+    )
     phase: MemberPhase = Field(description="Image preparation and execution progress of this task.")
     task_job: str | None = Field(
         default=None,
@@ -215,6 +227,14 @@ class TasksetRunMemberEntity(EntityBase):
         description=(
             "What the task published to Intake, as its ended Job reported it when the member settled; None when "
             "the Job reported nothing or the member settled without reading an ended Job."
+        ),
+    )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "The task Job's trials counted by phase, as the Job last reported them when the controller read it; "
+            "display only, at most one cycle old. Starts as the planned trials, all pending; None for runs from "
+            "before this was recorded."
         ),
     )
     create_sent_at: datetime | None = Field(
