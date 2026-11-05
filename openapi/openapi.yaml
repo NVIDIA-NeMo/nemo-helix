@@ -20522,11 +20522,6 @@ components:
           items:
             type: string
           type: array
-        num_nextn_predict_layers:
-          title: Num Nextn Predict Layers
-          description: Multi-token prediction depth declared by the checkpoint. None
-            when the config has no such field.
-          type: integer
         num_layers:
           type: integer
           title: Num Layers

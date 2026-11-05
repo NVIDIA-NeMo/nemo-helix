@@ -118,12 +118,6 @@ def _cache_put(key: tuple[str, bool], value: ModelSpec) -> None:
         _model_spec_cache.popitem(last=False)
 
 
-def _nextn_predict_layers(cfg: object) -> int | None:
-    """MTP layers the language config declares; None when it has no such field."""
-    value = getattr(cfg, "num_nextn_predict_layers", None)
-    return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
 def infer_model_cfg_from_hf(
     pretrained_or_path: str,
     is_trusted: bool = False,
@@ -235,7 +229,6 @@ def infer_model_cfg_from_hf(
     result = ModelSpec(
         **basic_config,
         architectures=architectures,
-        num_nextn_predict_layers=_nextn_predict_layers(cfg),
         is_chat=is_chat,
         gated_mlp=bool(gated_mlp),
         base_num_parameters=total_params,
