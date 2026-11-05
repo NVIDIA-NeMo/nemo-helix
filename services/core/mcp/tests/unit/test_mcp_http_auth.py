@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import fastmcp
 import httpx
 import pytest
 from nhx.core.mcp import main as mcp_main
@@ -59,6 +60,12 @@ class TestResolveHttpAuth:
     def test_short_token_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(AUTH_TOKEN_ENV_VAR, "short")
         with pytest.raises(MCPAuthConfigError, match="at least"):
+            resolve_http_auth("127.0.0.1", allow_unauthenticated=False)
+
+    @pytest.mark.parametrize("token", [f"{TOKEN}é", f"{TOKEN[:8]}\t{TOKEN[8:]}"])
+    def test_non_printable_ascii_token_rejected(self, monkeypatch: pytest.MonkeyPatch, token: str) -> None:
+        monkeypatch.setenv(AUTH_TOKEN_ENV_VAR, token)
+        with pytest.raises(MCPAuthConfigError, match="printable ASCII"):
             resolve_http_auth("127.0.0.1", allow_unauthenticated=False)
 
     @pytest.mark.parametrize("token", [" " * 16, f" {TOKEN}", f"{TOKEN}\n"])
@@ -269,3 +276,13 @@ class TestCliStartup:
         create_server_stub.return_value.run.assert_called_once_with(
             transport="streamable-http", host="127.0.0.1", port=8080, host_origin_protection="auto"
         )
+
+    def test_http_transport_keeps_strict_host_origin_protection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        create_server_stub: MagicMock,
+    ) -> None:
+        monkeypatch.setenv(AUTH_TOKEN_ENV_VAR, TOKEN)
+        monkeypatch.setattr(fastmcp.settings, "http_host_origin_protection", True)
+        self._run_main(monkeypatch, "--transport", "streamable-http")
+        assert create_server_stub.return_value.run.call_args.kwargs["host_origin_protection"] is True

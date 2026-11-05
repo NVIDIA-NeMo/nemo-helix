@@ -59,6 +59,9 @@ def resolve_http_auth(host: str, *, allow_unauthenticated: bool) -> SharedBearer
     if token:
         if token != token.strip():
             raise MCPAuthConfigError(f"{AUTH_TOKEN_ENV_VAR} must not start or end with whitespace")
+        # HTTP headers carry ASCII; any other character could never match a presented token
+        if not (token.isascii() and token.isprintable()):
+            raise MCPAuthConfigError(f"{AUTH_TOKEN_ENV_VAR} must contain only printable ASCII characters")
         if len(token) < MIN_AUTH_TOKEN_LENGTH:
             raise MCPAuthConfigError(f"{AUTH_TOKEN_ENV_VAR} must be at least {MIN_AUTH_TOKEN_LENGTH} characters")
         return SharedBearerTokenVerifier(token)

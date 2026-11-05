@@ -10,6 +10,7 @@ import argparse
 import logging
 import os
 
+import fastmcp
 from nhx.core.mcp.auth import AUTH_TOKEN_ENV_VAR, MCPAuthConfigError, resolve_http_auth
 from nhx.core.mcp.server import create_server
 
@@ -102,12 +103,13 @@ def main() -> None:
         server.run(transport="stdio")
     else:
         logger.info(f"Starting MCP server with HTTP transport on {args.host}:{args.port}...")
-        # "auto" rejects untrusted Host/Origin headers when bound to loopback (DNS rebinding); FastMCP defaults to off
+        # "auto" rejects untrusted Host/Origin headers when bound to loopback (DNS rebinding). FastMCP defaults
+        # to off, so raise that to "auto" but keep a stricter FASTMCP_HTTP_HOST_ORIGIN_PROTECTION=true
         server.run(  # type: ignore[call-arg]
             transport=args.transport,
             host=args.host,
             port=args.port,
-            host_origin_protection="auto",
+            host_origin_protection=fastmcp.settings.http_host_origin_protection or "auto",
         )
 
 

@@ -44,7 +44,7 @@ uv run nemo-mcp --transport streamable-http --port 8080 --allow-unauthenticated
 The HTTP transport acts on the platform with the server's own credentials, so it is locked down by default:
 
 - **Authentication:** `--transport streamable-http` refuses to start unless `NHX_MCP_AUTH_TOKEN` is set (at least 16
-  characters, no leading or trailing whitespace). Clients send it as `Authorization: Bearer <token>`. The token is read from the environment, not a
+  printable ASCII characters, no leading or trailing whitespace). Clients send it as `Authorization: Bearer <token>`. The token is read from the environment, not a
   flag, so it does not appear in the process list. Use a long random value.
 - **Transport encryption:** the server serves plain HTTP, so the bearer token is sent unencrypted. For any non-loopback
   `--host`, terminate TLS in front of the server (reverse proxy) or use an encrypted tunnel (SSH, VPN).
