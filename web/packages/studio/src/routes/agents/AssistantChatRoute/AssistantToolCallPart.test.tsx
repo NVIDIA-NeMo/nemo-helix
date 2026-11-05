@@ -92,6 +92,20 @@ describe('AssistantToolCallPart', () => {
     expect(within(step).getByText('src/notes/MEMORY.md')).toBeInTheDocument();
   });
 
+  it('keeps a failed file write as a tool call so its error shows', () => {
+    renderPart({
+      args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
+      isError: true,
+      result: 'EACCES: permission denied',
+      toolName: 'Write',
+    });
+
+    expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
+    const step = screen.getByTestId('assistant-work-tool-call');
+    expect(step).toHaveTextContent('Called Write');
+    expect(within(step).getByText('Error')).toBeInTheDocument();
+  });
+
   it('unpacks a subtle tool group into one step per call', () => {
     renderPart({
       args: {

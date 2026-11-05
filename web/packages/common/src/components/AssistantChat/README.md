@@ -74,7 +74,7 @@ When a request fails for a non-cancel reason the assistant message is marked `in
 
 The banner has no actions of its own: the reply's hover action row stays available, and its "Regenerate response" action reruns the request.
 
-The explanation is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line above the raw error.
+The explanation is the title and hint returned by the `describeError` prop, or the generic line "There was an error generating a response." when the prop is omitted or returns `undefined`. Only the agent chat passes one (`describeChatError`, wired in `ChatPlaygroundContent`), because its wording is specific to agents; every other surface shows the generic line, with the raw error behind "Show details".
 
 `describeChatError.ts` holds the agent rules. The platform returns 502 for any agent failure and the model's HTTP status survives only inside the message text, so the rules match phrases the platform writes (`Fabric runtime startup failed`, `Could not connect to agent`, a bodyless `502`) and the envelope the Fabric runtime wraps an openai SDK failure in (`RuntimeError: internal error: APIStatusError: Error code: NNN - ...`). Every rule is anchored at the start of the message, and platform phrases are checked before the upstream status, so a status or phrase that only appears inside quoted detail is ignored and a failure that merely quotes a status code is not blamed on the model provider. Statuses without a rule (400, 409, 422...) fall back to the generic line. Replace the text matching with a switch on a structured error code once the platform returns one.
 
@@ -91,7 +91,7 @@ Related documentation:
 - **Stop**: cancel aborts the active request or stream and marks any running assistant message as cancelled.
 - **Reset**: reset aborts active work and clears the local thread.
 - **Testing**: Storybook uses MSW handlers for streaming, indexed example responses, and a hanging stream that validates Stop behavior.
-- **Failures**: a failed reply shows the explanation in a red-barred body, the raw error in the banner, and copies the raw error.
+- **Failures**: a failed reply shows the explanation in an inline error banner, with the raw error in a copyable code snippet behind the "Show details" row and "Regenerate response" in the reply's action row.
 
 ## Supported
 
@@ -104,7 +104,7 @@ Related documentation:
 - Stop/cancel for an in-flight stream, regenerate for assistant responses, and reset for clearing the current thread.
 - Basic assistant-ui runtime hooks for future copy, branch, and thread-list features.
 - Storybook MSW mocks for normal streaming, indexed example responses, and a hanging stream used to validate Stop behavior.
-- Explained failures for surfaces that pass `describeError`, with the raw error kept in the banner and copy action.
+- Explained failures for surfaces that pass `describeError`, with the raw error kept behind "Show details".
 
 ## File Layout
 
@@ -113,10 +113,12 @@ Related documentation:
 - `AssistantChatThread.tsx` — thread viewport layout that wires message renderers and the composer together.
 - `AssistantMessage.tsx` / `UserMessage.tsx` — assistant/system and user message renderers (`AssistantMessage` also renders system messages).
 - `UserEditComposer.tsx` — the inline composer shown when editing a user message.
-- `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, tool-call fallback, error banner with the raw error) used by both message renderers.
-- `messageActions.tsx` — shared message-action styles, the copy-message button, and the copy-error button shown on failed replies.
+- `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, the reasoning and tool-call work group, and the error banner) used by both message renderers.
+- `ChatErrorBanner.tsx` — the failed-reply banner with the explanation, plus the "Show details" row holding the raw error.
+- `chainOfThought/` — the collapsible work group and its Thought, tool-call, and file-edit steps.
+- `messageActions.tsx` — shared message-action styles, the action button, and the copy-message button.
 - `describeChatError.ts` — rules that explain agent chat failures (`describeChatError`), `humanizeChatError`, and the generic error line. `messageUtils.ts` `getFailedReply` builds the failed reply from them.
-- `useMessageError.ts` — hook returning the raw error of a failed message, shared by the red bar, banner, and copy action.
+- `useMessageError.ts` — hook returning the raw error of a failed message, shared by the message renderer, the error banner, and its "Show details" row.
 - `AssistantChatErrorStates.stories.tsx` — error-state story driven by Storybook Controls.
 - `AssistantComposer.tsx` — the prompt composer, send/stop/reset controls, and image-attachment chips.
 - `types.ts` — shared prop and config types. `messageUtils.ts` / `completionUtils.ts` — message and completion helpers.

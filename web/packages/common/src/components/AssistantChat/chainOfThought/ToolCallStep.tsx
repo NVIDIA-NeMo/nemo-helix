@@ -39,7 +39,8 @@ const PayloadSection = ({
 
 /**
  * A tool call: its name, then the arguments it was called with and the result it returned.
- * Tools whose arguments carry a file path and content render as a file edit instead.
+ * Successful tools whose arguments carry a file path and content render as a file edit instead;
+ * a failed one stays a tool call so its error is shown.
  */
 export const ToolCallStep = ({
   args,
@@ -50,7 +51,7 @@ export const ToolCallStep = ({
   running,
   toolName,
 }: ToolCallStepProps) => {
-  const fileEdit = getFileEdit(args);
+  const fileEdit = isError ? undefined : getFileEdit(args);
   if (fileEdit) return <FileEditStep defaultOpen={defaultOpen} edit={fileEdit} />;
 
   const hasArgs =
