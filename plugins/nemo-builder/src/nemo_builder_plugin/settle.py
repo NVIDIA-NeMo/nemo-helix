@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Settling on read: a ``pending`` image whose job will never complete it is failed when it is read.
+"""Settling: a ``pending`` image whose job will never complete it is failed.
 
 An image is ``pending`` while its job may still complete it. Its job decides that: once the job has ended, or if it
-was never created, nothing will. Rather than a controller watching every job, the routes that read images ask, for
-each ``pending`` one they return, and write the ones they find abandoned ``failed``, conditional on the version they
-read. A row its push step completed meanwhile conflicts, and is read again.
+was never created, nothing will. :func:`settle` asks Jobs about each ``pending`` image it is given, and writes the
+ones it finds abandoned ``failed``, conditional on the version it read. A row its push step completed meanwhile
+conflicts, and is read again. Reading one image settles it, and the ``builder-settle`` controller settles every
+``pending`` one each pass; the two can run at once, since each write is conditional.
 
 A submit writes the rows, then creates the job, so a row without a job is only abandoned once :data:`JOB_GRACE` has
 passed. A submit slow enough to create its job after that builds images already failed: their push step's completion
@@ -21,7 +22,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from nemo_builder_plugin.entities import ContainerImage
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityConflictError
+from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.log_utils import sanitize_for_log
 
@@ -35,6 +38,20 @@ _ENDED = frozenset(HelixJobStatus.terminals())
 
 #: The status of the job ``(workspace, name)``, or None when there is no such job.
 JobStatus = Callable[[str, str], Awaitable[HelixJobStatus | None]]
+
+
+def job_status_from(jobs: AsyncJobsClient) -> JobStatus:
+    """:data:`JobStatus` over ``jobs``, which must act as the builder: a caller who may not see a job must not have it
+    taken for missing."""
+
+    async def job_status(workspace: str, name: str) -> HelixJobStatus | None:
+        try:
+            response = await jobs.get_job_status(workspace=workspace, name=name)
+        except NotFoundError:
+            return None
+        return response.data().status
+
+    return job_status
 
 
 class _Rows(Protocol):

@@ -358,20 +358,21 @@ credential for every workload.
 A successful submit returns `201` with the job's name and the `pending` rows. Poll the rows, not the
 job: images in a set finish independently.
 
-Jobs starts the job once its [execution profiles](#jobs-execution-profiles) have room: the chart's
-`builder.maxConcurrentBuilds` sets each build profile's `max_active_jobs`, so at most that many builds
-run at once, and Jobs queues the rest, one user's at a time. Meanwhile the job's status is `queued` and
-the rows stay `pending`.
+Jobs starts each of the job's steps once that step's [execution profile](#jobs-execution-profiles)
+has room: the chart's `builder.maxConcurrentBuilds` sets each build profile's `max_active_jobs`, so at
+most that many steps run on each profile at once, and Jobs queues the rest, one user's at a time. That
+caps the sandboxes, not the builds in flight (see the profiles section). While a step waits, the job's
+status is `queued` and the rows stay `pending`.
 
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
-| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail once read five minutes on. Or you're a service that isn't acting for a person. |
+| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail five minutes on. Or you're a service that isn't acting for a person. |
 | `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
-| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail once read five minutes on. Or the registry of an image to copy couldn't be reached. |
+| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
@@ -387,7 +388,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or when a read finds the image abandoned: its job ended without completing it, or it has had no job for five minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `pending`, `ready` or `failed`. `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it has had no job for five minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -716,6 +717,12 @@ A build runs one step at a time and holds its sandboxes only during `build`, so 
 namespace's ResourceQuota for that many sandboxes and that many step pods per profile. Jobs' per-user
 and per-workspace limits apply too.
 
+The limits count steps, not builds: a build between two steps holds no slot, so nothing caps how many
+builds are started and not yet finished. In a burst, `fetch` runs ahead of `build`, and most of the
+burst's contexts land on the work volume while `build` works through them that many at a time. Size
+the work volume for the largest burst, not for `builder.maxConcurrentBuilds` builds. A cap on whole
+builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
+
 ## Limitations
 
 ### Deployment
@@ -733,13 +740,15 @@ and per-workspace limits apply too.
 
 ### Reliability
 
-- **A row whose build fails fails when it's read.** Nothing watches the jobs. Reading an image, or
-  listing it, asks Jobs about it while it's `pending`: once its job has ended, or once it has had no
-  job for five minutes (a submit that died, or that Jobs refused, between writing its rows and
-  creating its job), the read writes it `failed`, with the reason in `status_detail`. Until then the
-  stored row stays `pending`, so listing `status=failed` leaves out the failures no read has found
-  yet. Within the five minutes, submitting the same request again creates its job; after them, submit
-  the next `revision`: the same one again would build images already failed.
+- **A row whose build fails is failed by `builder-settle`, or when it's read.** Once a `pending`
+  image's job has ended, or once it has had no job for five minutes (a submit that died, or that Jobs
+  refused, between writing its rows and creating its job), it is written `failed`, with the reason in
+  `status_detail`. The `builder-settle` controller does that for every `pending` image every 30
+  seconds, and reading one image does it for that image at once. Listing doesn't, so a listing's
+  `status` lags by up to a pass, and without `builder-settle` such rows stay `pending` in listings for
+  good: the chart refuses a controller selection that leaves it out. Within the five minutes,
+  submitting the same request again creates its job; after them, submit the next `revision`: the same
+  one again would build images already failed.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
