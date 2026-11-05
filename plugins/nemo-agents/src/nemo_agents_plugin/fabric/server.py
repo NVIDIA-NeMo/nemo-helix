@@ -11,7 +11,7 @@ import logging
 import sys
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -94,10 +94,8 @@ def _to_fabric_invocation_request(
         try:
             relay_session_root = session_id_to_uuid(session_id)
         except ValueError:
-            try:
+            with suppress(ValueError):
                 relay_session_root = str(uuid.UUID(session_id))
-            except ValueError:
-                pass  # Other opaque IDs have no Relay session root.
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
