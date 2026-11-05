@@ -60,7 +60,7 @@ def apis(cm):
 def sweeper(apis):
     core, batch, custom = apis
     terminal = MagicMock(return_value=True)
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.client.CustomObjectsApi", return_value=custom):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.CustomObjectsApi", return_value=custom):
         return StepConfigMapSweeper(core, batch, "test-namespace", terminal), terminal
 
 
@@ -223,7 +223,7 @@ def test_job_created_during_platform_lookup_is_preserved(sweeper, apis, volcano)
 
 
 def test_sweep_is_throttled(sweeper, apis):
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", return_value=100.0) as clock:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", return_value=100.0) as clock:
         sweeper[0].sweep()
         clock.return_value = 110.0
         sweeper[0].sweep()
@@ -309,7 +309,7 @@ def test_slow_batch_keeps_unfinished_candidates_and_reports_progress(sweeper, ap
     core.list_namespaced_config_map.return_value = client.V1ConfigMapList(items=[cm, other])
     core.read_namespaced_config_map.side_effect = [cm, other]
     progress = MagicMock()
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", return_value=100.0) as clock:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", return_value=100.0) as clock:
 
         def slow_delete(**kwargs):
             clock.return_value += 3
@@ -407,7 +407,7 @@ def test_delayed_requests_keep_progress_within_health_window(sweeper, apis, cm):
     custom.get_namespaced_custom_object.side_effect = absent
     sweeper[1].side_effect = lambda *args: delay(True)
     core.delete_namespaced_config_map.side_effect = lambda **kw: delay(None)
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", side_effect=lambda: ticks[0]):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", side_effect=lambda: ticks[0]):
         sweeper[0].sweep(lambda: heartbeats.append(ticks[0]))
     assert max(right - left for left, right in zip(heartbeats, heartbeats[1:])) < 6
     assert len(sweeper[0]._pending) == SWEEP_PAGE_SIZE - 1
@@ -451,7 +451,7 @@ def test_empty_page_request_cap_preserves_continuation(sweeper, apis, cm):
         ],
         client.V1ConfigMapList(items=[cm], metadata=client.V1ListMeta()),
     ]
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", return_value=100.0):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", return_value=100.0):
         sweeper[0].sweep()
         assert core.list_namespaced_config_map.call_count == SWEEP_MAX_PAGES
         core.list_namespaced_pod.assert_not_called()
@@ -464,7 +464,7 @@ def test_empty_page_request_cap_preserves_continuation(sweeper, apis, cm):
 
 def test_empty_page_deadline_preserves_continuation(sweeper, apis, cm):
     core = apis[0]
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", return_value=100.0) as clock:
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", return_value=100.0) as clock:
 
         def slow_page(**kwargs):
             clock.return_value = 103.0
@@ -535,7 +535,7 @@ def test_expiring_inventory_reaches_orphan_after_retained_prefix(sweeper, apis, 
         )
 
     core.list_namespaced_config_map.side_effect = list_page
-    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.time.monotonic", side_effect=lambda: clock[0]):
+    with patch("nhx.core.jobs.controllers.backends.kubernetes.configmaps.monotonic", side_effect=lambda: clock[0]):
         for _ in range(30):
             before = core.list_namespaced_config_map.call_count
             sweeper[0].sweep()

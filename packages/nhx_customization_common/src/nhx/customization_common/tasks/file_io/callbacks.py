@@ -5,10 +5,10 @@
 
 import logging
 import threading
-import time
 from abc import abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from typing import Any
 
 from fsspec.callbacks import Callback, TqdmCallback
@@ -294,12 +294,12 @@ class SingleFileUploadCallback(BaseSingleFileCallback):
 
     def __init__(self, parent: FileUploadProgressCallback, source_path: str, dest_path: str, **kwargs: Any):
         super().__init__(parent=parent, source_path=source_path, dest_path=dest_path, **kwargs)
-        self._started_at = time.monotonic()
+        self._started_at = monotonic()
         self._last_reported_at = self._started_at
 
     def relative_update(self, inc: int = 1) -> None:
         super().relative_update(inc)
-        now = time.monotonic()
+        now = monotonic()
         if self._completed or now - self._last_reported_at < UPLOAD_PROGRESS_INTERVAL_SECONDS:
             return
         self._last_reported_at = now

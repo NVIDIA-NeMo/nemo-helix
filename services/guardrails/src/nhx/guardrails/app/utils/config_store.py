@@ -6,7 +6,7 @@
 import logging
 from pathlib import Path
 
-import fsspec
+from fsspec import filesystem
 from nhx.common.entities import SYSTEM_WORKSPACE
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.guardrails.app.utils.config_utils import (
@@ -34,7 +34,7 @@ async def populate_config_store(
     config_store_path = config_store_path.resolve()
 
     # Use fsspec to list directories in the config_store_path (str for consistent behavior across platforms)
-    fs = fsspec.filesystem("file")
+    fs = filesystem("file")
     config_store_str = str(config_store_path)
 
     # Check if the config store path exists

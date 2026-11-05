@@ -2809,7 +2809,7 @@ def test_an_adapter_without_the_atif_output_is_not_wired(
         def to_dict() -> dict[str, Any]:
             return {"adapter_descriptor": {"descriptor": {"telemetry": otel_only}}}
 
-    monkeypatch.setattr(intake_export.fabric, "Fabric", lambda: SimpleNamespace(plan=lambda *a, **k: _Plan()))
+    monkeypatch.setattr(intake_export, "Fabric", lambda: SimpleNamespace(plan=lambda *a, **k: _Plan()))
 
     with caplog.at_level(logging.INFO):
         assert supports_intake_atif_export(_fabric_agent_config(), base_dir=tmp_path) is False

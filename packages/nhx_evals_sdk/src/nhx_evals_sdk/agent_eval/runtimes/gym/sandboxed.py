@@ -40,6 +40,7 @@ from time import monotonic
 from typing import Any
 
 import httpx
+from httpx import AsyncClient
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY
 from nhx_evals_sdk.agent_eval.runtimes.gym.dataset import materialize_dataset, source_datasets
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
@@ -292,7 +293,7 @@ class SandboxedGymAgentTaskRunner:
     async def _collect(self, examples: list[dict[str, Any]]) -> list[Any]:
         """POST the examples and return the host's rollout records."""
         started = monotonic()
-        async with httpx.AsyncClient(timeout=self._config.timeout_s) as client:
+        async with AsyncClient(timeout=self._config.timeout_s) as client:
             response = await client.post(
                 self._config.rollout_url,
                 json={"examples": examples},

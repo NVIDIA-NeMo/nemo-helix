@@ -295,7 +295,7 @@ def test_a_paused_worker_leaves_the_barriers_to_the_coordinator(
 def test_a_pause_fails_when_the_barriers_cannot_be_cleared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The job then ends in error, and a rerun starts a new attempt with its own barriers."""
     monkeypatch.setattr(
-        "nhx.automodel.tasks.training.distributed.shutil.rmtree", MagicMock(side_effect=PermissionError("denied"))
+        "nhx.automodel.tasks.training.distributed.rmtree", MagicMock(side_effect=PermissionError("denied"))
     )
 
     result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)

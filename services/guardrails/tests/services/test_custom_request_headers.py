@@ -5,6 +5,7 @@
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 from nhx.guardrails.app.handlers.checks import CheckRequestHandler
@@ -49,7 +50,10 @@ def create_mock_config():
 @pytest.fixture
 def mock_openai_clients():
     """Fixture to mock OpenAI sync and async clients."""
-    with patch("openai.OpenAI") as mock_openai_class, patch("openai.AsyncOpenAI") as mock_async_openai_class:
+    with (
+        patch("nhx.guardrails.app.llms.chat.nim.OpenAI") as mock_openai_class,
+        patch("nhx.guardrails.app.llms.chat.nim.AsyncOpenAI") as mock_async_openai_class,
+    ):
         # Sync client
         mock_openai_client = MagicMock()
         mock_openai_class.return_value = mock_openai_client
@@ -235,7 +239,13 @@ class TestLLMCustomHeaders:
         set_request_default_headers_into_context(custom_headers)
         mock_llm_dependencies.return_value = custom_headers
 
-        with patch("httpx.Client.post") as mock_post:
+        class _Client(httpx.Client):
+            pass
+
+        with (
+            patch("nhx.guardrails.app.llms.completion.nim.Client", _Client),
+            patch.object(_Client, "post") as mock_post,
+        ):
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_response.is_success = True
@@ -264,7 +274,13 @@ class TestLLMCustomHeaders:
         set_request_default_headers_into_context(custom_headers)
         mock_llm_dependencies.return_value = custom_headers
 
-        with patch("httpx.AsyncClient.post") as mock_post:
+        class _AsyncClient(httpx.AsyncClient):
+            pass
+
+        with (
+            patch("nhx.guardrails.app.llms.completion.nim.AsyncClient", _AsyncClient),
+            patch.object(_AsyncClient, "post") as mock_post,
+        ):
             mock_response = MagicMock()
             mock_response.status_code = 200
             mock_response.is_success = True

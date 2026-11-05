@@ -483,7 +483,7 @@ def test_volume_memory_and_file_count_are_bounded(tmp_path, caplog):
         path.write_bytes(_record() * 1000)
     # Duplicate sinks must not multiply the per-file/per-poll byte budget.
     observer.sinks *= 4
-    with patch("nemo_agents_plugin.fabric.progress.os.read", wraps=os.read) as read:
+    with patch("nemo_agents_plugin.fabric.progress.read", wraps=os.read) as read:
         observer.poll()
     assert read.call_count == 4
     assert all(call.args[1] == 65536 for call in read.call_args_list)

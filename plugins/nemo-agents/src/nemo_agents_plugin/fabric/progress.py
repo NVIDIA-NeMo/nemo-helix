@@ -18,6 +18,7 @@ import threading
 from collections import Counter
 from collections.abc import Generator
 from contextlib import contextmanager
+from os import read
 from pathlib import Path
 from time import monotonic
 
@@ -101,7 +102,7 @@ class LocalProgressObserver:
             self.buffers.pop(key, None)
             self.dropping.discard(key)
         os.lseek(fd, offset, os.SEEK_SET)
-        data = os.read(fd, _MAX_READ)
+        data = read(fd, _MAX_READ)
         self.offsets[key] = offset + len(data)
         data = self.buffers.pop(key, b"") + data
         lines = data.split(b"\n")

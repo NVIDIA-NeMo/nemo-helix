@@ -3,6 +3,7 @@
 
 """Tests for secrets encryptor module: local key creation config and usage."""
 
+import hvac
 import pytest
 from nhx.common.config import Configuration, nhx_user_data_dir
 from nhx.common.secrets.encryption import SecretKeyEncryptor, VaultEncryptor, get_base64_encoded_random_bytes
@@ -139,10 +140,12 @@ def _vault_provider_config() -> SecretsServiceConfig:
 
 def test_vault_authentication_failure_is_provider_not_configured(monkeypatch):
     """A Vault provider that cannot authenticate is a configuration error."""
-    monkeypatch.setattr(
-        "nhx.common.secrets.encryption.vault.hvac.Client.is_authenticated",
-        lambda self: False,
-    )
+
+    class _UnauthenticatedClient(hvac.Client):
+        def is_authenticated(self) -> bool:
+            return False
+
+    monkeypatch.setattr("nhx.common.secrets.encryption.vault.HvacClient", _UnauthenticatedClient)
     Configuration.set_override(_vault_provider_config())
     try:
         with pytest.raises(

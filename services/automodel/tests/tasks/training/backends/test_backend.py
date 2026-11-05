@@ -209,8 +209,8 @@ class RecordingProgress(JobsServiceProgressReporter):
 
 
 def run_execute(monkeypatch: pytest.MonkeyPatch, progress: JobsServiceProgressReporter, proc: Proc):
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", lambda *a, **k: proc)
-    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", lambda *a, **k: proc)
+    monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
     previous = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     config = MagicMock()
     config.parallelism.num_nodes = 1
@@ -274,8 +274,8 @@ class TestExecuteTrainingTrackerRun:
             launched["env"] = env
             return proc
 
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.subprocess.Popen", popen)
-        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.threading.Thread", Thread)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Popen", popen)
+        monkeypatch.setattr("nhx.automodel.tasks.training.backends.backend.Thread", Thread)
         monkeypatch.setattr(
             "nhx.automodel.tasks.training.backends.backend.find_mlflow_run_id",
             lambda config: "run-1" if config == mlflow_config else None,
