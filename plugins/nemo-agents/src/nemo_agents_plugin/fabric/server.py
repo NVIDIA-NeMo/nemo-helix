@@ -94,7 +94,10 @@ def _to_fabric_invocation_request(
         try:
             relay_session_root = session_id_to_uuid(session_id)
         except ValueError:
-            pass  # Direct callers may use opaque session IDs.
+            try:
+                relay_session_root = str(uuid.UUID(session_id))
+            except ValueError:
+                pass  # Other opaque IDs have no Relay session root.
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,

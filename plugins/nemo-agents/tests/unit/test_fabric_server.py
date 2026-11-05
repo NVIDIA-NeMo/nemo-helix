@@ -442,7 +442,10 @@ def test_chat_completion_returns_reasoning_from_fabric_messages(
     }
 
 
-@pytest.mark.parametrize(("session_id", "relay_session_root"), [(SESSION_ID, SESSION_UUID), ("session-1", None)])
+@pytest.mark.parametrize(
+    ("session_id", "relay_session_root"),
+    [(SESSION_ID, SESSION_UUID), (SESSION_UUID, SESSION_UUID), ("session-1", None)],
+)
 def test_chat_completion_with_session_id_reuses_session(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
@@ -653,7 +656,10 @@ def test_streaming_chat_completion_without_session_uses_one_shot_stream(
     assert _sse_line_payload(lines[-2])["choices"] == [{"index": 0, "delta": {}, "finish_reason": "stop"}]
 
 
-@pytest.mark.parametrize(("session_id", "relay_session_root"), [(SESSION_ID, SESSION_UUID), ("session-1", None)])
+@pytest.mark.parametrize(
+    ("session_id", "relay_session_root"),
+    [(SESSION_ID, SESSION_UUID), (SESSION_UUID, SESSION_UUID), ("session-1", None)],
+)
 def test_streaming_chat_completion_reuses_supplied_session_id(
     tmp_path: Path,
     mock_validate_agent_config: list[tuple[AgentConfig, Path]],
