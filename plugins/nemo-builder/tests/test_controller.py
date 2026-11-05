@@ -55,7 +55,8 @@ class FakeEntities:
         found = [e for e in self.entities.values() if isinstance(e, entity_type)]
         for field, value in (filter_obj or {}).items():
             found = [e for e in found if getattr(e, field) == value]
-        return SimpleNamespace(data=found, pagination=SimpleNamespace(total_pages=1))
+        # Copies, as the store returns: a change the controller fails to save must not stick.
+        return SimpleNamespace(data=[e.model_copy(deep=True) for e in found], pagination=SimpleNamespace(total_pages=1))
 
     async def get(self, entity_type, *, name, workspace):
         if name not in self.entities:
@@ -310,6 +311,33 @@ async def test_a_build_none_of_whose_images_still_waits_is_dropped_not_started()
     await controller.reconcile()
     assert jobs.jobs == {} and "retried" not in entities.entities
     assert entities.entities["retried.img"].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_a_pass_that_stops_after_releasing_the_images_leaves_the_job_to_the_next_pass() -> None:
+    entities, jobs = FakeEntities(), FakeJobs()
+    controller = BuildQueueController(cap=lambda: 1)
+    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
+    _queue(entities, "interrupted")
+    # The pass creates the job and moves the image to pending, then fails to save the build as started.
+    entities.fail_update.add("interrupted")
+    await controller.reconcile()
+    assert set(jobs.jobs) == {"interrupted"}
+    assert (entities.entities["interrupted.img"].status, entities.entities["interrupted"].state) == (
+        "pending",
+        "queued",
+    )
+
+    # The next pass adopts the job rather than dropping the build: it holds the slot...
+    _queue(entities, "next")
+    await controller.reconcile()
+    assert entities.entities["interrupted"].state == "started" and set(jobs.jobs) == {"interrupted"}
+
+    # ...and its image fails when the job does, rather than staying pending.
+    jobs.jobs["interrupted"].status = HelixJobStatus.ERROR
+    await controller.reconcile()
+    assert entities.entities["interrupted.img"].status == "failed" and "interrupted" not in entities.entities
+    assert set(jobs.jobs) == {"interrupted", "next"}
 
 
 @pytest.mark.asyncio

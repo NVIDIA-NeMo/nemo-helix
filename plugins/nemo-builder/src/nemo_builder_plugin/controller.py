@@ -174,10 +174,12 @@ class BuildQueueController(NemoController):
         except ValidationError as exc:
             await self._refuse(build, f"not built: the queued job request is invalid ({exc.error_count()} error(s))")
             return False
-        if not any(row.status == "queued" for row in await self._rows(build)):
+        if not any(row.status in ("queued", "pending") for row in await self._rows(build)):
             # Every image settled first, as a retry's do when the orphan check fails them just before the retry
-            # queues their build: a job now could publish none of them.
-            logger.info("dropping queued build %s: none of its images is still queued", _label(build))
+            # queues their build: a job now could publish none of them. A pending image still waits: an earlier
+            # pass released it to the job, then stopped before saving the build as started, and the create below
+            # adopts that job.
+            logger.info("dropping queued build %s: none of its images still waits for its job", _label(build))
             await self._forget(build)
             return False
         async with self._jobs_as(_submitter(build)) as jobs:
