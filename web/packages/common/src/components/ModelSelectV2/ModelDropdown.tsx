@@ -36,7 +36,14 @@ const isCustomModel = (model: ModelEntity): boolean => !isBaseModel(model);
 
 type ModelDropdownProps = Omit<
   ModelSelectV2Props,
-  'showParams' | 'inferenceParams' | 'onInferenceParamsChange' | 'onOpenChange' | 'aria-label'
+  | 'showParams'
+  | 'inferenceParams'
+  | 'onInferenceParamsChange'
+  | 'paramsDisabled'
+  | 'paramsFieldMetadata'
+  | 'paramsFields'
+  | 'onOpenChange'
+  | 'aria-label'
 > & {
   open: boolean;
   onOpenChange: (open: boolean) => void;

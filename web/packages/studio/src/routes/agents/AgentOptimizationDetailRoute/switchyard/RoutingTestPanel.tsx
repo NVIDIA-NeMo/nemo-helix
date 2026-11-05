@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AssistantMessageCompletion } from '@nemo/common/src/components/AssistantChat/types';
+import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
 import { ChatMulti } from '@nemo/icons/icons';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
+import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import {
   Anchor,
   Badge,
@@ -17,8 +19,11 @@ import {
   Stack,
   Text,
 } from '@nvidia/foundations-react-core';
-import { DEFAULT_INFERENCE_PARAMS, type InferenceParams } from '@studio/components/chat/params';
-import { ParamsPopover } from '@studio/components/chat/ParamsPopover';
+import {
+  CHAT_INFERENCE_PARAM_FIELDS,
+  CHAT_INFERENCE_PARAM_METADATA,
+  DEFAULT_CHAT_INFERENCE_PARAMS,
+} from '@studio/components/chat/params';
 import {
   routeSettingText,
   routingStrategyTitle,
@@ -111,7 +116,7 @@ export interface RoutingTestPanelProps {
 export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }) => {
   const { virtualModel } = route;
   const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
-    ...DEFAULT_INFERENCE_PARAMS,
+    ...DEFAULT_CHAT_INFERENCE_PARAMS,
     max_tokens: 1024,
   });
   // Kept per VirtualModel, so switching routes and back keeps what was already observed.
@@ -169,7 +174,12 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
               {routingStrategyTitle(route.configType)} · {routeSettingText(route)}
             </Text>
           </Flex>
-          <ParamsPopover value={inferenceParams} onChange={setInferenceParams} />
+          <ParamsDropdown
+            inferenceParams={inferenceParams}
+            onInferenceParamsChange={setInferenceParams}
+            fields={CHAT_INFERENCE_PARAM_FIELDS}
+            fieldMetadata={CHAT_INFERENCE_PARAM_METADATA}
+          />
         </Flex>
 
         <Grid cols={{ base: 1, xl: 3 }} gap="density-xl">

@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { WorkspaceModelSelectProps } from '@nemo/common/src/components/ModelSelectV2';
 import type { PromptData } from '@nemo/sdk/generated/platform/schema';
+import {
+  CHAT_INFERENCE_PARAM_FIELDS,
+  CHAT_INFERENCE_PARAM_METADATA,
+} from '@studio/components/chat/params';
 import { ModelChatPanel } from '@studio/components/ModelChatPanel';
 import { TestProviders } from '@studio/tests/util/TestProviders';
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 
 // Capture the props that ModelChat receives so we can assert on workspace/model
@@ -18,31 +23,40 @@ vi.mock('@studio/components/ModelChat', () => ({
   },
 }));
 
-// The model select fetches its own options; its internals are not what we're testing here.
+// The model select fetches its own options; its internals are not what we're testing here, only
+// the props the panel hands it.
+const modelSelectSpy = vi.fn<(props: WorkspaceModelSelectProps) => void>();
+
 vi.mock('@nemo/common/src/components/ModelSelectV2', () => ({
-  WorkspaceModelSelect: () => <div data-testid="mock-model-select" />,
+  WorkspaceModelSelect: (props: WorkspaceModelSelectProps) => {
+    modelSelectSpy(props);
+    return <div data-testid="mock-model-select" />;
+  },
 }));
+
+const panelState = (id: number, modelURN: string | null, overrides = {}) => ({
+  id,
+  collapsed: false,
+  modelURN,
+  adapter: null,
+  roleColor: 'baseline' as const,
+  roleLabel: `Panel ${id}`,
+  isSinglePanel: true,
+  locked: false,
+  ...overrides,
+});
 
 const renderPanel = (
   modelURN: string | null,
   adapter: string | null = null,
-  promptData?: PromptData
+  promptData?: PromptData,
+  locked = false
 ) => {
   return render(
     <TestProviders>
       <MemoryRouter>
         <ModelChatPanel
-          panel={{
-            id: 0,
-            collapsed: false,
-            modelURN,
-            adapter,
-            roleColor: 'baseline',
-            roleLabel: 'Baseline',
-            isSinglePanel: true,
-            locked: false,
-            promptData,
-          }}
+          panel={panelState(0, modelURN, { adapter, promptData, locked })}
           fallbackWorkspace="route-workspace"
           onToggle={vi.fn()}
           onRemove={vi.fn()}
@@ -53,9 +67,12 @@ const renderPanel = (
   );
 };
 
+const lastSelectProps = (): WorkspaceModelSelectProps => modelSelectSpy.mock.lastCall![0];
+
 describe('ModelChatPanel — URN routing', () => {
   beforeEach(() => {
     modelChatSpy.mockClear();
+    modelSelectSpy.mockClear();
   });
 
   it("routes inference to the model's own workspace (not the route workspace)", () => {
@@ -137,5 +154,78 @@ describe('ModelChatPanel — URN routing', () => {
         emptyState: expect.objectContaining({ slotHeading: expect.any(String) }),
       })
     );
+  });
+});
+
+describe('ModelChatPanel — inference params', () => {
+  beforeEach(() => {
+    modelChatSpy.mockClear();
+    modelSelectSpy.mockClear();
+  });
+
+  it('edits params through the integrated select, limited to what chat sends', () => {
+    renderPanel('nvidia/llama-70b');
+
+    expect(lastSelectProps()).toEqual(
+      expect.objectContaining({
+        showParams: true,
+        paramsFields: CHAT_INFERENCE_PARAM_FIELDS,
+        paramsFieldMetadata: CHAT_INFERENCE_PARAM_METADATA,
+        inferenceParams: { temperature: 0.7, max_tokens: 512 },
+      })
+    );
+  });
+
+  it('keeps params editable on a locked panel while the model stays fixed', () => {
+    renderPanel('nvidia/llama-70b', null, undefined, true);
+
+    expect(lastSelectProps()).toEqual(
+      expect.objectContaining({ disabled: true, paramsDisabled: false })
+    );
+  });
+
+  it('sends changed params with the next chat request', () => {
+    renderPanel('nvidia/llama-70b');
+
+    act(() => lastSelectProps().onInferenceParamsChange?.({ temperature: 0, max_tokens: 1024 }));
+
+    expect(modelChatSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0, max_tokens: 1024 } },
+      })
+    );
+  });
+
+  it("keeps each panel's params independent", () => {
+    render(
+      <TestProviders>
+        <MemoryRouter>
+          {[0, 1].map((id) => (
+            <ModelChatPanel
+              key={id}
+              panel={panelState(id, `nvidia/model-${id}`, { isSinglePanel: false })}
+              fallbackWorkspace="route-workspace"
+              onToggle={vi.fn()}
+              onRemove={vi.fn()}
+              onModelChange={vi.fn()}
+            />
+          ))}
+        </MemoryRouter>
+      </TestProviders>
+    );
+    const firstPanelSelect = modelSelectSpy.mock.calls.find(
+      ([props]) => props.value?.model === 'nvidia/model-0'
+    )![0];
+
+    act(() => firstPanelSelect.onInferenceParamsChange?.({ temperature: 1.5, max_tokens: 512 }));
+
+    const lastChatPropsFor = (model: string) =>
+      modelChatSpy.mock.calls.filter(([props]) => props.model === model).at(-1)![0];
+    expect(lastChatPropsFor('model-0').promptData).toEqual({
+      inference_params: { temperature: 1.5, max_tokens: 512 },
+    });
+    expect(lastChatPropsFor('model-1').promptData).toEqual({
+      inference_params: { temperature: 0.7, max_tokens: 512 },
+    });
   });
 });

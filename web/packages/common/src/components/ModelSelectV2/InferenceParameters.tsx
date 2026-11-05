@@ -26,6 +26,8 @@ export interface InferenceParametersProps {
   disabled?: boolean;
   /** Per-field overrides of the shared bounds and defaults, for callers whose backend differs. */
   fieldMetadata?: Partial<Record<InferenceParameterField, Partial<FieldMetadata>>>;
+  /** The fields to show, for callers whose request only carries some of them. Defaults to all. */
+  fields?: readonly InferenceParameterField[];
 }
 
 export const InferenceParameters: FC<InferenceParametersProps> = ({
@@ -33,9 +35,10 @@ export const InferenceParameters: FC<InferenceParametersProps> = ({
   onChange,
   disabled,
   fieldMetadata,
+  fields = INFERENCE_PARAMETER_FIELDS,
 }) => (
   <Stack gap="4">
-    {INFERENCE_PARAMETER_FIELDS.map((key) => {
+    {fields.map((key) => {
       const param = { ...INFERENCE_HYPERPARAMETER_FIELD_METADATA[key], ...fieldMetadata?.[key] };
       return (
         <SliderWithTextInput
@@ -47,6 +50,7 @@ export const InferenceParameters: FC<InferenceParametersProps> = ({
             onChange: (v: number) => onChange({ ...value, [key]: v }),
           }}
           defaultValue={param.default}
+          displayName={param.name}
           disabled={disabled}
           min={param.min}
           max={param.max}
