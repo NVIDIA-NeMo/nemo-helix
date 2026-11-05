@@ -87,7 +87,8 @@ def test_build_payload_matches_job_run_wire_contract() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw,expected", [(None, -1), (0, 0), ("12", 12), (-2, -1), (True, -1), (float("inf"), -1), (2**63, -1)]
+    "raw,expected",
+    [(None, -1), (0, 0), ("12", 12), (-2, -1), (True, -1), (float("inf"), -1), (2**63, -1), (-0.5, -1), (1.5, -1)],
 )
 def test_token_count_provenance_and_bounds(raw: object, expected: int) -> None:
     telemetry = build_job_run_telemetry(

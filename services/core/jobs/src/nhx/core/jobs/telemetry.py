@@ -67,6 +67,8 @@ def _token_count(details: dict[str, Any], key: str) -> int:
     raw_value = details.get(key)
     if raw_value is None or isinstance(raw_value, bool):
         return -1
+    if isinstance(raw_value, float) and not raw_value.is_integer():
+        return -1
     try:
         count = int(raw_value)
     except (TypeError, ValueError, OverflowError):
