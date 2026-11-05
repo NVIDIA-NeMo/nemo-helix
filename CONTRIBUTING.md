@@ -140,7 +140,7 @@ Then start the platform from the repository root:
 flox -q activate
 nemo services run
 
-# Or run everything with quickstart config (builds OPA policy first)
+# Or run everything with quickstart config (no policy build needed)
 make run
 
 # Or run specific services
@@ -164,7 +164,7 @@ automatically. System-toolchain contributors can install it explicitly with
 To start a server in development mode:
 
 ```bash
-# Recommended: builds OPA policy and runs with quickstart config
+# Recommended: runs with quickstart config and loads Rego source directly
 make run
 
 # Or run directly with the nemo CLI (from an activated venv)
@@ -289,7 +289,7 @@ For source development, prefer running Python processes directly in your local e
 
 ##### Usage
 
-The simplest way to run locally is with `make run`, which builds the OPA policy and starts all services with the quickstart config:
+The simplest way to run locally is with `make run`, which starts all services with the quickstart config and loads the shared Rego policy source directly:
 
 ```bash
 make run

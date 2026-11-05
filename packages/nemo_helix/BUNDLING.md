@@ -79,6 +79,89 @@ For the wrapper specifically, `make vendor` also creates aggregate extras from `
 
 Hand-written extras (e.g. the wrapper's `all` alias, or a plugin's `test` group) live directly in the pyproject's `[project.optional-dependencies]` table without the generator marker. The vendor tool will preserve them on every run; only extras with the `# Generated from [tool.bundle-package]; do not edit by hand.` marker are touched by `make vendor`.
 
+## Native Regorus binding dependency
+
+The embedded PDP uses the published **`gordon-to-regorus==0.13.0`** distribution
+from PyPI; its Python import remains **`regorus`**. This is a third-party fork of
+Microsoft's Regorus, not a Microsoft-published 0.14.1 wheel and not
+`lakera-regorus`. Do not co-install distributions providing the same `regorus`
+module: verify installed distribution ownership when diagnosing imports.
+
+Auth service dependencies and the wrapper's generated `auth-service` extra
+name this exact public distribution. Aggregate `core-service`, `services`, and
+`all` extras transitively select it. The root workspace has **no Regorus GitHub
+source override**; `uv.lock` resolves the PyPI release and its authentic artifact
+hashes. Published wheel consumers therefore use the same named dependency as a
+normal source checkout, rather than an unavailable source-only binding pin.
+
+The wrapper remains **`py3-none-any`**: it bundles Python service code and Rego
+sources, **not** the binding's `.so`/`.pyd`, an OPA/Go executable, or policy WASM.
+The platform-specific native binding is installed as a separate dependency,
+which is compatible with a universal wrapper wheel. There is no Go build or
+policy compilation step, and no startup download of a policy-engine executable.
+
+At the pinned release, CPython `abi3` wheels (Python 3.10 minimum) exist for
+Linux x86_64/aarch64 (`manylinux_2_34`), macOS x86_64/arm64, and Windows x86_64.
+The wrapper's own supported Python/platform constraints still apply. Only Linux
+amd64 was executed in the current validation; do not infer tested support for
+other platforms, PyPy, free-threaded Python, Alpine/musl, or older glibc from the
+universal wrapper tag. On a platform without a compatible binding wheel, a
+normal installer may fall back to the sdist and require Rust/maturin and native
+build tools. Wheel-only deployments should enforce an installer binary-only
+policy for `gordon-to-regorus` and fail clearly rather than unexpectedly compile.
+
+### Compatibility, provenance, and security limits
+
+The validated fork source is `1aff63ff7a923ea577a78211af4d6c6a71fabef3`, based on
+upstream Regorus 0.13.0 (`b94fc6bbda74d5d626321254bc4f2d8a9dddded9`). Its extra
+commit changes workflows, not core Rust/binding logic; publishing changes the
+Python distribution metadata. This engine is 32 upstream commits behind the
+old 0.14.1 draft pin, including later interpreter/resource-accounting fixes.
+The unchanged shared corpus (266 rules / 272 cases), auth tests including slow
+stress, and an isolated wheel import/install passed in the evaluation; these
+checks are compatibility evidence, not proof of equivalence to every later fix.
+
+An actual OSV scan found no known advisory matches in the 180-package Python
+binding source lock at evaluation time. The broader root lock contains ZIP
+advisories in the separate `xtask` tool, not a demonstrated dependency of the
+Python runtime. The enabled allocator includes vendored mimalloc C 2.2.6 and
+native Rust/C FFI: source-lock scanning does not establish comprehensive
+allocator, compiler, host-library, or native-wheel CVE coverage. **Do not call
+this distribution dependency-free or CVE-free.**
+
+The evaluated Linux wheel and sdist have verified PyPI publish attestations in
+offline verification mode. Online Sigstore TUF freshness could not be refreshed
+on the restricted network. A publish attestation binds an artifact digest to a
+publishing identity; it does **not** attest the complete source/build inventory
+or provide reproducible-build/SBOM assurance. Pin release artifacts/hashes, review
+maintainer changes, and repeat compatibility/security checks for upgrades.
+
+### Maintenance fallback: a maintained upstream wheel release
+
+If the fork maintainer lags a required upstream/security fix, maintainers may
+build and release an approved binding distribution from an explicitly pinned,
+reviewed upstream Regorus commit using the existing Rust/maturin Python binding.
+This is a fallback release responsibility, not an automatic runtime fallback or
+a new Go binding pipeline. Before changing the dependency:
+
+1. Record exact upstream commit, source/archive hashes, license expression,
+   Cargo lock/features, Rust/maturin versions, and platform build-image digests.
+2. Build the required CPython ABI/platform wheels with locked dependencies;
+   collect provenance/SBOM and independently verify each artifact hash.
+3. Run unchanged Rego corpus, full auth/security regressions, performance/stress,
+   and clean wheel-only installs on supported platforms; audit native/vendored
+   dependencies and relevant upstream fixes, not just Python `Requires-Dist`.
+4. Publish under an approved maintained distribution/version and registry with
+   protected credentials and attestations. Do not silently replace someone
+   else's `gordon-to-regorus==0.13.0` artifact or assume the same module name is
+   sufficient provenance.
+5. Update the auth dependency, regenerate wrapper metadata (`make vendor`),
+   resolve with uv, regenerate license/constraints artifacts, rebuild the
+   universal wrapper, and revalidate normal checkout and published-wheel installs.
+
+Do not hide a direct source reference or platform binary inside universal wheel
+metadata to bypass missing supported native artifacts.
+
 ## Dependency groups
 
 The wrapper's `[project.dependencies]` is hand-written with the true workspace dependencies for the base install:

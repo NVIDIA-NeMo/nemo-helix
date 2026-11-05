@@ -1,7 +1,11 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# OPA Authorization Policies
+# Shared Rego Authorization Policies
+
+The embedded PDP interprets these sources with Regorus; the external PDP evaluates
+these same sources with OPA. No compiled policy artifact or OPA build is needed
+for the embedded runtime.
 
 ## Entry Points
 
@@ -94,6 +98,18 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ## Testing
 
 ```bash
-make test-policy
+make test-policy      # Regorus: embedded-evaluator compatibility tests
+make test-policy-opa  # OPA compatibility oracle (requires the opa executable)
 ```
+
+The shared Rego tests use native `with` modifiers to install request and
+authorization-data fixtures. The embedded compatibility tests in
+`services/core/auth/tests/test_regorus_compatibility.py` evaluate the shared
+Rego test rules directly with Regorus, without a custom lowering runner.
+Production policies and the OPA compatibility oracle use the same Rego sources.
+The embedded Python import is `regorus`, supplied by the pinned third-party
+`gordon-to-regorus==0.13.0` distribution, not a source-built `regorus` package.
+
+When adding or changing policy behavior, run both evaluators. A passing native
+OPA test alone does not verify the embedded evaluator's behavior.
 

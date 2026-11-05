@@ -276,7 +276,7 @@ async def build_authorization_data(entities_client: Optional[EntityClient] = Non
     """Build authorization data for the policy engine.
 
     This extracts just the data building logic from the bundle generation,
-    returning the data structure needed by the embedded WASM policy engine.
+    returning the data structure needed by the embedded Rego policy engine.
 
     Args:
         entities_client: Optional EntityClient for fetching dynamic data

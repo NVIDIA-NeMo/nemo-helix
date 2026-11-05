@@ -706,7 +706,6 @@ target "nhx-api-docker" {
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
-    policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
@@ -733,7 +732,6 @@ target "nhx-agents-deepagents-e2e-docker" {
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
     nhx-studio-ui             = "target:nhx-studio-ui"
-    policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
     fastembed-cache           = FASTEMBED_CACHE_CONTEXT
   }
@@ -760,7 +758,6 @@ target "nhx-core-docker" {
     nhx-python-base           = "target:nhx-python-base"
     nhx-workspace             = "target:nhx-workspace"
     nhx-jobs-launcher         = "target:nhx-jobs-launcher"
-    policy-wasm-artifacts     = "target:root-policy-wasm-artifacts"
     root-busybox              = "target:root-busybox"
   }
   args = {
@@ -1236,14 +1233,6 @@ target "root-golang-artifacts" {
   target     = "root-golang-artifacts"
   context    = "."
   dockerfile = "docker/Dockerfile.bake"
-  platforms  = get_platforms()
-}
-
-# Auth policy WASM bundle (built from Rego during container build; multi-arch).
-target "root-policy-wasm-artifacts" {
-  target     = "root-policy-wasm-artifacts"
-  context    = "."
-  dockerfile = "docker/base/Dockerfile.policy-wasm"
   platforms  = get_platforms()
 }
 

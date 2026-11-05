@@ -147,6 +147,7 @@
 {"name": "google.golang.org/protobuf", "license": "BSD-3-CLAUSE", "compatible": true}
 {"name": "googleapis-common-protos", "license": "APACHE-2.0", "compatible": true}
 {"name": "gopkg.in/yaml.v3", "license": "MIT AND APACHE-2.0", "compatible": true}
+{"name": "gordon-to-regorus", "license": "MIT AND APACHE-2.0 AND BSD-3-CLAUSE", "compatible": true}
 {"name": "greenlet", "license": "MIT AND PSF-2.0", "compatible": true}
 {"name": "griffelib", "license": "ISC", "compatible": true}
 {"name": "grpcio", "license": "APACHE-2.0", "compatible": true}
@@ -244,7 +245,6 @@
 {"name": "nemo-fabric-adapters-nooa", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-adapters-remote-agent", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-collector", "license": "APACHE-2.0", "compatible": true}
-{"name": "nemo-fabric-evidence", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-fabric-runtime", "license": "APACHE-2.0", "compatible": true}
 {"name": "nemo-helix-tavily-plugin", "license": "MIT", "compatible": true}
 {"name": "nemo-relay", "license": "APACHE-2.0", "compatible": true}
@@ -452,7 +452,6 @@
 {"name": "uvloop", "license": "MIT", "compatible": true}
 {"name": "validators", "license": "MIT", "compatible": true}
 {"name": "wandb", "license": "MIT", "compatible": true}
-{"name": "wasmtime", "license": "APACHE-2.0 WITH LLVM-EXCEPTION", "compatible": true}
 {"name": "watchfiles", "license": "MIT", "compatible": true}
 {"name": "wcmatch", "license": "MIT", "compatible": true}
 {"name": "wcwidth", "license": "MIT", "compatible": true}

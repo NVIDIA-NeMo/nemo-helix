@@ -227,12 +227,12 @@ uv run python services/core/auth/scripts/auth-tools.py sync-plugins --dry-run
 Then rebuild and test the compiled policy:
 
 ```bash
-make build-policy && make test-policy
+make test-policy
 ```
 
 <Note>
 
-The compiled `policy.wasm` in the auth service is a gitignored build artifact. Run `make build-policy` after pulling authz or Rego changes — otherwise the embedded-PDP tests run against a stale copy and fail with misleading errors.
+The embedded PDP loads the Rego sources shipped with the auth package using Regorus; there is no generated policy artifact to rebuild. Restart the auth service after changing Rego sources. `make test-policy` tests the shared policy with the embedded evaluator; `make test-policy-opa` runs OPA as an independent compatibility oracle.
 
 </Note>
 

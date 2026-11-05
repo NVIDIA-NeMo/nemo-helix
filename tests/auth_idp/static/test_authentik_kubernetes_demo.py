@@ -314,7 +314,6 @@ def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
 
     assert set(runtime_job["needs"]) == {
         "eligibility",
-        "policy-wasm",
         "build-cpu-smoke-images",
         "python-auth-idp-static-test",
     }

@@ -12,7 +12,8 @@ import data.authz.extract_path
 import data.authz.scope_check_passed
 import data.common.endpoint_scan
 import data.common.get_applicable_principals
-import data.common.has_permissions
+# Keep the predicate distinct from this package's has_permissions API document.
+import data.common.has_permissions as principal_has_permissions
 import data.common.req_callers
 import data.common.req_deny
 import data.common.req_permissions
@@ -90,7 +91,7 @@ allow_request if {
 
 	# Check if any principal has the required permissions
 	some principal in applicable_principals
-	has_permissions(principal, workspace, required_permissions)
+	principal_has_permissions(principal, workspace, required_permissions)
 }
 
 # Wildcard workspace "-" with mutating methods: permission-based authorization.
@@ -115,7 +116,7 @@ allow_request if {
 
 	some principal in applicable_principals
 	valid_service_principal(principal)
-	has_permissions(principal, workspace, required_permissions)
+	principal_has_permissions(principal, workspace, required_permissions)
 }
 
 # Workspace-less endpoints with required permissions: check against the system workspace.
@@ -131,7 +132,7 @@ allow_request if {
 	count(required_permissions) > 0
 	workspace_scan == ""
 	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
+	principal_has_permissions(principal, "system", required_permissions)
 }
 
 # Allow cross-workspace LIST operations (GET/HEAD without workspace in path) for authenticated
@@ -182,7 +183,7 @@ allow_request if {
 	count(required_permissions) > 0
 
 	some principal in applicable_principals
-	has_permissions(principal, "system", required_permissions)
+	principal_has_permissions(principal, "system", required_permissions)
 }
 
 # True when the matched endpoint declares one or more required permissions for this method.
@@ -291,7 +292,7 @@ bundle_access_ok if {
 	count(applicable_principals) > 0
 	scope_check_passed
 	some principal in applicable_principals
-	has_permissions(principal, "system", ["iam.bundle.read"])
+	principal_has_permissions(principal, "system", ["iam.bundle.read"])
 }
 
 deny_request if {

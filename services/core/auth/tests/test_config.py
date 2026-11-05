@@ -17,7 +17,6 @@ def test_auth_config_defaults():
     # Auth service specific defaults
     assert cfg.policy_decision_point_provider == "embedded"
     assert cfg.policy_decision_point_request_timeout_seconds == 5
-    assert cfg.embedded_pdp_auto_build_wasm is True
     assert cfg.bundle_cache_seconds == 5
     assert cfg.admin_email is None
     assert cfg.default_workspace == "default"

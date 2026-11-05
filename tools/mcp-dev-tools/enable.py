@@ -166,7 +166,7 @@ The `nhx-dev` MCP server provides dedicated tools for common development tasks w
 
 **Project navigation:** Use `list_directory`, `find_files` instead of `ls` or `find`
 
-**Make targets:** Use `make_target` for allowed targets (`build-policy`, `check-licenses`, `check-policy`, `refresh-openapi`, `test-all`, `test-integration`, `test-policy`, `test-unit`, `update-licenses`, `update-sdk`) instead of `make` bash commands
+**Make targets:** Use `make_target` for allowed targets (`check-licenses`, `refresh-openapi`, `test-all`, `test-integration`, `test-policy`, `test-unit`, `update-licenses`, `update-sdk`) instead of `make` bash commands
 
 Only fall back to bash commands when no MCP tool equivalent exists.
 """

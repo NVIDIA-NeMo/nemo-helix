@@ -65,7 +65,6 @@ Each tool is:
 - `make_target(target)` - Run allowlisted make targets:
   - test-unit, test-integration, test-all
   - refresh-openapi, update-sdk
-  - build-policy, check-policy
   - update-licenses
 
 ## Testing the Server

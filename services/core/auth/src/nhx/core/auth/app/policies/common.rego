@@ -174,8 +174,7 @@ get_all_roles_in_chain(role_name) := all_roles if {
 
 	# Level 1: Direct includes
 	level_1 := {included |
-		some r in level_0
-		role := data.authz.roles[r]
+		role := data.authz.roles[role_name]
 		includes := object.get(role, "includes", [])
 		some included in includes
 	}

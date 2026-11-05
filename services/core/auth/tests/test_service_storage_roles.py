@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Explicit service entity grants through the production WASM runtime."""
+"""Explicit service entity grants through the production Rego runtime."""
 
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from nhx.core.auth.app.embedded_pdp import OPAPolicy
+from nhx.core.auth.app.embedded_pdp import RegoPolicy as OPAPolicy
 
 ASSETS = Path(__file__).parents[1] / "src/nhx/core/auth/assets"
 ENTITY_PERMISSIONS = ("entities.create", "entities.read", "entities.update", "entities.delete")
@@ -28,7 +28,7 @@ def policy_data() -> dict[str, Any]:
 
 @pytest.fixture
 def policy() -> OPAPolicy:
-    return OPAPolicy(str(ASSETS / "policy.wasm"))
+    return OPAPolicy()
 
 
 def allows(

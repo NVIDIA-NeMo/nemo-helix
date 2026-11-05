@@ -16,8 +16,8 @@ from nhx.core.auth.api.v2 import workload_token_exchange
 from nhx.core.auth.api.v2.bundle import endpoints as bundle
 from nhx.core.auth.api.v2.discovery import endpoints as discovery
 from nhx.core.auth.api.v2.iam import endpoints as iam
+from nhx.core.auth.app.embedded_pdp import get_policy
 from nhx.core.auth.app.embedded_pdp.data import apply_embedded_policy_document
-from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm
 from nhx.core.auth.config import AuthServiceConfig
 from nhx.core.auth.oidc_broker import routes as oidc_broker
 from nhx.core.entities.app.repository import dispose_async_engine
@@ -79,7 +79,7 @@ class AuthService(Service[AuthServiceConfig]):
             logger.info("Auth disabled - skipping embedded policy engine initialization")
             return
         if config.policy_decision_point_provider == "embedded":
-            ensure_embedded_policy_wasm(auto_build=config.embedded_pdp_auto_build_wasm)
+            get_policy()
 
     async def _start_refresh_loop(self) -> asyncio.Task:
         """Start background task to periodically refresh policy data."""
@@ -100,7 +100,7 @@ class AuthService(Service[AuthServiceConfig]):
                     logger.debug("Refreshing auth policy data")
                     # Bootstrap static YAML only when we do not yet have a successful full
                     # refresh (cold start or recovery after failure). On steady-state refreshes
-                    # we skip this: the WASM already holds the last document, so entity fetches
+                    # we skip this: the interpreter already holds the last document, so entity fetches
                     # stay authorized without briefly replacing dynamic principals with bootstrap-only
                     # data. Same loader as ``load_policy_data`` / ``apply_embedded_policy_document``.
                     data = await apply_embedded_policy_document(
