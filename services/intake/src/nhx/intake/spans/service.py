@@ -96,8 +96,11 @@ class IntakeSpansService:
     ) -> None:
         """Insert rows that an ingest worker process built off the event loop.
 
-        Mirrors ``ingest_batch``: spans first, then evaluator results. This
-        awaited insert is the commit point of an ATIF ingest ``201``.
+        Mirrors ``ingest_batch``: spans first, then evaluator results. These
+        awaited inserts are the commit point of an ATIF ingest ``201``: it is
+        returned only after both succeed. Like ``ingest_batch``, the inserts are
+        sequential, so a failure between them can leave spans stored without
+        their evaluator results; stable ids make a producer retry converge.
         """
         await self._spans.insert_span_rows(span_rows)
         if evaluator_result_rows:

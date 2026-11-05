@@ -30,6 +30,7 @@ from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluat
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
 from nhx.intake.repository.clickhouse.tables import ClickHouseTable
 from nhx.intake.spans.clickhouse_client import ClickHouseSettings, ClickHouseSpanClient
+from nhx.intake.spans.ingest.atif_offload import atif_ingest_worker_hold, atif_ingest_worker_ready
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +40,11 @@ LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS = 5.0
 # Worker processes that run the CPU-heavy part of ATIF ingest (mapping and row
 # building). Two workers overlap back-to-back trajectories without competing for
 # many cores. The spawn start method keeps workers from inheriting a forked copy
-# of this multithreaded server process.
+# of this multithreaded server process. Warm-up tasks hold a worker just long
+# enough that the pool spawns its full complement during startup.
 ATIF_INGEST_POOL_WORKERS = 2
 ATIF_INGEST_POOL_START_METHOD = "spawn"
-
-
-def _atif_ingest_worker_noop() -> None:
-    """Trivial task that pre-spawns an ingest worker during startup."""
+ATIF_INGEST_WARMUP_HOLD_SECONDS = 0.05
 
 
 class _LocalClickHouseProvisioner(BackgroundWorker):
@@ -221,11 +220,16 @@ class IntakeService(Service[IntakeConfig]):
         cfg = self.service_config or IntakeConfig()
         settings = ClickHouseSettings.from_config(cfg)
         # Start the ingest worker pool first so the spawn cost overlaps the rest of startup.
-        self.atif_ingest_executor = ProcessPoolExecutor(
-            max_workers=ATIF_INGEST_POOL_WORKERS,
-            mp_context=get_context(ATIF_INGEST_POOL_START_METHOD),
-        )
-        self._warm_atif_ingest_executor()
+        self.atif_ingest_executor = self._create_atif_ingest_executor()
+        try:
+            self._start_rest_of_intake(cfg, settings)
+        except BaseException:
+            # The lifespan never runs on_shutdown when startup failed, so close the
+            # pool here instead of leaking its worker processes.
+            await self._stop_atif_ingest_executor(self.atif_ingest_executor)
+            raise
+
+    def _start_rest_of_intake(self, cfg: IntakeConfig, settings: ClickHouseSettings) -> None:
         # The denormalizer needs a service-principal entity client (no request context).
         self._denormalizer_entity_client = self.dependency_provider.get_service_entity_client(self.name)
         if self._denormalizer_entity_client is None:
@@ -244,13 +248,25 @@ class IntakeService(Service[IntakeConfig]):
             self._start_denormalizer(self.clickhouse_client)
         self._ready = True
 
-    def _warm_atif_ingest_executor(self) -> None:
-        """Pre-spawn one ingest worker so the first ATIF ingest skips interpreter startup."""
-        executor = self.atif_ingest_executor
-        if executor is None:
-            return
-        future = executor.submit(_atif_ingest_worker_noop)
-        future.add_done_callback(self._log_atif_ingest_warmup_failure)
+    def _create_atif_ingest_executor(self) -> ProcessPoolExecutor:
+        executor = ProcessPoolExecutor(
+            max_workers=ATIF_INGEST_POOL_WORKERS,
+            mp_context=get_context(ATIF_INGEST_POOL_START_METHOD),
+        )
+        self._warm_atif_ingest_executor(executor)
+        return executor
+
+    def _warm_atif_ingest_executor(self, executor: ProcessPoolExecutor) -> None:
+        """Pre-spawn both ingest workers so the first overlapping ingests skip startup latency."""
+        for task in (
+            executor.submit(atif_ingest_worker_hold, ATIF_INGEST_WARMUP_HOLD_SECONDS),
+            executor.submit(atif_ingest_worker_ready),
+        ):
+            task.add_done_callback(self._log_atif_ingest_warmup_failure)
+
+    async def _stop_atif_ingest_executor(self, executor: ProcessPoolExecutor) -> None:
+        """Close the pool off the event loop so a draining worker cannot freeze teardown."""
+        await asyncio.to_thread(executor.shutdown, True)
 
     def _log_atif_ingest_warmup_failure(self, future: Future[None]) -> None:
         error = future.exception()
@@ -260,6 +276,23 @@ class IntakeService(Service[IntakeConfig]):
                 exc_info=error,
                 extra={"service": self.name},
             )
+
+    def rebuild_atif_ingest_executor(self, *, broken: ProcessPoolExecutor) -> None:
+        """Replace a pool whose worker died so later ingests heal instead of failing until restart.
+
+        ``ProcessPoolExecutor`` never recovers from a dead worker. Safe under
+        overlapping failures: when the current pool is no longer ``broken``,`
+        another caller already rebuilt it and this call is a no-op.
+        """
+        if self.atif_ingest_executor is not broken:
+            return
+        logger.error(
+            "ATIF ingest worker pool broke; replacing it",
+            extra={"service": self.name},
+        )
+        self.atif_ingest_executor = self._create_atif_ingest_executor()
+        # The broken pool has no live work left; closing it must not block the loop.
+        broken.shutdown(wait=False, cancel_futures=True)
 
     def _adopt_reconciled_clickhouse(self, url: str, settings: ClickHouseSettings, data_dir: Path | None) -> None:
         """Install the reconciled client. No await, so shutdown cannot interleave mid-assign."""
@@ -289,9 +322,9 @@ class IntakeService(Service[IntakeConfig]):
         self._readiness_message = ""
         executor, self.atif_ingest_executor = self.atif_ingest_executor, None
         if executor is not None:
-            # In-flight requests have drained by shutdown time; wait for any
-            # remaining worker so no offload outlives the service.
-            executor.shutdown(wait=True)
+            # Requests have drained by lifespan shutdown; a straggler mapping still
+            # finishes so no offload outlives the service, but off the loop.
+            await self._stop_atif_ingest_executor(executor)
         reconciler = self._reconciler
         self._reconciler = None
         if reconciler is not None:

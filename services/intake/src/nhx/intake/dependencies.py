@@ -61,7 +61,7 @@ def get_atif_ingest_executor(intake: IntakeServiceDep) -> ProcessPoolExecutor:
     if executor is None:
         raise HTTPException(
             status_code=503,
-            detail="ATIF ingest is not running; the intake service is shutting down",
+            detail="ATIF ingest is unavailable; the intake service is not running or is shutting down",
         )
     return executor
 

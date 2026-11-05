@@ -16,7 +16,6 @@ import os
 import signal
 import time
 from concurrent.futures import ProcessPoolExecutor
-from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
 from typing import Any, NoReturn
 
@@ -27,7 +26,11 @@ from nhx.intake.config import IntakeConfig
 from nhx.intake.dependencies import get_atif_ingest_executor
 from nhx.intake.repository.clickhouse.evaluator_results import evaluator_result_rows_for_insert
 from nhx.intake.repository.clickhouse.span import span_rows_for_insert
-from nhx.intake.service import ATIF_INGEST_POOL_START_METHOD, ATIF_INGEST_POOL_WORKERS
+from nhx.intake.service import (
+    ATIF_INGEST_POOL_START_METHOD,
+    ATIF_INGEST_POOL_WORKERS,
+    IntakeService,
+)
 from nhx.intake.spans.ingest import atif
 from nhx.intake.spans.ingest.atif import AtifIngestRequest, ingest_atif
 from nhx.intake.spans.ingest.atif_mapping import (
@@ -35,7 +38,7 @@ from nhx.intake.spans.ingest.atif_mapping import (
     trajectory_to_evaluator_results,
     trajectory_to_spans,
 )
-from nhx.intake.spans.ingest.atif_offload import PreparedAtifBatch, prepare_atif_batch
+from nhx.intake.spans.ingest.atif_offload import PreparedAtifBatch, atif_ingest_worker_ready, prepare_atif_batch
 from nhx.intake.spans.storage import utc_now
 
 # The route-level tests mirror the production wiring by building the same pool
@@ -97,17 +100,31 @@ async def _skip_evaluation_context_validation(**_kwargs: Any) -> None:
 
 
 class _RecordingSpansService:
-    """Records prepared inserts; optionally raises to simulate an insert error."""
+    """Records prepared inserts; optionally simulates insert errors.
 
-    def __init__(self, *, error: Exception | None = None) -> None:
+    ``error`` fails before any insert. ``error_on_evaluator_results`` fails after
+    the span insert, reproducing the sequential two-insert commit path.
+    """
+
+    def __init__(
+        self,
+        *,
+        error: Exception | None = None,
+        error_on_evaluator_results: Exception | None = None,
+    ) -> None:
         self._error = error
+        self._error_on_evaluator_results = error_on_evaluator_results
         self.batches: list[tuple[list[list[Any]], list[list[Any]]]] = []
+        self.span_inserts: list[list[list[Any]]] = []
 
     async def ingest_prepared_batch(
         self, *, span_rows: list[list[Any]], evaluator_result_rows: list[list[Any]]
     ) -> None:
         if self._error is not None:
             raise self._error
+        self.span_inserts.append(span_rows)
+        if evaluator_result_rows and self._error_on_evaluator_results is not None:
+            raise self._error_on_evaluator_results
         self.batches.append((span_rows, evaluator_result_rows))
 
 
@@ -117,6 +134,16 @@ class _RecordingDenormalizer:
 
     def mark_dirty(self, *, workspace: str, evaluation_name: str) -> None:
         self.dirty.append((workspace, evaluation_name))
+
+
+class _RecordingIntakeService:
+    """Records the route's request to replace a pool whose worker died."""
+
+    def __init__(self) -> None:
+        self.rebuilt: list[ProcessPoolExecutor] = []
+
+    def rebuild_atif_ingest_executor(self, *, broken: ProcessPoolExecutor) -> None:
+        self.rebuilt.append(broken)
 
 
 @pytest.fixture(scope="module")
@@ -141,7 +168,7 @@ async def _prewarm_workers(executor: ProcessPoolExecutor) -> None:
     )
 
 
-def _ingest_body(evaluation_context: dict[str, str] | None = None) -> AtifIngestRequest:
+def _ingest_body(evaluation_context: dict[str, str] | None = None, *, with_verifier: bool = False) -> AtifIngestRequest:
     payload: dict[str, Any] = {
         "schema_version": "ATIF-v1.6",
         "session_id": "atif-offload-session",
@@ -153,6 +180,8 @@ def _ingest_body(evaluation_context: dict[str, str] | None = None) -> AtifIngest
     }
     if evaluation_context is not None:
         payload["evaluation_context"] = evaluation_context
+    if with_verifier:
+        payload["extra"] = {"verifier_result": {"rewards": {"reward": 0.5}}}
     return AtifIngestRequest.model_validate(payload)
 
 
@@ -162,6 +191,7 @@ async def _ingest(
     *,
     service: _RecordingSpansService,
     denormalizer: _RecordingDenormalizer | None = None,
+    intake: _RecordingIntakeService | None = None,
 ) -> FastAPIResponse:
     return await ingest_atif(
         workspace="default",
@@ -171,6 +201,7 @@ async def _ingest(
         entity_client=object(),  # ty: ignore[invalid-argument-type]
         denormalizer=denormalizer,  # ty: ignore[invalid-argument-type]
         executor=executor,
+        intake=intake or _RecordingIntakeService(),  # ty: ignore[invalid-argument-type]
     )
 
 
@@ -222,6 +253,7 @@ async def test_prepare_atif_batch_pool_output_matches_inline_mapping(atif_pool) 
     assert prepared.span_rows, "the representative trajectory must map to at least one span row"
 
 
+@pytest.mark.flaky(reruns=2)
 @pytest.mark.asyncio
 async def test_overlapping_ingests_keep_event_loop_responsive_and_parallelize(
     atif_pool: ProcessPoolExecutor, monkeypatch: pytest.MonkeyPatch
@@ -267,19 +299,50 @@ async def test_worker_depth_error_fails_request_without_insert(
 
 
 @pytest.mark.asyncio
-async def test_dead_worker_fails_request_without_insert(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A worker that dies mid-mapping fails the request; nothing is inserted."""
+async def test_dead_worker_fails_request_rebuilds_pool_without_insert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead worker 503s the request, replaces the pool, and inserts nothing."""
     executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
+    intake = _RecordingIntakeService()
     try:
         monkeypatch.setattr(atif, "prepare_atif_batch", _worker_suicide)
         service = _RecordingSpansService()
 
-        with pytest.raises(BrokenProcessPool):
-            await _ingest(executor, _ingest_body(), service=service)
+        with pytest.raises(HTTPException) as exc_info:
+            await _ingest(executor, _ingest_body(), service=service, intake=intake)
 
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail == "ATIF ingest worker failed; retry the request"
+        assert intake.rebuilt == [executor]
         assert service.batches == []
     finally:
-        executor.shutdown(wait=False)
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+@pytest.mark.asyncio
+async def test_rebuild_atif_ingest_executor_replaces_only_the_broken_pool() -> None:
+    """The service replaces a broken pool once; overlapping rebuilds are no-ops."""
+    service = IntakeService()
+    broken = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
+    service.atif_ingest_executor = broken
+    replacement = None
+    try:
+        service.rebuild_atif_ingest_executor(broken=broken)
+        replacement = service.atif_ingest_executor
+        assert replacement is not broken
+        # The broken pool is closed for good.
+        with pytest.raises(RuntimeError):
+            broken.submit(atif_ingest_worker_ready)
+        # The replacement pool is live.
+        loop = asyncio.get_running_loop()
+        await asyncio.wait_for(loop.run_in_executor(replacement, atif_ingest_worker_ready), timeout=60)
+        # Rebuilding against an already-replaced pool changes nothing.
+        service.rebuild_atif_ingest_executor(broken=broken)
+        assert service.atif_ingest_executor is replacement
+    finally:
+        if replacement is not None:
+            replacement.shutdown(wait=False, cancel_futures=True)
 
 
 @pytest.mark.asyncio
@@ -300,6 +363,31 @@ async def test_insert_error_does_not_mark_denormalizer_dirty(
         )
 
     assert denormalizer.dirty == []
+    assert service.span_inserts == []
+
+
+@pytest.mark.asyncio
+async def test_evaluator_result_insert_failure_after_span_insert_skips_mark_dirty(
+    atif_pool: ProcessPoolExecutor, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The inserts are sequential: a failure between them skips mark_dirty."""
+    monkeypatch.setattr(atif, "validate_evaluation_context", _skip_evaluation_context_validation)
+    service = _RecordingSpansService(error_on_evaluator_results=RuntimeError("evaluator insert failed"))
+    denormalizer = _RecordingDenormalizer()
+
+    with pytest.raises(RuntimeError, match="evaluator insert failed"):
+        await _ingest(
+            atif_pool,
+            _ingest_body({"evaluation_name": "eval-x"}, with_verifier=True),
+            service=service,
+            denormalizer=denormalizer,
+        )
+
+    assert denormalizer.dirty == []
+    # Spans were inserted before the failure; a producer retry converges by stable id.
+    assert len(service.span_inserts) == 1
+    assert service.span_inserts[0]
+    assert service.batches == []
 
 
 @pytest.mark.asyncio

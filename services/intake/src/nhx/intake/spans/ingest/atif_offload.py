@@ -22,6 +22,7 @@ Constraints, enforced by tests:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -41,6 +42,19 @@ class PreparedAtifBatch:
 
     span_rows: list[list[Any]] = field(default_factory=list)
     evaluator_result_rows: list[list[Any]] = field(default_factory=list)
+
+
+def atif_ingest_worker_ready() -> None:
+    """Instant task that pre-spawns an ingest worker process during startup."""
+
+
+def atif_ingest_worker_hold(seconds: float) -> None:
+    """Hold one worker briefly so a second warm-up task forces a second spawn.
+
+    ``ProcessPoolExecutor`` only spawns a new process when no worker is idle, so
+    the short hold makes the warm-up cover the pool's full worker complement.
+    """
+    time.sleep(seconds)
 
 
 def prepare_atif_batch(

@@ -6,12 +6,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from concurrent.futures.process import BrokenProcessPool
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from nhx.common.entities.client import EntityClient
 from nhx.common.service.dependencies import get_entity_client
-from nhx.intake.dependencies import AtifIngestExecutorDep, IntakeConfigDep
+from nhx.intake.dependencies import AtifIngestExecutorDep, IntakeConfigDep, IntakeServiceDep
 from nhx.intake.spans.api.dependencies import DenormalizerDep, SpansServiceDep, require_workspace_access
 from nhx.intake.spans.ingest.atif_domain import (
     AtifAgent,
@@ -30,6 +32,8 @@ from nhx.intake.spans.ingest.evaluation_context import EvaluationContext
 from nhx.intake.spans.ingest.evaluation_context_validation import validate_evaluation_context
 from nhx.intake.spans.storage import utc_now
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_workspace_access)])
 API_TAG = "Ingest"
@@ -151,6 +155,7 @@ async def ingest_atif(
     entity_client: EntityClientDep,
     denormalizer: DenormalizerDep,
     executor: AtifIngestExecutorDep,
+    intake: IntakeServiceDep,
 ) -> Response:
     await validate_evaluation_context(
         workspace=workspace,
@@ -174,8 +179,18 @@ async def ingest_atif(
         )
     except AtifTrajectoryDepthError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
-    # The awaited insert is the commit point for the 201: when it raises, the
-    # trajectory is not stored and the denormalizer is never marked dirty.
+    except BrokenProcessPool as error:
+        # A worker died, which permanently breaks a ProcessPoolExecutor. Fail this
+        # request (nothing was inserted) and replace the pool so retries heal.
+        intake.rebuild_atif_ingest_executor(broken=executor)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest worker failed; retry the request",
+        ) from error
+    # The awaited inserts are the commit point for the 201: it is returned only
+    # after they succeed, and mark_dirty runs only then. The inserts are
+    # sequential (spans first), so a failure between them can leave spans stored
+    # without their evaluator results; stable ids make a producer retry converge.
     await service.ingest_prepared_batch(
         span_rows=prepared.span_rows,
         evaluator_result_rows=prepared.evaluator_result_rows,

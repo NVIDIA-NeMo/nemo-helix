@@ -4,6 +4,8 @@
 """ATIF ingest tests."""
 
 import json
+import os
+import signal
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -1104,13 +1106,40 @@ def test_atif_ingest_stores_verifier_rewards_as_evaluator_results(client: TestCl
     assert by_name["format_check"]["value"] == 1
 
 
-def test_atif_ingest_runs_on_the_service_process_pool(client: TestClient, intake_service: IntakeService):
-    """The pool lives with the service: present during requests, gone after shutdown."""
-    assert intake_service.atif_ingest_executor is not None
+def _kill_atif_worker() -> None:
+    """Kill the pool worker that runs this, permanently breaking that pool."""
+    os.kill(os.getpid(), signal.SIGKILL)
 
-    body = _verifier_trajectory_body("atif-pool-lifecycle")
-    ingest_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
-    assert ingest_response.status_code == 201, ingest_response.text
+
+def test_atif_ingest_recovers_after_a_worker_dies(client: TestClient, intake_service: IntakeService):
+    """A dead worker 503s that request (nothing stored); the pool heals and a retry stores."""
+    executor = intake_service.atif_ingest_executor
+    assert executor is not None
+    broke = executor.submit(_kill_atif_worker)
+    assert broke.exception(timeout=60) is not None, "worker was expected to die and break the pool"
+
+    body = _verifier_trajectory_body("atif-pool-recovery")
+    first_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert first_response.status_code == 503, first_response.text
+
+    retry_response = client.post("/apis/intake/v2/workspaces/default/ingest/atif", json=body)
+    assert retry_response.status_code == 201, retry_response.text
+    assert intake_service.atif_ingest_executor is not executor
+
+    spans_response = client.get(
+        "/apis/intake/v2/workspaces/default/spans",
+        params={
+            "filter[session_id]": body["session_id"],
+            "filter[started_at][gte]": _HISTORICAL_GTE,
+            "page_size": 50,
+            "sort": "started_at",
+        },
+    )
+    assert spans_response.status_code == 200, spans_response.text
+    # The 503 attempt inserted nothing, so the retry stored each span exactly once.
+    spans = spans_response.json()["data"]
+    assert len({span["span_id"] for span in spans}) == len(spans)
+    assert any(span["kind"] == "EVALUATOR" for span in spans)
 
 
 def test_intake_service_shuts_down_atif_process_pool(intake_config: IntakeConfig, intake_service: IntakeService):
