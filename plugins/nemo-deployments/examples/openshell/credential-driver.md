@@ -1,24 +1,26 @@
 <!-- SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved. -->
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 
-# NeMo credential driver beside a local OpenShell gateway
+# Connect a local OpenShell gateway to Helix secrets
 
-This opt-in Compose overlay runs the driver in the Helix API image with a different entrypoint. Use a dedicated gateway: the driver expects registration tickets and cannot serve unrelated raw provider credentials. The gateway, supervisor and sandbox runtime use OpenShell 0.1.6.
+The NeMo credential driver lets OpenShell retrieve secrets from Helix for agents running in its sandboxes. This example runs the driver alongside an OpenShell 0.1.6 gateway dedicated to Helix providers, since the driver accepts only credential registrations issued by Helix.
 
-The startup order is `credential-init` → healthy `credential-driver` → `gateway`. Initialization copies the operator's mounted files into private, container-owned files so Docker host UID differences do not break the driver's ownership checks. The driver and the local-development gateway run as UID 0, matching the existing example. The driver has no Docker socket, published port, or gateway state mount. Its capabilities are dropped and its root filesystem is read-only.
+Before starting, follow the JWT-key generation instructions in [docker-compose.yml](docker-compose.yml) and check that another gateway is not using `/var/lib/openshell` or host port 17670. Both are fixed in the base configuration, regardless of the Compose project name.
 
-The standard Helix API image includes the driver and OpenShell SDK. Set `NEMO_HELIX_IMAGE` to the API image tag used by your Helix installation; no separate build is needed.
+## Prepare the credentials
 
-## Supply driver credentials
+The driver needs a signing key shared with the Helix controller and, when authentication is enabled, a token for calling Helix. Create a private directory outside the checkout with mode `0700` for these files:
 
-Use a private directory outside the checkout. It must contain two regular, non-symlink files:
+- `registration.key` contains at least 32 random bytes. The controller uses this key to sign credential registrations, and the driver uses it to verify them.
+- `helix.token` contains a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities; an ordinary user or access-key token is not sufficient.
 
-- `registration.key`: at least 32 random bytes. Share this exact key only with the trusted Helix controller. It signs registration tickets; it is not a service credential. Preserve it with the binding database.
-- `helix.token`: a platform-issued service workload access token accepted by the Auth policy-evaluation endpoint. Its identity needs Secrets value access and read access to the relevant Jobs and deployment entities. Ordinary user/access-key tokens are not sufficient. The driver checks the signed creator’s permission explicitly before reading a value; it does not impersonate the creator through request headers.
+The initializer copies these files into the driver's private credential volume. Each must be a regular file rather than a symlink, no larger than 64 KiB, with mode `0600`.
 
-Keep the source directory mode 0700 and both files mode 0600. Each file must be no larger than 64 KiB. The initializer creates private destination files and never prints their contents. It refuses to overwrite an existing signing key with different bytes. Token replacement is allowed and atomic.
+For Helix installations with authentication disabled, only `registration.key` is needed. Add `-f docker-compose.credentials-noauth.yml` after `-f docker-compose.credentials.yml` in the Compose commands below. If you are switching an existing installation between authentication modes, its workload providers must be recreated because bindings cannot be reused across modes.
 
-Set these variables, replacing the credential directory and Helix URL with your actual values:
+## Configure and start the driver
+
+Set the image tag to match your Helix installation, then fill in the credential directory and Helix URL. The gateway ID must match the Helix controller's credential configuration; it is separate from OpenShell's gateway JWT settings in `gateway-credentials.toml`.
 
 ```sh
 export NEMO_HELIX_IMAGE=ghcr.io/nvidia-nemo/nemo-helix/nhx-api:YOUR_TAG
@@ -28,59 +30,37 @@ export NEMO_DRIVER_GATEWAY_ID=docker-dev
 export NEMO_DRIVER_CACHE_LIFETIME_SECONDS=300
 ```
 
-`NEMO_DRIVER_GATEWAY_ID` is the registration-ticket audience shared by the Helix controller, driver and binding database. It does not configure OpenShell’s own gateway identity. The example’s separate JWT issuer setting, `openshell.gateway.gateway_jwt.gateway_id`, remains `docker-dev` in `gateway-credentials.toml`.
+The Helix URL must be reachable from the driver container over HTTPS with a trusted certificate. The overlay provides `host.docker.internal` for reaching Helix on the Docker host. For certificates issued by a private CA, mount the CA's PEM bundle read-only through an additional Compose overlay and point `SSL_CERT_FILE` in `credential-driver.environment` to that path.
 
-The URL must be reachable from the driver container. `localhost` inside that container is not your host. The overlay adds `host.docker.internal` for a host endpoint; HTTPS with a trusted certificate is required. For a private CA, mount its PEM bundle read-only through an additional Compose overlay and set `SSL_CERT_FILE` in `credential-driver.environment`.
+OpenShell may cache resolved credentials for `NEMO_DRIVER_CACHE_LIFETIME_SECONDS`, which defaults to 300 seconds and accepts values from 1–3600. Changing this setting requires recreating the driver container and affects newly resolved credentials; those already cached retain their existing deadlines.
 
-## Start the sidecar, then the gateway
-
-From this directory:
+From this directory, start the driver and wait for its readiness check:
 
 ```sh
-docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml config --quiet
 docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml up -d --wait credential-driver
-docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml ps -a
 ```
 
-The health probe calls the local `GetCapabilities` RPC without contacting Helix or reading secrets.
-
-Before starting the gateway, complete the base example's JWT-key generation and ensure its `/var/lib/openshell` host directory and port 17670 are not used by another gateway. A different Compose project name isolates the new named volumes, but does not isolate the base example's bind-mounted gateway state or published port. Do not run this against an existing gateway's data directory. The `gateway-credentials.toml` file preserves the base example's pinned runtime settings and adds the driver socket configuration.
+Once it is healthy, start the gateway and check the logs for credential-driver connection errors:
 
 ```sh
 docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml up -d gateway
 docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml logs --tail=50 credential-driver gateway
 ```
 
-Check that OpenShell completes credential-driver protocol negotiation.
+## Connect the Helix controller
 
-## Connect Helix provisioning
+The Helix controller registers workload providers with the driver using the shared signing key and gateway ID. Mount `registration.key` into the controller and configure its OpenShell executor or job execution profile with that ID and the approved injection profiles, as described in the [environment integration guide](../../../nemo-agents/docs/provider-fulfillments.md#operator-configuration).
 
-For a Helix installation with authentication disabled, add `-f docker-compose.credentials-noauth.yml` after `-f docker-compose.credentials.yml` in each command. Supply `registration.key`; initialization removes any previously staged `helix.token` after validating the key. The override explicitly selects `--auth-disabled` for initialization and the driver. Changing auth modes requires recreating the workload's providers; bindings from the other mode are rejected. TLS and sandbox network restrictions still apply.
+The readiness check confirms that the driver is listening, but does not exercise Helix authorization or credential injection. Leave `credential_refresh_verified: false` in the controller's `gateway_credentials` configuration until the installation passes the lifetime, rotation, cleanup and isolation checks in that guide.
 
-Mount the same signing key into the trusted Helix controller, then configure its OpenShell executor or job execution profile with the matching gateway ID and approved injection profiles. Follow the [environment integration guide](../../../nemo-agents/docs/provider-fulfillments.md#operator-configuration). These controller settings are not set by the sidecar overlay.
+## Rotate the service token
 
-`NEMO_DRIVER_CACHE_LIFETIME_SECONDS` configures the driver’s advertised credential lifetime (default 300; range 1–3600 seconds). This applies in both auth modes. Standalone grants are also capped by binding expiry; workload grants check live workload state on resolution. Change it by recreating the driver container. Previously resolved credentials retain their original deadlines.
-
-Keep `credential_refresh_verified: false` until the installation passes the lifetime, rotation, cleanup and isolation checks in the environment integration guide. Driver readiness and protocol negotiation do not validate Helix authorization or credential lifecycle behavior.
-
-## Restart, rotate and stop
-
-The driver has `restart: unless-stopped`. On process startup it takes an exclusive socket lock. It can remove its own stale socket after a crash, but refuses to replace a live listener, a symlink, a regular file or another user's socket. The binding database survives container recreation.
-
-The SQLite registry stores binding metadata and revocation tombstones, never raw tickets or credential values. Keep it on a persistent local volume on one host; shared network filesystems and multiple driver replicas are unsupported. Tombstones have no automatic compaction.
-
-After replacing the source `helix.token`, restage it:
+When the service token changes, replace the source `helix.token` and run the initializer again to copy it into the credential volume:
 
 ```sh
 docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml run --rm --no-deps credential-init
 ```
 
-The running driver rereads the staged token on each NeMo call. The source bind mount is not read continuously, so updating only the host file is insufficient. Signing-key rotation needs an explicit migration and is deliberately not handled by this command.
+The running driver reads that copy on subsequent Helix requests, so it does not need a restart. The initializer refuses changes to `registration.key`; this command rotates only the service token.
 
-```sh
-docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml restart credential-driver
-docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml ps
-docker compose -p nemo-secrets-dev -f docker-compose.yml -f docker-compose.credentials.yml down
-```
-
-`down` retains the binding and credential volumes. Do not use `down -v` as routine cleanup: removing the registry also removes replay/revocation history. Socket, state and credential volumes are separate; only the socket volume is shared with the gateway. None is passed into agent sandboxes.
+Keep the signing key and binding database across driver restarts so the driver retains its registration and revocation history. This setup supports a single driver instance with persistent storage on one host.
