@@ -38,7 +38,10 @@ MCP_HEADERS = {"Content-Type": "application/json", "Accept": "application/json, 
         ("127.0.0.1", True),
         ("::1", True),
         ("localhost", True),
+        ("LOCALHOST", True),
+        ("[::1]", True),
         ("0.0.0.0", False),
+        ("[::]", False),
         ("::", False),
         ("10.1.2.3", False),
         ("example.com", False),
@@ -93,12 +96,17 @@ class TestSharedBearerTokenVerifier:
 
 class TestHttpTransport:
     @staticmethod
-    async def _post_initialize(headers: dict[str, str]) -> int:
+    async def _post_initialize(
+        headers: dict[str, str],
+        *,
+        base_url: str = "http://test",
+        allowed_hosts: list[str] | None = None,
+    ) -> int:
         server = create_server("http://unused.example.com", auth=SharedBearerTokenVerifier(TOKEN))
-        app = server.http_app(transport="streamable-http")
+        app = server.http_app(transport="streamable-http", host_origin_protection="auto", allowed_hosts=allowed_hosts)
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            async with httpx.AsyncClient(transport=transport, base_url=base_url) as client:
                 response = await client.post("/mcp", json=INITIALIZE_BODY, headers={**MCP_HEADERS, **headers})
         return response.status_code
 
@@ -113,6 +121,33 @@ class TestHttpTransport:
     @pytest.mark.asyncio
     async def test_request_with_valid_token_is_accepted(self) -> None:
         assert await self._post_initialize({"Authorization": f"Bearer {TOKEN}"}) == 200
+
+    @pytest.mark.asyncio
+    async def test_untrusted_host_on_loopback_is_rejected(self) -> None:
+        headers = {"Authorization": f"Bearer {TOKEN}", "Host": "rebind.example.com"}
+        assert await self._post_initialize(headers, base_url="http://127.0.0.1") == 421
+
+    @pytest.mark.asyncio
+    async def test_untrusted_origin_on_loopback_is_rejected(self) -> None:
+        headers = {"Authorization": f"Bearer {TOKEN}", "Origin": "https://evil.example.com"}
+        assert await self._post_initialize(headers, base_url="http://127.0.0.1") == 403
+
+    @pytest.mark.asyncio
+    async def test_tls_proxy_public_host_requires_allowed_hosts(self) -> None:
+        headers = {"Authorization": f"Bearer {TOKEN}", "Host": "mcp.example.com"}
+        assert await self._post_initialize(headers, base_url="http://127.0.0.1") == 421
+        assert (
+            await self._post_initialize(headers, base_url="http://127.0.0.1", allowed_hosts=["mcp.example.com"]) == 200
+        )
+
+    @pytest.mark.asyncio
+    async def test_allowed_hosts_enables_host_check_off_loopback(self) -> None:
+        rogue = {"Authorization": f"Bearer {TOKEN}", "Host": "rogue.example.com"}
+        public = {"Authorization": f"Bearer {TOKEN}", "Host": "mcp.example.com"}
+        allowed = ["mcp.example.com"]
+        assert await self._post_initialize(rogue, base_url="http://10.0.0.5") == 200
+        assert await self._post_initialize(rogue, base_url="http://10.0.0.5", allowed_hosts=allowed) == 421
+        assert await self._post_initialize(public, base_url="http://10.0.0.5", allowed_hosts=allowed) == 200
 
 
 class TestDestructiveToolGate:
@@ -198,7 +233,7 @@ class TestCliStartup:
         assert isinstance(kwargs["auth"], SharedBearerTokenVerifier)
         assert kwargs["enable_destructive_tools"] is False
         create_server_stub.return_value.run.assert_called_once_with(
-            transport="streamable-http", host="0.0.0.0", port=9001
+            transport="streamable-http", host="0.0.0.0", port=9001, host_origin_protection="auto"
         )
 
     def test_enable_destructive_tools_reaches_server_when_authenticated(
@@ -213,7 +248,9 @@ class TestCliStartup:
     ) -> None:
         self._run_main(monkeypatch, "--transport", "streamable-http", "--allow-unauthenticated")
         assert create_server_stub.call_args.kwargs["auth"] is None
-        create_server_stub.return_value.run.assert_called_once()
+        create_server_stub.return_value.run.assert_called_once_with(
+            transport="streamable-http", host="127.0.0.1", port=8000, host_origin_protection="auto"
+        )
 
     def test_stdio_needs_no_token_and_no_auth(
         self, monkeypatch: pytest.MonkeyPatch, create_server_stub: MagicMock
@@ -221,3 +258,14 @@ class TestCliStartup:
         self._run_main(monkeypatch)
         assert create_server_stub.call_args.kwargs["auth"] is None
         create_server_stub.return_value.run.assert_called_once_with(transport="stdio")
+
+    def test_http_transport_enables_host_origin_protection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        create_server_stub: MagicMock,
+    ) -> None:
+        monkeypatch.setenv(AUTH_TOKEN_ENV_VAR, TOKEN)
+        self._run_main(monkeypatch, "--transport", "streamable-http", "--port", "8080")
+        create_server_stub.return_value.run.assert_called_once_with(
+            transport="streamable-http", host="127.0.0.1", port=8080, host_origin_protection="auto"
+        )

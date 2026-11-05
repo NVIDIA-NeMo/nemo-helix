@@ -40,10 +40,11 @@ class SharedBearerTokenVerifier(TokenVerifier):
 
 def is_loopback_host(host: str) -> bool:
     """Return True for ``localhost`` and loopback IP literals; other hostnames are not trusted."""
+    host = host.lower()
     if host == "localhost":
         return True
     try:
-        return ipaddress.ip_address(host).is_loopback
+        return ipaddress.ip_address(host.removeprefix("[").removesuffix("]")).is_loopback
     except ValueError:
         return False
 
