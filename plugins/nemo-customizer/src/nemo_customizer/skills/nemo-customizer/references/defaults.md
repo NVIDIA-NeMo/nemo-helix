@@ -49,7 +49,7 @@ rl-specific (GRPO) — values below are a **real 8×H100 LoRA configuration**, n
 | Training | GRPO (`type: "grpo"`), **`finetuning_type: "lora"`** (`references/fast-path-rl.md` says when to use `all_weights`). `lora_merged` is rejected. |
 | Model (if user gives none) | `Qwen/Qwen3-8B-Base` → entity `qwen3-8b-base` |
 | Environment (if user gives none) | **Stop and ask**: `SKILL.md` § **GRPO** |
-| LoRA | `rank` 128, `alpha` 256, `dropout` 0.0, all linear layers (omit `target_modules`/`exclude_modules`). A rank-128 adapter loads only on a deployment with `--max-lora-rank` ≥ 128; default deployments stop at 16 (`post-training-eval.md` § **LoRA rank limit**). Omit `use_triton`: the compiler picks `true` at TP 1, `false` above |
+| LoRA | `rank` 128, `alpha` 256, `dropout` 0.0, all linear layers (omit `target_modules`/`exclude_modules`). A rank-128 adapter loads only on a deployment with `--max-lora-rank` ≥ 128; default deployments stop at 32 on vLLM and 16 on the model-free NIM (`post-training-eval.md` § **LoRA rank limit**). Omit `use_triton`: the compiler picks `true` at TP 1, `false` above |
 | Parallelism | 1 node × 8 GPUs, `tensor_parallel_size` 1, `execution_profile` `"h100"` |
 | Batch | `batch_size` 512, `micro_batch_size` 1, `num_prompts_per_step` 32, `num_generations_per_prompt` 16 |
 | Dynamic sampling | `use_dynamic_sampling` true, `batch_multiplier` 2.0, `dynamic_sampling_max_gen_batches` 10 |

@@ -480,6 +480,9 @@ class ModelEntityRunner:
             gpu=deploy_params.gpu,
             additional_envs=deploy_params.additional_envs,
         )
+        # Unset keeps the executor default.
+        if deploy_params.disk_size:
+            executor_config.disk_size = deploy_params.disk_size
 
         if deploy_params.tool_call_config:
             model_spec.tool_call_config = ToolCallConfig.model_validate(

@@ -354,6 +354,15 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
     drift_recovery: DriftRecoveryPolicy = Field(default_factory=DriftRecoveryPolicy, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    shm_size: str | None = Field(
+        default=None,
+        alias="shmSize",
+        description=(
+            "Size of /dev/shm in the main containers, as a Kubernetes quantity (e.g. '32Gi'). Multi-process "
+            "workloads such as multi-GPU inference servers exchange data through it. New configs default to "
+            "8Gi; null keeps the runtime default of 64Mi."
+        ),
+    )
     auth_proxy_sidecar: bool = Field(
         default=False,
         alias="authProxySidecar",
