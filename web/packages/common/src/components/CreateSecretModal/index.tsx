@@ -65,7 +65,7 @@ export const CreateSecretModal: FC<CreateSecretModalProps> = ({
   onNotify,
   open,
   onClose,
-  instruction = 'To create a new secret, provide a name, description, and value. ',
+  instruction = 'To create a new secret, provide a name, description, and value.',
   initialValues,
   valueHelp,
 }) => {

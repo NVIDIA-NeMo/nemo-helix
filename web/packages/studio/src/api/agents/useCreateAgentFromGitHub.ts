@@ -62,9 +62,7 @@ export const createAgentFromGitHub = async ({
   }
 
   try {
-    const config = parseAgentConfig(
-      await readAgentConfig(workspace, filesetName, source, secretName)
-    );
+    const config = parseAgentConfig(await readAgentConfig(workspace, filesetName, source));
 
     return await agentsRegisterAgent(workspace, {
       name,
@@ -81,15 +79,14 @@ export const createAgentFromGitHub = async ({
 const readAgentConfig = async (
   workspace: string,
   filesetName: string,
-  source: GitHubAgentSource,
-  secretName: string | undefined
+  source: GitHubAgentSource
 ): Promise<string> => {
   try {
     const blob = await filesDownloadFile(workspace, filesetName, AGENT_CONFIG_FILENAME);
     return await blob.text();
   } catch (error) {
     throw new Error(
-      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ${await readFailureHint(error, secretName)}`,
+      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ${await readFailureHint(error)}`,
       { cause: error }
     );
   }
@@ -103,7 +100,8 @@ const responseDetail = async (error: unknown): Promise<string> => {
   const data = error instanceof AxiosError ? error.response?.data : undefined;
   if (data instanceof Blob) {
     try {
-      const { detail } = JSON.parse(await data.text());
+      const parsed: unknown = JSON.parse(await data.text());
+      const detail = (parsed as { detail?: unknown } | null)?.detail;
       if (typeof detail === 'string') {
         return detail;
       }
@@ -114,17 +112,12 @@ const responseDetail = async (error: unknown): Promise<string> => {
   return getErrorMessage(error as Error);
 };
 
-const readFailureHint = async (error: unknown, secretName: string | undefined): Promise<string> => {
-  const status = responseStatus(error);
-  if (status === 404) {
+// A 502 covers both a refused token and GitHub being down; its detail already says which.
+const readFailureHint = async (error: unknown): Promise<string> => {
+  if (responseStatus(error) === 404) {
     return `Check that the branch and directory hold ${AGENT_CONFIG_FILENAME}.`;
   }
-  const detail = await responseDetail(error);
-  // The files service reports GitHub refusing the token as 502.
-  if (status === 502) {
-    return `${detail} ${accessHint(secretName)}`;
-  }
-  return detail;
+  return responseDetail(error);
 };
 
 const accessHint = (secretName: string | undefined): string => {

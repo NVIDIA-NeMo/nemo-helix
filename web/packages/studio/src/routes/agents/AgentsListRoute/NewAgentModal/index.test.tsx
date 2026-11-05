@@ -681,8 +681,11 @@ describe('NewAgentModal GitHub import', () => {
     const user = userEvent.setup();
     mockHelix();
     server.use(
-      http.get(UPLOAD_URL, () =>
-        HttpResponse.json({ detail: 'Failed to access upstream storage.' }, { status: 502 })
+      http.post(FILESETS_URL, () =>
+        HttpResponse.json(
+          { detail: 'GitHub denied access to repository owner/repo' },
+          { status: 400 }
+        )
       )
     );
 
@@ -697,6 +700,32 @@ describe('NewAgentModal GitHub import', () => {
     expect(
       await within(dialog).findByText(/token in "huggingface-token" can read this repository/)
     ).toBeInTheDocument();
+  });
+
+  it('shows the files service reason when GitHub fails after setup, without blaming the token', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () =>
+        HttpResponse.json(
+          { detail: 'Failed to connect to upstream storage backend' },
+          { status: 502 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/Failed to connect to upstream storage backend/)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/token in "huggingface-token"/)).not.toBeInTheDocument();
   });
 });
 
