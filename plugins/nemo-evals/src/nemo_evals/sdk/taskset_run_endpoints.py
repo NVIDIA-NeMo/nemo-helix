@@ -25,6 +25,8 @@ _RUNS = "/apis/evals/v2/workspaces/{workspace}/agent-evaluate/runs"
 
 
 class ListRunsQueryParams(TypedDict, total=False):
+    """Query of ``GET …/agent-evaluate/runs``."""
+
     active: NotRequired[bool]
     mine: NotRequired[bool]
     page: NotRequired[int]
@@ -32,6 +34,8 @@ class ListRunsQueryParams(TypedDict, total=False):
 
 
 class ListRunTasksQueryParams(TypedDict, total=False):
+    """Query of ``GET …/agent-evaluate/runs/{run_id}/tasks``; the client drops a ``None`` phase."""
+
     phase: NotRequired[MemberPhase | None]
     page: NotRequired[int]
     page_size: NotRequired[int]
@@ -39,28 +43,33 @@ class ListRunTasksQueryParams(TypedDict, total=False):
 
 @post(_RUNS)
 @abstractmethod
-def submit_run(*, workspace: str | None = None, body: TasksetRunInput) -> TasksetRunSubmitResponse: ...
+def submit_run(*, workspace: str | None = None, body: TasksetRunInput) -> TasksetRunSubmitResponse:
+    """Submit a taskset run; a repeat with the same idempotency key and body returns the accepted run."""
 
 
 @get(_RUNS)
 @abstractmethod
 def list_runs(
     *, workspace: str | None = None, query_params: ListRunsQueryParams | None = None
-) -> Page[TasksetRunStatus]: ...
+) -> Page[TasksetRunStatus]:
+    """One page of the workspace's runs, newest first."""
 
 
 @get(_RUNS + "/{run_id}")
 @abstractmethod
-def get_run(*, workspace: str | None = None, run_id: str) -> TasksetRunStatus: ...
+def get_run(*, workspace: str | None = None, run_id: str) -> TasksetRunStatus:
+    """One run's status."""
 
 
 @post(_RUNS + "/{run_id}/cancel")
 @abstractmethod
-def cancel_run(*, workspace: str | None = None, run_id: str) -> TasksetRunStatus: ...
+def cancel_run(*, workspace: str | None = None, run_id: str) -> TasksetRunStatus:
+    """Request a run's cancel; the run controller acts on it."""
 
 
 @get(_RUNS + "/{run_id}/tasks")
 @abstractmethod
 def list_run_tasks(
     *, workspace: str | None = None, run_id: str, query_params: ListRunTasksQueryParams | None = None
-) -> Page[TasksetRunTask]: ...
+) -> Page[TasksetRunTask]:
+    """One page of a run's task rows in task-index order."""
