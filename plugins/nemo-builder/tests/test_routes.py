@@ -16,20 +16,24 @@ from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService
+from nemo_builder_plugin.service import BuilderService, get_job_status
 from nemo_builder_plugin.submit import SubmitResult
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_client
+from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 
-def _app(entities: AsyncMock, caller: Caller = Caller(auth=False)) -> FastAPI:
+def _app(entities: AsyncMock, caller: Caller = Caller(auth=False), job_status: AsyncMock | None = None) -> FastAPI:
     app = FastAPI()
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
     app.dependency_overrides[get_entity_client] = lambda: entities
     app.dependency_overrides[current_caller] = lambda: caller
+    # Every build job still running, unless a test says otherwise.
+    jobs = job_status or AsyncMock(return_value=HelixJobStatus.ACTIVE)
+    app.dependency_overrides[get_job_status] = lambda: jobs
     return app
 
 
@@ -87,11 +91,33 @@ class TestListingOneJobsImages:
         TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images")
         assert entities.list.await_args.kwargs["filter_obj"] is None
 
-    def test_an_unknown_status_is_refused(self) -> None:
+    @pytest.mark.parametrize("status", ["done", "queued"])
+    def test_an_unknown_status_is_refused(self, status: str) -> None:
         entities = AsyncMock()
-        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": "done"})
+        response = TestClient(_app(entities)).get("/v2/workspaces/team-a/container-images", params={"status": status})
         assert response.status_code == 422
         entities.list.assert_not_awaited()
+
+    def test_the_images_whose_job_ended_fail_as_they_are_listed(self) -> None:
+        entities = _entities(_row())
+        page = MagicMock()
+        page.data = [_row(), _row("ready", DIGEST)]
+        entities.list.return_value = page
+        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
+        response = TestClient(_app(entities, job_status=job_status)).get("/v2/workspaces/ws-a/container-images")
+        assert response.status_code == 200
+        assert [image["status"] for image in response.json()] == ["failed", "ready"]
+        job_status.assert_awaited_once_with("ws-a", "build-1")
+
+    def test_an_image_that_failed_as_it_was_listed_leaves_a_status_filter(self) -> None:
+        entities = _entities(_row())
+        page = MagicMock()
+        page.data = [_row()]
+        entities.list.return_value = page
+        app = _app(entities, job_status=AsyncMock(return_value=HelixJobStatus.CANCELLED))
+        response = TestClient(app).get("/v2/workspaces/ws-a/container-images", params={"status": "pending"})
+        assert response.status_code == 200
+        assert response.json() == []
 
 
 DIGEST = "sha256:" + "d" * 64
@@ -240,6 +266,29 @@ class TestReadingOneImage:
         entities = AsyncMock()
         entities.get.side_effect = NemoEntityNotFoundError("no")
         assert TestClient(_app(entities, SERVICE_STEP)).get(IMAGE).status_code == 404
+
+    def test_a_pending_image_whose_job_ended_fails_as_it_is_read(self) -> None:
+        entities = _entities(_row())
+        job_status = AsyncMock(return_value=HelixJobStatus.COMPLETED)
+        response = TestClient(_app(entities, job_status=job_status)).get(IMAGE)
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+        assert "ended (completed) without publishing it" in response.json()["status_detail"]
+        entities.update.assert_awaited_once()
+
+    def test_a_pending_image_whose_job_runs_is_read_as_it_is(self) -> None:
+        entities = _entities(_row())
+        response = TestClient(_app(entities)).get(IMAGE)
+        assert response.json()["status"] == "pending"
+        entities.update.assert_not_awaited()
+
+    def test_a_refused_reader_settles_nothing(self) -> None:
+        entities = _entities(_row())
+        job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
+        app = _app(entities, Caller(auth=True, actor="service:evals"), job_status=job_status)
+        assert TestClient(app).get(IMAGE).status_code == 403
+        job_status.assert_not_awaited()
+        entities.update.assert_not_awaited()
 
 
 class TestSubmitting:

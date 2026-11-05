@@ -33,8 +33,7 @@ core:
     repository: my-registry/nhx-api
     tag: local
   controller:
-    # builder-queue starts queued builds: the chart sets max_concurrent_builds, so without it every build stays queued.
-    controllers: [jobs, builder-queue]
+    controllers: [jobs]
 postgresql:
   image:
     repository: docker.io/library/postgres
