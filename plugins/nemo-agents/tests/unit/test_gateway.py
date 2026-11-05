@@ -219,6 +219,7 @@ class TestProxyByDeploymentName:
 
         assert resp.status_code == 200
         assert resp.content == upstream_body
+        assert SESSION_ID_HEADER not in resp.headers
 
     def test_5xx_from_agent_becomes_502(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         """Agent 5xx responses must be translated to 502 Bad Gateway."""
@@ -466,14 +467,16 @@ class TestSessionAwareRouting:
             ("text/event-stream", b"data: done\n\n"),
         ],
     )
+    @pytest.mark.parametrize("header_session_id", [SESSION_ID, SESSION_UUID])
     def test_persists_session_activity_at_proxy_start_and_finish(
         self,
+        header_session_id: str,
         content_type: str,
         body: bytes,
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         updates: list[AgentSession] = []
@@ -487,7 +490,7 @@ class TestSessionAwareRouting:
             datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
             datetime(2026, 8, 25, 12, 5, tzinfo=UTC),
         ]
-        httpx_mock = _make_httpx_mock(200, body, content_type)
+        httpx_mock = _make_httpx_mock(200, body, content_type, response_headers={SESSION_ID_HEADER: SESSION_ID})
 
         with (
             patch.object(gateway_module, "_utc_now", side_effect=timestamps),
@@ -495,11 +498,14 @@ class TestSessionAwareRouting:
         ):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: header_session_id},
                 json={"stream": content_type == "text/event-stream"},
             )
 
         assert response.status_code == 200
+        assert response.headers.get_list(SESSION_ID_HEADER) == [SESSION_UUID]
+        stream_call = httpx_mock.__aenter__.return_value.stream.call_args
+        assert stream_call.kwargs["headers"][SESSION_ID_HEADER] == SESSION_ID
         assert [update.first_active_at for update in updates] == [timestamps[0], timestamps[0]]
         assert [update.last_active_at for update in updates] == timestamps
         assert [update.expires_at for update in updates] == [
@@ -528,6 +534,7 @@ class TestSessionAwareRouting:
             )
 
         assert resp.status_code == 200
+        assert resp.headers[SESSION_ID_HEADER] == SESSION_UUID
         assert mock_entity_client.find_one.await_args_list == [
             call(
                 AgentSession,
@@ -547,7 +554,7 @@ class TestSessionAwareRouting:
     ) -> None:
         test_app.dependency_overrides[get_effective_principal_id] = lambda: ""
         session = _make_session(
-            session_id="session-2",
+            session_id=SESSION_ID,
             deployment_id="deployment-2",
             created_by="service:platform",
         )
@@ -563,7 +570,7 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-2"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={"messages": []},
             )
 
@@ -571,7 +578,7 @@ class TestSessionAwareRouting:
         assert mock_entity_client.find_one.await_args_list[0] == call(
             AgentSession,
             workspace="default",
-            filter_obj={"id": "session-2"},
+            filter_obj={"id": SESSION_ID},
         )
 
     def test_retries_start_activity_once_after_optimistic_conflict(
@@ -579,9 +586,9 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
-        refreshed = _make_session(session_id="session-1", deployment_id="deployment-1")
+        refreshed = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         mock_entity_client.get_by_id = AsyncMock(return_value=refreshed)
         update_count = 0
@@ -599,13 +606,13 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={},
             )
 
         assert response.status_code == 200
         assert update_count == 3
-        mock_entity_client.get_by_id.assert_awaited_once_with(AgentSession, "session-1")
+        mock_entity_client.get_by_id.assert_awaited_once_with(AgentSession, SESSION_ID)
 
     def test_due_session_wins_start_activity_conflict(
         self,
@@ -695,7 +702,7 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         update_count = 0
@@ -713,7 +720,7 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             response = client.post(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/v1/chat/completions",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
                 json={},
             )
 
@@ -783,6 +790,7 @@ class TestSessionAwareRouting:
             )
 
         assert resp.status_code == 200
+        assert resp.headers[SESSION_ID_HEADER] == SESSION_UUID
         mock_entity_client.find_one.assert_awaited_once_with(
             AgentSession,
             workspace="default",
@@ -912,7 +920,7 @@ class TestSessionAwareRouting:
         client: TestClient,
         mock_entity_client: AsyncMock,
     ) -> None:
-        session = _make_session(session_id="session-1", deployment_id="deployment-1")
+        session = _make_session(session_id=SESSION_ID, deployment_id="deployment-1")
         deployment = _make_deployment(deployment_id="deployment-1")
         mock_entity_client.find_one = AsyncMock(side_effect=[session, deployment])
         httpx_mock = _make_httpx_mock(200, b'{"status": "ok"}')
@@ -920,7 +928,7 @@ class TestSessionAwareRouting:
         with patch("nemo_agents_plugin.api.v2.gateway.httpx.AsyncClient", return_value=httpx_mock):
             response = client.get(
                 "/apis/agents/v2/workspaces/default/agents/calc/-/health",
-                headers={SESSION_ID_HEADER: "session-1"},
+                headers={SESSION_ID_HEADER: SESSION_ID},
             )
 
         assert response.status_code == 200

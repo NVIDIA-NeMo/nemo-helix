@@ -357,7 +357,7 @@ async def _proxy_deployment(
 
     tracks_session_activity = session is not None and request.method.upper() in _PROXY_WRITE_METHODS
 
-    return await _proxy(
+    response = await _proxy(
         request,
         endpoint,
         trailing_uri,
@@ -368,6 +368,10 @@ async def _proxy_deployment(
         on_complete=persist_finish_activity if tracks_session_activity else None,
         strip_request_model=_is_nat_deployment(deployment),
     )
+
+    if session is not None:
+        response.headers[SESSION_ID_HEADER] = session.session_uuid
+    return response
 
 
 @router.api_route(
