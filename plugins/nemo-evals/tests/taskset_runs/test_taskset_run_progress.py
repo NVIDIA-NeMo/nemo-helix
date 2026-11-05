@@ -55,8 +55,15 @@ def test_task_jobs_count_registered_members_by_job_status():
         "members": {"registered": 4, "succeeded": 1, "failed": 1, "image_ready": 1},
         "queued": 1,
         "task_jobs": {"active": 2, "pending": 1},
+        "trial_counts": None,
     }
 
 
 def test_no_members_counts_nothing():
-    assert build_progress(iter([])).model_dump() == {"tasks": 0, "members": {}, "queued": 0, "task_jobs": {}}
+    assert build_progress(iter([])).model_dump() == {
+        "tasks": 0,
+        "members": {},
+        "queued": 0,
+        "task_jobs": {},
+        "trial_counts": None,
+    }

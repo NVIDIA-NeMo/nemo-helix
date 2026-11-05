@@ -36,6 +36,7 @@ from nemo_evals.taskset_runs.run_evaluation import QUEUE_DURATION_KEY, RESULT_ST
 from nemo_evals.taskset_runs.specs import RunIntakePublication, TasksetBundleSpec, TasksetRunPlan
 from nemo_evals.taskset_runs.store import PlanDigestMismatchError, TasksetRunStore
 from nemo_evals.taskset_runs.task_jobs import task_job_request
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import (
     ConflictError,
@@ -363,6 +364,86 @@ async def test_job_status_is_written_only_when_it_changes(harness, harbor_plan, 
     m0, m1 = await harness.members(run)
     assert m0.job_status is HelixJobStatus.ACTIVE and m0.db_version == versions[0] + 1
     assert m1.job_status is HelixJobStatus.CREATED and m1.phase is MemberPhase.REGISTERED  # last read kept
+
+
+async def test_members_carry_their_tasks_id_and_planned_trials_from_the_plan(harness, harbor_plan):
+    attempts = harbor_plan.spec.target.model_copy(update={"n_attempts": 3})
+    plan = harbor_plan.model_copy(update={"spec": harbor_plan.spec.model_copy(update={"target": attempts})})
+    run = await harness.submit(plan, name="run-a")
+
+    await harness.cycle()
+
+    members = await harness.members(run)
+    assert [m.task_name for m in members] == [t.id for t in harbor_plan.spec.tasks]
+    # Before any task Job reports, each task counts its planned trials as pending.
+    planned = TrialCounts(total=3, phases={TrialPhase.PENDING: 3})
+    assert [m.trial_counts for m in members] == [planned] * len(members)
+
+
+def reports_trials(jobs: FakeRunJobs, name: str, *phases: str, reward: float | None = None) -> None:
+    """Job ``name`` reports one trial per phase in its status details, as the task Job does while Harbor runs."""
+    trials = [{"trial": f"t{i}", "phase": phase, "reward": reward} for i, phase in enumerate(phases)]
+
+    details = {**(jobs.jobs[name].status_details or {}), "trials": trials}
+    jobs.jobs[name] = jobs.jobs[name].model_copy(update={"status_details": details})
+
+
+async def test_a_running_tasks_trial_counts_are_written_only_when_they_change(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running", "pending")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.AGENT_RUNNING: 1, TrialPhase.PENDING: 1}
+    version = member.db_version
+
+    await harness.cycle()
+
+    assert (await harness.members(run))[0].db_version == version  # same counts: no write
+
+    reports_trials(jobs, task(run, 0), "succeeded", "verifying", reward=1.0)
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.VERIFYING: 1}
+    assert member.trial_counts.reward == 1.0
+    assert member.db_version == version + 1
+
+
+async def test_a_settled_task_keeps_its_jobs_last_trial_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+
+    reports_trials(jobs, task(run, 0), "succeeded", "errored", reward=0.5)
+    jobs.finish(task(run, 0), "completed")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.SUCCEEDED
+    assert member.trial_counts is not None
+    assert member.trial_counts.phases == {TrialPhase.SUCCEEDED: 1, TrialPhase.ERRORED: 1}
+
+
+async def test_a_job_that_stops_reporting_trials_keeps_the_last_counts(harness, harbor_plan, jobs):
+    run = await harness.submit(sized(harbor_plan, 1), name="run-a")
+    await harness.cycle()
+    jobs.finish(task(run, 0), "active")
+
+    reports_trials(jobs, task(run, 0), "agent_running")
+    await harness.cycle()
+
+    jobs.jobs[task(run, 0)] = jobs.jobs[task(run, 0)].model_copy(update={"status_details": {"trials": "unreadable"}})
+    jobs.finish(task(run, 0), "error")
+    await harness.cycle()
+
+    (member,) = await harness.members(run)
+    assert member.phase is MemberPhase.FAILED
+    assert member.trial_counts is not None and member.trial_counts.total == 1
 
 
 async def test_finished_tasks_get_one_bundle_then_a_ready_result(harness, harbor_plan, jobs):

@@ -13,6 +13,7 @@ from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_s
 from nemo_evals.api.v2.taskset_runs import router
 from nemo_evals.service import EvaluatorPluginService
 from nemo_evals.taskset_runs.entities import MemberPhase, ResultState, TasksetRunMemberEntity, TasksetRunPhase
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.client.errors import PermissionDeniedError
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import NemoEntityConflictError
@@ -389,6 +390,37 @@ def test_real_authorization_denies_missing_read_list_and_direct_service(tmp_path
                 assert response.status_code == 403, response.text
     get.assert_not_awaited()
     listing.assert_not_awaited()
+
+
+async def test_run_lists_include_progress_only_when_asked(read_client, seed_run, entity_store):
+    run = await seed_run()
+    member = TasksetRunMemberEntity(
+        name="task-0",
+        workspace="default",
+        task_index=0,
+        phase=MemberPhase.SUCCEEDED,
+        trial_counts=TrialCounts(total=1, phases={TrialPhase.SUCCEEDED: 1}, rewarded=1, reward=1.0),
+    )
+    member._parent = run.id
+    await entity_store.create(member)
+
+    plain = (await read_client.get(PATH)).json()["data"]
+    counted = (await read_client.get(PATH, params={"progress": "true"})).json()["data"]
+
+    assert "progress" not in plain[0]
+    assert counted[0]["progress"] == {
+        "tasks": 1,
+        "members": {"succeeded": 1},
+        "queued": 0,
+        "task_jobs": {},
+        "trial_counts": {
+            "total": 1,
+            "phases": {"succeeded": 1},
+            "rewarded": 1,
+            "reward": 1.0,
+            "errors": {},
+        },
+    }
 
 
 async def test_auth_disabled_mine_uses_effective_development_creator(read_client, read_app, seed_run):

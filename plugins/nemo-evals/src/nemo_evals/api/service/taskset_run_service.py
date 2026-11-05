@@ -83,6 +83,13 @@ logger = logging.getLogger(__name__)
 MAX_CONCURRENT_IMAGE_PREPARATIONS = 10
 """Image checks or preparations one submit runs at once (each reads a task archive or an image build)."""
 
+MAX_CONCURRENT_PROGRESS_READS = 10
+"""How many runs the run list counts progress for at the same time.
+
+Counting a run's progress reads all of its tasks from the Entity Store, so this limits how many of those reads
+one list request makes at once.
+"""
+
 
 @dataclass(frozen=True)
 class SubmitOutcome:
@@ -254,6 +261,7 @@ class TasksetRunService:
         mine: bool = False,
         page: int = 1,
         page_size: int = 100,
+        progress: bool = False,
     ) -> Page[TasksetRunStatus]:
         """Project one independently filtered workspace run page into public statuses.
 
@@ -264,6 +272,7 @@ class TasksetRunService:
             mine: Restrict to the effective caller's runs when True.
             page: One-based page number.
             page_size: Maximum records on the requested page.
+            progress: Include each run's progress, counted from its tasks the same way as getting a single run.
 
         Returns:
             Newest-first status page preserving the store's pagination and sort.
@@ -276,8 +285,20 @@ class TasksetRunService:
             page=page,
             page_size=page_size,
         )
+
+        statuses = [to_status(run) for run in result.data]
+        if progress:
+            reads = asyncio.Semaphore(MAX_CONCURRENT_PROGRESS_READS)
+
+            async def with_progress(run: TasksetRunEntity, status: TasksetRunStatus) -> TasksetRunStatus:
+                async with reads:
+                    members = await self._store.list_all_members(run)
+                return status.model_copy(update={"progress": build_progress(members) if members else None})
+
+            statuses = await _all(with_progress(run, status) for run, status in zip(result.data, statuses, strict=True))
+
         return Page(
-            data=[to_status(run) for run in result.data],
+            data=statuses,
             pagination=result.pagination,
             sort=result.sort,
             filter=result.filter,

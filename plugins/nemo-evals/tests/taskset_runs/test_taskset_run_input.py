@@ -29,6 +29,7 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunMemberEntity,
     TasksetRunPhase,
 )
+from nemo_evals.taskset_runs.trials import TrialCounts, TrialPhase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nhx_evals_sdk.agent_eval.runtimes.harbor.runtime import HarborAgentTaskRunner, HarborRuntimeConfig
 from pydantic import ValidationError
@@ -467,6 +468,7 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         name="task-10",
         workspace="default",
         task_index=10,
+        task_name="sort-numbers" if with_details else None,
         phase=phase,
         task_job="run-selected-task-10" if with_details else None,
         job_status=HelixJobStatus.ACTIVE if with_details else None,
@@ -476,6 +478,16 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         publication=PublicationOutcome(status=HelixJobStatus.COMPLETED, evaluation_id="e", trial_count=2)
         if with_details
         else None,
+        trial_counts=(
+            TrialCounts(
+                total=3,
+                phases={TrialPhase.SUCCEEDED: 2, TrialPhase.AGENT_RUNNING: 1},
+                rewarded=2,
+                reward=0.5,
+            )
+            if with_details
+            else None
+        ),
     )
     member._parent = "taskset_run-parent"
     member._id = "taskset_run_member-identifier"
@@ -483,6 +495,7 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
     assert task.model_dump() == {
         "task": "task-10",
         "task_index": 10,
+        "task_name": "sort-numbers" if with_details else None,
         "phase": phase,
         "job": "run-selected-task-10" if with_details else None,
         "job_status": HelixJobStatus.ACTIVE if with_details else None,
@@ -494,6 +507,15 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
             "evaluator_result_count": 0,
             "skipped": [],
             "error": None,
+        }
+        if with_details
+        else None,
+        "trial_counts": {
+            "total": 3,
+            "phases": {"succeeded": 2, "agent_running": 1},
+            "rewarded": 2,
+            "reward": 0.5,
+            "errors": {},
         }
         if with_details
         else None,
