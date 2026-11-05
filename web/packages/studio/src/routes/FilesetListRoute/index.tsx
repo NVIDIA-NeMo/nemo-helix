@@ -6,7 +6,6 @@ import { getEntityReference } from '@nemo/common/src/namedEntity';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
 import { DatasetsTable } from '@studio/components/DatasetsTable';
-import { NewDatasetButton } from '@studio/components/NewDatasetButton';
 import { NewModelFilesetButton } from '@studio/components/NewModelFilesetButton';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -59,10 +58,7 @@ export const FilesetListRoute: FC = () => {
           slotDescription="Filesets organize files by purpose — Generic, Dataset, or Model. Purpose determines which metadata fields are available and can't be changed after creation. Use Dataset for training and evaluation data, Model for model weights and checkpoints, and Generic for everything else."
           slotActions={
             FILESET_DETAILS_ENABLED ? (
-              <>
-                <NewDatasetButton color="brand" />
-                <NewModelFilesetButton color="brand" />
-              </>
+              <NewModelFilesetButton color="brand" />
             ) : (
               <Button asChild color="brand">
                 <Link to={getNewFilesetRoute(workspace)}>Create Fileset</Link>

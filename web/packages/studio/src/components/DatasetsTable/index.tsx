@@ -29,6 +29,7 @@ export type { DatasetsTableProps } from '@studio/components/DatasetsTable/types'
  * A table that displays a list of datasets with optional filtering, search, and bulk operations.
  */
 export const DatasetsTable: FC<DatasetsTableProps> = ({
+  variant = 'filesets',
   onDatasetsSelected,
   onRowClick,
   enableActions = true,
@@ -69,8 +70,9 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     enableSelection,
     selectionType,
     getDatasetRoute,
-    purposeFilter,
+    purposeFilter: variant === 'datasets' ? FilesetPurpose.dataset : purposeFilter,
   });
+  const entity = variant === 'datasets' ? 'datasets' : 'filesets';
 
   const navigate = useNavigate();
   const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
@@ -84,6 +86,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
 
   // Column definitions
   const makeColumns = makeDatasetsTableColumns({
+    variant,
     enableSelection,
     selectionType,
     enableFilters,
@@ -97,14 +100,14 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
 
   // Loading state
   if (isPending) {
-    return <Loading description="Loading filesets..." />;
+    return <Loading description={`Loading ${entity}...`} />;
   }
 
   // Error state
   if (error) {
     return (
       <ErrorMessage
-        message="Failed to fetch filesets"
+        message={`Failed to fetch ${entity}`}
         slotFooter={
           <Button type="button" kind="tertiary" onClick={() => refetch()}>
             Retry
@@ -142,7 +145,7 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
         attributes={{
           ...attributes,
           DataViewSearchBar: {
-            placeholder: 'Search filesets...',
+            placeholder: `Search ${entity}...`,
           },
           DataViewRoot: {
             data: datasets,
@@ -154,13 +157,13 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
             renderEmptyState: () =>
               hasSearchOrFilters ? (
                 <EntityEmptyState
-                  entity="filesets"
+                  entity={entity}
                   variant="no-results"
                   onClearFilters={resetFilters}
                 />
               ) : (
                 <EntityEmptyState
-                  entity="filesets"
+                  entity={entity}
                   variant="first-use"
                   onCreate={handleCreateFileset}
                 />

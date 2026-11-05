@@ -483,6 +483,20 @@ describe('DatasetsTable', () => {
       await waitFor(() => expect(state.lastUrl?.searchParams.get('sort')).toBe('-name'));
     });
 
+    it('sends sort=storage_type when the Storage Backend header is clicked', async () => {
+      const state = installListHandler();
+      renderTable({ enableFilters: true });
+
+      await user.click(await screen.findByRole('button', { name: /^Storage Backend/ }));
+
+      await waitFor(
+        () => {
+          expect(state.lastUrl?.searchParams.get('sort')).toBe('storage_type');
+        },
+        { timeout: LG_SELECTOR_TIMEOUT }
+      );
+    });
+
     it('omits the sort param when enableFilters is false', async () => {
       const state = installListHandler();
       renderTable({ enableFilters: false });
@@ -878,6 +892,55 @@ describe('DatasetsTable', () => {
         await screen.findByText('Items per page', undefined, { timeout: LG_SELECTOR_TIMEOUT })
       ).toBeInTheDocument();
       expect(screen.getByText('1-2 of 2 items')).toBeInTheDocument();
+    });
+  });
+
+  describe("variant='datasets'", () => {
+    const renderDatasets = () => renderTable({ variant: 'datasets', enableFilters: true });
+
+    it('fetches only dataset filesets, without the Purpose filter', async () => {
+      const state = installListHandler();
+      renderDatasets();
+
+      await screen.findByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      expect(state.lastUrl?.searchParams.get('filter[purpose]')).toBe(FilesetPurpose.dataset);
+      expect(state.lastUrl?.searchParams.has('filter[purpose][$in]')).toBe(false);
+    });
+
+    it('renders Name, Storage Type, and Created, each sortable', async () => {
+      const state = installListHandler();
+      renderDatasets();
+
+      await screen.findByText('dataset-1', undefined, { timeout: LG_SELECTOR_TIMEOUT });
+      for (const header of ['Purpose', 'Path', 'Description', 'Created By']) {
+        expect(screen.queryByText(header)).not.toBeInTheDocument();
+      }
+
+      for (const [header, sort] of [
+        ['Name', 'name'],
+        ['Storage Type', 'storage_type'],
+        ['Created', 'created_at'],
+      ]) {
+        await user.click(screen.getByRole('button', { name: new RegExp(`^${header}`) }));
+        await waitFor(
+          () => {
+            expect(state.lastUrl?.searchParams.get('sort')).toBe(sort);
+          },
+          { timeout: LG_SELECTOR_TIMEOUT }
+        );
+      }
+    });
+
+    it('uses dataset wording for search and the first-use empty state', async () => {
+      installListHandler([]);
+      renderDatasets();
+
+      expect(
+        await screen.findByText(ENTITY_EMPTY_STATES.datasets.heading, undefined, {
+          timeout: LG_SELECTOR_TIMEOUT,
+        })
+      ).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Search datasets...')).toBeInTheDocument();
     });
   });
 });
