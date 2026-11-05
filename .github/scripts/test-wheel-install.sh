@@ -54,32 +54,7 @@ if [[ "${package}" == nemo-helix ]]; then
   # Fail directly on plugin import errors: degraded discovery and auth-disabled
   # startup can otherwise hide missing workspace-only dependencies. -I also
   # prevents checkout/PYTHONPATH imports from satisfying a broken wheel.
-  "${python_bin}" -I - <<'PY'
-import importlib
-import importlib.metadata
-import sys
-from pathlib import Path
-
-from packaging.requirements import Requirement
-
-for name in ("nhx_sandbox.egress", "nhx_sandbox.harbor_opensandbox_services", "nemo_evals.service"):
-    module = importlib.import_module(name)
-    assert Path(module.__file__).resolve().is_relative_to(Path(sys.prefix).resolve()), module.__file__
-
-distribution = importlib.metadata.distribution("nemo-helix")
-requirements = [Requirement(value) for value in distribution.requires or ()]
-assert not any(requirement.name == "nhx-sandbox" for requirement in requirements)
-assert any(
-    requirement.name == "nemo-helix"
-    and "nhx-sandbox" in requirement.extras
-    and requirement.marker is not None
-    and requirement.marker.evaluate({"extra": "nemo-evals-plugin"})
-    for requirement in requirements
-)
-evals = next(ep for ep in distribution.entry_points if ep.group == "nemo.services" and ep.name == "evals")
-assert evals.load().__name__ == "EvaluatorPluginService"
-print("built-wheel evals service and sandbox imports OK")
-PY
+  "${python_bin}" -I "${GITHUB_WORKSPACE}/.github/scripts/check-wheel-imports.py"
   export PATH="${bin_dir}:${PATH}"
   bash "${GITHUB_WORKSPACE}/script/test-nemo-cli.sh"
 else
