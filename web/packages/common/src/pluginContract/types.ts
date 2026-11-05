@@ -22,7 +22,11 @@ export interface ContractEntry {
 }
 
 export interface PluginContract {
-  /** Contract semver. Adding, removing or bumping an entry is a breaking change. */
+  /**
+   * Contract semver. Major bump: an entry was removed or its kind changed (breaks existing
+   * plugins). Minor bump: an entry was added (plugins built against an older minor still load;
+   * a plugin built against a newer minor than Studio's is unsupported).
+   */
   version: string;
   entries: readonly ContractEntry[];
 }
@@ -55,6 +59,6 @@ export interface ContractIssue {
   /** The package or specifier the issue is about; empty for a missing sidecar. */
   subject: string;
   message: string;
-  /** Numbered-ready resolution steps naming the exact change to make. */
+  /** Ordered resolution steps naming the exact change to make. */
   steps: string[];
 }

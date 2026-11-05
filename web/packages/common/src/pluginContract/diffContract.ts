@@ -12,9 +12,26 @@ import {
 import { parseVersion } from '@nemo/common/src/pluginContract/semver';
 import type {
   ContractIssue,
+  IssueCode,
+  IssueSeverity,
   PluginContract,
   PluginSidecar,
 } from '@nemo/common/src/pluginContract/types';
+
+const SEVERITY: Record<IssueCode, IssueSeverity> = {
+  PLUGIN_MANIFEST_MISSING: 'error',
+  PLUGIN_SPECIFIER_UNMAPPED: 'error',
+  PLUGIN_SINGLETON_BUNDLED: 'error',
+  PLUGIN_CONTRACT_UNSUPPORTED: 'error',
+  PLUGIN_VERSION_INCOMPATIBLE: 'error',
+  PLUGIN_VERSION_DRIFT: 'warning',
+};
+
+const issue = (
+  code: IssueCode,
+  subject: string,
+  fix: Pick<ContractIssue, 'message' | 'steps'>
+): ContractIssue => ({ code, severity: SEVERITY[code], subject, ...fix });
 
 const bySubject = (a: ContractIssue, b: ContractIssue) =>
   a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0;
@@ -30,39 +47,27 @@ export const diffContract = (
   studioVersions: Readonly<Record<string, string>>
 ): ContractIssue[] => {
   if (!sidecar) {
-    return [
-      { code: 'PLUGIN_MANIFEST_MISSING', severity: 'error', subject: '', ...manifestMissing() },
-    ];
+    return [issue('PLUGIN_MANIFEST_MISSING', '', manifestMissing())];
   }
   const issues: ContractIssue[] = [];
 
   const built = parseVersion(sidecar.contractVersion);
   const current = parseVersion(contract.version);
-  if (
-    built &&
-    current &&
-    (built[0] !== current[0] || (built[0] === current[0] && built[1] > current[1]))
-  ) {
-    issues.push({
-      code: 'PLUGIN_CONTRACT_UNSUPPORTED',
-      severity: 'error',
-      subject: sidecar.contractVersion,
-      ...contractUnsupported(sidecar.contractVersion, contract.version),
-    });
+  if (!built || (current && (built[0] !== current[0] || built[1] > current[1]))) {
+    issues.push(
+      issue(
+        'PLUGIN_CONTRACT_UNSUPPORTED',
+        sidecar.contractVersion,
+        contractUnsupported(sidecar.contractVersion, contract.version)
+      )
+    );
   }
 
   const known = new Set(contract.entries.map((e) => e.specifier));
   issues.push(
     ...sidecar.specifiers
       .filter((s) => !known.has(s))
-      .map(
-        (s): ContractIssue => ({
-          code: 'PLUGIN_SPECIFIER_UNMAPPED',
-          severity: 'error',
-          subject: s,
-          ...specifierUnmapped(s),
-        })
-      )
+      .map((s) => issue('PLUGIN_SPECIFIER_UNMAPPED', s, specifierUnmapped(s)))
       .sort(bySubject)
   );
 
@@ -72,14 +77,7 @@ export const diffContract = (
   issues.push(
     ...sidecar.bundledPackages
       .filter((p) => singletons.has(p))
-      .map(
-        (p): ContractIssue => ({
-          code: 'PLUGIN_SINGLETON_BUNDLED',
-          severity: 'error',
-          subject: p,
-          ...singletonBundled(p),
-        })
-      )
+      .map((p) => issue('PLUGIN_SINGLETON_BUNDLED', p, singletonBundled(p)))
       .sort(bySubject)
   );
 
@@ -90,19 +88,13 @@ export const diffContract = (
     const s = studio === undefined ? null : parseVersion(studio);
     if (!b || !s) continue;
     if (b[0] !== s[0]) {
-      versionIssues.push({
-        code: 'PLUGIN_VERSION_INCOMPATIBLE',
-        severity: 'error',
-        subject: pkg,
-        ...versionIncompatible(pkg, builtVersion, studio),
-      });
+      versionIssues.push(
+        issue('PLUGIN_VERSION_INCOMPATIBLE', pkg, versionIncompatible(pkg, builtVersion, studio))
+      );
     } else if (b[1] !== s[1] || b[2] !== s[2]) {
-      versionIssues.push({
-        code: 'PLUGIN_VERSION_DRIFT',
-        severity: 'warning',
-        subject: pkg,
-        ...versionDrift(pkg, builtVersion, studio),
-      });
+      versionIssues.push(
+        issue('PLUGIN_VERSION_DRIFT', pkg, versionDrift(pkg, builtVersion, studio))
+      );
     }
   }
   issues.push(...versionIssues.sort(bySubject));
