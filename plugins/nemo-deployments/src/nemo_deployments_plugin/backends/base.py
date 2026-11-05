@@ -150,3 +150,7 @@ class DeploymentBackend(abc.ABC):
         :class:`ImageInUseError` when a container still uses it.
         """
         raise ImagesUnsupportedError(f"{type(self).__name__} has no local image store")
+
+    async def image_tags(self, reference: str) -> list[str] | None:
+        """Every tag on the image *reference* resolves to, or ``None`` when it is gone."""
+        raise ImagesUnsupportedError(f"{type(self).__name__} has no local image store")

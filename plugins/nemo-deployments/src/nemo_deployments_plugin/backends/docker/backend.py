@@ -1630,6 +1630,13 @@ class DockerDeploymentBackend(DeploymentBackend):
             raise
         return True
 
+    async def image_tags(self, reference: str) -> list[str] | None:
+        try:
+            image = await asyncio.to_thread(self._client.images.get, reference)
+        except (self._docker_errors.ImageNotFound, self._docker_errors.NotFound):
+            return None
+        return list(image.tags)
+
     def _executor_volume_bindings(self) -> dict[str, dict[str, str]]:
         return {
             mount.volume_name: {

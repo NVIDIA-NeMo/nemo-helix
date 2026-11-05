@@ -13,6 +13,7 @@ from nemo_agents_plugin.images import remove_unused_image
 from nemo_deployments_plugin.backends.base import ImageInUseError
 
 _TAG = "nemo-agents/default/calc-abc:0.1"
+_PUSHED = "nvcr.io/my-org/nemo-agents/default/calc-abc:0.1"
 
 
 def _dep(
@@ -38,9 +39,10 @@ def _entities(deployments: list[AgentDeployment]) -> AsyncMock:
     return entities
 
 
-def _store() -> AsyncMock:
+def _store(*tags: str) -> AsyncMock:
     store = AsyncMock()
     store.remove_image = AsyncMock(return_value=True)
+    store.image_tags = AsyncMock(return_value=list(tags or [_TAG]))
     return store
 
 
@@ -91,3 +93,45 @@ class TestRemoveUnusedImage:
         store.remove_image.side_effect = RuntimeError("daemon gone")
 
         assert await remove_unused_image(store, _entities([]), _TAG, "default") is False
+
+    async def test_a_gone_image_is_not_removed(self) -> None:
+        store = _store()
+        store.image_tags.return_value = None
+
+        assert await remove_unused_image(store, _entities([]), _TAG, "default") is False
+        store.remove_image.assert_not_awaited()
+
+
+class TestPushedImages:
+    @pytest.mark.parametrize("reference", [_TAG, _PUSHED])
+    async def test_removes_the_build_and_push_tags_together(self, reference: str) -> None:
+        store = _store(_TAG, _PUSHED)
+
+        assert await remove_unused_image(store, _entities([]), reference, "default") is True
+        assert [c.args[0] for c in store.remove_image.await_args_list] == [_TAG, _PUSHED]
+
+    async def test_keeps_the_image_when_a_deployment_uses_its_push_tag(self) -> None:
+        store = _store(_TAG, _PUSHED)
+
+        assert (
+            await remove_unused_image(store, _entities([_dep(name="other", image=_PUSHED)]), _TAG, "default") is False
+        )
+        store.remove_image.assert_not_awaited()
+
+    async def test_leaves_tags_the_platform_did_not_add(self) -> None:
+        store = _store(_TAG, "mine:latest")
+
+        assert await remove_unused_image(store, _entities([]), _TAG, "default") is True
+        store.remove_image.assert_awaited_once_with(_TAG)
+
+    async def test_needs_the_local_build_tag_to_prove_ownership(self) -> None:
+        store = _store(_PUSHED)
+
+        assert await remove_unused_image(store, _entities([]), _PUSHED, "default") is False
+        store.remove_image.assert_not_awaited()
+
+    async def test_ignores_another_workspaces_push_tag(self) -> None:
+        store = _store()
+
+        assert await remove_unused_image(store, _entities([]), "nvcr.io/org/nemo-agents/other/a:1", "default") is False
+        store.image_tags.assert_not_awaited()

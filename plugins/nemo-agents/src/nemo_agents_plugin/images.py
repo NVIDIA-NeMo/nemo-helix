@@ -31,6 +31,11 @@ def is_platform_built(reference: str, workspace: str) -> bool:
     return reference.startswith(f"{TAG_NAMESPACE}/{workspace}/")
 
 
+def _is_platform_tag(tag: str, workspace: str) -> bool:
+    """The local build tag, or the ``{registry}/nemo-agents/{workspace}/...`` tag a push adds."""
+    return is_platform_built(tag, workspace) or f"/{TAG_NAMESPACE}/{workspace}/" in tag
+
+
 async def list_all_deployments(entities: NemoEntitiesClient) -> list[AgentDeployment]:
     deployments: list[AgentDeployment] = []
     page = 1
@@ -60,22 +65,32 @@ async def remove_tags(store: DeploymentBackend, tags: Iterable[str]) -> bool:
 async def remove_unused_image(
     store: DeploymentBackend, entities: NemoEntitiesClient, reference: str, workspace: str
 ) -> bool:
-    """Remove *reference* if the platform built it for *workspace* and no container or deployment uses it.
+    """Remove the image *reference* names if the platform built it for *workspace* and nothing uses it.
+
+    A push adds a ``{registry}/nemo-agents/{workspace}/...`` tag to the same image, so
+    every platform tag on it is removed together; removing only one would free no disk.
+    The image counts as platform-built only while it still carries the local build tag.
 
     Best effort: failures are logged and reported as ``False``, never raised.
     """
-    if not is_platform_built(reference, workspace):
+    if not _is_platform_tag(reference, workspace):
         return False
     try:
-        if reference in _referenced_images(await list_all_deployments(entities)):
-            logger.info("Keeping image %s: another deployment still uses it", reference)
+        tags = await store.image_tags(reference)
+        if not tags or not any(is_platform_built(t, workspace) for t in tags):
             return False
-        removed = await remove_tags(store, [reference])
+        owned = [t for t in tags if _is_platform_tag(t, workspace)]
+        if used := set(owned) & _referenced_images(await list_all_deployments(entities)):
+            logger.info("Keeping image %s: another deployment still uses %s", reference, ", ".join(sorted(used)))
+            return False
+        removed = await remove_tags(store, owned)
     except Exception:
         logger.warning("Failed to remove image %s", reference, exc_info=True)
         return False
-    if removed:
-        logger.info("Removed image %s", reference)
-    else:
+    if not removed:
         logger.info("Keeping image %s: a container still uses it", reference)
+    elif kept := [t for t in tags if t not in owned]:
+        logger.info("Untagged %s; image kept by other tags %s", ", ".join(owned), ", ".join(kept))
+    else:
+        logger.info("Removed image %s", reference)
     return removed

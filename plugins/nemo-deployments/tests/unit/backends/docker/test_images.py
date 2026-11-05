@@ -50,8 +50,26 @@ async def test_other_api_errors_propagate(
         await docker_backend.remove_image("nemo-agents/ws/a:1")
 
 
+async def test_image_tags_lists_every_tag(
+    docker_backend: DockerDeploymentBackend, mock_docker_client: MagicMock
+) -> None:
+    mock_docker_client.images.get.return_value = MagicMock(tags=["nemo-agents/ws/a:1", "reg.io/nemo-agents/ws/a:1"])
+
+    assert await docker_backend.image_tags("nemo-agents/ws/a:1") == ["nemo-agents/ws/a:1", "reg.io/nemo-agents/ws/a:1"]
+
+
+async def test_image_tags_reports_missing(
+    docker_backend: DockerDeploymentBackend, mock_docker_client: MagicMock
+) -> None:
+    mock_docker_client.images.get.side_effect = docker_errors.ImageNotFound("gone")
+
+    assert await docker_backend.image_tags("nemo-agents/ws/a:1") is None
+
+
 async def test_backends_without_an_image_store_refuse() -> None:
     backend = K8sDeploymentBackend.__new__(K8sDeploymentBackend)
 
     with pytest.raises(ImagesUnsupportedError):
         await backend.remove_image("x")
+    with pytest.raises(ImagesUnsupportedError):
+        await backend.image_tags("x")
