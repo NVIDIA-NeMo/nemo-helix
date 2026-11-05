@@ -73,9 +73,6 @@ outputs:
   deployments-openshell:
     description: "'true' if OpenShell deployment or credential authorization dependencies changed"
     value: ${{ steps.filter.outputs.deployments-openshell }}
-  credential-driver-sidecar:
-    description: "'true' if credential-driver, Compose, or API image inputs changed"
-    value: ${{ steps.filter.outputs.credential-driver-sidecar == 'true' || steps.filter.outputs.deps == 'true' }}
   jobs-openshell:
     description: "'true' if the jobs service or jobs-launcher changed (OpenShell job backend coverage)"
     value: ${{ steps.filter.outputs.jobs-openshell }}
@@ -281,23 +278,6 @@ runs:
             - 'services/core/entities/**'
             - 'services/core/secrets/**'
             - 'services/core/jobs/src/nhx/core/jobs/controllers/backends/openshell/**'
-          credential-driver-sidecar:
-            - 'plugins/nemo-deployments/src/nemo_deployments_plugin/backends/openshell/credential_driver/**'
-            - 'plugins/nemo-deployments/src/nemo_deployments_plugin/entities.py'
-            - 'plugins/nemo-deployments/examples/openshell/*.yml'
-            - 'plugins/nemo-deployments/examples/openshell/*.toml'
-            - 'plugins/nemo-deployments/tests/integration/backends/openshell/**'
-            - 'packages/nemo_helix_plugin/src/**'
-            - '**/pyproject.toml'
-            - 'docker/Dockerfile.nhx-api'
-            - 'docker/base/Dockerfile.nhx-python-base'
-            - 'docker/base/Dockerfile.nhx-workspace'
-            - 'docker/scripts/**'
-            - 'docker-bake.hcl'
-            - '.dockerignore'
-            - 'Makefile'
-            - '.github/workflows/ci.yaml'
-            - '.github/actions/changes/action.yaml'
           jobs-openshell:
             - 'services/core/jobs/**'
             - 'packages/nemo_helix_plugin/**'

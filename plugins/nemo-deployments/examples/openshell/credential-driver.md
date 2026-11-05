@@ -7,28 +7,7 @@ This opt-in Compose overlay runs the driver in the Helix API image with a differ
 
 The startup order is `credential-init` → healthy `credential-driver` → `gateway`. Initialization copies the operator's mounted files into private, container-owned files so Docker host UID differences do not break the driver's ownership checks. The driver and the local-development gateway run as UID 0, matching the existing example. The driver has no Docker socket, published port, or gateway state mount. Its capabilities are dropped and its root filesystem is read-only.
 
-## Build the existing API image
-
-Use a dedicated Docker host with sufficient memory for the full API build, including Studio and native dependencies. The container smoke test below is isolated by Compose project, but image-build resource exhaustion affects the whole Docker host.
-
-From the repository root, build and load the current source with the existing image target:
-
-```sh
-make docker-load DOCKER_TARGET=nhx-api-docker IMAGE_REGISTRY=local BAKE_TAG=credential-driver DOCKER_PLATFORMS=linux/arm64
-```
-
-Use `linux/amd64` on an x86 host. This builds the full API image, including the driver and OpenShell SDK; no separate driver image is required.
-
-Before supplying real credentials, run the isolated image smoke test from the repository root:
-
-```sh
-RUN_CREDENTIAL_DRIVER_COMPOSE_TEST=1 NEMO_HELIX_IMAGE=local/nhx-api:credential-driver \
-  uv run --frozen pytest \
-  plugins/nemo-deployments/tests/integration/backends/openshell/test_credential_driver_sidecar.py \
-  --basetemp="$PWD/.pytest_cache/credential-sidecar" -v
-```
-
-The test uses synthetic credentials to check registration, restart recovery, token rotation and persistence in an isolated Compose project. It starts no gateway and accesses no real Helix endpoint. The temporary directory must be shared with Docker; the command above uses the checkout's ignored pytest cache. The test removes its own containers and volumes.
+The standard Helix API image includes the driver and OpenShell SDK. Set `NEMO_HELIX_IMAGE` to the API image tag used by your Helix installation; no separate build is needed.
 
 ## Supply driver credentials
 
@@ -42,7 +21,7 @@ Keep the source directory mode 0700 and both files mode 0600. Each file must be 
 Set these variables, replacing the credential directory and Helix URL with your actual values:
 
 ```sh
-export NEMO_HELIX_IMAGE=local/nhx-api:credential-driver
+export NEMO_HELIX_IMAGE=ghcr.io/nvidia-nemo/nemo-helix/nhx-api:YOUR_TAG
 export NEMO_DRIVER_CREDENTIALS_DIR=/absolute/private/path/to/driver-credentials
 export NEMO_DRIVER_HELIX_URL=https://helix.example
 export NEMO_DRIVER_GATEWAY_ID=docker-dev
