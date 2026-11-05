@@ -1,0 +1,21 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.9.1 - 2026-11-05"
+description: ""
+---
+NeMo Helix v0.9.1 is a patch release for the 0.9 release line. It fixes a Kubernetes Python client compatibility problem in the Jobs service. For everything else in the 0.9 release line, see the [v0.9.0 release notes](/documentation/reference/release-notes/release-0-9-0).
+
+## What's fixed
+
+- **Kubernetes client compatibility for the Jobs service.** Kubernetes Python client 37 changes the `ApiClient.deserialize` API that the Jobs Kubernetes backend uses. The `nemo-helix` wheel extras that install the Jobs service and shared platform runtime now require `kubernetes>=30.1.0,<37`, so a fresh wheel install no longer picks up an incompatible client. The locked source-checkout environment still uses `kubernetes` 36.0.3. (documentation not yet available)
+
+## Install
+
+See [Setup](/documentation/get-started/setup) for local installations and [Install](/documentation/kubernetes-deployment/setup/helm/install) for self-managed Kubernetes deployments.
+
+## Links
+
+- [Repository](https://github.com/NVIDIA-NeMo/nemo-helix)
+- [Issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)
