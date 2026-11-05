@@ -229,7 +229,12 @@ export const AgentsTable: FC<CombinedAgentsTableProps> = ({
         })
       )
     );
-    await deleteAgentMutation.mutateAsync({ workspace, name: agentName });
+    // Images still in use by the deployments above are removed as each one finishes tearing down.
+    await deleteAgentMutation.mutateAsync({
+      workspace,
+      name: agentName,
+      params: { remove_images: true },
+    });
   };
 
   const handleDelete = async (): Promise<boolean> => {

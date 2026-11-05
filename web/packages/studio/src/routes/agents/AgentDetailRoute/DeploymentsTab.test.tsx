@@ -173,11 +173,11 @@ describe('DeploymentsTab', () => {
     expect(screen.getByText('Subprocess')).toBeInTheDocument();
   });
 
-  it('offers packaging from the deployments header', () => {
+  it('offers packaging from the images panel', () => {
     server.use(http.get(DEPLOYMENT_URL, () => HttpResponse.json(failedDeployment)));
     renderTab([failedDeployment]);
 
-    expect(screen.getByRole('button', { name: /Build image|Manage image/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Build image' })).toBeInTheDocument();
   });
 
   it('names the image a deployment is running, since an agent has many over time', () => {

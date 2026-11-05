@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ExpandableMessage } from '@nemo/common/src/components/ExpandableMessage';
-import { ExternalLink } from '@nemo/common/src/components/ExternalLink';
 import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { StatusDot } from '@nemo/common/src/components/StatusDot';
 import { JOB_POLLING_INTERVAL_MS } from '@nemo/common/src/constants';
@@ -10,11 +9,8 @@ import { useAgentsGetDeployment } from '@nemo/sdk/generated/agents/agent-deploym
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
 import { Badge, Block, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { type AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
-import {
-  deploymentModeLabel,
-  deploymentUrl,
-  shortRevision,
-} from '@studio/routes/agents/AgentDetailRoute/helpers';
+import { CommitLink } from '@studio/routes/agents/AgentDetailRoute/components/CommitLink';
+import { deploymentModeLabel, deploymentUrl } from '@studio/routes/agents/AgentDetailRoute/helpers';
 import { type FC } from 'react';
 
 interface DeploymentRowProps {
@@ -26,16 +22,6 @@ interface DeploymentRowProps {
   onDelete: (deployment: AgentDeployment) => void;
   onViewLogs: (deployment: AgentDeployment) => void;
 }
-
-/** A commit, linked when the source it came from is still known and has a web view. */
-const CommitLink: FC<{ source?: AgentSpecSource; revision: string }> = ({ source, revision }) =>
-  source?.commitUrl ? (
-    <ExternalLink href={source.commitUrl(revision)} textKind="body/regular/xs">
-      {shortRevision(revision)}
-    </ExternalLink>
-  ) : (
-    <>{shortRevision(revision)}</>
-  );
 
 /**
  * One deployment. A failure or deletion message is the row's most useful content

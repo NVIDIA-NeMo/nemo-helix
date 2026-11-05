@@ -27,8 +27,6 @@ describe('DeploymentsTab without container deployments', () => {
       />
     );
 
-    expect(
-      screen.queryByRole('button', { name: /Build image|Manage image/ })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Build image' })).not.toBeInTheDocument();
   });
 });

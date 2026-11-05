@@ -1,19 +1,22 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentImage } from '@nemo/sdk/generated/agents/schema/AgentImage';
 import type { DeploymentModes } from '@studio/api/agents/useDeploymentModes';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
+import { AGENT_IMAGES_URL } from '@studio/mocks/handlers/agentImages';
 import { server } from '@studio/mocks/node';
-import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
+import { ImagesPanel } from '@studio/routes/agents/AgentDetailRoute/components/ImagesPanel';
 import { renderRoute, screen, waitFor, within } from '@studio/tests/util/render';
 import userEvent from '@testing-library/user-event';
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 
 const workspace = workspace1.workspace;
 const agent = 'my-agent';
 const jobsUrl = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/jobs/package`;
 const jobUrl = `${jobsUrl}/:name`;
+const TAG = 'nemo-agents/default/my-agent:1.0';
 const platform = vi.hoisted(() => ({
   buildsUnsupported: false,
   modes: {
@@ -40,19 +43,31 @@ beforeEach(() => {
 const renderControl = (props?: {
   canPackage?: boolean;
   isAgentLoading?: boolean;
-  onImageBuilt?: (image: string) => void;
+  onDeployImage?: (image: string) => void;
   onImageAvailable?: (image: string) => void;
 }) =>
   renderRoute(
-    <PackageAgentControl
+    <ImagesPanel
       workspace={workspace}
       agentName={agent}
       canPackage={props?.canPackage ?? true}
       isAgentLoading={props?.isAgentLoading}
-      onImageBuilt={props?.onImageBuilt}
+      onDeployImage={props?.onDeployImage}
       onImageAvailable={props?.onImageAvailable}
     />
   );
+
+/** The images list, counting each read so a refresh is observable. */
+const mockImages = (images: AgentImage[]) => {
+  const reads = { count: 0 };
+  server.use(
+    http.get(AGENT_IMAGES_URL, () => {
+      reads.count++;
+      return HttpResponse.json({ data: images });
+    })
+  );
+  return reads;
+};
 
 /** A build from an earlier page load, found by the restore query rather than submitted here. */
 const mockRestoredJob = (
@@ -87,11 +102,11 @@ const mockJob = (status: string, image = 'nemo-agents/default/my-agent:1.0') => 
   );
 };
 
-/** Packaging lives behind a button in the Deployments header, not a panel. */
+/** Packaging lives behind a button in the images panel header. */
 const openControl = async (props?: Parameters<typeof renderControl>[0]) => {
   renderControl(props);
   const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: /Build image|Manage image/ }));
+  await user.click(screen.getByRole('button', { name: 'Build image' }));
   return user;
 };
 
@@ -107,7 +122,7 @@ const openPushOptions = async (user: ReturnType<typeof userEvent.setup>) => {
   return screen.getByRole('textbox', { name: /Registry/ });
 };
 
-describe('PackageAgentControl', () => {
+describe('Image builds', () => {
   it('pushes to a registry when one is given', async () => {
     const submitted: { registry?: string }[] = [];
     server.use(
@@ -145,47 +160,94 @@ describe('PackageAgentControl', () => {
     expect(submitted[0]).not.toHaveProperty('registry');
   });
 
-  it('offers the job rather than a wall of build output', async () => {
+  it('closes the modal and follows the build in the images list', async () => {
     mockJob('active');
     await openControl();
 
     await clickBuild();
 
-    expect(await screen.findByRole('button', { name: 'View job' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Building image')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    const row = await screen.findByTestId('image-build-row');
+    expect(within(row).getByText('Building image')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: 'View job' })).toBeInTheDocument();
+    // The row carries the progress; the trigger just can't start another build.
+    expect(screen.getByRole('button', { name: 'Build image' })).toBeDisabled();
+    expect(screen.getAllByLabelText('Building image')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /download/i })).not.toBeInTheDocument();
   });
 
-  it('surfaces the built tag once the job completes', async () => {
+  it('refreshes the images list once the build finishes', async () => {
+    const reads = mockImages([]);
     mockJob('completed');
     await openControl();
+    await waitFor(() => expect(reads.count).toBe(1));
+    mockImages([{ id: 'sha256:new', tags: [TAG], in_use: false }]);
+
     await clickBuild();
 
-    expect(await screen.findByText('nemo-agents/default/my-agent:1.0')).toBeInTheDocument();
+    expect(await screen.findByText(TAG)).toBeInTheDocument();
+    expect(screen.queryByTestId('image-build-row')).not.toBeInTheDocument();
   });
 
-  it('keeps the registry visible once an image exists, since a rebuild still pushes there', async () => {
+  it('shows a loading state while fetching the image a build just produced', async () => {
+    mockImages([]);
+    mockJob('completed');
+    await openControl();
+    await screen.findByText('No images built for this agent.');
+    server.use(
+      http.get(AGENT_IMAGES_URL, async () => {
+        await delay('infinite');
+        return HttpResponse.json({ data: [] });
+      })
+    );
+
+    await clickBuild();
+
+    expect(await screen.findByTestId('images-loading')).toBeInTheDocument();
+    expect(screen.queryByText('No images built for this agent.')).not.toBeInTheDocument();
+  });
+
+  it('remembers the registry for the next build', async () => {
     mockJob('completed');
     const user = await openControl();
 
     await user.type(await openPushOptions(user), 'nvcr.io/my-org');
     await clickBuild();
-    await screen.findByText('nemo-agents/default/my-agent:1.0');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Build image' }));
 
-    expect(screen.getByText('Push options')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /Registry/ })).toHaveValue('nvcr.io/my-org');
   });
 
-  it('hands the tag to the deployment flow', async () => {
-    const onImageBuilt = vi.fn();
-    mockJob('completed');
-    await openControl({ onImageBuilt });
+  it('deploys an image from its row', async () => {
+    const onDeployImage = vi.fn();
+    mockImages([{ id: 'sha256:a', tags: [TAG], in_use: false }]);
+    renderControl({ onDeployImage });
 
-    await clickBuild();
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'Deploy' }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Deploy' }));
 
-    expect(onImageBuilt).toHaveBeenCalledWith('nemo-agents/default/my-agent:1.0');
+    expect(onDeployImage).toHaveBeenCalledWith(TAG);
+  });
+
+  it('marks the newest image as the latest', async () => {
+    mockImages([
+      { id: 'sha256:old', tags: ['old:1'], in_use: false, created: '2026-01-01T00:00:00Z' },
+      { id: 'sha256:new', tags: ['new:1'], in_use: false, created: '2026-02-01T00:00:00Z' },
+    ]);
+    renderControl();
+
+    await screen.findByText('new:1');
+    const [first, second] = screen.getAllByTestId('image-row');
+    expect(within(first).getByText('new:1')).toBeInTheDocument();
+    expect(within(first).getByText('Latest')).toBeInTheDocument();
+    expect(within(second).queryByText('Latest')).not.toBeInTheDocument();
+  });
+
+  it('names the commit an image was built from', async () => {
+    mockImages([{ id: 'sha256:a', tags: [TAG], in_use: false, spec_revision: 'abcdef1234567' }]);
+    renderControl();
+
+    expect(await screen.findByText(/from commit abcdef1/)).toBeInTheDocument();
   });
 
   it('reports the tag without waiting to be asked, so deploying elsewhere has a default', async () => {
@@ -194,9 +256,8 @@ describe('PackageAgentControl', () => {
     await openControl({ onImageAvailable });
 
     await clickBuild();
-    await screen.findByText('nemo-agents/default/my-agent:1.0');
 
-    expect(onImageAvailable).toHaveBeenCalledWith('nemo-agents/default/my-agent:1.0');
+    await waitFor(() => expect(onImageAvailable).toHaveBeenCalledWith(TAG));
   });
 
   it('reports no tag when the job finishes without one', async () => {
@@ -229,6 +290,7 @@ describe('PackageAgentControl', () => {
     expect(
       await screen.findByText(/packaging supports 'nemo-agents-spec-v1' only/)
     ).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('reports a failed build instead of waiting forever', async () => {
@@ -240,22 +302,6 @@ describe('PackageAgentControl', () => {
     expect(await screen.findByText(/Packaging failed/)).toBeInTheDocument();
   });
 
-  it('does not offer a tag when the result carries none', async () => {
-    server.use(
-      http.post(jobsUrl, () => HttpResponse.json({ name: 'pkg-1', status: 'created' })),
-      http.get(`${jobUrl}/status`, () => HttpResponse.json({ status: 'completed' })),
-      http.get(`${jobUrl}/logs`, () => HttpResponse.json({ data: [] })),
-      http.get(`${jobUrl}/results/package_result/download`, () => HttpResponse.json({ agent }))
-    );
-    const onImageBuilt = vi.fn();
-    await openControl({ onImageBuilt });
-
-    await clickBuild();
-
-    expect(await screen.findByText(/finished without reporting an image tag/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
-  });
-
   it('says queued while the job waits to be dispatched', async () => {
     mockJob('created');
     await openControl();
@@ -263,17 +309,6 @@ describe('PackageAgentControl', () => {
     await clickBuild();
 
     expect(await screen.findByText(/Waiting for a build to start/)).toBeInTheDocument();
-  });
-
-  it('reports a running build on the trigger, so closing the modal does not lose it', async () => {
-    mockJob('active');
-    const user = await openControl();
-
-    await clickBuild();
-    await screen.findByText(/Building — this takes a few minutes/);
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-
-    expect(await screen.findByRole('button', { name: /Building…/ })).toBeInTheDocument();
   });
 
   it('refuses to package a NAT workflow agent', async () => {
@@ -309,6 +344,8 @@ describe('PackageAgentControl', () => {
 
     expect(await screen.findByText(/Lost track of this build/)).toBeInTheDocument();
     expect(screen.queryByLabelText('Building image')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Build image' }));
     expect(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Build image' })
     ).toBeEnabled();
@@ -341,13 +378,15 @@ describe('PackageAgentControl', () => {
 
   it('does not make a restored image the silent default for the next deployment', async () => {
     const onImageAvailable = vi.fn();
+    const reads = mockImages([]);
     mockRestoredJob('completed');
-    await openControl({ onImageAvailable });
+    renderControl({ onImageAvailable });
 
-    await screen.findByText('nemo-agents/default/my-agent:1.0');
+    await waitFor(() => expect(reads.count).toBeGreaterThan(0));
+    await screen.findByText('No images built for this agent.');
 
     expect(onImageAvailable).not.toHaveBeenCalled();
-    expect(screen.getByText(/rebuild to pick up newer changes/)).toBeInTheDocument();
+    expect(screen.queryByTestId('image-build-row')).not.toBeInTheDocument();
   });
 
   describe('when the platform cannot build images', () => {
@@ -429,10 +468,10 @@ describe('PackageAgentControl', () => {
 
   it('does not hand an image to a deployment the platform cannot run', async () => {
     platform.modes = { status: 'ready', enabled: ['subprocess'], withoutImage: [] };
-    mockRestoredJob('completed');
-    await openControl({ onImageBuilt: vi.fn() });
+    mockImages([{ id: 'sha256:a', tags: [TAG], in_use: false }]);
+    renderControl({ onDeployImage: vi.fn() });
 
-    await screen.findByText('nemo-agents/default/my-agent:1.0');
+    await screen.findByText(TAG);
     expect(screen.queryByRole('button', { name: 'Deploy' })).not.toBeInTheDocument();
   });
 

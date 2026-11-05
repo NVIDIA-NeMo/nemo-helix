@@ -7,10 +7,10 @@ import type { AgentSpecSource } from '@studio/api/agents/useAgentSpecFileset';
 import { AGENT_CONTAINER_DEPLOYMENTS_ENABLED } from '@studio/constants/environment';
 import type { PendingImageBuild } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { DeploymentRow } from '@studio/routes/agents/AgentDetailRoute/components/DeploymentRow';
+import { ImagesPanel } from '@studio/routes/agents/AgentDetailRoute/components/ImagesPanel';
 import { PendingImageBuildRow } from '@studio/routes/agents/AgentDetailRoute/components/PendingImageBuildRow';
 import { NoHealthyDeploymentsBanner } from '@studio/routes/agents/AgentDetailRoute/NoHealthyDeploymentsBanner';
 import { DetailPanel } from '@studio/routes/agents/AgentDetailRoute/overview/DetailPanel';
-import { PackageAgentControl } from '@studio/routes/agents/AgentDetailRoute/PackageAgentControl';
 import { type FC } from 'react';
 
 interface DeploymentsTabProps {
@@ -32,7 +32,8 @@ interface DeploymentsTabProps {
   canPackage: boolean;
   /** Still resolving whether this agent can be packaged, which is not the same as "no". */
   isAgentLoading?: boolean;
-  onImageBuilt?: (image: string) => void;
+  /** Deploy a specific image tag. */
+  onDeployImage?: (image: string) => void;
   onImageAvailable?: (image: string) => void;
   /** An image being built for a deployment that does not exist yet. */
   pendingBuild?: PendingImageBuild;
@@ -54,30 +55,12 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
   workspace,
   canPackage,
   isAgentLoading,
-  onImageBuilt,
+  onDeployImage,
   onImageAvailable,
   pendingBuild,
 }) => (
   <Stack gap="5" className="w-full">
-    <DetailPanel
-      title="Deployments"
-      flush
-      slotAction={
-        agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
-          <PackageAgentControl
-            // The route is reused across agents; without this the control would
-            // report the previous agent's build.
-            key={agentName}
-            workspace={workspace}
-            agentName={agentName}
-            canPackage={canPackage}
-            isAgentLoading={isAgentLoading}
-            onImageBuilt={onImageBuilt}
-            onImageAvailable={onImageAvailable}
-          />
-        ) : null
-      }
-    >
+    <DetailPanel title="Deployments" flush>
       {pendingBuild ? <PendingImageBuildRow workspace={workspace} build={pendingBuild} /> : null}
       {!isDeploymentsLoading && deployments.length === 0 ? (
         pendingBuild ? null : (
@@ -108,5 +91,19 @@ export const DeploymentsTab: FC<DeploymentsTabProps> = ({
         </Stack>
       )}
     </DetailPanel>
+    {agentName && AGENT_CONTAINER_DEPLOYMENTS_ENABLED ? (
+      <ImagesPanel
+        // The route is reused across agents; without this the panel would
+        // report the previous agent's build.
+        key={agentName}
+        workspace={workspace}
+        agentName={agentName}
+        canPackage={canPackage}
+        isAgentLoading={isAgentLoading}
+        specSource={specSource}
+        onDeployImage={onDeployImage}
+        onImageAvailable={onImageAvailable}
+      />
+    ) : null}
   </Stack>
 );

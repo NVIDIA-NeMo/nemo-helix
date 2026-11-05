@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
-import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
@@ -41,6 +40,7 @@ import {
   type PendingImageBuild,
 } from '@studio/routes/agents/AgentDetailRoute/BuildThenDeploy';
 import { ChatPlaygroundContent } from '@studio/routes/agents/AgentDetailRoute/ChatPlaygroundContent';
+import { DeleteDeploymentModal } from '@studio/routes/agents/AgentDetailRoute/components/DeleteDeploymentModal';
 import { DeploymentLogsView } from '@studio/routes/agents/AgentDetailRoute/DeploymentLogsView';
 import { DeploymentsTab } from '@studio/routes/agents/AgentDetailRoute/DeploymentsTab';
 import { EvaluationsTab } from '@studio/routes/agents/AgentDetailRoute/EvaluationsTab';
@@ -210,6 +210,10 @@ export const AgentDetailRoute: FC = () => {
     },
     [agentName]
   );
+
+  // An image picked from the images list, for the next deploy modal only — an
+  // older image chosen once must not become the default for later deployments.
+  const [deployImage, setDeployImage] = useState<string | undefined>();
 
   // Scoped like builtImage: the route is reused across agents.
   const [pendingBuild, setPendingBuild] = useState<
@@ -430,8 +434,8 @@ export const AgentDetailRoute: FC = () => {
               workspace={workspace}
               canPackage={canPackage}
               isAgentLoading={isAgentLoading}
-              onImageBuilt={(image) => {
-                rememberBuiltImage(image);
+              onDeployImage={(image) => {
+                setDeployImage(image);
                 setCreateDeploymentOpen(true);
               }}
               onImageAvailable={rememberBuiltImage}
@@ -507,8 +511,11 @@ export const AgentDetailRoute: FC = () => {
           open
           agent={agentName}
           workspace={workspace}
-          initialImage={builtImageForAgent}
-          onClose={() => setCreateDeploymentOpen(false)}
+          initialImage={deployImage ?? builtImageForAgent}
+          onClose={() => {
+            setCreateDeploymentOpen(false);
+            setDeployImage(undefined);
+          }}
         />
       )}
       {uploadOpen && agentName && (
@@ -528,16 +535,16 @@ export const AgentDetailRoute: FC = () => {
         onDismiss={endWalkthrough}
       />
       {deleteDeploymentTarget && (
-        <DeleteConfirmationModal
-          open
-          title="Delete Deployment"
-          successText="Successfully queued deployment for deletion."
-          onDelete={async () => {
+        <DeleteDeploymentModal
+          workspace={workspace}
+          deployment={deleteDeploymentTarget}
+          onDelete={async (removeImage) => {
             try {
               if (!deleteDeploymentTarget.name) return false;
               await deleteDeploymentMutation.mutateAsync({
                 workspace,
                 name: deleteDeploymentTarget.name,
+                params: { remove_image: removeImage },
               });
               return true;
             } catch {
@@ -545,7 +552,6 @@ export const AgentDetailRoute: FC = () => {
             }
           }}
           onClose={() => setDeleteDeploymentTarget(null)}
-          simpleConfirm
         />
       )}
     </AccessibleTitle>
