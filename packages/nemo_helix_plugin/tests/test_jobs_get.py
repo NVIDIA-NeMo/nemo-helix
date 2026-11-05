@@ -104,8 +104,14 @@ def test_get_renders_this_collections_job(client: TestClient, name: str, color: 
     assert resp.json()["spec"] == {"color": color}
 
 
-def test_get_another_collections_job_is_404(client: TestClient) -> None:
-    resp = client.get("/apis/widgets/v2/workspaces/default/jobs/run-1-task-0")
+@pytest.mark.parametrize("spec", [{"task_ref": "t"}, {"color": {}}], ids=["validation-error", "validator-key-error"])
+def test_get_another_collections_job_is_404(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, spec: dict[str, Any]
+) -> None:
+    monkeypatch.setattr(_RECORDS["run-1-task-0"], "spec", spec)
+
+    with TestClient(client.app, raise_server_exceptions=False) as unraised_client:
+        resp = unraised_client.get("/apis/widgets/v2/workspaces/default/jobs/run-1-task-0")
 
     assert resp.status_code == 404, resp.text
     assert resp.json()["detail"] == "Job 'run-1-task-0' not found"
@@ -124,11 +130,14 @@ def test_get_pre_rename_job_with_mutating_validator(client: TestClient, monkeypa
     assert resp.json()["spec"] == {"color": "green"}
 
 
-def test_get_own_source_invalid_spec_is_500(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("spec", [{"colour": "red"}, {"color": {}}], ids=["validation-error", "validator-key-error"])
+def test_get_own_source_invalid_spec_is_500(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, spec: dict[str, Any]
+) -> None:
     monkeypatch.setitem(
         _RECORDS,
         "widget-broken",
-        _job_record(name="widget-broken", source="widgets.paint", spec={"colour": "red"}),
+        _job_record(name="widget-broken", source="widgets.paint", spec=spec),
     )
 
     with TestClient(client.app, raise_server_exceptions=False) as unraised_client:

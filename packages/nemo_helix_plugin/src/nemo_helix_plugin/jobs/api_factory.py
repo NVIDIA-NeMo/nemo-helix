@@ -1493,7 +1493,7 @@ def job_route_factory(
             if job_resp.source != service_name:
                 try:
                     job_output_adapter.validate_python(deepcopy(job_resp.spec))
-                except ValidationError as exc:
+                except Exception as exc:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND, detail=f"Job '{name}' not found"
                     ) from exc
