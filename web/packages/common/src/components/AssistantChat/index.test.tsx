@@ -256,7 +256,7 @@ describe('AssistantChat', () => {
     );
   });
 
-  it('renders streamed reasoning as a collapsible thinking block', async () => {
+  it('renders streamed reasoning as a Thought step in a collapsed work group', async () => {
     const stream = {
       controller: new AbortController(),
       async *[Symbol.asyncIterator]() {
@@ -273,8 +273,9 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('Done.')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
-      'Thought processWeighing options.'
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent(/^Thought/);
+    expect(screen.getByTestId('assistant-work-thought')).toHaveTextContent(
+      'ThoughtWeighing options.'
     );
   });
 
@@ -303,7 +304,7 @@ describe('AssistantChat', () => {
     expect(onMessageComplete.mock.calls[0][0].tokensPerSec).toBeGreaterThan(0);
   });
 
-  it('passes streamed reasoning and tool calls to the tool call part component', async () => {
+  it('groups streamed reasoning and tool calls and hands tool calls to the part component', async () => {
     const toolCallChunk = {
       ...createCompletionChunk(''),
       choices: [
@@ -331,8 +332,8 @@ describe('AssistantChat', () => {
       <AssistantChat
         model="test-model"
         workspace="default"
-        toolCallPartComponent={({ toolName, args }) => (
-          <div data-testid="tool-part">{`${toolName}:${String(args.label ?? '')}`}</div>
+        toolCallPartComponent={({ toolName, toolCallId }) => (
+          <div data-testid="tool-part">{`${toolName}:${toolCallId}`}</div>
         )}
       />
     );
@@ -341,10 +342,12 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByTestId('tool-part')).toHaveTextContent(
-        'AssistantCollapsedStudioDetails:Work details'
-      )
+    const group = screen.getByTestId('assistant-work-group');
+    // Finished replies keep their real parts instead of folding into a "Work details" part.
+    expect(within(group).getByTestId('tool-part')).toHaveTextContent('search:call_a');
+    expect(within(group).getByTestId('assistant-work-thought')).toHaveTextContent('Plan.');
+    expect(within(group).getByTestId('assistant-work-group-label')).toHaveTextContent(
+      /^Ran 1 tool call · /
     );
   });
 
