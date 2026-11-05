@@ -294,7 +294,7 @@ Validate before you apply.
 1. Validate the rendered `evals` config. Pass the chart version and values files you installed with, then `harbor-profiles.yaml`. This needs the evals plugin of the chart's release in your Python environment, since another version may accept different keys:
 
    - Stable chart `0.10.0` → `pip install 'nemo-helix[nemo-evals-plugin]==0.10.0'`
-   
+
    ```bash
    helm template "$NHX_HELM_RELEASE" <chart> --version "$NHX_HELM_CHART_VERSION" -n "$NHX_NAMESPACE" -f values.yaml -f harbor-profiles.yaml \
      --show-only templates/platform-configmap.yaml \
