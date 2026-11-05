@@ -77,6 +77,7 @@ from nhx.core.jobs.controllers.backends.kubernetes.common import (
     KubernetesVolume,
     KubernetesVolumeMount,
     PodStatus,
+    _storage_cleanup_job_name,
     build_affinity,
     build_image_pull_secrets,
     build_metadata,
@@ -633,6 +634,7 @@ def test_cleanup_job_persistent_storage_applies_pod_security_context():
     assert sc.run_as_user == 2000
     assert sc.fs_group == 3000
     assert sc.run_as_non_root is True
+    assert body.metadata.name == _storage_cleanup_job_name("pvc", "ws", "jid")
 
 
 def test_cleanup_job_persistent_storage_omits_security_context_when_unconfigured():
@@ -694,6 +696,65 @@ def _cleanup_jobs(batch_v1: MagicMock, *jobs: client.V1Job) -> None:
     batch_v1.list_namespaced_job.return_value = SimpleNamespace(items=list(jobs))
 
 
+def test_cleanup_does_not_treat_another_pvcs_job_as_this_directory():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1, _cleanup_job("other-pvc-cleanup", pvc_name="other-pvc"))
+
+    cleanup_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        step_name="step",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+    batch_v1.create_namespaced_job.assert_called_once()
+
+
+def test_cleanup_keeps_the_job_another_caller_already_created():
+    batch_v1 = MagicMock()
+    _cleanup_jobs(batch_v1)
+    batch_v1.create_namespaced_job.side_effect = ApiException(status=409)
+
+    cleanup_job_persistent_storage(
+        namespace="ns",
+        batch_v1=batch_v1,
+        pvc_name="pvc",
+        workspace="ws",
+        job_id="jid",
+        step_name="other-step",
+        permissions_image="perm:img",
+        execution_backend="kubernetes_job",
+        execution_profile="default",
+        job_metadata=KubernetesObjectMetadata(),
+        pod_metadata=KubernetesObjectMetadata(),
+    )
+
+    assert batch_v1.create_namespaced_job.call_args.kwargs["body"].metadata.name == _storage_cleanup_job_name(
+        "pvc", "ws", "jid"
+    )
+
+
+def test_cleanup_job_name_is_a_short_hash_of_the_claim_and_folder():
+    """A second PVC, or a workspace that would truncate to the same prefix, is a different Job."""
+    shared = _storage_cleanup_job_name("pvc", "ws", "jid")
+    assert shared == _storage_cleanup_job_name("pvc", "ws", "jid")
+    assert shared != _storage_cleanup_job_name("other-pvc", "ws", "jid")
+    long_workspace = "workspace-" + ("a" * 80)
+    other_long_workspace = "workspace-" + ("b" * 80)
+    assert _storage_cleanup_job_name("pvc", long_workspace, "job") != _storage_cleanup_job_name(
+        "pvc", other_long_workspace, "job"
+    )
+    assert shared.startswith("cleanup-")
+    assert len(shared) <= 63
+
+
 def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
     batch_v1 = MagicMock()
     _cleanup_jobs(batch_v1)
@@ -705,11 +766,11 @@ def test_reclaim_starts_a_cleanup_job_and_reports_it_pending():
         f"{JOB_TYPE_LABEL}={JOB_TYPE_STORAGE_CLEANUP}",
         f"{JOB_WORKSPACE_ID_LABEL}=ws",
         f"{JOB_ID_LABEL}=jid",
-        f"{JOB_STEP_NAME_LABEL}=retention",
         f"{JOB_EXECUTION_BACKEND_LABEL}=kubernetes_job",
         f"{JOB_EXECUTION_PROFILE_LABEL}=default",
     ):
         assert label in selector
+    assert f"{JOB_STEP_NAME_LABEL}=" not in batch_v1.list_namespaced_job.call_args.kwargs["label_selector"]
     body = batch_v1.create_namespaced_job.call_args.kwargs["body"]
     assert all(body.metadata.labels[key] == value for key, value in (item.split("=") for item in selector))
     # Reclaim deletes the Job once it has seen it finish. A TTL could delete it before that.

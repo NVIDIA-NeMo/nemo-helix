@@ -23,6 +23,8 @@ import pytest
 from sandboxed_gym.environment_package import (
     WHEELS_V1_SUBDIR,
     EnvironmentMetadata,
+    NativeV1Manifest,
+    NativeV1Package,
     WheelsV1Manifest,
     WheelsV1Package,
 )
@@ -742,6 +744,84 @@ def test_an_operators_own_uv_offline_setting_is_not_overwritten(tmp_path, monkey
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "0"
 
 
+def test_packaged_server_is_staged_onto_the_gym_checkout_and_searched_first(tmp_path, monkeypatch):
+    package = tmp_path / "pkg" / "resources_servers" / "math_with_judge"
+    package.mkdir(parents=True)
+    (package / "app.py").write_text("print('packaged')\n")
+    (package / "requirements.txt").write_text("-e nemo-gym[dev] @ ../../\nmath-verify==0.8.0\n")
+    shared = tmp_path / "pkg" / "shared"
+    shared.mkdir()
+    (shared / "settings.json").write_text('{"from": "package"}\n')
+    (tmp_path / "pkg" / "resources_servers" / "settings.json").write_text('{"beside": "server"}\n')
+    reference = tmp_path / "pkg" / "resources_servers" / "builtin_judge" / "configs"
+    reference.mkdir(parents=True)
+    (reference / "builtin_judge.yaml").write_text("entrypoint: app.py\n")
+    image_reference = tmp_path / "gym" / "resources_servers" / "builtin_judge"
+    image_reference.mkdir(parents=True)
+    (image_reference / "app.py").write_text("print('image builtin')\n")
+    image_server = tmp_path / "gym" / "resources_servers" / "math_with_judge"
+    image_server.mkdir(parents=True)
+    (image_server / "app.py").write_text("print('image')\n")
+    (image_server / "requirements.txt").write_text("image\n")
+    (tmp_path / "gym" / "pyproject.toml").write_text("[project]\nname='gym'\n")
+    checkout_shared = tmp_path / "gym" / "shared"
+    checkout_shared.mkdir()
+    (checkout_shared / "settings.json").write_text('{"from": "checkout"}\n')
+    (checkout_shared / "keep.txt").write_text("keep\n")
+    (tmp_path / "gym" / "nemo_gym").mkdir()
+    (tmp_path / "gym" / "nemo_gym" / "__init__.py").write_text("image\n")
+    (tmp_path / "pkg" / "nemo_gym").mkdir()
+    (tmp_path / "pkg" / "nemo_gym" / "__init__.py").write_text("package\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(tmp_path / "gym"))
+    monkeypatch.delenv(runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY, raising=False)
+
+    loaded = NativeV1Package(
+        root=tmp_path / "pkg",
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    runtime._prepend_environment_search_root(str(loaded.root), checkout_first=True)
+
+    assert (image_server / "app.py").read_text() == "print('packaged')\n"
+    assert (tmp_path / "gym" / "shared" / "settings.json").read_text() == '{"from": "package"}\n'
+    assert (tmp_path / "gym" / "shared" / "keep.txt").read_text() == "keep\n"
+    assert (tmp_path / "gym" / "nemo_gym" / "__init__.py").read_text() == "image\n"
+    assert (tmp_path / "gym" / "resources_servers" / "settings.json").read_text() == '{"beside": "server"}\n'
+    assert (image_reference / "app.py").read_text() == "print('image builtin')\n"
+    assert not (image_reference / "configs").exists()
+    assert (tmp_path / "gym" / "pyproject.toml").is_file()
+    roots = runtime.os.environ[runtime.NEMO_GYM_EXTRA_ROOTS_ENV_KEY].split(os.pathsep)
+    assert roots[0] == str((tmp_path / "gym").resolve())
+    assert roots[1] == str(loaded.root)
+
+
+def test_a_reference_only_server_does_not_replace_the_image_checkout(tmp_path, monkeypatch):
+    package = tmp_path / "pkg" / "resources_servers" / "math_with_judge" / "configs"
+    package.mkdir(parents=True)
+    (package / "math_with_judge.yaml").write_text("entrypoint: app.py\n")
+    image_server = tmp_path / "gym" / "resources_servers" / "math_with_judge"
+    image_server.mkdir(parents=True)
+    (image_server / "app.py").write_text("print('image')\n")
+    monkeypatch.delenv(runtime.IMAGE_GYM_SRC_ENV_KEY, raising=False)
+    monkeypatch.setattr(runtime, "DEFAULT_IMAGE_GYM_SRC", str(tmp_path / "gym"))
+
+    loaded = NativeV1Package(
+        root=tmp_path / "pkg",
+        manifest=NativeV1Manifest(
+            metadata=EnvironmentMetadata(name="math-with-judge"),
+            config_paths=("resources_servers/math_with_judge/configs/math_with_judge.yaml",),
+        ),
+        config_paths=(),
+    )
+    assert not runtime._stage_packaged_servers_into_gym_checkout(loaded)
+    assert (image_server / "app.py").read_text() == "print('image')\n"
+
+
 def test_search_root_puts_the_image_gym_checkout_after_the_package(tmp_path, monkeypatch):
     package = tmp_path / "pkg"
     image = tmp_path / "gym"
@@ -987,8 +1067,13 @@ def test_bootstrap_installs_wheels_before_starting_gym(monkeypatch):
     )
     monkeypatch.setattr(
         runtime,
+        "_stage_packaged_servers_into_gym_checkout",
+        lambda loaded_package: False,
+    )
+    monkeypatch.setattr(
+        runtime,
         "_prepend_environment_search_root",
-        lambda environment_root: events.append("environment-root-prepended"),
+        lambda environment_root, **kwargs: events.append("environment-root-prepended"),
     )
     monkeypatch.setattr(
         runtime,

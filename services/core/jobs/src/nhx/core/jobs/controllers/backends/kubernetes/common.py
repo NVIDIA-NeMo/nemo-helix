@@ -3,10 +3,10 @@
 
 import copy
 import datetime
+import hashlib
 import json
 import logging
 import os
-import uuid
 from typing import Any
 
 from kubernetes import client
@@ -1200,6 +1200,22 @@ def cleanup_job_persistent_storage(
         pod_security_context: Same pod security context as workload jobs (runAsUser/fsGroup, etc.) so cleanup
             can remove files on NFS and similar storage where the workload user owns the data.
     """
+    # Workload cleanup and retention share this directory. A second rm races the first.
+    labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
+    labels.pop(JOB_STEP_NAME_LABEL, None)
+    selector = ",".join(f"{key}={value}" for key, value in labels.items())
+    inflight = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items or []
+    if any(
+        _finished_condition(item) != "Failed"
+        and any(
+            volume.name == JOB_STORAGE_VOLUME_NAME
+            and volume.persistent_volume_claim is not None
+            and volume.persistent_volume_claim.claim_name == pvc_name
+            for volume in item.spec.template.spec.volumes or []
+        )
+        for item in inflight
+    ):
+        return
     cleanup_job_name, cleanup_job = _storage_cleanup_job(
         namespace=namespace,
         pvc_name=pvc_name,
@@ -1220,6 +1236,9 @@ def cleanup_job_persistent_storage(
             extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
         )
     except ApiException as e:
+        # The name is the directory. The other creator won the race.
+        if e.status == 409:
+            return
         logger.error(
             "Failed to create persistent storage cleanup job",
             extra=dict(job=f"{workspace}/{job_id}", error=e),
@@ -1254,6 +1273,16 @@ STORAGE_CLEANUP_RESOURCES = client.V1ResourceRequirements(
 )
 
 
+def _storage_cleanup_job_name(pvc_name: str, workspace: str, job_id: str) -> str:
+    """DNS-1123 name for ``jobs/{workspace}/{job_id}`` on one PVC.
+
+    Hash the claim and the full folder. Truncating ``cleanup-{workspace}-{job_id}``
+    collides across claims and long names, and a 409 then leaves the second directory.
+    """
+    folder = f"{pvc_name}/{build_job_storage_subpath(workspace, job_id)}"
+    return f"cleanup-{hashlib.sha256(folder.encode()).hexdigest()[:16]}"
+
+
 def _storage_cleanup_job(
     namespace: str,
     pvc_name: str,
@@ -1269,7 +1298,8 @@ def _storage_cleanup_job(
 ) -> tuple[str, client.V1Job]:
     """Build the Job that removes a job's storage directory, and return its name and body."""
     job_storage_subpath = build_job_storage_subpath(workspace, job_id)
-    cleanup_job_name = f"cleanup-{workspace}-{job_id}-{uuid.uuid4().hex[:8]}"[:63].rstrip("-")
+    # Stable name: a second creator for this directory gets 409 instead of a second rm.
+    cleanup_job_name = _storage_cleanup_job_name(pvc_name, workspace, job_id)
     cleanup_common_labels = _storage_cleanup_labels(workspace, job_id, step_name, execution_backend, execution_profile)
 
     job_meta = build_metadata(cleanup_common_labels, job_metadata)
@@ -1356,6 +1386,7 @@ def reclaim_job_persistent_storage(
     call starts a new one.
     """
     labels = _storage_cleanup_labels(workspace, job_id, STORAGE_RECLAIM_STEP_NAME, execution_backend, execution_profile)
+    labels.pop(JOB_STEP_NAME_LABEL, None)
     selector = ",".join(f"{key}={value}" for key, value in labels.items())
     cleanup_jobs = batch_v1.list_namespaced_job(namespace=namespace, label_selector=selector).items
     # Providers may use the same profile name with different PVCs. A cleanup of one
@@ -1388,11 +1419,16 @@ def reclaim_job_persistent_storage(
         # Finished reclaim Jobs are deleted here. A TTL could delete one before it is seen to
         # succeed, and the next call would start another.
         cleanup_job.spec.ttl_seconds_after_finished = None
-        batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
-        logger.info(
-            "Created storage reclaim job",
-            extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
-        )
+        try:
+            batch_v1.create_namespaced_job(namespace=namespace, body=cleanup_job)
+        except ApiException as e:
+            if e.status != 409:
+                raise
+        else:
+            logger.info(
+                "Created storage reclaim job",
+                extra=dict(cleanup_job_name=cleanup_job_name, job=f"{workspace}/{job_id}"),
+            )
         return False
 
     outcomes = [_finished_condition(cleanup_job) for cleanup_job in cleanup_jobs]
