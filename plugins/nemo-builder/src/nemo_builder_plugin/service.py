@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from typing import ClassVar, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -28,7 +29,7 @@ from nemo_builder_plugin.config import BuilderConfig
 from nemo_builder_plugin.entities import ContainerImage
 from nemo_builder_plugin.identity import ImageReference
 from nemo_builder_plugin.schema import BuildSet, SubmitBuildResponse
-from nemo_builder_plugin.settle import JobStatus, job_status_from, settle
+from nemo_builder_plugin.settle import job_status_from, settle
 from nemo_builder_plugin.submit import (
     BuildConflict,
     InvalidBuildRequest,
@@ -42,13 +43,14 @@ from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.dependencies import get_nemo_client
+from nemo_helix_plugin.entities import EntityClient
+from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityNotFoundError,
     get_entity_client,
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
-from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
@@ -63,15 +65,21 @@ async def _get_row(entity_client: NemoEntitiesClient, workspace: str, name: str)
         raise HTTPException(status_code=404, detail=f"Container image '{name}' not found.") from exc
 
 
-async def _job_status(workspace: str, name: str) -> HelixJobStatus | None:
-    # As the builder, not the reader: a reader who may not see the job must not have it taken for missing.
+#: ``image`` as it stands once settled: failed if its job abandoned it.
+Settle = Callable[[ContainerImage], Awaitable[ContainerImage]]
+
+
+async def _settle_as_builder(image: ContainerImage) -> ContainerImage:
+    # As the builder, not the reader: a reader who may not see the job must not have it taken for missing, and one
+    # who may not write the image must not be refused, nor have the failure written in their name.
     async with get_async_nemo_client(as_service="builder", internal=True) as client:
-        return await job_status_from(AsyncJobsClient.from_client(client))(workspace, name)
+        rows = EntityClient(AsyncEntitiesClient.from_client(client))
+        return (await settle(rows, [image], job_status_from(AsyncJobsClient.from_client(client))))[0]
 
 
-def get_job_status() -> JobStatus:
-    """How reading an image reads its build job's status, to settle it if the job abandoned it."""
-    return _job_status
+def get_settle() -> Settle:
+    """How reading an image settles it, if its job abandoned it."""
+    return _settle_as_builder
 
 
 class BuilderService(NemoService):
@@ -224,7 +232,7 @@ def _build_router() -> APIRouter:
         name: str,
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
         caller: Caller = Depends(current_caller),
-        job_status: JobStatus = Depends(get_job_status),
+        settle_image: Settle = Depends(get_settle),
     ) -> ContainerImage:
         """Read one image. This is what a caller polls until `status` leaves `pending`.
 
@@ -234,7 +242,7 @@ def _build_router() -> APIRouter:
         refusal = read_refusal(row, caller)
         if refusal is not None:
             raise HTTPException(status_code=403, detail=refusal)
-        return (await settle(entity_client, [row], job_status))[0]
+        return await settle_image(row)
 
     @router.post("/container-images/{name}/complete", response_model=ContainerImage, tags=["Builder"])
     @scope.write

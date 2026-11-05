@@ -16,7 +16,8 @@ from fastapi.testclient import TestClient
 from nemo_builder_plugin import service
 from nemo_builder_plugin.completion import Caller, current_caller, submit_refusal
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.service import BuilderService, get_job_status
+from nemo_builder_plugin.service import BuilderService, get_settle
+from nemo_builder_plugin.settle import settle
 from nemo_builder_plugin.submit import SubmitResult
 from nemo_helix_plugin.authz import CallerKind, get_path_rules
 from nemo_helix_plugin.client.client import AsyncNemoClient
@@ -25,7 +26,13 @@ from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, get_entity_
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
 
-def _app(entities: AsyncMock, caller: Caller = Caller(auth=False), job_status: AsyncMock | None = None) -> FastAPI:
+def _app(
+    entities: AsyncMock,
+    caller: Caller = Caller(auth=False),
+    job_status: AsyncMock | None = None,
+    builder: AsyncMock | None = None,
+) -> FastAPI:
+    """``entities`` is the caller's entity store; ``builder`` the builder's, which settling writes through."""
     app = FastAPI()
     for spec in BuilderService().get_routers():
         app.include_router(spec.router, prefix=spec.prefix)
@@ -33,7 +40,12 @@ def _app(entities: AsyncMock, caller: Caller = Caller(auth=False), job_status: A
     app.dependency_overrides[current_caller] = lambda: caller
     # Every build job still running, unless a test says otherwise.
     jobs = job_status or AsyncMock(return_value=HelixJobStatus.ACTIVE)
-    app.dependency_overrides[get_job_status] = lambda: jobs
+    rows = builder or AsyncMock(update=AsyncMock(side_effect=lambda updated: updated))
+
+    async def settle_as_builder(image: ContainerImage) -> ContainerImage:
+        return (await settle(rows, [image], jobs))[0]
+
+    app.dependency_overrides[get_settle] = lambda: settle_as_builder
     return app
 
 
@@ -263,12 +275,15 @@ class TestReadingOneImage:
 
     def test_a_pending_image_whose_job_ended_fails_as_it_is_read(self) -> None:
         entities = _entities(_row())
+        builder = _entities(_row())
         job_status = AsyncMock(return_value=HelixJobStatus.COMPLETED)
-        response = TestClient(_app(entities, job_status=job_status)).get(IMAGE)
+        response = TestClient(_app(entities, job_status=job_status, builder=builder)).get(IMAGE)
         assert response.status_code == 200
         assert response.json()["status"] == "failed"
         assert "ended (completed) without publishing it" in response.json()["status_detail"]
-        entities.update.assert_awaited_once()
+        # As the builder: a reader who may not write the image must not be refused, nor be its writer.
+        builder.update.assert_awaited_once()
+        entities.update.assert_not_awaited()
 
     def test_a_pending_image_whose_job_runs_is_read_as_it_is(self) -> None:
         entities = _entities(_row())
@@ -279,10 +294,11 @@ class TestReadingOneImage:
     def test_a_refused_reader_settles_nothing(self) -> None:
         entities = _entities(_row())
         job_status = AsyncMock(return_value=HelixJobStatus.ERROR)
-        app = _app(entities, Caller(auth=True, actor="service:evals"), job_status=job_status)
+        builder = _entities(_row())
+        app = _app(entities, Caller(auth=True, actor="service:evals"), job_status=job_status, builder=builder)
         assert TestClient(app).get(IMAGE).status_code == 403
         job_status.assert_not_awaited()
-        entities.update.assert_not_awaited()
+        builder.update.assert_not_awaited()
 
 
 class TestSubmitting:
