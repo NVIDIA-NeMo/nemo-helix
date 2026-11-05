@@ -22,7 +22,7 @@ interface WorkPartLike {
   readonly args?: unknown;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // Job progress cards stay visible next to the answer instead of hiding in the collapsed group.
@@ -111,7 +111,7 @@ export const getWorkGroupLabel = ({
     : summary;
 };
 
-const FILE_PATH_KEYS = ['file_path', 'filePath', 'path', 'filename', 'file_name', 'file'];
+export const FILE_PATH_KEYS = ['file_path', 'filePath', 'path', 'filename', 'file_name', 'file'];
 const FILE_CONTENT_KEYS = ['content', 'contents', 'new_string', 'newString', 'new_content', 'text'];
 
 export interface FileEdit {

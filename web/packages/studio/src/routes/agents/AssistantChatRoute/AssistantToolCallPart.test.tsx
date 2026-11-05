@@ -67,7 +67,7 @@ describe('AssistantToolCallPart', () => {
     expect(within(step).getByText('Result')).toBeInTheDocument();
   });
 
-  it('labels a running tool call as Calling and a failed result as Error', () => {
+  it('labels a running known tool with its running action and a failed result as Error', () => {
     renderPart({
       args: { command: 'pwd' },
       isError: true,
@@ -77,19 +77,28 @@ describe('AssistantToolCallPart', () => {
     });
 
     const step = screen.getByTestId('assistant-work-tool-call');
-    expect(step).toHaveTextContent('Calling Bash');
+    expect(step).toHaveTextContent('Running command pwd');
     expect(within(step).getByText('Error')).toHaveClass('text-feedback-danger');
   });
 
-  it('renders a tool with a file path and content as an Edited step', () => {
+  it('renders a known file tool as a file step with its action text', () => {
     renderPart({
       args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
       toolName: 'Write',
     });
 
     const step = screen.getByTestId('assistant-work-file-edit');
-    expect(step).toHaveTextContent('Edited MEMORY.md');
+    expect(step).toHaveTextContent('Wrote file MEMORY.md');
     expect(within(step).getByText('src/notes/MEMORY.md')).toBeInTheDocument();
+  });
+
+  it('renders an unknown tool with file-edit arguments as an Edited step', () => {
+    renderPart({
+      args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
+      toolName: 'save_note',
+    });
+
+    expect(screen.getByTestId('assistant-work-file-edit')).toHaveTextContent('Edited MEMORY.md');
   });
 
   it('keeps a failed file write as a tool call so its error shows', () => {
@@ -102,7 +111,7 @@ describe('AssistantToolCallPart', () => {
 
     expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
     const step = screen.getByTestId('assistant-work-tool-call');
-    expect(step).toHaveTextContent('Called Write');
+    expect(step).toHaveTextContent('Wrote file MEMORY.md');
     expect(within(step).getByText('Error')).toBeInTheDocument();
   });
 
@@ -120,8 +129,8 @@ describe('AssistantToolCallPart', () => {
     const steps = screen.getAllByTestId('assistant-work-tool-call');
     expect(steps.map((step) => step.textContent)).toEqual(
       expect.arrayContaining([
-        expect.stringContaining('Called Read'),
-        expect.stringContaining('Called Grep'),
+        expect.stringContaining('Read file README.md'),
+        expect.stringContaining('Searched text AssistantChat'),
       ])
     );
   });

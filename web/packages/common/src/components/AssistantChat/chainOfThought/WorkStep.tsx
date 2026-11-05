@@ -15,7 +15,8 @@ export const WORK_ICON_SIZE = '12';
 // The work group reads as quiet rows on the canvas rather than KUI's default panel: no fill,
 // hover background, or dividers, regular-weight labels that brighten when open, and no horizontal
 // padding so rows line up with the edges of the reply. KUI shrinks nested accordion labels to
-// 12px; the design keeps every row at 14px.
+// 12px; the design keeps every row at 14px. Titles have a fixed 16px line height so rows stay the
+// same height whatever fonts the title mixes.
 export const WORK_ACCORDION_CLASS = {
   root: 'w-full min-w-0 bg-transparent [--nv-accordion-label-font-size:var(--text-14)] [--nv-accordion-trigger-bg-hover:transparent] [--nv-accordion-trigger-padding:calc(var(--spacing)*3)_0]',
   item: 'border-b-0',
@@ -65,7 +66,7 @@ export const WorkAccordion = ({
       >
         <Flex align="center" gap="inherit" className="min-w-0">
           {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
-          <span className="min-w-0 truncate" data-testid={titleTestId}>
+          <span className="h-4 min-w-0 truncate leading-4" data-testid={titleTestId}>
             {title}
           </span>
         </Flex>

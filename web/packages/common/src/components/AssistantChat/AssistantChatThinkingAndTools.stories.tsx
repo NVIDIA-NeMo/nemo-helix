@@ -229,6 +229,25 @@ export const LiveStream: Story = {
   },
 };
 
+// One call per entry in TOOL_STEP_DEFINITIONS, with names in the styles different agents use.
+const KNOWN_TOOL_EXAMPLES: readonly { readonly toolName: string; readonly args: object }[] = [
+  { toolName: 'Bash', args: { command: 'pnpm --filter @nemo/common test' } },
+  { toolName: 'read_file', args: { file_path: 'web/packages/common/README.md' } },
+  { toolName: 'Write', args: { file_path: 'notes/MEMORY.md', content: '- Pack an umbrella' } },
+  { toolName: 'Edit', args: { file_path: 'src/app.ts', old_string: 'foo', new_string: 'bar' } },
+  { toolName: 'Glob', args: { pattern: '**/*.stories.tsx' } },
+  { toolName: 'Grep', args: { pattern: 'ToolCallStep' } },
+  { toolName: 'list_directory', args: { path: 'web/packages' } },
+  { toolName: 'web_search', args: { query: 'Paris weather tomorrow' } },
+  { toolName: 'WebFetch', args: { url: 'https://example.com/forecast' } },
+  { toolName: 'TodoWrite', args: { todos: [{}, {}, {}] } },
+  { toolName: 'TaskCreate', args: { description: 'Summarize the eval results' } },
+  { toolName: 'TaskUpdate', args: { task: 'Summarize the eval results', status: 'done' } },
+  { toolName: 'AskUserQuestion', args: { question: 'Which dataset should I use?' } },
+  { toolName: 'ToolSearch', args: { query: 'calendar' } },
+  { toolName: 'mcp__studio__Skill', args: { skill: 'nemo-status' } },
+];
+
 const GalleryLabel = ({ children }: { readonly children: string }) => (
   <Text kind="label/bold/sm" className="text-secondary">
     {children}
@@ -282,6 +301,13 @@ export const ComponentGallery: Story = {
       <Stack gap="density-sm">
         <GalleryLabel>Tool call still running</GalleryLabel>
         <ToolCallStep defaultOpen toolName="search_web" args={{ query: 'Paris weather' }} running />
+      </Stack>
+      <Stack gap="density-sm">
+        <GalleryLabel>Known tools</GalleryLabel>
+        {KNOWN_TOOL_EXAMPLES.map(({ toolName, args }) => (
+          <ToolCallStep key={toolName} toolName={toolName} args={args} result="ok" />
+        ))}
+        <ToolCallStep toolName="Bash" args={{ command: 'make test' }} running />
       </Stack>
     </Stack>
   ),
