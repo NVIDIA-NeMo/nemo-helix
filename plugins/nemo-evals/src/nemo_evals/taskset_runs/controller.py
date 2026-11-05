@@ -48,6 +48,7 @@ from filesets import AsyncFilesetFileSystem, parse_fileset_ref
 from nemo_evals.config import RunControllerConfig
 from nemo_evals.entities import AgentEvalResultEntity
 from nemo_evals.jobs.agent_evaluate import DEFAULT_RESULT_NAME, SUMMARY_FILE_NAME
+from nemo_evals.jobs.agent_spec import HarborRunnerTarget
 from nemo_evals.jobs.publication import PublicationOutcome
 from nemo_evals.jobs.result_persistence import agent_eval_result_entity
 from nemo_evals.jobs.run_outcome import PUBLICATION_STATUS_KEY
@@ -75,6 +76,7 @@ from nemo_evals.taskset_runs.task_jobs import (
     runs_request,
     task_job_request,
 )
+from nemo_evals.taskset_runs.trials import TrialCounts, count_trials, reported_trials
 from nemo_helix_plugin.auth import RuntimePrincipal
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoTransportError, NotFoundError
@@ -555,7 +557,9 @@ class TasksetRunReconciler:
         for index in range(len(plan.spec.tasks)):
             if index in have:
                 continue
-            created = await self.store.create_member(state.run, index)
+            created = await self.store.create_member(
+                state.run, index, plan.spec.tasks[index].id, planned_trials=_planned_trials(plan)
+            )
             if created is None:
                 raise MemberListingIncompleteError(
                     f"run {state.run.name}: member task-{index} exists but wasn't listed"
@@ -662,7 +666,7 @@ class TasksetRunReconciler:
         jobs: RunJobs,
         stop: TasksetRunPhase | None,
     ) -> None:
-        """P4: settle a registered member whose Job ended; record a changed ``job_status`` otherwise.
+        """P4: settle a registered member whose Job ended; record a changed ``job_status`` or trial counts otherwise.
 
         ``job`` is what the run's Jobs list read under the member's name (None: no Job there). Ours only when its
         id is ``member.job_id``: Jobs deletes only ended Jobs, so another id under the name means ours ended and
@@ -681,8 +685,9 @@ class TasksetRunReconciler:
             state.replace(await self.store.update_member(member, phase=phase, error="job_missing"))
         elif status not in TERMINAL_JOB_STATUSES:
             state.matched.add(member.name)
-            if job.status != member.job_status:
-                state.replace(await self.store.update_member(member, job_status=job.status))
+            counts = _trial_counts(job) or member.trial_counts
+            if job.status != member.job_status or counts != member.trial_counts:
+                state.replace(await self.store.update_member(member, job_status=job.status, trial_counts=counts))
         elif result is not None and result.job != member.job_id:
             # The name changed hands between the two reads; the next read sees the other id and settles it.
             logger.info("Run %s: Job %s was replaced before its result was read", state.run.name, member.task_job)
@@ -694,6 +699,7 @@ class TasksetRunReconciler:
                     bundle_ref=result.artifact_url,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
         else:
@@ -707,6 +713,7 @@ class TasksetRunReconciler:
                     error=error,
                     job_status=job.status,
                     publication=_publication(job),
+                    trial_counts=_trial_counts(job) or member.trial_counts,
                 )
             )
 
@@ -848,7 +855,12 @@ class TasksetRunReconciler:
                 ended = f"{error}; its Job ended {_status(job)}"
                 state.replace(
                     await self.store.update_member(
-                        member, phase=phase, error=ended, job_status=job.status, publication=_publication(job)
+                        member,
+                        phase=phase,
+                        error=ended,
+                        job_status=job.status,
+                        publication=_publication(job),
+                        trial_counts=_trial_counts(job) or member.trial_counts,
                     )
                 )
                 return
@@ -1359,6 +1371,18 @@ def _publication(job: HelixJobResponse) -> PublicationOutcome | None:
     except ValidationError as exc:
         logger.warning("Job %s reported a publication that doesn't validate: %s", job.name, exc)
         return None
+
+
+def _planned_trials(plan: TasksetRunPlan) -> int | None:
+    """Trials each task Job runs: one task, ``n_attempts`` times; None for a target that isn't a Harbor runner."""
+    target = plan.spec.target
+    return target.n_attempts if isinstance(target, HarborRunnerTarget) else None
+
+
+def _trial_counts(job: HelixJobResponse) -> TrialCounts | None:
+    """The Job's trials counted by phase, as it last reported them; None when it reported none we can read."""
+    trials = reported_trials(job.status_details)
+    return count_trials(trials) if trials else None
 
 
 class JobsServiceRunJobs:

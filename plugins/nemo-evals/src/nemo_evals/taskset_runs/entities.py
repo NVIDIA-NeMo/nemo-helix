@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import ClassVar, Self
 
 from nemo_evals.jobs.publication import PublicationOutcome
+from nemo_evals.taskset_runs.trials import TrialCounts
 from nemo_helix_plugin.auth import AuthContext
 from nemo_helix_plugin.entities import EntityBase
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
@@ -187,6 +188,10 @@ class TasksetRunMemberEntity(EntityBase):
     __entity_type__: ClassVar[str] = "taskset_run_member"
 
     task_index: int = Field(ge=0, description="Zero-based index of the task in the run's resolved task list.")
+    task_name: str | None = Field(
+        default=None,
+        description="The task's id in the plan (a Harbor task's native id), copied when the member is created.",
+    )
     phase: MemberPhase = Field(description="Image preparation and execution progress of this task.")
     task_job: str | None = Field(
         default=None,
@@ -215,6 +220,14 @@ class TasksetRunMemberEntity(EntityBase):
         description=(
             "What the task published to Intake, as its ended Job reported it when the member settled; None when "
             "the Job reported nothing or the member settled without reading an ended Job."
+        ),
+    )
+    trial_counts: TrialCounts | None = Field(
+        default=None,
+        description=(
+            "The task Job's trials counted by phase, as the controller last read them; display only, at most one "
+            "cycle old. Every planned trial counts as pending until the Job reports; None for runs created before "
+            "trial counts were added."
         ),
     )
     create_sent_at: datetime | None = Field(
