@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  buildWorkspaceGroup,
+  type ModelWorkspaceGroup,
+} from '@nemo/common/src/api/models/useModels';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
 import {
   modelsFromProviders,
@@ -15,6 +19,8 @@ import { useFormContext } from 'react-hook-form';
 interface AnonymizerModels {
   readonly models: DataDesignerModelOption[];
   readonly items: { label: string; value: string }[];
+  /** The same models grouped by workspace, for the shared model picker. */
+  readonly groups: ModelWorkspaceGroup[];
   readonly isLoading: boolean;
   readonly applyModel: (role: string, id: string) => void;
 }
@@ -38,6 +44,13 @@ export const useAnonymizerModels = (): AnonymizerModels => {
     () => models.map((model) => ({ label: model.name, value: model.id })),
     [models]
   );
+  const groups = useMemo(() => {
+    const byWorkspace = new Map<string, DataDesignerModelOption[]>();
+    for (const model of models) {
+      byWorkspace.set(model.workspace, [...(byWorkspace.get(model.workspace) ?? []), model]);
+    }
+    return [...byWorkspace].map(([name, entries]) => buildWorkspaceGroup(name, entries));
+  }, [models]);
 
   const applyModel = useCallback(
     (role: string, id: string) => {
@@ -52,5 +65,5 @@ export const useAnonymizerModels = (): AnonymizerModels => {
     [models, setValue]
   );
 
-  return { models, items, isLoading, applyModel };
+  return { models, items, groups, isLoading, applyModel };
 };
