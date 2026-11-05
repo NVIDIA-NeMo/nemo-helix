@@ -1005,6 +1005,13 @@ authz:
         scopes:
         - intake:write
         - platform:write
+    /apis/intake/v2/workspaces/{workspace}/evaluations/compare:
+      get:
+        permissions:
+        - intake.evaluations.read
+        scopes:
+        - intake:read
+        - platform:read
     /apis/intake/v2/workspaces/{workspace}/evaluations/{name}:
       delete:
         permissions:

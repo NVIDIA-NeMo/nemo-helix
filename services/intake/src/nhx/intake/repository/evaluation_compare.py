@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from nhx.intake.experiments.compare import CompareMetric, EvaluationMetricSession
 
 
-
 class EvaluationCompareRepository(ABC):
     """Domain-facing interface for the per-session inputs of a comparison."""
 

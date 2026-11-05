@@ -157,9 +157,16 @@ def test_compare_interval_is_deterministic_for_the_fixed_seed() -> None:
     second = compare_test_case_means(baseline, candidate, metric)
 
     assert first == second
-    assert first.interval_low is not None and first.interval_high is not None
-    assert first.interval_low <= first.mean_paired_difference <= first.interval_high
-    assert 0.0 <= first.p_candidate_better <= 1.0
+    mean = first.mean_paired_difference
+    low = first.interval_low
+    high = first.interval_high
+    probability = first.p_candidate_better
+    assert mean is not None
+    assert low is not None
+    assert high is not None
+    assert probability is not None
+    assert low <= mean <= high
+    assert 0.0 <= probability <= 1.0
 
 
 def test_compare_interval_brackets_a_clear_improvement() -> None:

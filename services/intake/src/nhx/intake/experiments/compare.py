@@ -63,6 +63,13 @@ class CompareMetric:
     id: str
     higher_is_better: bool
 
+    @property
+    def evaluator_name(self) -> str | None:
+        """The evaluator this metric reads, or None for a rollup metric."""
+        if not self.id.startswith(_EVALUATOR_METRIC_PREFIX):
+            return None
+        return self.id[len(_EVALUATOR_METRIC_PREFIX) :]
+
 
 def parse_compare_metric(metric: str) -> CompareMetric:
     """Parse a metric id into a :class:`CompareMetric`.

@@ -9,6 +9,12 @@ from dataclasses import dataclass
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities.client import EntityClient, EntityNotFoundError
 from nhx.intake.entities.experiments import Experiment as Evaluation
+from nhx.intake.experiments.compare import (
+    PairedComparison,
+    compare_evaluation_sessions,
+    parse_compare_metric,
+)
+from nhx.intake.repository.evaluation_compare import EvaluationCompareRepository
 from nhx.intake.repository.evaluation_rollup import EvaluationRollup, EvaluationRollupRepository
 from nhx.intake.repository.evaluation_session import (
     EvaluationSessionPage,
@@ -70,10 +76,12 @@ class EvaluationReadService:
         entity_client: EntityClient,
         rollup_repository: EvaluationRollupRepository | None,
         session_repository: EvaluationSessionRepository | None,
+        compare_repository: EvaluationCompareRepository | None = None,
     ) -> None:
         self._entities = entity_client
         self._rollups = rollup_repository
         self._sessions = session_repository
+        self._compare = compare_repository
 
     async def list_evaluations(
         self,
@@ -168,6 +176,45 @@ class EvaluationReadService:
                 _sanitize_for_log(evaluation_name),
             )
             raise EvaluationTelemetryUnavailableError(configured=True) from exc
+
+    async def compare_evaluations(
+        self,
+        *,
+        workspace: str,
+        baseline_name: str,
+        candidate_name: str,
+        metric_id: str,
+    ) -> PairedComparison:
+        """Pair two evaluations per test case on one metric and bootstrap the difference.
+
+        The comparison needs telemetry: without ClickHouse there is no per-session
+        metric to pair, so an unavailable store is an error rather than an empty result.
+        """
+        # Parse first so a bad metric fails fast, before any store is touched.
+        metric = parse_compare_metric(metric_id)
+        await self._get_live_evaluation(workspace=workspace, name=baseline_name)
+        await self._get_live_evaluation(workspace=workspace, name=candidate_name)
+        if self._compare is None:
+            raise EvaluationTelemetryUnavailableError(configured=False)
+        try:
+            sessions = await self._compare.get_metric_sessions(
+                workspace=workspace,
+                evaluation_names=[baseline_name, candidate_name],
+                metric=metric,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Evaluation comparison read failed for workspace=%s baseline=%s candidate=%s",
+                _sanitize_for_log(workspace),
+                _sanitize_for_log(baseline_name),
+                _sanitize_for_log(candidate_name),
+            )
+            raise EvaluationTelemetryUnavailableError(configured=True) from exc
+        return compare_evaluation_sessions(
+            (session for session in sessions if session.evaluation_name == baseline_name),
+            (session for session in sessions if session.evaluation_name == candidate_name),
+            metric,
+        )
 
     async def _get_live_evaluation(self, *, workspace: str, name: str) -> Evaluation:
         try:
