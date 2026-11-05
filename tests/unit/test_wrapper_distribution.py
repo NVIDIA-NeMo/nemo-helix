@@ -31,6 +31,24 @@ def test_all_extra_bundles_default_deployments_backend() -> None:
     assert project["entry-points"]["nemo.skills"]["deployments"].startswith("nemo_deployments_plugin.")
 
 
+def test_evals_plugin_bundles_sandbox_dependency_closure() -> None:
+    """Service discovery imports sandbox schemas even without executing a trial."""
+    pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
+    with pyproject_path.open("rb") as pyproject:
+        wrapper = tomllib.load(pyproject)
+    with (ROOT / "packages/nhx_sandbox/pyproject.toml").open("rb") as pyproject:
+        sandbox = tomllib.load(pyproject)
+
+    bundle = wrapper["tool"]["bundle-package"]["nhx-sandbox"]
+    assert bundle["module"] == "nhx_sandbox"
+    source = (pyproject_path.parent / bundle["source"]).resolve()
+    assert source == ROOT / "packages/nhx_sandbox/src/nhx_sandbox"
+    assert (source / "harbor_opensandbox_services.py").is_file()
+    extras = wrapper["project"]["optional-dependencies"]
+    assert "nhx-sandbox" in extras["nemo-evals-plugin"]
+    assert extras["nhx-sandbox"] == sandbox["project"]["dependencies"]
+
+
 def test_harness_extras_include_agents_plugin_dependencies() -> None:
     pyproject_path = ROOT / "packages/nemo_helix/pyproject.toml"
     with open(pyproject_path, "rb") as pyproject:
