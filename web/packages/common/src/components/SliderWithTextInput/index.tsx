@@ -64,6 +64,9 @@ export const SliderWithTextInput = ({
   displayName,
 }: SliderWithTextInputProps) => {
   const [draftValue, setDraftValue] = useState<string | null>(null);
+  // Name the controls after a visible text label when there is one; the label is not tied to them.
+  const accessibleLabel =
+    typeof formFieldProps?.slotLabel === 'string' ? formFieldProps.slotLabel : undefined;
 
   const handleSliderChange = (newValue: number) => {
     const clampedValue = clamp(newValue, min, max);
@@ -161,7 +164,7 @@ export const SliderWithTextInput = ({
           disabled={disabled}
           stepPosition={showStepMarkers ? (attributes?.Slider?.stepPosition ?? 'end') : undefined}
           customSteps={attributes?.Slider?.customSteps ?? [min, max]}
-          aria-label="Controlled slider"
+          aria-label={accessibleLabel ?? 'Controlled slider'}
           stepFormatFn={attributes?.Slider?.stepFormatFn ?? toScientificNotation}
           {...attributes?.Slider}
           onValueChange={handleSliderChange}
@@ -185,7 +188,9 @@ export const SliderWithTextInput = ({
         onBlur={handleTextInputBlur}
         attributes={{
           Input: {
-            'aria-label': `${id || 'slider'}_text_input`,
+            'aria-label': accessibleLabel
+              ? `${accessibleLabel} value`
+              : `${id || 'slider'}_text_input`,
             className: 'text-center',
           },
         }}

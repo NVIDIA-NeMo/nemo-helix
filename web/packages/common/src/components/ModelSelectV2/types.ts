@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
+import type { InferenceParametersProps } from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
 import type { InferenceParams, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 export interface ModelSelection {
@@ -80,6 +81,15 @@ export interface ModelSelectProps {
   inferenceParams?: Partial<InferenceParams>;
   /** Called when the user changes any inference parameter */
   onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
+  /**
+   * Disable the params control on its own. Defaults to {@link disabled}; pass `false` to keep
+   * params editable while the model is fixed (e.g. a locked chat panel).
+   */
+  paramsDisabled?: boolean;
+  /** Per-field bounds and defaults for the params control, for callers whose backend differs. */
+  paramsFieldMetadata?: InferenceParametersProps['fieldMetadata'];
+  /** The params to show, for callers whose request only carries some of them. Defaults to all. */
+  paramsFields?: InferenceParametersProps['fields'];
   /** Called when the model dropdown opens or closes */
   onOpenChange?: (open: boolean) => void;
   /** aria-label for the button group */

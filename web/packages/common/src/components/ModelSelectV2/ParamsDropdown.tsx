@@ -20,11 +20,13 @@ import type { FC } from 'react';
 
 export interface ParamsDropdownProps {
   disabled?: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  /** Controlled open state. Leave both unset to let the dropdown manage it. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   inferenceParams?: Partial<InferenceParams>;
   onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
   fieldMetadata?: InferenceParametersProps['fieldMetadata'];
+  fields?: InferenceParametersProps['fields'];
 }
 
 export const ParamsDropdown: FC<ParamsDropdownProps> = ({
@@ -34,6 +36,7 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
   inferenceParams = {},
   onInferenceParamsChange,
   fieldMetadata,
+  fields,
 }) => (
   <DropdownRoot open={open} onOpenChange={onOpenChange}>
     <DropdownTrigger asChild showChevron={false}>
@@ -66,6 +69,7 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
           onChange={onInferenceParamsChange ?? (() => {})}
           disabled={disabled}
           fieldMetadata={fieldMetadata}
+          fields={fields}
         />
       </Stack>
     </DropdownContent>
