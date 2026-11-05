@@ -21,11 +21,7 @@ from nemo_helix_ext.cli.commands.skills.base import (
 
 logger = logging.getLogger(__name__)
 
-# Manifest file recording the skill directories this installer wrote, kept
-# beside the installed skills (one per skills root, so project scope, user
-# scope, and `--path` each get their own). Only files recorded here are ever
-# removed by a pruning full install; directories written before this record
-# existed are left alone.
+# One per skills root. A pruning install only ever removes directories recorded here.
 INSTALLED_SKILLS_MANIFEST_NAME = ".nemo-helix-installed-skills.json"
 
 
@@ -56,11 +52,8 @@ def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
     """Write the manifest last, after all writes and removals for this install."""
     skills_root.mkdir(parents=True, exist_ok=True)
     manifest_path = skills_root / INSTALLED_SKILLS_MANIFEST_NAME
-    # A kept name can also be one this call wrote (overwrite), so dedupe.
     payload = json.dumps({"owned": sorted(set(owned))}, indent=2) + "\n"
-    # Write to a fresh file in the same directory, then rename it into place:
-    # a crash mid-write leaves the previous record intact, and a symlink
-    # planted at the manifest path is replaced rather than followed.
+    # Rename into place: a crash mid-write keeps the old record, and a planted symlink is replaced, not followed.
     fd, tmp_name = tempfile.mkstemp(dir=skills_root, prefix=INSTALLED_SKILLS_MANIFEST_NAME, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
@@ -72,29 +65,23 @@ def _write_owned_directories(skills_root: Path, owned: list[str]) -> None:
 
 
 def _remove_if_owned(skills_root: Path, name: str) -> bool:
-    """Remove ``skills_root/name`` when it is a directory this installer owns.
-
-    Safety checks, in order: the name must be a single path segment carrying
-    the installed-skill prefix (the only names this installer writes), the
-    resolved target must stay inside ``skills_root`` (symlinks pointing out
-    are left alone), and anything that is not a directory is left alone. A
-    missing directory counts as already removed.
-    """
+    """Remove a recorded skill directory; True when it is gone, False when it was left alone."""
     if not _is_single_path_segment(name) or not name.startswith(INSTALLED_SKILL_PREFIX):
         return False
     target = skills_root / name
-    if not target.exists() and not target.is_symlink():
-        return True  # Already gone; treat the recorded name as removed.
     root_resolved = skills_root.resolve()
     target_resolved = target.resolve()
     if target_resolved == root_resolved or root_resolved not in target_resolved.parents:
-        return False  # Resolves outside the skills root: leave it alone.
+        return False  # Symlinks out of the skills root are never followed.
     if target.is_symlink():
-        target.unlink()  # The link itself lives inside the root; its target does not get touched.
+        target.unlink()  # Removes the link only, never its target.
         return True
-    if not target.is_dir():
-        return False  # A plain file is not a directory this installer wrote.
-    shutil.rmtree(target)
+    try:
+        shutil.rmtree(target)
+    except FileNotFoundError:
+        return True
+    except NotADirectoryError:
+        return False  # A plain file is not something this installer wrote.
     return True
 
 
@@ -126,14 +113,9 @@ class BaseAgentInstaller:
         return skill.raw
 
     def install(self, scope: Scope, project_root: Path, skills: dict[str, Skill], prune: bool = False) -> list[Path]:
-        """Install all skills. Returns list of paths written.
+        """Install all skills and return the paths written.
 
-        Writes the new skill files first (including overwriting a same-named
-        skill), then, when ``prune`` is true, removes directories a previous
-        install recorded that this install set no longer contains, and
-        finally writes the manifest. Only full installs (no ``--skill``)
-        pass ``prune=True``; subset installs record what they wrote and never
-        remove anything.
+        With ``prune``, also remove recorded directories that ``skills`` no longer contains.
         """
         paths: list[Path] = []
         self.pruned_directories = []
@@ -146,6 +128,7 @@ class BaseAgentInstaller:
                 raise ValueError(f"Multiple skills resolve to {path}: {destinations[path]!r} and {skill_name!r}")
             destinations[path] = skill_name
             pending.append((skill, path))
+        preexisting = {path.parent for _, path in pending if path.parent.exists()}
         for skill, path in pending:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(self.format_content(skill))
@@ -161,6 +144,14 @@ class BaseAgentInstaller:
 
         for skills_root, installed_dirs in wrote.items():
             owned = _read_owned_directories(skills_root)
+            owned_folded = {name.casefold() for name in owned}
+            # A directory that existed before this install and was never recorded may be the
+            # user's own; overwrite its SKILL.md but never claim it, so it is never pruned.
+            claimed = [
+                name
+                for name in installed_dirs
+                if name.casefold() in owned_folded or skills_root / name not in preexisting
+            ]
             kept: list[str] = []
             if prune:
                 # Case-insensitive: on a case-insensitive filesystem a recorded name differing
@@ -182,7 +173,7 @@ class BaseAgentInstaller:
                 kept = owned
             # Manifest last: a crash before this write leaves the previous
             # record intact, so the next full install finishes the removal.
-            _write_owned_directories(skills_root, [*kept, *installed_dirs])
+            _write_owned_directories(skills_root, [*kept, *claimed])
         return paths
 
     def _copy_companion_files(self, skill: Skill, installed_path: Path) -> None:

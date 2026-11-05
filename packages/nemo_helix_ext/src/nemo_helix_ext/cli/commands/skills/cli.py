@@ -312,9 +312,8 @@ def install(
     Use --skill to select specific skills, --user for user scope, or
     --project-dir to explicitly select a known agent's project directory.
 
-    A full install (no --skill) also removes skill directories, in the same
-    skills directory, that a previous install recorded and this build no
-    longer ships. A --skill install records what it wrote and removes nothing.
+    A full install (no --skill) also removes skills a previous install wrote
+    that this build no longer ships.
 
     Examples:
       nemo skills install --agent claude

@@ -19,6 +19,7 @@ from nemo_helix_ext.cli.commands.skills.registry import (
     get_installer,
     list_agent_names,
     load_skills,
+    load_skills_with_warnings,
     skill_providers_excluded_by_allowlist,
 )
 from nemo_helix_ext.skills import skills_dir as platform_skills_dir
@@ -139,7 +140,7 @@ def test_load_skills_includes_example_plugin_skills(monkeypatch):
     """Adding a provider on top of the platform should expose its skills too."""
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {
+        lambda _warnings: {
             "platform": _platform_provider(),
             "example": SkillProvider(
                 name="example",
@@ -168,7 +169,7 @@ def test_load_skills_skips_invalid_provider_frontmatter(monkeypatch, tmp_path: P
     (invalid / "SKILL.md").write_text("---\nname: broken\ndescription: [\n---\n# Broken\n")
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {"example": SkillProvider(name="example", path=root, dist_name="example-dist")},
+        lambda _warnings: {"example": SkillProvider(name="example", path=root, dist_name="example-dist")},
     )
 
     with patch("nemo_helix_ext.cli.commands.skills.registry.logger.warning") as mock_warning:
@@ -199,7 +200,7 @@ def test_load_skills_skips_non_mapping_frontmatter(monkeypatch, tmp_path: Path):
     (invalid / "SKILL.md").write_text("---\n- not\n- a\n- mapping\n---\n# Broken\n")
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {"example": SkillProvider(name="example", path=root, dist_name="example-dist")},
+        lambda _warnings: {"example": SkillProvider(name="example", path=root, dist_name="example-dist")},
     )
 
     with patch("nemo_helix_ext.cli.commands.skills.registry.logger.warning") as mock_warning:
@@ -221,7 +222,7 @@ def test_load_skills_duplicate_names_raise(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {
+        lambda _warnings: {
             "platform": _platform_provider(),
             "example": SkillProvider(name="example", path=root, dist_name="example-dist"),
         },
@@ -261,14 +262,11 @@ def test_load_skills_skips_missing_provider_path_with_warning(monkeypatch, tmp_p
         lambda _group: list(fake_eps.values()),
     )
 
-    with patch("nemo_helix_ext.cli.commands.skills.registry.logger.warning") as mock_warning:
-        skills = load_skills()
+    skills, warnings = load_skills_with_warnings()
 
     # The platform's own skills must still be present even when another provider is broken.
     assert {"inference"} <= skills.keys()
-    # A warning fires specifically for the missing-path ghost provider.
-    warning_messages = [call.args[0] for call in mock_warning.call_args_list]
-    assert any("path does not exist" in msg for msg in warning_messages)
+    assert any("'ghost'" in msg and "path does not exist" in msg for msg in warnings)
 
 
 def _write_skill_dir(root: Path, name: str, body: str = "# body\n") -> Path:

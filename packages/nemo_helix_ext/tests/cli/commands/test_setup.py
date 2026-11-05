@@ -1608,48 +1608,22 @@ class TestFilterAgentsByScope:
 
 
 class TestLoadSkillsWithWarnings:
-    def test_captures_plugin_warnings(self):
-        # Stub load_skills so it emits a warning via the registry logger; the
-        # capture handler should pick it up and return it as a structured message.
-        def _stub() -> dict:
-            skills_registry.logger.warning("Skipping plugin 'fake': boom")
-            return {}
-
-        with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_stub):
-            skills, warnings = _load_skills_with_warnings()
-        assert skills == {}
-        assert any("Skipping plugin 'fake'" in msg for msg in warnings)
-
-    def test_handler_cleaned_up_on_exception(self):
-        handler_count_before = len(skills_registry.logger.handlers)
-
-        def _boom() -> dict:
-            raise RuntimeError("kaboom")
-
-        with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_boom):
-            with pytest.raises(RuntimeError):
-                _load_skills_with_warnings()
-        # Even on exception, the capture handler is removed.
-        assert len(skills_registry.logger.handlers) == handler_count_before
-
-    def test_warnings_captured_even_when_logger_level_above_warning(self):
-        """If an upstream caller raised the registry logger to ERROR, plugin
-        warnings should still reach the preview."""
-
-        def _stub() -> dict:
-            skills_registry.logger.warning("Skipping plugin 'quiet': nothing here")
+    def test_returns_discovery_warnings_regardless_of_logger_level(self):
+        def _discover(warnings: list[str]) -> dict:
+            warnings.append("Skipping plugin 'fake': boom")
             return {}
 
         original = skills_registry.logger.level
         skills_registry.logger.setLevel(logging.ERROR)
+        skills_registry.clear_cache()
         try:
-            with patch("nemo_helix_ext.cli.commands.skills.registry.load_skills", side_effect=_stub):
-                _, warnings = _load_skills_with_warnings()
-            assert any("Skipping plugin 'quiet'" in m for m in warnings)
-            # Logger level is restored to ERROR after the call.
-            assert skills_registry.logger.level == logging.ERROR
+            with patch("nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers", side_effect=_discover):
+                skills, warnings = _load_skills_with_warnings()
         finally:
             skills_registry.logger.setLevel(original)
+            skills_registry.clear_cache()
+        assert skills == {}
+        assert warnings == ["Skipping plugin 'fake': boom"]
 
 
 class TestMaybeInstallSkills:

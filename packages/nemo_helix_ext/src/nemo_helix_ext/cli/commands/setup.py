@@ -1497,13 +1497,7 @@ def _find_project_root() -> Path:
 
 
 def _load_skills_with_warnings() -> tuple[dict[str, Skill], list[str]]:
-    """Load skills while capturing any plugin-discovery warnings.
-
-    The registry emits ``logger.warning`` records when a plugin's skills directory
-    is missing, malformed, or invalid. We capture those records so they can be
-    surfaced in the preview before any install happens, rather than scrolling
-    past mid-install.
-    """
+    """Load skills plus discovery warnings, so the preview can show them before installing."""
     return skills_registry.load_skills_with_warnings()
 
 

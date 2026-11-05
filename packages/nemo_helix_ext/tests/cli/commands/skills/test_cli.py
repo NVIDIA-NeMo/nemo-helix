@@ -70,7 +70,7 @@ def example_plugin_skills(monkeypatch):
     _load_skills_cached.cache_clear()
     monkeypatch.setattr(
         "nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers",
-        lambda: {
+        lambda _warnings: {
             "platform": SkillProvider(name="platform", path=platform_skills_dir(), dist_name="nemo-helix-ext"),
             "example": SkillProvider(
                 name="example", path=_example_plugin_skills_root(), dist_name="nemo-example-plugin"

@@ -245,30 +245,56 @@ class TestInstallManifest:
         assert "updated" in (skills_root / "nemo-alpha" / "SKILL.md").read_text()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
 
-    def test_prune_tolerates_corrupt_manifest(self, tmp_path: Path, caplog: pytest.LogCaptureFixture):
-        """A corrupt manifest is treated as no record: nothing is pruned.
+    def test_install_never_claims_a_preexisting_unrecorded_directory(self, tmp_path: Path):
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        _write_skill_dir(skills_root, "nemo-alpha")
 
-        Directories written before any manifest existed stay, and the next
-        install rewrites a valid manifest. An existing-but-unreadable
-        manifest emits a warning so the discarded record is visible.
-        """
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha"), "beta": _make_skill("beta")})
+        assert _read_manifest(tmp_path)["owned"] == ["nemo-beta"]
+
+        installer.install(Scope.PROJECT, tmp_path, {"beta": _make_skill("beta")}, prune=True)
+        assert (skills_root / "nemo-alpha" / "SKILL.md").exists()
+
+    def test_prune_drops_a_recorded_directory_that_is_already_gone(self, tmp_path: Path):
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
         skills_root.mkdir(parents=True)
-        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text("not json")
-        _write_skill_dir(skills_root, "nemo-orphan")
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-gone"]}))
+
+        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
+
+        assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
+
+    @pytest.mark.parametrize(
+        "manifest_text,expected_warning",
+        [
+            pytest.param("not json", "unreadable", id="corrupt"),
+            pytest.param(json.dumps({"owned": "nemo-a"}), "unexpected shape", id="owned-not-a-list"),
+            pytest.param(json.dumps({"owned": ["nemo-a", 1]}), "unexpected shape", id="non-string-entry"),
+            pytest.param(json.dumps(["nemo-a"]), "unexpected shape", id="not-a-mapping"),
+        ],
+    )
+    def test_prune_treats_an_invalid_manifest_as_unrecorded(
+        self, tmp_path: Path, manifest_text: str, expected_warning: str, caplog: pytest.LogCaptureFixture
+    ):
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        skills_root.mkdir(parents=True)
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(manifest_text)
+        _write_skill_dir(skills_root, "nemo-a")
 
         with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
             installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
 
-        assert (skills_root / "nemo-orphan" / "SKILL.md").exists()
+        assert (skills_root / "nemo-a" / "SKILL.md").exists()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
-        assert any("unreadable" in record.message for record in caplog.records)
+        assert any(expected_warning in record.message for record in caplog.records)
 
     def test_prune_keeps_a_recorded_directory_it_cannot_remove(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ):
-        """A failed removal is warned about and stays recorded so a later full install retries it."""
+        """A failed removal stays recorded so a later full install retries it."""
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
         installer.install(
@@ -287,35 +313,6 @@ class TestInstallManifest:
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha", "nemo-beta"]
         assert any("Could not remove" in record.message for record in caplog.records)
 
-    def test_prune_leaves_a_recorded_name_without_the_installed_skill_prefix(self, tmp_path: Path):
-        """The installer only writes ``nemo-*`` directories, so it never removes anything else."""
-        installer = DirectoryLayoutInstaller()
-        skills_root = _skills_root(tmp_path)
-        skills_root.mkdir(parents=True)
-        _write_skill_dir(skills_root, "team-skill")
-        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["team-skill"]}))
-
-        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
-
-        assert (skills_root / "team-skill" / "SKILL.md").exists()
-        assert "team-skill" in _read_manifest(tmp_path)["owned"]
-
-    @pytest.mark.parametrize("manifest", [{"owned": "nemo-a"}, {"owned": ["nemo-a", 1]}, ["nemo-a"]])
-    def test_prune_warns_on_a_manifest_with_an_unexpected_shape(
-        self, tmp_path: Path, manifest: object, caplog: pytest.LogCaptureFixture
-    ):
-        installer = DirectoryLayoutInstaller()
-        skills_root = _skills_root(tmp_path)
-        skills_root.mkdir(parents=True)
-        _write_skill_dir(skills_root, "nemo-a")
-        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps(manifest))
-
-        with caplog.at_level(logging.WARNING, logger="nemo_helix_ext.cli.commands.skills.installer"):
-            installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
-
-        assert (skills_root / "nemo-a" / "SKILL.md").exists()
-        assert any("unexpected shape" in record.message for record in caplog.records)
-
     def test_prune_never_removes_a_recorded_name_matching_a_written_one_case_insensitively(self, tmp_path: Path):
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
@@ -328,35 +325,40 @@ class TestInstallManifest:
         assert installer.pruned_directories == []
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
 
-    def test_prune_leaves_a_recorded_name_that_is_a_plain_file(self, tmp_path: Path):
-        """A recorded name that is now a regular file is not a directory this installer owns."""
+    @pytest.mark.parametrize(
+        "recorded",
+        [
+            pytest.param("team-skill", id="no-installed-prefix"),
+            pytest.param("nemo-not-a-dir", id="plain-file"),
+            pytest.param("nemo-root-link", id="symlink-to-skills-root"),
+            pytest.param("nemo-outside-link", id="symlink-outside-skills-root"),
+            pytest.param("../neighbor", id="multi-segment"),
+        ],
+    )
+    def test_prune_leaves_an_unsafe_recorded_name_in_place_and_recorded(self, tmp_path: Path, recorded: str):
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
         skills_root.mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "SKILL.md").write_text("outside content")
+        _write_skill_dir(skills_root, "team-skill")
         (skills_root / "nemo-not-a-dir").write_text("user file")
-        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-not-a-dir"]}))
-
-        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
-
-        assert (skills_root / "nemo-not-a-dir").read_text() == "user file"
-        assert "nemo-not-a-dir" in _read_manifest(tmp_path)["owned"]
-
-    def test_prune_leaves_a_recorded_name_that_resolves_to_the_skills_root(self, tmp_path: Path):
-        """A recorded name symlinked to the skills root itself never removes the root."""
-        installer = DirectoryLayoutInstaller()
-        skills_root = _skills_root(tmp_path)
-        skills_root.mkdir(parents=True)
         (skills_root / "nemo-root-link").symlink_to(skills_root, target_is_directory=True)
-        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": ["nemo-root-link"]}))
+        (skills_root / "nemo-outside-link").symlink_to(outside, target_is_directory=True)
+        (tmp_path / ".agent" / "neighbor").mkdir()
+        (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).write_text(json.dumps({"owned": [recorded]}))
+        target = skills_root / recorded
+        before = target.lstat()
 
         installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
 
-        assert (skills_root / "nemo-root-link").is_symlink()
-        assert (skills_root / "nemo-alpha" / "SKILL.md").exists()
-        assert "nemo-root-link" in _read_manifest(tmp_path)["owned"]
+        assert target.lstat().st_ino == before.st_ino
+        assert (outside / "SKILL.md").read_text() == "outside content"
+        assert installer.pruned_directories == []
+        assert recorded in _read_manifest(tmp_path)["owned"]
 
     def test_manifest_write_does_not_follow_a_symlink_planted_at_the_manifest_path(self, tmp_path: Path):
-        """The manifest write replaces a symlink instead of truncating its target."""
         installer = DirectoryLayoutInstaller()
         skills_root = _skills_root(tmp_path)
         victim = tmp_path / "victim.json"
@@ -369,34 +371,3 @@ class TestInstallManifest:
         assert victim.read_text() == "precious"
         assert not (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).is_symlink()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
-
-    def test_prune_leaves_recorded_names_resolving_outside_skills_root(self, tmp_path: Path):
-        """Recorded names that are unsafe to remove are left alone and kept.
-
-        A symlink resolving outside the skills root and a name that is not a
-        single path segment must never be deleted. A recorded directory that
-        is already gone counts as removed and is dropped from the manifest.
-        """
-        installer = DirectoryLayoutInstaller()
-        skills_root = _skills_root(tmp_path)
-        skills_root.mkdir(parents=True)
-
-        outside = tmp_path / "outside" / "nemo-link"
-        outside.mkdir(parents=True)
-        (outside / "SKILL.md").write_text("outside content")
-        (skills_root / "nemo-link").symlink_to(outside, target_is_directory=True)
-        (tmp_path / "neighbor").mkdir()
-
-        manifest_path = skills_root / INSTALLED_SKILLS_MANIFEST_NAME
-        manifest_path.write_text(json.dumps({"owned": ["nemo-link", "../neighbor", "nemo-gone"]}))
-
-        installer.install(Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha")}, prune=True)
-
-        # The symlink is still there and its target was not deleted.
-        assert (skills_root / "nemo-link").is_symlink()
-        assert (outside / "SKILL.md").read_text() == "outside content"
-        # The multi-segment name was not followed either.
-        assert (tmp_path / "neighbor").is_dir()
-        # Both unsafe names stay recorded so a later install can reassess them.
-        owned = _read_manifest(tmp_path)["owned"]
-        assert set(owned) == {"nemo-link", "../neighbor", "nemo-alpha"}
