@@ -6,7 +6,7 @@
 import logging
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from fastapi.exceptions import RequestValidationError
 from nemo_evals.api.dependencies import get_service_run_store, get_taskset_run_service
 from nemo_evals.api.service.taskset_run_service import (
@@ -23,6 +23,7 @@ from nemo_evals.api.taskset_run_schemas import (
     TasksetRunStatus,
     TasksetRunSubmitResponse,
     TasksetRunTask,
+    TasksetRunTaskDetail,
     to_status,
 )
 from nemo_evals.authz import scope
@@ -430,4 +431,62 @@ async def list_taskset_run_tasks(
         raise HTTPException(status_code=500, detail="Internal server error") from None
     if result is None:
         raise HTTPException(status_code=404, detail="Taskset run not found")
+    return result
+
+
+@router.get(
+    "/agent-evaluate/runs/{run_id}/tasks/{task_index}",
+    summary="Get Taskset Run Task",
+    response_model=TasksetRunTaskDetail,
+    response_model_exclude_none=True,
+    responses={
+        403: {"description": "Caller lacks permission to read run resources."},
+        404: {"description": "Run, or that task of it, not found in this workspace."},
+    },
+)
+@scope.read
+@path_rule(callers=[CallerKind.PRINCIPAL], permissions=[TasksetRunPerms.READ])
+async def get_taskset_run_task(
+    workspace: str,
+    run_id: str,
+    task_index: int = Path(ge=0, description="Zero-based index of the task in the run's resolved task list."),
+    service: TasksetRunService = Depends(get_taskset_run_service),
+) -> TasksetRunTaskDetail:
+    """Read one task of a run with each of its trials, as its task Job reports them while it runs.
+
+    Args:
+        workspace: Workspace containing the run and its children.
+        run_id: Public run name.
+        task_index: Zero-based task index, as the run's task list gives it.
+        service: Shared request-scoped run service.
+
+    Returns:
+        The stored task with ``trials`` read from its task Job now; omitted before the task has a Job,
+        when the Job reported no trials, or when the caller can't read it.
+
+    Raises:
+        HTTPException: Permission denied (403), the run or task is absent (404), or an unexpected failure (500).
+    """
+    try:
+        result = await service.get_task(workspace, run_id, task_index)
+    except PermissionDeniedError as exc:
+        logger.warning(
+            "Downstream permission denied while attempting to get taskset run task %s/%s/%s (status=%s, request_id=%s)",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            sanitize_for_log(str(task_index)),
+            exc.status_code,
+            sanitize_for_log(exc.http_response.headers.get("x-request-id", "unknown")),
+        )
+        raise HTTPException(status_code=403, detail="Forbidden") from exc
+    except Exception:
+        logger.exception(
+            "Failed to get taskset run task %s/%s/%s",
+            sanitize_for_log(workspace),
+            sanitize_for_log(run_id),
+            sanitize_for_log(str(task_index)),
+        )
+        raise HTTPException(status_code=500, detail="Internal server error") from None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Taskset run task not found")
     return result

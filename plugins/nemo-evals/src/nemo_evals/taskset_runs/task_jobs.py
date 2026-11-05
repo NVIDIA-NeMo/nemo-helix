@@ -12,7 +12,7 @@ outcome is unknown keeps its slot until the Job is found, or until ``create_grac
 import logging
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from nemo_evals.jobs.harbor_task_dispatch import TASK_JOB_SOURCE, HarborTaskDispatchJob
 from nemo_evals.jobs.harbor_task_spec import PreparedHarborEnvironment, build_task_job_input
@@ -36,10 +36,14 @@ logger = logging.getLogger(__name__)
 
 
 class TaskJobs(Protocol):
-    """The Jobs check submit needs, acting as the caller."""
+    """The Jobs reads the run API needs, acting as the caller."""
 
     async def is_subprocess_profile(self, profile: str) -> bool:
         """True when Jobs runs ``profile``'s CPU steps as host subprocesses."""
+        ...
+
+    async def status_details(self, workspace: str, name: str) -> dict[str, Any] | None:
+        """Job ``name``'s status details, where a task Job reports its trials; None when there's no such Job."""
         ...
 
 
@@ -52,6 +56,13 @@ class JobsServiceTaskJobs:
     async def is_subprocess_profile(self, profile: str) -> bool:
         profiles = (await self._jobs.get_execution_profiles()).data()
         return any(isinstance(item, SubprocessJobExecutionProfile) and item.profile == profile for item in profiles)
+
+    async def status_details(self, workspace: str, name: str) -> dict[str, Any] | None:
+        try:
+            job = (await self._jobs.get_job(workspace=workspace, name=name)).data()
+        except NotFoundError:
+            return None
+        return job.status_details
 
 
 async def task_job_request(
