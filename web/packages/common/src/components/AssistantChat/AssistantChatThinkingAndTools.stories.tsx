@@ -3,6 +3,7 @@
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat';
+import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/RepeatedToolCallsStep';
 import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
 import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
 import { WorkGroupView } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkGroup';
@@ -297,6 +298,27 @@ export const ComponentGallery: Story = {
           result="PermissionDenied: calendar access was not granted for this agent."
           isError
         />
+      </Stack>
+      <Stack gap="density-sm">
+        <GalleryLabel>File edit with the replaced text</GalleryLabel>
+        <ToolCallStep
+          defaultOpen
+          toolName="Edit"
+          args={{
+            file_path: 'src/forecast.ts',
+            old_string: "const unit = 'F';",
+            new_string: "const unit = 'C';\nconst showRain = true;",
+          }}
+          result="ok"
+        />
+      </Stack>
+      <Stack gap="density-sm">
+        <GalleryLabel>Repeated calls folded into one step</GalleryLabel>
+        <RepeatedToolCallsStep defaultOpen count={3} toolName="Read">
+          <ToolCallStep toolName="Read" args={{ file_path: 'README.md' }} />
+          <ToolCallStep toolName="Read" args={{ file_path: 'web/AGENTS.md' }} />
+          <ToolCallStep toolName="Read" args={{ file_path: 'SETUP.md' }} />
+        </RepeatedToolCallsStep>
       </Stack>
       <Stack gap="density-sm">
         <GalleryLabel>Tool call still running</GalleryLabel>

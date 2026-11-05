@@ -92,6 +92,27 @@ describe('AssistantToolCallPart', () => {
     expect(within(step).getByText('src/notes/MEMORY.md')).toBeInTheDocument();
   });
 
+  it('shows line counts and the replaced and replacement text of an edit', () => {
+    renderPart({
+      args: { file_path: 'src/app.ts', old_string: 'a\nb', new_string: 'c' },
+      toolName: 'Edit',
+    });
+
+    const step = screen.getByTestId('assistant-work-file-edit');
+    expect(step).toHaveTextContent('Edited file app.ts');
+    expect(within(step).getByTestId('assistant-work-edit-stats')).toHaveTextContent('+1 −2');
+    expect(within(step).getByText('src/app.ts · before')).toBeInTheDocument();
+    expect(within(step).getByText('src/app.ts · after')).toBeInTheDocument();
+  });
+
+  it('shows a Bash command as a shell snippet rather than JSON', () => {
+    renderPart({ args: { command: 'ls -la' }, toolName: 'Bash' });
+
+    const step = screen.getByTestId('assistant-work-tool-call');
+    expect(within(step).getByText('Command')).toBeInTheDocument();
+    expect(within(step).queryByText('Arguments')).not.toBeInTheDocument();
+  });
+
   it('renders an unknown tool with file-edit arguments as an Edited step', () => {
     renderPart({
       args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
@@ -133,6 +154,27 @@ describe('AssistantToolCallPart', () => {
         expect.stringContaining('Searched text AssistantChat'),
       ])
     );
+  });
+
+  it('folds repeated calls of one tool in a subtle group into a single step', () => {
+    renderPart({
+      args: {
+        actions: [
+          { toolCallId: 'toolu_read_1', toolName: 'Read', args: { file_path: 'a.md' } },
+          { toolCallId: 'toolu_grep', toolName: 'Grep', args: { pattern: 'x', path: 'src' } },
+          { toolCallId: 'toolu_read_2', toolName: 'Read', args: { file_path: 'b.md' } },
+          { toolCallId: 'toolu_read_3', toolName: 'Read', args: { file_path: 'c.md' } },
+        ],
+      },
+      toolName: ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+    });
+
+    const repeated = screen.getByTestId('assistant-work-repeated-tool-calls');
+    expect(repeated).toHaveTextContent('Read 3 files');
+    expect(within(repeated).getAllByTestId('assistant-work-tool-call')).toHaveLength(3);
+    expect(
+      screen.getAllByTestId('assistant-work-tool-call').map((step) => step.textContent)
+    ).toEqual(expect.arrayContaining([expect.stringContaining('Searched text x in src')]));
   });
 
   it('unpacks collapsed details into thought, narration, and tool steps', () => {

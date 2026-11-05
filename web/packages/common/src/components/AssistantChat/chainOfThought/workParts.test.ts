@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  countLines,
   countToolCalls,
   formatToolPayload,
   formatWorkDuration,
@@ -98,14 +99,43 @@ describe('formatWorkDuration', () => {
 });
 
 describe('getFileEdit', () => {
-  it('detects any tool with a path and content', () => {
-    expect(getFileEdit({ file_path: 'notes/MEMORY.md', content: 'milk' })).toEqual({
+  it('detects a written file with its line count', () => {
+    expect(getFileEdit({ file_path: 'notes/MEMORY.md', content: 'milk\neggs\n' })).toEqual({
       path: 'notes/MEMORY.md',
-      content: 'milk',
+      content: 'milk\neggs\n',
+      additions: 2,
+      deletions: 0,
     });
-    expect(getFileEdit({ path: 'a.ts', new_string: 'x' })).toEqual({ path: 'a.ts', content: 'x' });
     expect(getFileEdit({ path: 'a.ts' })).toBeUndefined();
     expect(getFileEdit({ query: 'weather' })).toBeUndefined();
+  });
+
+  it('keeps the replaced and replacement text of an edit', () => {
+    expect(getFileEdit({ path: 'a.ts', old_string: 'x\ny', new_string: 'z' })).toEqual({
+      path: 'a.ts',
+      before: 'x\ny',
+      after: 'z',
+      additions: 1,
+      deletions: 2,
+    });
+  });
+
+  it('sums the line counts of a multi-edit', () => {
+    expect(
+      getFileEdit({
+        file_path: 'a.ts',
+        edits: [
+          { old_string: 'a', new_string: 'b\nc' },
+          { old_string: '', new_string: 'd' },
+        ],
+      })
+    ).toEqual({ path: 'a.ts', additions: 3, deletions: 1 });
+  });
+
+  it('counts lines without a trailing newline', () => {
+    expect(countLines('')).toBe(0);
+    expect(countLines('one')).toBe(1);
+    expect(countLines('one\r\ntwo\r\n')).toBe(2);
   });
 
   it('picks a highlighter language from the extension', () => {

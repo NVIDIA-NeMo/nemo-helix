@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
+import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/RepeatedToolCallsStep';
 import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
 import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
 import {
@@ -57,6 +58,27 @@ const getSerializedParts = (value: unknown): readonly SerializedPart[] =>
     ];
   });
 
+const getPartKey = (part: SerializedPart) =>
+  part.type === 'tool-call' ? part.toolCallId : part.type;
+
+// Calls of the same tool in a subtle group fold into one step ("Read 3 files"), in the order the
+// tool first appeared.
+const groupRepeatedToolCalls = (parts: readonly SerializedPart[]): readonly SerializedPart[][] => {
+  const groups: SerializedPart[][] = [];
+  const byTool = new Map<string, SerializedPart[]>();
+  for (const part of parts) {
+    const existing = part.type === 'tool-call' ? byTool.get(part.toolName) : undefined;
+    if (existing) {
+      existing.push(part);
+      continue;
+    }
+    const group = [part];
+    if (part.type === 'tool-call') byTool.set(part.toolName, group);
+    groups.push(group);
+  }
+  return groups;
+};
+
 const SerializedPartContent = ({ part }: { readonly part: SerializedPart }) => {
   if (part.type !== 'tool-call') {
     return part.type === 'reasoning' ? (
@@ -93,21 +115,33 @@ const AssistantToolCallPartContent = ({
 
   if (isAssistantJobProgressToolName(toolName)) return <JobProgressToolCall args={args} />;
 
-  if (
-    toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME ||
-    toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME
-  ) {
-    const parts = getSerializedParts(
-      toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME ? args.actions : args.parts
-    );
+  if (toolName === ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME) {
     return (
       <>
-        {parts.map((part, index) => (
-          <SerializedPartContent
-            key={`${part.type === 'tool-call' ? part.toolCallId : part.type}-${index}`}
-            part={part}
-          />
+        {getSerializedParts(args.parts).map((part, index) => (
+          <SerializedPartContent key={`${getPartKey(part)}-${index}`} part={part} />
         ))}
+      </>
+    );
+  }
+
+  if (toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME) {
+    return (
+      <>
+        {groupRepeatedToolCalls(getSerializedParts(args.actions)).map((group, index) => {
+          const [first] = group;
+          if (!first) return null;
+          const key = `${getPartKey(first)}-${index}`;
+          return group.length > 1 && first.type === 'tool-call' ? (
+            <RepeatedToolCallsStep count={group.length} key={key} toolName={first.toolName}>
+              {group.map((part, partIndex) => (
+                <SerializedPartContent key={`${getPartKey(part)}-${partIndex}`} part={part} />
+              ))}
+            </RepeatedToolCallsStep>
+          ) : (
+            <SerializedPartContent key={key} part={first} />
+          );
+        })}
       </>
     );
   }

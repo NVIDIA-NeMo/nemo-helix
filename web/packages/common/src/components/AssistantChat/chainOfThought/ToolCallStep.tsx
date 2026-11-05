@@ -9,6 +9,7 @@ import {
 } from '@nemo/common/src/components/AssistantChat/chainOfThought/toolSteps';
 import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkCodeSnippet';
 import {
+  type FileEdit,
   formatToolPayload,
   getFileEdit,
   getFileLanguage,
@@ -50,11 +51,43 @@ const PayloadSection = ({
   return <WorkCodeSnippet label={label} language={language} tone={tone} value={text} />;
 };
 
+/** Lines added and removed by a file edit, "+12 −3". */
+const EditStats = ({ additions, deletions }: Pick<FileEdit, 'additions' | 'deletions'>) => (
+  <span className="ml-1 text-[13px] tabular-nums" data-testid="assistant-work-edit-stats">
+    <span className="text-feedback-success">+{additions}</span>{' '}
+    <span className="text-feedback-danger">−{deletions}</span>
+  </span>
+);
+
+/** The written file, the replaced and replacement text, or (for a list of edits) the arguments. */
+const FileEditContent = ({ args, edit }: { readonly args: unknown; readonly edit: FileEdit }) => {
+  const language = getFileLanguage(edit.path);
+  if (edit.content !== undefined) {
+    return <WorkCodeSnippet label={edit.path} language={language} value={edit.content} />;
+  }
+  if (edit.after !== undefined) {
+    return (
+      <Stack gap="density-md">
+        {edit.before !== undefined ? (
+          <WorkCodeSnippet
+            label={`${edit.path} · before`}
+            language={language}
+            value={edit.before}
+          />
+        ) : null}
+        <WorkCodeSnippet label={`${edit.path} · after`} language={language} value={edit.after} />
+      </Stack>
+    );
+  }
+  return <PayloadSection label="Arguments" value={args} />;
+};
+
 /**
  * A tool call, with the icon and action text from its `TOOL_STEP_DEFINITIONS` entry, or
  * "Called {toolName}" for tools without one. Expanding it shows the arguments and the result.
- * Successful calls whose arguments carry a file path and content show the file instead; a failed
- * one keeps the arguments and error so the failure is visible.
+ * Successful calls whose arguments carry a file path and content show the file change instead,
+ * with its line counts in the title; a failed one keeps the arguments and error so the failure
+ * is visible.
  */
 export const ToolCallStep = ({
   args,
@@ -65,15 +98,14 @@ export const ToolCallStep = ({
   running,
   toolName,
 }: ToolCallStepProps) => {
+  const toolArgs = isRecord(args) ? args : {};
   const fileEdit = isError ? undefined : getFileEdit(args);
   const step =
     findToolStepDefinition(toolName) ?? (fileEdit ? FILE_EDIT_STEP : getFallbackToolStep(toolName));
   const { icon: Icon } = step;
+  const { action, subject } = getToolStepTitleParts(step, { args: toolArgs, running });
   const hasArgs = isRecord(args) ? Object.keys(args).length > 0 : args !== undefined;
-  const { action, subject } = getToolStepTitleParts(step, {
-    args: isRecord(args) ? args : {},
-    running,
-  });
+  const argsView = hasArgs ? step.formatArgs?.(toolArgs) : undefined;
 
   return (
     <WorkStep
@@ -81,27 +113,35 @@ export const ToolCallStep = ({
       defaultOpen={defaultOpen}
       icon={<Icon size={WORK_ICON_SIZE} />}
       title={
-        subject ? (
-          <>
-            {action}{' '}
-            <span className={cn(SUBJECT_CLASS, step.subjectIsCode && CODE_SUBJECT_CLASS)}>
-              {subject}
-            </span>
-          </>
-        ) : (
-          action
-        )
+        <>
+          {action}
+          {subject ? (
+            <>
+              {' '}
+              <span className={cn(SUBJECT_CLASS, step.subjectIsCode && CODE_SUBJECT_CLASS)}>
+                {subject}
+              </span>
+            </>
+          ) : null}
+          {fileEdit ? (
+            <EditStats additions={fileEdit.additions} deletions={fileEdit.deletions} />
+          ) : null}
+        </>
       }
     >
       {fileEdit ? (
-        <WorkCodeSnippet
-          label={fileEdit.path}
-          language={getFileLanguage(fileEdit.path)}
-          value={fileEdit.content}
-        />
+        <FileEditContent args={args} edit={fileEdit} />
       ) : (
         <Stack gap="density-md">
-          <PayloadSection label="Arguments" value={hasArgs ? args : argsText || '{}'} />
+          {argsView ? (
+            <WorkCodeSnippet
+              label={argsView.label}
+              language={argsView.language}
+              value={argsView.text}
+            />
+          ) : (
+            <PayloadSection label="Arguments" value={hasArgs ? args : argsText || '{}'} />
+          )}
           {result !== undefined ? (
             <PayloadSection
               label={isError ? 'Error' : 'Result'}

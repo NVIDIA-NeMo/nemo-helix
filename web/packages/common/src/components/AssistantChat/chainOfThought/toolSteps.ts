@@ -22,6 +22,7 @@ import {
   WindowTerminal,
   World,
 } from '@nemo/icons/icons';
+import type { CodeSnippetLanguage } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
 export type ToolStepIcon = FC<Omit<NvidiaGuiIconProps, 'iconName'>>;
@@ -40,6 +41,16 @@ export interface ToolStepDefinition {
   readonly subject?: (args: ToolArgs) => string | undefined;
   /** Show the subject in the code font: commands, paths, patterns, and URLs rather than prose. */
   readonly subjectIsCode?: boolean;
+  /** Title for several calls folded into one step, with `{count}`: "Read {count} files". */
+  readonly repeated?: string;
+  /** Shows the arguments as something other than JSON, e.g. a Bash command as a shell snippet. */
+  readonly formatArgs?: (args: ToolArgs) => ToolStepArgsView | undefined;
+}
+
+export interface ToolStepArgsView {
+  readonly label: string;
+  readonly language: CodeSnippetLanguage;
+  readonly text: string;
 }
 
 const firstString =
@@ -68,20 +79,34 @@ const itemCount = (key: string, noun: string) => (args: ToolArgs) => {
     : undefined;
 };
 
+const patternInPath = (args: ToolArgs) => {
+  const pattern = firstString('pattern', 'query')(args);
+  const path = firstString('path')(args);
+  return pattern && path ? `${pattern} in ${path}` : pattern;
+};
+
+const commandSnippet = (args: ToolArgs): ToolStepArgsView | undefined => {
+  const command = firstString('command', 'cmd')(args);
+  return command ? { label: 'Command', language: 'bash', text: command } : undefined;
+};
+
 export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
   {
     names: ['Bash', 'Shell', 'RunCommand', 'ExecuteCommand'],
     icon: WindowTerminal,
     running: 'Running command',
     done: 'Ran command',
+    repeated: 'Ran {count} commands',
     subject: firstString('command', 'cmd'),
     subjectIsCode: true,
+    formatArgs: commandSnippet,
   },
   {
     names: ['Read', 'ReadFile'],
     icon: IconDocument,
     running: 'Reading file',
     done: 'Read file',
+    repeated: 'Read {count} files',
     subject: fileName,
     subjectIsCode: true,
   },
@@ -90,6 +115,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: Pencil,
     running: 'Writing file',
     done: 'Wrote file',
+    repeated: 'Wrote {count} files',
     subject: fileName,
     subjectIsCode: true,
   },
@@ -98,6 +124,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: Pencil,
     running: 'Editing file',
     done: 'Edited file',
+    repeated: 'Edited {count} files',
     subject: fileName,
     subjectIsCode: true,
   },
@@ -106,6 +133,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: MagnifyingGlass,
     running: 'Finding files',
     done: 'Found files',
+    repeated: 'Found files {count} times',
     subject: firstString('pattern', 'query', 'path'),
     subjectIsCode: true,
   },
@@ -114,7 +142,8 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: MagnifyingGlass,
     running: 'Searching text',
     done: 'Searched text',
-    subject: firstString('pattern', 'query'),
+    repeated: 'Searched text {count} times',
+    subject: patternInPath,
     subjectIsCode: true,
   },
   {
@@ -122,6 +151,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: FolderOpen,
     running: 'Listing directory',
     done: 'Listed directory',
+    repeated: 'Listed {count} directories',
     subject: firstString('path', 'directory'),
     subjectIsCode: true,
   },
@@ -130,6 +160,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: World,
     running: 'Searching web',
     done: 'Searched web',
+    repeated: 'Searched web {count} times',
     subject: firstString('query', 'q'),
   },
   {
@@ -137,6 +168,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: Link,
     running: 'Fetching URL',
     done: 'Fetched URL',
+    repeated: 'Fetched {count} URLs',
     subject: firstString('url'),
     subjectIsCode: true,
   },
@@ -145,6 +177,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: ListCheckmark,
     running: 'Updating todos',
     done: 'Updated todos',
+    repeated: 'Updated todos {count} times',
     subject: itemCount('todos', 'item'),
   },
   {
@@ -152,6 +185,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: IconClipboard,
     running: 'Creating task',
     done: 'Created task',
+    repeated: 'Created {count} tasks',
     subject: firstString('description', 'task', 'prompt'),
   },
   {
@@ -159,6 +193,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: IconClipboard,
     running: 'Updating task',
     done: 'Updated task',
+    repeated: 'Updated {count} tasks',
     subject: firstString('description', 'task', 'subject'),
   },
   {
@@ -166,6 +201,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: HelpCircle,
     running: 'Asking user',
     done: 'Asked user',
+    repeated: 'Asked {count} questions',
     subject: firstQuestion,
   },
   {
@@ -173,6 +209,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: Toolbox,
     running: 'Searching tools',
     done: 'Searched tools',
+    repeated: 'Searched tools {count} times',
     subject: firstString('query', 'pattern', 'name'),
   },
   {
@@ -180,6 +217,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     icon: Puzzle,
     running: 'Using skill',
     done: 'Used skill',
+    repeated: 'Used {count} skills',
     subject: firstString('skill', 'name', 'command'),
     subjectIsCode: true,
   },
@@ -191,15 +229,19 @@ export const FILE_EDIT_STEP: ToolStepDefinition = {
   icon: Pencil,
   running: 'Editing',
   done: 'Edited',
+  repeated: 'Edited {count} files',
   subject: fileName,
   subjectIsCode: true,
 };
 
+/** Unknown tools show their name, plus whichever common argument they have as the detail. */
 export const getFallbackToolStep = (toolName: string): ToolStepDefinition => ({
   names: [toolName],
   icon: WindowCode,
   running: `Calling ${toolName}`,
   done: `Called ${toolName}`,
+  repeated: `Called ${toolName} {count} times`,
+  subject: firstString('command', 'file_path', 'path', 'pattern', 'query', 'url'),
 });
 
 const normalizeToolName = (name: string) =>
@@ -239,3 +281,7 @@ export const getToolStepTitle = (
   const { action, subject } = getToolStepTitleParts(definition, options);
   return subject ? `${action} ${subject}` : action;
 };
+
+/** Title for `count` calls of the same tool folded into one step, e.g. "Read 3 files". */
+export const getRepeatedToolStepTitle = (definition: ToolStepDefinition, count: number): string =>
+  (definition.repeated ?? `${definition.done} {count} times`).replace('{count}', String(count));

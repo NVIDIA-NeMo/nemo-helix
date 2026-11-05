@@ -5,6 +5,7 @@ import {
   FILE_EDIT_STEP,
   findToolStepDefinition,
   getFallbackToolStep,
+  getRepeatedToolStepTitle,
   getToolStepTitle,
   getToolStepTitleParts,
   TOOL_STEP_DEFINITIONS,
@@ -61,9 +62,41 @@ describe('getToolStepTitle', () => {
     );
   });
 
-  it('falls back to the tool name for unknown tools', () => {
+  it('falls back to the tool name for unknown tools, with a common argument as detail', () => {
     const step = getFallbackToolStep('get_weather');
     expect(getToolStepTitle(step, { args: { city: 'Paris' } })).toBe('Called get_weather');
     expect(getToolStepTitle(step, { args: {}, running: true })).toBe('Calling get_weather');
+    expect(getToolStepTitle(step, { args: { query: 'rain' } })).toBe('Called get_weather rain');
+  });
+
+  it('joins a search pattern with its path', () => {
+    const grep = findToolStepDefinition('Grep')!;
+    expect(getToolStepTitle(grep, { args: { pattern: 'TODO', path: 'src' } })).toBe(
+      'Searched text TODO in src'
+    );
+    expect(getToolStepTitle(grep, { args: { pattern: 'TODO' } })).toBe('Searched text TODO');
+  });
+});
+
+describe('getRepeatedToolStepTitle', () => {
+  it('fills in the count, falling back to "{done} N times"', () => {
+    expect(getRepeatedToolStepTitle(findToolStepDefinition('Read')!, 3)).toBe('Read 3 files');
+    expect(getRepeatedToolStepTitle(getFallbackToolStep('search_configs'), 2)).toBe(
+      'Called search_configs 2 times'
+    );
+    expect(
+      getRepeatedToolStepTitle({ ...findToolStepDefinition('Grep')!, repeated: undefined }, 2)
+    ).toBe('Searched text 2 times');
+  });
+});
+
+describe('formatArgs', () => {
+  it('shows a Bash command as a shell snippet', () => {
+    expect(findToolStepDefinition('Bash')!.formatArgs!({ command: 'ls -la' })).toEqual({
+      label: 'Command',
+      language: 'bash',
+      text: 'ls -la',
+    });
+    expect(findToolStepDefinition('Bash')!.formatArgs!({})).toBeUndefined();
   });
 });

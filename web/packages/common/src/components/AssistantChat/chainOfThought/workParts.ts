@@ -112,22 +112,56 @@ export const getWorkGroupLabel = ({
 };
 
 export const FILE_PATH_KEYS = ['file_path', 'filePath', 'path', 'filename', 'file_name', 'file'];
-const FILE_CONTENT_KEYS = ['content', 'contents', 'new_string', 'newString', 'new_content', 'text'];
+const FILE_CONTENT_KEYS = ['content', 'contents', 'new_content', 'text'];
+const REPLACED_TEXT_KEYS = ['old_string', 'oldString', 'old_str', 'old_text'];
+const REPLACEMENT_TEXT_KEYS = ['new_string', 'newString', 'new_str', 'new_text'];
 
 export interface FileEdit {
   readonly path: string;
-  readonly content: string;
+  /** Lines added and removed, so the step can show "+12 −3". */
+  readonly additions: number;
+  readonly deletions: number;
+  /** The whole file, when a tool writes it. */
+  readonly content?: string;
+  /** The replaced and replacement text, when a tool edits part of a file. */
+  readonly before?: string;
+  readonly after?: string;
 }
 
 const getFirstString = (args: Record<string, unknown>, keys: readonly string[]) =>
   keys.map((key) => args[key]).find((value): value is string => typeof value === 'string');
 
-/** Any tool whose arguments carry a file path and file content counts as a file edit. */
+export const countLines = (text: string | undefined): number =>
+  text ? text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').length : 0;
+
+/**
+ * Any tool whose arguments carry a file path and either the file's content, a replacement
+ * (`old_string`/`new_string`), or a list of such `edits` counts as a file edit.
+ */
 export const getFileEdit = (args: unknown): FileEdit | undefined => {
   if (!isRecord(args)) return undefined;
   const path = getFirstString(args, FILE_PATH_KEYS)?.trim();
+  if (!path) return undefined;
+
+  const after = getFirstString(args, REPLACEMENT_TEXT_KEYS);
+  if (after !== undefined) {
+    const before = getFirstString(args, REPLACED_TEXT_KEYS);
+    return { path, before, after, additions: countLines(after), deletions: countLines(before) };
+  }
+
   const content = getFirstString(args, FILE_CONTENT_KEYS);
-  return path && content !== undefined ? { path, content } : undefined;
+  if (content !== undefined) return { path, content, additions: countLines(content), deletions: 0 };
+
+  const edits = Array.isArray(args.edits) ? args.edits.filter(isRecord) : [];
+  if (!edits.length) return undefined;
+  return edits.reduce<FileEdit>(
+    (total, edit) => ({
+      ...total,
+      additions: total.additions + countLines(getFirstString(edit, REPLACEMENT_TEXT_KEYS)),
+      deletions: total.deletions + countLines(getFirstString(edit, REPLACED_TEXT_KEYS)),
+    }),
+    { path, additions: 0, deletions: 0 }
+  );
 };
 
 export const getFileName = (path: string): string => path.split(/[\\/]/).at(-1) || path;
