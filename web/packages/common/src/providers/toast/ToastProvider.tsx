@@ -8,7 +8,7 @@ import {
   TOAST_ENQUEUE_MS,
 } from '@nemo/common/src/providers/toast/constants';
 import { getTransformStyles } from '@nemo/common/src/providers/toast/GetTransformStyles';
-import {
+import type {
   AddToastFn,
   ToastContextValue,
   ToastDescriptor,
@@ -16,9 +16,9 @@ import {
 import { ToastContext } from '@nemo/common/src/providers/toast/useToast';
 import { Toast } from '@nvidia/foundations-react-core';
 import {
-  FC,
-  PropsWithChildren,
-  SyntheticEvent,
+  type FC,
+  type PropsWithChildren,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useMemo,

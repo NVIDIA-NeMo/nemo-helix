@@ -3564,6 +3564,12 @@ components:
           title: Db Version
           description: Database version of the entity for optimistic locking.
           readOnly: true
+        session_uuid:
+          type: string
+          title: Session Uuid
+          description: Unique identifier for the session. Can be used to group and
+            retrieve the session's traces in Intake.
+          readOnly: true
       type: object
       required:
       - workspace
@@ -3576,6 +3582,7 @@ components:
       - entity_id
       - parent
       - db_version
+      - session_uuid
       title: AgentSession
       description: 'A durable logical conversation associated with an AgentDeployment.
 

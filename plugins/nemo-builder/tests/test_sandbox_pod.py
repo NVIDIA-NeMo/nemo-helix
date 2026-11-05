@@ -295,6 +295,26 @@ class _Api:
         """Only named: the faked Watch streams the pods."""
 
 
+class _Clock:
+    """Stands in for supervise's ``time`` module.
+
+    Patching ``supervise.time.sleep`` would patch the shared ``time`` module, so every other thread in the
+    worker would record its sleeps here and spin, and a failing assert would then format a list too long to
+    print before the test timed out.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
 class TestEachSandboxFailsAlone:
     NAME = "nhx-sbx-abc-g0"
     BUILT = f"{RESULT_MARKER} demo-1-0 0\n{RESULT_MARKER} demo-1-1 0\n"
@@ -314,23 +334,17 @@ class TestEachSandboxFailsAlone:
         )
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr(supervise.time, "sleep", sleeps.append)
+        clock = _Clock()
+        monkeypatch.setattr(supervise, "time", clock)
         api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
-        assert sleeps == []
+        assert clock.sleeps == []
 
     def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        now = [0.0]
-        sleeps: list[float] = []
-
-        def sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-            now[0] += seconds
-
-        monkeypatch.setattr(supervise.time, "monotonic", lambda: now[0])
-        monkeypatch.setattr(supervise.time, "sleep", sleep)
+        clock = _Clock()
+        sleeps = clock.sleeps
+        monkeypatch.setattr(supervise, "time", clock)
         quota = ApiException(status=403, reason="Forbidden")
         quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
         api = _Api(create=quota, create_failures=3)

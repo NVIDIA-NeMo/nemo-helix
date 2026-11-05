@@ -3,11 +3,11 @@
 
 import {
   buildWorkspaceGroup,
-  ModelWorkspaceGroup,
+  type ModelWorkspaceGroup,
   useModelsInfinite,
 } from '@nemo/common/src/api/models/useModels';
-import { ModelsListModelsParams, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
-import { UseQueryOptions } from '@tanstack/react-query';
+import type { ModelsListModelsParams, ModelEntitysPage } from '@nemo/sdk/generated/platform/schema';
+import type { UseQueryOptions } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 
 export interface UseModelsFromWorkspaceOptions {

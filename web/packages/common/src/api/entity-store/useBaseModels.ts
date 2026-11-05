@@ -7,10 +7,10 @@ import { DEFAULT_PAGE_SIZE, QUERY_PREFIX_ENTITY_STORE } from '@nemo/common/src/c
 import { isBaseModel } from '@nemo/common/src/utils/models';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
 import {
-  ModelEntity,
-  ModelEntityFilter,
+  type ModelEntity,
+  type ModelEntityFilter,
   ModelEntitySortField,
-  ModelEntitysPage,
+  type ModelEntitysPage,
 } from '@nemo/sdk/generated/platform/schema';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';

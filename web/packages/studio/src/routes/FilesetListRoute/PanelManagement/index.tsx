@@ -9,7 +9,7 @@ import { FilesetFilePreviewPanel } from '@studio/components/FilesetFilePreviewPa
 import { ROUTE_PARAMS, ROUTES } from '@studio/constants/routes';
 import { QUERY_PARAMETERS } from '@studio/routes/constants';
 import { getFilesetDetailsRoute, getFilesetFileRoute } from '@studio/routes/utils';
-import { FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useState } from 'react';
 import { generatePath, useNavigate, useParams } from 'react-router';
 
 interface PanelManagementProps {

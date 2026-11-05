@@ -191,12 +191,17 @@ class TestUpdateJobCli:
         assert result.exit_code == 0
         assert json.loads(result.output) == {"message": "Hello, Wrapped!"}
 
-    def test_take_job_submit_delegates_without_spec_flags(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("output_location", [None, "evaluation-files"])
+    def test_take_job_submit_delegates_without_spec_flags(
+        self, monkeypatch: pytest.MonkeyPatch, output_location: str | None
+    ) -> None:
         """A replacement with none of the generated flags still submits, not prints help."""
         submitted: list[dict] = []
+        metadata: list[object] = []
 
         def _capture(_self: object, _job_cls: type[NemoJob], spec: dict, **_kwargs: object) -> dict:
             submitted.append(spec)
+            metadata.append(_kwargs.get("metadata"))
             return {"id": "job-123"}
 
         monkeypatch.setattr("nemo_helix_plugin.scheduler.NemoJobScheduler.submit_remote", _capture)
@@ -209,7 +214,12 @@ class TestUpdateJobCli:
 
                 @group.callback(invoke_without_command=True)
                 def greet(typer_ctx: typer.Context, who: str = typer.Argument(...)) -> None:
-                    submit(typer_ctx, spec=json.dumps({"name": who}), workspace="default")
+                    submit(
+                        typer_ctx,
+                        spec=json.dumps({"name": who}),
+                        workspace="default",
+                        output_location=output_location,
+                    )
 
         app = _app_with_jobs(_GreetJob, cli=_CLI())
 
@@ -218,6 +228,7 @@ class TestUpdateJobCli:
         assert result.exit_code == 0, result.output
         assert "Usage:" not in result.output
         assert submitted == [{"name": "Wrapped"}]
+        assert metadata == [{"output_location": output_location} if output_location is not None else None]
 
     def test_take_job_submit_forwards_renderer_kwargs_to_renderer_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         submitted: list[dict] = []
@@ -258,7 +269,7 @@ class TestUpdateJobCli:
         [cli_kwargs] = rendered
         assert cli_kwargs["loud"] is True
 
-    @pytest.mark.parametrize("name", ["spec_file", "profile", "config"])
+    @pytest.mark.parametrize("name", ["spec_file", "profile", "config", "output_location"])
     def test_take_job_submit_rejects_renderer_kwargs_that_shadow_flags(self, name: str) -> None:
         job_group = _app_with_jobs(_GreetJob).registered_groups[0].typer_instance
         assert job_group is not None

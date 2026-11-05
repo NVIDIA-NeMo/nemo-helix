@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FileFormatType, InputFileSchemaType } from '@nemo/common/src/types';
+import { type FileFormatType, InputFileSchemaType } from '@nemo/common/src/types';
 import { findMessagesArray, getFirstRow } from '@nemo/common/src/utils/file';
 import { parseJsonOrJsonl } from '@nemo/common/src/utils/parseRecords';
-import { ChatCompletionRole } from 'openai/resources/index.mjs';
+import type { ChatCompletionRole } from 'openai/resources/index.mjs';
 
 export interface FileValidationResult {
   isValid: boolean;

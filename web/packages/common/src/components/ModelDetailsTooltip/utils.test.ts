@@ -7,7 +7,7 @@ import {
 } from '@nemo/common/src/components/ModelDetailsTooltip/utils';
 import { MODEL_METADATA } from '@nemo/common/src/constants/modelMetadata';
 import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
-import { FinetuningType, ModelEntity } from '@nemo/sdk/generated/platform/schema';
+import type { FinetuningType, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 
 // Mock the dependencies
 vi.mock('@nemo/common/src/namedEntity');

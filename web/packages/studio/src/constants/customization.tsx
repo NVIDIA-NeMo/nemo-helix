@@ -3,7 +3,7 @@
 
 import { CheckmarkBadge, CheckCircle, Play } from '@nemo/icons/icons';
 import { Flex } from '@nvidia/foundations-react-core';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 /**
  * An enum of the files in a Data Store fileset needed to create a customization.

@@ -27,7 +27,7 @@ import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { JobConfigDrawer } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobConfigDrawer';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { isJobSuccessful } from '@studio/util/safeSynthesizer';
-import { FC, useCallback, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 
 interface SafeSynthesizerFilesetPreviewProps {
   job: GenerateJob;

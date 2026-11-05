@@ -9,8 +9,8 @@ import Mistral from '@nemo/common/src/svgs/model_icon_mistral.svg?react';
 import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
 import Qwen from '@nemo/common/src/svgs/model_icon_qwen.svg?react';
 import { Cube, NeuralNetwork, Toolbox } from '@nemo/icons/icons';
-import { FinetuningType } from '@nemo/sdk/generated/platform/schema';
-import { ReactNode } from 'react';
+import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
+import type { ReactNode } from 'react';
 
 export type TagLabel = 'tool-calling' | 'reasoning';
 

@@ -5,7 +5,7 @@ import { ToastProvider } from '@nemo/common/src/providers/toast/ToastProvider';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface TestProps {
   durationMs?: number;

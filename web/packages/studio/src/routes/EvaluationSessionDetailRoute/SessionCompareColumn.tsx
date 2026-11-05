@@ -13,7 +13,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import { Button, Flex, Spinner, Stack, Text } from '@nvidia/foundations-react-core';
 import { SpanListView } from '@studio/components/IntakeDetail/TraceSpanListView';
-import { type NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
+import type { NoteRequest } from '@studio/components/IntakeDetail/traceSpanShared';
 import { useSessionTrajectories } from '@studio/components/IntakeDetail/useSessionTrajectories';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { runLabel } from '@studio/routes/EvaluationSessionDetailRoute/runLabel';

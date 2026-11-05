@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Project, ProjectsPage } from '@nemo/sdk/generated/platform/schema';
+import type { Project, ProjectsPage } from '@nemo/sdk/generated/platform/schema';
 
 export const workspace1: Project = {
   id: 'project-EE9fhQtuH6UHEdFrma1sZE',

@@ -6,7 +6,7 @@ import type {
   SpanPayloadFormat,
   SpanPayloadFormatState,
 } from '@studio/components/IntakeDetail/IntakeComponents/spanPayloadFormat';
-import { type FC, type MouseEvent } from 'react';
+import type { FC, MouseEvent } from 'react';
 
 const FORMAT_OPTIONS: readonly { format: SpanPayloadFormat; label: string; name: string }[] = [
   { format: 'raw', label: 'raw', name: 'raw text' },

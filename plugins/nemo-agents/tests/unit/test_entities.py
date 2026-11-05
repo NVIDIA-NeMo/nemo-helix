@@ -268,6 +268,7 @@ class TestAgentSessionEntity:
         session = AgentSession(name="session", workspace="default", deployment_id="deployment-id")
 
         assert session.status is SessionStatus.ACTIVE
+        assert session.session_uuid == ""
         assert session.first_active_at is None
         assert session.last_active_at is None
         assert session.expires_at is None
@@ -350,11 +351,14 @@ class TestAgentSessionEntity:
 
     def test_entity_serialises_as_api_response(self) -> None:
         session = AgentSession(name="session", workspace="default", deployment_id="deployment-id")
-        session._id = "session-id"
+        session._id = "agent-session-RFppQd3GgwudZJeKDx5t8K"
         session._created_at = NOW
 
         data = session.model_dump()
-        assert data["id"] == "session-id"
+        assert data["id"] == "agent-session-RFppQd3GgwudZJeKDx5t8K"
+        assert data["session_uuid"] == "c46d3588-d205-497f-b96b-37f938263064"
+        assert "session_uuid" not in session._get_data_fields()
+        assert AgentSession.model_json_schema(mode="serialization")["properties"]["session_uuid"]["readOnly"]
         assert data["name"] == "session"
         assert data["workspace"] == "default"
         assert data["deployment_id"] == "deployment-id"

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Compartment, Extension } from '@codemirror/state';
-import { EditorView } from '@codemirror/view';
+import { Compartment, type Extension } from '@codemirror/state';
+import type { EditorView } from '@codemirror/view';
 import { useCallback, useEffect, useMemo } from 'react';
 
 export function useExtensionWithDependency(

@@ -5,7 +5,7 @@ import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { formatDurationMs } from '@nemo/common/src/utils/date';
 import { Wrench } from '@nemo/icons/icons';
-import { type Span } from '@nemo/sdk/generated/platform/schema';
+import type { Span } from '@nemo/sdk/generated/platform/schema';
 import { useGetSpan } from '@nemo/sdk/generated/platform/spans';
 import {
   Button,

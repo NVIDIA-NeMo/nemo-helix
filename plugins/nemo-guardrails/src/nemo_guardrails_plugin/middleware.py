@@ -587,7 +587,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
                     try:
                         # The rail-model calls happen while the stream is consumed, so the request's
                         # headers must be in scope here and not only when the stream was created.
-                        with platform_headers_context(iorails_client):
+                        with platform_headers_context(iorails_client, request_headers):
                             async for chunk in inner:
                                 yield chunk
                     finally:
@@ -623,7 +623,7 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
 
             async def _streaming_with_lease() -> AsyncIterator[dict[str, Any]]:
                 try:
-                    with platform_headers_context(client):
+                    with platform_headers_context(client, request_headers):
                         async with cache.lease(stable, main_llm=main_llm, provenance=lease_provenance) as llm_rails:
                             inner = handle_streaming_output_check(
                                 llm_rails,
@@ -814,13 +814,13 @@ class GuardrailsMiddleware(NemoInferenceMiddleware):
         # IORails when the request and config allow it; the LLMRails path below is the fallback.
         if iorails_runtime is not None and iorails_stable is not None and iorails_client is not None:
             iorails_runtime.warn_ignored_log_options(user_log_options)
-            with self._map_rails_errors(error_msg), platform_headers_context(iorails_client):
+            with self._map_rails_errors(error_msg), platform_headers_context(iorails_client, request_headers):
                 return await iorails_runtime.check(iorails_stable, messages=messages, rail_types=rail_types)
 
         cache, stable, provenance, main_llm, client = await self._prepare_lease_with_503(
             ctx, source, request_body, request_headers, error_msg
         )
-        with self._map_rails_errors(error_msg), platform_headers_context(client):
+        with self._map_rails_errors(error_msg), platform_headers_context(client, request_headers):
             async with cache.lease(stable, main_llm=main_llm, provenance=provenance) as llm_rails:
                 raw_generation_response = await asyncio.to_thread(
                     run_generate_in_new_loop,

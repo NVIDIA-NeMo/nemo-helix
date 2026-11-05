@@ -11,7 +11,7 @@ import {
   DEFAULT_LLM_JUDGE_DEFAULTS,
   EVALUATION_DEFAULT_OUTPUT_TEMPLATE_STRING,
 } from '@nemo/common/src/constants/metrics';
-import { ChatCompletionRole } from 'openai/resources/index.mjs';
+import type { ChatCompletionRole } from 'openai/resources/index.mjs';
 
 interface InferenceRequestTemplate {
   messages: Array<{ role: ChatCompletionRole; content: string }>;

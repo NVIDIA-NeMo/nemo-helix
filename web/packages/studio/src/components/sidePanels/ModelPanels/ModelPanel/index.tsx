@@ -6,11 +6,7 @@ import {
   getModelsListModelsQueryKey,
   useModelsDeleteModel,
 } from '@nemo/sdk/generated/platform/models';
-import {
-  type Adapter,
-  type ModelDeployment,
-  type ModelEntity,
-} from '@nemo/sdk/generated/platform/schema';
+import type { Adapter, ModelDeployment, ModelEntity } from '@nemo/sdk/generated/platform/schema';
 import {
   Block,
   Button,
@@ -23,9 +19,9 @@ import { Empty } from '@studio/components/Empty';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { ModelChatTab } from '@studio/components/ModelChatTab';
 import {
-  ModelArtifactData,
+  type ModelArtifactData,
   ModelDetailOverview,
-  ModelDetailOverviewProps,
+  type ModelDetailOverviewProps,
   ModelParametersAccordion,
 } from '@studio/components/sidePanels/ModelPanels/ModelPanel/components';
 import { useQueryClient } from '@tanstack/react-query';

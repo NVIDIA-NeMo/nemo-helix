@@ -3,7 +3,7 @@
 
 import { Filter } from '@nemo/icons/icons';
 import { Block, TextInput } from '@nvidia/foundations-react-core';
-import { ChangeEvent, FC } from 'react';
+import type { ChangeEvent, FC } from 'react';
 
 interface ModelDropdownSearchProps {
   value: string;

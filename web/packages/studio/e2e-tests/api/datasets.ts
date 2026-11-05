@@ -3,7 +3,7 @@
 
 import { MOCKS_DIR } from '@e2e-tests/utils/constants';
 import { PLATFORM_BASE_URL, NHX_BASE_URL } from '@e2e-tests/utils/environment';
-import { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';

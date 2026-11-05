@@ -19,7 +19,12 @@ from nhx.core.models.api.service.model_deployment_config_service import (
     ReferentialIntegrityError,
 )
 from nhx.core.models.api.service.model_entity_service import _has_tool_call_plugin, validate_tool_call_plugin_allowed
-from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, NOT_FOUND_ERRORS, deployments_enabled
+from nhx.core.models.api.v2.utils import (
+    ERR_DEPLOYMENTS_NOT_ENABLED,
+    LIST_REQUEST_ERRORS,
+    NOT_FOUND_ERRORS,
+    deployments_enabled,
+)
 from nhx.core.models.schemas import (
     CreateModelDeploymentConfigRequest,
     ModelDeploymentConfig,
@@ -99,7 +104,7 @@ async def list_deployment_configs(
             filter_operation=parsed_filter.operation,
         )
         return result
-    except NOT_FOUND_ERRORS:
+    except LIST_REQUEST_ERRORS:
         raise
     except PermissionDeniedError:
         raise

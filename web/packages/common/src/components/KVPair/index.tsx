@@ -3,7 +3,7 @@
 
 import { Flex, Skeleton, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ComponentProps, FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 type Props = {
   label: string;

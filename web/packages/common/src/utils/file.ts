@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { FileFormatType } from '@nemo/common/src/types';
+import type { FileFormatType } from '@nemo/common/src/types';
 import {
   jsonlLines,
   parquetRowCount,

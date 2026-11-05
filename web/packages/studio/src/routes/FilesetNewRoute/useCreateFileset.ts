@@ -15,9 +15,9 @@ import {
   useFilesCreateFileset,
 } from '@nemo/sdk/generated/platform/files';
 import {
-  FilesetOutput,
+  type FilesetOutput,
   FilesetPurpose,
-  CreateFilesetRequest,
+  type CreateFilesetRequest,
 } from '@nemo/sdk/generated/platform/schema';
 import { filesetNameTakenMessage } from '@studio/components/filesets/filesetNames';
 import { invalidateFilesetNameCheck } from '@studio/components/filesets/hooks/useFilesetNameStatus';
@@ -28,7 +28,7 @@ import {
 } from '@studio/routes/FilesetNewRoute/helpers';
 import {
   DatasetCreateFilesetFormSchema,
-  DatasetFormFields,
+  type DatasetFormFields,
 } from '@studio/routes/FilesetNewRoute/types';
 import { getFilesetDetailRoute, getFilesetDetailsRoute } from '@studio/routes/utils';
 import { storageConfigFromUrl } from '@studio/util/storageConfigFromUrl';

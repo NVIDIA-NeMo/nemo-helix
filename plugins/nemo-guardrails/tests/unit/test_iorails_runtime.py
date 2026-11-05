@@ -500,7 +500,9 @@ async def _run_rails(middleware: GuardrailsMiddleware, **overrides: Any) -> Any:
     request_body = overrides.pop("request_body", {"model": "main-model"})
     kwargs.update(overrides)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("nemo_guardrails_plugin.middleware.platform_headers_context", lambda client: _NullContext())
+        mp.setattr(
+            "nemo_guardrails_plugin.middleware.platform_headers_context", lambda client, request_headers: _NullContext()
+        )
         return await middleware._run_rails(MagicMock(request_nemo_client=None), MagicMock(), request_body, {}, **kwargs)
 
 

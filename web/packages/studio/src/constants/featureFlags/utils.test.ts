@@ -15,7 +15,7 @@ import {
   stringFlag,
   numberFlag,
   parseFlags,
-  EnvConfig,
+  type EnvConfig,
 } from '@studio/constants/featureFlags/utils';
 
 describe('featureFlags utils', () => {

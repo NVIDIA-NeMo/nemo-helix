@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useWebSession } from '@studio/providers/auth/useWebSession';
-import { User } from 'oidc-client-ts';
+import type { User } from 'oidc-client-ts';
 import { useMemo } from 'react';
 import { useAuth } from 'react-oidc-context';
 
