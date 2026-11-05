@@ -3,7 +3,7 @@
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Stack, Text, Flex } from '@nvidia/foundations-react-core';
-import { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
+import type { SafeSynthesizerFormData } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { useFormContext } from 'react-hook-form';
 
 export const DataPreparationSettings = () => {

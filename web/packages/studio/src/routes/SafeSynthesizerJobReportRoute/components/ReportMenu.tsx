@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
-import { MenuItem, ReportSection } from '..';
+import type { MenuItem, ReportSection } from '..';
 
 interface ReportMenuProps {
   onSectionChange?: (section: ReportSection) => void;

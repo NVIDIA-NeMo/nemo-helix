@@ -19,7 +19,7 @@ import { EvaluationDetailMetrics } from '@studio/routes/EvaluationDetailRoute/Ev
 import { getExperimentDetailRoute, getExperimentRoute } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { evaluationSessionsExport } from '@studio/util/resultExports';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 const SESSIONS_PAGE_SIZE = 1000;
 

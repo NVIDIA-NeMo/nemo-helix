@@ -31,7 +31,7 @@ import {
   useModelsListProviders,
 } from '@nemo/sdk/generated/platform/model-providers';
 import { getModelsListModelsQueryKey } from '@nemo/sdk/generated/platform/models';
-import {
+import type {
   ModelProvider,
   ModelProviderFilter,
   ModelProviderSort,

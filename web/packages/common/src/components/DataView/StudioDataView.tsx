@@ -6,7 +6,10 @@ import { FilterPanel } from '@nemo/common/src/components/DataView/FilterPanel';
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import '@nemo/common/src/components/DataView/StudioDataView.css';
 import { StudioDataViewToolbar } from '@nemo/common/src/components/DataView/StudioDataViewToolbar';
-import { RowClickHandler, useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
+import {
+  type RowClickHandler,
+  useRowClick,
+} from '@nemo/common/src/components/DataView/useRowClick';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import {
@@ -23,7 +26,7 @@ import {
   Block,
   Stack,
 } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode, RefObject, useMemo, useState } from 'react';
+import { type ComponentProps, type ReactNode, type RefObject, useMemo, useState } from 'react';
 
 const PREBUILT_COLUMN_IDS = new Set(['row-selection', 'row-actions', 'row-expansion']);
 

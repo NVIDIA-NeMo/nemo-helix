@@ -12,7 +12,7 @@ import { Loading } from '@studio/components/Layouts/Loading';
 import { useAuthProfile } from '@studio/providers/auth';
 import { useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
-import { FC, useCallback, useEffect } from 'react';
+import { type FC, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 
 async function createWorkspaceIfNotExists(workspace: string, name: string) {

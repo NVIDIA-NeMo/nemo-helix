@@ -219,7 +219,8 @@ def test_deployments_create_rejects_image_entrypoint_for_openshell() -> None:
         client.deployments.create(agent="calc", deployment_mode="openshell", use_image_entrypoint=True)
 
 
-def test_invoke_sends_session_id_as_header() -> None:
+@pytest.mark.parametrize("session_id", ["c46d3588-d205-497f-b96b-37f938263064", "agent-session-RFppQd3GgwudZJeKDx5t8K"])
+def test_invoke_sends_session_id_as_header(session_id: str) -> None:
     captured: dict[str, Any] = {}
 
     def handler(req: httpx.Request) -> httpx.Response:
@@ -230,11 +231,11 @@ def test_invoke_sends_session_id_as_header() -> None:
 
     client = AgentsResource(_client(handler))
 
-    result = client.invoke(input="Continue", deployment="calc-dep", session_id="session-entity-id")
+    result = client.invoke(input="Continue", deployment="calc-dep", session_id=session_id)
 
     assert result == {"id": "completion-id"}
     assert captured["path"] == "/apis/agents/v2/workspaces/team-a/deployments/calc-dep/-/v1/chat/completions"
-    assert captured["session_id"] == "session-entity-id"
+    assert captured["session_id"] == session_id
     assert captured["body"] == {
         "messages": [{"role": "user", "content": "Continue"}],
         "stream": False,

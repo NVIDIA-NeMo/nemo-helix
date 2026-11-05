@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TextInputSpinner } from '@nemo/common/src/components/form/TextInputSpinner';
-import { UseControllerComponentProps } from '@nemo/common/src/types';
+import type { UseControllerComponentProps } from '@nemo/common/src/types';
 import { FormField, Select } from '@nvidia/foundations-react-core';
-import { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { useController } from 'react-hook-form';
 
 // Generic type to handle both single and multiple selection

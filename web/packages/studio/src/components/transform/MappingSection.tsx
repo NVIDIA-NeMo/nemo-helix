@@ -6,7 +6,7 @@ import { CustomTemplateRows } from '@studio/components/transform/CustomTemplateR
 import { FieldMappingRow } from '@studio/components/transform/FieldMappingRow';
 import { TemplateSyntaxTooltip } from '@studio/components/transform/TemplateSyntaxTooltip';
 import type { TransformMapping } from '@studio/components/transform/useTransformMapping';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   mapping: TransformMapping;

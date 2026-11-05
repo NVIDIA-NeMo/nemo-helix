@@ -10,7 +10,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { MetricTrend, type MetricTrendProps } from '@studio/components/charts/MetricTrend';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 export type {
   MetricTrendPoint,

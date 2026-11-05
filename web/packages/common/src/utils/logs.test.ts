@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { formatLogs, formatLogsForDisplay, logStatusForJob } from '@nemo/common/src/utils/logs';
-import { HelixJobLog, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import { type HelixJobLog, HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
 
 const createLog = (message: string, timestamp: string): HelixJobLog => ({
   timestamp,

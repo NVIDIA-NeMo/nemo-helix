@@ -20,8 +20,8 @@ import { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { useModelsListDeployments } from '@nemo/sdk/generated/platform/model-deployments';
 import {
-  ModelDeployment,
-  ModelDeploymentFilter,
+  type ModelDeployment,
+  type ModelDeploymentFilter,
   ModelDeploymentStatus,
 } from '@nemo/sdk/generated/platform/schema';
 import { type DropdownEntry, Stack, Text } from '@nvidia/foundations-react-core';

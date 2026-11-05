@@ -7,11 +7,11 @@ import {
   getEntitiesListWorkspacesQueryKey,
   useEntitiesDeleteWorkspace,
 } from '@nemo/sdk/generated/platform/entity-store';
-import { WorkspacesPage } from '@nemo/sdk/generated/platform/schema';
+import type { WorkspacesPage } from '@nemo/sdk/generated/platform/schema';
 import { queryClient } from '@studio/api/queryClient';
 import { useRecentWorkspaces } from '@studio/components/WorkspaceDropdown/useRecentWorkspaces';
 import { getWorkspaceDetailsDefaultRoute } from '@studio/routes/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
 interface DeleteWorkspaceModalProps {

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
-import { EntityIdentifier } from '@studio/api/common/types';
+import type { EntityIdentifier } from '@studio/api/common/types';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { renameDatasetFile } from '@studio/api/datasets/useDatasetFileRename';
-import { UseMutationOptions, useMutation } from '@tanstack/react-query';
+import { type UseMutationOptions, useMutation } from '@tanstack/react-query';
 
 type MoveDatasetFilesParams = Required<EntityIdentifier> & {
   /** Array of file paths to move */

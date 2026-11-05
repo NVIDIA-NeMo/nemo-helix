@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
-import * as DataView from '@nemo/common/src/components/DataView/internal';
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { Eye, Trash } from '@nemo/icons/icons';
@@ -18,7 +18,7 @@ import {
   Tooltip,
 } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
-import { ComponentProps, FC, useCallback } from 'react';
+import { type ComponentProps, type FC, useCallback } from 'react';
 
 // ---------------------------------------------------------------------------
 // Mock datasets

@@ -3,8 +3,8 @@
 
 import { logger } from '@nemo/common/src/utils/logger';
 import { Block, Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, useCallback, ReactNode } from 'react';
-import { useDropzone, FileRejection } from 'react-dropzone';
+import { type FC, useCallback, type ReactNode } from 'react';
+import { useDropzone, type FileRejection } from 'react-dropzone';
 
 type DatasetFileDropzoneProps = {
   children: (openFileDialog: () => void) => ReactNode;

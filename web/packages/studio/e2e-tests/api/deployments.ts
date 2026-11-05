@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NHX_BASE_URL } from '@e2e-tests/utils/environment';
-import { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext } from '@playwright/test';
 
 export class DeploymentsAPI {
   constructor(private request: APIRequestContext) {

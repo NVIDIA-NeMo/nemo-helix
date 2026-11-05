@@ -5,7 +5,7 @@ import { ModelDropdown } from '@nemo/common/src/components/ModelSelectV2/ModelDr
 import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
 import type { ModelSelectV2Props } from '@nemo/common/src/components/ModelSelectV2/types';
 import { Group } from '@nvidia/foundations-react-core';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 export const ModelSelectV2: FC<ModelSelectV2Props> = ({
   showParams = false,
