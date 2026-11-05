@@ -52,7 +52,8 @@ from nemo_helix_plugin.auth.workload_identity import (
 from nemo_helix_plugin.config import ImagePullSecret, get_platform_config
 
 CONFIG_FILES_VOLUME = "config-files"
-# Memory-backed emptyDir mounted at /dev/shm when a config sets shm_size (the runtime default is 64Mi).
+# Memory-backed emptyDir mounted at /dev/shm when a config sets shm_size (new configs default to 8Gi;
+# without it the runtime default is 64Mi).
 SHM_VOLUME_NAME = "dshm"
 NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
 

@@ -460,8 +460,9 @@ def compile_model_deployment(
             engine=engine,
             runtime=resolved.runtime,
         )
-    # Multi-GPU servers exchange data through /dev/shm, which defaults to 64Mi. Size it from
-    # the GPUs the server finally requests (NIM overrides can change them); same sizing as GPU jobs.
+    # Multi-GPU servers exchange data through /dev/shm. Size it from the GPUs the server finally
+    # requests (NIM overrides can change them), the same sizing as GPU jobs; a CPU server keeps the
+    # deployments plugin's 8Gi default.
     server_gpus = int((server.resources.limits or {}).get("nvidia.com/gpu") or 0)
     if server_gpus > 0:
         server_config.shm_size = f"{_SHM_GIB_PER_GPU * server_gpus}Gi"

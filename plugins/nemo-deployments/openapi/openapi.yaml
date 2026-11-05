@@ -992,8 +992,9 @@ components:
         shmSize:
           title: Shmsize
           description: Size of /dev/shm in the main containers, as a Kubernetes quantity
-            (e.g. '32Gi'). Multi-GPU inference servers exchange data through it. Unset
-            keeps the runtime default of 64Mi.
+            (e.g. '32Gi'). Multi-process workloads such as multi-GPU inference servers
+            exchange data through it. New configs default to 8Gi; null keeps the runtime
+            default of 64Mi.
           type: string
         authProxySidecar:
           type: boolean

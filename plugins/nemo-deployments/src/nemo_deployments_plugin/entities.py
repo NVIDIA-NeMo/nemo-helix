@@ -358,8 +358,9 @@ class DeploymentConfig(NemoEntity, entity_type=ENTITY_TYPE_DEPLOYMENT_CONFIG):
         default=None,
         alias="shmSize",
         description=(
-            "Size of /dev/shm in the main containers, as a Kubernetes quantity (e.g. '32Gi'). Multi-GPU "
-            "inference servers exchange data through it. Unset keeps the runtime default of 64Mi."
+            "Size of /dev/shm in the main containers, as a Kubernetes quantity (e.g. '32Gi'). Multi-process "
+            "workloads such as multi-GPU inference servers exchange data through it. New configs default to "
+            "8Gi; null keeps the runtime default of 64Mi."
         ),
     )
     auth_proxy_sidecar: bool = Field(
