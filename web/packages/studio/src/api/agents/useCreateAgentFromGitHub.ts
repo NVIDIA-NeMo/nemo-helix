@@ -46,11 +46,20 @@ export const createAgentFromGitHub = async ({
 
   await claimFileset(workspace, name, filesetName, replaceOrphanedFileset);
 
-  await filesCreateFileset(workspace, {
-    name: filesetName,
-    description: `Agent spec for ${name}, from ${formatGitHubSource(source)}`,
-    storage: githubStorageConfig(source, secretName),
-  });
+  try {
+    await filesCreateFileset(workspace, {
+      name: filesetName,
+      description: `Agent spec for ${name}, from ${formatGitHubSource(source)}`,
+      storage: githubStorageConfig(source, secretName),
+    });
+  } catch (error) {
+    if (responseStatus(error) !== 400) {
+      throw error;
+    }
+    throw new Error(`${getErrorMessage(error as Error)}. ${accessHint(secretName)}`, {
+      cause: error,
+    });
+  }
 
   try {
     const config = parseAgentConfig(
@@ -79,20 +88,44 @@ const readAgentConfig = async (
     const blob = await filesDownloadFile(workspace, filesetName, AGENT_CONFIG_FILENAME);
     return await blob.text();
   } catch (error) {
-    const hint = isAccessDenial(error)
-      ? `Check the branch and directory. ${accessHint(secretName)}`
-      : getErrorMessage(error as Error);
     throw new Error(
-      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ${hint}`,
+      `Could not read ${AGENT_CONFIG_FILENAME} from ${formatGitHubSource(source)}. ${await readFailureHint(error, secretName)}`,
       { cause: error }
     );
   }
 };
 
-const ACCESS_DENIAL_STATUSES = new Set([401, 403, 404]);
+const responseStatus = (error: unknown): number | undefined =>
+  error instanceof AxiosError ? error.response?.status : undefined;
 
-const isAccessDenial = (error: unknown): boolean =>
-  error instanceof AxiosError && ACCESS_DENIAL_STATUSES.has(error.response?.status ?? 0);
+// Downloads use a blob response type, so the platform's JSON detail arrives as a Blob.
+const responseDetail = async (error: unknown): Promise<string> => {
+  const data = error instanceof AxiosError ? error.response?.data : undefined;
+  if (data instanceof Blob) {
+    try {
+      const { detail } = JSON.parse(await data.text());
+      if (typeof detail === 'string') {
+        return detail;
+      }
+    } catch {
+      // Not JSON; fall through to the generic message.
+    }
+  }
+  return getErrorMessage(error as Error);
+};
+
+const readFailureHint = async (error: unknown, secretName: string | undefined): Promise<string> => {
+  const status = responseStatus(error);
+  if (status === 404) {
+    return `Check that the branch and directory hold ${AGENT_CONFIG_FILENAME}.`;
+  }
+  const detail = await responseDetail(error);
+  // The files service reports GitHub refusing the token as 502.
+  if (status === 502) {
+    return `${detail} ${accessHint(secretName)}`;
+  }
+  return detail;
+};
 
 const accessHint = (secretName: string | undefined): string => {
   if (secretName) {

@@ -78,6 +78,7 @@ import {
   type DragEventHandler,
   type FC,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -374,6 +375,13 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
         ? getErrorMessage(failure) || 'Failed to create agent'
         : undefined;
 
+  const errorBannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (errorMessage) {
+      errorBannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [errorMessage]);
+
   const busy = isPending || isCreatingTraced || deployOnCreate.isDeploying;
   const awaitingDeployModes = deployOnCreate.blocksSubmit(Boolean(watchedDeploy));
 
@@ -582,7 +590,7 @@ export const NewAgentModal: FC<NewAgentModalProps> = ({
           </TabsContent>
         </TabsRoot>
         {onCreateTab && errorMessage && (
-          <Banner kind="inline" status="error">
+          <Banner ref={errorBannerRef} kind="inline" status="error">
             {errorMessage}
           </Banner>
         )}

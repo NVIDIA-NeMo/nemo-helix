@@ -562,8 +562,10 @@ describe('NewAgentModal GitHub import', () => {
 
     await submit(dialog, user);
 
-    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
-    expect(within(dialog).getByText(/If the repository is private/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/Check that the branch and directory hold agent\.yaml/)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
   });
@@ -643,15 +645,45 @@ describe('NewAgentModal GitHub import', () => {
     await typeRepo(dialog, user);
     await submit(dialog, user);
 
-    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/Could not read agent\.yaml from owner\/repo\. unavailable/)
+    ).toBeInTheDocument();
     expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
+  });
+
+  it('suggests a token when GitHub turns the repository away at setup', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    server.use(
+      http.post(FILESETS_URL, () =>
+        HttpResponse.json(
+          { detail: 'GitHub has no repository owner/repo, or the token does not have access' },
+          { status: 400 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(
+        /the token does not have access\. If the repository is private, choose an access token secret\./
+      )
+    ).toBeInTheDocument();
+    expect(filesets).toHaveLength(0);
   });
 
   it('says which secret could not read the repository', async () => {
     const user = userEvent.setup();
     mockHelix();
     server.use(
-      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'not found' }, { status: 404 }))
+      http.get(UPLOAD_URL, () =>
+        HttpResponse.json({ detail: 'Failed to access upstream storage.' }, { status: 502 })
+      )
     );
 
     renderModal();
