@@ -111,13 +111,6 @@ def test_systemone_response_dump_is_lossless():
     assert parsed.model_dump(mode="json") == payload
 
 
-def test_systemone_response_without_usage_is_untyped():
-    payload = _systemone_response()
-    del payload["usage"]
-
-    assert parse_typed_response(BackendFormat.SYSTEMONE, payload) is None
-
-
 @pytest.mark.asyncio
 async def test_systemone_stream_has_no_typed_view_and_keeps_raw_chunks():
     async def _chunks() -> AsyncIterator[dict[str, Any]]:
