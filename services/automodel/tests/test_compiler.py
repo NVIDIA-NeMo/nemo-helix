@@ -383,13 +383,9 @@ def _text_moe_job(*, expert_parallel_size: int | None = None, num_gpus_per_node:
     )
 
 
-def test_compile_training_step_allows_unregistered_text_moe_without_expert_parallel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_compile_training_step_allows_unregistered_text_moe_without_expert_parallel() -> None:
     """An architecture outside Automodel's map keeps the Hugging Face path."""
     from nhx.automodel.app.jobs.training import compiler
-
-    monkeypatch.setattr(compiler, "uses_custom_automodel_impl", lambda architecture: False)
 
     step = compiler.compile_training_step(
         _text_moe_job(),
@@ -402,13 +398,9 @@ def test_compile_training_step_allows_unregistered_text_moe_without_expert_paral
     assert cfg["parallelism"]["expert_parallel_size"] is None
 
 
-def test_compile_training_step_rejects_registered_text_moe_without_expert_parallel(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_compile_training_step_rejects_registered_text_moe_without_expert_parallel() -> None:
     """A registered text MoE fails before the download step reserves GPUs."""
     from nhx.automodel.app.jobs.training import compiler
-
-    monkeypatch.setattr(compiler, "uses_custom_automodel_impl", lambda architecture: True)
 
     with pytest.raises(HelixJobCompilationError, match="expert_parallel_size"):
         compiler.compile_training_step(

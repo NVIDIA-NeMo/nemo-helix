@@ -106,8 +106,7 @@ def test_merge_loads_the_model_class_for_the_checkpoint(
     _Peft.loaded = None
     _Peft.adapter = None
     _install_ml_stubs(monkeypatch)
-    work = tmp_path / "stage"
-    monkeypatch.setattr(lora, "_merge_workdir", lambda: work)
+    monkeypatch.setattr(lora, "_merge_parent", lambda: tmp_path)
     adapter = tmp_path / "adapter"
     output = tmp_path / "output"
 
@@ -128,4 +127,4 @@ def test_merge_loads_the_model_class_for_the_checkpoint(
     assert (output / "tokenizer_config.json").is_file()
     assert (output / "preprocessor_config.json").is_file() is has_vision_tower
     assert (output / "chat_template.jinja").read_text() == ("processor" if has_vision_tower else "tokenizer")
-    assert not work.exists()
+    assert not list(tmp_path.glob("merged_lora-*"))

@@ -9,14 +9,26 @@ plugins can import this package without them.
 """
 
 import logging
+import os
 import shutil
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def _merge_workdir() -> Path:
-    return Path("/scratch/merged_lora") if Path("/scratch").is_dir() else Path("/tmp/merged_lora")
+def _merge_parent() -> Path:
+    """Directory that holds one staging folder per merge.
+
+    Prefer the task's ephemeral storage so concurrent jobs on one host do not
+    share a directory. Otherwise use node scratch, then /tmp.
+    """
+    ephemeral = os.environ.get("NEMO_JOB_EPHEMERAL_TASK_STORAGE_PATH")
+    if ephemeral:
+        return Path(ephemeral)
+    if Path("/scratch").is_dir():
+        return Path("/scratch")
+    return Path("/tmp")
 
 
 def merge_lora_adapter(
@@ -62,9 +74,9 @@ def merge_lora_adapter(
         model_cls = AutoModelForCausalLM
 
     logger.info("Merging LoRA adapter from %s into base model %s", adapter_path, base_model_path)
-    tmp_path = _merge_workdir()
-    shutil.rmtree(tmp_path, ignore_errors=True)
-    tmp_path.mkdir(parents=True, exist_ok=True)
+    parent = _merge_parent()
+    parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = Path(tempfile.mkdtemp(prefix="merged_lora-", dir=parent))
     try:
         logger.info("Loading base model...")
         model = model_cls.from_pretrained(
