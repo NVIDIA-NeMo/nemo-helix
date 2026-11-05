@@ -47,8 +47,10 @@ class _LoopEngineBinding:
 # entities controller thread each run their own loop, and SQLAlchemy's async pool binds
 # its queue to the loop that first uses it; sharing one engine across loops raises
 # "Queue is bound to a different event loop" under pool pressure. Each loop therefore
-# owns its own engine. Weakly keyed so a loop that is garbage-collected without a
-# dispose does not pin its entry (and its engine) in the registry forever.
+# owns its own engine. Weakly keyed so a loop whose engine never opened a pooled
+# connection does not pin its entry once the loop is dropped; once a connection is
+# pooled the binding keeps its loop alive, so every loop that initializes an engine
+# must dispose_async_engine() before it goes away.
 _async_engines: WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopEngineBinding] = WeakKeyDictionary()
 
 
@@ -72,8 +74,8 @@ async def initialize_async_engine(config: EntitiesConfig) -> None:
     if binding is not None:
         if binding.engine.url != make_url(config.get_async_sqlalchemy_url()):
             raise RuntimeError(
-                "The entities engine is already initialized for a different database. One process runs one "
-                "entity store; a test that opens a second service context must close the first one before it."
+                "The entities engine is already initialized for a different database on this event loop. "
+                "Dispose this loop's engine before initializing another."
             )
         return  # Already initialized on this loop
 

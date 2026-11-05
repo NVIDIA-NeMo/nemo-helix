@@ -12,6 +12,7 @@ from nhx.common.controller import ControllerManager, Loop, TimedLoopWaiter, Trac
 from nhx.common.service.api.health import wait_for_service_ready
 from nhx.core.entities.app.repository import (
     SQLAlchemyWorkspaceRepository,
+    dispose_async_engine,
     get_async_session_maker,
     initialize_async_engine,
 )
@@ -50,42 +51,47 @@ def run(parent_stop_signal: threading.Event | None = None):
 
     workspace_repository = SQLAlchemyWorkspaceRepository(session_maker)
 
-    if not wait_for_service_ready(platform_config, "entities", local_stop_signal):
-        if local_stop_signal.is_set():
-            logger.info("Shutdown requested before server became ready")
-            return
-        logger.warning("Server did not become ready in time, starting loops anyway")
-
-    cleanup_controller = WorkspaceCleanup(
-        client=client,
-        workspace_repository=workspace_repository,
-        stop_signal=local_stop_signal,
-        loop=loop,
-    )
-    cleanup_controller_monitored = TrackLastExecutionTime(cleanup_controller)
-
-    cleanup_loop = Loop(
-        TimedLoopWaiter(entities_config.workspace_cleanup_interval, stop_signal=local_stop_signal),
-        cleanup_controller_monitored,
-        stop_signal=local_stop_signal,
-    )
-
-    controller_manager = ControllerManager.get_instance()
-    controller_manager.register("workspace_cleanup", cleanup_loop)
-
-    cleanup_loop.start()
-    logger.info("Entities controller started successfully")
-
+    cleanup_loop: Loop | None = None
     try:
+        if not wait_for_service_ready(platform_config, "entities", local_stop_signal):
+            if local_stop_signal.is_set():
+                logger.info("Shutdown requested before server became ready")
+                return
+            logger.warning("Server did not become ready in time, starting loops anyway")
+
+        cleanup_controller = WorkspaceCleanup(
+            client=client,
+            workspace_repository=workspace_repository,
+            stop_signal=local_stop_signal,
+            loop=loop,
+        )
+        cleanup_controller_monitored = TrackLastExecutionTime(cleanup_controller)
+
+        cleanup_loop = Loop(
+            TimedLoopWaiter(entities_config.workspace_cleanup_interval, stop_signal=local_stop_signal),
+            cleanup_controller_monitored,
+            stop_signal=local_stop_signal,
+        )
+
+        controller_manager = ControllerManager.get_instance()
+        controller_manager.register("workspace_cleanup", cleanup_loop)
+
+        cleanup_loop.start()
+        logger.info("Entities controller started successfully")
+
         while not local_stop_signal.is_set():
             local_stop_signal.wait(timeout=1)
     except KeyboardInterrupt:
         logger.info("Received keyboard interrupt, stopping entities controller")
     finally:
-        cleanup_loop.stop()
-        cleanup_loop.join(timeout=10)
-        if cleanup_loop.is_alive():
-            logger.warning("Workspace cleanup loop did not stop in time")
+        if cleanup_loop is not None:
+            cleanup_loop.stop()
+            cleanup_loop.join(timeout=10)
+            if cleanup_loop.is_alive():
+                logger.warning("Workspace cleanup loop did not stop in time")
+        # This loop owns its own engine; dispose it so shutdown does not leak the pool.
+        loop.run_until_complete(dispose_async_engine())
+        loop.close()
         logger.info("Entities controller stopped")
 
 

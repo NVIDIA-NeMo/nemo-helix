@@ -218,12 +218,15 @@ class TestWorkspaceCleanupStep:
 
     def test_failed_step_pins_unhealthy_until_the_next_successful_step_clears_it(self):
         repo = AsyncMock()
-        repo.list_workspaces.side_effect = [
-            Exception("db error"),
-            ([], None),
-            ([], None),
-            ([], None),
-        ]
+        failures = {"count": 0}
+
+        def _list_workspaces(*args, **kwargs):
+            if failures["count"] == 0:
+                failures["count"] += 1
+                raise Exception("db error")
+            return ([], None)
+
+        repo.list_workspaces.side_effect = _list_workspaces
         controller = _make_controller(workspace_repo=repo)
 
         controller.step()

@@ -9,7 +9,7 @@ engines by ``asyncio.get_running_loop()`` so each loop gets its own connection p
 instead of sharing a process-global engine whose pool queue is bound to whichever
 loop initialized it first. Sharing one engine made a pool-saturated loop raise
 ``RuntimeError: Queue is bound to a different event loop`` and pinned the
-workspace_cleanup controller unhealthy (GitHub issue #1230).
+workspace_cleanup controller unhealthy in local single-process mode.
 """
 
 import asyncio
@@ -77,8 +77,9 @@ async def _hold_every_pooled_connection(engine: AsyncEngine) -> tuple[list[async
     """Check out every connection the engine's pool can provide and hold it until released."""
     pool = engine.pool
     size = getattr(pool, "size", None)
-    max_overflow = getattr(pool, "_max_overflow", 0)
     assert callable(size), f"unexpected pool without a size(): {pool!r}"
+    assert hasattr(pool, "_max_overflow"), f"unexpected pool without _max_overflow: {pool!r}"
+    max_overflow = pool._max_overflow
     count = size() + max_overflow
     assert count >= 1, f"unexpected pool without capacity: {pool!r}"
     release = asyncio.Event()
@@ -95,7 +96,7 @@ async def _hold_every_pooled_connection(engine: AsyncEngine) -> tuple[list[async
             await release.wait()
 
     tasks = [asyncio.ensure_future(_hold()) for _ in range(count)]
-    await ready.wait()
+    await asyncio.wait_for(ready.wait(), timeout=30)
     return tasks, release
 
 
