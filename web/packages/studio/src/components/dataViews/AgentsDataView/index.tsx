@@ -75,9 +75,6 @@ export interface AgentConfig {
   };
 }
 
-export type AgentItem = Agent & { id: string };
-export type AgentEntity = AgentDeployment & { id: string };
-
 const TERMINAL_DEPLOYMENT_STATUSES = new Set(['running', 'failed', 'stopped', 'error']);
 
 export type AgentTableRow = {

@@ -64,9 +64,6 @@ export const evalJobConfigLabel = (job: HelixJobResponse): string | null => {
   return asNonEmptyString(asRecord(spec.benchmark)?.eval_config_fileset) ?? null;
 };
 
-export const hasMixedEvalKinds = (rows: EvalJobRow[]): boolean =>
-  new Set(rows.map((row) => row.kind)).size > 1;
-
 export const evalJobDetailRoute = (workspace: string, row: EvalJobRow): string =>
   row.kind === 'dataset'
     ? getEvaluationResultDetailsRoute(workspace, row.name)

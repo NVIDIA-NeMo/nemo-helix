@@ -16,7 +16,5 @@ export enum FilesetDetailTab {
   Files = 'files',
 }
 
-export const FILESET_DETAIL_DEFAULT_TAB = FilesetDetailTab.Card;
-
 export const isFilesetDetailTab = (value: string | undefined): value is FilesetDetailTab =>
   Object.values(FilesetDetailTab).includes(value as FilesetDetailTab);
