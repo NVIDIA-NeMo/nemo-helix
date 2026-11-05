@@ -49,6 +49,7 @@ ENDPOINTS = [
     ],
 )
 def test_list_query_error_response(module, dependency, method, path, params, error_type, status, detail, monkeypatch):
+    """Preserve upstream status/detail without reclassifying programming failures."""
     service_method = AsyncMock()
     if error_type in (BadRequestError, UnprocessableEntityError, NotFoundError):
         service_method.side_effect = error_type(

@@ -172,7 +172,9 @@ class SQLAlchemyFilterRepository(FilterRepository):
         ``$startsWith``/``$endsWith``/``$nin``.
         """
         if operator == FilterOperator.EQ:
-            return self._json_eq(element, value) if is_json else element == value
+            return (
+                self._json_eq(element, value) if is_json else element == self._coerce_value_for_column(element, value)
+            )
         comparison = self._non_eq_compare(element, is_json, operator, value)
         if is_json and operator in self._NULL_EXCLUDING_OPS:
             return and_(not_(self._json_eq(element, None)), comparison)
@@ -188,7 +190,7 @@ class SQLAlchemyFilterRepository(FilterRepository):
         if operator == FilterOperator.LIKE:
             return text.ilike(f"%{value}%")
         if operator in (FilterOperator.IN, FilterOperator.NIN):
-            values = [str(v) for v in value] if is_json else value
+            values = [str(v) for v in value] if is_json else [self._coerce_value_for_column(element, v) for v in value]
             return text.in_(values) if operator == FilterOperator.IN else text.not_in(values)
         op = self._ORDERED_OPS[operator]
         if not is_json:
