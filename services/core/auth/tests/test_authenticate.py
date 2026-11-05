@@ -478,8 +478,9 @@ def test_internal_ext_authz_mints_token_for_web_session_in_workload_mode(tmp_pat
 
 
 @pytest.mark.parametrize("workload_mode", [False, True])
-@pytest.mark.parametrize("header", ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"])
-def test_ext_authz_refuses_browser_requests_with_a_web_session(tmp_path, workload_mode: bool, header: str):
+@pytest.mark.parametrize("header", ["Sec-Fetch-Site", "Sec-Fetch-Mode", "sec-fetch-dest"])
+@pytest.mark.parametrize("url", ["/ext-authz", "/ext-authz/apis/entities/v2/workspaces/default"])
+def test_ext_authz_refuses_browser_requests_with_a_web_session(tmp_path, workload_mode: bool, header: str, url: str):
     # A same-origin script could otherwise read the minted bearer token from the response.
     config = _web_session_config(tmp_path)
     if workload_mode:
@@ -496,7 +497,7 @@ def test_ext_authz_refuses_browser_requests_with_a_web_session(tmp_path, workloa
 
     with _test_client(config, credential_store=credential_store) as client:
         response = client.get(
-            "/ext-authz",
+            url,
             cookies={"nhx_session": "session-handle"},
             headers={header: "same-origin"},
         )
@@ -506,6 +507,23 @@ def test_ext_authz_refuses_browser_requests_with_a_web_session(tmp_path, workloa
     assert "Authorization" not in response.headers
     _assert_no_principal_response_headers(response)
     credential_store.get_active.assert_not_awaited()
+
+
+def test_ext_authz_fetch_metadata_check_only_applies_to_cookie_only_requests(tmp_path):
+    config = _web_session_config(tmp_path)
+    credential_store = AsyncMock(spec=AccountCredentialStore)
+    credential_store.get_active.return_value = _web_session_record()
+
+    with _test_client(config, credential_store=credential_store) as client:
+        response = client.get(
+            "/ext-authz",
+            cookies={"nhx_session": "session-handle"},
+            headers={"Authorization": "Bearer not-a-token", "Sec-Fetch-Site": "same-origin"},
+        )
+
+    # An invalid bearer is rejected as a bearer, not by the callout-only check.
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid bearer token"
 
 
 def test_authenticate_oidc_access_token_with_actor_returns_direct_principal_json(tmp_path):

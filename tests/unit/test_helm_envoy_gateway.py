@@ -3,6 +3,7 @@
 
 """The chart's default Envoy gateway must not expose the ext-authz callout to clients."""
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -16,7 +17,11 @@ EXT_AUTHZ_PREFIX = "/apis/auth/ext-authz"
 
 def _http_connection_manager() -> dict:
     if shutil.which("helm") is None:
-        pytest.skip("helm is required to render the NeMo Helix chart")
+        # A skip would hide a missing fence in CI, so fail there.
+        message = "helm is required to render the NeMo Helix chart"
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        pytest.skip(message)
     rendered = subprocess.run(
         [
             "helm",

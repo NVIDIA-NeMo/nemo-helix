@@ -60,9 +60,11 @@ _AUTHENTICATE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     },
 }
 
-# Fetch metadata headers. Browsers add them to every request sent over HTTPS or to localhost, and page
-# scripts can neither set nor remove them. The session cookie is Secure, so any browser request that
-# carries it also carries these. Gateway callouts forward only allow-listed headers, never these.
+# Fetch metadata headers. Current browsers add them to every request sent over HTTPS or to localhost, and
+# page scripts can neither set nor remove them. The session cookie is Secure, so a request from such a
+# browser that carries it also carries these. Gateway callouts forward only allow-listed headers, never
+# these. Older browsers and non-browser clients omit them, so this is defense in depth behind the
+# gateway's 404 for the callout, not a replacement for it.
 _BROWSER_FETCH_METADATA_HEADERS = ("sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest")
 
 

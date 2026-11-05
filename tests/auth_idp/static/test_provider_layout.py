@@ -364,3 +364,31 @@ def test_authentik_runtimes_declare_platform_access_key_capability():
 
     assert "platform_access_keys" in runtimes["authentik-compose"]["capabilities"]
     assert "platform_access_keys" in runtimes["authentik-kubernetes"]["capabilities"]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "contrib/auth/authentik/gateway/envoy.yaml",
+        "contrib/auth/authentik/helm/templates/_envoy-config.tpl",
+        "contrib/auth/zitadel/helm/templates/_envoy-config.tpl",
+    ],
+)
+def test_contrib_gateways_normalize_paths_before_the_ext_authz_fence(template: str) -> None:
+    # Without normalization, /apis/auth/ext%2Dauthz misses the literal 404 prefix and reaches the API.
+    # The .tpl files are Helm templates that do not parse as YAML, so match the settings as sibling keys of
+    # the connection manager's stat_prefix (a commented-out or misplaced key does not count).
+    lines = (Path(__file__).parent.parent.parent.parent / template).read_text(encoding="utf-8").splitlines()
+
+    stat_prefix_index = next(i for i, line in enumerate(lines) if line.strip() == "stat_prefix: ingress_http")
+    indent = len(lines[stat_prefix_index]) - len(lines[stat_prefix_index].lstrip())
+    siblings = {line.strip() for line in lines if len(line) - len(line.lstrip()) == indent}
+    assert {
+        "normalize_path: true",
+        "merge_slashes: true",
+        "path_with_escaped_slashes_action: UNESCAPE_AND_REDIRECT",
+    } <= siblings
+
+    fence_index = next(i for i, line in enumerate(lines) if line.strip() == 'prefix: "/apis/auth/ext-authz"')
+    api_index = next(i for i, line in enumerate(lines) if line.strip() == 'prefix: "/apis/"')
+    assert fence_index < api_index
