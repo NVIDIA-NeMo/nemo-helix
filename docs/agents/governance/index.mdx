@@ -116,43 +116,64 @@ Before running a war-game, make sure you have:
 
 ### On Kubernetes
 
-On a Helm deployment, war-game and benign-suite jobs are not supported yet.
-OpenShell 0.1.0 and later create sandboxes only from a registry image, and the
-current Agent Hardener release still builds the victim from a Dockerfile, so the
-victim sandbox can't be created. Submitting either job fails right away with an
-error that says so. The Agent Hardening pages in Studio and the
-`/apis/agent-hardener` endpoints still work.
-
-<Warning>
-The rest of this section is a preview for testing a future Agent Hardener release.
-With the current release, these jobs fail when the victim sandbox is created.
-</Warning>
-
-Set `platformConfig.agent_hardener.container_jobs: true` to run both jobs in the
+On a Helm deployment, war-game and benign-suite jobs run in the
 `nhx-agent-hardener-tasks` image on the default `cpu` Jobs profile. That image
 already carries the Agent Hardener and garak virtual environments and the
 `openshell` CLI, so the cluster needs no Docker and no
-`nemo agent-hardener setup`. Instead of the host prerequisites above, you need:
+`nemo agent-hardener setup`. Studio submits these jobs. The CLI's `run` and
+`synth-benign` still run on your own machine, with its Docker and OpenShell.
+
+A job there cannot build the victim, and OpenShell creates a sandbox only from
+an image the cluster can pull. So each manifest needs a victim image that you
+build yourself, the same way you build an agent image for a Kubernetes
+deployment. Until a manifest has one, submitting a job for it fails right away
+with the steps below.
+
+Instead of the host prerequisites above, you need:
 
 1. An [OpenShell gateway](/documentation/kubernetes-deployment/setup/helm/openshell)
    in the cluster.
-1. Its endpoint in `platformConfig.agent_hardener.openshell_gateway_endpoint`.
-   Apply `k8s/helm/examples/openshell/agent-hardener-values.yaml` after your
-   platform values and change the endpoint to your gateway's Service address.
-   Each job registers the gateway with the `openshell` CLI before it starts.
+1. Agent Hardener jobs turned on and pointed at the gateway. Apply
+   `k8s/helm/examples/openshell/agent-hardener-values.yaml` after your platform
+   values and change the endpoint to your gateway's Service address. It sets
+   `container_jobs`, `openshell_gateway_endpoint` and `events_dir`, and, when
+   `networkPolicies.enabled` is set, lets job pods reach the gateway. Each job
+   registers the gateway with the `openshell` CLI before it starts.
 1. For an `https` endpoint, the gateway's mTLS client bundle stored as three NeMo
    Secrets in the run's workspace, named by `openshell_ca_secret`,
    `openshell_client_cert_secret` and `openshell_client_key_secret`. An `http`
    endpoint is plaintext and needs none.
 1. The Agent Hardener model key in the `agent-hardener-inference-key` Secret, the
    one `nemo agent-hardener setup` reads on a host.
+1. A registry the gateway's compute nodes can pull from. For a private registry,
+   configure OpenShell's `sandboxImagePullSecrets`; the platform chart's image-pull
+   credentials do not reach the gateway.
+
+To give a manifest its victim image:
+
+1. Stage the victim's build context. In Studio, open the manifest and select
+   **Stage Build Context**, then download the archive. From the CLI, on a machine
+   that ran `nemo agent-hardener setup`:
+   ```bash
+   nemo agent-hardener stage --manifest-id <manifest>
+   ```
+1. Build and push the archive as it is:
+   ```bash
+   docker build -t <registry>/<image>:<tag> - < <manifest>-victim-context.tar.gz
+   docker push <registry>/<image>:<tag>
+   ```
+1. Record the image on the manifest, in the manifest's **Victim Image** panel in
+   Studio or with:
+   ```bash
+   nemo agent-hardener manifest set <manifest> --victim-image <registry>/<image>:<tag>
+   ```
+
+A run checks that the image was built from the context it stages, and fails if
+it was not. Stage and build again after you refresh the manifest or upgrade
+Agent Hardener.
 
 ## Scope
 
-- **Local deployments only.** Agent Governance runs on a platform started from
-  source with `nemo services run`. The Helm chart and container images do not
-  include it, so the Agent hardening plugin API and the Studio Agent Hardening
-  page are absent there.
 - **Attacks focus on agent behavior.** Probes exercise how the agent responds to
   adversarial input, including prompt injection, indirect injection through tool
   output and jailbreaks. Network reach is covered on the defense side, where the
