@@ -1098,7 +1098,7 @@ def _spy_on_run_job(monkeypatch: pytest.MonkeyPatch, calls: list[bool]) -> None:
     """
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scopes=()):
         async def run_job() -> None:
             calls.append(bool(force_rerun))
 
@@ -1269,7 +1269,7 @@ async def test_agent_kwargs_and_env_reach_harbor_agent_config_unchanged(
 
 
 @pytest.mark.asyncio
-async def test_the_job_scope_holds_each_planned_job_while_it_runs(
+async def test_the_job_scopes_hold_each_planned_job_while_it_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A caller can change a planned job's trials before any runs, and clean up after the last."""
@@ -1288,21 +1288,24 @@ async def test_the_job_scope_holds_each_planned_job_while_it_runs(
         async def run(self) -> None:
             events.append("run")
 
-    @contextlib.asynccontextmanager
-    async def scope(job: Any) -> Any:
-        assert isinstance(job, FakeJob)
-        events.append("enter")
-        yield
-        events.append("exit")
+    def scope(name: str) -> Any:
+        @contextlib.asynccontextmanager
+        async def entering(job: Any) -> Any:
+            assert isinstance(job, FakeJob)
+            events.append(f"enter {name}")
+            yield
+            events.append(f"exit {name}")
+
+        return entering
 
     monkeypatch.setattr(harbor.job, "Job", FakeJob)
     config = HarborRuntimeConfig(jobs_dir=tmp_path / "jobs", job_name="scoped")
     _, run_job = _build_native_job(
-        config, tmp_path / "dataset", None, job_name="scoped", env_templates={}, job_scope=scope
+        config, tmp_path / "dataset", None, job_name="scoped", env_templates={}, job_scopes=[scope("a"), scope("b")]
     )
     await run_job()
 
-    assert events == ["create", "enter", "run", "exit"]
+    assert events == ["create", "enter a", "enter b", "run", "exit b", "exit a"]
 
 
 @pytest.mark.asyncio
@@ -1658,7 +1661,7 @@ async def test_inputs_changing_mid_run_leaves_the_job_unstamped(
     config = config.model_copy(update={"agent_import_path": "wrapper:Agent", "agent_dir": agent_dir})
     (job_dir / harbor_runtime.CACHE_STAMP_FILENAME).unlink()
 
-    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
+    def fake(cfg, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scopes=()):
         async def run_job() -> None:
             (agent_dir / "wrapper.py").write_text("v2-EDITED-MID-RUN\n")
 
@@ -3404,7 +3407,7 @@ def _capture_env_templates(monkeypatch: pytest.MonkeyPatch, captured: list[Mappi
     """Replace the native job build, recording the templates ``run_tasks`` computed for it."""
     from nhx_evals_sdk.agent_eval.runtimes.harbor import runtime as harbor_runtime
 
-    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scope=None):
+    def fake(config, _dataset_path, _task_names, *, job_name=None, force_rerun=None, env_templates, job_scopes=()):
         captured.append(dict(env_templates))
 
         async def run_job() -> None:
