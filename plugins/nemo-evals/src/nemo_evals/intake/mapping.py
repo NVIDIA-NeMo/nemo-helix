@@ -463,8 +463,16 @@ def _enrich_trial_boundary(
     instruction = task.inputs.get("instruction") if task is not None else None
     output = trial.output.output_text if trial.output is not None else None
     for direction, authoritative, aliases in (
-        ("input", instruction, ("input.value", "gen_ai.input.messages")),
-        ("output", output, ("output.value", "gen_ai.output.messages", "final_result")),
+        (
+            "input",
+            instruction,
+            ("input.value", "gen_ai.input.messages", "gen_ai.tool.call.arguments", "tool_arguments"),
+        ),
+        (
+            "output",
+            output,
+            ("output.value", "gen_ai.output.messages", "final_result", "gen_ai.tool.call.result", "tool_response"),
+        ),
     ):
         native_prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
         if (

@@ -1184,6 +1184,31 @@ async def test_explicit_native_root_boundary_is_not_overwritten_by_retained_tria
     assert root["nemo_relay.end.output"].string_value == "native output"
 
 
+@pytest.mark.parametrize(
+    ("input_key", "output_key"),
+    [("gen_ai.tool.call.arguments", "gen_ai.tool.call.result"), ("tool_arguments", "tool_response")],
+)
+async def test_explicit_tool_root_boundary_survives_trial_enrichment(input_key: str, output_key: str) -> None:
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+
+    trial = _otlp_trial()
+    assert trial.evidence is not None
+    root = trial.evidence.descriptors["trace"].data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    root["attributes"] = [
+        {"key": key, "value": {"stringValue": value}}
+        for key, value in {input_key: "recorded arguments", output_key: "recorded result"}.items()
+    ]
+    result = _result([trial], [])
+    result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "task request"})]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert "input.value" not in attrs
+    assert "output.value" not in attrs
+    assert attrs[input_key].string_value == "recorded arguments"
+    assert attrs[output_key].string_value == "recorded result"
+
+
 @pytest.mark.parametrize("on_resource", [False, True])
 async def test_explicit_root_boundary_survives_caller_identity_override(on_resource: bool) -> None:
     from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
