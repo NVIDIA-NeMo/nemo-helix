@@ -6,20 +6,16 @@ set -euo pipefail
 
 required_uv_version="0.13.4"
 
-if ! command -v uv >/dev/null 2>&1; then
-  echo "uv is required to update uv.lock." >&2
-  echo "Install uv ${required_uv_version}: curl -LsSf https://astral.sh/uv/${required_uv_version}/install.sh | sh" >&2
-  exit 1
-fi
+shim="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/uv"
 
-uv_version_output="$(uv --version)"
+uv_version_output="$("${shim}" --version)"
 actual_uv_version="$(printf '%s\n' "${uv_version_output}" | awk '{print $2}')"
 
 if [[ "${actual_uv_version}" != "${required_uv_version}" ]]; then
-  echo "uv.lock must be checked or updated with uv ${required_uv_version}, matching platform containers and CI." >&2
-  echo "Current uv: ${uv_version_output}" >&2
-  echo "Install uv ${required_uv_version}: curl -LsSf https://astral.sh/uv/${required_uv_version}/install.sh | sh" >&2
+  echo "uv.lock must be checked or updated with version ${required_uv_version}, matching platform containers and CI." >&2
+  echo "Current version: ${uv_version_output}" >&2
+  echo "Commit from an activated Flox environment ('flox -q activate'), or install ${required_uv_version} on PATH and rerun with TOOLCHAIN=system." >&2
   exit 1
 fi
 
-exec uv lock "$@"
+exec "${shim}" lock "$@"

@@ -273,7 +273,7 @@ FLOX_EXEC :=
 else
 $(error TOOLCHAIN must be either flox or system)
 endif
-UV := $(FLOX_EXEC) uv
+UV := $(CURDIR)/script/uv
 ifeq ($(TOOLCHAIN),flox)
 FLOX_NODE_EXEC := $(FLOX_QUIET) activate --dir "$(CURDIR)/tools/nodejs" --
 PNPM := $(FLOX_NODE_EXEC) pnpm

@@ -4,6 +4,9 @@
 
 set -e
 
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+uv_shim="${repo_root}/script/uv"
+
 # Get the list of changed Python files
 files=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.py$' || true)
 
@@ -17,11 +20,11 @@ filtered_files=()
 while IFS= read -r filtered_file; do
 	[ -n "$filtered_file" ] || continue
 	filtered_files+=("$filtered_file")
-done < <(printf '%s\n' "$files" | uv run --frozen tools/lint/filter_ty_exclusions.py)
+done < <(printf '%s\n' "$files" | "${uv_shim}" run --frozen tools/lint/filter_ty_exclusions.py)
 
 if [ ${#filtered_files[@]} -eq 0 ]; then
 	echo "No Python files to check (all files are excluded)"
 	exit 0
 fi
 
-uv run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"
+"${uv_shim}" run --frozen --group compass --group typecheck --group scaled-evals ty check --exit-zero-on-warning "${filtered_files[@]}"

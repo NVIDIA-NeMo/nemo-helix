@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Shared uv resolution shim for make and the pre-commit hooks.
+#
+# Guarantees make and the hooks agree on which uv runs:
+#   - TOOLCHAIN=system: the uv binary found on PATH.
+#   - FLOX_ENV_PROJECT resolving to this repo (an already-activated Flox shell):
+#     the uv on PATH, so an activated environment does not re-run activation.
+#   - Anything else: the Flox-pinned uv via `flox -q activate`.
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+if [[ "${TOOLCHAIN:-}" == "system" ]]; then
+  exec uv "$@"
+fi
+
+if [[ -n "${FLOX_ENV_PROJECT:-}" ]] \
+  && [[ "$(cd "${FLOX_ENV_PROJECT}" 2>/dev/null && pwd -P)" == "${repo_root}" ]]; then
+  exec uv "$@"
+fi
+
+if ! command -v flox >/dev/null 2>&1; then
+  echo "flox is required to resolve the pinned uv for this repo." >&2
+  echo "Install flox (https://flox.dev), or rerun with TOOLCHAIN=system." >&2
+  exit 1
+fi
+
+exec flox -q activate --dir "${repo_root}" -- uv "$@"
