@@ -140,3 +140,14 @@ async def test_json_timestamp_text_is_not_coerced(client: AsyncClient, ctx, oper
     response = await client.get(ENTITIES, params={"filter": json.dumps({"data.created_at": {operator: value}})})
     assert response.status_code == 200, response.text
     assert [item["name"] for item in response.json()["data"]] == ([] if operator == "$nin" else ["test-item"])
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("timestamp", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"])
+async def test_timestamp_utc_conversion_out_of_range_returns_400(client: AsyncClient, ctx, timestamp):
+    """Valid ISO strings outside the UTC datetime range must not become 500s."""
+    response = await client.get(ENTITIES, params={"filter[created_at]": timestamp})
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"]
+    assert detail.startswith("Invalid timestamp filter value")
+    assert timestamp[:10] in detail

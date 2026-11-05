@@ -129,7 +129,10 @@ class SQLAlchemyFilterRepository(FilterRepository):
                 raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
         if isinstance(value, datetime):
             if value.tzinfo is not None:
-                return value.astimezone(timezone.utc).replace(tzinfo=None)
+                try:
+                    return value.astimezone(timezone.utc).replace(tzinfo=None)
+                except OverflowError as exc:
+                    raise InvalidFilterError(f"Invalid timestamp filter value '{value}'") from exc
             return value
         # Preserve date operands already accepted by SQLAlchemy's DateTime binder.
         if isinstance(value, date):
