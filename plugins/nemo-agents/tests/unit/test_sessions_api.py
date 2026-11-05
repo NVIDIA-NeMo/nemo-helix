@@ -27,6 +27,8 @@ from nemo_helix_plugin.entity_client import (
 NOW = datetime.now(timezone.utc)
 BASE = "/apis/agents/v2/workspaces/default/sessions"
 OWNER_PRINCIPAL_ID = "session-owner"
+SESSION_ID = "agent-session-RFppQd3GgwudZJeKDx5t8K"
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
 
 
 def _make_deployment(
@@ -57,7 +59,7 @@ def _make_session(
         deployment_id=deployment_id,
         status=status,
     )
-    session._id = f"session-{name}-id"
+    session._id = SESSION_ID
     session._created_at = NOW
     session._created_by = created_by
     return session
@@ -65,7 +67,7 @@ def _make_session(
 
 async def _persist_session(session: AgentSession) -> AgentSession:
     assert session.created_by is None
-    session._id = "session-id"
+    session._id = SESSION_ID
     session._created_at = NOW
     session._created_by = OWNER_PRINCIPAL_ID
     return session
@@ -109,7 +111,8 @@ class TestCreateSession:
 
         assert response.status_code == 201
         body = response.json()
-        assert body["id"] == "session-id"
+        assert body["id"] == SESSION_ID
+        assert body["session_uuid"] == SESSION_UUID
         assert body["name"] == "session-one"
         assert body["deployment_id"] == "deployment-id"
         assert body["status"] == "active"
@@ -192,6 +195,7 @@ class TestListSessions:
         assert response.status_code == 200
         body = response.json()
         assert body["data"][0]["name"] == "session-one"
+        assert body["data"][0]["session_uuid"] == SESSION_UUID
         assert body["pagination"]["total_results"] == 1
         assert mock_entity_client.list.await_args.kwargs["filter_obj"] == {"created_by": OWNER_PRINCIPAL_ID}
 
@@ -221,6 +225,7 @@ class TestGetSession:
 
         assert response.status_code == 200
         assert response.json()["name"] == "session-one"
+        assert response.json()["session_uuid"] == SESSION_UUID
         mock_entity_client.get.assert_awaited_once_with(AgentSession, name="session-one", workspace="default")
 
     def test_get_returns_404(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
@@ -260,6 +265,7 @@ class TestCloseSession:
 
         assert response.status_code == 200
         assert response.json()["status"] == "closed"
+        assert response.json()["session_uuid"] == SESSION_UUID
         updated: AgentSession = mock_entity_client.update.await_args.args[0]
         assert updated.status is SessionStatus.CLOSED
         cleanup.assert_awaited_once_with(mock_entity_client, updated)
@@ -444,6 +450,7 @@ class TestFabricRuntimeCleanup:
         deployment.endpoint = "http://localhost:9001"
         mock_entity_client.find_one.return_value = deployment
         session = _make_session(name="session/one")
+        session._id = "session-session/one-id"
         requests: list[httpx.Request] = []
 
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -499,7 +506,7 @@ class TestFabricRuntimeCleanup:
 
         assert attempts == 1
         assert (
-            "Fabric runtime cleanup failed for session ID 'session-session-one-id' in workspace 'default' "
+            f"Fabric runtime cleanup failed for session ID '{SESSION_ID}' in workspace 'default' "
             "(deployment ID 'deployment-id'): request failed: refused."
         ) in caplog.text
 
@@ -521,7 +528,7 @@ class TestFabricRuntimeCleanup:
             await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert (
-            "Fabric runtime cleanup failed for session ID 'session-session-one-id' in workspace 'default' "
+            f"Fabric runtime cleanup failed for session ID '{SESSION_ID}' in workspace 'default' "
             "(deployment ID 'deployment-id'): request returned HTTP 503."
         ) in caplog.text
 
@@ -536,6 +543,6 @@ class TestFabricRuntimeCleanup:
         await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert (
-            "Fabric runtime cleanup failed for session ID 'session-session-one-id' in workspace 'default' "
+            f"Fabric runtime cleanup failed for session ID '{SESSION_ID}' in workspace 'default' "
             "(deployment ID 'deployment-id'): could not resolve deployment: entity store unavailable."
         ) in caplog.text

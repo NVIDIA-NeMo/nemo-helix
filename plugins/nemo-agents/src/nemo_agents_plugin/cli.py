@@ -2765,7 +2765,7 @@ def _create_session_for_deployment(
         ),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         created_session = AgentSession.model_validate(response)
@@ -2789,7 +2789,7 @@ def _resolve_existing_session(
         lambda: _json_from_response(client.get_session(workspace=workspace, name=session_name)),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         resolved_session = AgentSession.model_validate(response)
