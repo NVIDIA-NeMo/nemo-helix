@@ -78,14 +78,34 @@ reusable actions, and supporting docs.
   Verifies published charts, containers and wheels. Timestamped RC charts map
   to `.dev` wheels; numbered prereleases such as `1.0.0-rc1` remain distinct.
 
-## Post-merge image and end-to-end checks
+## Image and end-to-end checks
 
-Container image builds and platform e2e checks in `ci.yaml` run only on pushes
-to `main`, or via `workflow_dispatch`. They are skipped for
-pull requests and merge-group validation. This includes CPU smoke, garak, and
-Safe Synthesizer image builds; all Kind suites; Authentik/ZITADEL runtime tests;
-and both Python e2e jobs. Existing path filters and manual publishing inputs
-still apply. Studio UI e2e and Docker source-image smoke remain manual-only.
+Container image builds and platform e2e checks in `ci.yaml` retain their existing
+`main` push and `workflow_dispatch` behavior, including path filters and manual
+publishing inputs. Merge-group validation does not run them.
+
+To opt a PR into platform e2e, add the **`e2e`** label to a **non-draft PR whose
+head branch is in this repository**, targeting `main` or `release/*`. Fork PRs,
+drafts, and missing/invalid PR context cannot opt in. This uses `pull_request`,
+never `pull_request_target`; permissions and secret restrictions are unchanged.
+Adding the label triggers CI immediately. Current labels are checked again on
+synchronize, reopen, ready-for-review, and label events, so new commits retain
+opt-in and unrelated labels do not disable it. Removing `e2e` or converting to
+draft replaces/cancels the prior PR run and skips these opt-in checks.
+
+The label enables CPU smoke image build/publication, all Kind suites (including
+customizer auth and network policy), Authentik/ZITADEL runtime tests and their
+static prerequisites, and both Python e2e jobs, even when their usual path
+filters do not match. Image-based tests still require a successful published
+CPU image build; auth-IDP runtime tests also require successful static checks.
+These e2e results, including image-backed Python and auth-IDP tests, participate
+in the final `CI status` aggregate. This can be expensive: apply the label only
+to trusted same-repository changes ready for deployed/process validation.
+
+The label does **not** enable the separate garak or Safe Synthesizer image build
+jobs. Studio UI e2e and Docker source-image smoke remain manual-only. Manual
+`publish: false` still prevents image-dependent suites from using unpublished
+images; the label does not change dispatch input semantics.
 
 Lint, unit tests, integration tests, wheel build/install checks, Helm validation,
 and Docker bake-graph validation stay pre-merge. Printing the bake graph does

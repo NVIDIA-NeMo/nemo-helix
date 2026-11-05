@@ -94,10 +94,12 @@ uv lock --offline --check
 git diff -- uv.lock
 ```
 
-For this cutover, the final lock diff is exactly **16 deleted lines** removing
-the obsolete Regorus package and references: no other versions, graph edges,
-URLs, artifact hashes, or project index configuration changed. The canonical
-`uv lock --offline --check` succeeded after restoration.
+The initial prototype resolution removed the candidate Regorus dependency.
+After rebasing onto `release/0.10`, the final lock diff is **24 deleted lines**
+removing Wasmtime and its SDK-extra references. All other release-branch package
+versions, graph edges, URLs, artifact hashes, and project index configuration
+are preserved. The canonical `uv lock --offline --check` succeeds with 612
+packages after restoration and rebase.
 
 The normal license generator was then run without environment synchronization:
 `nemo-helix-tools license generate --sequential`, using current source through

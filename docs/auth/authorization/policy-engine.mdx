@@ -64,7 +64,7 @@ auth:
  opa_binary_path: /opt/opa/opa
 ```
 
-Explicit/PATH binaries are operator-trusted. The resolver requires OPA >=1.22.0,<2
+Explicit/PATH binaries are operator-trusted. The resolver requires OPA `>=1.22.0,<2`
 via a bounded version probe, but does not verify provenance. An invalid or
 incompatible explicit path fails startup; an incompatible PATH binary is skipped. Downloads
 fail closed on checksum mismatch, network failure, or unsupported platform.
