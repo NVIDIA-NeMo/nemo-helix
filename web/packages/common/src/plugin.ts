@@ -65,6 +65,8 @@ export { RelativeTime, useRelativeTimeSince } from '@nemo/common/src/components/
 export { StatusBadge } from '@nemo/common/src/components/StatusBadge';
 export type { BadgeStatus, StatusConfigEntry } from '@nemo/common/src/components/StatusBadge';
 export { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
+export { VirtualDropdownList } from '@nemo/common/src/components/VirtualDropdownList';
+export type { VirtualDropdownListProps } from '@nemo/common/src/components/VirtualDropdownList';
 
 export { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 export { ControlledTextArea } from '@nemo/common/src/components/form/ControlledTextArea';
