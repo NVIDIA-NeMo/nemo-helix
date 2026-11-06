@@ -92,6 +92,7 @@ class _UploadStream(RawIOBase):
     """Expose the async request stream to boto3's non-threaded transfer manager."""
 
     def __init__(self, stream: AsyncIterator[bytes], content_length: int):
+        """Track the declared length and current fragment without buffering the request."""
         self.stream = stream
         self.remaining = content_length
         self.pending = memoryview(b"")
@@ -100,6 +101,7 @@ class _UploadStream(RawIOBase):
         return True
 
     def readinto(self, buffer: Any) -> int:
+        """Read on an AnyIO worker, preserving partial chunks and checking the declared length."""
         from_thread.check_cancelled()
         while not self.pending:
             try:
@@ -298,6 +300,7 @@ class S3StorageImpl(StorageImpl):
             raise ValueError("content_length must be non-negative")
 
         def upload() -> None:
+            """Keep SDK calls and synchronous stream reads on the same AnyIO worker."""
             # Serial classic transfers keep reads on this AnyIO worker and memory bounded.
             transfer = TransferConfig(use_threads=False, preferred_transfer_client="classic")
             transfer.multipart_chunksize = ChunksizeAdjuster().adjust_chunksize(

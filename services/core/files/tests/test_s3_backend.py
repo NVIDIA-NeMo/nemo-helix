@@ -465,6 +465,7 @@ class TestS3StorageImplUpload:
 
     @pytest.mark.parametrize("content_length", [None, -1])
     async def test_upload_requires_content_length(self, s3_impl_no_prefix, content_length):
+        """Reject missing or negative lengths before consuming the request stream."""
         with pytest.raises(ValueError, match="content_length"):
             await s3_impl_no_prefix.upload("file.txt", AsyncIteratorMock([b"test data"]), content_length)
 
