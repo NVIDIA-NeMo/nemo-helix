@@ -295,7 +295,10 @@ async def delete_run(
 ) -> None:
     """Delete a war-game run record. The underlying platform job is cancelled/deleted separately."""
     try:
-        await entity_client.delete(AgentHardenerRun, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(AgentHardenerRun, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            AgentHardenerRun, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404, detail=f"AgentHardenerRun '{name}' not found in workspace '{workspace}'."

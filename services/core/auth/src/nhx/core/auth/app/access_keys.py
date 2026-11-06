@@ -146,10 +146,9 @@ class AccessKeyRegistry:
         if self._credential_adapter is not None and await self._credential_adapter.delete(jti):
             return
         try:
-            await self._entity_client.delete(
-                AccessKeyEntity,
-                name=jti,
-                workspace=ACCESS_KEY_WORKSPACE,
+            _delete_target = await self._entity_client.get(AccessKeyEntity, name=jti, workspace=ACCESS_KEY_WORKSPACE)
+            await self._entity_client.delete_by_id(
+                AccessKeyEntity, _delete_target.id, expected_db_version=_delete_target.db_version
             )
         except EntityNotFoundError:
             pass

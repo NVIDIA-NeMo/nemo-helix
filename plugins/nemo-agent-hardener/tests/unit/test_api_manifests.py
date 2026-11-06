@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from nemo_agent_hardener_plugin.agent_resolver import ResolvedManifest
 from nemo_agent_hardener_plugin.api.v2 import manifests as manifests_module
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
+from nemo_agent_hardener_plugin.filesets import UploadedFileset
 from nemo_agent_hardener_plugin.jobs import manifest as job_manifest
 from nemo_helix_plugin.entity_client import NemoEntityNotFoundError, NemoPaginationInfo, get_entity_client
 
@@ -56,8 +57,12 @@ def client(mock_entity_client: AsyncMock, monkeypatch: pytest.MonkeyPatch) -> Te
     monkeypatch.setattr(manifests_module, "get_nemo_client", lambda **_: MagicMock())
     monkeypatch.setattr(manifests_module, "resolve_agent_to_manifest", lambda *_a, **kw: _resolved(kw.get("egress")))
     # Resolution now writes a scaffold that gets frozen as a fileset; the real upload needs a real dir.
-    monkeypatch.setattr(manifests_module, "upload_project_dir", lambda _sdk, _dir, *, workspace: "default/agent-fs-1")
-    monkeypatch.setattr(manifests_module, "delete_fileset", lambda _sdk, _ref: None)
+    monkeypatch.setattr(
+        manifests_module,
+        "upload_project_dir",
+        lambda _sdk, _dir, *, workspace: UploadedFileset("default/agent-fs-1", "scaffold-id"),
+    )
+    monkeypatch.setattr(manifests_module, "delete_fileset", lambda _sdk, _ref, _id: None)
     app = FastAPI()
     app.include_router(manifests_module.router, prefix=PREFIX)
     app.dependency_overrides[get_entity_client] = lambda: mock_entity_client
@@ -362,11 +367,11 @@ def test_refresh_rebuilds_the_scaffold_but_keeps_operator_settings(client, mock_
 def test_delete_manifest_removes_its_bundle(client, mock_entity_client, monkeypatch) -> None:
     """A bundle outliving its manifest is unreachable storage nobody will ever clean up."""
     deleted: list[str] = []
-    monkeypatch.setattr(manifests_module, "delete_fileset", lambda _sdk, ref: deleted.append(ref))
+    monkeypatch.setattr(manifests_module, "delete_fileset", lambda _sdk, ref, _id: deleted.append(ref))
     mock_entity_client.get = AsyncMock(
         return_value=AgentHardenerManifest(name="m1", workspace="default", agent_fileset="default/agent-fs-1")
     )
-    mock_entity_client.delete = AsyncMock(return_value=None)
+    mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
     resp = client.delete("/apis/agent-hardener/v2/workspaces/default/manifests/m1")
 

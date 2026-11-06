@@ -401,7 +401,7 @@ async def test_delete_model_provider_success(model_provider_service, mock_entity
     """Test successful model provider deletion."""
     # Arrange
     mock_entity_client.get.return_value = sample_provider_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
     delete_request = DeleteModelProviderRequest(workspace="default", name="test-provider")
 
     # Act
@@ -409,11 +409,8 @@ async def test_delete_model_provider_success(model_provider_service, mock_entity
 
     # Assert
     assert result is True
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        sample_provider_entity.name,
-        workspace="default",
-        expected_db_version=sample_provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, sample_provider_entity.id, expected_db_version=sample_provider_entity.db_version
     )
 
 
@@ -426,17 +423,18 @@ async def test_delete_model_provider_retries_when_the_provider_changes_underneat
     stale._db_version = 1
     current = create_provider_entity(name="test-provider", workspace="default", host_url="https://api.example.com/v1")
     current._db_version = 2
-    mock_entity_client.get.side_effect = [stale, current]
-    mock_entity_client.delete.side_effect = [EntityConflictError("version changed"), None]
+    mock_entity_client.get.return_value = stale
+    mock_entity_client.get_by_id.return_value = current
+    mock_entity_client.delete_by_id.side_effect = [EntityConflictError("version changed"), None]
 
     result = await model_provider_service.delete_model_provider(
         DeleteModelProviderRequest(workspace="default", name="test-provider")
     )
 
     assert result is True
-    assert mock_entity_client.delete.call_args_list == [
-        call(ModelProviderEntity, "test-provider", workspace="default", expected_db_version=1),
-        call(ModelProviderEntity, "test-provider", workspace="default", expected_db_version=2),
+    assert mock_entity_client.delete_by_id.call_args_list == [
+        call(ModelProviderEntity, mock_entity_client.get.return_value.id, expected_db_version=1),
+        call(ModelProviderEntity, mock_entity_client.get.return_value.id, expected_db_version=2),
     ]
 
 
@@ -446,14 +444,15 @@ async def test_delete_model_provider_gives_up_on_a_persistent_conflict(
 ):
     """Conflicts on every attempt are a real concurrent edit, so the conflict reaches the caller."""
     mock_entity_client.get.return_value = sample_provider_entity
-    mock_entity_client.delete.side_effect = EntityConflictError("version changed")
+    mock_entity_client.get_by_id.return_value = sample_provider_entity
+    mock_entity_client.delete_by_id.side_effect = EntityConflictError("version changed")
 
     with pytest.raises(EntityConflictError):
         await model_provider_service.delete_model_provider(
             DeleteModelProviderRequest(workspace="default", name="test-provider")
         )
 
-    assert mock_entity_client.delete.call_count == 3
+    assert mock_entity_client.delete_by_id.call_count == 3
 
 
 @pytest.mark.asyncio
@@ -468,7 +467,7 @@ async def test_delete_model_provider_not_found(model_provider_service, mock_enti
 
     # Assert
     assert result is False
-    mock_entity_client.delete.assert_not_called()
+    mock_entity_client.delete_by_id.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -737,7 +736,7 @@ async def test_delete_provider_unlinks_shared_model_entity(model_provider_servic
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
     mock_entity_client.update.return_value = model_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
     result = await model_provider_service.delete_model_provider(request)
@@ -746,11 +745,8 @@ async def test_delete_provider_unlinks_shared_model_entity(model_provider_servic
     mock_entity_client.update.assert_called_once()
     updated_model = mock_entity_client.update.call_args[0][0]
     assert updated_model.model_providers == ["ws/other-provider"]
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "provider-to-delete",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -773,26 +769,16 @@ async def test_delete_provider_deletes_exclusively_served_model_entity(model_pro
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    assert mock_entity_client.delete.call_args_list == [
-        call(
-            ModelProviderEntity,
-            "provider-to-delete",
-            workspace="ws",
-            expected_db_version=provider_entity.db_version,
-        ),
-        call(
-            Model,
-            "my-model",
-            workspace="ws",
-            expected_db_version=model_entity.db_version,
-        ),
+    assert mock_entity_client.delete_by_id.call_args_list == [
+        call(ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version),
+        call(Model, model_entity.id, expected_db_version=model_entity.db_version),
     ]
 
 
@@ -817,7 +803,7 @@ async def test_delete_provider_deletes_associated_model_that_is_already_orphaned
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"orphaned-model": model_entity})
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     result = await model_provider_service.delete_model_provider(
         DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
@@ -825,19 +811,9 @@ async def test_delete_provider_deletes_associated_model_that_is_already_orphaned
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    assert mock_entity_client.delete.call_args_list == [
-        call(
-            ModelProviderEntity,
-            "provider-to-delete",
-            workspace="ws",
-            expected_db_version=provider_entity.db_version,
-        ),
-        call(
-            Model,
-            "orphaned-model",
-            workspace="ws",
-            expected_db_version=model_entity.db_version,
-        ),
+    assert mock_entity_client.delete_by_id.call_args_list == [
+        call(ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version),
+        call(Model, model_entity.id, expected_db_version=model_entity.db_version),
     ]
 
 
@@ -861,7 +837,7 @@ async def test_delete_provider_deletes_exclusively_served_user_model_entity(mode
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"user-model": model_entity})
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     result = await model_provider_service.delete_model_provider(
         DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
@@ -869,19 +845,9 @@ async def test_delete_provider_deletes_exclusively_served_user_model_entity(mode
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    assert mock_entity_client.delete.call_args_list == [
-        call(
-            ModelProviderEntity,
-            "provider-to-delete",
-            workspace="ws",
-            expected_db_version=provider_entity.db_version,
-        ),
-        call(
-            Model,
-            "user-model",
-            workspace="ws",
-            expected_db_version=model_entity.db_version,
-        ),
+    assert mock_entity_client.delete_by_id.call_args_list == [
+        call(ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version),
+        call(Model, model_entity.id, expected_db_version=model_entity.db_version),
     ]
 
 
@@ -908,7 +874,7 @@ async def test_delete_deployment_provider_unlinks_exclusively_served_model_entit
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
     mock_entity_client.update.return_value = model_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     result = await model_provider_service.delete_model_provider(
         DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
@@ -918,11 +884,8 @@ async def test_delete_deployment_provider_unlinks_exclusively_served_model_entit
     mock_entity_client.update.assert_called_once()
     updated_model = mock_entity_client.update.call_args[0][0]
     assert updated_model.model_providers == []
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "deployment-provider",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -949,7 +912,7 @@ async def test_delete_deployment_provider_keeps_already_unlinked_model_entity(
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"deployed-model": model_entity})
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     result = await model_provider_service.delete_model_provider(
         DeleteModelProviderRequest(workspace="ws", name="deployment-provider")
@@ -957,11 +920,8 @@ async def test_delete_deployment_provider_keeps_already_unlinked_model_entity(
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "deployment-provider",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -984,7 +944,7 @@ async def test_delete_provider_conflict_leaves_model_entity_references(model_pro
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
-    mock_entity_client.delete.side_effect = EntityConflictError("stale version")
+    mock_entity_client.delete_by_id.side_effect = EntityConflictError("stale version")
 
     request = DeleteModelProviderRequest(workspace="ws", name="provider-to-delete")
     with pytest.raises(EntityConflictError):
@@ -1000,14 +960,14 @@ async def test_delete_provider_no_served_models_skips_cleanup(
 ):
     """When the provider has no served_models the delete proceeds without cleanup queries."""
     mock_entity_client.get.return_value = sample_provider_entity  # served_models=[]
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="default", name="test-provider")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    mock_entity_client.delete.assert_called_once()
+    mock_entity_client.delete_by_id.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1024,14 +984,14 @@ async def test_delete_provider_cleanup_missing_model_entity(model_provider_servi
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity)
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="my-provider")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    mock_entity_client.delete.assert_called_once()
+    mock_entity_client.delete_by_id.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -1053,18 +1013,15 @@ async def test_delete_provider_cleanup_provider_not_in_model_providers(model_pro
     )
 
     mock_entity_client.get.side_effect = _make_entity_get_dispatcher(provider_entity, {"my-model": model_entity})
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="my-provider")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "my-provider",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -1082,18 +1039,15 @@ async def test_delete_provider_cleanup_malformed_model_entity_id(model_provider_
     )
 
     mock_entity_client.get.return_value = provider_entity
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="my-provider")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     mock_entity_client.update.assert_not_called()
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "my-provider",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -1120,18 +1074,15 @@ async def test_delete_provider_cleanup_error_does_not_block_deletion(model_provi
         raise RuntimeError("transient entity-store error")
 
     mock_entity_client.get.side_effect = _failing_model_get
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="my-provider")
     result = await model_provider_service.delete_model_provider(request)
 
     assert result is True
     assert call_count == 1
-    mock_entity_client.delete.assert_called_once_with(
-        ModelProviderEntity,
-        "my-provider",
-        workspace="ws",
-        expected_db_version=provider_entity.db_version,
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version
     )
 
 
@@ -1159,7 +1110,7 @@ async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_
         provider_entity, {"model-a": model_a, "model-b": model_b}
     )
     mock_entity_client.update.return_value = model_a
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     request = DeleteModelProviderRequest(workspace="ws", name="prov")
     result = await model_provider_service.delete_model_provider(request)
@@ -1167,17 +1118,29 @@ async def test_delete_provider_cleans_up_multiple_model_entities(model_provider_
     assert result is True
     mock_entity_client.update.assert_called_once_with(model_b)
     assert model_b.model_providers == ["ws/other"]
-    assert mock_entity_client.delete.call_args_list == [
-        call(
-            ModelProviderEntity,
-            "prov",
-            workspace="ws",
-            expected_db_version=provider_entity.db_version,
-        ),
-        call(
-            Model,
-            "model-a",
-            workspace="ws",
-            expected_db_version=model_a.db_version,
-        ),
+    assert mock_entity_client.delete_by_id.call_args_list == [
+        call(ModelProviderEntity, provider_entity.id, expected_db_version=provider_entity.db_version),
+        call(Model, model_a.id, expected_db_version=model_a.db_version),
     ]
+
+
+@pytest.mark.asyncio
+async def test_delete_provider_retry_cannot_select_a_replacement(model_provider_service, mock_entity_client):
+    """After a conflict, the retry follows the original ID even if its name has been reused."""
+    original = create_provider_entity(
+        entity_id="original-id", name="provider", workspace="default", host_url="https://api.example.com/v1"
+    )
+    mock_entity_client.get.return_value = original
+    mock_entity_client.delete_by_id.side_effect = EntityConflictError("changed")
+    mock_entity_client.get_by_id.side_effect = EntityNotFoundError("original deleted")
+
+    result = await model_provider_service.delete_model_provider(
+        DeleteModelProviderRequest(workspace="default", name="provider")
+    )
+
+    assert result is False
+    mock_entity_client.get.assert_awaited_once()
+    mock_entity_client.get_by_id.assert_awaited_once_with(ModelProviderEntity, "original-id")
+    mock_entity_client.delete_by_id.assert_awaited_once_with(
+        ModelProviderEntity, "original-id", expected_db_version=original.db_version
+    )

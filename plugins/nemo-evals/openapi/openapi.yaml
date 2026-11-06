@@ -7772,6 +7772,10 @@ components:
             re-registration while the job is queued cannot change the files it runs
             with. Present only when the resolved config refers to files by relative
             path.'
+        fileset_id:
+          title: Fileset Id
+          description: ID of the snapshot allocation; absent on legacy jobs.
+          type: string
       additionalProperties: false
       type: object
       required:

@@ -50,6 +50,7 @@ from nemo_evals.jobs.agent_evaluate import AgentEvalJob
 from nemo_evals.jobs.agent_spec import (
     AgentEvalSpec,
     ResolvedTask,
+    registered_agent_files_receipt,
     registered_agent_source,
     target_agent_identity,
 )
@@ -446,8 +447,7 @@ class TasksetRunService:
             return SubmitOutcome(TasksetRunSubmitResponse(**to_status(replay).model_dump()), created=False)
 
         pinned, spec = await self._resolve(req, workspace)
-        source = registered_agent_source(spec.target)
-        snapshot = source.files if source is not None else None
+        snapshot = registered_agent_files_receipt(spec.target)
         acceptance_started = False
         try:
             try:
@@ -491,7 +491,7 @@ class TasksetRunService:
                 timeout_seconds=timeout,
                 execution_deadline_at=execution,
                 finalization_deadline_at=finalization,
-                discard_on_loss=(snapshot.root,) if snapshot is not None else (),
+                discard_on_loss=(snapshot,) if snapshot is not None else (),
                 auth_context=self._auth_context,
             )
             acceptance_started = True
@@ -501,7 +501,7 @@ class TasksetRunService:
             raise
         except Exception as exc:
             if snapshot is not None and (not acceptance_started or isinstance(exc, PlanStorageError)):
-                await delete_fileset_ref(self._store.files_client, snapshot.root)
+                await delete_fileset_ref(self._store.files_client, snapshot.ref, fileset_id=snapshot.fileset_id)
             # Even a subsequent absent lookup cannot prove a create did not commit.
             raise
 

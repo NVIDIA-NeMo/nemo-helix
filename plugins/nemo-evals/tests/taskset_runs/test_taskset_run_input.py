@@ -433,7 +433,7 @@ def test_status_schema_covers_every_run_domain_field():
         domain_fields
         == (set(TasksetRunStatus.model_fields) - {"run_id", "workspace", "created_by", "progress"}) | _INTERNAL_FIELDS
     )
-    assert _INTERNAL_FIELDS == {"plan_ref", "plan_digest", "request_digest"}
+    assert _INTERNAL_FIELDS == {"plan_ref", "plan_fileset_id", "plan_digest", "request_digest"}
 
 
 def test_status_rejects_unmapped_future_domain_fields():

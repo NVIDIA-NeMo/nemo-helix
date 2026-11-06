@@ -411,7 +411,8 @@ def _persist_upgraded_bundle(sdk: Any, manifest_id: str, ctx: JobContext, record
     try:
         fileset = upload_project_dir(sdk, resolved.project_dir, workspace=ctx.workspace)
         updated = {**(getattr(record, "data", {}) or {})}
-        updated["agent_fileset"] = fileset
+        updated["agent_fileset"] = fileset.ref
+        updated["agent_fileset_id"] = fileset.fileset_id
         updated["manifest_yaml"] = yaml.safe_dump(resolved.manifest, sort_keys=False)
         client_from_platform(sdk, EntitiesClient).update_entity_by_name(
             name=manifest_id,
