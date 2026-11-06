@@ -20,8 +20,6 @@ import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMe
 import { Retry } from '@nemo/icons/icons';
 import { Skeleton, Tooltip } from '@nvidia/foundations-react-core';
 
-const ASSISTANT_MESSAGE_SURFACE_CLASS = 'w-full min-w-0 max-w-full';
-
 export const AssistantMessage = ({
   animateCompletion = false,
   hideAssistantMessageActions,
@@ -43,7 +41,7 @@ export const AssistantMessage = ({
   const messageContent = (
     <div className="flex w-full min-w-0 flex-col items-start gap-density-xs">
       <AssistantChatMessageContent
-        contentSurfaceClassName={ASSISTANT_MESSAGE_SURFACE_CLASS}
+        contentSurfaceClassName="w-full min-w-0 max-w-full"
         messageContentProps={messageContentProps}
         toolCallPartComponent={toolCallPartComponent}
       />

@@ -37,7 +37,7 @@ const getRawStringArg = (args: Record<string, unknown>, keys: string[]): string 
   return undefined;
 };
 
-const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
+export const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
   switch (toolName) {
     case 'Bash':
       return getStringArg(args, ['command']);
@@ -68,14 +68,14 @@ const getToolSummary = (toolName: string, args: AssistantToolArgs): string | und
   }
 };
 
-const compactSubtleDetail = (detail: string | undefined): string | undefined => {
+export const compactSubtleDetail = (detail: string | undefined): string | undefined => {
   const compacted = detail?.replace(/\s+/g, ' ').trim();
   if (!compacted) return undefined;
   if (compacted.length <= SUBTLE_MESSAGE_MAX_LENGTH) return compacted;
   return `${compacted.slice(0, SUBTLE_MESSAGE_MAX_LENGTH - 3).trimEnd()}...`;
 };
 
-const formatSubtleToolMessage = (
+export const formatSubtleToolMessage = (
   action: string,
   detail: string | undefined,
   fallback: string
