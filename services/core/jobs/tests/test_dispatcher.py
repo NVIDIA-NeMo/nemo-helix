@@ -1758,6 +1758,74 @@ async def test_update_job_status_from_step_skips_job_run_telemetry_without_sessi
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [HelixJobStatus.COMPLETED, HelixJobStatus.ERROR, HelixJobStatus.CANCELLED, HelixJobStatus.PAUSED],
+)
+@pytest.mark.parametrize("with_session", [False, True])
+@pytest.mark.parametrize("failure", [None, "metrics", "telemetry"])
+async def test_job_metrics_precede_telemetry_gate_and_do_not_repeat(
+    mock_dispatcher: JobDispatcher,
+    mock_store: EntityClient,
+    sample_platform_job_request: CreateHelixJobRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    status: HelixJobStatus,
+    with_session: bool,
+    failure: str | None,
+):
+    from nhx.core.jobs.telemetry import build_job_run_telemetry_from_observation
+
+    if not with_session:
+        monkeypatch.setenv("NEMO_TELEMETRY_ENABLED", "false")
+    request = sample_platform_job_request.model_copy(
+        update={
+            "custom_fields": build_job_telemetry_custom_fields("session-123") if with_session else {},
+        }
+    )
+    job = await mock_dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    step = await mock_dispatcher.get_current_job_step_by_name(job.name, "basic", DEFAULT_WORKSPACE)
+    assert step is not None
+    step.status = HelixJobStatus.ACTIVE
+    step = await mock_store.update(step)
+    attempt = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert attempt is not None
+    attempt.status = HelixJobStatus.ACTIVE
+    await mock_store.update(attempt)
+    calls = []
+    expected_calls = ["metrics", "outbound_gate"]
+
+    def record(observation):
+        calls.append("metrics")
+        assert observation.status == status.value
+        if failure == "metrics":
+            raise RuntimeError("metrics sink failed")
+
+    def outbound_gate(observation, custom_fields):
+        calls.append("outbound_gate")
+        if failure == "telemetry":
+            raise RuntimeError("telemetry sink failed")
+        return build_job_run_telemetry_from_observation(observation, custom_fields)
+
+    with (
+        patch("nhx.core.jobs.app.dispatcher.record_job_run_metrics", side_effect=record) as metrics,
+        patch("nhx.core.jobs.app.dispatcher.build_job_run_telemetry_from_observation", side_effect=outbound_gate),
+        patch("nhx.core.jobs.app.dispatcher.emit_job_run_event") as emit,
+    ):
+        await mock_dispatcher.update_job_status_from_step(step, status, status_details={"input_tokens": 3})
+        assert calls == expected_calls
+        assert emit.call_count == int(with_session and failure != "telemetry")
+        metrics.assert_called_once()
+        # Replayed/reconciled updates are not new lifecycle observations.
+        saved_step = await mock_store.get_by_id(HelixJobStep, step.id)
+        await mock_dispatcher.update_job_status_from_step(saved_step, status)
+        metrics.assert_called_once()
+        assert calls == expected_calls
+    saved_attempt = await mock_dispatcher.get_current_attempt(job.name, DEFAULT_WORKSPACE)
+    assert saved_attempt is not None
+    assert saved_attempt.status == status
+
+
+@pytest.mark.asyncio
 async def test_update_job_status_from_step_retries_on_entity_conflict(
     mock_dispatcher: JobDispatcher,
     mock_store: EntityClient,
