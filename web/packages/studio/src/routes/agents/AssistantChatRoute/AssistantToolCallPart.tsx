@@ -6,6 +6,10 @@ import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat
 import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
 import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
 import {
+  getSubtleToolGroupActions,
+  summarizeRepeatedSubtleToolActions,
+} from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+import {
   ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
   ASSISTANT_COLLAPSED_THINKING_TOOL_NAME,
   ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
@@ -126,6 +130,12 @@ const AssistantToolCallPartContent = ({
   }
 
   if (toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME) {
+    // The folded titles ("Read 3 files") come from the same helpers the old subtle rows used.
+    const foldedTitles = new Map(
+      summarizeRepeatedSubtleToolActions(getSubtleToolGroupActions(args))
+        .filter((action) => action.details?.length)
+        .map((action) => [action.toolName, action.message] as const)
+    );
     return (
       <>
         {groupRepeatedToolCalls(getSerializedParts(args.actions)).map((group, index) => {
@@ -133,7 +143,13 @@ const AssistantToolCallPartContent = ({
           if (!first) return null;
           const key = `${getPartKey(first)}-${index}`;
           return group.length > 1 && first.type === 'tool-call' ? (
-            <RepeatedToolCallsStep count={group.length} key={key} toolName={first.toolName}>
+            <RepeatedToolCallsStep
+              key={key}
+              title={
+                foldedTitles.get(first.toolName) ?? `Used ${first.toolName} ${group.length} times`
+              }
+              toolName={first.toolName}
+            >
               {group.map((part, partIndex) => (
                 <SerializedPartContent key={`${getPartKey(part)}-${partIndex}`} part={part} />
               ))}

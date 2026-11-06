@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  countLines,
   countToolCalls,
   formatToolPayload,
   formatWorkDuration,
-  getFileEdit,
   getFileLanguage,
   getWorkGroupLabel,
   getWorkGroupOrdinal,
@@ -98,41 +96,7 @@ describe('formatWorkDuration', () => {
   });
 });
 
-describe('getFileEdit', () => {
-  it('reads a written file with its line count', () => {
-    expect(getFileEdit('write', { file_path: 'notes/MEMORY.md', content: 'milk\neggs\n' })).toEqual(
-      { path: 'notes/MEMORY.md', content: 'milk\neggs\n', additions: 2, deletions: 0 }
-    );
-    expect(getFileEdit('write', { path: 'a.ts' })).toBeUndefined();
-    expect(getFileEdit('write', { content: 'no path' })).toBeUndefined();
-  });
-
-  it('counts the replaced and replacement lines of an edit', () => {
-    expect(getFileEdit('edit', { path: 'a.ts', old_string: 'x\ny', new_string: 'z' })).toEqual({
-      path: 'a.ts',
-      additions: 1,
-      deletions: 2,
-    });
-  });
-
-  it('sums the line counts of a multi-edit', () => {
-    expect(
-      getFileEdit('edit', {
-        file_path: 'a.ts',
-        edits: [
-          { old_string: 'a', new_string: 'b\nc' },
-          { old_string: '', new_string: 'd' },
-        ],
-      })
-    ).toEqual({ path: 'a.ts', additions: 3, deletions: 1 });
-  });
-
-  it('counts lines without a trailing newline', () => {
-    expect(countLines('')).toBe(0);
-    expect(countLines('one')).toBe(1);
-    expect(countLines('one\r\ntwo\r\n')).toBe(2);
-  });
-
+describe('getFileLanguage', () => {
   it('picks a highlighter language from the extension', () => {
     expect(getFileLanguage('src/app.tsx')).toBe('tsx');
     expect(getFileLanguage('MEMORY.md')).toBe('markdown');

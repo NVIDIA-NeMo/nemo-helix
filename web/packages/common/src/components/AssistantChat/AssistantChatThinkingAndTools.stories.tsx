@@ -230,7 +230,7 @@ export const LiveStream: Story = {
   },
 };
 
-// One call per entry in TOOL_STEP_DEFINITIONS.
+// One call per tool the toolCall/ helpers know.
 const KNOWN_TOOL_EXAMPLES: readonly { readonly toolName: string; readonly args: object }[] = [
   { toolName: 'Bash', args: { command: 'pnpm --filter @nemo/common test' } },
   { toolName: 'Read', args: { file_path: 'web/packages/common/README.md' } },
@@ -314,7 +314,7 @@ export const ComponentGallery: Story = {
       </Stack>
       <Stack gap="density-sm">
         <GalleryLabel>Repeated calls folded into one step</GalleryLabel>
-        <RepeatedToolCallsStep defaultOpen count={3} toolName="Read">
+        <RepeatedToolCallsStep defaultOpen title="Read 3 files" toolName="Read">
           <ToolCallStep toolName="Read" args={{ file_path: 'README.md' }} />
           <ToolCallStep toolName="Read" args={{ file_path: 'web/AGENTS.md' }} />
           <ToolCallStep toolName="Read" args={{ file_path: 'SETUP.md' }} />

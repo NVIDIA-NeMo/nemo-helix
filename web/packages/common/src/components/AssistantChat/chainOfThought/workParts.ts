@@ -22,7 +22,7 @@ interface WorkPartLike {
   readonly args?: unknown;
 }
 
-export const isRecord = (value: unknown): value is Record<string, unknown> =>
+const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // Job progress cards stay visible next to the answer instead of hiding in the collapsed group.
@@ -109,48 +109,6 @@ export const getWorkGroupLabel = ({
   return durationMs !== undefined && Number.isFinite(durationMs)
     ? `${summary} · ${formatWorkDuration(durationMs)}`
     : summary;
-};
-
-/** A whole-file write (`content`), or an edit with `old_string`/`new_string` or a list of `edits`. */
-export type FileChangeKind = 'write' | 'edit';
-
-export interface FileEdit {
-  readonly path: string;
-  /** Lines added and removed, so the step can show "+12 −3". */
-  readonly additions: number;
-  readonly deletions: number;
-  /** The whole file, for a write. */
-  readonly content?: string;
-}
-
-const getFirstString = (args: Record<string, unknown>, keys: readonly string[]) =>
-  keys.map((key) => args[key]).find((value): value is string => typeof value === 'string');
-
-export const countLines = (text: string | undefined): number =>
-  text ? text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').length : 0;
-
-/** The file change a `Write`, `Edit`, or `MultiEdit` call describes, with its line counts. */
-export const getFileEdit = (kind: FileChangeKind, args: unknown): FileEdit | undefined => {
-  if (!isRecord(args)) return undefined;
-  const path = getFirstString(args, ['file_path', 'path'])?.trim();
-  if (!path) return undefined;
-
-  if (kind === 'write') {
-    const content = getFirstString(args, ['content']);
-    return content === undefined
-      ? undefined
-      : { path, content, additions: countLines(content), deletions: 0 };
-  }
-
-  const edits = Array.isArray(args.edits) ? args.edits.filter(isRecord) : [args];
-  return edits.reduce<FileEdit>(
-    (total, edit) => ({
-      ...total,
-      additions: total.additions + countLines(getFirstString(edit, ['new_string'])),
-      deletions: total.deletions + countLines(getFirstString(edit, ['old_string'])),
-    }),
-    { path, additions: 0, deletions: 0 }
-  );
 };
 
 export const getFileName = (path: string): string => path.split(/[\\/]/).at(-1) || path;
