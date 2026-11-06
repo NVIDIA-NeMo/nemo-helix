@@ -8,6 +8,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -43,8 +44,10 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
-      # Keep container builds and deployed/process e2e out of PRs and the merge queue.
+      # Keep existing post-merge/manual behavior separate from explicit PR opt-in.
       post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+      # Current labels survive synchronize/other label events; absent draft context fails closed.
+      pr-e2e: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && toJSON(github.event.pull_request.draft) == 'false' && contains(github.event.pull_request.labels.*.name, 'e2e') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
@@ -193,8 +196,9 @@ jobs:
     name: Build CPU smoke images
     needs: [changes]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
         needs.changes.outputs.customization-auth == 'true'
@@ -487,7 +491,7 @@ jobs:
     name: Kind CPU e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -562,7 +566,7 @@ jobs:
     name: Kind Gym agent-evaluate e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -637,10 +641,10 @@ jobs:
     name: Kind customizer auth e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
-      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.pr-e2e == 'true' || needs.changes.outputs.customization-auth == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -693,10 +697,11 @@ jobs:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.e2e == 'true'
       )
@@ -1478,6 +1483,7 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
@@ -1530,8 +1536,9 @@ jobs:
         python-auth-idp-static-test,
       ]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
         github.event_name == 'workflow_dispatch' ||
+        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
       ) &&
@@ -1767,7 +1774,7 @@ jobs:
     name: Python e2e tests
     needs: [changes, policy-wasm]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.policy-wasm.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1825,7 +1832,7 @@ jobs:
     name: Python e2e tests (prebuilt image)
     needs: [changes, policy-wasm, build-cpu-smoke-images]
     if: >
-      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
+      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -1905,8 +1912,8 @@ jobs:
       - python-auth-idp-e2e-test
       - python-e2e-test
       - python-e2e-image-test
-    # Independent of ci-status: image builds and auth/image e2e are not all in
-    # that gate's needs list. Still report when a prerequisite prevents e2e.
+    # Independent of ci-status: separate garak/Safe Synthesizer image builds
+    # are not in that gate's needs list. Still report prerequisite failures.
     if: >
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -2550,6 +2557,9 @@ jobs:
       # - python-integration-test
       - wheel-build
       - python-e2e-test
+      - python-e2e-image-test
+      - python-auth-idp-static-test
+      - python-auth-idp-e2e-test
       - github-scripts
       - web-typecheck
       - web-test

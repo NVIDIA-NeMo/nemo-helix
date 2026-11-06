@@ -80,12 +80,26 @@ reusable actions, and supporting docs.
 
 ## Post-merge image and end-to-end checks
 
-Container image builds and platform e2e checks in `ci.yaml` run only on pushes
-to `main`, or via `workflow_dispatch`. They are skipped for
-pull requests and merge-group validation. This includes CPU smoke, garak, and
-Safe Synthesizer image builds; all Kind suites; Authentik/ZITADEL runtime tests;
-and both Python e2e jobs. Existing path filters and manual publishing inputs
-still apply. Studio UI e2e and Docker source-image smoke remain manual-only.
+Container image builds and platform e2e checks retain their `main` push and
+`workflow_dispatch` behavior, including path filters and publishing inputs.
+Merge-group validation does not run these checks.
+
+For PRs to `main` or `release/*`, maintainers can opt in by adding **`e2e`** to a
+**non-draft, same-repository PR**. Forks and missing/invalid PR context cannot opt
+in. Current labels are checked on synchronize, reopen, ready-for-review, and
+label events; removing `e2e` or converting to draft cancels/replaces the prior
+PR run and skips opt-in jobs. No `pull_request_target` or new permissions are used.
+
+The label enables CPU image publication, all Kind suites, Authentik/ZITADEL
+runtime tests and their static prerequisites, and both Python e2e jobs even
+without matching path changes. Existing policy-WASM and successful published
+image prerequisites remain enforced. The auth-IDP static/runtime checks and
+both Python e2e results participate in the `CI status` aggregate.
+
+Separate garak and Safe Synthesizer image builds are not enabled by the label.
+Studio UI e2e and Docker source-image smoke remain manual-only. Manual
+`publish: false` still skips tests needing published images. These opt-in checks
+are expensive and execute trusted PR code; apply the label deliberately.
 
 Lint, unit tests, integration tests, wheel build/install checks, Helm validation,
 and Docker bake-graph validation stay pre-merge. Printing the bake graph does
