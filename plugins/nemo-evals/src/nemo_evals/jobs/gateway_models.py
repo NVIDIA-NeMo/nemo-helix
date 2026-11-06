@@ -289,35 +289,59 @@ def rebase_registered_agent_config(target: HarborRunnerTarget, agent_kwargs: dic
 MODEL_FREE_HARBOR_AGENTS = frozenset({"oracle", "nop"})
 
 
-def closed_book_run(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> bool:
-    """Whether a run is closed-book: its target is labelled so, or some task's agent runs with no network."""
-    if isinstance(target, HarborRunnerTarget) and target.agent_name in MODEL_FREE_HARBOR_AGENTS:
-        return False
-    return (isinstance(target, HarborRunnerTarget) and target.closed_book) or bool(no_network_task_ids(tasks))
+def closed_book_run(target: object) -> bool:
+    """Whether a run is closed-book: its Harbor target is labelled so and its agent calls a model.
+
+    No-network tasks don't make a run closed-book: their sandbox has no network, but the model provider may.
+    """
+    return (
+        isinstance(target, HarborRunnerTarget)
+        and target.closed_book
+        and target.agent_name not in MODEL_FREE_HARBOR_AGENTS
+    )
+
+
+def open_book_notice(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> str | None:
+    """One submit notice for a run whose no-network tasks run open-book, or None.
+
+    ``tasks`` are (task id, task.toml config) pairs. A run gets the notice when its Harbor agent calls a model, it isn't
+    labelled closed-book, and some task's agent runs with no network. The notice counts those tasks and names none.
+    """
+    if not isinstance(target, HarborRunnerTarget) or target.closed_book:
+        return None
+    if target.agent_name in MODEL_FREE_HARBOR_AGENTS:
+        return None
+    count = len(no_network_task_ids(tasks))
+    if not count:
+        return None
+    tasks_run = "task and runs" if count == 1 else "tasks and runs"
+    sandbox = "Its sandbox has" if count == 1 else "Their sandboxes have"
+    return (
+        f"This run has {count} no-network {tasks_run} open-book. {sandbox} no network, but the model provider may "
+        'still use hosted tools such as web search. To enforce closed-book, set "closed_book": true on the target '
+        "and use a virtual model that includes closed-book middleware (must be last middleware entry)."
+    )
 
 
 async def require_closed_book_route(
     target: object,
-    tasks: Iterable[tuple[str, Mapping[str, Any]]],
     *,
     async_sdk: AsyncHelixClient | None,
     authorize: SourceReadAuthorizer | None,
 ) -> None:
     """Refuse a closed-book run unless every VirtualModel its agent can reach is closed-book capable.
 
-    A run is closed-book when its target says so or a task's agent runs with no network: a no-network sandbox can
-    still reach the model route. ``tasks`` are (task id, task.toml config) pairs. Each of the agent's gateway models,
+    A run is closed-book when its target is labelled so (``closed_book: true``). Each of the agent's gateway models,
     and each VirtualModel it routes to (its recording middleware's ``routes_to``), must end its request middleware with
     the closed-book middleware.
 
     Raises:
         ValueError: The run is closed-book, and some VirtualModel its agent can reach isn't closed-book capable, or its
-            registered agent's default model doesn't call the gateway, or the target is labelled closed-book and its
-            agent calls a model elsewhere.
+            registered agent's default model doesn't call the gateway, or its agent calls a model elsewhere.
     """
-    if not closed_book_run(target, tasks):
+    if not closed_book_run(target):
         return
-    why = _closed_book_reason(target, tasks)
+    why = "closed_book runs"
     try:
         models = _gateway_models(target)
     except ValueError as exc:
@@ -332,7 +356,7 @@ async def require_closed_book_route(
             f"closed_book_required: {why} need the agent's default model to call the Inference Gateway, which issues "
             "each trial its credential"
         )
-    if closed_book_run(target, ()) and not calls_only_gateway_models(target):
+    if not calls_only_gateway_models(target):
         raise ValueError(
             f"closed_book_required: {why} need every model the agent calls to go through the Inference Gateway, and "
             "its config calls one elsewhere"
@@ -353,11 +377,6 @@ async def require_closed_book_route(
             continue
         checked.add(ref)
         pending.extend(await _require_closed_book_model(ModelRef(ref), why, async_sdk=async_sdk, authorize=authorize))
-
-
-def _closed_book_reason(target: object, tasks: Iterable[tuple[str, Mapping[str, Any]]]) -> str:
-    no_network = no_network_task_ids(tasks)
-    return f"no-network tasks {no_network}" if no_network else "closed_book runs"
 
 
 def calls_only_gateway_models(target: object) -> bool:
