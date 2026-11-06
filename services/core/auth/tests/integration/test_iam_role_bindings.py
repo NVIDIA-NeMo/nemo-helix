@@ -3,6 +3,7 @@
 
 """Integration tests for IAM role binding CRUD operations."""
 
+import json
 import uuid
 
 import pytest
@@ -294,3 +295,91 @@ class TestIAMRoleBindings:
         assert "pagination" in data
         assert data["pagination"]["page"] == 1
         assert data["pagination"]["page_size"] == 5
+
+    def test_active_filter_with_pagination(self, http_client: TestClient):
+        """Active filtering reaches entity storage before counting and pagination."""
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        principal = f"active-filter-{uuid.uuid4().hex[:8]}@example.com"
+        names: dict[str, str] = {}
+        try:
+            for role in ("Viewer", "Editor", "Admin"):
+                response = http_client.post(
+                    IAM_ROLE_BINDINGS_PATH,
+                    params={"wait_role_propagation": "false"},
+                    headers=headers,
+                    json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": role},
+                )
+                assert response.status_code == 200, response.text
+                names[role] = response.json()["name"]
+            response = http_client.delete(
+                f"{IAM_ROLE_BINDINGS_PATH}/{names['Viewer']}",
+                params={"wait_role_propagation": "false"},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+
+            base_params = {"filter[principal]": principal, "filter[workspace]": DEFAULT_WORKSPACE}
+            response = http_client.get(IAM_ROLE_BINDINGS_PATH, params=base_params, headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 3
+
+            active_names: set[str] = set()
+            for page in (1, 2):
+                response = http_client.get(
+                    IAM_ROLE_BINDINGS_PATH,
+                    params={
+                        **base_params,
+                        "filter[is_active]": "true",
+                        "page_size": "1",
+                        "page": str(page),
+                        "sort": "name",
+                    },
+                    headers=headers,
+                )
+                assert response.status_code == 200, response.text
+                body = response.json()
+                assert body["pagination"]["total_results"] == 2
+                assert body["pagination"]["total_pages"] == 2
+                assert len(body["data"]) == 1
+                assert body["data"][0]["revoked_at"] is None
+                active_names.add(body["data"][0]["name"])
+            assert active_names == {names["Editor"], names["Admin"]}
+
+            response = http_client.get(
+                IAM_ROLE_BINDINGS_PATH,
+                params={**base_params, "filter[is_active]": "false"},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 1
+            assert [binding["name"] for binding in response.json()["data"]] == [names["Viewer"]]
+
+            # An OR nested beneath the principal constraint must preserve active translation.
+            expression = {
+                "$and": [
+                    {"principal": principal},
+                    {"$or": [{"is_active": False}, {"role": "Editor"}]},
+                ]
+            }
+            response = http_client.get(
+                IAM_ROLE_BINDINGS_PATH,
+                params={"filter": json.dumps(expression)},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 2
+            assert {binding["name"] for binding in response.json()["data"]} == {
+                names["Viewer"],
+                names["Editor"],
+            }
+
+            for params in ({"filter[is_active]": "null"}, {"filter": '{"is_active":null}'}):
+                response = http_client.get(IAM_ROLE_BINDINGS_PATH, params=params, headers=headers)
+                assert response.status_code == 422, response.text
+        finally:
+            for name in names.values():
+                http_client.delete(
+                    f"{IAM_ROLE_BINDINGS_PATH}/{name}",
+                    params={"wait_role_propagation": "false"},
+                    headers=headers,
+                )
