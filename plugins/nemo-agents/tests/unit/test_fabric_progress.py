@@ -426,7 +426,10 @@ async def test_real_nonstreaming_deadline_cancels_invocation_and_closes_runtime(
         return await run_fabric_agent_once(request, fabric=Fabric())
 
     with patch("nemo_agents_plugin.fabric.invocation.run_fabric_agent_once", invoke):
-        async with asyncio.timeout(1):
+        # Hang guard only: the 0.02s invocation deadline is what the test exercises.
+        # Keep it generous because it also covers worker-thread directory setup,
+        # which can stall for over a second on loaded CI runners.
+        async with asyncio.timeout(30):
             with pytest.raises(FabricRuntimeTimeoutError):
                 await invoke_agent_config_request_once(
                     AgentConfigInvocationRequest(
