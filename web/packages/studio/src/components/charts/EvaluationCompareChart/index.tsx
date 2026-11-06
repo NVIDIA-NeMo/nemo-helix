@@ -7,14 +7,12 @@ import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { HeadToHeadChart } from '@studio/components/charts/EvaluationCompareChart/HeadToHeadChart';
 import { ImprovementChart } from '@studio/components/charts/EvaluationCompareChart/ImprovementChart';
 import { ScoresChart } from '@studio/components/charts/EvaluationCompareChart/ScoresChart';
-import { useComparedSessions } from '@studio/components/charts/EvaluationCompareChart/useComparedSessions';
+import { useComparedEvaluations } from '@studio/components/charts/EvaluationCompareChart/useComparedEvaluations';
 import {
   buildImprovementRows,
   buildMetricValueRows,
-  evaluatorNameOf,
-  headToHead,
+  describeComparison,
   isEvaluatorMetric,
-  meanScoreByTestCase,
   toComparedEvaluations,
 } from '@studio/components/charts/EvaluationCompareChart/utils';
 import { deriveTrendMetrics } from '@studio/components/charts/ExperimentTrendChart/utils';
@@ -81,19 +79,22 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
   const headToHeadMetric =
     evaluatorMetrics.find(({ id }) => id === headToHeadMetricId) ?? evaluatorMetrics[0];
 
-  const evaluationNames = useMemo(() => compared.map(({ row }) => row.name), [compared]);
-  const sessions = useComparedSessions(workspace, evaluationNames);
+  const candidateNames = useMemo(() => candidates.map(({ row }) => row.name), [candidates]);
+  const comparisons = useComparedEvaluations(
+    workspace,
+    baseline?.row.name,
+    candidateNames,
+    headToHeadMetric?.id
+  );
   const headToHeadRows = useMemo(() => {
-    if (!baseline || !headToHeadMetric || sessions.isLoading) return [];
-    const evaluatorName = evaluatorNameOf(headToHeadMetric);
-    const scoresOf = (name: string) =>
-      meanScoreByTestCase(sessions.sessionsByEvaluation.get(name) ?? [], evaluatorName);
-    const baselineScores = scoresOf(baseline.row.name);
-    return candidates.map(({ row }) => ({
-      name: row.name,
-      ...headToHead(baselineScores, scoresOf(row.name)),
+    if (!baseline || !headToHeadMetric || comparisons.isLoading) return [];
+    return comparisons.comparisons.map(({ name, result }) => ({
+      name,
+      better: result?.better ?? 0,
+      same: result?.same ?? 0,
+      worse: result?.worse ?? 0,
     }));
-  }, [baseline, candidates, headToHeadMetric, sessions]);
+  }, [baseline, headToHeadMetric, comparisons]);
   const hasPairedTestCases = headToHeadRows.some((row) => row.better + row.same + row.worse > 0);
 
   if (!baseline) return null;
@@ -106,19 +107,38 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
 
   const renderHeadToHead = () => {
     if (!headToHeadMetric) return <Placeholder>No evaluator scores to compare.</Placeholder>;
-    if (sessions.isError) return <Placeholder>Could not load test case results.</Placeholder>;
-    if (sessions.isLoading) {
+    if (comparisons.isError)
+      return <Placeholder>Could not load the paired comparison.</Placeholder>;
+    if (comparisons.isLoading) {
       return (
         <Flex aria-busy align="center" gap="density-md">
           <CircleTick width={16} height={16} className="animate-spin text-brand" />
-          <Placeholder>Loading test case results…</Placeholder>
+          <Placeholder>Comparing test case results…</Placeholder>
         </Flex>
       );
     }
     if (!hasPairedTestCases) {
       return <Placeholder>No test cases were scored by both runs.</Placeholder>;
     }
-    return <HeadToHeadChart rows={headToHeadRows} />;
+    return (
+      <Stack gap="density-sm">
+        <HeadToHeadChart rows={headToHeadRows} />
+        {comparisons.comparisons.map(({ name, result }) =>
+          result ? (
+            <Stack key={name} gap="density-xxs">
+              <Text kind="body/regular/xs" color="subtle">
+                {`${name}: ${describeComparison(result)}`}
+              </Text>
+              {result.interval_caveat ? (
+                <Text kind="body/regular/xs" color="subtle">
+                  {result.interval_caveat}
+                </Text>
+              ) : null}
+            </Stack>
+          ) : null
+        )}
+      </Stack>
+    );
   };
 
   return (
@@ -152,7 +172,7 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
       </Section>
       <Section
         title="Per test case"
-        description="How each run scored on the same test cases as the baseline. Repeated attempts are averaged."
+        description="How each run scored on the same test cases as the baseline. Repeated attempts are averaged server-side, with a 95% bootstrap interval and P(candidate better) for the selected evaluator."
       >
         {evaluatorMetrics.length > 1 && headToHeadMetric && (
           <MetricSelect
@@ -162,11 +182,6 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
             onChange={setHeadToHeadMetricId}
             triggerClassName="w-44"
           />
-        )}
-        {sessions.truncated.length > 0 && (
-          <Placeholder>
-            {`Only the first 1,000 sessions of ${sessions.truncated.join(', ')} are counted.`}
-          </Placeholder>
         )}
         {renderHeadToHead()}
       </Section>

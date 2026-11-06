@@ -11084,6 +11084,7 @@ nemo intake [OPTIONS] COMMAND [ARGS]...
 **Commands:**
 
 * `annotations`: Manage annotations
+* `evaluations`: Manage evaluations
 * `evaluator-results`: Manage evaluator_results
 * `ingest`: Ingest operations
 * `sessions`: Manage sessions
@@ -11244,6 +11245,57 @@ nemo intake annotations get [OPTIONS] ANNOTATION_ID
 **Options:**
 
 * `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo intake evaluations
+
+Manage evaluations
+
+**Usage:**
+
+```shell
+nemo intake evaluations [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `compare`: Compare two evaluations per test case on one metric.
+
+##### nemo intake evaluations compare
+
+Compare two evaluations per test case on one metric.
+
+Both runs' attempts are averaged per test case (a failed evaluator result scores 0;
+an unscored attempt is omitted), the shared test cases are paired, and the result
+reports the better/same/worse counts, the mean paired difference, a 95% bootstrap
+interval over the paired mean differences, and P(candidate better).
+
+**Usage:**
+
+```shell
+nemo intake evaluations compare [OPTIONS] BASELINE CANDIDATE
+```
+
+**Arguments:**
+
+* `<BASELINE>`: Name of the baseline Evaluation.
+* `<CANDIDATE>`: Name of the candidate Evaluation.
+
+**Options:**
+
+* `--workspace`
+* `--metric`: Metric to compare: an evaluator as 'evaluators.&lt;name>', or one of 'cost_usd', 'latency_ms', 'tokens'. Evaluator scores are higher-is-better; the rollup metrics are lower-is-better.
 
 **Help:**
 

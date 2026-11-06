@@ -5028,6 +5028,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/intake/v2/workspaces/{workspace}/evaluations/compare:
+    get:
+      tags:
+      - Evaluations
+      summary: Compare Evaluations
+      description: 'Pair two evaluations per test case and compare them on one metric.
+
+
+        Both runs'' attempts are averaged per test case (a failed evaluator result
+        scores
+
+        0; an unscored attempt is omitted), the shared test cases are paired, and
+        the
+
+        response reports the mean paired difference with a 95% bootstrap interval,
+        the
+
+        fraction of resamples favoring the candidate, and the better/same/worse counts.'
+      operationId: compare_evaluations_apis_intake_v2_workspaces__workspace__evaluations_compare_get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: baseline
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Name of the baseline Evaluation.
+          title: Baseline
+        description: Name of the baseline Evaluation.
+      - name: candidate
+        in: query
+        required: true
+        schema:
+          type: string
+          description: Name of the candidate Evaluation.
+          title: Candidate
+        description: Name of the candidate Evaluation.
+      - name: metric
+        in: query
+        required: true
+        schema:
+          type: string
+          description: 'Metric to compare: an evaluator as ''evaluators.<name>'',
+            or one of ''cost_usd'', ''latency_ms'', ''tokens''. Evaluator scores are
+            higher-is-better; the rollup metrics are lower-is-better.'
+          title: Metric
+        description: 'Metric to compare: an evaluator as ''evaluators.<name>'', or
+          one of ''cost_usd'', ''latency_ms'', ''tokens''. Evaluator scores are higher-is-better;
+          the rollup metrics are lower-is-better.'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvaluationCompareResponse'
+        '400':
+          description: Unsupported metric
+        '404':
+          description: Baseline or candidate Evaluation not found
+        '503':
+          description: Telemetry store unavailable
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/intake/v2/workspaces/{workspace}/evaluations/{name}:
     get:
       tags:
@@ -14321,6 +14394,104 @@ components:
       required:
       - detail
       title: ErrorResponse
+    EvaluationCompareResponse:
+      properties:
+        workspace:
+          type: string
+          title: Workspace
+        baseline:
+          type: string
+          title: Baseline
+          description: Name of the baseline Evaluation.
+        candidate:
+          type: string
+          title: Candidate
+          description: Name of the candidate Evaluation.
+        metric:
+          type: string
+          title: Metric
+          description: 'The compared metric: ''evaluators.<name>'', ''cost_usd'',
+            ''latency_ms'', or ''tokens''.'
+        higher_is_better:
+          type: boolean
+          title: Higher Is Better
+          description: 'Direction of the metric: true when a higher value is better
+            (evaluator scores), false when lower is better (cost, latency, tokens).'
+        n_pairs:
+          type: integer
+          title: N Pairs
+          description: Test cases present on both sides, i.e. the pairs compared.
+        better:
+          type: integer
+          title: Better
+          description: Paired test cases where the candidate is better.
+        same:
+          type: integer
+          title: Same
+          description: Paired test cases within a 1e-9 absolute difference of the
+            baseline.
+        worse:
+          type: integer
+          title: Worse
+          description: Paired test cases where the candidate is worse.
+        mean_paired_difference:
+          title: Mean Paired Difference
+          description: Mean of the per-test-case differences, signed candidate minus
+            baseline. Null when no test case is shared.
+          nullable: true
+          type: number
+        interval_low:
+          title: Interval Low
+          description: Lower bound of the 95% bootstrap interval of the mean paired
+            difference.
+          nullable: true
+          type: number
+        interval_high:
+          title: Interval High
+          description: Upper bound of the 95% bootstrap interval of the mean paired
+            difference.
+          nullable: true
+          type: number
+        p_candidate_better:
+          title: P Candidate Better
+          description: Fraction of bootstrap resamples whose mean paired difference
+            favors the candidate under the metric's direction. Resamples within 1e-9
+            of zero are ties and count as neither better nor worse, so 1 minus this
+            value is not the chance the candidate is worse. Null when no test case
+            is shared.
+          nullable: true
+          type: number
+        interval_caveat:
+          title: Interval Caveat
+          description: 'Plain-language caveat about the interval: absent pairs, or
+            a small pair count, make it a weak estimate.'
+          nullable: true
+          type: string
+      type: object
+      required:
+      - workspace
+      - baseline
+      - candidate
+      - metric
+      - higher_is_better
+      - n_pairs
+      - better
+      - same
+      - worse
+      title: EvaluationCompareResponse
+      description: 'Paired baseline-vs-candidate comparison of one metric across shared
+        test cases.
+
+
+        Differences are signed ``candidate - baseline``. ``interval_low``/``interval_high``
+
+        bound a 95% bootstrap interval over the paired test-case mean differences,
+        and
+
+        ``p_candidate_better`` is the fraction of resamples whose mean favors the
+        candidate
+
+        under the metric''s direction. All three are null when no test case is shared.'
     EvaluationContext:
       properties:
         evaluation_name:

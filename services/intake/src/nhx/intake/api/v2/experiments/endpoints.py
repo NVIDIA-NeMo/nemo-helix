@@ -30,6 +30,7 @@ from nhx.intake.api.v2.experiments.dependencies import (
     EvaluationReadServiceDep,
 )
 from nhx.intake.api.v2.experiments.schemas import (
+    EvaluationCompareResponse,
     EvaluationFilter,
     EvaluationPatchRequest,
     EvaluationRequest,
@@ -49,6 +50,7 @@ from nhx.intake.api.v2.experiments.schemas import (
 # layer uses; only the entity's own field names (e.g. parent_experiment_id) reference Experiment directly.
 from nhx.intake.entities.experiments import Experiment as Evaluation
 from nhx.intake.entities.experiments import ExperimentGroup
+from nhx.intake.experiments.compare import InvalidEvaluationMetricError
 from nhx.intake.experiments.denormalizer import EvaluationDenormalizer
 from nhx.intake.experiments.read_service import (
     EvaluationNotFoundError,
@@ -509,6 +511,63 @@ async def list_evaluations(
         ),
         sort=sort,
         filter=parsed.to_response(),
+    )
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/evaluations/compare",
+    response_model=EvaluationCompareResponse,
+    tags=[EVALUATIONS_TAG],
+    responses={
+        400: {"description": "Unsupported metric"},
+        404: {"description": "Baseline or candidate Evaluation not found"},
+        503: {"description": "Telemetry store unavailable"},
+    },
+)
+async def compare_evaluations(
+    workspace: str,
+    read_service: EvaluationReadServiceDep,
+    baseline: str = Query(description="Name of the baseline Evaluation."),
+    candidate: str = Query(description="Name of the candidate Evaluation."),
+    metric: str = Query(
+        description=(
+            "Metric to compare: an evaluator as 'evaluators.<name>', or one of 'cost_usd', "
+            "'latency_ms', 'tokens'. Evaluator scores are higher-is-better; the rollup "
+            "metrics are lower-is-better."
+        ),
+    ),
+) -> EvaluationCompareResponse:
+    """Pair two evaluations per test case and compare them on one metric.
+
+    Both runs' attempts are averaged per test case (a failed evaluator result scores
+    0; an unscored attempt is omitted), the shared test cases are paired, and the
+    response reports the mean paired difference with a 95% bootstrap interval, the
+    fraction of resamples favoring the candidate, and the better/same/worse counts.
+    """
+    try:
+        comparison = await read_service.compare_evaluations(
+            workspace=workspace,
+            baseline_name=baseline,
+            candidate_name=candidate,
+            metric_id=metric,
+        )
+    except InvalidEvaluationMetricError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except EvaluationNotFoundError as exc:
+        raise _evaluation_not_found_http_error(exc) from exc
+    except EvaluationTelemetryUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=CLICKHOUSE_UNAVAILABLE_MESSAGE,
+        ) from exc
+    return EvaluationCompareResponse.from_comparison(
+        workspace=workspace,
+        baseline=baseline,
+        candidate=candidate,
+        comparison=comparison,
     )
 
 
