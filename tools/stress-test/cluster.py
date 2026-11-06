@@ -22,7 +22,15 @@ class JobView:
 
 
 class Cluster(Protocol):
-    def create_job(self, name: str, environment: dict[str, str], pod: PodSize, profile_name: str) -> bool:
+    def create_job(
+        self,
+        name: str,
+        environment: dict[str, str],
+        pod: PodSize,
+        profile_name: str,
+        provider: str = "cpu",
+        image: str | None = None,
+    ) -> bool:
         """Submit one job. Return False when the platform refuses it."""
 
     def jobs(self, prefix: str) -> list[JobView]:
@@ -37,8 +45,14 @@ class Cluster(Protocol):
     def read_result(self, name: str) -> bytes | None:
         """Return the ``service-stress`` artifact, or None when it is absent."""
 
+    def diagnose(self, name: str) -> dict[str, object]:
+        """Platform error messages and a log tail for a job that produced no result."""
+
     def write_file(self, path: str, data: bytes) -> None:
         """Copy one object into the run fileset."""
+
+    def read_file(self, path: str) -> bytes | None:
+        """Return one fileset object, or None when it is absent."""
 
     def remove_prefix(self, prefix: str) -> None:
         """Delete fileset objects under ``prefix`` and keep the fileset."""

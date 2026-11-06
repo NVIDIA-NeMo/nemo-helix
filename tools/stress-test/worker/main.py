@@ -6,10 +6,12 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
 
+from barrier import BarrierFiles, live_fileset, wait_for_barrier
 from hammer import Operations, live_operations, run_hammer
 from history import HistoryLog
 
@@ -19,14 +21,15 @@ RESULT_PATH = Path("/tmp/service-stress.jsonl")
 def main() -> None:
     kind = os.environ["STRESS_KIND"]
     duration = float(os.environ.get("STRESS_DURATION_SECONDS", "0"))
+    timeout = float(os.environ.get("STRESS_TIMEOUT_SECONDS", "0"))
     service = os.environ.get("STRESS_SERVICE", "")
     rate = float(os.environ.get("STRESS_RATE", "1"))
     payload = b"x" * int(os.environ.get("STRESS_PAYLOAD_BYTES", "1024"))
     log = HistoryLog(RESULT_PATH)
-    calls = live_operations() if kind == "hammer" else _Unused()
-    run(
+    code = run(
         kind=kind,
         duration=duration,
+        timeout=timeout,
         service=service,
         rate=rate,
         payload=payload,
@@ -36,15 +39,17 @@ def main() -> None:
         clock=time.monotonic,
         sleep=time.sleep,
         log=log,
-        calls=calls,
         publish=lambda: publish_result(RESULT_PATH),
     )
+    if code:
+        sys.exit(code)
 
 
 def run(
     *,
     kind: str,
     duration: float,
+    timeout: float = 0,
     service: str,
     rate: float,
     payload: bytes,
@@ -54,14 +59,30 @@ def run(
     clock: Callable[[], float],
     sleep: Callable[[float], None],
     log: HistoryLog,
-    calls: Operations,
     publish: Callable[[], None],
-) -> None:
+    calls: Operations | None = None,
+    files: BarrierFiles | None = None,
+    barrier_poll: float = 1.0,
+) -> int:
     started = clock()
     achieved = 0.0
+    reason = ""
+    code = 0
     try:
         if kind == "idle":
             sleep(duration)
+        elif kind == "barrier":
+            port = files if files is not None else live_fileset()
+            reason = wait_for_barrier(
+                step=step,
+                job=job,
+                timeout=timeout,
+                clock=clock,
+                sleep=sleep,
+                files=port,
+                poll=barrier_poll,
+            )
+            code = 0 if reason == "barrier" else 1
         elif kind == "hammer":
             achieved = run_hammer(
                 service=service,
@@ -73,7 +94,7 @@ def run(
                 clock=clock,
                 sleep=sleep,
                 log=log,
-                calls=calls,
+                calls=live_operations() if calls is None else calls,
                 publish=publish,
             )
     finally:
@@ -85,10 +106,12 @@ def run(
                 "ended_at": clock(),
                 "code_fetch_seconds": fetch,
                 "achieved_rate": achieved,
+                "exit_reason": reason,
             }
         )
         log.close()
         publish()
+    return code
 
 
 def publish_result(path: Path) -> None:
@@ -101,73 +124,9 @@ def publish_result(path: Path) -> None:
     client = get_task_nemo_client("jobs", workspace=workspace)
     manager = result_manager_factory(
         os.environ["NEMO_JOB_ID"],
-        attempt_id=os.environ.get("NEMO_JOB_ATTEMPT_ID"),
+        attempt_id=os.environ["NEMO_JOB_ATTEMPT_ID"],
         workspace=workspace,
         files_client=FilesClient.from_client(client),
         jobs_client=JobsClient.from_client(client),
     )
     manager.create_result("service-stress", path)
-
-
-class _Unused:
-    """Exit and idle jobs do not call a service."""
-
-    def fileset_create(self, name: str) -> int:
-        return 0
-
-    def fileset_get(self, name: str) -> int:
-        return 0
-
-    def fileset_list(self) -> int:
-        return 0
-
-    def fileset_delete(self, name: str) -> int:
-        return 0
-
-    def file_upload(self, name: str, payload: bytes) -> int:
-        return 0
-
-    def file_download(self, name: str) -> int:
-        return 0
-
-    def file_list(self) -> int:
-        return 0
-
-    def file_delete(self, name: str) -> int:
-        return 0
-
-    def secret_create(self, name: str) -> int:
-        return 0
-
-    def secret_get(self, name: str) -> int:
-        return 0
-
-    def secret_list(self) -> int:
-        return 0
-
-    def secret_update(self, name: str) -> int:
-        return 0
-
-    def secret_delete(self, name: str) -> int:
-        return 0
-
-    def secret_value(self, name: str) -> int:
-        return 0
-
-    def discovery(self) -> int:
-        return 0
-
-    def authz(self) -> int:
-        return 0
-
-    def access_key_create(self) -> tuple[int, str]:
-        return 0, ""
-
-    def access_key_list(self) -> int:
-        return 0
-
-    def access_key_revoke(self, jti: str) -> int:
-        return 0
-
-    def cleanup(self) -> None:
-        return None

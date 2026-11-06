@@ -8,6 +8,8 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
 _WORKER = _ROOT / "worker"
-for _path in (_WORKER, _ROOT):
-    if str(_path) not in sys.path:
-        sys.path.insert(0, str(_path))
+for _path in (_ROOT, _WORKER):
+    if str(_path) in sys.path:
+        sys.path.remove(str(_path))
+sys.path.insert(0, str(_WORKER))
+sys.path.insert(0, str(_ROOT))

@@ -53,3 +53,28 @@ def resource_name(run_key: str) -> str:
     if len(name) > 63:
         raise NameError(f"workspace {name!r} exceeds 63 characters")
     return name
+
+
+def union_workspace_names(run_key: str, counts: list[int]) -> list[str]:
+    """Workspace names used by any of ``counts``, without repeating a name."""
+    found: list[str] = []
+    for count in counts:
+        for name in workspace_names(run_key, count):
+            if name not in found:
+                found.append(name)
+    return found
+
+
+def workspace_names(run_key: str, count: int) -> list[str]:
+    """One workspace by default. Additional workspaces get a numeric suffix."""
+    if count < 1:
+        raise NameError("workspace count must be a positive integer")
+    base = resource_name(run_key)
+    if count == 1:
+        return [base]
+    names = [f"{base}-{index}" for index in range(1, count + 1)]
+    for name in names:
+        check_token(name, "workspace")
+        if len(name) > 63:
+            raise NameError(f"workspace {name!r} exceeds 63 characters")
+    return names

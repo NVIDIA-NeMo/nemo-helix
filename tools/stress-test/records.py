@@ -10,7 +10,15 @@ from pathlib import Path
 
 from config import Step
 
-MEASUREMENT_FIELDS = ("kind", "count", "duration_seconds", "service", "rate_per_second")
+MEASUREMENT_FIELDS = (
+    "kind",
+    "count",
+    "duration_seconds",
+    "service",
+    "rate_per_second",
+    "timeout_seconds",
+    "workspaces",
+)
 
 
 def step_dir(run_dir: Path, step_id: str) -> Path:
@@ -41,10 +49,23 @@ def read_json(path: Path) -> dict[str, object]:
     return {str(key): value for key, value in loaded.items()}
 
 
-def marker_matches(run_dir: Path, step: Step) -> bool:
+def marker_matches(run_dir: Path, step: Step, *, workspaces: int | None = None) -> bool:
     """A step is finished only when its marker stores the loaded measurement."""
     path = marker_path(run_dir, step.id)
     if not path.is_file():
         return False
     stored = read_json(path)
-    return all(stored.get(field) == step.measurement()[field] for field in MEASUREMENT_FIELDS)
+    expected = step.measurement()
+    if workspaces is not None:
+        expected = {**expected, "workspaces": workspaces}
+    return all(_marker_value(stored, field) == expected[field] for field in MEASUREMENT_FIELDS)
+
+
+def _marker_value(stored: dict[str, object], field: str) -> object:
+    if field == "workspaces":
+        return stored.get(field, 1)
+    return stored.get(field)
+
+
+def cohort_path(run_dir: Path, step_id: str) -> Path:
+    return step_dir(run_dir, step_id) / "cohort.json"

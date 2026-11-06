@@ -12,9 +12,9 @@ from typing import Literal
 import yaml
 from names import NameError, check_token, job_name, resource_name
 
-Kind = Literal["exit", "idle", "hammer"]
+Kind = Literal["exit", "idle", "hammer", "barrier"]
 Service = Literal["files", "secrets", "auth"]
-_KINDS = ("exit", "idle", "hammer")
+_KINDS = ("exit", "idle", "hammer", "barrier")
 _SERVICES = ("files", "secrets", "auth")
 
 
@@ -38,6 +38,8 @@ class Step:
     duration_seconds: int | None
     service: Service | None
     rate_per_second: float | None
+    timeout_seconds: int | None = None
+    workspaces: int = 1
 
     def measurement(self) -> dict[str, object]:
         """Fields that decide whether a stored result is still current."""
@@ -47,6 +49,8 @@ class Step:
             "duration_seconds": self.duration_seconds,
             "service": self.service,
             "rate_per_second": self.rate_per_second,
+            "timeout_seconds": self.timeout_seconds,
+            "workspaces": self.workspaces,
         }
 
 
@@ -56,6 +60,7 @@ class Sweep:
     payload_bytes: int
     pods: dict[str, PodSize]
     steps: tuple[Step, ...]
+    image: str | None = None
 
     def step(self, step_id: str) -> Step:
         found = [item for item in self.steps if item.id == step_id]
@@ -100,6 +105,8 @@ def _kind(value: object) -> Kind:
         return "idle"
     if value == "hammer":
         return "hammer"
+    if value == "barrier":
+        return "barrier"
     raise ConfigError(f"kind must be one of {', '.join(_KINDS)}")
 
 
@@ -125,8 +132,14 @@ def _step(value: object, seen: set[str]) -> Step:
     duration: int | None = None
     service: Service | None = None
     rate: float | None = None
+    timeout: int | None = None
+    workspaces: int = 1
+    if "workspaces" in raw:
+        workspaces = _positive_int(raw.get("workspaces"), f"{step_id} workspaces")
     if kind in ("idle", "hammer"):
         duration = _positive_int(raw.get("duration_seconds"), f"{step_id} duration_seconds")
+    if kind == "barrier":
+        timeout = _positive_int(raw.get("timeout_seconds"), f"{step_id} timeout_seconds")
     if kind == "hammer":
         service = _service(raw.get("service"))
         rate_value = raw.get("rate_per_second")
@@ -140,6 +153,8 @@ def _step(value: object, seen: set[str]) -> Step:
         duration_seconds=duration,
         service=service,
         rate_per_second=rate,
+        timeout_seconds=timeout,
+        workspaces=workspaces,
     )
 
 
@@ -158,17 +173,19 @@ def _load_sweep(path: Path) -> Sweep:
     check_token(run_key, "run key")
     resource_name(run_key)
     payload_bytes = _positive_int(raw.get("payload_bytes"), "payload_bytes")
+    image = _text(raw.get("image"), "image") if "image" in raw else None
     pods_raw = _mapping(raw.get("pods"), "pods")
-    pods = {kind: _pod(pods_raw.get(kind), kind) for kind in _KINDS}
+    pods = {kind: _pod(pods_raw.get(kind), kind) for kind in _KINDS if kind in pods_raw}
+    if "barrier" not in pods:
+        pods["barrier"] = pods["idle"]
     steps_raw = raw.get("steps")
     if not isinstance(steps_raw, list) or not steps_raw:
         raise ConfigError("steps must be a non-empty list")
     seen: set[str] = set()
     steps = tuple(_step(item, seen) for item in steps_raw)
     for step in steps:
-        for index in range(1, step.count + 1):
-            job_name(run_key, step.id, index, step.count)
-    return Sweep(run_key=run_key, payload_bytes=payload_bytes, pods=pods, steps=steps)
+        _check_job_names(run_key, step)
+    return Sweep(run_key=run_key, payload_bytes=payload_bytes, pods=pods, steps=steps, image=image)
 
 
 def override_run_key(sweep: Sweep, run_key: str | None) -> Sweep:
@@ -178,9 +195,10 @@ def override_run_key(sweep: Sweep, run_key: str | None) -> Sweep:
     check_token(run_key, "run key")
     resource_name(run_key)
     for step in sweep.steps:
-        for index in range(1, step.count + 1):
-            job_name(run_key, step.id, index, step.count)
-    return Sweep(run_key=run_key, payload_bytes=sweep.payload_bytes, pods=sweep.pods, steps=sweep.steps)
+        _check_job_names(run_key, step)
+    return Sweep(
+        run_key=run_key, payload_bytes=sweep.payload_bytes, pods=sweep.pods, steps=sweep.steps, image=sweep.image
+    )
 
 
 def select_step(sweep: Sweep, step_id: str | None) -> Step | None:
@@ -188,3 +206,39 @@ def select_step(sweep: Sweep, step_id: str | None) -> Step | None:
     if step_id is None:
         return None
     return sweep.step(step_id)
+
+
+def sweep_files(directory: Path) -> list[Path]:
+    """Sweep files in ``directory``, in name order. Subdirectories are not searched."""
+    return sorted(path for path in directory.glob("*.yaml") if path.is_file())
+
+
+def format_catalog(label: str, sweep: Sweep) -> str:
+    """One sweep and its steps, for ``list``."""
+    lines = [label, f"  run_key: {sweep.run_key}"]
+    if sweep.image is not None:
+        lines.append(f"  image: {sweep.image}")
+    lines.extend(f"  {_step_line(step)}" for step in sweep.steps)
+    return "\n".join(lines)
+
+
+def _step_line(step: Step) -> str:
+    parts = [step.id, step.kind, f"count={step.count}"]
+    if step.duration_seconds is not None:
+        parts.append(f"duration={step.duration_seconds}s")
+    if step.service is not None:
+        parts.append(f"service={step.service}")
+    if step.rate_per_second is not None:
+        rate = int(step.rate_per_second) if step.rate_per_second == int(step.rate_per_second) else step.rate_per_second
+        parts.append(f"rate={rate}/s")
+    if step.timeout_seconds is not None:
+        parts.append(f"timeout={step.timeout_seconds}s")
+    if step.kind == "barrier" or step.workspaces != 1:
+        parts.append(f"workspaces={step.workspaces}")
+    return " ".join(parts)
+
+
+def _check_job_names(run_key: str, step: Step) -> None:
+    total = step.count * step.workspaces
+    job_name(run_key, step.id, 1, total)
+    job_name(run_key, step.id, total, total)

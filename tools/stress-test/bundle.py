@@ -16,6 +16,7 @@ from nemo_helix_plugin.jobs.providers import (
     ComputeResourceSpec,
     ContainerSpec,
     CPUExecutionProvider,
+    GPUExecutionProvider,
 )
 from nemo_helix_plugin.jobs.spec import HelixJobEnvironmentVariable, HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
@@ -65,6 +66,18 @@ def digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def barrier_ready_path(step_id: str, job: str) -> str:
+    return f"barrier/{step_id}/ready/{job}"
+
+
+def barrier_release_path(step_id: str) -> str:
+    return f"barrier/{step_id}/release"
+
+
+def barrier_exit_path(step_id: str, job: str) -> str:
+    return f"barrier/{step_id}/exit/{job}"
+
+
 def job_environment(sweep: Sweep, step: Step, fileset: str) -> dict[str, str]:
     """Environment the bootstrap and worker read. Platform job variables stay unset."""
     values = {
@@ -77,6 +90,8 @@ def job_environment(sweep: Sweep, step: Step, fileset: str) -> dict[str, str]:
     }
     if step.duration_seconds is not None:
         values["STRESS_DURATION_SECONDS"] = str(step.duration_seconds)
+    if step.timeout_seconds is not None:
+        values["STRESS_TIMEOUT_SECONDS"] = str(step.timeout_seconds)
     if step.service is not None:
         values["STRESS_SERVICE"] = step.service
     if step.rate_per_second is not None:
@@ -84,19 +99,35 @@ def job_environment(sweep: Sweep, step: Step, fileset: str) -> dict[str, str]:
     return values
 
 
-def job_request(name: str, environment: dict[str, str], pod: PodSize, profile_name: str) -> CreateHelixJobRequest:
-    """One CPU step on the selected profile. The image stays unset."""
+def _container(kind: str, image: str | None) -> ContainerSpec:
+    """Exit and idle are inline shell. Hammers and barrier jobs download the worker zip."""
+    if kind == "exit":
+        return ContainerSpec(image=image, entrypoint=["/bin/bash", "-c"], command=["exit 0"])
+    if kind == "idle":
+        return ContainerSpec(image=image, entrypoint=["/bin/bash", "-c"], command=['sleep "$STRESS_DURATION_SECONDS"'])
+    return ContainerSpec(image=image, entrypoint=["python", "-c"], command=[BOOTSTRAP])
+
+
+def job_request(
+    name: str,
+    environment: dict[str, str],
+    pod: PodSize,
+    profile_name: str,
+    provider: str = "cpu",
+    image: str | None = None,
+) -> CreateHelixJobRequest:
+    """One step on the selected profile. An unset image uses the profile default."""
     resources = ComputeResources(
         requests=ComputeResourceSpec(cpu=pod.cpu_request, memory=pod.memory_request),
         limits=ComputeResourceSpec(cpu=pod.cpu_limit, memory=pod.memory_limit),
     )
-    container = ContainerSpec(entrypoint=["python", "-c"], command=[BOOTSTRAP])
-    executor = CPUExecutionProvider(
-        provider="cpu",
-        profile=profile_name,
-        container=container,
-        resources=resources,
-    )
+    container = _container(environment.get("STRESS_KIND", ""), image)
+    if provider == "cpu":
+        executor = CPUExecutionProvider(provider="cpu", profile=profile_name, container=container, resources=resources)
+    elif provider == "gpu":
+        executor = GPUExecutionProvider(provider="gpu", profile=profile_name, container=container, resources=resources)
+    else:
+        raise ValueError(f"unsupported provider {provider!r}")
     step = HelixJobStepSpec(
         name="run",
         environment=[HelixJobEnvironmentVariable(name=key, value=value) for key, value in sorted(environment.items())],

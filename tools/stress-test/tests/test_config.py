@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from config import ConfigError, load_sweep, select_step
+from config import ConfigError, format_catalog, load_sweep, select_step, sweep_files
 
 SWEEP = Path(__file__).resolve().parents[1] / "sweep.yaml"
 
@@ -17,23 +17,61 @@ def test_default_sweep_lists_each_measurement() -> None:
         "exit-01",
         "exit-10",
         "exit-25",
-        "idle-01",
-        "idle-10",
-        "idle-25",
+        "exit-50",
+        "exit-100",
+        "exit-500",
+        "barrier-10",
+        "barrier-10-w2",
+        "barrier-100",
+        "barrier-100-w2",
         "files-01",
         "files-10",
         "files-25",
         "secrets-01",
         "secrets-10",
         "secrets-25",
+        "secrets-100",
+        "secrets-300",
         "auth-01",
         "auth-10",
         "auth-25",
     ]
+    assert sweep.image == "nvcr.io/0921617854601259/nemo-helix-dev/nhx-tasks:70cc13d4055922c48de00f383a2dbabfc622ad88"
     assert sweep.steps[0].kind == "exit"
-    assert sweep.steps[3].duration_seconds == 300
-    assert sweep.steps[6].service == "files"
-    assert sweep.steps[6].rate_per_second == 5
+    assert sweep.step("exit-50").count == 50
+    assert sweep.step("exit-100").count == 100
+    assert sweep.step("exit-500").count == 500
+    barrier = sweep.step("barrier-10")
+    assert barrier.kind == "barrier"
+    assert barrier.count == 10
+    assert barrier.timeout_seconds == 180
+    assert barrier.workspaces == 1
+    assert sweep.step("barrier-10-w2").workspaces == 2
+    assert sweep.step("barrier-100").count == 100
+    assert sweep.step("barrier-100").timeout_seconds == 600
+    assert sweep.step("barrier-100-w2").workspaces == 2
+    assert sweep.step("files-01").service == "files"
+    assert sweep.step("files-01").rate_per_second == 5
+    assert sweep.step("secrets-100").count == 100
+    assert sweep.step("secrets-300").count == 300
+    assert sweep.step("secrets-300").duration_seconds == 60
+    assert sweep.step("secrets-300").rate_per_second == 5
+
+
+def test_catalog_lists_the_sweep_and_its_steps() -> None:
+    text = format_catalog("sweep.yaml", load_sweep(SWEEP))
+    assert text.splitlines()[0] == "sweep.yaml"
+    assert "run_key: stress" in text
+    assert "image: nvcr.io/0921617854601259/nemo-helix-dev/nhx-tasks:70cc13d4055922c48de00f383a2dbabfc622ad88" in text
+    assert "exit-01 exit count=1" in text
+    assert "barrier-10 barrier count=10 timeout=180s workspaces=1" in text
+    assert "barrier-100-w2 barrier count=100 timeout=600s workspaces=2" in text
+    assert "files-01 hammer count=1 duration=60s service=files rate=5/s" in text
+    assert "auth-25" in text
+
+
+def test_sweep_files_includes_the_shipped_sweep() -> None:
+    assert SWEEP in sweep_files(SWEEP.parent)
 
 
 def test_unknown_step_lists_configured_ids() -> None:
