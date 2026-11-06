@@ -106,6 +106,27 @@ def test_reap_logs_a_control_plane_failure_and_returns(
     assert "failed to reap sandboxes for job rl-1" in caplog.text
 
 
+def test_reap_gives_up_after_the_callers_timeout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A caller inside a termination grace period bounds the sweep so its own teardown still runs."""
+
+    class _Hung(_Driver):
+        async def destroy_sandboxes_matching(self, metadata: Mapping[str, str]) -> tuple[str, ...]:
+            await asyncio.sleep(60)
+            return ()
+
+    monkeypatch.setattr(
+        "sandboxed_gym.backends._opensandbox_driver.OpenSandboxDriver",
+        lambda *, connection=None, **kwargs: _Hung(connection=connection),
+    )
+
+    with caplog.at_level("ERROR"):
+        assert reap_job_sandboxes("rl-1", host_provider="opensandbox", timeout_s=0.05) == ()
+
+    assert "failed to reap sandboxes for job rl-1" in caplog.text
+
+
 def test_reap_logs_an_unknown_provider_and_returns(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("ERROR"):
         assert reap_job_sandboxes("rl-1", host_provider="no-such-provider") == ()
