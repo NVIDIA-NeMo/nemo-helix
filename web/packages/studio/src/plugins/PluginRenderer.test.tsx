@@ -1,15 +1,20 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { usePlugins, usePluginsLoaded } from '@studio/plugins/PluginContext';
+import {
+  usePluginLoadFailure,
+  usePluginLoadFailures,
+  usePlugins,
+  usePluginsLoaded,
+} from '@studio/plugins/PluginContext';
 import { PluginRenderer } from '@studio/plugins/PluginRenderer';
-import type { LoadedPlugin, PluginRootProps } from '@studio/plugins/types';
+import type { LoadedPlugin, PluginLoadFailure, PluginRootProps } from '@studio/plugins/types';
 import { BreadcrumbsProvider } from '@studio/providers/breadcrumbs/BreadcrumbsProvider';
 import {
   useBreadcrumbs,
   type BreadcrumbsItemProps,
 } from '@studio/providers/breadcrumbs/useBreadcrumbs';
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { useEffect } from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
@@ -38,6 +43,8 @@ function makePlugin(name: string): LoadedPlugin {
 vi.mock('@studio/plugins/PluginContext', () => ({
   usePlugins: vi.fn(),
   usePluginsLoaded: vi.fn(),
+  usePluginLoadFailures: vi.fn(),
+  usePluginLoadFailure: vi.fn(),
 }));
 vi.mock('@nemo/common/src/providers/toast/useToast', () => ({
   useToast: () => ({
@@ -72,7 +79,35 @@ beforeEach(() => {
   capturedProps = undefined;
   mountSpy.mockReset();
   vi.mocked(usePluginsLoaded).mockReturnValue(true);
+  vi.mocked(usePluginLoadFailures).mockReturnValue([]);
+  vi.mocked(usePluginLoadFailure).mockReturnValue(undefined);
 });
+
+const failure: PluginLoadFailure = {
+  name: 'pr-review',
+  issues: [
+    {
+      code: 'PLUGIN_SINGLETON_BUNDLED',
+      subject: 'react-router',
+      message: 'The singleton "react-router" is bundled into the plugin.',
+      steps: ['Import react-router only by its contract specifier.', 'Rebuild the plugin.'],
+    },
+    {
+      code: 'PLUGIN_SPECIFIER_UNMAPPED',
+      subject: 'lodash',
+      message: 'Studio does not provide "lodash".',
+      steps: ['Bundle lodash as a normal dependency.'],
+    },
+  ],
+};
+
+function mockFailedPlugin() {
+  vi.mocked(usePlugins).mockReturnValue([]);
+  vi.mocked(usePluginLoadFailures).mockReturnValue([failure]);
+  vi.mocked(usePluginLoadFailure).mockImplementation((name) =>
+    name === failure.name ? failure : undefined
+  );
+}
 
 describe('PluginRenderer', () => {
   it('shows loading state while plugins have not finished loading', () => {
@@ -237,5 +272,46 @@ describe('PluginRenderer', () => {
     // only the effect's deps can force the reset.
     act(() => capturedProps?.host.navigation.navigate('/workspaces/ws1/plugin/plugin-b/'));
     expect(seen.at(-1)).toEqual([]);
+  });
+  describe('when the plugin failed to load', () => {
+    it('shows a failure panel naming the plugin, not "not found"', () => {
+      mockFailedPlugin();
+
+      renderPlugin('pr-review');
+
+      expect(screen.getAllByText(/pr-review/).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/not found/i)).not.toBeInTheDocument();
+      expect(screen.queryByTestId('plugin-root')).not.toBeInTheDocument();
+    });
+
+    it('lists each issue code and message with its steps as a numbered list', () => {
+      mockFailedPlugin();
+
+      renderPlugin('pr-review');
+
+      for (const issue of failure.issues) {
+        expect(screen.getByText(new RegExp(issue.code))).toBeInTheDocument();
+        expect(screen.getByText(issue.message)).toBeInTheDocument();
+      }
+      const lists = screen.getAllByRole('list');
+      expect(lists).toHaveLength(failure.issues.length);
+      lists.forEach((list, i) => {
+        expect(list).toBeInstanceOf(HTMLOListElement);
+        expect(
+          within(list)
+            .getAllByRole('listitem')
+            .map((li) => li.textContent)
+        ).toEqual(failure.issues[i].steps);
+      });
+    });
+
+    it('still shows not found for a plugin that is neither loaded nor failed', () => {
+      mockFailedPlugin();
+
+      renderPlugin('unknown-plugin');
+
+      expect(screen.getByText(/not found/i)).toBeInTheDocument();
+      expect(screen.queryByText(/PLUGIN_SINGLETON_BUNDLED/)).not.toBeInTheDocument();
+    });
   });
 });
