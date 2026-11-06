@@ -5,24 +5,19 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import status
 from pydantic import BaseModel, Field
-from starlette.responses import Response
-
-logger = logging.getLogger(__name__)
 
 WINDOW_SECONDS = 60.0
 MAX_REPORTS_PER_WINDOW = 20
 
-# C0, DEL and C1 control characters (includes \n, \r, \x1b).
-_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# C0, DEL and C1 control characters, plus Unicode characters that split lines in log viewers
+# (U+2028/2029) or reorder/hide terminal text (bidi controls, zero-width and format characters).
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]")
 
 
 class PluginIssueCode(str, Enum):
@@ -70,8 +65,8 @@ class ReportThrottle:
         self._seen: dict[tuple[str, frozenset[tuple[str, str]]], float] = {}
         self._accepted: list[float] = []
 
-    def check(self, report: PluginLoadErrorReport) -> int | None:
-        """Return None to log, or the HTTP status to answer with instead."""
+    def check(self, report: PluginLoadErrorReport) -> Literal["log", "duplicate", "limited"]:
+        """Classify a report: duplicates are checked first so they never consume rate-limit budget."""
         now = time.monotonic()
         cutoff = now - WINDOW_SECONDS
         self._seen = {k: t for k, t in self._seen.items() if t > cutoff}
@@ -79,25 +74,9 @@ class ReportThrottle:
 
         key = (report.plugin, frozenset((i.code.value, i.subject) for i in report.issues))
         if key in self._seen:
-            return status.HTTP_204_NO_CONTENT
+            return "duplicate"
         if len(self._accepted) >= MAX_REPORTS_PER_WINDOW:
-            return status.HTTP_429_TOO_MANY_REQUESTS
+            return "limited"
         self._seen[key] = now
         self._accepted.append(now)
-        return None
-
-
-def build_report_handler(is_enabled: Callable[[], bool]) -> Callable[[PluginLoadErrorReport], Awaitable[Response]]:
-    """Create the POST handler; throttle state lives in this closure (per service instance)."""
-    throttle = ReportThrottle()
-
-    async def report_plugin_load_errors(report: PluginLoadErrorReport) -> Response:
-        if not is_enabled():
-            return Response(status_code=status.HTTP_404_NOT_FOUND)
-        rejected = throttle.check(report)
-        if rejected is None:
-            logger.warning("%s", format_report(report))
-            rejected = status.HTTP_204_NO_CONTENT
-        return Response(status_code=rejected)
-
-    return report_plugin_load_errors
+        return "log"
