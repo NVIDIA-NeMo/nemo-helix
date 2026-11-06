@@ -71,9 +71,11 @@ class _RecordingModels:
 
 
 def _run(models: _RecordingModels) -> tuple[dict, Any]:
-    base_me = SimpleNamespace(name="base-model", workspace=BASE_WORKSPACE)
-    runner = ModelEntityRunner(models, None, None)  # type: ignore[arg-type]
-    return runner._create_or_update_adapter(_config(), base_me, f"{OUTPUT_WORKSPACE}/my-adapter")  # type: ignore[arg-type]
+    base_me: Any = SimpleNamespace(name="base-model", workspace=BASE_WORKSPACE)
+    runner_args: Any = (models, None, None)
+    runner = ModelEntityRunner(*runner_args)
+    config: Any = _config()
+    return runner._create_or_update_adapter(config, base_me, f"{OUTPUT_WORKSPACE}/my-adapter")
 
 
 def test_create_registers_adapter_in_output_workspace_with_qualified_base_model():
