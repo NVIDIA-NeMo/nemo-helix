@@ -96,6 +96,8 @@ export const ROUTES = {
     /** Nested under fine-tune so the Fine-tuning nav item stays active. */
     modelDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}`,
     modelAdapterDetail: `/workspaces/:${P.workspace}/fine-tune/models/:${P.modelName}/adapters/:${P.adapterName}`,
+    /** Filesets scoped to `purpose: dataset`. */
+    datasets: `/workspaces/:${P.workspace}/datasets`,
     filesets: `/workspaces/:${P.workspace}/filesets`,
     filesetNew: `/workspaces/:${P.workspace}/filesets/new`,
     filesetDetails: `/workspaces/:${P.workspace}/filesets/:${P.filesetId}`,
