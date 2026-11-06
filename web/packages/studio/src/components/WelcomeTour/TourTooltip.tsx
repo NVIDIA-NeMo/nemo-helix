@@ -3,10 +3,10 @@
 
 import { Button } from '@nvidia/foundations-react-core';
 import { TourCard } from '@studio/components/WelcomeTour/TourCard';
-import { TooltipCoords } from '@studio/components/WelcomeTour/types';
+import type { TooltipCoords } from '@studio/components/WelcomeTour/types';
 import { computePosition } from '@studio/components/WelcomeTour/utils';
 import { useTour } from 'modern-tour';
-import { FC, useLayoutEffect, useRef, useState } from 'react';
+import { type FC, useLayoutEffect, useRef, useState } from 'react';
 
 interface TourTooltipProps {
   onClose: () => void;

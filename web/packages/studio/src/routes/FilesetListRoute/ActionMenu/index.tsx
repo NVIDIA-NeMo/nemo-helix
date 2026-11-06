@@ -7,7 +7,7 @@ import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
 import { MoreVert } from '@nemo/icons/icons';
 import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
-import { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
   DropdownContent,
@@ -18,7 +18,8 @@ import {
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
 import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
-import { FC, useState } from 'react';
+import { CopyFilesetModal } from '@studio/components/filesets/CopyFilesetModal';
+import { type FC, useState } from 'react';
 
 interface ActionMenuProps {
   dataset: FilesetOutput;
@@ -33,7 +34,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   onDatasetUpdated,
   onDatasetDeleted,
 }) => {
-  const [modalOpen, setModalOpen] = useState<'edit' | 'delete' | undefined>(undefined);
+  const [modalOpen, setModalOpen] = useState<'edit' | 'copy' | 'delete' | undefined>(undefined);
   const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
     mutation: {
       onSuccess: (_data, variables) => {
@@ -81,6 +82,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
         <DropdownContent align="end" className="w-[180px]">
           <DropdownItem onClick={() => onNavigateToDetails(dataset)}>View</DropdownItem>
           <DropdownItem onClick={() => setModalOpen('edit')}>Edit</DropdownItem>
+          <DropdownItem onClick={() => setModalOpen('copy')}>Copy to New Fileset</DropdownItem>
           <DropdownItem onClick={() => setModalOpen('delete')} danger>
             Delete
           </DropdownItem>
@@ -95,6 +97,14 @@ export const ActionMenu: FC<ActionMenuProps> = ({
           onClose={handleModalClose}
           onDatasetUpdated={handleDatasetUpdated}
           open={modalOpen === 'edit'}
+        />
+      )}
+
+      {modalOpen === 'copy' && (
+        <CopyFilesetModal
+          source={dataset}
+          onClose={handleModalClose}
+          onCopied={onNavigateToDetails}
         />
       )}
 

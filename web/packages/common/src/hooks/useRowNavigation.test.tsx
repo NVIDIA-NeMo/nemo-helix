@@ -3,7 +3,7 @@
 
 import { useRowNavigation } from '@nemo/common/src/hooks/useRowNavigation';
 import { renderHook } from '@testing-library/react';
-import React from 'react';
+import type React from 'react';
 
 const navigate = vi.fn();
 

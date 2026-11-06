@@ -26,6 +26,8 @@ from nemo_agents_plugin.fabric.runtime import (
 from nemo_agents_plugin.fabric.streaming import iter_fabric_chat_completion_sse
 from nemo_fabric import FabricConfig, HarnessConfig, MetadataConfig
 
+SESSION_UUID = "c46d3588-d205-497f-b96b-37f938263064"
+
 
 class _FabricMapping:
     def __init__(self, mapping: dict[str, Any]) -> None:
@@ -221,6 +223,7 @@ class TestRunFabricAgentOnce:
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
             overrides={"models": {"default": {"temperature": 0.1}}},
         )
 
@@ -240,6 +243,7 @@ class TestRunFabricAgentOnce:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.status == "succeeded"
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
@@ -430,6 +434,7 @@ class TestStreamFabricAgentOnce:
             input="hello",
             request_id="platform-request-1",
             caller_context={"source": "server"},
+            relay_session_root=SESSION_UUID,
         )
 
         async with stream_fabric_agent_once(request, fabric=fake_fabric, streaming_method=method) as stream:
@@ -459,6 +464,7 @@ class TestStreamFabricAgentOnce:
         assert fabric_request.input == "hello"
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"source": "server"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.response == "hello"
 
     @pytest.mark.parametrize("method", list(StreamingMethod))
@@ -609,12 +615,22 @@ class TestStreamFabricAgentOnce:
 
 @pytest.mark.asyncio
 class TestInvokeFabricRuntime:
+    async def test_session_roots_preserve_distinct_request_ids(self) -> None:
+        fake_runtime = _FakeRuntime()
+        roots = [SESSION_UUID, SESSION_UUID, "00000000-0000-0000-0000-000000000001", None, None]
+        for root in roots:
+            await invoke_fabric_runtime(cast(Any, fake_runtime), FabricInvocationRequest(relay_session_root=root))
+
+        assert [request.relay_session_root for request in fake_runtime.invoke_requests] == roots
+        assert len({request.request_id for request in fake_runtime.invoke_requests}) == len(roots)
+
     async def test_invokes_active_runtime_without_changing_its_lifecycle(self) -> None:
         fake_runtime = _FakeRuntime()
         request = FabricInvocationRequest(
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
         )
 
         result = await invoke_fabric_runtime(cast(Any, fake_runtime), request)
@@ -625,6 +641,7 @@ class TestInvokeFabricRuntime:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
         assert result.status == "succeeded"
         assert result.response == "hello"
         assert result.runtime_id == "runtime-1"
@@ -689,6 +706,7 @@ class TestStreamFabricRuntime:
             input={"prompt": "hi"},
             request_id="platform-request-1",
             caller_context={"session_id": "session-1"},
+            relay_session_root=SESSION_UUID,
         )
 
         stream = stream_fabric_runtime(cast(Any, fake_runtime), request)
@@ -697,6 +715,7 @@ class TestStreamFabricRuntime:
         assert fabric_request.input == {"prompt": "hi"}
         assert fabric_request.request_id == "platform-request-1"
         assert fabric_request.context == {"session_id": "session-1"}
+        assert fabric_request.relay_session_root == SESSION_UUID
 
         records = [record async for record in stream.records()]
         assert records == [{"type": "span", "message": "thinking"}]

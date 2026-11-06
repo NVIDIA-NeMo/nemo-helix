@@ -27,9 +27,11 @@ from nhx.automodel.tasks.training.datasets.preparation import select_dataset_fil
 from nhx.automodel.tasks.training.datasets.validation import DatasetValidator
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
 from nhx.customization_common.dry_run import DatasetRows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits, traits_from_model_spec
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
+    fetch_model_entity,
 )
 from pydantic import BaseModel
 
@@ -56,8 +58,19 @@ class AutomodelJob(BaseSubmitJob[AutomodelJobInput, AutomodelJobOutput]):
         return AutomodelJobInput
 
     @classmethod
-    def _dry_run_datasets(cls, spec: AutomodelJobOutput, workspace: str) -> list[DatasetRows]:
-        validator = DatasetValidator(training_type=TrainingType(spec.training.training_type))
+    async def _dry_run_traits(
+        cls, spec: AutomodelJobOutput, workspace: str, async_client: AsyncNemoClient
+    ) -> CheckpointTraits:
+        platform = async_customization_platform_clients_from_platform(async_client)
+        return traits_from_model_spec((await fetch_model_entity(spec.model, workspace, platform)).spec)
+
+    @classmethod
+    def _dry_run_datasets(cls, spec: AutomodelJobOutput, workspace: str, traits: CheckpointTraits) -> list[DatasetRows]:
+        # Compile rejects a vision checkpoint for every recipe but SFT, which trains image rows.
+        validator = DatasetValidator(
+            training_type=TrainingType(spec.training.training_type),
+            allow_multimodal=traits.has_vision_tower,
+        )
         return [
             DatasetRows(
                 name="training dataset",

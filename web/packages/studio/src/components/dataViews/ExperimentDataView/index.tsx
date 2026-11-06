@@ -4,7 +4,7 @@
 import { dateTimeFilter } from '@nemo/common/src/components/DataView/dateTimeFilter';
 import { numberRangeFilter } from '@nemo/common/src/components/DataView/FilterPanel/NumberRangeFilter/util';
 import {
-  Root as DataViewRoot,
+  type Root as DataViewRoot,
   EditColumnsMenu,
 } from '@nemo/common/src/components/DataView/internal';
 import {

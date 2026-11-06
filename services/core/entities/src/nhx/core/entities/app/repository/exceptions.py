@@ -4,6 +4,10 @@
 """Custom exceptions for entity repository operations."""
 
 
+class InvalidFilterError(ValueError):
+    """Raised when a requested filter field or value is invalid."""
+
+
 class EntityRepositoryError(Exception):
     """Base exception for entity repository errors."""
 

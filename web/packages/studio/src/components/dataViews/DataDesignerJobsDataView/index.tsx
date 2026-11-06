@@ -34,7 +34,7 @@ import { STATUS_FILTER_OPTIONS } from '@studio/constants/platformJobs';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getDataDesignerJobDetailsRoute, getNewDataDesignerJobRoute } from '@studio/routes/utils';
 import { keepPreviousData, useQueryClient } from '@tanstack/react-query';
-import { ComponentProps, FC, useCallback, useMemo, useState } from 'react';
+import { type ComponentProps, type FC, useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 type DataDesignerJobWithId = DataDesignerJob & { id: string };

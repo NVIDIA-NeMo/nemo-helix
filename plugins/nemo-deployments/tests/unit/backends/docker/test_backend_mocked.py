@@ -2398,3 +2398,24 @@ async def test_create_volume_bound(
     )
 
     assert update.status == "BOUND"
+
+
+@pytest.mark.parametrize(
+    ("shm_size", "expected"),
+    [("32Gi", 32 * 2**30), ("8G", 8 * 10**9), ("1Ti", 2**40), ("512Mi", 512 * 2**20), (None, None)],
+)
+def test_build_run_kwargs_sizes_dev_shm(
+    docker_backend: DockerDeploymentBackend, shm_size: str | None, expected: str | None
+) -> None:
+    config = sample_config().model_copy(update={"shm_size": shm_size})
+    run_kwargs = docker_backend._build_run_kwargs(
+        workspace="default",
+        config=config,
+        container=config.containers[0],
+        name="srv",
+        labels={},
+        host_ports={},
+        gpu_ids=[],
+        network=None,
+    )
+    assert run_kwargs.get("shm_size") == expected

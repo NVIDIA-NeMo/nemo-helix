@@ -15,7 +15,7 @@ import { Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { IntakeTelemetryDataView } from '@studio/components/IntakeLists/IntakeTelemetryDataView';
 import { makeIntakeTraceColumns } from '@studio/components/IntakeLists/intakeTraceColumns';
 import { getIntakeSessionTraceRoute } from '@studio/routes/utils';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 // Module-level so its identity is stable: DataView rebuilds columns, and remounts every cell,
 // whenever makeColumns changes.

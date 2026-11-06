@@ -5,7 +5,7 @@ import { DatasetFileSelectButton } from '@nemo/common/src/components/DatasetFile
 import { useFilePreview } from '@nemo/common/src/components/DatasetFileSelect/hooks/useFilePreview';
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { FileContentPreview } from '@nemo/common/src/components/FileContentPreview';
-import { FileList, FileListItem } from '@nemo/common/src/components/FileList';
+import { FileList, type FileListItem } from '@nemo/common/src/components/FileList';
 import { UploadModal } from '@nemo/common/src/components/UploadModal/index';
 import { InlineUploadPicker } from '@nemo/common/src/components/UploadModal/InlineUploadPicker';
 import type { SubmitUploadType } from '@nemo/common/src/components/UploadModal/types';
@@ -13,7 +13,7 @@ import { getFileExtension, isAcceptedFileType } from '@nemo/common/src/utils/fil
 import { FolderOpen } from '@nemo/icons/icons';
 import type { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { SidePanel, Stack, Text } from '@nvidia/foundations-react-core';
-import { FC, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useEffect, useMemo, useRef, useState } from 'react';
 
 export type AcceptedFileType = '.json' | '.jsonl' | '.csv' | '.parquet' | '.yml' | '.yaml';
 

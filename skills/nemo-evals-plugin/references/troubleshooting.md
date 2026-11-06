@@ -54,7 +54,7 @@ nemo evals agent-evaluate explain
 | 401 `… records evaluation trials, so calls to it must carry the credential the evaluation issued` | A direct call, with platform auth off, to a virtual model with `nemo-evals-trial-recording` | Call the model entity, or a virtual model without trial recording |
 | `nemo evals runs submit` returns HTTP 409 | The idempotency key was used for a different request | Use a new key, or resend the identical request |
 | Taskset run trials error during agent install | The sandbox profile blocks an install host | Ask the cluster admin to add the host to the profile's `agent_setup_egress` (https://docs.nvidia.com/nemo-helix/latest/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles#network) |
-| Taskset run is `completed` with result `failed`, or `failed` with result `none` | The merge didn't finish, or no task succeeded | Read per-task scores with `nemo evals runs results`; check failed tasks with `nemo evals runs tasks --phase failed` |
+| Taskset run is `completed` with result `failed`, or `failed` with result `none` | The merge didn't finish, or no task succeeded | Read per-task scores with `nemo evals runs results "$RUN_ID" --workspace "$WS"`; check failed tasks with `nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed` |
 
 ## Debug in the smallest scope
 

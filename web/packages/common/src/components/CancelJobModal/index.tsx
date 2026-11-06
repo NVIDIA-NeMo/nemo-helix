@@ -4,7 +4,7 @@
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { FormModal } from '@nemo/common/src/components/FormModal';
 import { Flex, Text } from '@nvidia/foundations-react-core';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 export interface CancelJobModalProps {
   open: boolean;

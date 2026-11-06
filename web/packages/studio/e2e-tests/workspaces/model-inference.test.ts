@@ -13,14 +13,14 @@ import {
   generateTestWorkspaceName,
 } from '@e2e-tests/utils/constants';
 import {
-  TestWorkspaceFixture,
-  TestModelFixture,
+  type TestWorkspaceFixture,
+  type TestModelFixture,
   testWorkspaceFixture,
   testModelFixture,
 } from '@e2e-tests/utils/fixtures';
 import { expectChatResponseToContain } from '@e2e-tests/utils/models';
 import { disableAuthForTest } from '@e2e-tests/utils/pageUtils';
-import { CreateModelEntityRequest } from '@nemo/sdk/generated/platform/schema';
+import type { CreateModelEntityRequest } from '@nemo/sdk/generated/platform/schema';
 import { test as baseTest } from '@playwright/test';
 
 // USER_ID-scoped prefix for workspaces created by this suite; afterAll cleans up by this prefix.

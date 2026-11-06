@@ -3,11 +3,20 @@
 
 import { sanitizeEntityName, toValidEntityName } from '@nemo/common/src/utils/entityName';
 import { deployOnCreateFormSchema } from '@studio/api/agents/useDeployOnCreate';
+import type { NewAgentTab } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/type';
 import { z } from 'zod';
 
 export const AGENT_CONFIG_FILENAME = 'agent.yaml';
 
-export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
+export const NEW_AGENT_TABS = [
+  'upload',
+  'github',
+  'imported-traces',
+  'coding-agent-prompt',
+] as const;
+
+export const isNewAgentTab = (value: string | null): value is NewAgentTab =>
+  NEW_AGENT_TABS.some((tab) => tab === value);
 
 // Container staging skips this file, so its bytes never reach a deployment.
 export const AGENT_SPEC_FILENAME = 'AGENT-SPEC.md';

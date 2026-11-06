@@ -3,7 +3,7 @@
 
 import { AdvancedParameters } from '@studio/routes/SafeSynthesizerNewRoute/components/AdvancedParameters';
 import {
-  SafeSynthesizerFormData,
+  type SafeSynthesizerFormData,
   getSafeSynthesizerFormDefaults,
 } from '@studio/routes/SafeSynthesizerNewRoute/schema';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';

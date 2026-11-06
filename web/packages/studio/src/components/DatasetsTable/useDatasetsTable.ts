@@ -5,10 +5,10 @@ import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
 import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
-import {
-  type FilesetFilter,
-  type FilesetOutput as Dataset,
-  type GenericSortField,
+import type {
+  FilesetFilter,
+  FilesetOutput as Dataset,
+  GenericSortField,
 } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
 import {
@@ -17,10 +17,10 @@ import {
   isDefaultPurposeFilter,
   VISIBLE_PURPOSES,
 } from '@studio/components/DatasetsTable/constants';
-import {
-  type DatasetWithId,
-  type DatasetsTableProps,
-  type ModalOpenState,
+import type {
+  DatasetWithId,
+  DatasetsTableProps,
+  ModalOpenState,
 } from '@studio/components/DatasetsTable/types';
 import { useOwnedFirstFilesets } from '@studio/components/DatasetsTable/useOwnedFirstFilesets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';

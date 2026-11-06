@@ -16,6 +16,7 @@ from nhx.core.models.api.dependencies import get_adapter_entity_service, get_fil
 from nhx.core.models.api.permissions import check_fileset_access
 from nhx.core.models.api.service.adapter_entity_service import AdapterEntityService
 from nhx.core.models.api.service.model_entity_service import FilesetValidationError
+from nhx.core.models.api.v2.utils import LIST_REQUEST_ERRORS
 from nhx.core.models.schemas import (
     Adapter,
     AdapterEntityFilter,
@@ -124,6 +125,8 @@ async def list_adapters(
             parsed_filter=parsed_filter,
         )
     except PermissionDeniedError:
+        raise
+    except LIST_REQUEST_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to list adapter entities")

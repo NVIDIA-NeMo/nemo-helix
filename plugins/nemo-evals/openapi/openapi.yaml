@@ -6716,6 +6716,13 @@ components:
           description: The image's `WORKDIR`, or None when it sets none.
           type: string
           maxLength: 4096
+        user:
+          title: User
+          description: The image's `USER`, as `name`, `uid` or either with `:group`;
+            an empty string when it sets none, so it runs as root. None when Builder
+            didn't record it, as for an image it built before it started to.
+          type: string
+          maxLength: 256
       type: object
       title: ImageRuntimeConfig
       description: 'How the image starts by default, from its image config, including

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { INTAKE_ENABLED, TRACE_GRAPH_ENABLED } from '@e2e-tests/utils/environment';
+import { INTAKE_ENABLED } from '@e2e-tests/utils/environment';
 import { disableAuthForTest } from '@e2e-tests/utils/pageUtils';
 import { expect, test, type Page, type Route } from '@playwright/test';
 
@@ -134,7 +134,6 @@ const viewportZoom = async (page: Page): Promise<string | undefined> => {
 
 test.describe('Intake trace graph', () => {
   test.skip(!INTAKE_ENABLED, 'Intake routes are disabled');
-  test.skip(!TRACE_GRAPH_ENABLED, 'Trace graph view is disabled');
 
   test.beforeEach(async ({ page }) => {
     await setupApiMocks(page);

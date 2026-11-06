@@ -3,14 +3,14 @@
 
 import {
   Stack,
-  StackProps,
+  type StackProps,
   Text,
   Label,
-  LabelProps,
+  type LabelProps,
   Skeleton,
 } from '@nvidia/foundations-react-core';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface Props {
   className?: string;

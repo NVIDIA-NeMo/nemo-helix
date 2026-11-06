@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 export class ProjectSafeSynthesizerPage {
   constructor(public readonly page: Page) {}

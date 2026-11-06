@@ -4,7 +4,7 @@
 import { Card, Checkbox, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import { LineChartSkeleton } from '@studio/components/charts/LineChartSkeleton';
 import type { RunSummary } from '@studio/routes/agents/AgentMonitorRoute/telemetry';
-import { FC, type ReactElement, useMemo, useState } from 'react';
+import { type FC, type ReactElement, useMemo, useState } from 'react';
 import {
   Bar,
   BarChart,
