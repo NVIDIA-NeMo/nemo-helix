@@ -113,7 +113,7 @@ def test_services_reject_non_positive_keep_alive_timeout(command: str, timeout: 
 
 
 def test_run_shows_services_extra_hint_when_pyleak_missing():
-    with patch(f"{_CLI_MODULE}.importlib.util.find_spec", side_effect=_no_pyleak):
+    with patch(f"{_CLI_MODULE}.find_spec", side_effect=_no_pyleak):
         result = runner.invoke(app, ["services", "run"])
     assert result.exit_code == 1
     assert "nemo-helix[all]" in result.stderr
@@ -230,7 +230,7 @@ def test_run_records_background_mode_when_launched_by_start(base_dir: Path):
 
 
 def test_start_shows_extra_hint_when_pyleak_missing():
-    with patch(f"{_CLI_MODULE}.importlib.util.find_spec", side_effect=_no_pyleak):
+    with patch(f"{_CLI_MODULE}.find_spec", side_effect=_no_pyleak):
         result = runner.invoke(app, ["services", "start"])
     assert result.exit_code == 1
     assert "nemo-helix[all]" in result.stderr
@@ -327,7 +327,7 @@ def test_start_reports_failure(base_dir: Path):
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
         patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
-        patch(f"{_PROCESS_MODULE}.os.killpg"),
+        patch(f"{_PROCESS_MODULE}.killpg"),
     ):
         result = runner.invoke(
             app,
@@ -412,7 +412,7 @@ def test_start_stops_child_when_ready_times_out(base_dir: Path):
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-stop"])
 
@@ -436,10 +436,10 @@ def test_start_reports_child_still_running_when_stop_fails(base_dir: Path):
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
-        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
-        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_CLI_MODULE}.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.Process", return_value=_leader_process()),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-stuck"])
 
@@ -463,9 +463,9 @@ def test_start_does_not_signal_a_reused_pid_when_group_lookup_fails(base_dir: Pa
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])),
-        patch(f"{_CLI_MODULE}.os.getpgid", side_effect=ProcessLookupError),
+        patch(f"{_CLI_MODULE}.getpgid", side_effect=ProcessLookupError),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-missing-pid"])
 
@@ -495,10 +495,10 @@ def test_start_signals_group_when_launcher_exits_but_lock_remains(base_dir: Path
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop),
-        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
-        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_CLI_MODULE}.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.Process", return_value=_leader_process()),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "timeout-orphan-lock"])
 
@@ -532,10 +532,10 @@ def test_start_releases_lock_when_launcher_exits_early(base_dir: Path):
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
         patch(f"{_CLI_MODULE}.stop_instance", side_effect=_stop) as mock_stop,
-        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
-        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_CLI_MODULE}.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.Process", return_value=_leader_process()),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg", side_effect=_killpg) as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg", side_effect=_killpg) as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-lock"])
 
@@ -559,10 +559,10 @@ def test_start_signals_group_when_launcher_exits_before_lock(base_dir: Path):
         patch(f"{_CLI_MODULE}.start_background", return_value=mock_proc),
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
-        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
-        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_CLI_MODULE}.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.Process", return_value=_leader_process()),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+        patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-nolock"])
 
@@ -589,10 +589,10 @@ def test_start_stops_scope_when_lock_appears_after_early_exit_signal(base_dir: P
         patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False),
         patch(f"{_CLI_MODULE}.is_instance_alive", side_effect=_alive),
         patch(f"{_CLI_MODULE}.stop_instance", return_value=StopResult(stopped_pids=[])) as mock_stop,
-        patch(f"{_CLI_MODULE}.os.getpgid", return_value=88888),
-        patch(f"{_CLI_MODULE}.psutil.Process", return_value=_leader_process()),
+        patch(f"{_CLI_MODULE}.getpgid", return_value=88888),
+        patch(f"{_CLI_MODULE}.Process", return_value=_leader_process()),
         patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-        patch(f"{_PROCESS_MODULE}.os.killpg"),
+        patch(f"{_PROCESS_MODULE}.killpg"),
     ):
         result = runner.invoke(app, ["services", "start", "--instance", "early-exit-late-lock"])
 
@@ -674,7 +674,7 @@ class TestServicesRestart:
 
     def test_restart_checks_extras_before_stopping(self, base_dir: Path):
         with (
-            patch(f"{_CLI_MODULE}.importlib.util.find_spec", side_effect=_no_pyleak),
+            patch(f"{_CLI_MODULE}.find_spec", side_effect=_no_pyleak),
             patch(f"{_CLI_MODULE}.stop_instance") as mock_stop,
         ):
             result = runner.invoke(app, ["services", "restart"])
@@ -939,7 +939,7 @@ class TestServicesRestart:
             patch(f"{_CLI_MODULE}._wait_for_healthy", return_value=False) as mock_wait,
             patch(f"{_CLI_MODULE}._saved_process_group", return_value=None),
             patch(f"{_PROCESS_MODULE}._SIGKILL_WAIT_TIMEOUT", 0),
-            patch(f"{_PROCESS_MODULE}.os.killpg") as mock_killpg,
+            patch(f"{_PROCESS_MODULE}.killpg") as mock_killpg,
         ):
             result = runner.invoke(app, ["services", "restart", "--instance", scope])
 
@@ -1281,7 +1281,7 @@ class TestWaitForHealthy:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
 
-        with patch(f"{_CLI_MODULE}.httpx.get", return_value=mock_resp):
+        with patch(f"{_CLI_MODULE}.http_get", return_value=mock_resp):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=5, poll_interval=0.1)
 
         assert result is True
@@ -1290,7 +1290,7 @@ class TestWaitForHealthy:
         import httpx
         from nemo_helix_ext.cli.commands.services.cli import _wait_for_healthy
 
-        with patch(f"{_CLI_MODULE}.httpx.get", side_effect=httpx.ConnectError("")):
+        with patch(f"{_CLI_MODULE}.http_get", side_effect=httpx.ConnectError("")):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=0.3, poll_interval=0.1)
 
         assert result is False
@@ -1301,7 +1301,7 @@ class TestWaitForHealthy:
         proc = MagicMock()
         proc.poll.return_value = 1
 
-        with patch(f"{_CLI_MODULE}.httpx.get") as mock_get:
+        with patch(f"{_CLI_MODULE}.http_get") as mock_get:
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=240, poll_interval=30, proc=proc)
 
         assert result is False
@@ -1322,7 +1322,7 @@ class TestWaitForHealthy:
                 raise httpx.ConnectError("")
             return mock_resp
 
-        with patch(f"{_CLI_MODULE}.httpx.get", side_effect=fail_then_succeed):
+        with patch(f"{_CLI_MODULE}.http_get", side_effect=fail_then_succeed):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=5, poll_interval=0.1)
 
         assert result is True
@@ -1339,7 +1339,7 @@ class TestWaitForHealthy:
             captured_urls.append(url)
             return mock_resp
 
-        with patch(f"{_CLI_MODULE}.httpx.get", side_effect=capture_get):
+        with patch(f"{_CLI_MODULE}.http_get", side_effect=capture_get):
             _wait_for_healthy("0.0.0.0", 9090, timeout=2, poll_interval=0.1)
 
         assert "localhost" in captured_urls[0]
@@ -1370,7 +1370,7 @@ class TestWaitForHealthy:
         with (
             patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
             patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
-            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+            patch(f"{_CLI_MODULE}.http_get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
 
@@ -1398,7 +1398,7 @@ class TestWaitForHealthy:
         with (
             patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
             patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
-            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+            patch(f"{_CLI_MODULE}.http_get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
 
@@ -1431,7 +1431,7 @@ class TestWaitForHealthy:
         with (
             patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
             patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
-            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+            patch(f"{_CLI_MODULE}.http_get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
 
@@ -1463,7 +1463,7 @@ class TestWaitForHealthy:
         with (
             patch(f"{_CLI_MODULE}.monotonic", side_effect=monotonic),
             patch(f"{_CLI_MODULE}.sleep", side_effect=sleep),
-            patch(f"{_CLI_MODULE}.httpx.get", side_effect=get),
+            patch(f"{_CLI_MODULE}.http_get", side_effect=get),
         ):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=1, poll_interval=2)
 
@@ -1480,7 +1480,7 @@ class TestWaitForHealthy:
         resp_200.status_code = 200
         responses = [resp_503, resp_503, resp_200]
 
-        with patch(f"{_CLI_MODULE}.httpx.get", side_effect=responses):
+        with patch(f"{_CLI_MODULE}.http_get", side_effect=responses):
             result = _wait_for_healthy("127.0.0.1", 8080, timeout=5, poll_interval=0.1)
 
         assert result is True

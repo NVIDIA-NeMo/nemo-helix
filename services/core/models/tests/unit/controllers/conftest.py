@@ -83,7 +83,7 @@ def mock_asyncio_run_patch():
         return mock_loop.run_until_complete.return_value
 
     mock_loop.run_until_complete.side_effect = _run_until_complete
-    with patch("nhx.core.models.controllers.models_controller.asyncio.new_event_loop", return_value=mock_loop):
+    with patch("nhx.core.models.controllers.models_controller.new_event_loop", return_value=mock_loop):
         yield mock_loop.run_until_complete
 
 

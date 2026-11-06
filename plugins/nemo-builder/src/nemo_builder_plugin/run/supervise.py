@@ -11,13 +11,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import shlex
-import time
 from pathlib import Path, PurePosixPath
+from time import monotonic, sleep
 
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
-from kubernetes import watch as k8s_watch
 from kubernetes.client.exceptions import ApiException
+from kubernetes.watch import Watch
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_helix_plugin.jobs.constants import job_storage_subpath
@@ -180,8 +180,8 @@ def _pod_manifest(
 
 
 def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
-    watcher = k8s_watch.Watch()
-    deadline = time.monotonic() + _POD_TIMEOUT_SECONDS
+    watcher = Watch()
+    deadline = monotonic() + _POD_TIMEOUT_SECONDS
     try:
         for event in watcher.stream(
             api.list_namespaced_pod,
@@ -194,7 +194,7 @@ def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
             if phase in ("Succeeded", "Failed"):
                 watcher.stop()
                 return phase + _terminations(event["object"])
-            if time.monotonic() > deadline:
+            if monotonic() > deadline:
                 break
     finally:
         watcher.stop()
@@ -233,15 +233,15 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
 
     ponytail: a waiting step keeps its pod's share of the quota; capping concurrent builds removes that.
     """
-    deadline = time.monotonic() + _RETRY_DEADLINE_SECONDS
+    deadline = monotonic() + _RETRY_DEADLINE_SECONDS
     for attempt in range(1, _RETRY_ATTEMPTS + 1):
-        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - time.monotonic(), 1.0))
+        timeout = min(_CREATE_TIMEOUT_SECONDS, max(deadline - monotonic(), 1.0))
         try:
             # A (connect, read) tuple: kubernetes 29.x ignores a float timeout.
             api.create_namespaced_pod(namespace=namespace, body=manifest, _request_timeout=(timeout, timeout))
             return
         except ApiException as exc:
-            remaining = deadline - time.monotonic()
+            remaining = deadline - monotonic()
             retryable = any(exc.status == status and text in str(exc.body) for status, text in _RETRYABLE_ERRORS)
             if not retryable or attempt == _RETRY_ATTEMPTS or remaining <= 0:
                 raise
@@ -249,7 +249,7 @@ def _create_pod(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace
             logger.warning(
                 "sandbox %s: %s; retrying in %.0fs", sanitize_for_log(name), sanitize_for_log(exc.reason), delay
             )
-        time.sleep(delay)
+        sleep(delay)
 
 
 def _run_sandbox(api: k8s.CoreV1Api, *, name: str, manifest: k8s.V1Pod, namespace: str) -> tuple[str, str]:

@@ -12,8 +12,8 @@ workspace before persisting the session.
 from __future__ import annotations
 
 import logging
-import secrets
 from collections.abc import Awaitable
+from secrets import token_hex
 from typing import cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -71,7 +71,7 @@ async def create_session(
         workspace=workspace,
         deployment_id=body.deployment_id,
     )
-    session_name = body.name or f"{deployment.name}-{secrets.token_hex(4)}"
+    session_name = body.name or f"{deployment.name}-{token_hex(4)}"
     session = AgentSession(
         name=session_name,
         workspace=workspace,

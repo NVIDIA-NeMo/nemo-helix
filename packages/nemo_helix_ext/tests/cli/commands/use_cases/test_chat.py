@@ -327,7 +327,7 @@ def test_chat_prompt_runs_once_with_plain_text_output(runner: CliRunner) -> None
 
     with (
         patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask") as mock_prompt,
+        patch("nemo_helix_ext.cli.chat_tui.Prompt") as mock_prompt_cls,
     ):
         result = runner.invoke(
             app,
@@ -338,7 +338,7 @@ def test_chat_prompt_runs_once_with_plain_text_output(runner: CliRunner) -> None
     assert result.stdout == "391\n"
     assert "NeMo Helix Chat Session" not in result.stdout
     assert "\x1b[" not in result.stdout
-    mock_prompt.assert_not_called()
+    mock_prompt_cls.ask.assert_not_called()
 
     post = mock_client.stream_openai
     post.assert_called_once()
@@ -461,12 +461,12 @@ def test_chat_interactive_with_prompt_sends_initial_message_then_prompts(runner:
     with (
         patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=KeyboardInterrupt) as mock_prompt,
+        patch("nemo_helix_ext.cli.chat_tui.Prompt", **{"ask.side_effect": KeyboardInterrupt}) as mock_prompt_cls,
     ):
         result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 0
-    mock_prompt.assert_called_once()
+    mock_prompt_cls.ask.assert_called_once()
 
     post = mock_client.stream_openai
     post.assert_called_once()
@@ -488,13 +488,13 @@ def test_chat_interactive_interrupt_during_initial_response_exits_gracefully(
     with (
         patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask") as mock_prompt,
+        patch("nemo_helix_ext.cli.chat_tui.Prompt") as mock_prompt_cls,
     ):
         result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
 
     assert result.exit_code == 0
     assert "Chat session ended" in result.stdout
-    mock_prompt.assert_not_called()
+    mock_prompt_cls.ask.assert_not_called()
 
 
 def test_chat_interactive_preserves_model_history_across_shared_tui_turns(runner: CliRunner) -> None:
@@ -513,8 +513,8 @@ def test_chat_interactive_preserves_model_history_across_shared_tui_turns(runner
         patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
         patch(
-            "nemo_helix_ext.cli.chat_tui.Prompt.ask",
-            side_effect=["What did I just say?", KeyboardInterrupt],
+            "nemo_helix_ext.cli.chat_tui.Prompt",
+            **{"ask.side_effect": ["What did I just say?", KeyboardInterrupt]},
         ),
     ):
         result = runner.invoke(app, ["chat", "-m", "my-model", "hi", "--interactive"])
@@ -544,7 +544,7 @@ def test_chat_interactive_discards_user_turn_after_empty_response(runner: CliRun
     with (
         patch("nemo_helix_ext.cli.core.context.CLIContext.typed_client", return_value=mock_client),
         patch("nemo_helix_ext.cli.commands.use_cases.chat._is_interactive_chat_session", return_value=True),
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=["second turn", KeyboardInterrupt]),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt", **{"ask.side_effect": ["second turn", KeyboardInterrupt]}),
     ):
         result = runner.invoke(app, ["chat", "-m", "my-model", "empty turn", "--interactive"])
 

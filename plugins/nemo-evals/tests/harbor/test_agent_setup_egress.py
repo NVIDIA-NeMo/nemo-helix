@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from harbor.agents.base import BaseAgent
 from harbor.agents.factory import AgentFactory
 from harbor.agents.installed.base import NonZeroAgentExitCodeError
 from harbor.agents.nop import NopAgent
@@ -156,11 +157,20 @@ def _agent(tmp_path, inner: str = "nop", hosts: list[str] | None = None) -> Any:
     return AgentFactory.create_agent_from_config(config, logs_dir=tmp_path)
 
 
+def _override_inner(monkeypatch, base: type[BaseAgent], **methods: Any) -> None:
+    """Have the wrapper wrap a subclass of ``base`` with ``methods`` overridden wherever it would wrap ``base``."""
+    resolve = agent_setup_egress._inner_agent_class
+    subclass = type(base.__name__, (base,), methods)
+    monkeypatch.setattr(
+        agent_setup_egress, "_inner_agent_class", lambda inner: subclass if resolve(inner) is base else resolve(inner)
+    )
+
+
 def _record_setup(monkeypatch, events: list[Any]) -> None:
     async def setup(self, environment) -> None:
         events.append(("setup", environment.network_policy))
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
 
 
 def _allowlist(*hosts: str) -> NetworkPolicy:
@@ -179,7 +189,7 @@ async def test_setup_runs_inside_the_window(tmp_path, monkeypatch):
     async def setup(self, environment) -> None:
         events.append("setup")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events == ["open", "setup", "close"]
 
@@ -314,7 +324,7 @@ async def test_a_setup_error_without_a_message_is_retried_and_named(tmp_path, mo
         if error := next(attempts):
             raise error
 
-    monkeypatch.setattr(Codex, "setup", setup)
+    _override_inner(monkeypatch, Codex, setup=setup)
     agent = _codex(tmp_path)
     await agent.setup(_WindowEnvironment(events))
     assert events == ["open", "setup", "setup", "close"]
@@ -348,7 +358,7 @@ async def test_a_failed_setup_of_an_agent_that_is_not_installed_is_not_retried(t
         events.append("setup")
         raise NonZeroAgentExitCodeError("install failed")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     with pytest.raises(NonZeroAgentExitCodeError):
         await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events == ["open", "setup", "close"]
@@ -366,7 +376,7 @@ async def test_a_dynamic_policy_environment_retries_inside_one_policy_switch(tmp
         if error := next(attempts):
             raise error
 
-    monkeypatch.setattr(Codex, "setup", setup)
+    _override_inner(monkeypatch, Codex, setup=setup)
     environment = _PolicyEnvironment(events)
     await _codex(tmp_path).setup(environment)
     opened = _allowlist(*SETUP_HOSTS)
@@ -380,7 +390,7 @@ async def test_a_failed_setup_still_closes_the_window(tmp_path, monkeypatch):
     async def setup(self, environment) -> None:
         raise RuntimeError("install failed")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     with pytest.raises(RuntimeError, match="install failed"):
         await _agent(tmp_path).setup(_WindowEnvironment(events))
     assert events == ["open", "close"]
@@ -392,7 +402,7 @@ async def test_an_environment_without_a_window_runs_setup_unchanged(tmp_path, mo
     async def setup(self, environment) -> None:
         events.append("setup")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     await _agent(tmp_path).setup(object())
     assert events == ["setup"]
 
@@ -422,7 +432,7 @@ async def test_a_failed_setup_restores_the_policy(tmp_path, monkeypatch):
     async def setup(self, environment) -> None:
         raise RuntimeError("install failed")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     environment = _PolicyEnvironment(events)
     with pytest.raises(RuntimeError, match="install failed"):
         await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
@@ -438,7 +448,7 @@ async def test_a_cancelled_setup_restores_the_policy(tmp_path, monkeypatch):
         started.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     environment = _PolicyEnvironment(events)
     task = asyncio.create_task(_agent(tmp_path, hosts=SETUP_HOSTS).setup(environment))
     await started.wait()
@@ -525,7 +535,7 @@ async def test_commands_run_while_open_and_after_a_clean_close(tmp_path, monkeyp
         await environment.exec("npm install -g agent")
         await environment.service_exec("pip install agent")
 
-    monkeypatch.setattr(NopAgent, "setup", setup)
+    _override_inner(monkeypatch, NopAgent, setup=setup)
     environment = _PolicyEnvironment(events)
     await _agent(tmp_path, hosts=SETUP_HOSTS).setup(environment)
     await environment.exec("echo task")
@@ -679,7 +689,7 @@ def test_preflight_is_the_real_agents_without_the_wrapper_kwarg(monkeypatch):
     def preflight(cls, kwargs=None, env=None) -> None:
         seen.append(dict(kwargs or {}))
 
-    monkeypatch.setattr(NopAgent, "preflight", classmethod(preflight))
+    _override_inner(monkeypatch, NopAgent, preflight=classmethod(preflight))
     AgentFactory.run_preflight(
         AgentConfig(
             import_path=SETUP_EGRESS_AGENT,

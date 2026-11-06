@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
+from shutil import which
+from subprocess import run
 from typing import NamedTuple
 
 import typer
@@ -39,12 +40,10 @@ class CheckResult(NamedTuple):
 
 def docker_ok() -> tuple[bool, str]:
     """True if the Docker CLI is present and the daemon is reachable."""
-    if shutil.which("docker") is None:
+    if which("docker") is None:
         return False, "docker CLI not found — install Docker: https://docs.docker.com/engine/install/"
     try:
-        proc = subprocess.run(
-            ["docker", "info"], capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS, check=False
-        )
+        proc = run(["docker", "info"], capture_output=True, text=True, timeout=PROBE_TIMEOUT_SECONDS, check=False)
     except subprocess.TimeoutExpired:
         return False, f"`docker info` timed out after {PROBE_TIMEOUT_SECONDS}s — the daemon looks wedged."
     except (OSError, subprocess.SubprocessError) as exc:
@@ -56,13 +55,13 @@ def docker_ok() -> tuple[bool, str]:
 
 def openshell_gateway_ok() -> tuple[bool, str]:
     """True if the OpenShell CLI reports the auto-defender gateway as Connected."""
-    if shutil.which("openshell") is None:
+    if which("openshell") is None:
         return False, (
             "openshell CLI not found — install it: "
             "curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh"
         )
     try:
-        proc = subprocess.run(
+        proc = run(
             ["openshell", "status", "--gateway", OPENSHELL_GATEWAY],
             capture_output=True,
             text=True,

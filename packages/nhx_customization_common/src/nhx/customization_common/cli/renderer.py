@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 import httpx
 import typer
+from httpx import get as http_get
 from nemo_helix_plugin.cli_renderer import CLIRenderer, RendererContext
 from rich.console import Console
 
@@ -73,7 +74,7 @@ def studio_is_available(base_url: str | None, *, timeout: float = _STATUS_PROBE_
     if not trimmed:
         return False
     try:
-        response = httpx.get(f"{trimmed}/status", timeout=timeout, follow_redirects=True)
+        response = http_get(f"{trimmed}/status", timeout=timeout, follow_redirects=True)
         response.raise_for_status()
         payload = response.json()
     except (httpx.HTTPError, httpx.InvalidURL, ValueError):
