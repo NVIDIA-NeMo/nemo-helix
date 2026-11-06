@@ -323,6 +323,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         name: str | None = None,
         project: str | None = None,
         updated_by: str | None = None,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> Entity:
         """Update an entity by ID, optionally changing its name."""
@@ -331,6 +332,9 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             existing_entity = result.scalar_one_or_none()
             if existing_entity is None:
                 raise EntityNotFoundError(f"Entity with ID '{entity_id}' not found")
+
+            if expected_db_version is not None and existing_entity.db_version != expected_db_version:
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.")
 
             stored_data = self.field_policy.update_data(data, existing_entity.data)
             _validate_json_data(stored_data)
@@ -414,6 +418,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         self,
         *,
         entity_id: str,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by ID."""
@@ -423,8 +428,15 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             if existing_entity is None:
                 return 0
 
-            await sess.delete(existing_entity)
-            await sess.commit()
+            if expected_db_version is not None and existing_entity.db_version != expected_db_version:
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.")
+
+            try:
+                await sess.delete(existing_entity)
+                await sess.commit()
+            except StaleDataError as err:
+                await sess.rollback()
+                raise EntityVersionConflictError(f"Entity {entity_id!r} was modified by another request.") from err
             return 1
 
     async def delete_entity_by_name(

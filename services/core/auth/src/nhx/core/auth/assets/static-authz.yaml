@@ -638,6 +638,19 @@ authz:
         scopes:
         - entities:write
         - platform:write
+    /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
+      delete:
+        permissions:
+        - entities.delete
+        scopes:
+        - entities:write
+        - platform:write
+      put:
+        permissions:
+        - entities.update
+        scopes:
+        - entities:write
+        - platform:write
     /apis/entities/v2/workspaces/{workspace}/members:
       get:
         permissions:
