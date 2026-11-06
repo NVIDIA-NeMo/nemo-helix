@@ -111,9 +111,9 @@ auth:
     introspection_client_id:
     # Environment variable containing the client secret used to authenticate RFC 7662 introspection requests. Required by most IdPs when introspect_opaque_tokens is enabled. Store only the environment variable name here; the secret value must come from the process environment.
     introspection_client_secret_env_var:
-    # Removed. UserInfo responses carry no 'aud' claim, so they cannot be checked against the required oidc.audience; setting this to true is rejected at config load. Use introspect_opaque_tokens for IdPs that issue opaque access tokens. | default: False
+    # Removed; true is rejected at config load because UserInfo responses have no 'aud' claim. Use introspect_opaque_tokens for opaque access tokens. | default: False
     resolve_opaque_tokens_via_userinfo: false
-    # Unused. Retained so existing configs still load; UserInfo resolution was removed.
+    # UserInfo endpoint advertised by auth discovery. Defaults to the identity provider's value. Not used for token validation.
     userinfo_endpoint:
     # Expected token audience. Required when OIDC is enabled; tokens must include this value in their 'aud' claim.
     audience:

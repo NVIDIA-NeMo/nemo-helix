@@ -292,14 +292,14 @@ class OIDCConfig(BaseSettings):
 
     resolve_opaque_tokens_via_userinfo: bool = Field(
         default=False,
-        description="Removed. UserInfo responses carry no 'aud' claim, so they cannot be checked against "
-        "the required oidc.audience; setting this to true is rejected at config load. "
-        "Use introspect_opaque_tokens for IdPs that issue opaque access tokens.",
+        description="Removed; true is rejected at config load because UserInfo responses have no 'aud' claim. "
+        "Use introspect_opaque_tokens for opaque access tokens.",
     )
 
     userinfo_endpoint: str | None = Field(
         default=None,
-        description="Unused. Retained so existing configs still load; UserInfo resolution was removed.",
+        description="UserInfo endpoint advertised by auth discovery. Defaults to the identity provider's value. "
+        "Not used for token validation.",
     )
 
     # Token validation settings
