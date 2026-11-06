@@ -309,8 +309,9 @@ async def build_agent_layer(
             sidecar = f"{container}-egress"
             await _start_egress_sidecar(sidecar, egress)
             network = ["--network", f"container:{sidecar}"]
-        # The image's ENTRYPOINT is overridden too: a task's entrypoint may initialize state each trial must make
-        # for itself, which a layer would otherwise share.
+        # The image's ENTRYPOINT is cleared too: a task's entrypoint may initialize state each trial must make
+        # for itself, which a layer would otherwise share. Cleared, not replaced: `docker commit` can't put back an
+        # absent ENTRYPOINT, so a replacement would stay in the layer.
         await _docker(
             "run",
             "--detach",
@@ -319,8 +320,9 @@ async def build_agent_layer(
             container,
             *network,
             "--entrypoint",
-            "sh",
+            "",
             image,
+            "sh",
             "-c",
             "sleep infinity",
         )
