@@ -5,12 +5,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, Provenance
-from nemo_builder_plugin.settle import JOB_GRACE, NO_JOB, QUEUE_GONE, settle
+from nemo_builder_plugin.settle import JOB_GRACE, JOB_READS, NO_JOB, QUEUE_GONE, settle
 from nemo_helix_plugin.entities import EntityConflictError
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 
@@ -120,6 +121,49 @@ class TestWhatAReadFails:
 
 
 class TestHowAReadWrites:
+    @pytest.mark.asyncio
+    async def test_jobs_are_read_several_at_a_time_but_no_more_than_job_reads(self) -> None:
+        """One at a time, a pass over about 100 pending images outran the controller's 90-second health window."""
+        reading = most = 0
+        asked: list[str] = []
+
+        async def slow_status(workspace: str, name: str) -> HelixJobStatus | None:
+            nonlocal reading, most
+            reading += 1
+            most = max(most, reading)
+            asked.append(name)
+            await asyncio.sleep(0.01)
+            reading -= 1
+            return HelixJobStatus.ACTIVE
+
+        names = [f"builder-demo-{i}" for i in range(3 * JOB_READS)]
+        rows = FakeRows(*(_row(f"img-{i}", job=f"ws-a/{name}") for i, name in enumerate(names)))
+        images = await settle(rows, list(rows.rows.values()), slow_status, now=NOW)
+        assert most == JOB_READS
+        assert sorted(asked) == sorted(names)
+        assert [image.status for image in images] == ["pending"] * len(names)
+
+    @pytest.mark.asyncio
+    async def test_every_job_is_read_before_any_image_is_written(self) -> None:
+        """A write before the last read would only make the pass longer; the reads are what run at once."""
+        events: list[str] = []
+        jobs = FakeJobs({"builder-demo-1": HelixJobStatus.ERROR, "builder-demo-2": HelixJobStatus.ERROR})
+
+        async def recorded(workspace: str, name: str) -> HelixJobStatus | None:
+            events.append(f"read:{name}")
+            return await jobs(workspace, name)
+
+        rows = FakeRows(_row("a"), _row("b", job="ws-a/builder-demo-2"))
+        update = rows.update
+
+        async def recorded_update(entity: ContainerImage) -> ContainerImage:
+            events.append(f"write:{entity.name}")
+            return await update(entity)
+
+        rows.update = recorded_update  # ty: ignore[invalid-assignment]
+        await settle(rows, list(rows.rows.values()), recorded, now=NOW)
+        assert events == ["read:builder-demo-1", "read:builder-demo-2", "write:a", "write:b"]
+
     @pytest.mark.asyncio
     async def test_each_job_is_asked_about_once(self) -> None:
         jobs = FakeJobs({"builder-demo-1": HelixJobStatus.ERROR, "builder-demo-2": HelixJobStatus.ACTIVE})
