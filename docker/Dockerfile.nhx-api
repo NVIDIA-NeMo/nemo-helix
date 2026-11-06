@@ -10,10 +10,6 @@ ARG NHX_API_RUNTIME_BASE=nhx-python-base
 FROM ${NHX_PYTHON_BASE} AS builder
 ARG NHX_API_DEPENDENCY_GROUP=functional-services
 COPY --from=nhx-workspace . .
-# Put the generated authorization policy into the source package before uv
-# installs it. This keeps the artifact aligned with the venv's actual Python
-# version instead of assuming a hard-coded site-packages path.
-COPY --from=policy-wasm-artifacts /artifacts/policy.wasm /app/services/core/auth/src/nhx/core/auth/assets/policy.wasm
 
 # Prevents annoy (a dependency of the nemoguardrails library) from generating CPU-specific instructions
 # that cause Guardrails to crash at inference-time with SIGILL on AVX2-only CPUs (e.g. AMD EPYC Zen 2).
@@ -44,8 +40,8 @@ RUN /app/.venv/bin/python -c 'import switchyard_rust; import nemo_switchyard.mid
 RUN /app/.venv/bin/pip --version && \
     test "$(ls -d /app/.venv/lib/python3.13/site-packages/pip-*.dist-info | wc -l)" -eq 1
 
-# Fail the image build if the installed auth package cannot see its generated policy.
-RUN /app/.venv/bin/python -c 'from nhx.core.auth.app.embedded_pdp.policy_wasm import ensure_embedded_policy_wasm; ensure_embedded_policy_wasm(auto_build=False)'
+# Fail the image build if the installed auth package cannot compile its Rego sources.
+RUN /app/.venv/bin/python -c 'from nhx.core.auth.app.embedded_pdp import get_policy; get_policy().set_data({})'
 
 # Pre-install DuckDB aws + httpfs so OTLP log ingestion works without outbound network.
 # Download the extension artifacts directly over HTTPS and install from local files

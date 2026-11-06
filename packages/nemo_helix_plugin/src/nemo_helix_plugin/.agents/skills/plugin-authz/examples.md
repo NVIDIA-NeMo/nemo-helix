@@ -518,9 +518,9 @@ From the repo root, with the workspace installed:
 uv run python services/core/auth/scripts/auth-tools.py sync-plugins --dry-run
 # -> reports 0 degraded plugins when every route is ruled
 
-make build-policy && make test-policy
+make test-policy
 ```
 
-Local dev note: `services/core/auth/.../assets/policy.wasm` is a gitignored build artifact. Run `make build-policy` after pulling authz/Rego changes, otherwise `test_embedded_pdp.py` fails against a stale copy (misleading `sprintf` / fence-fails-open errors).
+Local dev note: The embedded PDP loads packaged Rego sources with Regorus; no policy build step is required. Restart the auth service after changing Rego sources and run `make test-policy` to test the shared policy with the embedded evaluator.
 
 If a route is unruled or references an out-of-namespace permission, the fail-mode is set by the auth service config field `on_invalid_plugin` (env `NHX_AUTH_ON_INVALID_PLUGIN`, default `hard_fail`): `hard_fail` refuses to build the bundle (platform-wide fail-closed); `quarantine` denies the whole offending plugin but keeps the platform up; `deny_route` denies only the bad routes.

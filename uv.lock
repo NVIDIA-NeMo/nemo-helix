@@ -2298,6 +2298,17 @@ wheels = [
 ]
 
 [[package]]
+name = "gordon-to-regorus"
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/fc/3d363e54ae3d3a0804b03bbf0dcb047b72f1fc78c16f0710fc95fa1c6c86/gordon_to_regorus-0.13.0.tar.gz", hash = "sha256:e34bf5dddd83c939c4689823f073a38aaf908def153148dae43c2d6ad3bf5bfc", size = 4025814, upload-time = "2026-10-15T10:56:26.068Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/40/d8/4ffe79e3d0a18fd0a6fc2ba249c9ed6e4dc4dac3f4e58f28a1019ca07453/gordon_to_regorus-0.13.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:32806ebac3e6341b71fc4e9b9c72f6fd3d3c8193e8becd6b8394d6a6f73b5b6f", size = 3347980, upload-time = "2026-10-15T10:56:18.949Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/55/6acc0c9db85a28f88f1c3efdbb30e61cf08cacdc51f840781385c011840a/gordon_to_regorus-0.13.0-cp310-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:a548d0b8564a79c248873f675b943eafdf9a117fcae35a8237878c7bcbaacdff", size = 3623386, upload-time = "2026-10-15T10:56:20.71Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/a6/5e466ab2b688880c77e2f833b54e746d5a772f896a55c731687f371678b4/gordon_to_regorus-0.13.0-cp310-abi3-manylinux_2_34_x86_64.whl", hash = "sha256:2724c476306c8e0a3e5c759894c4af1e55c3a9b5b3ca3c5737f0cf34ef6ba631", size = 3857069, upload-time = "2026-10-15T10:56:22.759Z" },
+]
+
+[[package]]
 name = "greenlet"
 version = "3.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -5113,6 +5124,7 @@ all = [
     { name = "filesets" },
     { name = "fsspec" },
     { name = "garak-api" },
+    { name = "gordon-to-regorus" },
     { name = "greenlet" },
     { name = "gunicorn" },
     { name = "httpx" },
@@ -5201,11 +5213,11 @@ all = [
     { name = "tzdata" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "wasmtime" },
     { name = "yara-python" },
 ]
 auth-service = [
     { name = "fastapi", extra = ["standard"] },
+    { name = "gordon-to-regorus" },
     { name = "httpx" },
     { name = "nhx-common" },
     { name = "nhx-entities" },
@@ -5213,7 +5225,6 @@ auth-service = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "wasmtime" },
 ]
 automodel-service = [
     { name = "aiofiles" },
@@ -5241,6 +5252,7 @@ core-service = [
     { name = "fastapi", extra = ["standard"] },
     { name = "fastmcp" },
     { name = "filesets" },
+    { name = "gordon-to-regorus" },
     { name = "greenlet" },
     { name = "httpx" },
     { name = "hvac" },
@@ -5263,7 +5275,6 @@ core-service = [
     { name = "types-aioboto3", extra = ["s3"] },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "wasmtime" },
 ]
 data-designer-nemo = [
     { name = "anyio" },
@@ -5966,6 +5977,7 @@ services = [
     { name = "filesets" },
     { name = "fsspec" },
     { name = "garak-api" },
+    { name = "gordon-to-regorus" },
     { name = "greenlet" },
     { name = "gunicorn" },
     { name = "httpx" },
@@ -6054,7 +6066,6 @@ services = [
     { name = "tzdata" },
     { name = "urllib3" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "wasmtime" },
     { name = "yara-python" },
 ]
 studio-service = [
@@ -6253,6 +6264,10 @@ requires-dist = [
     { name = "garak-api", marker = "extra == 'nemo-garak-plugin'", editable = "packages/garak_api" },
     { name = "garak-api", marker = "extra == 'plugins'", editable = "packages/garak_api" },
     { name = "garak-api", marker = "extra == 'services'", editable = "packages/garak_api" },
+    { name = "gordon-to-regorus", marker = "extra == 'all'", specifier = "==0.13.0" },
+    { name = "gordon-to-regorus", marker = "extra == 'auth-service'", specifier = "==0.13.0" },
+    { name = "gordon-to-regorus", marker = "extra == 'core-service'", specifier = "==0.13.0" },
+    { name = "gordon-to-regorus", marker = "extra == 'services'", specifier = "==0.13.0" },
     { name = "greenlet", marker = "extra == 'all'", specifier = ">=3.0.0" },
     { name = "greenlet", marker = "extra == 'core-service'", specifier = ">=3.0.0" },
     { name = "greenlet", marker = "extra == 'entities-service'", specifier = ">=3.0.0" },
@@ -7065,10 +7080,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'services'", specifier = ">=0.12.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'services'", specifier = ">=0.23.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'studio-service'", specifier = ">=0.12.0" },
-    { name = "wasmtime", marker = "extra == 'all'", specifier = ">=20.0.0" },
-    { name = "wasmtime", marker = "extra == 'auth-service'", specifier = ">=20.0.0" },
-    { name = "wasmtime", marker = "extra == 'core-service'", specifier = ">=20.0.0" },
-    { name = "wasmtime", marker = "extra == 'services'", specifier = ">=20.0.0" },
     { name = "xdg-base-dirs", marker = "extra == 'garak-service'", specifier = ">=6.0.1" },
     { name = "yara-python", marker = "extra == 'all'", specifier = "==4.5.4" },
     { name = "yara-python", marker = "extra == 'guardrails-service'", specifier = "==4.5.4" },
@@ -8372,6 +8383,7 @@ version = "0.0.0"
 source = { editable = "services/core/auth" }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
+    { name = "gordon-to-regorus" },
     { name = "httpx" },
     { name = "nhx-common" },
     { name = "nhx-entities" },
@@ -8379,7 +8391,6 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pyyaml" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "wasmtime" },
 ]
 
 [package.dev-dependencies]
@@ -8396,6 +8407,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.4" },
+    { name = "gordon-to-regorus", specifier = "==0.13.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "nhx-common", editable = "packages/nhx_common" },
     { name = "nhx-entities", editable = "services/core/entities" },
@@ -8403,7 +8415,6 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.6.1" },
     { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.12.0" },
-    { name = "wasmtime", specifier = ">=20.0.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -13735,20 +13746,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/26/13/775a4c7d87fb771a2ddb104ce7c5c5d393e48720e448b4e8c43aac7cd4ce/wandb-0.30.0-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:bad9412f137d02303bf178513e0109f4fed37a6c817604085a1a4151047d8790", size = 26105520, upload-time = "2026-09-09T00:16:28.146Z" },
     { url = "https://files.pythonhosted.org/packages/58/36/4974e9ec44c23dd28a39c8ee699f1b8911dd6619c932c3fe94b016bc8a1f/wandb-0.30.0-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:1f2cc20c033f1650d387ca073177e629f1e2a1b5c4be393698e3db4752b9cf3a", size = 24112309, upload-time = "2026-09-09T00:16:30.3Z" },
     { url = "https://files.pythonhosted.org/packages/05/77/5eddd97f33f581f4d167f41bbf4736f2a51ad7271b9c9ed5dceb6994cbd6/wandb-0.30.0-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:e7dc3b0b1567f6a121d8f7a58131b5d085861139a653ef8bed1569c9be796721", size = 26320243, upload-time = "2026-09-09T00:16:32.878Z" },
-]
-
-[[package]]
-name = "wasmtime"
-version = "47.0.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/2c/94/95cab3216e1015379b4d3ad7c43ead61c3d7fbde7c5051aa46676e74a288/wasmtime-47.0.1.tar.gz", hash = "sha256:fab6ee0e87354f14ef228fa71b40841dd3c2c713f6efce636af234b4e3e6edcc", size = 129028, upload-time = "2026-07-20T18:50:19.684Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/c2/470db1a8a4fd3080ec91700613526ec5c8f3699bf07cf1aa7c09812063c8/wasmtime-47.0.1-py3-none-any.whl", hash = "sha256:5146a700c93909e797e0f6c05707c992fc75f4f5f5c5ecf826a9aff689ec6af1", size = 8069916, upload-time = "2026-07-20T18:50:03.946Z" },
-    { url = "https://files.pythonhosted.org/packages/dc/b2/fc660c451b7969a9eef8d35f505837ffc8e8a21064f18255a8f0347c1318/wasmtime-47.0.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:58da69f71750e844e32614c1805246ffca4c8b032d46a8145faa26c228c6c5ac", size = 8455235, upload-time = "2026-07-20T18:50:07.246Z" },
-    { url = "https://files.pythonhosted.org/packages/5e/ba/f321faaad1d616b94fe70a62ebb7e4054cfe41a6a46aa796ad2bb07fa08c/wasmtime-47.0.1-py3-none-manylinux1_x86_64.whl", hash = "sha256:9724600b036c6e95c4fe952e29fad83b4f02bdc11d23f25c4ee3ffff2c1d7257", size = 9963365, upload-time = "2026-07-20T18:50:08.973Z" },
-    { url = "https://files.pythonhosted.org/packages/d7/93/f12469c859fed8332961c4efa68c1f1981542b9ce95248b617255938a55d/wasmtime-47.0.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:4f72162ceed1d50de8226fac6b12e1ecce54883a0c3f7355bb141eae40df488a", size = 8822179, upload-time = "2026-07-20T18:50:11.056Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/24/545c7a118750f997986127e826ae900070c515081b48dba8c7ac175a7956/wasmtime-47.0.1-py3-none-musllinux_1_2_aarch64.whl", hash = "sha256:0aeb53d4c8e682cccebbaac48882939b34e71a1243b622129de3e6834728044d", size = 8857887, upload-time = "2026-07-20T18:50:13.39Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/a1/1640bf06ee0515a3eac1a84ae1805cab5407af6226ad52a9e6034d43974f/wasmtime-47.0.1-py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:f900fa571a9a5668b6210de9ecca1c5b66db14d85b7c36514c3d307d4f4cdc90", size = 10013249, upload-time = "2026-07-20T18:50:15.031Z" },
 ]
 
 [[package]]

@@ -16,22 +16,19 @@ def clear_config_overrides():
 
 
 @pytest.mark.asyncio
-async def test_on_startup_preflights_embedded_policy_wasm(monkeypatch: pytest.MonkeyPatch):
-    calls: list[bool] = []
+async def test_on_startup_preflights_embedded_policy(monkeypatch: pytest.MonkeyPatch):
+    calls: list[None] = []
     Configuration.set_override(
         AuthServiceConfig(
             enabled=True,
             policy_decision_point_provider="embedded",
-            embedded_pdp_auto_build_wasm=False,
         )
     )
-    monkeypatch.setattr(
-        "nhx.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
-    )
+    monkeypatch.setattr("nhx.core.auth.service.get_policy", lambda: calls.append(None))
 
     await AuthService().on_startup()
 
-    assert calls == [False]
+    assert calls == [None]
 
 
 @pytest.mark.parametrize(
@@ -42,15 +39,13 @@ async def test_on_startup_preflights_embedded_policy_wasm(monkeypatch: pytest.Mo
     ],
 )
 @pytest.mark.asyncio
-async def test_on_startup_skips_policy_wasm_preflight_when_not_needed(
+async def test_on_startup_skips_policy_preflight_when_not_needed(
     config: AuthServiceConfig,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    calls: list[bool] = []
+    calls: list[None] = []
     Configuration.set_override(config)
-    monkeypatch.setattr(
-        "nhx.core.auth.service.ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build)
-    )
+    monkeypatch.setattr("nhx.core.auth.service.get_policy", lambda: calls.append(None))
 
     await AuthService().on_startup()
 

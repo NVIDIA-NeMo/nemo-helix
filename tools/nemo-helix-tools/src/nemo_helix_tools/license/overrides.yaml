@@ -275,13 +275,14 @@ overrides:
   greenlet: MIT AND PSF-2.0
   narwhals: MIT
   regex: Apache-2.0 AND CNRI-Python
+  # Published fork metadata and upstream binding license expression, release 0.13.0.
+  gordon-to-regorus: MIT AND Apache-2.0 AND BSD-3-Clause
   rpds-py: MIT
   sqlite-vec: Apache-2.0 OR MIT # https://pypi.org/project/sqlite-vec/
   tqdm: MIT AND MPL-2.0
   uuid-utils: BSD-3-Clause
 
   # Auth service
-  wasmtime: APACHE-2.0 WITH LLVM-EXCEPTION
 
   # MCP Server
   beartype: MIT

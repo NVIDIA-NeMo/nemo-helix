@@ -140,7 +140,7 @@ Then start the platform from the repository root:
 flox -q activate
 nemo services run
 
-# Or run everything with quickstart config (builds OPA policy first)
+# Or run everything with the local config (authorization disabled by default)
 make run
 
 # Or run specific services
@@ -164,7 +164,7 @@ automatically. System-toolchain contributors can install it explicitly with
 To start a server in development mode:
 
 ```bash
-# Recommended: builds OPA policy and runs with quickstart config
+# Recommended: runs with the local config (authorization disabled by default)
 make run
 
 # Or run directly with the nemo CLI (from an activated venv)
@@ -289,11 +289,13 @@ For source development, prefer running Python processes directly in your local e
 
 ##### Usage
 
-The simplest way to run locally is with `make run`, which builds the OPA policy and starts all services with the quickstart config:
+The simplest way to run locally is with `make run`, which uses the local configuration with `auth.enabled: false`. The embedded policy is not loaded and authorization endpoints are not registered in this mode:
 
 ```bash
 make run
 ```
+
+To exercise authorization, set `NHX_CONFIG_FILE_PATH` to a configuration with `auth.enabled: true` before running `make run`.
 
 For more control, invoke the CLI directly. The examples below assume an activated virtual environment; prefix with `uv run` if you don't have one:
 

@@ -16,7 +16,8 @@ dependencies = [
     "pyyaml>=6.0.0",
     "nhx-common",
     "nhx-entities",
-    "wasmtime>=20.0.0",
+    # Published native binding wheels; Python import name remains `regorus`.
+    "gordon-to-regorus==0.13.0",
 ]
 version = "0.0.0"
 

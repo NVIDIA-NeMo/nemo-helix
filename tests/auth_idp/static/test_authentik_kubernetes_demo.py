@@ -266,7 +266,7 @@ def test_authentik_e2e_ci_requires_published_nhx_api_image() -> None:
     ci_workflow = Path(".github/workflows/ci.yaml").read_text(encoding="utf-8")
     job = _workflow_job_block(ci_workflow, "python-auth-idp-e2e-test")
 
-    assert "needs.policy-wasm.result == 'success'" in job
+    assert "policy-wasm" not in job
     assert "needs.build-cpu-smoke-images.result == 'success'" in job
     assert "needs.build-cpu-smoke-images.outputs.publish_images == 'true'" in job
     assert "needs.python-auth-idp-static-test.result == 'success'" in job

@@ -455,67 +455,21 @@ def test_build_platform_app_accepts_platform_app_config(monkeypatch):
     assert captured["access_key_lifecycle_http_client"] is None
 
 
-def test_embedded_auth_preflight_invokes_policy_wasm_helper(monkeypatch):
-    calls: list[bool] = []
-    auth_cfg = AuthConfig(
-        enabled=True,
-        policy_decision_point_provider="embedded",
-        embedded_pdp_auto_build_wasm=False,
-    )
-
-    from nhx.core.auth.app.embedded_pdp import policy_wasm
-
-    monkeypatch.setattr(policy_wasm, "ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build))
-
-    server.preflight_embedded_auth_policy_wasm(auth_cfg)
-
-    assert calls == [False]
-
-
-@pytest.mark.parametrize(
-    "auth_cfg",
-    [
-        AuthConfig(enabled=False, policy_decision_point_provider="embedded"),
-        AuthConfig(enabled=True, policy_decision_point_provider="opa"),
-    ],
-)
-def test_embedded_auth_preflight_skips_when_not_needed(auth_cfg, monkeypatch):
-    calls: list[bool] = []
-
-    from nhx.core.auth.app.embedded_pdp import policy_wasm
-
-    monkeypatch.setattr(policy_wasm, "ensure_embedded_policy_wasm", lambda *, auto_build: calls.append(auto_build))
-
-    server.preflight_embedded_auth_policy_wasm(auth_cfg)
-
-    assert calls == []
-
-
-def test_run_server_runs_embedded_auth_preflight():
-    auth_cfg = _make_auth_config(enabled=True)
-    calls: list[AuthConfig] = []
+def test_run_server_sets_keep_alive_timeout():
     with (
-        patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch(
-            "nhx.platform_runner.server.preflight_embedded_auth_policy_wasm", side_effect=lambda cfg: calls.append(cfg)
-        ),
         patch("nhx.platform_runner.server.create_app", return_value=FastAPI()) as create_app,
         patch("nhx.platform_runner.server.setup_fastapi_instrumentations"),
         patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
     ):
         server.run_server(services=[], host="127.0.0.1", port=9999, keep_alive_timeout_seconds=12)
 
-    assert calls == [auth_cfg]
     create_app.assert_called_once_with([])
     uvicorn_run.assert_called_once()
     assert uvicorn_run.call_args.kwargs["timeout_keep_alive"] == 12
 
 
 def test_run_server_can_bind_tcp_and_unix_domain_socket():
-    auth_cfg = _make_auth_config(enabled=True)
     with (
-        patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch("nhx.platform_runner.server.preflight_embedded_auth_policy_wasm"),
         patch("nhx.platform_runner.server.create_app", return_value=FastAPI()),
         patch("nhx.platform_runner.server.setup_fastapi_instrumentations"),
         patch("nhx.platform_runner.server._run_server_on_bound_sockets") as run_bound_sockets,
@@ -566,10 +520,7 @@ def test_run_server_on_bound_sockets_sets_keep_alive_timeout():
 
 
 def test_run_server_with_reload_sets_keep_alive_timeout():
-    auth_cfg = _make_auth_config(enabled=True)
     with (
-        patch("nhx.platform_runner.server.get_auth_config", return_value=auth_cfg),
-        patch("nhx.platform_runner.server.preflight_embedded_auth_policy_wasm"),
         patch("nhx.platform_runner.server.uvicorn.run") as uvicorn_run,
     ):
         server.run_server_with_reload(
@@ -798,7 +749,6 @@ def test_non_get_root_still_requires_auth():
 def test_run_server_owns_docker_and_loopback_listener_together(monkeypatch):
     monkeypatch.setattr(server, "docker_listener_host", lambda host: "172.17.0.1")
     with (
-        patch.object(server, "preflight_embedded_auth_policy_wasm"),
         patch.object(server, "create_app", return_value=FastAPI()),
         patch.object(server, "setup_fastapi_instrumentations"),
         patch.object(server, "_run_server_on_bound_sockets") as serve,
