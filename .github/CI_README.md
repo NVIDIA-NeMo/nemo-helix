@@ -23,7 +23,7 @@ reusable actions, and supporting docs.
 
 - `ci.yaml`
   Main source validation workflow. It runs linting,
-  Python unit tests, Python integration tests, OPA policy tests, Studio web
+  Python unit tests (including the shared Rego assertions), Python integration tests, Studio web
   checks for relevant web changes, and PR coverage comments. It runs on pushes
   to `main`, pull requests to `main` or `release/*`, merge queue checks, and
   manual dispatch.

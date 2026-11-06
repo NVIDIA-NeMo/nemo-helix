@@ -986,24 +986,6 @@ jobs:
             web/packages/sdk/generated/
             diff.txt
 
-  opa-policy-test:
-    name: Test shared Rego policy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Install Flox
-        uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
-        with:
-          disable-metrics: "true"
-      - name: Test shared Rego policy
-        uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
-        with:
-          dir: ./tools/open-policy-agent
-          command: |
-            opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
-
   python-unit-test-tools:
     name: Python unit tests (tools)
     needs: [changes]
@@ -2476,7 +2458,6 @@ jobs:
       - evaluator-integration-test
       - ngc-metadata-test
       - test-gates
-      - opa-policy-test
       - python-unit-test-tools
       - python-unit-test
       - python-unit-test-scaled-evals
