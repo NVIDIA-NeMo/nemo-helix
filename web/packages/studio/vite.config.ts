@@ -60,6 +60,20 @@ const VENDOR_IMPORT_MAP: Record<string, string> = {
   '@nemo/common': 'common.js',
 };
 
+// Installed version of each contract package, resolved like Node would (hoisted
+// installs live in a parent node_modules). Studio compares plugin sidecars to it.
+const STUDIO_SHARED_VERSIONS = Object.fromEntries(
+  [...new Set(PLUGIN_CONTRACT.entries.map((entry) => entry.package))].flatMap((pkg) => {
+    for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
+      const file = path.join(dir, 'node_modules', pkg, 'package.json');
+      if (fs.existsSync(file)) {
+        return [[pkg, (JSON.parse(fs.readFileSync(file, 'utf8')) as PackageJson).version]];
+      }
+      if (path.dirname(dir) === dir) return [];
+    }
+  })
+);
+
 {
   const contractSpecifiers = PLUGIN_CONTRACT.entries.map((entry) => entry.specifier);
   const missing = contractSpecifiers.filter((s) => !(s in VENDOR_IMPORT_MAP));
@@ -544,6 +558,7 @@ export default defineConfig(({ mode }) => {
   return mergeConfig(baseTestConfig, {
     envDir: './env',
     base,
+    define: { __STUDIO_SHARED_VERSIONS__: JSON.stringify(STUDIO_SHARED_VERSIONS) },
     plugins,
     resolve: {
       tsconfigPaths: true,
