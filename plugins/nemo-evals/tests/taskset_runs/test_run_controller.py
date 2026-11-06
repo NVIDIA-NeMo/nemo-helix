@@ -185,9 +185,12 @@ class FakeRunJobs:
             raise broken  # one Job that can't be read fails the whole list, as its page would
         return {name: self.jobs[name] for name in names if name in self.jobs}
 
-    async def result(self, job, name):
+    async def result_by_id(self, job_id: str, name: str):
         await self._scripted("result")
-        return self.results.get((job, name))
+        job = next((job for job in self.jobs.values() if job.id == job_id), None)
+        if job is None:
+            raise http_error(NotFoundError, 404, "Job not found")
+        return self.results.get((job.name, name))
 
     async def create(self, request):
         self.creates.append(request.name)
@@ -197,9 +200,10 @@ class FakeRunJobs:
         self.created.append(request)
         return self.put(request, "created")
 
-    async def has_steps(self, name):
+    async def has_steps_by_id(self, job_id: str):
         await self._scripted("has_steps")
-        return name not in self.stepless
+        job = next((job for job in self.jobs.values() if job.id == job_id), None)
+        return job is not None and job.name not in self.stepless
 
     async def read_summary(self, bundle_ref):
         return SUMMARY
@@ -213,8 +217,12 @@ class FakeRunJobs:
     async def get_record(self, name):
         return next((record for record in self.records if record.name == name), None)
 
-    async def cancel(self, name):
+    async def cancel_by_id(self, job_id: str):
         await self._scripted("cancel")
+        job = next((job for job in self.jobs.values() if job.id == job_id), None)
+        if job is None:
+            return
+        name = job.name
         self.cancelled.append(name)
         if name in self.jobs and self.jobs[name].status.value not in TERMINAL_JOB_STATUSES:
             self.jobs[name] = self.jobs[name].model_copy(update={"status": HelixJobStatus.CANCELLING})
@@ -1821,10 +1829,10 @@ async def test_a_cancel_conflict_on_a_running_job_is_raised_and_on_a_finished_on
     adapter, fake, requests = conflicting_jobs
     name = next(iter(fake.jobs))
     with pytest.raises(ConflictError):
-        await adapter.cancel(name)  # e.g. a rerun replaced its step mid-cancel
-    assert requests == [f"POST {JOBS_PATH}{name}/cancel", f"GET {JOBS_PATH}{name}"]
+        await adapter.cancel_by_id(fake.jobs[name].id)  # e.g. a rerun replaced its step mid-cancel
+    assert requests == [f"POST {JOBS_PATH}{fake.jobs[name].id}/cancel", f"GET {JOBS_PATH}{fake.jobs[name].id}"]
     fake.finish(name, "completed")
-    await adapter.cancel(name)
+    await adapter.cancel_by_id(fake.jobs[name].id)
 
 
 async def test_the_controllers_store_never_retries_an_entity_store_call():
@@ -1889,14 +1897,14 @@ async def test_creates_and_the_intake_stamp_act_for_the_creator_and_reads_as_the
     adapter = JobsServiceRunJobs(client("service"), client("creator"), "default")
     await adapter.create(request)
     await adapter.get(job.name)
-    await adapter.cancel(job.name)
+    await adapter.cancel_by_id(job.id)
     with pytest.raises(Exception):
         await adapter.evaluations.get("default", "run-a")  # the fake answers a Job, not an Evaluation
     assert [who for who, _ in seen] == ["creator", "service", "service", "creator"]
     assert [call for _, call in seen[:3]] == [
         "POST /apis/jobs/v2/workspaces/default/jobs",
         f"GET {job.name}",
-        f"POST {job.name}/cancel",
+        f"POST {job.id}/cancel",
     ]
     assert "/apis/intake/" in seen[3][1]
 

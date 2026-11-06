@@ -1368,6 +1368,13 @@ authz:
         scopes:
         - jobs:read
         - platform:read
+    /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/metadata:
+      get:
+        permissions:
+        - jobs.read
+        scopes:
+        - jobs:read
+        - platform:read
     /apis/jobs/v2/workspaces/{workspace}/jobs/{name}:
       delete:
         permissions:

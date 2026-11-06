@@ -34,6 +34,7 @@ from nemo_anonymizer_plugin.sdk.job_resources import AnonymizerJobResource, Asyn
 from nemo_anonymizer_plugin.sdk.logging import with_logging
 from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from pydantic import BaseModel, TypeAdapter
 
@@ -231,23 +232,36 @@ class AnonymizerResource(_BaseAnonymizerResource[NemoClient]):
             resp.raise_for_status()
             job = resp.json()
             logger.info(f"  |-- job name: {job['name']}")
-            job_client = AnonymizerJobResource(job_name=job["name"], platform=self._platform, workspace=workspace)
+            job_client = AnonymizerJobResource(
+                job_name=job["name"], job_id=job["id"], platform=self._platform, workspace=workspace
+            )
             if wait_until_done:
                 job_client.wait_until_done()
             return job_client
         except Exception as e:
             raise _get_error(e) from e
 
-    def get_job_resource(self, job_name: str, workspace: str | None = None) -> AnonymizerJobResource:
+    def get_job_resource(
+        self, job_name: str, workspace: str | None = None, *, job_reference_kind: JobReferenceKind | None = None
+    ) -> AnonymizerJobResource:
         try:
             resp = self._client().get(
                 self._url(f"/jobs/run/{http.path_segment(job_name)}", workspace),
                 headers=self._headers(),
+                params={"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else None,
             )
             resp.raise_for_status()
-            return AnonymizerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+            return AnonymizerJobResource(
+                job_name=resp.json()["name"], job_id=resp.json()["id"], platform=self._platform, workspace=workspace
+            )
         except Exception as e:
             raise _get_error(e) from e
+
+    def get_job_resource_by_id(self, job_id: str, workspace: str | None = None) -> AnonymizerJobResource:
+        return self.get_job_resource(job_id, workspace, job_reference_kind=JobReferenceKind.ID)
+
+    def get_job_resource_by_name(self, job_name: str, workspace: str | None = None) -> AnonymizerJobResource:
+        return self.get_job_resource(job_name, workspace, job_reference_kind=JobReferenceKind.NAME)
 
 
 @with_logging
@@ -303,23 +317,36 @@ class AsyncAnonymizerResource(_BaseAnonymizerResource[AsyncNemoClient]):
             )
             resp.raise_for_status()
             job = resp.json()
-            job_client = AsyncAnonymizerJobResource(job_name=job["name"], platform=self._platform, workspace=workspace)
+            job_client = AsyncAnonymizerJobResource(
+                job_name=job["name"], job_id=job["id"], platform=self._platform, workspace=workspace
+            )
             if wait_until_done:
                 await job_client.wait_until_done()
             return job_client
         except Exception as e:
             raise _get_error(e) from e
 
-    async def get_job_resource(self, job_name: str, workspace: str | None = None) -> AsyncAnonymizerJobResource:
+    async def get_job_resource(
+        self, job_name: str, workspace: str | None = None, *, job_reference_kind: JobReferenceKind | None = None
+    ) -> AsyncAnonymizerJobResource:
         try:
             resp = await self._client().get(
                 self._url(f"/jobs/run/{http.path_segment(job_name)}", workspace),
                 headers=self._headers(),
+                params={"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else None,
             )
             resp.raise_for_status()
-            return AsyncAnonymizerJobResource(job_name=job_name, platform=self._platform, workspace=workspace)
+            return AsyncAnonymizerJobResource(
+                job_name=resp.json()["name"], job_id=resp.json()["id"], platform=self._platform, workspace=workspace
+            )
         except Exception as e:
             raise _get_error(e) from e
+
+    async def get_job_resource_by_id(self, job_id: str, workspace: str | None = None) -> AsyncAnonymizerJobResource:
+        return await self.get_job_resource(job_id, workspace, job_reference_kind=JobReferenceKind.ID)
+
+    async def get_job_resource_by_name(self, job_name: str, workspace: str | None = None) -> AsyncAnonymizerJobResource:
+        return await self.get_job_resource(job_name, workspace, job_reference_kind=JobReferenceKind.NAME)
 
 
 def _get_error(e: BaseException) -> AnonymizerClientError:

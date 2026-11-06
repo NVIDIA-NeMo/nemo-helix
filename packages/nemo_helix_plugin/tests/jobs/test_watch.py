@@ -12,6 +12,7 @@ from nemo_helix_plugin.client.response import NemoPaginatedResponse, NemoRespons
 from nemo_helix_plugin.client.types import CursorPagination, PreparedRequest
 from nemo_helix_plugin.jobs import watch as watch_module
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatus, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.jobs.watch import _status_event, watch_job
 
@@ -115,7 +116,9 @@ class _StatusOnlyClient:
         self._results = list(results)
         self.calls = 0
 
-    def get_job_status(self, *, workspace: str | None = None, name: str) -> NemoResponse[HelixJobStatusResponse]:
+    def get_job_status(
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> NemoResponse[HelixJobStatusResponse]:
         self.calls += 1
         result = self._results.pop(0)
         if isinstance(result, Exception):
@@ -139,6 +142,7 @@ class _StatusOnlyClient:
         workspace: str | None = None,
         name: str,
         query_params: JobLogsQueryParams | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
     ) -> NemoPaginatedResponse[HelixJobLog, CursorPagination]:
         raise AssertionError("logs are disabled in this test")
 

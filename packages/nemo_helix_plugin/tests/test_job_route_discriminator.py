@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import patch
@@ -15,6 +17,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from nemo_helix_plugin.dependencies import get_entity_client, get_nemo_client, get_request_authorizer
 from nemo_helix_plugin.jobs.api_factory import JobRouteOption, job_route_factory
+from nemo_helix_plugin.jobs.selectors import JobMetadataReferenceKind, JobReferenceKind
+from nemo_helix_plugin.jobs.types import JobMetadataResponse
 from pydantic import BaseModel, ConfigDict, RootModel
 from starlette.testclient import TestClient
 
@@ -123,16 +127,49 @@ class _JobsClient:
         self.list_query = dict(query_params)
         return _PageResponse(self.list_items)
 
-    async def get_job(self, *, name: str, workspace: str) -> _Response:
+    async def get_job(
+        self, *, name: str, workspace: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> _Response:
         del workspace
         self.get_calls.append(name)
-        return _Response(self.jobs[name])
+        job = (
+            next((job for job in self.jobs.values() if job.id == name), None)
+            if job_reference_kind is JobReferenceKind.ID
+            else self.jobs.get(name)
+        )
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return _Response(job)
+
+    async def get_job_metadata(
+        self, *, job: str, workspace: str, job_reference_kind: JobMetadataReferenceKind
+    ) -> _Response:
+        self.get_calls.append(job)
+        selected = (
+            next((value for value in self.jobs.values() if value.id == job), None)
+            if job_reference_kind is JobMetadataReferenceKind.ID
+            else self.jobs.get(job)
+        )
+        if selected is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return _Response(
+            JobMetadataResponse(
+                id=selected.id,
+                name=selected.name,
+                workspace=workspace,
+                parent_id=None,
+                source=selected.source,
+                spec=selected.spec,
+            )
+        )
 
     async def _unexpected_action(self, action: str) -> None:
         self.action_calls.append(action)
         raise AssertionError(f"{action} must not run before collection ownership is verified")
 
-    async def update_job(self, *, name: str, workspace: str, body: object) -> _Response:
+    async def update_job(
+        self, *, name: str, workspace: str, body: object, job_reference_kind: JobReferenceKind | None = None
+    ) -> _Response:
         del name, workspace, body
         await self._unexpected_action("update")
         raise AssertionError("unreachable")
@@ -204,7 +241,9 @@ class _InternalNemoClient:
 class _WriteOnlyJobsClient(_JobsClient):
     """Caller client that can mutate but must never be used for ownership reads."""
 
-    async def get_job(self, *, name: str, workspace: str) -> _Response:
+    async def get_job(
+        self, *, name: str, workspace: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> _Response:
         del name, workspace
         raise AssertionError("the caller's jobs.read permission must not be used for mutation preflight")
 
@@ -226,7 +265,9 @@ class _WriteOnlyJobsClient(_JobsClient):
     async def rerun_job(self, **kwargs: object) -> _Response:
         return self._mutation_response("rerun", cast(str, kwargs["job"]), cast(str, kwargs["workspace"]))
 
-    async def update_job(self, *, name: str, workspace: str, body: object) -> _Response:
+    async def update_job(
+        self, *, name: str, workspace: str, body: object, job_reference_kind: JobReferenceKind | None = None
+    ) -> _Response:
         self.updated_body = body
         self.updated_name = name
         response = self._mutation_response("update", "war-1", workspace)
@@ -277,9 +318,24 @@ def _build_app(jobs_client: _JobsClient, *, authorize: Any | None = None) -> Fas
 
 @pytest.fixture(autouse=True)
 def _patch_jobs_client() -> Any:
-    with patch(
-        "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
-        side_effect=lambda client: client.jobs_client,
+    current_jobs: ContextVar[_JobsClient] = ContextVar("ownership_jobs")
+    original_build_app = _build_app
+
+    def build_app(jobs_client: _JobsClient, *, authorize: Any | None = None) -> FastAPI:
+        current_jobs.set(jobs_client)
+        return original_build_app(jobs_client, authorize=authorize)
+
+    @asynccontextmanager
+    async def ownership_client(**_kwargs: object):
+        yield _InternalNemoClient(current_jobs.get())
+
+    with (
+        patch(
+            "nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client",
+            side_effect=lambda client: client.jobs_client,
+        ),
+        patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", side_effect=ownership_client),
+        patch(__name__ + "._build_app", side_effect=build_app),
     ):
         yield
 
@@ -337,7 +393,7 @@ def test_get_accepts_only_matching_collection_and_hides_marker() -> None:
     assert response.status_code == 200, response.text
     assert response.json()["spec"] == {"value": "war-1"}
     # Reuse the ownership response rather than doubling Studio's named-job polls.
-    assert jobs.get_calls == ["war-1"]
+    assert jobs.get_calls == ["war-1", "id-war-1"]
 
 
 @pytest.mark.parametrize(

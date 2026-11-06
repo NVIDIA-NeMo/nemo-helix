@@ -503,16 +503,30 @@ class ClusterRunJobs:
     async def list_named(self, names: Sequence[str]) -> dict[str, HelixJobResponse]:
         return await self._cluster.list_named(self._workspace, names)
 
-    async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
-        return await self._cluster.result(self._workspace, job, name)
+    def _name_for_id(self, job_id: str) -> str | None:
+        job = self._cluster.by_id.get(job_id)
+        if (
+            job is None
+            or job.workspace != self._workspace
+            or self._cluster.jobs.get((self._workspace, job.name)) is not job
+        ):
+            return None
+        return job.name
+
+    async def result_by_id(self, job_id: str, name: str) -> HelixJobResultResponse | None:
+        job_name = self._name_for_id(job_id)
+        if job_name is None:
+            raise _http_error(NotFoundError, 404, "Job not found", "GET")
+        return await self._cluster.result(self._workspace, job_name, name)
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
         if self._run is None:
             raise RuntimeError("this Jobs adapter only reads")
         return await self._cluster.create(self._workspace, self._run, request)
 
-    async def has_steps(self, name: str) -> bool:
-        return await self._cluster.has_steps(self._workspace, name)
+    async def has_steps_by_id(self, job_id: str) -> bool:
+        name = self._name_for_id(job_id)
+        return await self._cluster.has_steps(self._workspace, name) if name is not None else False
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary:
         return AgentEvalSummary()
@@ -523,8 +537,10 @@ class ClusterRunJobs:
     async def get_record(self, name: str) -> AgentEvalResultEntity | None:
         return self._cluster.get_record(self._workspace, name)
 
-    async def cancel(self, name: str) -> None:
-        await self._cluster.cancel(self._workspace, name)
+    async def cancel_by_id(self, job_id: str) -> None:
+        name = self._name_for_id(job_id)
+        if name is not None:
+            await self._cluster.cancel(self._workspace, name)
 
 
 class SimClock:

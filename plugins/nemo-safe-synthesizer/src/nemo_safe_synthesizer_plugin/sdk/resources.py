@@ -12,6 +12,7 @@ from nemo_helix_plugin.client.client import AsyncNemoClient, NemoClient
 from nemo_helix_plugin.client.response import AsyncNemoPaginatedResponse, NemoPaginatedResponse
 from nemo_helix_plugin.jobs.client import AsyncJobsClient, JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLogPage, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
 from nemo_safe_synthesizer_plugin.sdk.client import AsyncSafeSynthesizerClient, SafeSynthesizerClient
@@ -98,18 +99,54 @@ class SafeSynthesizerJobsResource:
             query_params=_list_query_params(params),
         )
 
-    def retrieve(self, name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+    def retrieve(
+        self, name: str, *, workspace: str | None = None, job_reference_kind: JobReferenceKind | None = None
+    ) -> SafeSynthesizerJobResponse:
         """Retrieve one Safe Synthesizer job by name."""
-        return self._safe_synthesizer.get_job(workspace=self._client.resolve_workspace(workspace), name=name).data()
+        return self._safe_synthesizer.get_job(
+            workspace=self._client.resolve_workspace(workspace), name=name, job_reference_kind=job_reference_kind
+        ).data()
 
-    def get_status(self, name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+    def retrieve_by_id(self, job_id: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+        return self.retrieve(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID)
+
+    def retrieve_by_name(self, job_name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+        return self.retrieve(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME)
+
+    def get_status(
+        self, name: str, *, workspace: str | None = None, job_reference_kind: JobReferenceKind | None = None
+    ) -> HelixJobStatusResponse:
         """Retrieve Safe Synthesizer job status."""
-        return self._jobs.get_job_status(name=name, workspace=workspace).data()
+        return self._jobs.get_job_status(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
-    def get_logs(self, name: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+    def get_status_by_id(self, job_id: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+        return self.get_status(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID)
+
+    def get_status_by_name(self, job_name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+        return self.get_status(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME)
+
+    def get_logs(
+        self,
+        name: str,
+        *,
+        workspace: str | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
+        **params: object,
+    ) -> HelixJobLogPage:
         """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
-        page = self._jobs.list_job_logs(name=name, workspace=workspace, query_params=_log_query_params(params)).page()
+        page = self._jobs.list_job_logs(
+            name=name,
+            workspace=workspace,
+            query_params=_log_query_params(params),
+            job_reference_kind=job_reference_kind,
+        ).page()
         return HelixJobLogPage(data=page.items, **page.metadata)
+
+    def get_logs_by_id(self, job_id: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+        return self.get_logs(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID, **params)
+
+    def get_logs_by_name(self, job_name: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+        return self.get_logs(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME, **params)
 
 
 class SafeSynthesizerResource:
@@ -161,22 +198,60 @@ class AsyncSafeSynthesizerJobsResource:
             query_params=_list_query_params(params),
         )
 
-    async def retrieve(self, name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+    async def retrieve(
+        self, name: str, *, workspace: str | None = None, job_reference_kind: JobReferenceKind | None = None
+    ) -> SafeSynthesizerJobResponse:
         """Retrieve one Safe Synthesizer job by name."""
-        response = await self._safe_synthesizer.get_job(workspace=self._client.resolve_workspace(workspace), name=name)
+        response = await self._safe_synthesizer.get_job(
+            workspace=self._client.resolve_workspace(workspace), name=name, job_reference_kind=job_reference_kind
+        )
         return response.data()
 
-    async def get_status(self, name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
-        """Retrieve Safe Synthesizer job status."""
-        return (await self._jobs.get_job_status(name=name, workspace=workspace)).data()
+    async def retrieve_by_id(self, job_id: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+        return await self.retrieve(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID)
 
-    async def get_logs(self, name: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+    async def retrieve_by_name(self, job_name: str, *, workspace: str | None = None) -> SafeSynthesizerJobResponse:
+        return await self.retrieve(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME)
+
+    async def get_status(
+        self, name: str, *, workspace: str | None = None, job_reference_kind: JobReferenceKind | None = None
+    ) -> HelixJobStatusResponse:
+        """Retrieve Safe Synthesizer job status."""
+        return (
+            await self._jobs.get_job_status(name=name, workspace=workspace, job_reference_kind=job_reference_kind)
+        ).data()
+
+    async def get_status_by_id(self, job_id: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+        return await self.get_status(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID)
+
+    async def get_status_by_name(self, job_name: str, *, workspace: str | None = None) -> HelixJobStatusResponse:
+        return await self.get_status(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME)
+
+    async def get_logs(
+        self,
+        name: str,
+        *,
+        workspace: str | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
+        **params: object,
+    ) -> HelixJobLogPage:
         """Retrieve paginated Safe Synthesizer job logs from the Jobs service."""
         response = await self._jobs.list_job_logs(
-            name=name, workspace=workspace, query_params=_log_query_params(params)
+            name=name,
+            workspace=workspace,
+            query_params=_log_query_params(params),
+            job_reference_kind=job_reference_kind,
         )
         page = response.page()
         return HelixJobLogPage(data=page.items, **page.metadata)
+
+    async def get_logs_by_id(self, job_id: str, *, workspace: str | None = None, **params: object) -> HelixJobLogPage:
+        return await self.get_logs(job_id, workspace=workspace, job_reference_kind=JobReferenceKind.ID, **params)
+
+    async def get_logs_by_name(
+        self, job_name: str, *, workspace: str | None = None, **params: object
+    ) -> HelixJobLogPage:
+        return await self.get_logs(job_name, workspace=workspace, job_reference_kind=JobReferenceKind.NAME, **params)
 
 
 class AsyncSafeSynthesizerResource:

@@ -31,6 +31,7 @@ from nemo_helix_plugin.client.types import CursorPagination
 from nemo_helix_plugin.inference_gateway.client import InferenceGatewayClient
 from nemo_helix_plugin.jobs.client import JobsWatchClient
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.jobs.watch_types import (
     JobStatusEvent,
@@ -62,9 +63,12 @@ class _WatchedJobsClient:
         self,
         *,
         workspace: str | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
         name: str,
     ) -> NemoResponse[HelixJobStatusResponse]:
-        response = self._jobs_client.get_job_status(workspace=workspace, name=name)
+        response = self._jobs_client.get_job_status(
+            workspace=workspace, name=name, job_reference_kind=job_reference_kind
+        )
         self.last_status = response.data()
         return response
 
@@ -72,21 +76,25 @@ class _WatchedJobsClient:
         self,
         *,
         workspace: str | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
         name: str,
         query_params: JobLogsQueryParams | None = None,
     ) -> NemoPaginatedResponse[HelixJobLog, CursorPagination]:
-        return self._jobs_client.list_job_logs(workspace=workspace, name=name, query_params=query_params)
+        return self._jobs_client.list_job_logs(
+            workspace=workspace, name=name, query_params=query_params, job_reference_kind=job_reference_kind
+        )
 
     def watch_job(
         self,
         name: str,
         *,
         workspace: str | None = None,
+        job_reference_kind: JobReferenceKind | None = None,
         poll_interval: float = 3,
         timeout: float | None = None,
         include_history: bool = True,
         include_logs: bool = True,
-        attempt_id: int | None = None,
+        attempt_id: str | None = None,
         step_id: str | None = None,
         task_id: str | None = None,
         limit: int | None = None,
@@ -98,6 +106,7 @@ class _WatchedJobsClient:
             self,
             name,
             workspace=workspace,
+            job_reference_kind=job_reference_kind,
             poll_interval=poll_interval,
             timeout=timeout,
             include_history=include_history,
@@ -325,6 +334,7 @@ def wait_for_platform_job(
     name: str,
     *,
     workspace: str | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
     resource_label: str = "job",
     timeout: int = 1200,
     poll_interval: int = 3,
@@ -342,6 +352,7 @@ def wait_for_platform_job(
             for event in jobs.watch_job(
                 name,
                 workspace=workspace,
+                job_reference_kind=job_reference_kind,
                 poll_interval=poll_interval,
                 timeout=timeout,
                 include_logs=False,

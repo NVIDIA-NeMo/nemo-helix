@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.jobs.selectors import JobById, JobReferenceKind, job_selector
 from nhx.common.auth import AuthClient, AuthContext, get_auth_client
 from nhx.core.jobs.api.dependencies import dep_dispatcher
 from nhx.core.jobs.api.v2.jobs.endpoints import job_operation_errors
@@ -22,13 +23,18 @@ router = APIRouter()
 async def rerun_job(
     job: str,
     workspace: str,
+    job_reference_kind: JobReferenceKind | None = Query(default=None),
     auth_client: AuthClient = Depends(get_auth_client),
     dispatcher: JobDispatcher = Depends(dep_dispatcher),
 ) -> HelixJobResponse:
     """Rerun a failed job from its surviving storage as a new attempt."""
+    identity = await dispatcher.resolve_job(job_selector(job, job_reference_kind), workspace=workspace)
+    if identity is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    target = JobById(identity.job_id)
     with job_operation_errors("rerun", job, workspace):
         job_response = await dispatcher.rerun_job(
-            job,
+            target,
             workspace=workspace,
             auth_context=AuthContext.from_principal(auth_client.principal),
         )

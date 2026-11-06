@@ -367,19 +367,19 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                         cancel_succeeded = False
                         try:
                             logger.info(f"Cancelling job: {job.name}")
-                            await jobs_client.cancel_job(
-                                name=job.name,
+                            await jobs_client.cancel_job_by_id(
+                                job_id=job.id,
                                 workspace=workspace.name,
                             )
                             cancel_succeeded = True
                         except Exception as e:
                             logger.warning(f"Failed to cancel job {job.name}: {e}")
                         if cancel_succeeded:
-                            await self._wait_for_terminal_job(jobs_client, workspace.name, job.name)
+                            await self._wait_for_terminal_job(jobs_client, workspace.name, job.id)
 
                     logger.info(f"Deleting job: {job.name}")
-                    await jobs_client.delete_job(
-                        name=job.name,
+                    await jobs_client.delete_job_by_id(
+                        job_id=job.id,
                         workspace=workspace.name,
                     )
                 except NotFoundError:
@@ -400,13 +400,13 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
             logger.error(f"Failed to cleanup jobs for workspace {workspace.name}: {e}")
             raise
 
-    async def _wait_for_terminal_job(self, jobs_client: AsyncJobsClient, workspace: str, job_name: str) -> None:
+    async def _wait_for_terminal_job(self, jobs_client: AsyncJobsClient, workspace: str, job_id: str) -> None:
         """Wait until a cancelled job is terminal before hard deletion."""
         deadline = asyncio.get_running_loop().time() + _JOB_TERMINAL_WAIT_TIMEOUT_SECONDS
         last_status: HelixJobStatus | str = ""
         while True:
             try:
-                response = await jobs_client.get_job_status(name=job_name, workspace=workspace)
+                response = await jobs_client.get_job_status_by_id(job_id=job_id, workspace=workspace)
             except NotFoundError:
                 return
             status_info = response.data()
@@ -415,7 +415,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
                 return
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError(
-                    f"Timed out waiting for job {job_name} in workspace {workspace} to reach a terminal status; "
+                    f"Timed out waiting for job {job_id} in workspace {workspace} to reach a terminal status; "
                     f"last status was {last_status}"
                 )
             self.emit_heartbeat()

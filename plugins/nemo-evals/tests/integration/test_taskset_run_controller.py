@@ -276,8 +276,9 @@ async def _unbind_group(base_url: str, space: GroupOnlyWorkspace) -> None:
 
 async def _cancel_and_wait(reads: JobsServiceRunJobs, name: str) -> None:
     """GET and cancel ``name`` the way the controller does, then wait for Jobs to take the cancel."""
-    assert await reads.get(name) is not None
-    await reads.cancel(name)
+    selected = await reads.get(name)
+    assert selected is not None
+    await reads.cancel_by_id(selected.id)
     status = None
     for _ in range(60):
         current = await reads.get(name)

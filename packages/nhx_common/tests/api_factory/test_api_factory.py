@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import json
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
@@ -364,6 +364,15 @@ def _job_routes_app():
     mock_sdk = MagicMock()
     mock_jobs = MagicMock()
     mock_jobs.with_retry.return_value = mock_jobs
+    mock_jobs.get_job_metadata = AsyncMock(return_value=_resp(create_mock_platform_job("my-job")))
+
+    async def allow(method: str, path: str) -> None:
+        return None
+
+    @asynccontextmanager
+    async def ownership_client(**_kwargs):
+        yield mock_sdk
+
     # Routes that act on a job first check that it is one of this service's jobs.
     mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job")))
     router = job_route_factory(
@@ -377,6 +386,9 @@ def _job_routes_app():
     register_sdk_exception_handlers(app)
 
     # Setup dependency overrides for SDK and entity client injection
+    from nemo_helix_plugin.dependencies import get_request_authorizer
+
+    app.dependency_overrides[get_request_authorizer] = lambda: allow
     app.dependency_overrides[get_nemo_client] = lambda: mock_sdk
     app.dependency_overrides[get_entity_client] = lambda: MagicMock()
 
@@ -384,6 +396,7 @@ def _job_routes_app():
     app.include_router(router, prefix="/v2/workspaces/{workspace}/test")
 
     with (
+        patch("nemo_helix_plugin.jobs.api_factory.get_async_nemo_client", side_effect=ownership_client),
         patch("nemo_helix_plugin.jobs.api_factory.AsyncJobsClient.from_client", return_value=mock_jobs),
         patch("nemo_helix_plugin.jobs.api_factory.AsyncFilesClient.from_client", return_value=mock_jobs),
     ):
@@ -483,9 +496,7 @@ def test_get_job_logs_default_parameters(mock_service_with_job_routes):
 
     # None-valued limit/page_cursor are omitted from query_params.
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={},
+        workspace="default", name="test-job-123", query_params={}, job_reference_kind=None
     )
 
 
@@ -509,9 +520,7 @@ def test_get_job_logs_with_limit(mock_service_with_job_routes):
     assert response_data["next_page"] == "next_cursor_123"
 
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"limit": 2},
+        workspace="default", name="test-job-123", query_params={"limit": 2}, job_reference_kind=None
     )
 
 
@@ -539,6 +548,7 @@ def test_get_job_logs_with_page_cursor(mock_service_with_job_routes):
         workspace="default",
         name="test-job-123",
         query_params={"page_cursor": "cursor_abc_123"},
+        job_reference_kind=None,
     )
 
 
@@ -559,9 +569,7 @@ def test_get_job_logs_with_tail(mock_service_with_job_routes):
     assert response_data["prev_page"] == "prev_cursor_123"
 
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"tail": 2},
+        workspace="default", name="test-job-123", query_params={"tail": 2}, job_reference_kind=None
     )
 
 
@@ -591,6 +599,7 @@ def test_get_job_logs_with_both_parameters(mock_service_with_job_routes):
         workspace="default",
         name="test-job-123",
         query_params={"limit": 5, "page_cursor": "combined_cursor_xyz"},
+        job_reference_kind=None,
     )
 
 
@@ -615,9 +624,7 @@ def test_get_job_logs_with_zero_limit(mock_service_with_job_routes):
 
     # limit=0 is not None, so it is included in query_params.
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"limit": 0},
+        workspace="default", name="test-job-123", query_params={"limit": 0}, job_reference_kind=None
     )
 
 
@@ -640,9 +647,7 @@ def test_get_job_logs_empty_page_cursor(mock_service_with_job_routes):
 
     # Empty string is not None, so it is included in query_params.
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"page_cursor": ""},
+        workspace="default", name="test-job-123", query_params={"page_cursor": ""}, job_reference_kind=None
     )
 
 
@@ -664,9 +669,7 @@ def test_get_job_logs_job_not_found(mock_service_with_job_routes):
 
     # Verify the jobs client was called
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="nonexistent-job",
-        query_params={},
+        workspace="default", name="nonexistent-job", query_params={}, job_reference_kind=None
     )
 
 
@@ -689,9 +692,7 @@ def test_get_job_logs_large_limit(mock_service_with_job_routes):
     assert response_data["total"] == 1000
 
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"limit": 1000},
+        workspace="default", name="test-job-123", query_params={"limit": 1000}, job_reference_kind=None
     )
 
 
@@ -718,9 +719,7 @@ def test_get_job_logs_special_characters_in_cursor(mock_service_with_job_routes)
 
     # Verify the jobs client was called with correct parameters (decoded)
     mock_jobs.list_job_logs.assert_called_once_with(
-        workspace="default",
-        name="test-job-123",
-        query_params={"page_cursor": special_cursor},
+        workspace="default", name="test-job-123", query_params={"page_cursor": special_cursor}, job_reference_kind=None
     )
 
 
@@ -782,6 +781,7 @@ def test_get_job_logs_response_structure(mock_service_with_job_routes):
         workspace="default",
         name="test-job-456",
         query_params={"limit": 2, "page_cursor": "middle_cursor"},
+        job_reference_kind=None,
     )
 
 
@@ -1061,7 +1061,7 @@ def test_list_job_results_includes_download_url(mock_service_with_job_routes):
     assert "download_url" in result1
     assert (
         result1["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-123/results/result1/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-123/results/result1/download?job_reference_kind=id"
     )
 
     result2 = response_data["data"][1]
@@ -1069,11 +1069,13 @@ def test_list_job_results_includes_download_url(mock_service_with_job_routes):
     assert "download_url" in result2
     assert (
         result2["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-123/results/result2/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-123/results/result2/download?job_reference_kind=id"
     )
 
     # Verify the jobs client was called correctly
-    mock_jobs.list_job_results.assert_called_once_with(name="test-job-123", workspace="default")
+    mock_jobs.list_job_results.assert_called_once_with(
+        name="test-job-123", workspace="default", job_reference_kind=None
+    )
 
 
 def test_list_job_results_empty_list(mock_service_with_job_routes):
@@ -1093,7 +1095,9 @@ def test_list_job_results_empty_list(mock_service_with_job_routes):
     assert len(response_data["data"]) == 0
 
     # Verify the jobs client was called correctly
-    mock_jobs.list_job_results.assert_called_once_with(name="test-job-456", workspace="default")
+    mock_jobs.list_job_results.assert_called_once_with(
+        name="test-job-456", workspace="default", job_reference_kind=None
+    )
 
 
 def test_list_job_results_forwards_attempt_filter(mock_service_with_job_routes):
@@ -1107,9 +1111,7 @@ def test_list_job_results_forwards_attempt_filter(mock_service_with_job_routes):
 
     assert response.status_code == 200
     mock_jobs.list_job_results.assert_awaited_once_with(
-        name="test-job",
-        workspace="default",
-        query_params={"attempt_id": "current"},
+        name="test-job", workspace="default", query_params={"attempt_id": "current"}, job_reference_kind=None
     )
 
 
@@ -1141,7 +1143,7 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert "download_url" in response_data
     assert (
         response_data["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-789/results/test_result/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-789/results/test_result/download?job_reference_kind=id"
     )
 
     # Verify other fields are preserved
@@ -1151,7 +1153,9 @@ def test_get_job_result_includes_download_url(mock_service_with_job_routes):
     assert response_data["artifact_url"] == "default/test-fileset#test_result"
 
     # Verify the jobs client was called correctly
-    mock_jobs.get_job_result.assert_awaited_once_with(name="test_result", job="test-job-789", workspace="default")
+    mock_jobs.get_job_result.assert_awaited_once_with(
+        name="test_result", job="test-job-789", workspace="default", job_reference_kind=None
+    )
 
 
 def test_get_job_result_download_url_format(mock_service_with_job_routes):
@@ -1182,12 +1186,12 @@ def test_get_job_result_download_url_format(mock_service_with_job_routes):
     assert "download_url" in response_data
     assert (
         response_data["download_url"]
-        == "http://testserver/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1/download"
+        == "http://testserver/v2/workspaces/default/test/jobs/test-job-abc/results/evaluation_report_v1/download?job_reference_kind=id"
     )
 
     # Verify the jobs client was called correctly
     mock_jobs.get_job_result.assert_awaited_once_with(
-        name="evaluation_report_v1", job="test-job-abc", workspace="default"
+        name="evaluation_report_v1", job="test-job-abc", workspace="default", job_reference_kind=None
     )
 
 
@@ -1219,7 +1223,7 @@ def test_list_job_results_download_url_different_job_ids(mock_service_with_job_r
         assert len(response_data["data"]) == 1
         assert (
             response_data["data"][0]["download_url"]
-            == f"http://testserver/v2/workspaces/default/test/jobs/{job_id}/results/output/download"
+            == f"http://testserver/v2/workspaces/default/test/jobs/{job_id}/results/output/download?job_reference_kind=id"
         )
 
         # Reset mock for next iteration
@@ -1244,7 +1248,7 @@ def test_get_job_result_not_found(mock_service_with_job_routes):
 
     # Verify the jobs client was called
     mock_jobs.get_job_result.assert_awaited_once_with(
-        name="nonexistent-result", job="nonexistent-job", workspace="default"
+        name="nonexistent-result", job="nonexistent-job", workspace="default", job_reference_kind=None
     )
 
 
@@ -1262,7 +1266,9 @@ def test_get_job_result_needs_no_attempt_selector(mock_service_with_job_routes):
     response = TestClient(app).get("/v2/workspaces/default/test/jobs/test-job/results/output")
 
     assert response.status_code == 200
-    mock_jobs.get_job_result.assert_awaited_once_with(name="output", job="test-job", workspace="default")
+    mock_jobs.get_job_result.assert_awaited_once_with(
+        name="output", job="test-job", workspace="default", job_reference_kind=None
+    )
 
 
 # Tests for entity_client injection
@@ -2019,7 +2025,9 @@ class TestSDKExceptionHandling:
     ):
         app, mock_jobs = mock_service_with_job_routes
         client = TestClient(app, raise_server_exceptions=False)
-        mock_jobs.get_job = AsyncMock(return_value=_resp(create_mock_platform_job("my-job").model_copy(update=stored)))
+        mock_jobs.get_job_metadata = AsyncMock(
+            return_value=_resp(create_mock_platform_job("my-job").model_copy(update=stored))
+        )
         action = AsyncMock()
         setattr(mock_jobs, client_method, action)
         body = {"json": {"pause_ttl_seconds": 600}} if method == "patch" else {}

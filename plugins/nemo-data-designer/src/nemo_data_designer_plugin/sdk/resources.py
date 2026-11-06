@@ -54,6 +54,7 @@ from nemo_helix_plugin.client.errors import NemoHTTPError
 from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, DataDesignerClient
 from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobRequest, PreviewRequest
 from nemo_helix_plugin.functions.frames import Done, Error, Heartbeat
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.models.client import AsyncModelsClient, ModelsClient
 from nemo_helix_plugin.models.types import ModelProvider as NHXModelProvider
 from nemo_helix_plugin.sdk import NemoPluginSDKResources
@@ -304,7 +305,9 @@ class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
         request = DataDesignerJobConfig(config=config, num_records=num_records)
         return self._submit_named_job("create", request, workspace=workspace, wait_until_done=wait_until_done)
 
-    def get_job_resource(self, job_name: str, workspace: str | None = None) -> DataDesignerJobResource:
+    def get_job_resource(
+        self, job_name: str, workspace: str | None = None, *, job_reference_kind: JobReferenceKind | None = None
+    ) -> DataDesignerJobResource:
         """Get a high-level resource for an existing data generation job.
 
         Args:
@@ -319,10 +322,20 @@ class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
             ValueError: If the job ID provided is empty.
         """
         try:
-            self._data_designer_client.get_job(workspace=workspace, name=job_name).data()
+            job = self._data_designer_client.get_job(
+                workspace=workspace, name=job_name, job_reference_kind=job_reference_kind
+            ).data()
         except Exception as e:
             raise _get_error(e) from e
-        return DataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
+        return DataDesignerJobResource(
+            job_name=job.name, job_id=job.id, client=self._data_designer_client, workspace=workspace
+        )
+
+    def get_job_resource_by_id(self, job_id: str, workspace: str | None = None) -> DataDesignerJobResource:
+        return self.get_job_resource(job_id, workspace, job_reference_kind=JobReferenceKind.ID)
+
+    def get_job_resource_by_name(self, job_name: str, workspace: str | None = None) -> DataDesignerJobResource:
+        return self.get_job_resource(job_name, workspace, job_reference_kind=JobReferenceKind.NAME)
 
     def get_default_model_configs(self) -> list[dd.ModelConfig]:
         """Default model configs are not supported in the NeMo Helix Data Designer service."""
@@ -450,6 +463,7 @@ class DataDesignerResource(_BaseDataDesignerResource[NemoClient]):
             logger.info(f"  |-- job name: {job.name}")
             job_client = DataDesignerJobResource(
                 job_name=job.name,
+                job_id=job.id,
                 client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,
@@ -545,7 +559,9 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
         request = DataDesignerJobConfig(config=config, num_records=num_records)
         return await self._submit_named_job("create", request, workspace=workspace, wait_until_done=wait_until_done)
 
-    async def get_job_resource(self, job_name: str, workspace: str | None = None) -> AsyncDataDesignerJobResource:
+    async def get_job_resource(
+        self, job_name: str, workspace: str | None = None, *, job_reference_kind: JobReferenceKind | None = None
+    ) -> AsyncDataDesignerJobResource:
         """Get a high-level resource for an existing data generation job.
 
         Args:
@@ -560,11 +576,23 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
             ValueError: If the job ID provided is empty.
         """
         try:
-            response = await self._data_designer_client.get_job(workspace=workspace, name=job_name)
-            response.data()
+            response = await self._data_designer_client.get_job(
+                workspace=workspace, name=job_name, job_reference_kind=job_reference_kind
+            )
+            job = response.data()
         except Exception as e:
             raise _get_error(e) from e
-        return AsyncDataDesignerJobResource(job_name=job_name, client=self._data_designer_client, workspace=workspace)
+        return AsyncDataDesignerJobResource(
+            job_name=job.name, job_id=job.id, client=self._data_designer_client, workspace=workspace
+        )
+
+    async def get_job_resource_by_id(self, job_id: str, workspace: str | None = None) -> AsyncDataDesignerJobResource:
+        return await self.get_job_resource(job_id, workspace, job_reference_kind=JobReferenceKind.ID)
+
+    async def get_job_resource_by_name(
+        self, job_name: str, workspace: str | None = None
+    ) -> AsyncDataDesignerJobResource:
+        return await self.get_job_resource(job_name, workspace, job_reference_kind=JobReferenceKind.NAME)
 
     async def get_default_model_configs(self) -> list[dd.ModelConfig]:
         """Default model configs are not supported in the NeMo Helix Data Designer service."""
@@ -661,6 +689,7 @@ class AsyncDataDesignerResource(_BaseDataDesignerResource[AsyncNemoClient]):
             logger.info(f"  |-- job name: {job.name}")
             job_client = AsyncDataDesignerJobResource(
                 job_name=job.name,
+                job_id=job.id,
                 client=self._data_designer_client,
                 workspace=workspace,
                 job_collection=job_name,

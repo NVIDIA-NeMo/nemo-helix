@@ -46,6 +46,7 @@ from pydantic import BaseModel
 from pytest_mock import MockerFixture
 
 _JOB_PAYLOAD = {
+    "id": "job-immutable-id",
     "name": "job-123",
     "status": "created",
     "spec": {
@@ -58,14 +59,14 @@ _JOB_PAYLOAD = {
         "dataset": [{"expected": "a", "output": "a"}],
     },
 }
-_STATUS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
-_AGGREGATE_URL = (
-    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/aggregate-scores/download"
-)
+_STATUS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/status"
+_AGGREGATE_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/results/aggregate-scores/download"
 _ROW_SCORES_URL = (
-    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/row-scores/download"
+    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/results/row-scores/download"
 )
-_ARTIFACTS_URL = "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
+_ARTIFACTS_URL = (
+    "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/results/artifacts/download"
+)
 
 
 @pytest.fixture
@@ -254,7 +255,7 @@ def test_get_job_status_delegates_to_metric_jobs_resource(
         _STATUS_URL,
         content=None,
         headers={"Authorization": "Bearer platform-token"},
-        params=None,
+        params={"job_reference_kind": "id"},
     )
 
 
@@ -466,8 +467,16 @@ def test_get_result_returns_evaluation_result(
         ("GET", _ROW_SCORES_URL),
     ]
     assert [call.kwargs for call in http_client.stream.call_args_list] == [
-        {"content": None, "headers": {"Authorization": "Bearer platform-token"}, "params": None},
-        {"content": None, "headers": {"Authorization": "Bearer platform-token"}, "params": None},
+        {
+            "content": None,
+            "headers": {"Authorization": "Bearer platform-token"},
+            "params": {"job_reference_kind": "id"},
+        },
+        {
+            "content": None,
+            "headers": {"Authorization": "Bearer platform-token"},
+            "params": {"job_reference_kind": "id"},
+        },
     ]
 
 
@@ -542,7 +551,7 @@ def test_download_artifacts_extracts_artifact_tarball(
         _ARTIFACTS_URL,
         content=None,
         headers={"Authorization": "Bearer platform-token"},
-        params=None,
+        params={"job_reference_kind": "id"},
     )
 
 
@@ -634,7 +643,11 @@ async def test_async_get_job_status_delegates_to_metric_jobs_resource(
     status = _status_response("active")
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+        assert (
+            str(request.url.copy_with(query=None))
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/status"
+        )
+        assert request.url.params["job_reference_kind"] == "id"
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=status.model_dump(mode="json"))
 
@@ -654,7 +667,11 @@ async def test_async_get_job_status_accepts_nullable_detail_fields(
     payload["error_details"] = None
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert str(request.url) == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/status"
+        assert (
+            str(request.url.copy_with(query=None))
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/status"
+        )
+        assert request.url.params["job_reference_kind"] == "id"
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, json=payload)
 
@@ -676,9 +693,9 @@ async def test_async_get_result_collects_async_row_score_stream(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer platform-token"
-        if str(request.url).endswith("/aggregate-scores/download"):
+        if request.url.path.endswith("/aggregate-scores/download"):
             return httpx.Response(200, json=aggregate_scores.model_dump(mode="json"))
-        if str(request.url).endswith("/row-scores/download"):
+        if request.url.path.endswith("/row-scores/download"):
             return httpx.Response(
                 200,
                 text="\n".join(json.dumps(row_score.model_dump(mode="json")) for row_score in row_scores) + "\n",
@@ -713,9 +730,9 @@ async def test_async_get_result_filters_aggregate_fields(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer platform-token"
-        if str(request.url).endswith("/aggregate-scores/download"):
+        if request.url.path.endswith("/aggregate-scores/download"):
             return httpx.Response(200, json=aggregate_scores.model_dump(mode="json"))
-        if str(request.url).endswith("/row-scores/download"):
+        if request.url.path.endswith("/row-scores/download"):
             return httpx.Response(
                 200,
                 text="\n".join(json.dumps(row_score.model_dump(mode="json")) for row_score in row_scores) + "\n",
@@ -748,8 +765,8 @@ async def test_async_download_artifacts_extracts_artifact_tarball(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert (
-            str(request.url)
-            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-123/results/artifacts/download"
+            str(request.url.copy_with(query=None))
+            == "https://nhx.test/apis/evals/v2/workspaces/client-ws/evaluate/jobs/job-immutable-id/results/artifacts/download"
         )
         assert request.headers["authorization"] == "Bearer platform-token"
         return httpx.Response(200, content=_artifact_tar_bytes())
@@ -772,9 +789,9 @@ async def test_async_get_result_ignores_blank_jsonl_lines(
 
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer platform-token"
-        if str(request.url).endswith("/aggregate-scores/download"):
+        if request.url.path.endswith("/aggregate-scores/download"):
             return httpx.Response(200, json=aggregate_scores.model_dump(mode="json"))
-        if str(request.url).endswith("/row-scores/download"):
+        if request.url.path.endswith("/row-scores/download"):
             return httpx.Response(
                 200,
                 text="\n\n".join(json.dumps(row_score.model_dump(mode="json")) for row_score in row_scores) + "\n\n",
@@ -825,4 +842,63 @@ async def test_async_wait_until_done_returns_after_completed_status(
         timeout=2.0,
         pending_timeout=1.0,
         poll_interval=0.1,
+    )
+
+
+def test_name_only_compatibility_constructor_binds_id_once():
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        payload = (
+            _status_response("completed").model_dump(mode="json")
+            if request.url.path.endswith("/status")
+            else _JOB_PAYLOAD
+        )
+        return httpx.Response(200, json=payload)
+
+    with httpx.Client(transport=httpx.MockTransport(handle)) as transport:
+        client = EvaluatorClient(base_url="https://nhx.test", http_client=transport)
+        resource = EvaluatorJobResource(
+            job=EvaluatorJob.model_validate({**_JOB_PAYLOAD, "id": None}), client=client, workspace="client-ws"
+        )
+        resource.get_job_status()
+        resource.get_job_status()
+    assert resource.name == "job-123"
+    assert len(calls) == 3
+    assert calls[0].url.path.endswith("/jobs/job-123")
+    assert not calls[0].url.params
+    assert all(
+        request.url.path.endswith("/jobs/job-immutable-id/status") and request.url.params["job_reference_kind"] == "id"
+        for request in calls[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_async_name_only_compatibility_constructor_binds_id_once():
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        payload = (
+            _status_response("completed").model_dump(mode="json")
+            if request.url.path.endswith("/status")
+            else _JOB_PAYLOAD
+        )
+        return httpx.Response(200, json=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as transport:
+        client = AsyncEvaluatorClient(base_url="https://nhx.test", http_client=transport)
+        resource = AsyncEvaluatorJobResource(
+            job=EvaluatorJob.model_validate({**_JOB_PAYLOAD, "id": None}), client=client, workspace="client-ws"
+        )
+        await resource.get_job_status()
+        await resource.get_job_status()
+    assert resource.name == "job-123"
+    assert len(calls) == 3
+    assert calls[0].url.path.endswith("/jobs/job-123")
+    assert not calls[0].url.params
+    assert all(
+        request.url.path.endswith("/jobs/job-immutable-id/status") and request.url.params["job_reference_kind"] == "id"
+        for request in calls[1:]
     )

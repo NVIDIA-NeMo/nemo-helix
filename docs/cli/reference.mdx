@@ -4148,7 +4148,7 @@ Cancel a platform job by name or ID.
 **Usage:**
 
 ```shell
-nemo jobs cancel [OPTIONS] NAME
+nemo jobs cancel [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4158,6 +4158,8 @@ nemo jobs cancel [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4231,7 +4233,7 @@ Delete a platform job by name or ID.
 **Usage:**
 
 ```shell
-nemo jobs delete [OPTIONS] NAME
+nemo jobs delete [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4241,6 +4243,8 @@ nemo jobs delete [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4253,7 +4257,7 @@ Get paginated logs for a platform job.
 **Usage:**
 
 ```shell
-nemo jobs get-logs [OPTIONS] NAME
+nemo jobs get-logs [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4270,6 +4274,8 @@ nemo jobs get-logs [OPTIONS] NAME
 * `--tail <INTEGER>`: Number of newest log lines to return
 * `--task-id`: Filter logs by task ID
 * `--all-pages`: Fetch all pages
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4289,7 +4295,7 @@ Get the status of a platform job.
 **Usage:**
 
 ```shell
-nemo jobs get-status [OPTIONS] NAME
+nemo jobs get-status [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4299,6 +4305,8 @@ nemo jobs get-status [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4384,7 +4392,7 @@ Pause a platform job by name or ID.
 **Usage:**
 
 ```shell
-nemo jobs pause [OPTIONS] NAME
+nemo jobs pause [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4394,6 +4402,8 @@ nemo jobs pause [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4410,7 +4420,7 @@ Resume a paused platform job by name or ID.
 **Usage:**
 
 ```shell
-nemo jobs resume [OPTIONS] NAME
+nemo jobs resume [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4420,6 +4430,8 @@ nemo jobs resume [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4436,7 +4448,7 @@ Rerun a failed platform job from surviving storage.
 **Usage:**
 
 ```shell
-nemo jobs rerun [OPTIONS] NAME
+nemo jobs rerun [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4446,6 +4458,8 @@ nemo jobs rerun [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4473,6 +4487,8 @@ nemo jobs control [OPTIONS] NAME
 
 * `--pause-ttl-seconds <INTEGER>`: How long to keep storage after a pause, measured from the pause. Cannot exceed the platform maximum.
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4489,7 +4505,7 @@ Get a platform job by name or ID.
 **Usage:**
 
 ```shell
-nemo jobs get [OPTIONS] NAME
+nemo jobs get [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4499,6 +4515,8 @@ nemo jobs get [OPTIONS] NAME
 **Options:**
 
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4515,7 +4533,7 @@ Update a job description or the definition used by future attempts.
 **Usage:**
 
 ```shell
-nemo jobs update [OPTIONS] NAME
+nemo jobs update [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4528,6 +4546,8 @@ nemo jobs update [OPTIONS] NAME
 * `--description`
 * `--spec`: JSON string
 * `--platform-spec`: JSON string
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4549,7 +4569,7 @@ Watch a platform job until it reaches a terminal status.
 **Usage:**
 
 ```shell
-nemo jobs watch [OPTIONS] NAME
+nemo jobs watch [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4566,6 +4586,8 @@ nemo jobs watch [OPTIONS] NAME
 * `--timeout <INTEGER RANGE>`: Maximum watch time in seconds
 * `--poll-interval <INTEGER RANGE>`: Seconds between status checks [default: 3]
 * `--history, --no-history`: Include logs already present before watching
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4578,7 +4600,7 @@ Print the newest lines from a platform job log.
 **Usage:**
 
 ```shell
-nemo jobs tail [OPTIONS] NAME
+nemo jobs tail [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4592,6 +4614,8 @@ nemo jobs tail [OPTIONS] NAME
 * `--attempt-id`: Filter logs to an attempt ID or 'current'
 * `--step-id`: Filter logs to a step ID
 * `--task-id`: Filter logs to a task ID
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4623,7 +4647,7 @@ List execution attempts for a job.
 **Usage:**
 
 ```shell
-nemo jobs attempts list [OPTIONS] JOB
+nemo jobs attempts list [OPTIONS] [JOB]
 ```
 
 **Arguments:**
@@ -4638,6 +4662,8 @@ nemo jobs attempts list [OPTIONS] JOB
 * `--page-size <INTEGER RANGE>`
 * `--sort <CHOICE>`: [possible values: seq, -seq]
 * `--all-pages`: Fetch all pages
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4668,6 +4694,8 @@ nemo jobs attempts get [OPTIONS] ATTEMPT
 
 * `--job`: Job name or ID (required).
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4730,6 +4758,8 @@ nemo jobs results create [OPTIONS] NAME
 * `--attempt-id`: Producing attempt ID
 * `--artifact-storage-type <CHOICE>`: (required) [possible values: fileset]
 * `--artifact-url`: (required)
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4763,6 +4793,8 @@ nemo jobs results download [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--output-file, -o <PATH>`: Output file path (required).
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4775,7 +4807,7 @@ List results for a job.
 **Usage:**
 
 ```shell
-nemo jobs results list [OPTIONS] NAME
+nemo jobs results list [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4787,6 +4819,8 @@ nemo jobs results list [OPTIONS] NAME
 * `--workspace`
 * `--attempt-id`: Attempt ID or 'current'
 * `--sort <CHOICE>`: The field to sort by. [possible values: created_at, -created_at, updated_at, -updated_at]
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4817,6 +4851,8 @@ nemo jobs results get [OPTIONS] NAME
 
 * `--job`: Job name or ID
 * `--workspace`
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4853,7 +4889,7 @@ List job steps with pagination and filtering.
 **Usage:**
 
 ```shell
-nemo jobs steps list [OPTIONS] NAME
+nemo jobs steps list [OPTIONS] [NAME]
 ```
 
 **Arguments:**
@@ -4868,6 +4904,8 @@ nemo jobs steps list [OPTIONS] NAME
 * `--page-size <INTEGER>`: Page size.
 * `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at]
 * `--all-pages`: Fetch all pages
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Filter Options:**
 
@@ -4909,6 +4947,8 @@ nemo jobs steps get [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -4951,6 +4991,8 @@ nemo jobs steps update-status [OPTIONS] NAME
 * `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state.  [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--error-details`: Optional error details related to the status update. (JSON string)
 * `--status-details`: Optional status details related to the status update. (JSON string)
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -5020,6 +5062,8 @@ nemo jobs tasks create-or-update [OPTIONS] NAME
 * `--error-stack`
 * `--status <CHOICE>`: Enumeration of possible job statuses. This enum represents the various states a job can be in during its lifecycle, from creation to a terminal state. [possible values: created, queued, pending, active, cancelled, cancelling, error, completed, paused, pausing, resuming]
 * `--status-details`: JSON string
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -5053,6 +5097,8 @@ nemo jobs tasks list [OPTIONS] NAME
 * `--workspace`
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 
@@ -5085,6 +5131,8 @@ nemo jobs tasks get [OPTIONS] NAME
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
+* `--job-id`: Select an immutable Job ID
+* `--job-name`: Select an exact Job name
 
 **Help:**
 

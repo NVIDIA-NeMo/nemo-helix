@@ -22,6 +22,7 @@ from nemo_builder_plugin.upstream import UpstreamError, UpstreamRegistry
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +255,9 @@ class HttpImageBuilder:
 
     async def job_status(self, job: str) -> str | None:
         try:
-            response = await self._jobs.get_job_status(workspace=self._workspace, name=job)
+            response = await self._jobs.get_job_status(
+                workspace=self._workspace, name=job, job_reference_kind=JobReferenceKind.NAME
+            )
         except NotFoundError:
             return None
         return response.data().status.value

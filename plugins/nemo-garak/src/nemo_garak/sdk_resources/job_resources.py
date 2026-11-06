@@ -149,8 +149,9 @@ def _try_parse_log_message(raw_message: str) -> dict[str, str] | None:
 class GarakJobResource:
     """Sync SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: NemoClient, workspace: str) -> None:
+    def __init__(self, *, job_name: str, job_id: str | None = None, platform: NemoClient, workspace: str) -> None:
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
@@ -160,17 +161,31 @@ class GarakJobResource:
         """The unique identifying name of the job."""
         return self._job_name
 
+    def _require_job_id(self) -> str:
+        if self._job_id is None:
+            self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        url = _job_url(self._platform, self._workspace, self._job_name)
-        resp = _platform_get(self._platform, url)
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name)
+        resp = _platform_get(
+            self._platform, url, params=({"job_reference_kind": "id"} if self._job_id is not None else None)
+        )
         resp.raise_for_status()
-        return resp.json()
+        payload = resp.json()
+        job_id = payload.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Jobs response is missing its immutable ID")
+        self._job_id = job_id
+        return payload
 
     def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
-        resp = _platform_get(self._platform, url)
+        url = _job_url(self._platform, self._workspace, self._require_job_id(), "/status")
+        resp = _platform_get(self._platform, url, params={"job_reference_kind": "id"})
         resp.raise_for_status()
         return resp.json().get("status")
 
@@ -204,8 +219,8 @@ class GarakJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
-            resp = _platform_get(self._platform, url, params=params)
+            url = _job_url(self._platform, self._workspace, self._require_job_id(), "/logs")
+            resp = _platform_get(self._platform, url, params={"job_reference_kind": "id", **(params or {})})
             resp.raise_for_status()
             response = resp.json()
             for log in response.get("data", []):
@@ -237,8 +252,10 @@ class GarakJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
-        resp = _platform_get(self._platform, url)
+        url = _job_url(
+            self._platform, self._workspace, self._require_job_id(), f"/results/{ARTIFACTS_RESULT_NAME}/download"
+        )
+        resp = _platform_get(self._platform, url, params={"job_reference_kind": "id"})
         resp.raise_for_status()
         with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
             safe_extract_tar(tar, output_path, error_cls=RuntimeError)
@@ -260,8 +277,9 @@ class GarakJobResource:
 class AsyncGarakJobResource:
     """Async SDK handle for a submitted audit job."""
 
-    def __init__(self, *, job_name: str, platform: AsyncNemoClient, workspace: str) -> None:
+    def __init__(self, *, job_name: str, job_id: str | None = None, platform: AsyncNemoClient, workspace: str) -> None:
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
@@ -271,17 +289,31 @@ class AsyncGarakJobResource:
         """The unique identifying name of the job."""
         return self._job_name
 
+    async def _require_job_id(self) -> str:
+        if self._job_id is None:
+            await self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     async def get_job(self) -> dict[str, object]:
         """Fetch the current job dict."""
-        url = _job_url(self._platform, self._workspace, self._job_name)
-        resp = await _async_platform_get(self._platform, url)
+        url = _job_url(self._platform, self._workspace, self._job_id or self._job_name)
+        resp = await _async_platform_get(
+            self._platform, url, params=({"job_reference_kind": "id"} if self._job_id is not None else None)
+        )
         resp.raise_for_status()
-        return resp.json()
+        payload = resp.json()
+        job_id = payload.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Jobs response is missing its immutable ID")
+        self._job_id = job_id
+        return payload
 
     async def get_job_status(self) -> HelixJobStatus | None:
         """Fetch the current platform status of the job."""
-        url = _job_url(self._platform, self._workspace, self._job_name, "/status")
-        resp = await _async_platform_get(self._platform, url)
+        url = _job_url(self._platform, self._workspace, await self._require_job_id(), "/status")
+        resp = await _async_platform_get(self._platform, url, params={"job_reference_kind": "id"})
         resp.raise_for_status()
         return resp.json().get("status")
 
@@ -315,8 +347,8 @@ class AsyncGarakJobResource:
         page_cursor = None
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
-            url = _job_url(self._platform, self._workspace, self._job_name, "/logs")
-            resp = await _async_platform_get(self._platform, url, params=params)
+            url = _job_url(self._platform, self._workspace, await self._require_job_id(), "/logs")
+            resp = await _async_platform_get(self._platform, url, params={"job_reference_kind": "id", **(params or {})})
             resp.raise_for_status()
             response = resp.json()
             for log in response.get("data", []):
@@ -348,8 +380,10 @@ class AsyncGarakJobResource:
                 "Wait until the job completes before downloading artifacts."
             )
         output_path = Path(path or self._job_name)
-        url = _job_url(self._platform, self._workspace, self._job_name, f"/results/{ARTIFACTS_RESULT_NAME}/download")
-        resp = await _async_platform_get(self._platform, url)
+        url = _job_url(
+            self._platform, self._workspace, await self._require_job_id(), f"/results/{ARTIFACTS_RESULT_NAME}/download"
+        )
+        resp = await _async_platform_get(self._platform, url, params={"job_reference_kind": "id"})
         resp.raise_for_status()
         await asyncio.to_thread(
             lambda: _extract_tar(resp.content, output_path),

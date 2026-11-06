@@ -14,6 +14,8 @@ class _SafeSynthesizerMethods:
     create_job = method(endpoints.create_job)
     list_jobs = method(endpoints.list_jobs)
     get_job = method(endpoints.get_job)
+    get_job_by_id = method(endpoints.get_job_by_id)
+    get_job_by_name = method(endpoints.get_job_by_name)
 
 
 class SafeSynthesizerClient(_SafeSynthesizerMethods, NemoClient):

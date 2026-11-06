@@ -23,6 +23,7 @@ from nemo_helix_plugin.data_designer.client import AsyncDataDesignerClient, Data
 from nemo_helix_plugin.data_designer.types import DataDesignerJobCollection, DataDesignerJobLogsQueryParams
 from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         client: DataDesignerClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
@@ -114,6 +116,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         platform: NemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
@@ -123,6 +126,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         client: DataDesignerClient | None = None,
         platform: NemoClient | None = None,
         workspace: str | None,
@@ -136,6 +140,7 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
             raise TypeError("Pass only one of client= or platform=")
 
         self._job_name = job_name
+        self._job_id = job_id
         self._client = client
         self._workspace = workspace
         self._job_collection = job_collection
@@ -150,6 +155,13 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         """
         return self._job_name
 
+    def _require_job_id(self) -> str:
+        if self._job_id is None:
+            self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     def get_job(self) -> dict[str, object]:
         """Get the current job.
 
@@ -158,10 +170,14 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         """
         try:
             job = self._client.get_job(
-                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                name=self._job_id or self._job_name,
+                job_reference_kind=JobReferenceKind.ID if self._job_id is not None else None,
             ).data()
         except NemoHTTPError as exc:
             raise _get_job_error(exc) from exc
+        self._job_id = job.id
         return job.model_dump(mode="json")
 
     def get_job_status(self) -> HelixJobStatus | None:
@@ -171,8 +187,8 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
             The current job status.
         """
         try:
-            status = self._client.get_job_status(
-                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            status = self._client.get_job_status_by_id(
+                workspace=self._workspace, job_collection=self._job_collection, job_id=self._require_job_id()
             ).data()
         except NemoHTTPError as exc:
             raise _get_job_error(exc) from exc
@@ -230,10 +246,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         while True:
             query_params: DataDesignerJobLogsQueryParams | None = {"page_cursor": page_cursor} if page_cursor else None
             try:
-                page = self._client.get_job_logs(
+                page = self._client.get_job_logs_by_id(
                     workspace=self._workspace,
                     job_collection=self._job_collection,
-                    name=self._job_name,
+                    job_id=self._require_job_id(),
                     query_params=query_params,
                 ).data()
             except NemoHTTPError as exc:
@@ -261,10 +277,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         logger.info(f"🏺 Downloading artifacts from Job {self._job_name!r}")
 
         try:
-            artifact_bytes = self._client.download_job_result(
+            artifact_bytes = self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=self._require_job_id(),
                 name=ARTIFACTS_RESULT_NAME,
             ).read()
         except NemoHTTPError as exc:
@@ -272,10 +288,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         _extract_artifact_bytes(artifact_bytes, output_path)
 
         try:
-            analysis_bytes = self._client.download_job_result(
+            analysis_bytes = self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=self._require_job_id(),
                 name=ANALYSIS_RESULT_NAME,
             ).read()
             analysis = DatasetProfilerResults.model_validate_json(analysis_bytes)
@@ -299,10 +315,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
         """
         self._check_if_result_available(ANALYSIS_RESULT_NAME)
         try:
-            analysis_bytes = self._client.download_job_result(
+            analysis_bytes = self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=self._require_job_id(),
                 name=ANALYSIS_RESULT_NAME,
             ).read()
             return DatasetProfilerResults.model_validate_json(analysis_bytes)
@@ -315,10 +331,10 @@ class DataDesignerJobResource(WithRecordSamplerMixin):
             return
         if status == "active" or status in TERMINAL_INCOMPLETE_STATUSES:
             try:
-                self._client.get_job_result(
+                self._client.get_job_result_by_id(
                     workspace=self._workspace,
                     job_collection=self._job_collection,
-                    job=self._job_name,
+                    job_id=self._require_job_id(),
                     name=result_name,
                 ).data()
                 if status == "active":
@@ -366,6 +382,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         client: AsyncDataDesignerClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
@@ -376,6 +393,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         platform: AsyncNemoClient,
         workspace: str | None,
         job_collection: DataDesignerJobCollection = "create",
@@ -385,6 +403,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         self,
         *,
         job_name: str,
+        job_id: str | None = None,
         client: AsyncDataDesignerClient | None = None,
         platform: AsyncNemoClient | None = None,
         workspace: str | None,
@@ -398,6 +417,7 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
             raise TypeError("Pass only one of client= or platform=")
 
         self._job_name = job_name
+        self._job_id = job_id
         self._client = client
         self._workspace = workspace
         self._job_collection = job_collection
@@ -412,6 +432,13 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         """
         return self._job_name
 
+    async def _require_job_id(self) -> str:
+        if self._job_id is None:
+            await self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     async def get_job(self) -> dict[str, object]:
         """Get the current job.
 
@@ -420,10 +447,14 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         """
         try:
             response = await self._client.get_job(
-                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+                workspace=self._workspace,
+                job_collection=self._job_collection,
+                name=self._job_id or self._job_name,
+                job_reference_kind=JobReferenceKind.ID if self._job_id is not None else None,
             )
         except NemoHTTPError as exc:
             raise _get_job_error(exc) from exc
+        self._job_id = response.data().id
         return response.data().model_dump(mode="json")
 
     async def get_job_status(self) -> HelixJobStatus | None:
@@ -433,8 +464,8 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
             The current job status.
         """
         try:
-            response = await self._client.get_job_status(
-                workspace=self._workspace, job_collection=self._job_collection, name=self._job_name
+            response = await self._client.get_job_status_by_id(
+                workspace=self._workspace, job_collection=self._job_collection, job_id=await self._require_job_id()
             )
         except NemoHTTPError as exc:
             raise _get_job_error(exc) from exc
@@ -492,10 +523,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         while True:
             query_params: DataDesignerJobLogsQueryParams | None = {"page_cursor": page_cursor} if page_cursor else None
             try:
-                response = await self._client.get_job_logs(
+                response = await self._client.get_job_logs_by_id(
                     workspace=self._workspace,
                     job_collection=self._job_collection,
-                    name=self._job_name,
+                    job_id=await self._require_job_id(),
                     query_params=query_params,
                 )
             except NemoHTTPError as exc:
@@ -524,10 +555,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         logger.info(f"🏺 Downloading artifacts from Job {self._job_name!r}")
 
         try:
-            artifact_response = await self._client.download_job_result(
+            artifact_response = await self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=await self._require_job_id(),
                 name=ARTIFACTS_RESULT_NAME,
             )
             artifact_bytes = await artifact_response.read()
@@ -536,10 +567,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         await asyncio.to_thread(_extract_artifact_bytes, artifact_bytes, output_path)
 
         try:
-            analysis_response = await self._client.download_job_result(
+            analysis_response = await self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=await self._require_job_id(),
                 name=ANALYSIS_RESULT_NAME,
             )
             analysis_bytes = await analysis_response.read()
@@ -564,10 +595,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
         """
         await self._check_if_result_available(ANALYSIS_RESULT_NAME)
         try:
-            response = await self._client.download_job_result(
+            response = await self._client.download_job_result_by_id(
                 workspace=self._workspace,
                 job_collection=self._job_collection,
-                job=self._job_name,
+                job_id=await self._require_job_id(),
                 name=ANALYSIS_RESULT_NAME,
             )
             analysis_bytes = await response.read()
@@ -581,10 +612,10 @@ class AsyncDataDesignerJobResource(WithRecordSamplerMixin):
             return
         if status == "active" or status in TERMINAL_INCOMPLETE_STATUSES:
             try:
-                response = await self._client.get_job_result(
+                response = await self._client.get_job_result_by_id(
                     workspace=self._workspace,
                     job_collection=self._job_collection,
-                    job=self._job_name,
+                    job_id=await self._require_job_id(),
                     name=result_name,
                 )
                 response.data()

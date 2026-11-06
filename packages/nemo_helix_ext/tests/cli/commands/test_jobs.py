@@ -254,9 +254,7 @@ def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
         )
 
     jobs_client.download_job_result.assert_called_once_with(
-        workspace="test-workspace",
-        job="job-a",
-        name="metrics",
+        workspace="test-workspace", job="job-a", name="metrics", job_reference_kind=None
     )
     assert output_file.read_bytes() == b"metric-bytes"
     assert binary_response.stream_calls == 1
@@ -307,9 +305,7 @@ def test_list_results_forwards_attempt_filter() -> None:
         )
 
     jobs_client.list_job_results.assert_called_once_with(
-        workspace="test-workspace",
-        name="job-a",
-        query_params={"attempt_id": "current"},
+        workspace="test-workspace", name="job-a", query_params={"attempt_id": "current"}, job_reference_kind=None
     )
 
 
@@ -349,6 +345,7 @@ def test_get_logs_uses_source_owned_cursor_page() -> None:
             "tail": 100,
             "task_id": "task-a",
         },
+        job_reference_kind=None,
     )
     output_page = format_output.call_args.args[0]
     assert output_page.data == [log]
@@ -385,6 +382,7 @@ def test_tail_platform_job_renders_newest_log_lines() -> None:
             "step_id": "step-a",
             "task_id": "task-a",
         },
+        job_reference_kind=None,
     )
     render_job_logs.assert_called_once_with([log])
 
@@ -488,6 +486,7 @@ def test_list_attempts_uses_paginated_source_owned_route() -> None:
         workspace="test-workspace",
         job="job-a",
         query_params={"page": 1, "page_size": 25, "sort": "-seq"},
+        job_reference_kind=None,
     )
     assert format_output.call_args.args[0].data == [attempt]
 
@@ -510,9 +509,7 @@ def test_retrieve_current_attempt_uses_selector() -> None:
         )
 
     jobs_client.get_job_attempt.assert_called_once_with(
-        workspace="test-workspace",
-        job="job-a",
-        attempt="current",
+        workspace="test-workspace", job="job-a", attempt="current", job_reference_kind=None
     )
 
 
@@ -557,9 +554,7 @@ def test_retrieve_result_uses_job_owned_route() -> None:
         )
 
     jobs_client.get_job_result.assert_called_once_with(
-        workspace="test-workspace",
-        job="job-a",
-        name="metrics",
+        workspace="test-workspace", job="job-a", name="metrics", job_reference_kind=None
     )
 
 
@@ -616,7 +611,7 @@ def test_rerun_is_sent_once() -> None:
         rerun_jobs(_ctx(SimpleNamespace()), name="job-a", workspace="test-workspace")
 
     jobs_client.with_retry.assert_called_once_with(RetryPolicy(max_retries=0))
-    jobs_client.rerun_job.assert_called_once_with(job="job-a", workspace="test-workspace")
+    jobs_client.rerun_job.assert_called_once_with(job="job-a", workspace="test-workspace", job_reference_kind=None)
 
 
 def test_jobs_result_get_code_generation_uses_job_route() -> None:
@@ -661,3 +656,54 @@ def test_jobs_task_update_code_generation_uses_attempt_route() -> None:
     assert "update_attempt_step_task" in code
     assert "update_job_step_task" not in code
     assert "attempt=args['attempt_id']" in code
+
+
+def test_cli_explicit_id_can_replace_the_positional_job():
+    from nemo_helix_ext.cli.commands.jobs import app
+    from nemo_helix_plugin.jobs.client import JobsClient
+    from nemo_helix_plugin.jobs.selectors import JobReferenceKind
+    from typer.testing import CliRunner
+
+    jobs = MagicMock(spec=JobsClient)
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs._jobs_client_from_state", return_value=(MagicMock(), jobs)),
+        patch("nemo_helix_ext.cli.commands.jobs.handle_code_generation", return_value=False),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        result = CliRunner().invoke(
+            app, ["get", "--job-id", "immutable-id", "--workspace", "team"], obj=_ctx(MagicMock()).obj
+        )
+    assert result.exit_code == 0, result.output
+    jobs.get_job.assert_called_once_with(name="immutable-id", workspace="team", job_reference_kind=JobReferenceKind.ID)
+
+
+def test_nested_cli_keeps_the_child_name_separate_from_job_selection():
+    from nemo_helix_ext.cli.commands.jobs import app
+    from nemo_helix_plugin.jobs.client import JobsClient
+    from nemo_helix_plugin.jobs.selectors import JobReferenceKind
+    from typer.testing import CliRunner
+
+    jobs = MagicMock(spec=JobsClient)
+    with (
+        patch("nemo_helix_ext.cli.commands.jobs._jobs_client_from_state", return_value=(MagicMock(), jobs)),
+        patch("nemo_helix_ext.cli.commands.jobs.handle_code_generation", return_value=False),
+        patch("nemo_helix_ext.cli.commands.jobs.format_output"),
+    ):
+        result = CliRunner().invoke(
+            app, ["results", "get", "report", "--job-name", "training"], obj=_ctx(MagicMock()).obj
+        )
+    assert result.exit_code == 0, result.output
+    jobs.get_job_result.assert_called_once_with(
+        job="training", name="report", workspace=None, job_reference_kind=JobReferenceKind.NAME
+    )
+
+
+def test_cli_rejects_conflicting_selector_forms_before_client_creation():
+    from nemo_helix_ext.cli.commands.jobs import app
+    from typer.testing import CliRunner
+
+    with patch("nemo_helix_ext.cli.commands.jobs._jobs_client_from_state") as get_client:
+        for args in (["get", "old-reference", "--job-id", "id"], ["get", "--job-id", "id", "--job-name", "name"]):
+            result = CliRunner().invoke(app, args, obj=_ctx(MagicMock()).obj)
+            assert result.exit_code != 0, result.output
+        get_client.assert_not_called()

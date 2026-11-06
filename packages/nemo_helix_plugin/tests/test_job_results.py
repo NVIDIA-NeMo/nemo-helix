@@ -335,16 +335,16 @@ def test_result_manager_fetches_metadata_from_typed_task_client() -> None:
         jobs_client=JobsClient.from_client(client),
     )
 
-    assert manager._fetch_job_metadata() == ("att-123", "test-fileset", "shared-fs")
+    assert manager._fetch_job_metadata() == ("job-1", "att-123", "test-fileset", "shared-fs")
 
 
 def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(tmp_path: Path) -> None:
     artifact = tmp_path / "metrics.json"
     artifact.write_text("{}")
     jobs_client = MagicMock()
-    current_job = MagicMock(attempt_id="attempt-b", fileset="results", output_location=None)
-    jobs_client.get_job.return_value.data.return_value = current_job
-    jobs_client.create_job_result.return_value.data.return_value = _platform_record(
+    current_job = MagicMock(id="job-immutable-id", attempt_id="attempt-b", fileset="results", output_location=None)
+    jobs_client.get_job_by_name.return_value.data.return_value = current_job
+    jobs_client.create_job_result_by_id.return_value.data.return_value = _platform_record(
         url="fileset://ws/results#results/attempt-a/metrics"
     )
     file_manager = MagicMock()
@@ -362,6 +362,6 @@ def test_result_manager_uses_explicit_runtime_attempt_for_path_and_registration(
         manager.create_result("metrics", artifact)
 
     assert file_manager.upload.call_args.kwargs["remote_path"] == "results/attempt-a/metrics"
-    jobs_client.create_job_result.assert_called_once()
-    call = jobs_client.create_job_result.call_args
+    jobs_client.create_job_result_by_id.assert_called_once()
+    call = jobs_client.create_job_result_by_id.call_args
     assert call.kwargs["body"].attempt_id == "attempt-a"

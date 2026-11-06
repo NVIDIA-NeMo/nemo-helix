@@ -94,6 +94,7 @@ from nemo_helix_plugin.intake.client import AsyncIntakeClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.file_manager import AsyncFilesetFileManager
 from nemo_helix_plugin.jobs.schemas import HelixJobResultResponse, HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobMetadataReferenceKind
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, HelixJobResponse
 from nhx_evals_sdk.agent_eval.results import AgentEvalSummary
 from pydantic import ValidationError
@@ -139,14 +140,14 @@ class RunJobs(Protocol):
         would give. A name with no Job (or one saved without its attempt) is left out."""
         ...
 
-    async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
-        """Result ``name`` of the Job now under name ``job``; its ``job`` field is that Job's id."""
+    async def result_by_id(self, job_id: str, name: str) -> HelixJobResultResponse | None:
+        """Result ``name`` of immutable Job ``job_id``."""
         ...
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse: ...
 
-    async def has_steps(self, name: str) -> bool:
-        """True when Job ``name``'s current attempt has at least one step."""
+    async def has_steps_by_id(self, job_id: str) -> bool:
+        """True when immutable Job ``job_id`` has at least one step."""
         ...
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary: ...
@@ -155,8 +156,8 @@ class RunJobs(Protocol):
 
     async def get_record(self, name: str) -> AgentEvalResultEntity | None: ...
 
-    async def cancel(self, name: str) -> None:
-        """Cancel Job ``name``; a missing or already finished Job is not an error."""
+    async def cancel_by_id(self, job_id: str) -> None:
+        """Cancel immutable Job ``job_id``; a missing or already finished Job is not an error."""
         ...
 
     @property
@@ -223,17 +224,17 @@ class GuardedRunJobs:
             listed |= await self._jobs_call(lambda chunk=chunk: self._inner.list_named(chunk), read=True)
         return listed
 
-    async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
-        return await self._jobs_call(lambda: self._inner.result(job, name), read=True)
+    async def result_by_id(self, job_id: str, name: str) -> HelixJobResultResponse | None:
+        return await self._jobs_call(lambda: self._inner.result_by_id(job_id, name), read=True)
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
         return await self._jobs_call(lambda: self._inner.create(request))
 
-    async def has_steps(self, name: str) -> bool:
-        return await self._jobs_call(lambda: self._inner.has_steps(name), read=True)
+    async def has_steps_by_id(self, job_id: str) -> bool:
+        return await self._jobs_call(lambda: self._inner.has_steps_by_id(job_id), read=True)
 
-    async def cancel(self, name: str) -> None:
-        await self._jobs_call(lambda: self._inner.cancel(name))
+    async def cancel_by_id(self, job_id: str) -> None:
+        await self._jobs_call(lambda: self._inner.cancel_by_id(job_id))
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary:
         return await self._inner.read_summary(bundle_ref)
@@ -758,7 +759,11 @@ class TasksetRunReconciler:
         try:
             job = _ours(job, member)
             status = _status(job) if job is not None else None
-            result = await jobs.result(member.task_job, DEFAULT_RESULT_NAME) if status == "completed" else None
+            result = (
+                await jobs.result_by_id(job.id, DEFAULT_RESULT_NAME)
+                if job is not None and status == "completed"
+                else None
+            )
         except Exception as exc:
             logger.debug("Run %s: reading Job %s failed: %s", state.run.name, member.task_job, exc)
             return  # keeps its slot and its last job_status
@@ -840,8 +845,9 @@ class TasksetRunReconciler:
         """
         assert member.task_job is not None
         if member.name in state.matched and member.job_status is not HelixJobStatus.CANCELLING:
+            assert member.job_id is not None
             try:
-                await jobs.cancel(member.task_job)
+                await jobs.cancel_by_id(member.job_id)
             except Exception as exc:
                 logger.info("Run %s: cancelling Job %s failed: %s", state.run.name, member.task_job, exc)
         if forced:
@@ -962,7 +968,7 @@ class TasksetRunReconciler:
                     elif _status(job) in TERMINAL_JOB_STATUSES:
                         gone = True
                     else:
-                        gone = entry.sent_at is not None and conclusive and not await jobs.has_steps(entry.name)
+                        gone = entry.sent_at is not None and conclusive and not await jobs.has_steps_by_id(job.id)
             except Exception as exc:
                 logger.debug("Reading stuck Job %s/%s failed: %s", entry.workspace, entry.name, exc)
                 continue
@@ -1182,7 +1188,7 @@ async def finalize_run(
     if bundle is None or _status(bundle) not in TERMINAL_JOB_STATUSES:
         return PassOutcome("bundling", bundle.name if bundle else "")
     if _status(bundle) == "completed":
-        result = await jobs.result(bundle.name, DEFAULT_RESULT_NAME)
+        result = await jobs.result_by_id(bundle.id, DEFAULT_RESULT_NAME)
         if result is not None and result.job != bundle.id:
             # The name changed hands between the two reads; the next pass sees the other Job and refuses it.
             return PassOutcome("bundling", f"{bundle.name} was replaced before its result was read")
@@ -1269,7 +1275,7 @@ async def _miss_finalization(
             if bundle is None or _status(bundle) in TERMINAL_JOB_STATUSES:
                 continue
             await _own_bundle_job(bundle, run, plan, accepted)
-            await jobs.cancel(name)
+            await jobs.cancel_by_id(bundle.id)
         except ForeignBundleJobError as exc:
             logger.warning("Run %s: not cancelling: %s", run.name, exc)
         except Exception as exc:
@@ -1349,8 +1355,9 @@ async def _create_bundle_job(
     """Create bundle Job ``name``; return the Job now under that name, if Jobs shows one."""
     request = await _bundle_request(run, plan, accepted, name, finished_at)
     try:
-        await jobs.create(request)
+        created = await jobs.create(request)
         logger.info("Created bundle Job %s for run %s (%d tasks)", name, run.name, len(accepted))
+        return created
     except ConflictError:
         pass  # another pass created it, or someone else did; the caller checks
     return await jobs.get(name)
@@ -1361,7 +1368,7 @@ async def _stalled(job: HelixJobResponse, jobs: RunJobs, now: datetime) -> bool:
     return (
         _status(job) == "created"
         and now - _utc(job.created_at) >= timedelta(seconds=STALLED_CREATE_SECONDS)
-        and not await jobs.has_steps(job.name)
+        and not await jobs.has_steps_by_id(job.id)
     )
 
 
@@ -1477,7 +1484,7 @@ class JobsServiceRunJobs:
 
     async def get(self, name: str) -> HelixJobResponse | None:
         try:
-            return (await self._jobs.get_job(workspace=self._workspace, name=name)).data()
+            return (await self._jobs.get_job_by_name(workspace=self._workspace, job_name=name)).data()
         except NotFoundError:
             return None
 
@@ -1492,10 +1499,15 @@ class JobsServiceRunJobs:
         )
         return {job.name: job for job in response.page().items if job.name in names}
 
-    async def result(self, job: str, name: str) -> HelixJobResultResponse | None:
+    async def result_by_id(self, job_id: str, name: str) -> HelixJobResultResponse | None:
         try:
-            return (await self._jobs.get_job_result(workspace=self._workspace, job=job, name=name)).data()
+            return (await self._jobs.get_job_result_by_id(workspace=self._workspace, job_id=job_id, name=name)).data()
         except NotFoundError:
+            # A missing result is conclusive only while the checked Job still exists.
+            # If it disappeared, defer settlement until the next identity read.
+            await self._jobs.get_job_metadata(
+                workspace=self._workspace, job=job_id, job_reference_kind=JobMetadataReferenceKind.ID
+            )
             return None
 
     async def create(self, request: CreateHelixJobRequest) -> HelixJobResponse:
@@ -1503,8 +1515,10 @@ class JobsServiceRunJobs:
             raise RuntimeError("this Jobs adapter only reads")
         return (await self._creating_jobs.create_job(workspace=self._workspace, body=request)).data()
 
-    async def has_steps(self, name: str) -> bool:
-        response = await self._jobs.list_steps(workspace=self._workspace, name=name, query_params={"page_size": 1})
+    async def has_steps_by_id(self, job_id: str) -> bool:
+        response = await self._jobs.list_steps_by_id(
+            workspace=self._workspace, job_id=job_id, query_params={"page_size": 1}
+        )
         return bool(response.page().items)
 
     async def read_summary(self, bundle_ref: str) -> AgentEvalSummary:
@@ -1530,16 +1544,19 @@ class JobsServiceRunJobs:
         except NemoEntityNotFoundError:
             return None
 
-    async def cancel(self, name: str) -> None:
+    async def cancel_by_id(self, job_id: str) -> None:
         try:
-            await self._jobs.cancel_job(workspace=self._workspace, name=name)
+            await self._jobs.cancel_job_by_id(workspace=self._workspace, job_id=job_id)
         except NotFoundError:
             pass
         except ConflictError:
             # 409 also covers a Job still running: a rerun replaced its step, or it is pausing. Raise for
             # those so the run stays open and the next pass cancels again; a Job that finished is done.
-            job = await self.get(name)
-            if job is not None and _status(job) not in TERMINAL_JOB_STATUSES:
+            try:
+                job = (await self._jobs.get_job_by_id(workspace=self._workspace, job_id=job_id)).data()
+            except NotFoundError:
+                return
+            if _status(job) not in TERMINAL_JOB_STATUSES:
                 raise
 
 

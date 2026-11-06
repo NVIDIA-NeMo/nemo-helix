@@ -13,6 +13,7 @@ from nemo_helix_ext.cli.commands.inference.deployments import create_deployments
 from nemo_helix_ext.cli.commands.jobs import create_jobs, watch_platform_job
 from nemo_helix_ext.cli.core.job_watch_renderer import JobWatchRenderResult
 from nemo_helix_plugin.client.client import NemoClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import CreateModelDeploymentRequest
 
@@ -22,6 +23,7 @@ PLATFORM_SPEC_JSON = '{"steps":[{"name":"step-one","executor":{"provider":"cpu",
 class _CreatedJob:
     def __init__(self, *, name: str = "created-job", workspace: str = "result-workspace") -> None:
         self.name = name
+        self.id = "created-job-id"
         self.workspace = workspace
 
     def model_dump(self, *, mode: str = "json") -> dict[str, str]:
@@ -157,10 +159,11 @@ def test_jobs_create_watch_uses_sdk_watcher_and_outputs_created_job() -> None:
         timestamp_format=None,
     )
     jobs_client.watch_job.assert_called_once_with(
-        "created-job",
+        "created-job-id",
         workspace="result-workspace",
         timeout=42,
         poll_interval=7,
+        job_reference_kind=JobReferenceKind.ID,
     )
     render_events.assert_called_once_with(events, resource_label="job")
 
@@ -312,11 +315,12 @@ def test_jobs_create_wait_uses_quiet_waiter_and_outputs_created_job() -> None:
     _assert_created_job_request(jobs_client)
     wait_for_job.assert_called_once_with(
         jobs_client,
-        "created-job",
+        "created-job-id",
         workspace="result-workspace",
         resource_label="job",
         timeout=42,
         poll_interval=7,
+        job_reference_kind=JobReferenceKind.ID,
     )
     format_output.assert_called_once_with(
         created_job,
@@ -500,6 +504,7 @@ def test_jobs_watch_command_uses_sdk_watcher() -> None:
         timeout=42,
         poll_interval=7,
         include_history=False,
+        job_reference_kind=None,
     )
     render_events.assert_called_once_with(events, resource_label="job")
 

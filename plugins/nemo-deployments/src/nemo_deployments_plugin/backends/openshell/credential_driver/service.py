@@ -118,9 +118,11 @@ class CredentialDriver(driver_grpc.CredentialDriverServicer):
             if not workload.attempt_id or not workload.step_name:
                 raise RegistrationDenied("Missing job execution identity.")
             jobs = AsyncJobsClient.from_client(self.secrets_client)
-            job = (await jobs.get_job(workspace=workload.workspace, name=workload.name)).data()
+            job = (await jobs.get_job_by_name(workspace=workload.workspace, job_name=workload.name)).data()
             step = (
-                await jobs.get_job_step(workspace=workload.workspace, job=workload.name, name=workload.step_name)
+                await jobs.get_attempt_step_by_id(
+                    workspace=workload.workspace, job_id=job.id, attempt=workload.attempt_id, name=workload.step_name
+                )
             ).data()
             active = {"created", "pending", "active"}
             if (

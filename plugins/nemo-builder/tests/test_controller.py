@@ -17,6 +17,7 @@ from nemo_helix_plugin.client.errors import ConflictError, NotFoundError, Permis
 from nemo_helix_plugin.entities import EntityNotFoundError
 from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 
@@ -67,7 +68,8 @@ class FakeJobs:
             raise ConflictError(_response(409))
         self.jobs[body.name] = SimpleNamespace(status=HelixJobStatus.CREATED, custom_fields=body.custom_fields)
 
-    async def get_job(self, *, workspace: str, name: str):
+    async def get_job(self, *, workspace: str, name: str, job_reference_kind: JobReferenceKind | None = None):
+        assert job_reference_kind is JobReferenceKind.NAME
         if name not in self.jobs:
             raise NotFoundError(_response(404))
         return SimpleNamespace(data=lambda: self.jobs[name])

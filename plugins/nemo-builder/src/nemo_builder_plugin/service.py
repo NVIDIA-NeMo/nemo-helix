@@ -46,6 +46,7 @@ from nemo_helix_plugin.entity_client import (
     get_entity_client,
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nemo_helix_plugin.service import NemoService, RouterSpec
@@ -103,7 +104,9 @@ def _build_router() -> APIRouter:
             return await jobs_client.create_job(workspace=workspace, body=request)
 
         async def get_job_fields(name: str):
-            return (await jobs_client.get_job(workspace=workspace, name=name)).data().custom_fields or {}
+            return (
+                await jobs_client.get_job(workspace=workspace, name=name, job_reference_kind=JobReferenceKind.NAME)
+            ).data().custom_fields or {}
 
         secrets_client = AsyncSecretsClient.from_client(client)
 

@@ -17,6 +17,7 @@ from nemo_helix_plugin.client.errors import NotFoundError, raise_for_status
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 
 NOW = datetime(2026, 9, 18, 12, tzinfo=timezone.utc)
 PREVIOUS = NOW - timedelta(days=1)
@@ -61,7 +62,9 @@ async def test_success_reads_only_tracked_job_and_advances_to_attempt_start() ->
     assert status.status == AnalysisConfigStatus.IDLE
     assert status.last_successful_run_at == NOW
     assert status.last_completed_at is not None
-    jobs.get_job.assert_awaited_once_with(workspace="default", name="scheduled-job")
+    jobs.get_job.assert_awaited_once_with(
+        workspace="default", name="scheduled-job", job_reference_kind=JobReferenceKind.NAME
+    )
     entities.list.assert_not_awaited()
     assert pending.status == AnalysisConfigStatus.RUNNING
 
@@ -237,7 +240,8 @@ async def test_same_prefix_agents_submitted_together_reconcile_only_their_own_jo
             status=HelixJobStatus.COMPLETED, custom_fields={"insights_analysis_agent": agent}
         )
 
-    async def get_job(*, workspace, name):
+    async def get_job(*, workspace, name, job_reference_kind: JobReferenceKind | None = None):
+        assert job_reference_kind is JobReferenceKind.NAME
         return MagicMock(data=lambda: submitted_jobs[name])
 
     entities.create.side_effect = save

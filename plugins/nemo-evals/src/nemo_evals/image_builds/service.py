@@ -32,6 +32,7 @@ from nemo_helix_plugin.entities import EntityClient, ListResponse, PaginationInf
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
 from nemo_helix_plugin.filter_ops import ComparisonOperation, FilterOperator, LogicalOperation
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.schema import Page, PaginationData
 
@@ -99,7 +100,9 @@ class JobsServiceBuildJobs:
 
     async def get(self, name: str) -> BuildJob | None:
         try:
-            job = (await self._jobs.get_job(workspace=self._workspace, name=name)).data()
+            job = (
+                await self._jobs.get_job(workspace=self._workspace, name=name, job_reference_kind=JobReferenceKind.NAME)
+            ).data()
         except NotFoundError:
             return None
         return BuildJob(status=job.status.value, custom_fields=job.custom_fields)

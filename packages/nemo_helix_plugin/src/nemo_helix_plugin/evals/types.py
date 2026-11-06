@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, TypedDict
 
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.jobs.types import validate_output_location
+from nemo_helix_plugin.jobs.types import JobSelectorQueryParams, validate_output_location
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, RootModel, StrictBool, field_validator, model_validator
 
@@ -521,7 +521,7 @@ class ListTasksetsQueryParams(TypedDict, total=False):
     filter: NotRequired[str]
 
 
-class EvaluatorJobLogsQueryParams(TypedDict, total=False):
+class EvaluatorJobLogsQueryParams(JobSelectorQueryParams, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
     tail: NotRequired[int]

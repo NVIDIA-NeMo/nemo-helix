@@ -535,6 +535,7 @@ class _CreateCapturingSdk:
             self.body_json = body.model_dump_json(exclude_unset=True)
             stored = json.loads(self.body_json)
             job_resp = SimpleNamespace(
+                source="test-source",
                 id="job-1",
                 attempt_id="attempt-1",
                 name=body.name or "job-1",

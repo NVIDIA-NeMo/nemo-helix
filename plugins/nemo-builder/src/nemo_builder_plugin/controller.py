@@ -30,6 +30,7 @@ from nemo_helix_plugin.entities import EntityClient, EntityConflictError, Entity
 from nemo_helix_plugin.entities.client import AsyncEntitiesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_helix_plugin.log_utils import sanitize_for_log
 from pydantic import ValidationError
@@ -127,7 +128,11 @@ class BuildQueueController(NemoController):
     async def _still_running(self, build: QueuedBuild) -> bool:
         assert self._jobs is not None
         try:
-            job = (await self._jobs.get_job(workspace=build.workspace, name=build.name)).data()
+            job = (
+                await self._jobs.get_job(
+                    workspace=build.workspace, name=build.name, job_reference_kind=JobReferenceKind.NAME
+                )
+            ).data()
         except NotFoundError:
             return False
         except Exception:
@@ -149,7 +154,11 @@ class BuildQueueController(NemoController):
                 await jobs.create_job(workspace=build.workspace, body=request)
             except ConflictError as exc:
                 try:
-                    job = (await self._jobs.get_job(workspace=build.workspace, name=build.name)).data()
+                    job = (
+                        await self._jobs.get_job(
+                            workspace=build.workspace, name=build.name, job_reference_kind=JobReferenceKind.NAME
+                        )
+                    ).data()
                 except NotFoundError:
                     # A 409 with no job behind it is a refusal, such as a secret the job names going missing.
                     await self._refuse(build, f"not built: Jobs refused the build job (HTTP 409): {exc.detail}")

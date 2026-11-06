@@ -58,8 +58,9 @@ def _raise_for_status(resp: httpx.Response) -> None:
 
 @with_logging
 class AnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: NemoClient, workspace: str | None):
+    def __init__(self, *, job_name: str, job_id: str | None = None, platform: NemoClient, workspace: str | None):
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
@@ -67,21 +68,35 @@ class AnonymizerJobResource:
     def _client(self) -> httpx.Client:
         return self._platform._client
 
+    def _require_job_id(self) -> str:
+        if self._job_id is None:
+            self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     def get_job(self) -> dict[str, object]:
         resp = self._client().get(
-            _job_url(self._platform, self._workspace, _job_path(self._job_name)),
+            _job_url(self._platform, self._workspace, _job_path((self._job_id or self._job_name))),
             headers=http.headers(self._platform),
+            params=({"job_reference_kind": "id"} if self._job_id is not None else None),
         )
         _raise_for_status(resp)
-        return resp.json()
+        payload = resp.json()
+        job_id = payload.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Jobs response is missing its immutable ID")
+        self._job_id = job_id
+        return payload
 
     def get_job_status(self) -> HelixJobStatus | None:
         resp = self._client().get(
-            _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
+            _job_url(self._platform, self._workspace, _job_path(self._require_job_id(), "/status")),
             headers=http.headers(self._platform),
+            params={"job_reference_kind": "id"},
         )
         _raise_for_status(resp)
-        return resp.json().get("status")
+        return resp.json().get("status", params={"job_reference_kind": "id"})
 
     def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         return _status_is_complete(self.get_job_status(), raise_if_not_complete)
@@ -102,20 +117,20 @@ class AnonymizerJobResource:
         while True:
             params = {"page_cursor": page_cursor} if page_cursor else None
             resp = self._client().get(
-                _job_url(self._platform, self._workspace, _job_path(self._job_name, "/logs")),
+                _job_url(self._platform, self._workspace, _job_path(self._require_job_id(), "/logs")),
                 headers=http.headers(self._platform),
-                params=params,
+                params={"job_reference_kind": "id", **(params or {})},
             )
             _raise_for_status(resp)
             response = resp.json()
-            for log in response.get("data", []):
+            for log in response.get("data", [], params={"job_reference_kind": "id"}):
                 try:
                     deserialized = json.loads(log["message"])
                     if isinstance(deserialized, dict) and "message" in deserialized:
                         logs.append(deserialized)
                 except Exception:
                     pass
-            page_cursor = response.get("next_page")
+            page_cursor = response.get("next_page", params={"job_reference_kind": "id"})
             if page_cursor is None:
                 break
         return logs
@@ -129,9 +144,10 @@ class AnonymizerJobResource:
             _job_url(
                 self._platform,
                 self._workspace,
-                _job_path(self._job_name, f"/results/{http.path_segment(ARTIFACTS_RESULT_NAME)}/download"),
+                _job_path(self._require_job_id(), f"/results/{http.path_segment(ARTIFACTS_RESULT_NAME)}/download"),
             ),
             headers=http.headers(self._platform),
+            params={"job_reference_kind": "id"},
         )
         _raise_for_status(resp)
         with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:
@@ -162,8 +178,9 @@ class AnonymizerJobResource:
 
 @with_logging
 class AsyncAnonymizerJobResource:
-    def __init__(self, *, job_name: str, platform: AsyncNemoClient, workspace: str | None):
+    def __init__(self, *, job_name: str, job_id: str | None = None, platform: AsyncNemoClient, workspace: str | None):
         self._job_name = job_name
+        self._job_id = job_id
         self._platform = platform
         self._workspace = workspace
         self._consecutive_poll_errors = 0
@@ -171,21 +188,35 @@ class AsyncAnonymizerJobResource:
     def _client(self) -> httpx.AsyncClient:
         return self._platform._client
 
+    async def _require_job_id(self) -> str:
+        if self._job_id is None:
+            await self.get_job()
+        if self._job_id is None:
+            raise RuntimeError("Job identity was not resolved")
+        return self._job_id
+
     async def get_job(self) -> dict[str, object]:
         resp = await self._client().get(
-            _job_url(self._platform, self._workspace, _job_path(self._job_name)),
+            _job_url(self._platform, self._workspace, _job_path((self._job_id or self._job_name))),
             headers=http.headers(self._platform),
+            params=({"job_reference_kind": "id"} if self._job_id is not None else None),
         )
         _raise_for_status(resp)
-        return resp.json()
+        payload = resp.json()
+        job_id = payload.get("id")
+        if not isinstance(job_id, str) or not job_id:
+            raise ValueError("Jobs response is missing its immutable ID")
+        self._job_id = job_id
+        return payload
 
     async def get_job_status(self) -> HelixJobStatus | None:
         resp = await self._client().get(
-            _job_url(self._platform, self._workspace, _job_path(self._job_name, "/status")),
+            _job_url(self._platform, self._workspace, _job_path(await self._require_job_id(), "/status")),
             headers=http.headers(self._platform),
+            params={"job_reference_kind": "id"},
         )
         _raise_for_status(resp)
-        return resp.json().get("status")
+        return resp.json().get("status", params={"job_reference_kind": "id"})
 
     async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         return _status_is_complete(await self.get_job_status(), raise_if_not_complete)
@@ -208,9 +239,12 @@ class AsyncAnonymizerJobResource:
             _job_url(
                 self._platform,
                 self._workspace,
-                _job_path(self._job_name, f"/results/{http.path_segment(ARTIFACTS_RESULT_NAME)}/download"),
+                _job_path(
+                    await self._require_job_id(), f"/results/{http.path_segment(ARTIFACTS_RESULT_NAME)}/download"
+                ),
             ),
             headers=http.headers(self._platform),
+            params={"job_reference_kind": "id"},
         )
         _raise_for_status(resp)
         with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tar:

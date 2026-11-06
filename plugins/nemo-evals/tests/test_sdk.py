@@ -341,7 +341,7 @@ def test_sync_executor_creates_evaluator_job() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     executor = _SyncEvaluatorPluginExecutor(client=platform)
@@ -371,7 +371,7 @@ def test_sync_executor_create_does_not_use_asyncio_thread_bridge() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     executor = _SyncEvaluatorPluginExecutor(client=platform)
@@ -389,7 +389,7 @@ def test_sync_executor_create_uses_platform_workspace_by_default() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/platform-ws/evaluate/jobs",
-        {"name": "job-123", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     executor = _SyncEvaluatorPluginExecutor(client=platform)
@@ -426,7 +426,7 @@ def test_sync_executor_waits_when_requested(mocker: MockerFixture) -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     wait = mocker.patch("nemo_evals.sdk.job_resources.EvaluatorJobResource.wait_until_done")
@@ -452,7 +452,7 @@ def test_sync_resource_gets_existing_job_resource() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "GET",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs/job-123",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
 
@@ -487,7 +487,7 @@ def test_sync_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "GET",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
-        {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = Evaluator(platform)
 
@@ -711,7 +711,7 @@ async def test_async_executor_creates_evaluator_job() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     executor = _AsyncEvaluatorPluginExecutor(client=platform)
@@ -744,7 +744,7 @@ async def test_async_executor_waits_when_requested(mocker: MockerFixture) -> Non
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     wait = mocker.patch(
@@ -772,7 +772,7 @@ async def test_async_resource_gets_existing_job_resource() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "GET",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs/job-123",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
 
@@ -794,7 +794,7 @@ async def test_async_resource_url_encodes_reserved_chars_in_job_name() -> None:
     platform.http_client_mock.request.return_value = _json_response(
         "GET",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs/job%2F123%3F",
-        {"name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job/123?", "status": "created", "spec": _EXACT_MATCH_SPEC},
     )
     resource = AsyncEvaluator(platform)
 
@@ -935,7 +935,7 @@ async def test_async_executor_remote_submit_uses_platform_async_client_headers_a
     platform.http_client_mock.request.return_value = _json_response(
         "POST",
         "http://127.0.0.1:8000/apis/evals/v2/workspaces/ws/evaluate/jobs",
-        {"name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
+        {"id": "job-immutable-id", "name": "job-123", "status": "created", "spec": _EXACT_MATCH_SPEC},
         status_code=201,
     )
     executor = _AsyncEvaluatorPluginExecutor(client=platform)

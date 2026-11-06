@@ -18,6 +18,7 @@ from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
+from nemo_helix_plugin.jobs.selectors import ResolvedJobIdentity
 from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest
 from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
@@ -156,16 +157,21 @@ async def test_update_job_without_current_attempt_returns_conflict(
 ):
     with patch.object(
         mock_dispatcher,
-        "update_job",
-        new=AsyncMock(side_effect=JobHasNoAttemptError("Job 'not-run' has not run yet.")),
+        "resolve_job",
+        new=AsyncMock(return_value=ResolvedJobIdentity("job-id", "test-job", "default", None)),
     ):
-        response = await test_client.patch(
-            f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/not-run",
-            json={"description": "updated"},
-        )
+        with patch.object(
+            mock_dispatcher,
+            "update_job",
+            new=AsyncMock(side_effect=JobHasNoAttemptError("Job 'not-run' has not run yet.")),
+        ):
+            response = await test_client.patch(
+                f"/apis/jobs/v2/workspaces/{DEFAULT_WORKSPACE}/jobs/not-run",
+                json={"description": "updated"},
+            )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "Job 'not-run' has not run yet."
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Job 'not-run' has not run yet."
 
 
 @pytest.mark.asyncio
@@ -1737,19 +1743,24 @@ async def test_cancel_job_conflict_hides_internal_transition(
     test_client: AsyncClient,
     mock_dispatcher: JobDispatcher,
 ):
-    raw_error = (
-        "Invalid status transition from HelixJobStatus.RESUMING to HelixJobStatus.CANCELLING for step step-id-123"
-    )
     with patch.object(
-        mock_dispatcher, "cancel_job", new=AsyncMock(side_effect=StateTransitionConflictError(raw_error))
+        mock_dispatcher,
+        "resolve_job",
+        new=AsyncMock(return_value=ResolvedJobIdentity("job-id", "test-job", "default", None)),
     ):
-        response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs/conflicted-job/cancel")
+        raw_error = (
+            "Invalid status transition from HelixJobStatus.RESUMING to HelixJobStatus.CANCELLING for step step-id-123"
+        )
+        with patch.object(
+            mock_dispatcher, "cancel_job", new=AsyncMock(side_effect=StateTransitionConflictError(raw_error))
+        ):
+            response = await test_client.post("/apis/jobs/v2/workspaces/default/jobs/conflicted-job/cancel")
 
-    assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert "Cannot cancel job 'conflicted-job'" in detail
-    assert "HelixJobStatus" not in detail
-    assert "step-id-123" not in detail
+        assert response.status_code == 409
+        detail = response.json()["detail"]
+        assert "Cannot cancel job 'conflicted-job'" in detail
+        assert "HelixJobStatus" not in detail
+        assert "step-id-123" not in detail
 
 
 @pytest.mark.asyncio
@@ -1760,18 +1771,23 @@ async def test_cancel_job_conflict_sanitizes_log_fields(
 ):
     with patch.object(
         mock_dispatcher,
-        "cancel_job",
-        new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
+        "resolve_job",
+        new=AsyncMock(return_value=ResolvedJobIdentity("job-id", "test-job", "default", None)),
     ):
-        with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
-            response = await test_client.post(
-                "/apis/jobs/v2/workspaces/default%0Aforged/jobs/conflicted-job%0D%0Aforged/cancel"
-            )
+        with patch.object(
+            mock_dispatcher,
+            "cancel_job",
+            new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
+        ):
+            with caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"):
+                response = await test_client.post(
+                    "/apis/jobs/v2/workspaces/default%0Aforged/jobs/conflicted-job%0D%0Aforged/cancel"
+                )
 
-    assert response.status_code == 409
-    message = next(record.getMessage() for record in caplog.records if "Cannot cancel job" in record.getMessage())
-    assert "\r" not in message
-    assert "\n" not in message
+        assert response.status_code == 409
+        message = next(record.getMessage() for record in caplog.records if "Cannot cancel job" in record.getMessage())
+        assert "\r" not in message
+        assert "\n" not in message
 
 
 @pytest.mark.asyncio
@@ -1792,10 +1808,15 @@ async def test_job_operation_races_are_not_server_errors(
     expected_status: int,
 ):
     """A concurrent writer moving the job mid-request gives 409, and a deleted job gives 404, never 500."""
-    with patch.object(mock_dispatcher, f"{operation}_job", new=AsyncMock(side_effect=error)):
-        response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/raced-job/{operation}")
+    with patch.object(
+        mock_dispatcher,
+        "resolve_job",
+        new=AsyncMock(return_value=ResolvedJobIdentity("job-id", "test-job", "default", None)),
+    ):
+        with patch.object(mock_dispatcher, f"{operation}_job", new=AsyncMock(side_effect=error)):
+            response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/raced-job/{operation}")
 
-    assert response.status_code == expected_status, response.text
+        assert response.status_code == expected_status, response.text
 
 
 @pytest.mark.asyncio
@@ -1848,28 +1869,33 @@ async def test_update_job_step_conflict_sanitizes_log_fields(
     mock_dispatcher: JobDispatcher,
     caplog,
 ):
-    with (
-        patch.object(
-            mock_dispatcher,
-            "get_current_job_step_by_name",
-            new=AsyncMock(return_value=MagicMock()),
-        ),
-        patch.object(
-            mock_dispatcher,
-            "update_job_status_from_step",
-            new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
-        ),
-        caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
+    with patch.object(
+        mock_dispatcher,
+        "resolve_job",
+        new=AsyncMock(return_value=ResolvedJobIdentity("job-id", "test-job", "default", None)),
     ):
-        response = await test_client.patch(
-            "/apis/jobs/v2/workspaces/default/jobs/job%0Aforged/steps/step%0D%0Aforged/status",
-            json={"status": "pending"},
-        )
+        with (
+            patch.object(
+                mock_dispatcher,
+                "get_current_job_step_by_name",
+                new=AsyncMock(return_value=MagicMock()),
+            ),
+            patch.object(
+                mock_dispatcher,
+                "update_job_status_from_step",
+                new=AsyncMock(side_effect=StateTransitionConflictError("invalid transition")),
+            ),
+            caplog.at_level(logging.INFO, logger="nhx.core.jobs.api.v2.jobs.endpoints"),
+        ):
+            response = await test_client.patch(
+                "/apis/jobs/v2/workspaces/default/jobs/job%0Aforged/steps/step%0D%0Aforged/status",
+                json={"status": "pending"},
+            )
 
-    assert response.status_code == 409
-    message = next(record.getMessage() for record in caplog.records if "Cannot update job step" in record.msg)
-    assert "\r" not in message
-    assert "\n" not in message
+        assert response.status_code == 409
+        message = next(record.getMessage() for record in caplog.records if "Cannot update job step" in record.msg)
+        assert "\r" not in message
+        assert "\n" not in message
 
 
 @pytest.mark.asyncio

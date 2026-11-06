@@ -17,6 +17,7 @@ import pytest
 from nemo_helix_plugin.client.errors import ConflictError, NotFoundError
 from nemo_helix_plugin.iam.types import AuthzResponse
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 
 pytest.importorskip("scaled_evals")
 
@@ -116,19 +117,19 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
         "job-4": HelixJobStatus.COMPLETED,
     }
 
-    async def _get_job_status(*, workspace: str, name: str) -> Any:
+    async def _get_job_status(*, workspace: str, name: str, job_reference_kind: JobReferenceKind | None = None) -> Any:
         if name not in statuses:
             raise NotFoundError(httpx.Response(404, request=httpx.Request("GET", "http://jobs")))
-        return SimpleNamespace(data=lambda: SimpleNamespace(status=statuses[name]))
+        return SimpleNamespace(data=lambda: SimpleNamespace(id="id-" + name, status=statuses[name]))
 
     cancelled: list[str] = []
 
-    async def _cancel_job(*, workspace: str, name: str) -> None:
-        cancelled.append(name)
+    async def _cancel_job(*, workspace: str, job_id: str) -> None:
+        cancelled.append(job_id)
 
     repo = MagicMock()
     controller = ScaledEvalsJobsController()
-    controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status, cancel_job=_cancel_job))
+    controller._jobs = cast(Any, SimpleNamespace(get_job_status=_get_job_status, cancel_job_by_id=_cancel_job))
     monkeypatch.setattr(controller, "_list_cancelled_evaluations", lambda: rows)
     monkeypatch.setattr(controller_module, "EvaluationStore", lambda *_: repo)
 
@@ -137,7 +138,7 @@ async def test_controller_settles_every_cancelled_evaluation_it_inspects(
     # A queued Job is stopped before it pulls an image and runs a cancelled
     # evaluation. A running one is left alone because its task owns sandbox
     # teardown, and cancelling it would race a sandbox launch.
-    assert cancelled == ["job-3"]
+    assert cancelled == ["id-job-3"]
     # A dead Job still holding a sandbox has no task left to release it. It must
     # terminalize, or it pins the head of the teardown window forever and hides
     # the leaked runtime.
@@ -177,7 +178,7 @@ async def test_an_active_job_keeps_its_reconcile_lease_so_the_drain_advances(
 
     inspected: list[str] = []
 
-    async def _get_job_status(*, workspace: str, name: str) -> Any:
+    async def _get_job_status(*, workspace: str, name: str, job_reference_kind: JobReferenceKind | None = None) -> Any:
         inspected.append(name)
         return SimpleNamespace(data=lambda: SimpleNamespace(status=HelixJobStatus.ACTIVE))
 

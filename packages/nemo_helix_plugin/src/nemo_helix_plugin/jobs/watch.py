@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.client import (
     JobsWatchClient,
 )
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import JobLogsQueryParams
 from nemo_helix_plugin.jobs.watch_types import (
     JobLogEvent,
@@ -57,6 +58,7 @@ class _AsyncWatchClients:
 
 @dataclass(frozen=True, slots=True)
 class _WatchOptions:
+    job_reference_kind: JobReferenceKind | None
     workspace: str | None
     attempt_id: str | None
     step_id: str | None
@@ -193,6 +195,7 @@ def watch_job(
     name: str,
     *,
     workspace: str | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
     poll_interval: float = 3,
     timeout: float | None = None,
     include_history: bool = True,
@@ -214,6 +217,7 @@ def watch_job(
     jobs = _SyncWatchClients(status=client, logs=client if include_logs else None)
     options = _WatchOptions(
         workspace=workspace,
+        job_reference_kind=job_reference_kind,
         attempt_id=attempt_id,
         step_id=step_id,
         task_id=task_id,
@@ -235,6 +239,7 @@ def async_watch_job(
     name: str,
     *,
     workspace: str | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
     poll_interval: float = 3,
     timeout: float | None = None,
     include_history: bool = True,
@@ -256,6 +261,7 @@ def async_watch_job(
     jobs = _AsyncWatchClients(status=client, logs=client if include_logs else None)
     options = _WatchOptions(
         workspace=workspace,
+        job_reference_kind=job_reference_kind,
         attempt_id=attempt_id,
         step_id=step_id,
         task_id=task_id,
@@ -287,7 +293,9 @@ def _watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = jobs.status.get_job_status(workspace=options.workspace, name=name)
+            status_response = jobs.status.get_job_status(
+                workspace=options.workspace, name=name, job_reference_kind=options.job_reference_kind
+            )
             status_event = _status_event(status_response.data(), name)
         except Exception as exc:
             if not _is_transient_failure(exc):
@@ -355,7 +363,9 @@ async def _async_watch_job(
     while True:
         deadline.raise_if_expired()
         try:
-            status_response = await jobs.status.get_job_status(workspace=options.workspace, name=name)
+            status_response = await jobs.status.get_job_status(
+                workspace=options.workspace, name=name, job_reference_kind=options.job_reference_kind
+            )
             status_event = _status_event(status_response.data(), name)
         except Exception as exc:
             if not _is_transient_failure(exc):
@@ -580,6 +590,8 @@ def _new_log_events(
 
 def _log_query_params(options: _WatchOptions, *, page_cursor: str | None) -> JobLogsQueryParams | None:
     params: JobLogsQueryParams = {}
+    if options.job_reference_kind is not None:
+        params["job_reference_kind"] = options.job_reference_kind
     if options.attempt_id is not None:
         params["attempt_id"] = options.attempt_id
     if options.step_id is not None:
