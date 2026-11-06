@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
+from httpx import AsyncClient
 from nemo_helix_plugin.inference_middleware import (
     InferenceMiddlewareError,
     InferenceRequest,
@@ -134,7 +135,7 @@ class IgwJudgeTransport:
             **target.required_extra_body,
         }
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout)) as client:
+            async with AsyncClient(timeout=httpx.Timeout(self._timeout)) as client:
                 response = await client.post(url, json=payload, headers=target.outbound_headers)
         except httpx.TimeoutException as exc:
             raise InferenceMiddlewareError(

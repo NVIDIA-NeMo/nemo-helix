@@ -11,13 +11,14 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from subprocess import run
+from sys import executable
 from types import ModuleType
 from typing import Any, Generator
 
@@ -109,7 +110,7 @@ def _run_build_step(cmd: list[str]) -> None:
     # stdout carries this CLI's JSON result. `uv pip compile` echoes the compiled
     # requirements even with --output-file, and pip download prints progress, so an
     # inherited stdout lands both in front of the JSON and breaks a strict consumer.
-    subprocess.run(cmd, check=True, stdout=sys.stderr)
+    run(cmd, check=True, stdout=sys.stderr)
 
 
 def rl_dependency_policy(nemo_rl_root: Path) -> tuple[list[str], list[str]]:
@@ -296,7 +297,7 @@ def _run_pip_download(
     """Download the already-pinned closure with ``pip download --no-deps``."""
     dest.mkdir(parents=True, exist_ok=True)
     cmd = [
-        sys.executable,
+        executable,
         "-m",
         "pip",
         "download",
@@ -751,7 +752,7 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
     """
     whl = _hub_package_wheel(wheels_dir, package_name)
     cmd = [
-        sys.executable,
+        executable,
         "-m",
         "pip",
         "install",
@@ -765,7 +766,7 @@ def _install_hub_package_from_wheels(wheels_dir: Path, package_name: str) -> Non
         "importable afterwards. Run pi-to-gym-conversion from a dedicated conversion "
         "environment rather than the repo .venv if that matters.",
         whl.name,
-        sys.executable,
+        executable,
     )
     logger.info("Installing hub package for dataset load: %s", " ".join(cmd))
     _run_build_step(cmd)

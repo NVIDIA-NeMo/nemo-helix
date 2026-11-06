@@ -96,7 +96,7 @@ def test_compose_workload_exchange_posts_token_exchange_grant(monkeypatch) -> No
         return httpx.Response(200, json={"access_token": exchanged_token, "token_type": "Bearer"}, request=request)
 
     monkeypatch.setenv("NHX_CLIENT_SSL_CERT_FILE", "/tmp/nemo-ca.pem")
-    monkeypatch.setattr("tests.auth_idp.runtime_compose.httpx.post", fake_post)
+    monkeypatch.setattr("tests.auth_idp.runtime_compose.http_post", fake_post)
 
     token = runtime.exchange_workload_token(subject_token)
 

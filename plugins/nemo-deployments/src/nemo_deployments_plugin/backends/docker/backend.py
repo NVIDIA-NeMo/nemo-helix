@@ -125,6 +125,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _docker_from_env(**kwargs: Any) -> docker.DockerClient:
+    import docker
+
+    return docker.from_env(**kwargs)
+
+
 _ONE_SHOT_RESTART_POLICIES = frozenset({"Never", "OnFailure"})
 _EXITED_CONTAINER_STATES = frozenset({"exited", "dead"})
 # Docker rejects a publish with this message when its own allocator already holds
@@ -235,7 +241,7 @@ class DockerDeploymentBackend(DeploymentBackend):
     def _create_client(self) -> docker.DockerClient:
         # docker-py 7.x rejects base_url= on from_env; override DOCKER_HOST instead
         # so TLS env vars (DOCKER_TLS_VERIFY, cert paths) still apply.
-        client = self._docker.from_env(
+        client = _docker_from_env(
             **docker_from_env_kwargs(
                 timeout=self._executor_config.docker_timeout,
                 docker_host=self._executor_config.docker_host,

@@ -9,6 +9,7 @@ import logging
 import os
 import stat
 from dataclasses import dataclass
+from os import chmod
 from pathlib import Path
 from typing import Generic, TypeVar
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 def _try_secure_chmod_dir(path: Path) -> None:
     """Best-effort owner-only permissions on a directory (e.g. ``/tmp`` may reject chmod)."""
     try:
-        os.chmod(path, stat.S_IRWXU)  # 700
+        chmod(path, stat.S_IRWXU)  # 700
     except PermissionError:
         pass
 
@@ -55,7 +56,7 @@ def _write_secure_yaml(path: Path, config_data: dict) -> None:
         if fd >= 0:
             os.close(fd)
     # Existing files keep prior mode under O_TRUNC; enforce 600 after write.
-    os.chmod(path, mode)
+    chmod(path, mode)
 
 
 @dataclass(frozen=True)

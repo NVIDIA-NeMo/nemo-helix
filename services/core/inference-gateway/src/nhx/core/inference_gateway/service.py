@@ -8,6 +8,7 @@ import logging
 from typing import ClassVar, List, Optional, Set
 
 import aiohttp
+from aiohttp import ClientSession
 from fastapi import FastAPI
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nhx.common.service import RouterConfig, Service
@@ -151,7 +152,7 @@ class InferenceGatewayService(Service):
         #   the pattern used by `services/core/files/.../http_session.py`.
         #   Per-host limit prevents one slow provider from starving the rest.
         self._http_client = set_global_http_client(
-            aiohttp.ClientSession(
+            ClientSession(
                 cookie_jar=aiohttp.DummyCookieJar(),
                 auto_decompress=False,
                 skip_auto_headers=["Accept-Encoding"],

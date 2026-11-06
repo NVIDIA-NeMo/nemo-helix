@@ -591,7 +591,7 @@ def test_the_compiled_job_carries_the_placeholder_key(harbor_resolved_task) -> N
 def test_an_agent_whose_connection_names_no_variables_cannot_call_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     """Evals would have nowhere to put the gateway's URL or key, so the agent is refused like one with no connection."""
     agent = SimpleNamespace(MODEL_CONNECTION=ModelConnectionSpec(default_provider="anthropic"))
-    monkeypatch.setattr(gateway_agents.AgentFactory, "get_agent_class", lambda name: agent)
+    monkeypatch.setattr(gateway_agents, "AgentFactory", SimpleNamespace(get_agent_class=lambda name: agent))
     monkeypatch.setitem(
         gateway_agents.PROVIDERS, "anthropic", ProviderAccess(api_key_envs=(), base_url="https://x", base_url_envs=())
     )

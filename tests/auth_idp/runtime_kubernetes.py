@@ -16,6 +16,8 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from subprocess import Popen
+from subprocess import run as run_process
 from time import monotonic
 from time import sleep as pause
 from typing import TypeVar
@@ -23,6 +25,8 @@ from urllib.parse import urlparse
 
 import httpx
 import pytest
+from httpx import Client as HttpClient
+from httpx import get as http_get
 from nemo_helix_ext.client.tls import NHX_CLIENT_SSL_CERT_FILE_ENVVAR, HttpxTLSConfig
 from nemo_helix_plugin.client.client import NemoClient
 from nhx.common.auth.token_claims import groups_from_claim
@@ -239,7 +243,7 @@ def _require_tool(name: str) -> None:
 
 
 def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -260,7 +264,7 @@ def _run(args: list[str], *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS) -
 def _run_with_input(
     args: list[str], input_text: str, *, timeout: float = DEFAULT_COMMAND_TIMEOUT_SECONDS
 ) -> subprocess.CompletedProcess[str]:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -312,7 +316,7 @@ def _write_diagnostic_process(
     *,
     timeout: float = DIAGNOSTIC_COMMAND_TIMEOUT_SECONDS,
 ) -> None:
-    completed = subprocess.run(
+    completed = run_process(
         args,
         cwd=REPO_ROOT,
         text=True,
@@ -451,7 +455,7 @@ def _collect_kubernetes_diagnostics(context: str, cluster_name: str, kubeconfig:
         kubeconfig,
     )
     try:
-        pods = subprocess.run(
+        pods = run_process(
             pod_discovery_args,
             cwd=REPO_ROOT,
             text=True,
@@ -661,7 +665,7 @@ def _kind_import_image_via_ctr(cluster_name: str, image: str) -> None:
             timeout=IMAGE_LOAD_TIMEOUT_SECONDS,
         )
         with Path(image_archive.name).open("rb") as archive:
-            completed = subprocess.run(
+            completed = run_process(
                 [
                     "docker",
                     "exec",
@@ -709,7 +713,7 @@ def _kind_load_docker_image(cluster_name: str, image: str) -> None:
 
 def _docker_image_exists(image: str) -> bool:
     return (
-        subprocess.run(
+        run_process(
             ["docker", "image", "inspect", image],
             cwd=REPO_ROOT,
             stdout=subprocess.DEVNULL,
@@ -984,7 +988,7 @@ def _get_json_with_retries(
     request_tls_config: HttpxTLSConfig = {} if tls_config is None else tls_config
 
     def get_json(remaining: float) -> dict | None:
-        response = httpx.get(url, timeout=min(HTTP_REQUEST_TIMEOUT_SECONDS, remaining), **request_tls_config)
+        response = http_get(url, timeout=min(HTTP_REQUEST_TIMEOUT_SECONDS, remaining), **request_tls_config)
         if response.status_code >= 500:
             return None
         response.raise_for_status()
@@ -1102,7 +1106,7 @@ def _start_port_forward_service(
         log_handle.flush()
         stdout = log_handle
     try:
-        process = subprocess.Popen(
+        process = Popen(
             command,
             cwd=REPO_ROOT,
             stdout=stdout,
@@ -1119,7 +1123,7 @@ def _start_port_forward_service(
         if process.poll() is not None:
             assert process.returncode is not None
             raise AssertionError(_port_forward_exit_message(process.returncode, log_file))
-        return httpx.get(
+        return http_get(
             gateway_url + GATEWAY_READY_PATH,
             timeout=min(PORT_FORWARD_HTTP_TIMEOUT_SECONDS, remaining),
             **tls_config,
@@ -1312,7 +1316,7 @@ class KubernetesAuthIdpRuntime:
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> JsonObject:
-        with httpx.Client(follow_redirects=False, **tls_config) as client:
+        with HttpClient(follow_redirects=False, **tls_config) as client:
             return self._oidc_test_driver.authenticate_device_flow(
                 client,
                 device_authorization_endpoint=device_authorization_endpoint,
@@ -1331,7 +1335,7 @@ class KubernetesAuthIdpRuntime:
         password: str,
         tls_config: HttpxTLSConfig,
     ) -> str:
-        with httpx.Client(follow_redirects=False, **tls_config) as client:
+        with HttpClient(follow_redirects=False, **tls_config) as client:
             return self._oidc_test_driver.complete_authorization(
                 client,
                 authorization_url=authorization_url,
@@ -1505,6 +1509,6 @@ class KubernetesAuthIdpRuntime:
             base_url=self.gateway_base_url,
             auth=token,
             timeout=PLATFORM_API_REQUEST_TIMEOUT_SECONDS,
-            http_client=httpx.Client(verify=self.verify),
+            http_client=HttpClient(verify=self.verify),
             owns_http_client=True,
         )

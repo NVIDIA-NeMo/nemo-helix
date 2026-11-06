@@ -173,7 +173,7 @@ class TestJWTValidator:
             "token_endpoint": "https://sso.example.com/token",
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.common.auth.jwt.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -194,7 +194,7 @@ class TestJWTValidator:
     @pytest.mark.asyncio
     async def test_discover_oidc_config_rejects_non_object_body(self, jwt_validator):
         """OIDC discovery must return a JSON object."""
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.common.auth.jwt.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -212,7 +212,7 @@ class TestJWTValidator:
         """Test that discovery results are cached within TTL."""
         discovery_doc = {"issuer": "https://sso.example.com"}
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.common.auth.jwt.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -236,7 +236,7 @@ class TestJWTValidator:
         discovery_doc_v1 = {"issuer": "https://sso.example.com", "jwks_uri": "https://sso.example.com/jwks-v1"}
         discovery_doc_v2 = {"issuer": "https://sso.example.com", "jwks_uri": "https://sso.example.com/jwks-v2"}
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.common.auth.jwt.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -273,7 +273,7 @@ class TestJWTValidator:
             mock_get_jwks.return_value = mock_jwks
 
             # Make jwt.decode raise ExpiredSignatureError
-            with patch("jwt.decode", side_effect=jwt.ExpiredSignatureError("Token expired")):
+            with patch("nhx.common.auth.jwt.decode", side_effect=jwt.ExpiredSignatureError("Token expired")):
                 result = await jwt_validator.validate_token("expired.token.here")
 
             assert result is None
@@ -288,7 +288,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")):
+            with patch("nhx.common.auth.jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")):
                 result = await jwt_validator.validate_token("invalid.audience.token")
 
             assert result is None
@@ -303,7 +303,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", side_effect=jwt.InvalidIssuerError("Invalid issuer")):
+            with patch("nhx.common.auth.jwt.decode", side_effect=jwt.InvalidIssuerError("Invalid issuer")):
                 result = await jwt_validator.validate_token("invalid.issuer.token")
 
             assert result is None
@@ -311,7 +311,7 @@ class TestJWTValidator:
     @pytest.mark.asyncio
     async def test_validate_unsigned_token_rejected_when_disabled(self, jwt_validator):
         """Unsigned JWTs should raise a specific error when disabled."""
-        with patch("jwt.get_unverified_header", return_value={"alg": "none"}):
+        with patch("nhx.common.auth.jwt.get_unverified_header", return_value={"alg": "none"}):
             with pytest.raises(UnsignedJWTRejectedError, match="Unsigned JWTs are not accepted"):
                 await jwt_validator.validate_token("unsigned.token.value")
 
@@ -447,7 +447,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -480,7 +480,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -511,7 +511,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -536,7 +536,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -561,7 +561,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -586,7 +586,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -611,7 +611,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims):
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims):
                 result = await jwt_validator.validate_token("valid.token.here")
 
             assert result is not None
@@ -650,7 +650,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims) as mock_decode:
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims) as mock_decode:
                 result = await validator.validate_token("valid.token.here")
 
             # Verify audience=None and verify_aud=False were passed
@@ -692,7 +692,7 @@ class TestJWTValidator:
             mock_jwks.get_signing_key_from_jwt = AsyncMock(return_value=mock_signing_key)
             mock_get_jwks.return_value = mock_jwks
 
-            with patch("jwt.decode", return_value=valid_claims) as mock_decode:
+            with patch("nhx.common.auth.jwt.decode", return_value=valid_claims) as mock_decode:
                 result = await validator.validate_token("valid.token.here")
 
             # Verify audience is passed as a list with the configured value
@@ -937,8 +937,8 @@ class TestOpaqueTokenIntrospection:
             mock_get_jwks.return_value = mock_jwks
 
             with (
-                patch("jwt.get_unverified_header", return_value={"alg": "RS256"}),
-                patch("jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")),
+                patch("nhx.common.auth.jwt.get_unverified_header", return_value={"alg": "RS256"}),
+                patch("nhx.common.auth.jwt.decode", side_effect=jwt.InvalidAudienceError("Invalid audience")),
                 patch.object(http_clients, "shared_async_http_client") as mock_shared_client,
             ):
                 result = await validator.validate_token("invalid.audience.token")

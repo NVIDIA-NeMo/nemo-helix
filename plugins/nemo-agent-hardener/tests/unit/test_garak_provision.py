@@ -95,7 +95,7 @@ def _capture_provision(monkeypatch: pytest.MonkeyPatch, cfg: AgentHardenerConfig
         cfg.agent_hardener_bin.parent.mkdir(parents=True, exist_ok=True)
         cfg.agent_hardener_bin.touch()  # simulate uv producing the binary
 
-    monkeypatch.setattr(provisioning.shutil, "which", lambda _n: "/usr/bin/uv")
+    monkeypatch.setattr(provisioning, "which", lambda _n: "/usr/bin/uv")
     monkeypatch.setattr(provisioning, "run_subprocess", fake_run)
     return commands
 
@@ -158,7 +158,7 @@ def test_existing_venv_does_not_hide_install_failure(tmp_path: Path, monkeypatch
     cfg = _config(tmp_path)
     cfg.agent_hardener_bin.parent.mkdir(parents=True)
     cfg.agent_hardener_bin.touch()
-    monkeypatch.setattr(provisioning.shutil, "which", lambda _n: "/usr/bin/uv")
+    monkeypatch.setattr(provisioning, "which", lambda _n: "/usr/bin/uv")
 
     def fail_install(cmd: list[str], action: str) -> None:
         assert "install" in cmd
@@ -275,7 +275,7 @@ def test_run_subprocess_streams_instead_of_capturing() -> None:
         return subprocess.CompletedProcess(cmd, returncode=0)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(provisioning.subprocess, "run", fake_run)
+        patch.setattr(provisioning, "run", fake_run)
         provisioning.run_subprocess(["uv", "pip", "install", "agent-hardener"], "install agent-hardener")
 
     assert "capture_output" not in recorded and "stdout" not in recorded  # inherits the terminal
@@ -286,13 +286,13 @@ def test_run_subprocess_exits_on_timeout(monkeypatch: pytest.MonkeyPatch) -> Non
     def fake_run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=provisioning.SUBPROCESS_TIMEOUT_SECONDS)
 
-    monkeypatch.setattr(provisioning.subprocess, "run", fake_run)
+    monkeypatch.setattr(provisioning, "run", fake_run)
     with pytest.raises(typer.Exit) as excinfo:
         provisioning.run_subprocess(["uv", "pip", "install", "agent-hardener"], "install agent-hardener", timeout=1)
     assert excinfo.value.exit_code == 1
 
 
 def test_run_subprocess_exits_on_nonzero_returncode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(provisioning.subprocess, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, returncode=2))
+    monkeypatch.setattr(provisioning, "run", lambda cmd, **_: subprocess.CompletedProcess(cmd, returncode=2))
     with pytest.raises(typer.Exit):
         provisioning.run_subprocess(["uv", "venv"], "create venv")

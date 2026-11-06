@@ -439,7 +439,7 @@ def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, cap
         def stop(self) -> None:
             pass
 
-    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "Watch", Watch)
     monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
     with caplog.at_level(logging.ERROR, logger=supervise.__name__):
         failures = _build_group(

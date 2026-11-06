@@ -176,7 +176,7 @@ def test_custom_counts_that_sum_correctly_build_a_real_config(tmp_path: Path) ->
 def test_conversion_defaults_build_a_real_conversion_run_config(tmp_path: Path) -> None:
     src = tmp_path / "in.jsonl"
     src.write_text("{}\n", encoding="utf-8")
-    with patch("data_designer_retrieval_sdg.run_conversion_with_config") as run_conversion:
+    with patch("nemo_data_designer_plugin.retrieval.conversion._run_conversion") as run_conversion:
         execute_conversion(
             input_path=src,
             output_dir=tmp_path / "conv",

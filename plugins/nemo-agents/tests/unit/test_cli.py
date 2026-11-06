@@ -102,7 +102,7 @@ def _install_mock_transport(
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch("nemo_helix_plugin.client.client.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.Client", _Client)
 
 
 class _CLIState:
@@ -184,7 +184,7 @@ def test_run_starts_nat_server_for_nat_config(tmp_path: Path) -> None:
     config.write_text("workflow:\n  _type: chat_completion\n")
 
     app = AgentsCLI().get_cli()
-    with patch("subprocess.run") as run:
+    with patch("nemo_agents_plugin.cli.run_command") as run:
         result = CliRunner().invoke(
             app,
             ["run", "--agent-config", str(config), "--host", "127.0.0.1", "--port", "8081"],
@@ -213,7 +213,7 @@ def test_run_starts_fabric_server_for_platform_config(tmp_path: Path) -> None:
     config.write_text("config_format: nemo-agents-spec-v1\nname: fabric-agent\n")
 
     app = AgentsCLI().get_cli()
-    with patch("subprocess.run") as run:
+    with patch("nemo_agents_plugin.cli.run_command") as run:
         result = CliRunner().invoke(
             app,
             ["run", "--agent-config", str(config), "--host", "127.0.0.1", "--port", "8081"],
@@ -242,7 +242,7 @@ def test_run_rejects_empty_yaml_config(tmp_path: Path) -> None:
     config.write_text("")
 
     app = AgentsCLI().get_cli()
-    with patch("subprocess.run") as run:
+    with patch("nemo_agents_plugin.cli.run_command") as run:
         result = CliRunner().invoke(app, ["run", "--agent-config", str(config)])
 
     assert result.exit_code == 1

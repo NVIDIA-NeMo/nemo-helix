@@ -2,13 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from tests.auth_idp import runtime_host
 from tests.auth_idp.deployment_context import (
     AuthIdpDeploymentContext,
     DeploymentRuntime,
@@ -111,10 +111,10 @@ def test_host_runtime_accepts_exact_owned_port_forward(tmp_path: Path, monkeypat
     context = _context(tmp_path, runtime="kind", port_forward=port_forward)
     port_forward.pid_file.write_text("1234\n", encoding="utf-8")
     runtime = HostAuthIdpRuntime(context)
-    monkeypatch.setattr(os, "kill", lambda pid, signal: None)
+    monkeypatch.setattr(runtime_host, "kill", lambda pid, signal: None)
     monkeypatch.setattr(
-        subprocess,
-        "run",
+        runtime_host,
+        "run_process",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             0,
@@ -133,10 +133,10 @@ def test_host_runtime_rejects_pid_owned_by_another_forward(tmp_path: Path, monke
     context = _context(tmp_path, runtime="kind", port_forward=port_forward)
     port_forward.pid_file.write_text("1234\n", encoding="utf-8")
     runtime = HostAuthIdpRuntime(context)
-    monkeypatch.setattr(os, "kill", lambda pid, signal: None)
+    monkeypatch.setattr(runtime_host, "kill", lambda pid, signal: None)
     monkeypatch.setattr(
-        subprocess,
-        "run",
+        runtime_host,
+        "run_process",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args[0],
             0,
@@ -159,7 +159,7 @@ def test_host_runtime_includes_port_forward_log_when_process_exited(
     def process_missing(pid: int, signal: int) -> None:
         raise ProcessLookupError
 
-    monkeypatch.setattr(os, "kill", process_missing)
+    monkeypatch.setattr(runtime_host, "kill", process_missing)
 
     with pytest.raises(AssertionError, match="address already in use"):
         runtime.assert_available()

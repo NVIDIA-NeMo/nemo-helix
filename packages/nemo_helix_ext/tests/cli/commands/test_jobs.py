@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import httpx
+import pytest
 from nemo_helix_ext.cli.commands.jobs import (
     _generate_jobs_python_code,
     create_or_update_tasks,
@@ -234,17 +235,14 @@ def test_list_steps_serializes_json_filter_for_source_owned_client() -> None:
     warn_if_more_pages.assert_called_once()
 
 
-def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
+def test_download_results_streams_chunks_to_output_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     platform_client = SimpleNamespace()
     jobs_client = MagicMock()
     binary_response = _BinaryResponse([b"metric-", b"bytes"])
     output_file = tmp_path / "metrics.bin"
     jobs_client.download_job_result.return_value = binary_response
 
-    with (
-        patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client),
-        patch("nemo_helix_ext.cli.commands.jobs.typer.echo") as echo,
-    ):
+    with patch("nemo_helix_ext.cli.commands.jobs.JobsClient.from_client", return_value=jobs_client):
         download_results(
             _ctx(platform_client),
             name="metrics",
@@ -260,8 +258,9 @@ def test_download_results_streams_chunks_to_output_file(tmp_path: Path) -> None:
     )
     assert output_file.read_bytes() == b"metric-bytes"
     assert binary_response.stream_calls == 1
-    echo.assert_called_once()
-    assert echo.call_args.args[0].endswith(f"Downloaded to {output_file!r}")
+    echoed = capsys.readouterr().out.splitlines()
+    assert len(echoed) == 1
+    assert echoed[0].endswith(f"Downloaded to {output_file!r}")
 
 
 def test_create_result_sends_required_attempt_association() -> None:

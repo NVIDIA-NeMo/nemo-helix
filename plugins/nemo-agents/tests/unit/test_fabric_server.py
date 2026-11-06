@@ -247,7 +247,7 @@ def test_main_starts_packaged_server(tmp_path: Path, socket_fd: int | None) -> N
 
     with (
         patch("nemo_agents_plugin.fabric.server.create_fabric_serving_app", return_value=app) as create_app,
-        patch("uvicorn.run") as run,
+        patch("nemo_agents_plugin.fabric.server.run") as run,
     ):
         result = server.main(
             [

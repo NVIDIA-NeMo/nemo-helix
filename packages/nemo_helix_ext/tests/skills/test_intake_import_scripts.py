@@ -122,7 +122,7 @@ def test_braintrust_fetch_does_not_assume_created_time_page_order(monkeypatch: p
         _Response({"events": [{"id": "in-range", "created": "2026-08-01T12:00:00Z"}]}),
     ]
     get = Mock(side_effect=responses)
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
     args = argparse.Namespace(
         braintrust_base_url="https://api.braintrust.dev",
@@ -140,7 +140,7 @@ def test_braintrust_fetch_does_not_assume_created_time_page_order(monkeypatch: p
 def test_braintrust_fetch_accepts_null_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     module = importlib.import_module("import_braintrust")
     get = Mock(return_value=_Response({"events": [{"id": "one", "created": "2026-08-01T12:00:00Z", "metrics": None}]}))
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
 
     payload = module.fetch_braintrust(_braintrust_args())
@@ -151,8 +151,8 @@ def test_braintrust_fetch_accepts_null_metrics(monkeypatch: pytest.MonkeyPatch) 
 def test_braintrust_fetch_rejects_missing_event_id(monkeypatch: pytest.MonkeyPatch) -> None:
     module = importlib.import_module("import_braintrust")
     monkeypatch.setattr(
-        module.requests,
-        "get",
+        module,
+        "http_get",
         Mock(return_value=_Response({"events": [{"created": "2026-08-01T12:00:00Z"}]})),
     )
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
@@ -169,7 +169,7 @@ def test_braintrust_fetch_rejects_repeated_cursor(monkeypatch: pytest.MonkeyPatc
             _Response({"events": [{"id": "two", "created": "2026-08-01T13:00:00Z"}], "cursor": "same"}),
         ]
     )
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
 
     with pytest.raises(RuntimeError, match="Braintrust pagination returned a repeated cursor"):
@@ -181,7 +181,7 @@ def test_braintrust_fetch_rejects_repeated_cursor(monkeypatch: pytest.MonkeyPatc
 def test_braintrust_fetch_stops_on_empty_page(monkeypatch: pytest.MonkeyPatch) -> None:
     module = importlib.import_module("import_braintrust")
     get = Mock(return_value=_Response({"events": [], "cursor": "unused"}))
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
     monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
 
     payload = module.fetch_braintrust(_braintrust_args())
@@ -198,7 +198,7 @@ def test_phoenix_fetch_pages_reads_multiple_pages(monkeypatch: pytest.MonkeyPatc
             _Response({"data": [{"spanId": "two"}]}),
         ]
     )
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
 
     results = module._fetch_pages("https://phoenix.example.com/v1/spans", headers={}, params={})
 
@@ -214,7 +214,7 @@ def test_phoenix_fetch_pages_rejects_repeated_cursor(monkeypatch: pytest.MonkeyP
             _Response({"data": [{"spanId": "two"}], "next_cursor": "same"}),
         ]
     )
-    monkeypatch.setattr(module.requests, "get", get)
+    monkeypatch.setattr(module, "http_get", get)
 
     with pytest.raises(RuntimeError, match="Phoenix pagination returned a repeated cursor"):
         module._fetch_pages("https://phoenix.example.com/v1/spans", headers={}, params={})

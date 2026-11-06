@@ -80,7 +80,7 @@ def test_main_runs_the_named_agents_setup_as_its_user(tmp_path: Path, monkeypatc
         built.append(config)
         return _Agent()
 
-    monkeypatch.setattr(agent_layer_install.AgentFactory, "create_agent_from_config", create)
+    monkeypatch.setattr(agent_layer_install, "create_agent_from_config", create)
     spec = tmp_path / "agent.json"
     spec.write_text(
         json.dumps(
@@ -116,7 +116,7 @@ def test_a_fabric_agents_config_bundle_is_left_out_of_its_layer(
         built.append(config)
         return _Agent()
 
-    monkeypatch.setattr(agent_layer_install.AgentFactory, "create_agent_from_config", create)
+    monkeypatch.setattr(agent_layer_install, "create_agent_from_config", create)
     spec = tmp_path / "agent.json"
     kwargs = {"fabric_package": "nemo-fabric[codex]==0.5.0", "fabric_config_bundle": "/bundle"}
     spec.write_text(json.dumps({"name": None, "import_path": "x:FabricInstalledAgent", "kwargs": kwargs, "user": None}))
@@ -132,4 +132,4 @@ def test_main_needs_one_argument() -> None:
 
 def test_the_agent_is_built_by_harbors_factory() -> None:
     """The install builds the agent the way a trial does, so its setup is the one a trial would run."""
-    assert agent_layer_install.AgentFactory is AgentFactory
+    assert agent_layer_install.create_agent_from_config == AgentFactory.create_agent_from_config

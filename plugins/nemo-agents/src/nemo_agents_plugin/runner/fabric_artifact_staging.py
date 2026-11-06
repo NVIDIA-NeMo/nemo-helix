@@ -12,6 +12,7 @@ import shutil
 import tempfile
 from collections.abc import Collection
 from pathlib import Path, PurePosixPath
+from shutil import rmtree
 from typing import Any
 
 import yaml
@@ -208,7 +209,7 @@ def _clear_staged_tree(base_dir: Path, preserved: set[str]) -> None:
             continue
         try:
             if child.is_dir() and not child.is_symlink():
-                shutil.rmtree(child)
+                rmtree(child)
             else:
                 child.unlink(missing_ok=True)
         except OSError as exc:
