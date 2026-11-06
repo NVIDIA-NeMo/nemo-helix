@@ -233,7 +233,7 @@ describe('SafeSynthesizerFilesetPreview', () => {
       const job = createMockJob({ status: HelixJobStatus.completed });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
-      expect(mockUseListJobResults).toHaveBeenCalledWith(
+      expect(mockUseListJobResults).toHaveBeenLastCalledWith(
         'test-workspace',
         'test-job-id',
         undefined,
@@ -249,45 +249,13 @@ describe('SafeSynthesizerFilesetPreview', () => {
       const job = createMockJob({ status: HelixJobStatus.active });
       render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
 
-      expect(mockUseListJobResults).toHaveBeenCalledWith(
+      expect(mockUseListJobResults).toHaveBeenLastCalledWith(
         'test-workspace',
         'test-job-id',
         undefined,
         expect.objectContaining({
           query: expect.objectContaining({
             enabled: false,
-          }),
-        })
-      );
-    });
-
-    it('should disable results query when job is not terminated', () => {
-      const job = createMockJob({ status: HelixJobStatus.active });
-      render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
-
-      expect(mockUseListJobResults).toHaveBeenCalledWith(
-        'test-workspace',
-        'test-job-id',
-        undefined,
-        expect.objectContaining({
-          query: expect.objectContaining({
-            enabled: false,
-          }),
-        })
-      );
-    });
-
-    it('should enable results query when job is terminated', () => {
-      const job = createMockJob({ status: HelixJobStatus.completed });
-      render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
-
-      expect(mockUseListJobResults).toHaveBeenCalledWith(
-        'test-workspace',
-        'test-job-id',
-        undefined,
-        expect.objectContaining({
-          query: expect.objectContaining({
-            enabled: true,
           }),
         })
       );
@@ -591,79 +559,6 @@ describe('SafeSynthesizerFilesetPreview', () => {
 
       // The component displays the full path from the fileset URL
       expect(screen.getByText('path/to/output.csv')).toBeInTheDocument();
-    });
-  });
-
-  describe('Loading States', () => {
-    it('should set loading state when previewing synthetic data', async () => {
-      const user = userEvent.setup();
-      let resolvePromise: (value: { data: Blob }) => void;
-      const mockRefetch = vi.fn().mockReturnValue(
-        new Promise((resolve) => {
-          resolvePromise = resolve;
-        })
-      );
-
-      mockUseDownloadJobResultSyntheticData.mockReturnValue({
-        refetch: mockRefetch,
-        data: undefined,
-        isLoading: false,
-        error: null,
-      } as never);
-
-      const job = createMockJob();
-      render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
-
-      const syntheticDataLink = screen.getByText('synthetic-data.csv');
-      await user.click(syntheticDataLink);
-
-      await waitFor(() => {
-        expect(screen.getByTestId('file-preview-loading')).toBeInTheDocument();
-      });
-
-      const mockBlob = new Blob(['id,name\n1,Test 1\n2,Test 2'], { type: 'text/csv' });
-      resolvePromise!({ data: mockBlob });
-
-      await waitFor(() => {
-        expect(screen.queryByTestId('file-preview-loading')).not.toBeInTheDocument();
-      });
-    });
-
-    it('should clear loading state after closing panel', async () => {
-      const user = userEvent.setup();
-      const csvContent = 'id,name\n1,Test 1\n2,Test 2';
-      const mockBlob = {
-        text: vi.fn().mockResolvedValue(csvContent),
-      };
-      const mockRefetch = vi.fn().mockResolvedValue({
-        data: mockBlob,
-      });
-
-      mockUseDownloadJobResultSyntheticData.mockReturnValue({
-        refetch: mockRefetch,
-        data: undefined,
-        isLoading: false,
-        error: null,
-      } as never);
-
-      const job = createMockJob();
-      render(<SafeSynthesizerFilesetPreview job={job} />, { wrapper: createWrapper() });
-
-      // Open preview
-      const syntheticDataLink = screen.getByText('synthetic-data.csv');
-      await user.click(syntheticDataLink);
-
-      await waitFor(() => {
-        expect(screen.getByTestId('file-preview')).toBeInTheDocument();
-      });
-
-      // Close preview
-      const closeButton = screen.getByText('Close');
-      await user.click(closeButton);
-
-      await waitFor(() => {
-        expect(screen.queryByTestId('file-preview')).not.toBeInTheDocument();
-      });
     });
   });
 

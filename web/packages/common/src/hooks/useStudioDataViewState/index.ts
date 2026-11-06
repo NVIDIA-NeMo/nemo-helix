@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import * as DataView from '@nemo/common/src/components/DataView/internal';
 import { DEFAULT_DEBOUNCE_MS } from '@nemo/common/src/constants';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@nemo/common/src/constants/pagination';
 import {
   decodeColumnFiltersParam,
   FILTERS_SEARCH_PARAM,
@@ -9,9 +11,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router';
 import { useDebounce } from 'use-debounce';
-
-import * as DataView from '../../components/DataView/internal';
-import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '../../constants/pagination';
 
 const DEFAULT_COLUMN_PINNING = {
   left: ['row-selection'],

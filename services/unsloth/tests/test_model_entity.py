@@ -536,7 +536,7 @@ class TestLaunchModel:
             workspace="other",
             fileset=FileSetRef(workspace="other", name="x"),
             model_entity="other/base",
-            deployment_config=DeploymentParams(gpu=1, image_name="img", image_tag="1.0"),
+            deployment_config=DeploymentParams(gpu=1, image_name="img", image_tag="1.0", disk_size="300Gi"),
         )
 
         runner.launch_model(config, me)
@@ -552,6 +552,7 @@ class TestLaunchModel:
         assert config_body.executor_config.gpu == 1
         assert config_body.executor_config.image_name == "img"
         assert config_body.executor_config.image_tag == "1.0"
+        assert config_body.executor_config.disk_size == "300Gi"
 
         deployment_call = models.create_deployment.call_args
         assert deployment_call.kwargs["workspace"] == "other"
@@ -602,6 +603,8 @@ class TestLaunchModel:
         assert isinstance(body, UpdateModelDeploymentConfigRequest)
         assert body.engine is Engine.VLLM
         assert body.executor_config.gpu == 2
+        # No disk_size on the job keeps the executor default.
+        assert body.executor_config.disk_size == "50Gi"
         models.create_deployment.assert_called_once()
 
     def test_inline_nim_engine_creates_a_nim_config(self) -> None:

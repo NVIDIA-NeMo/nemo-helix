@@ -69,10 +69,14 @@ export function VirtualDropdownList<R extends { key: string }>({
 
   const isVirtualized = viewportHeight > 0;
 
+  // TanStack rebuilds every row's measurements when `getItemKey` changes identity, so keep it stable.
+  const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateSize(rows[index]),
+    getItemKey,
     overscan: OVERSCAN,
     initialRect: INITIAL_RECT,
   });
@@ -124,7 +128,7 @@ export function VirtualDropdownList<R extends { key: string }>({
         >
           {virtualItems.map((virtualRow) => (
             <div
-              key={rows[virtualRow.index].key}
+              key={virtualRow.key}
               ref={virtualizer.measureElement}
               data-index={virtualRow.index}
               className="absolute top-0 left-0 w-full"

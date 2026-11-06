@@ -3352,7 +3352,9 @@ def _upload_ethos_fileset(
     fileset = ethos_fileset_name(agent_name)
     sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
-        staged = Path(directory) / agent_root.name
+        # The upload uses directory contents, not its basename. A fixed child
+        # also keeps relative roots like '.' and '..' inside the temp directory.
+        staged = Path(directory) / "agent"
         staged.mkdir()
         for relative_path, content in artifacts:
             destination = staged / relative_path

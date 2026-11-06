@@ -28,8 +28,6 @@ import type { ReactNode } from 'react';
 
 export { formatFinetuningType };
 
-export type FileType = 'training' | 'testing' | 'validation';
-
 /** Training/finetuning type for display (e.g. training.training_type / training.finetuning_type). */
 export const getFormattedTrainingType = (type?: string) => {
   if (type === undefined) {
@@ -762,12 +760,17 @@ export const getGrpoRunConfig = (
   const expertParallel = parallelism.expert_parallel_size ?? 1;
 
   // Megatron is inert for GRPO. The policy worker is always AutomodelPolicyWorker.
-  const isLora = training.finetuning_type === 'lora';
+  const trainingLabel =
+    training.finetuning_type === 'lora'
+      ? 'LoRA'
+      : training.finetuning_type === 'lora_merged'
+        ? 'LoRA (merged)'
+        : 'Full weights';
 
   return {
     environment: spec.environment,
     promptDataset: spec.dataset,
-    trainingBackend: joinParts('Automodel', isLora ? 'LoRA' : 'Full weights'),
+    trainingBackend: joinParts('Automodel', trainingLabel),
     parallelism: joinParts(
       `TP ${tensorParallel}`,
       `PP ${parallelism.pipeline_parallel_size ?? 1}`,

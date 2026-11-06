@@ -47,10 +47,14 @@ class JobRunTelemetry:
 
 
 def _source_client_version() -> str:
-    try:
-        return metadata.version("nhx-jobs")
-    except metadata.PackageNotFoundError:
-        return "undefined"
+    # Published Helix wheels bundle the jobs service without necessarily installing
+    # its standalone distribution metadata. Prefer the enclosing product version.
+    for distribution in ("nemo-helix", "nhx-jobs"):
+        try:
+            return metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            continue
+    return "undefined"
 
 
 def _job_type_bucket(source: str) -> str:

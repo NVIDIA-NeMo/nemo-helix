@@ -82,6 +82,7 @@ from nemo_deployments_plugin.entities import (
     Deployment,
     DeploymentConfig,
 )
+from nemo_deployments_plugin.quantity import quantity_bytes
 from nemo_deployments_plugin.secrets import (
     SecretResolutionError,
     resolve_deployment_config_secrets,
@@ -1093,6 +1094,9 @@ class DockerDeploymentBackend(DeploymentBackend):
         device_requests = device_requests_for_gpus(gpu_ids)
         if device_requests:
             run_kwargs["device_requests"] = device_requests
+        if config.shm_size:
+            # Bytes: docker reads "8G" as GiB and rejects "Ti", unlike Kubernetes.
+            run_kwargs["shm_size"] = quantity_bytes(config.shm_size)
 
         return run_kwargs
 

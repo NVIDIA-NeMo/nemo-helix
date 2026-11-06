@@ -63,7 +63,7 @@ GRPO needs **two** FileSets beyond the model: an environment package (code + con
 
 | Field | Default | Notes |
 |-------|---------|-------|
-| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` `1e-5` | Peak LR. |
+| `learning_rate` | `5e-6`; GRPO with `finetuning_type: "lora"` or `"lora_merged"` `1e-5` | Peak LR. |
 | `min_learning_rate` | `null` | Floor for cosine decay. |
 | `weight_decay` | `0.01` | |
 | `adam_beta1` / `adam_beta2` | `0.9` / `0.999` | Adam betas. |
@@ -162,7 +162,7 @@ The last two default to `true` on this platform, where the underlying library de
 |---|---|---|
 | `"all_weights"` (default) | Every weight | Full model entity |
 | `"lora"` | Adapter only | HF PEFT **adapter** entity, registered against the base model |
-| `"lora_merged"` | — | **Rejected.** The Automodel path does not merge at export. |
+| `"lora_merged"` | Adapter only | Full **model** entity. The adapter is folded into the base weights at export, same as Automodel `lora_merged` |
 
 ```json
 {
@@ -198,14 +198,14 @@ The last two default to `true` on this platform, where the underlying library de
 **Rules the schema enforces:**
 
 - `lora` must be **omitted** when `finetuning_type` is `all_weights` — supplying both fails with `lora must be omitted when finetuning_type is all_weights`.
-- Omitting `lora` while asking for `finetuning_type: "lora"` is fine: defaults are filled in.
-- `lora_merged` is rejected at the schema level, so a merged checkpoint is not reachable from a GRPO job. To serve merged weights, train full-weight instead.
+- Omitting `lora` while asking for `finetuning_type: "lora"` or `"lora_merged"` is fine: defaults are filled in.
+- `lora_merged` publishes a model entity, not an adapter. It does not need `lora_enabled` on the deployment. `lora` does.
 
 LoRA and full-weight GRPO both train on `AutomodelPolicyWorker`. A LoRA run and a full-weight run use the same worker.
 
 ### Using a GRPO adapter
 
-The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default deployments (vLLM and the vLLM model-free NIM) stop at rank 16, and the SGLang model-free NIM at 16 when it starts with no adapters (otherwise at the highest rank among adapters present when it starts), so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Call it on the gateway's OpenAI-compatible route by its entity ID, `default/<base>&adapters/default/<adapter>` (`post-training-eval.md` § **Hand-off to nemo-evals**).
+The job registers an HF PEFT adapter entity whose base model is the entity you trained from, with `rank` and `alpha` recorded on it. It behaves like any other platform LoRA adapter: it hot-reloads onto a **READY** deployment of the base model that has `lora_enabled: true` and a max LoRA rank ≥ the adapter's `rank`, so there is no deployment to create before evaluating it. Default vLLM deployments stop at rank 32, the vLLM model-free NIM at 16, and the SGLang model-free NIM at 16 when it starts with no adapters (otherwise at the highest rank among adapters present when it starts), so the skill's rank-128 GRPO default needs `--max-lora-rank 128` on the deployment (`post-training-eval.md` § **LoRA rank limit**). Call it on the gateway's OpenAI-compatible route by its entity ID, `default/<base>&adapters/default/<adapter>` (`post-training-eval.md` § **Hand-off to nemo-evals**).
 
 Full-weight GRPO instead registers a new **model** entity, which does need its own deployment before inference.
 
@@ -216,11 +216,11 @@ Full-weight GRPO instead registers a new **model** entity, which does need its o
 | Limited GPU memory, or the full-weight run OOMs after `activation_checkpointing` | **LoRA** — the optimizer state is the adapter, not the model |
 | Several reward environments over one base model | **LoRA** — adapters share the base deployment |
 | Reward barely moves and the task needs broad behaviour change | **Full weights** — the adapter may be the bottleneck; raise `rank` first, then reconsider |
-| You need merged weights to export or serve elsewhere | **Full weights** — GRPO does not merge adapters |
+| You need a standalone model with the adapter baked in | **`lora_merged`** — trains the adapter, publishes full weights |
 
 ### `parallelism`
 
-Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (GRPO only). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NHX_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
+Same block as automodel (`num_nodes`, `num_gpus_per_node`, `tensor_parallel_size`, `pipeline_parallel_size`, `context_parallel_size`, `sequence_parallel`), plus `expert_parallel_size` for MoE policy training (DPO and GRPO). Divisibility rule (enforced by `RlJobOutput.validate_for_training`): `total_gpus = num_nodes × num_gpus_per_node` must be divisible by `tensor_parallel_size × pipeline_parallel_size × context_parallel_size × expert_parallel_size`, and `batch_size` by `micro_batch_size × data_parallel_size`. **Multi-node (`num_nodes > 1`)** additionally requires the platform to set `NHX_RL_MULTINODE_SHARED_STORAGE_PATH` (shared filesystem for Ray's cross-node coordination); the compiler fails fast otherwise.
 
 ### Known limitation: `max_new_tokens` does not reach the agent
 

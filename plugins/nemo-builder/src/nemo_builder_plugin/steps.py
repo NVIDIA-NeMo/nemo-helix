@@ -123,14 +123,25 @@ class SandboxSpec(BaseModel):
     ephemeral_storage: str | None = None
 
 
+class SandboxMount(BaseModel):
+    """Files mounted read-only into a sandbox at ``target``, which the build's ``RUN`` instructions read there."""
+
+    source: ContextSource
+    target: str
+
+
 class SandboxImage(BaseModel):
     image: str = Field(description="The `ContainerImage` row name.")
     platform: str
-    dockerfile: str = Field(description="Dockerfile path, relative to the group's context.")
+    dockerfile: str = Field(
+        description="Dockerfile path, relative to the group's context, or absolute inside one of its mounts."
+    )
 
 
 class SandboxGroup(BaseModel):
     source: ContextSource
+    #: Unset in a config from before mounts existed: none.
+    mounts: list[SandboxMount] = Field(default_factory=list)
     images: list[SandboxImage] = Field(min_length=1)
 
 

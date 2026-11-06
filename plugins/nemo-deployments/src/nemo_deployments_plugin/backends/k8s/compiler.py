@@ -52,6 +52,9 @@ from nemo_helix_plugin.auth.workload_identity import (
 from nemo_helix_plugin.config import ImagePullSecret, get_platform_config
 
 CONFIG_FILES_VOLUME = "config-files"
+# Memory-backed emptyDir mounted at /dev/shm when a config sets shm_size (new configs default to 8Gi;
+# without it the runtime default is 64Mi).
+SHM_VOLUME_NAME = "dshm"
 NATIVE_SIDECAR_RESTART_POLICY: RestartPolicy = "Always"
 
 logger = logging.getLogger(__name__)
@@ -531,6 +534,20 @@ def _build_config_file_volume(configmap_name: str, config_files: list[ConfigFile
     )
 
 
+def _build_shm_volume(shm_size: str, taken_names: set[str]) -> Any:
+    # Pick a name no configured volume uses, so an existing mount named "dshm" keeps working.
+    name = SHM_VOLUME_NAME
+    suffix = 1
+    while name in taken_names:
+        name = f"{SHM_VOLUME_NAME}-{suffix}"
+        suffix += 1
+    k8s = k8s_client_module()
+    return k8s.client.V1Volume(
+        name=name,
+        empty_dir=k8s.client.V1EmptyDirVolumeSource(medium="Memory", size_limit=shm_size),
+    )
+
+
 def build_pod_image_pull_secrets(
     executor_image_pull_secrets: list[ImagePullSecret] | None = None,
 ) -> list[Any]:
@@ -614,6 +631,18 @@ def compile_workload(
         build_container(container, config=config, include_probes=True, secret_name=secret_name)
         for container in config.containers
     ]
+    if config.shm_size:
+        shm_volume = _build_shm_volume(config.shm_size, {volume.name for volume in volumes})
+        volumes = [*volumes, shm_volume]
+        k8s = k8s_client_module()
+        for main_container in main_containers:
+            # A container that already mounts something at /dev/shm keeps its own mount.
+            if any(mount.mount_path == "/dev/shm" for mount in main_container.volume_mounts or []):
+                continue
+            main_container.volume_mounts = [
+                *(main_container.volume_mounts or []),
+                k8s.client.V1VolumeMount(name=shm_volume.name, mount_path="/dev/shm"),
+            ]
 
     pod_spec_kwargs: dict[str, Any] = {
         "restart_policy": pod_restart_policy,

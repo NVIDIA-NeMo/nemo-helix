@@ -140,11 +140,6 @@ export function buildClonedJobRequest(job: DataDesignerJob): DataDesignerJobRequ
   };
 }
 
-/** Navigation state passed to the new-job route to pre-fill the form from an existing job. */
-export interface DataDesignerCloneState {
-  cloneJobRequest: DataDesignerJobRequest;
-}
-
 /**
  * Narrow an unknown router location state to the cloned job request, if present.
  * Returns null when the state is absent or not shaped like a clone payload.

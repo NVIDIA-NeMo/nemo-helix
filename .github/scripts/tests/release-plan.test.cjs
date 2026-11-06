@@ -140,6 +140,7 @@ for (const [label, context] of [
           ...CONTAINERS,
           { id: "nhx-builder-tasks", target: "nhx-builder-tasks-docker" },
           { id: "nhx-kaniko", target: "nhx-kaniko-docker" },
+          { id: "nhx-agent-installer", target: "nhx-agent-installer-docker" },
         ]),
       },
       listBranches: async () => BRANCHES,
