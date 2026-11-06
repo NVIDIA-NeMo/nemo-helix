@@ -6,6 +6,7 @@
  * Do not edit manually.
  * agent-hardener (plugin)
  */
+import type { ManifestBackend } from './ManifestBackend.ts';
 import type { ManifestInitEnv } from './ManifestInitEnv.ts';
 import type { ManifestInitSourceType } from './ManifestInitSourceType.ts';
 import type { WarGameModels } from './WarGameModels.ts';
@@ -49,8 +50,8 @@ export interface ManifestInit {
   egress?: string[];
   /** Non-secret environment variables for the victim (agent-hardener's `agent.env`). Stored in plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from the Secrets store at run time. */
   env?: ManifestInitEnv;
-  /** Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT and opens the sandbox->host route. */
-  backends?: string[];
+  /** Route-only backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086') for a service on the operator's host, or an object with `name`, `ports` and optional `host` / `allowed_ips` for one elsewhere. A host backend rewrites the agent's localhost:PORT to host.docker.internal:PORT; either form opens the sandbox's route to it. */
+  backends?: (string | ManifestBackend)[];
   /** Stored default model selection (attack/analysis/agent groups); omit to use agent-hardener's built-in defaults. */
   models?: WarGameModels;
 }

@@ -231,9 +231,13 @@ def _apply_victim_image(manifest: dict[str, Any], data: dict[str, Any]) -> None:
     """Run the victim from the manifest's pre-built image — the config form of agent-hardener's ``--victim-image``.
 
     Set in the manifest rather than on each command line so ``up``, ``run`` and ``synth-benign`` all pick it up.
+    A per-run ``allow_context_drift`` override travels the same way.
     """
     if image := str(data.get("victim_image") or ""):
-        manifest.setdefault("overrides", {}).setdefault("victim_control", {}).setdefault("config", {})["image"] = image
+        victim_config = manifest.setdefault("overrides", {}).setdefault("victim_control", {}).setdefault("config", {})
+        victim_config["image"] = image
+        if data.get("allow_context_drift"):
+            victim_config["allow_context_drift"] = True
 
 
 def _materialize_manifest(

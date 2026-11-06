@@ -63,6 +63,7 @@ from nemo_agent_hardener_plugin.jobs.records import (
     _update_run,
 )
 from nemo_agent_hardener_plugin.jobs.spec import WarGameSpec
+from nemo_agent_hardener_plugin.jobs.victim_image import VictimImage
 from nemo_agent_hardener_plugin.model_config import (
     ANALYSIS_DEFAULT_BASE_URL,
     ATTACK_DEFAULT_BASE_URL,
@@ -216,6 +217,7 @@ class AgentHardenerRunJob(NemoJob):
             workspace=workspace,
             manifest_id=war_game.manifest_id,
             entity_client=cast(NemoEntitiesClient, entity_client),
+            victim_image=war_game.victim_image,
         )
 
         # Pre-create the run record now (a Studio war-game submits a manifest_id + service driver) so the UI
@@ -325,7 +327,9 @@ class AgentHardenerRunJob(NemoJob):
         rounds = 1
         # Per-run config overrides from the launch dialog: apply over the manifest without persisting.
         config_overrides = {
-            key: config[key] for key in ("port", "defenders", "attack_intensity") if config.get(key) is not None
+            key: config[key]
+            for key in ("port", "defenders", "attack_intensity", "allow_context_drift")
+            if config.get(key) is not None
         }
         # Effective model selection = the manifest's stored default merged with the per-run override. Drives
         # both the subprocess env knobs (attack/analysis groups) and the guardrail model, which travels in
@@ -395,6 +399,7 @@ class AgentHardenerRunJob(NemoJob):
 
         # Benign suite: an uploaded suite (if supplied) overrides the manifest's cached suite for this run.
         benign_override = _uploaded_benign_suite(config.get("benign_suite_fileset") or None, sdk, ctx)
+        victim_image = VictimImage.from_spec(config)
 
         # `driver: "service"` (Studio) drives the interview/review HITL via the serve service; otherwise the
         # default one-shot `agent-hardener run` (TTY interview when interactive).
@@ -416,6 +421,7 @@ class AgentHardenerRunJob(NemoJob):
                 benign_suite_override=benign_override,
                 source_run=str(config.get("source_run") or ""),
                 model_env=model_env,
+                victim_image=victim_image,
             )
         else:
             # One-shot `agent-hardener run` consumes a suite; it never synthesizes. Prefer an uploaded override,
@@ -434,6 +440,7 @@ class AgentHardenerRunJob(NemoJob):
                 benign_suite=suite_for_run,
                 model_env=model_env,
                 rounds=rounds,
+                victim_image=victim_image,
             )
 
         # Record the run's garak hitlog so a later run (e.g. the Harden-tab sanity check) can replay it;

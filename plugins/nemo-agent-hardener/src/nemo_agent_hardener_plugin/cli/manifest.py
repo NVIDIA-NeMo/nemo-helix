@@ -14,6 +14,9 @@ import json
 import typer
 from nemo_agent_hardener_plugin.cli._shared import (
     ATTACK_INTENSITIES,
+    BACKEND_ALLOWED_IP_HELP,
+    BACKEND_HOST_HELP,
+    backends_from_flags,
     command_context,
     json_mapping,
     merge_models,
@@ -73,6 +76,14 @@ def build_app() -> typer.Typer:
             help="Non-secret env var as KEY=VALUE, repeatable. Replaces the stored map. Credentials "
             "belong in the manifest's secrets, which resolve from the platform Secrets store.",
         ),
+        backend: list[str] = typer.Option(
+            None,
+            "--backend",
+            help="Service the victim calls, as NAME:PORT[,PORT], repeatable. Replaces the stored backends; "
+            "the gateway's own route is kept.",
+        ),
+        backend_host: list[str] = typer.Option(None, "--backend-host", help=BACKEND_HOST_HELP),
+        backend_allowed_ip: list[str] = typer.Option(None, "--backend-allowed-ip", help=BACKEND_ALLOWED_IP_HELP),
         attack_model: str | None = typer.Option(
             None, "--attack-model", help="Default model for garak's red-team + detector."
         ),
@@ -132,6 +143,9 @@ def build_app() -> typer.Typer:
             body["env"] = parse_env_pairs(list(env))
         if victim_image is not None:
             body["victim_image"] = victim_image
+        backends = backends_from_flags(list(backend or []), list(backend_host or []), list(backend_allowed_ip or []))
+        if backends:
+            body["backends"] = backends
         chosen_models = models_from_flags(
             attack_model=attack_model,
             attack_base_url=attack_base_url,

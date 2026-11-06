@@ -111,14 +111,21 @@ async def victim_image_required(*, async_sdk: object, profile: str | None = None
 
 
 async def require_victim_image(
-    executor: ExecutorSpec, *, step: str, workspace: str, manifest_id: str | None, entity_client: NemoEntitiesClient
+    executor: ExecutorSpec,
+    *,
+    step: str,
+    workspace: str,
+    manifest_id: str | None,
+    entity_client: NemoEntitiesClient,
+    victim_image: str | None = None,
 ) -> None:
-    """Fail at submit, not at sandbox creation, when a container job's manifest has no pre-built victim image.
+    """Fail at submit, not at sandbox creation, when a container job has no pre-built victim image.
 
     A container job has no Docker to build the victim, and OpenShell only creates a sandbox from an image the
-    cluster can pull. A host (subprocess) job still builds it locally.
+    cluster can pull. A host (subprocess) job still builds it locally. The job's own ``victim_image`` overrides
+    the manifest's.
     """
-    if isinstance(executor, SubprocessExecutionProviderSpec) or not manifest_id:
+    if isinstance(executor, SubprocessExecutionProviderSpec) or not manifest_id or victim_image:
         return
     manifest = await entity_client.get(AgentHardenerManifest, name=manifest_id, workspace=workspace)
     if not manifest.victim_image:

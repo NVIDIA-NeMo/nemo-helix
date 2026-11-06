@@ -17,7 +17,7 @@ from typer.testing import CliRunner
 
 def _patch_cli(cli_main: Any, monkeypatch: pytest.MonkeyPatch, manifests: Any) -> Any:
     fake_sdk = SimpleNamespace(agent_hardener=SimpleNamespace(manifests=manifests))
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
@@ -81,6 +81,55 @@ def test_manifest_set_builds_patch_body(monkeypatch: pytest.MonkeyPatch) -> None
     }
     assert "attack_intensity" not in captured["body"]
     assert "port" not in captured["body"]
+
+
+def test_manifest_set_replaces_backends(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    captured: dict[str, Any] = {}
+
+    def _update(name: str, *, workspace: str, **body: Any) -> dict:
+        captured["body"] = body
+        return {"name": name}
+
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace(update=_update))
+    result = CliRunner().invoke(
+        app,
+        [
+            "manifest",
+            "set",
+            "finance",
+            "--backend",
+            "finance:8086",
+            "--backend",
+            "ledger:8087",
+            "--backend-host",
+            "ledger=fd00::12",
+            "--backend-allowed-ip",
+            "ledger=fd00::/8",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["body"] == {
+        "backends": [
+            "finance:8086",
+            {"name": "ledger", "ports": ["8087"], "host": "fd00::12", "allowed_ips": ["fd00::/8"]},
+        ]
+    }
+
+
+def test_manifest_set_rejects_a_backend_host_without_its_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    def _update(*_args: Any, **_kwargs: Any) -> dict:  # pragma: no cover - must not run
+        raise AssertionError("update should not be called")
+
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace(update=_update))
+    result = CliRunner().invoke(app, ["manifest", "set", "finance", "--backend-host", "ledger=ledger.ns.svc"])
+
+    assert result.exit_code == 1
+    assert "no --backend named ledger" in result.output
 
 
 def test_manifest_set_requires_a_field(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -431,3 +480,38 @@ def test_stage_failure_shows_the_cause_and_its_remedy(monkeypatch: pytest.Monkey
     assert result.exit_code == 1
     assert "agent-hardener is not provisioned" in result.output
     assert "Run `nemo agent-hardener setup`." in result.output
+
+
+def test_stage_a_local_manifest_points_at_victim_image_instead_of_manifest_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    seen: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, SimpleNamespace())
+    fake = SimpleNamespace(
+        stage_victim_context=lambda **kw: seen.update(kw) or {"status": "completed", "context_archive": "/c.tar.gz"}
+    )
+    monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake))
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent: {}\n", encoding="utf-8")
+
+    result = CliRunner().invoke(app, ["stage", "--config", str(manifest)])
+
+    assert result.exit_code == 0, result.output
+    assert seen["config"] == str(manifest)
+    assert seen["manifest_id"] is None
+    assert "--victim-image" in result.output
+    assert "manifest set" not in result.output
+
+
+@pytest.mark.parametrize("args", [[], ["--manifest-id", "m1", "--config", "a.yaml"]])
+def test_stage_needs_exactly_one_manifest(args: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+
+    app = _patch_stage(cli_main, monkeypatch, {"status": "completed", "context_archive": "/c.tar.gz"})
+
+    result = CliRunner().invoke(app, ["stage", *args])
+
+    assert result.exit_code == 1
+    assert "exactly one of --manifest-id or --config" in result.output

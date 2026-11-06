@@ -152,6 +152,18 @@ async def test_a_container_synth_needs_the_manifests_victim_image() -> None:
 
 @pytest.mark.usefixtures("api_config")
 @pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
+async def test_a_container_job_with_its_own_victim_image_skips_the_manifests() -> None:
+    spec = synth_module.SynthBenignSpec(manifest_id="m1", victim_image="reg.example/override:2")
+    job_spec = await synth_module.AgentHardenerSynthBenignJob.compile(
+        workspace="default", spec=spec, entity_client=_manifests(""), job_name=None, async_sdk=None
+    )
+
+    (step,) = list(job_spec["steps"])
+    assert step["executor"]["provider"] == "cpu"
+
+
+@pytest.mark.usefixtures("api_config")
+@pytest.mark.parametrize("execution_profiles", [CPU_ONLY])
 async def test_staging_the_victim_context_needs_no_victim_image() -> None:
     spec = victim_context_module.VictimContextSpec(manifest_id="m1")
     job_spec = await victim_context_module.AgentHardenerVictimContextJob.compile(

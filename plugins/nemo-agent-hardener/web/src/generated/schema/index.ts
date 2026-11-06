@@ -71,6 +71,7 @@ export * from './InspectProjectRequest.ts';
 export * from './InspectProjectResponse.ts';
 export * from './InspectProjectResponseEnv.ts';
 export * from './JobControl.ts';
+export * from './ManifestBackend.ts';
 export * from './ManifestFilter.ts';
 export * from './ManifestInit.ts';
 export * from './ManifestInitEnv.ts';

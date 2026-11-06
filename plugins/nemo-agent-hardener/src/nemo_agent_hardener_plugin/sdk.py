@@ -21,7 +21,7 @@ from nemo_agent_hardener_plugin.filesets import upload_file_to_fileset
 from nemo_agent_hardener_plugin.jobs.defenses import compose_defense
 from nemo_agent_hardener_plugin.jobs.run import AgentHardenerRunJob
 from nemo_agent_hardener_plugin.jobs.synth_benign import AgentHardenerSynthBenignJob
-from nemo_agent_hardener_plugin.jobs.victim_context import AgentHardenerVictimContextJob
+from nemo_agent_hardener_plugin.jobs.victim_context import AgentHardenerVictimContextJob, stage_local_manifest
 from nemo_helix_plugin.agent_hardener.client import AgentHardenerClient
 from nemo_helix_plugin.agent_hardener.types import (
     AGENT_HARDENER_MANIFEST_TYPE,
@@ -102,6 +102,8 @@ def _run_war_game(
     attack_intensity: str | None = None,
     replay_hitlog_fileset: str | None = None,
     models: JsonMap | None = None,
+    victim_image: str | None = None,
+    allow_context_drift: bool = False,
 ) -> JsonMap:
     """Blocking war-game launch shared by the sync and async resources.
 
@@ -140,6 +142,7 @@ def _run_war_game(
         spec["replay_hitlog_fileset"] = replay_hitlog_fileset
     if models:
         spec["models"] = models
+    spec.update(_victim_image_spec(victim_image, allow_context_drift))
     WarGameSpec.model_validate(spec)
     if benign_suite:
         spec["benign_suite_fileset"] = upload_file_to_fileset(
@@ -154,8 +157,25 @@ def _run_war_game(
     )
 
 
+def _victim_image_spec(victim_image: str | None, allow_context_drift: bool) -> dict[str, JsonValue]:
+    """The spec keys selecting a pre-built victim image; empty keeps the spec as it was without one."""
+    spec: dict[str, JsonValue] = {}
+    if victim_image is not None:
+        spec["victim_image"] = victim_image
+    if allow_context_drift:
+        spec["allow_context_drift"] = True
+    return spec
+
+
 def _run_synth_benign(
-    sync_sdk: SyncHelixClient, *, manifest_id: str, env_file: str | None, interview: str, workspace: str
+    sync_sdk: SyncHelixClient,
+    *,
+    manifest_id: str,
+    env_file: str | None,
+    interview: str,
+    workspace: str,
+    victim_image: str | None = None,
+    allow_context_drift: bool = False,
 ) -> JsonMap:
     """Blocking benign-suite synthesis for a saved manifest, shared by the sync and async resources.
 
@@ -163,6 +183,7 @@ def _run_synth_benign(
     reviewed suite on the manifest entity through the sync ``sdk``.
     """
     spec: dict[str, JsonValue] = {"manifest_id": manifest_id, "env_file": env_file, "interview": interview}
+    spec.update(_victim_image_spec(victim_image, allow_context_drift))
     SynthBenignSpec.model_validate(spec)
     return _to_json_map(
         AgentHardenerSynthBenignJob().run(
@@ -299,6 +320,8 @@ class AgentHardenerPluginResource:
         attack_intensity: str | None = None,
         replay_hitlog_fileset: str | None = None,
         models: ModelSelection | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Run the war-game locally against a local ``config`` manifest or a saved ``manifest_id``.
 
@@ -308,6 +331,9 @@ class AgentHardenerPluginResource:
 
         ``rounds``/``port``/``defenders``/``attack_intensity``/``replay_hitlog_fileset`` are per-run
         overrides applied without persisting them on the manifest.
+
+        ``victim_image`` runs a pre-built image (built from :meth:`stage_victim_context` output) instead of a local docker
+        build; ``allow_context_drift`` lets one built from an older staged context run with a warning.
         """
         return _run_war_game(
             self._platform,
@@ -322,6 +348,8 @@ class AgentHardenerPluginResource:
             attack_intensity=attack_intensity,
             replay_hitlog_fileset=replay_hitlog_fileset,
             models=_models_to_json_map(models),
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
 
     def synth_benign(
@@ -331,6 +359,8 @@ class AgentHardenerPluginResource:
         env_file: str | None = None,
         interview: str = "interactive",
         workspace: str | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Synthesize a saved manifest's benign suite and cache it on the manifest.
 
@@ -343,23 +373,26 @@ class AgentHardenerPluginResource:
             env_file=env_file,
             interview=interview,
             workspace=workspace or "default",
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
 
-    def stage_victim_context(self, *, manifest_id: str, workspace: str | None = None) -> JsonMap:
-        """Stage a saved manifest's victim build context on this host and return the job result.
+    def stage_victim_context(
+        self, *, manifest_id: str | None = None, config: str | None = None, workspace: str | None = None
+    ) -> JsonMap:
+        """Stage a saved ``manifest_id`` or a local ``config`` manifest's victim build context on this host.
 
         Needs the agent-hardener venv (``nemo agent-hardener setup``) but no Docker or OpenShell. On success,
         ``context_archive`` is a ``.tar.gz`` that ``docker build -t <ref> - < archive`` builds directly.
         """
+        if bool(manifest_id) == bool(config):
+            raise ValueError("stage_victim_context requires exactly one of 'manifest_id' or 'config'.")
+        ctx = _local_job_context(workspace=workspace or "default", job_name=AgentHardenerVictimContextJob.name)
+        if config:
+            return _to_json_map(stage_local_manifest(Path(config), ctx))
         spec: dict[str, JsonValue] = {"manifest_id": manifest_id}
         VictimContextSpec.model_validate(spec)
-        return _to_json_map(
-            AgentHardenerVictimContextJob().run(
-                spec,
-                ctx=_local_job_context(workspace=workspace or "default", job_name=AgentHardenerVictimContextJob.name),
-                sdk=self._platform,
-            )
-        )
+        return _to_json_map(AgentHardenerVictimContextJob().run(spec, ctx=ctx, sdk=self._platform))
 
     def submit(
         self,
@@ -370,6 +403,8 @@ class AgentHardenerPluginResource:
         driver: str | None = None,
         workspace: str | None = None,
         profile: str | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Submit the war-game to the platform executor (remote-capable path Studio uses).
 
@@ -382,6 +417,7 @@ class AgentHardenerPluginResource:
             "env_file": env_file,
             "driver": driver,
         }
+        spec.update(_victim_image_spec(victim_image, allow_context_drift))
         WarGameSpec.model_validate(spec)
         return _to_json_map(
             NemoJobScheduler().submit_remote(
@@ -399,6 +435,8 @@ class AgentHardenerPluginResource:
         env_file: str | None = None,
         workspace: str | None = None,
         profile: str | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Submit a validate-only war-game: freeze the chosen defenses and replay the recorded attacks + benign.
 
@@ -417,6 +455,7 @@ class AgentHardenerPluginResource:
             "defense_guardrails": guardrails_toml,
             "defense_policy": policy_yaml,
         }
+        spec.update(_victim_image_spec(victim_image, allow_context_drift))
         WarGameSpec.model_validate(spec)
         return _to_json_map(
             NemoJobScheduler().submit_remote(
@@ -445,6 +484,8 @@ class AsyncAgentHardenerPluginResource:
         attack_intensity: str | None = None,
         replay_hitlog_fileset: str | None = None,
         models: ModelSelection | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Async twin of :meth:`AgentHardenerPluginResource.run`.
 
@@ -469,6 +510,8 @@ class AsyncAgentHardenerPluginResource:
             attack_intensity=attack_intensity,
             replay_hitlog_fileset=replay_hitlog_fileset,
             models=_models_to_json_map(models),
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
 
     async def synth_benign(
@@ -478,6 +521,8 @@ class AsyncAgentHardenerPluginResource:
         env_file: str | None = None,
         interview: str = "interactive",
         workspace: str | None = None,
+        victim_image: str | None = None,
+        allow_context_drift: bool = False,
     ) -> JsonMap:
         """Async twin of :meth:`AgentHardenerPluginResource.synth_benign` (runs the blocking flow off-loop)."""
         sync_sdk = make_sdk(str(self._platform.base_url))
@@ -488,6 +533,8 @@ class AsyncAgentHardenerPluginResource:
             env_file=env_file,
             interview=interview,
             workspace=workspace or "default",
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
 
 

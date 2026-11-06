@@ -40,6 +40,7 @@ from nemo_agent_hardener_plugin.jobs.manifest import (
 )
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, _update_run, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.run import _effective_models
+from nemo_agent_hardener_plugin.jobs.victim_image import VictimImage
 from nemo_helix_plugin.agent_hardener.types import SynthBenignSpec
 from nemo_helix_plugin.entity_client import NemoEntitiesClient
 from nemo_helix_plugin.job import NemoJob
@@ -92,6 +93,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             workspace=workspace,
             manifest_id=synth.manifest_id,
             entity_client=cast(NemoEntitiesClient, entity_client),
+            victim_image=synth.victim_image,
         )
         return HelixJobSpec(
             steps=[
@@ -128,7 +130,8 @@ class AgentHardenerSynthBenignJob(NemoJob):
         _common.require_provisioned(plugin_config)
 
         manifest_id = str(config["manifest_id"])
-        manifest = _materialize_manifest(sdk, manifest_id, ctx)
+        drift_override = {"allow_context_drift": True} if config.get("allow_context_drift") else None
+        manifest = _materialize_manifest(sdk, manifest_id, ctx, drift_override)
         stale_warning = _agent_staleness_warning(sdk, manifest_id, ctx)
         # Synthesis probes the live victim, so it needs the manifest's declared secrets: from the operator env,
         # the manifest's Secrets-store refs and any --env-file. Either way the victim's .env gets written.
@@ -162,6 +165,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             {**env, **model_env},
             ctx,
             interview=str(config.get("interview") or "interactive"),
+            victim_image=VictimImage.from_spec(config),
         )
         suite = read_and_persist_suite(sdk, ctx, manifest_id, csv_path)
         details = {"suite_size": str(len(suite))}
@@ -197,6 +201,7 @@ class AgentHardenerSynthBenignJob(NemoJob):
             prepared_run_name=config.get("run_name") or None,
             source_run=str(config.get("source_run") or ""),
             model_env=model_env,
+            victim_image=VictimImage.from_spec(config),
         )
         self._finalize_run(sdk, ctx, config, manifest, agent, port, manifest_id, outcome, stale_warning)
         return {

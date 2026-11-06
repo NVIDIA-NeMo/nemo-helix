@@ -22,6 +22,16 @@ def test_run_checks_includes_garak_venv(tmp_path: Path) -> None:
     assert "garak venv" in labels
 
 
+def test_run_checks_skips_docker_for_a_prebuilt_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(checks, "docker_ok", lambda: pytest.fail("docker must not be probed"))
+    monkeypatch.setattr(checks, "openshell_gateway_ok", lambda: (True, "ok"))
+
+    labels = [c.label for c in checks.run_checks(_config(tmp_path), needs_docker=False)]
+
+    assert "docker" not in labels
+    assert "openshell gateway" in labels
+
+
 def test_garak_venv_ok_reports_missing(tmp_path: Path) -> None:
     ok, detail = checks.garak_venv_ok(_config(tmp_path))
     assert ok is False

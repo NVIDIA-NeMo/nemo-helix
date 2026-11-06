@@ -80,6 +80,6 @@ def test_require_preflight_is_a_noop_without_sandbox(tmp_path: Path, monkeypatch
 
 
 def test_require_preflight_exits_when_a_check_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(checks, "run_checks", lambda _c: [checks.CheckResult("docker", False, "daemon down")])
+    monkeypatch.setattr(checks, "run_checks", lambda _c, **_k: [checks.CheckResult("docker", False, "daemon down")])
     with pytest.raises(typer.Exit):
         checks.require_preflight(_config(tmp_path))

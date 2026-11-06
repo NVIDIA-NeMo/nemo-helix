@@ -9,6 +9,7 @@ are each one decision rather than one per command module.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import get_args
 
@@ -26,7 +27,7 @@ from nemo_agent_hardener_plugin.model_config import (
     effective_safety,
 )
 from nemo_agent_hardener_plugin.sdk import AgentHardenerPluginResource
-from nemo_helix_plugin.agent_hardener.types import JsonMap, JsonValue
+from nemo_helix_plugin.agent_hardener.types import VICTIM_IMAGE_PATTERN, JsonMap, JsonValue
 from nemo_helix_plugin.client.adapter import SyncHelixClient
 
 # The entity's own Literal is the single source of truth for the valid presets.
@@ -44,7 +45,40 @@ class CommandContext:
     workspace: str
 
 
-def command_context(workspace: str | None, *, preflight: bool = True) -> CommandContext:
+def _victim_image(value: str | None) -> str | None:
+    if value is None:
+        return None
+    image = value.strip()
+    if not re.fullmatch(VICTIM_IMAGE_PATTERN, image):
+        raise typer.BadParameter("name an image reference, e.g. registry.example.com/agent:1")
+    return image
+
+
+VICTIM_IMAGE_OPTION = typer.Option(
+    None,
+    "--victim-image",
+    callback=_victim_image,
+    help="Pre-built victim image to run instead of building it locally with docker; overrides the manifest's "
+    "image for this run. Build it from the archive `nemo agent-hardener stage` writes for the same manifest.",
+)
+ALLOW_CONTEXT_DRIFT_OPTION = typer.Option(
+    False,
+    "--allow-context-drift",
+    help="Run a victim image (--victim-image or the manifest's) that was not built from the context `stage` "
+    "writes now, with a warning instead of failing.",
+)
+
+
+def require_victim_image_for_drift(
+    victim_image: str | None, allow_context_drift: bool, manifest_id: str | None
+) -> None:
+    """Reject ``--allow-context-drift`` with no image to apply it to, which would otherwise be silently ignored."""
+    if allow_context_drift and not (victim_image or manifest_id):
+        typer.secho("Error: --allow-context-drift needs --victim-image or a --manifest-id with one.", fg="red")
+        raise typer.Exit(code=1)
+
+
+def command_context(workspace: str | None, *, preflight: bool = True, needs_docker: bool = True) -> CommandContext:
     """Shared command preamble: config, host preflight, SDK client, resolved workspace.
 
     Making *preflight* an explicit argument keeps the "which commands gate on host readiness"
@@ -52,7 +86,7 @@ def command_context(workspace: str | None, *, preflight: bool = True) -> Command
     """
     config = AgentHardenerConfig.get()
     if preflight:
-        checks.require_preflight(config)
+        checks.require_preflight(config, needs_docker=needs_docker)
     url = base_url()
     sdk = make_sdk(url)
     return CommandContext(
@@ -74,6 +108,70 @@ def parse_env_pairs(pairs: list[str]) -> dict[str, str]:
             raise typer.Exit(code=1)
         env[key] = value
     return env
+
+
+def _backend_pairs(pairs: list[str], flag: str) -> list[tuple[str, str]]:
+    parsed: list[tuple[str, str]] = []
+    for pair in pairs:
+        name, sep, value = pair.partition("=")
+        if not sep or not name or not value:
+            typer.secho(f"Error: {flag} expects NAME=VALUE, got {pair!r}.", fg="red")
+            raise typer.Exit(code=1)
+        parsed.append((name, value))
+    return parsed
+
+
+def backends_from_flags(
+    backends: list[str], hosts: list[str], allowed_ips: list[str]
+) -> list[str | dict[str, JsonValue]]:
+    """Combine ``--backend NAME:PORT[,PORT]`` with the ``--backend-host`` / ``--backend-allowed-ip`` for it.
+
+    A backend with neither stays a ``NAME:PORT`` string; one with either becomes the structured form. The
+    server validates both, so ports and addresses are passed through as given.
+    """
+    host_pairs = _backend_pairs(hosts, "--backend-host")
+    ip_pairs = _backend_pairs(allowed_ips, "--backend-allowed-ip")
+    host_by_name = dict(host_pairs)
+    if len(host_by_name) != len(host_pairs):
+        typer.secho("Error: --backend-host names the same backend more than once.", fg="red")
+        raise typer.Exit(code=1)
+    ips_by_name: dict[str, list[JsonValue]] = {}
+    for name, ip in ip_pairs:
+        ips_by_name.setdefault(name, []).append(ip)
+
+    declared = {spec.partition(":")[0] for spec in backends}
+    unknown = sorted((host_by_name.keys() | ips_by_name.keys()) - declared)
+    if unknown:
+        typer.secho(
+            f"Error: no --backend named {', '.join(unknown)}; --backend-host and --backend-allowed-ip "
+            "refer to a backend given with --backend NAME:PORT.",
+            fg="red",
+        )
+        raise typer.Exit(code=1)
+
+    combined: list[str | dict[str, JsonValue]] = []
+    for spec in backends:
+        name, _, port_list = spec.partition(":")
+        if name not in host_by_name and name not in ips_by_name:
+            combined.append(spec)
+            continue
+        entry: dict[str, JsonValue] = {"name": name, "ports": list[JsonValue](port_list.split(","))}
+        if name in host_by_name:
+            entry["host"] = host_by_name[name]
+        if name in ips_by_name:
+            entry["allowed_ips"] = ips_by_name[name]
+        combined.append(entry)
+    return combined
+
+
+BACKEND_HOST_HELP = (
+    "Host of a --backend that is not on this machine, as NAME=HOST (hostname, IPv4 or IPv6), repeatable. The "
+    "sandbox reaches it directly instead of via host.docker.internal."
+)
+BACKEND_ALLOWED_IP_HELP = (
+    "IP or CIDR a --backend resolves to, as NAME=IP_OR_CIDR, repeatable. OpenShell blocks private addresses "
+    "(such as a cluster service IP) unless they are listed."
+)
 
 
 def json_string_list(value: JsonValue | None) -> list[str]:

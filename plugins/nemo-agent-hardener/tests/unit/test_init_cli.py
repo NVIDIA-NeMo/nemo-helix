@@ -45,7 +45,7 @@ def _patch_cli(
             manifests=SimpleNamespace(create=fake_create, inspect_project=fake_inspect_project)
         )
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
@@ -157,6 +157,71 @@ def test_init_passes_repeated_backends_to_the_create_body(tmp_path: Path, monkey
 
     assert result.exit_code == 0, result.output
     assert created["backends"] == ["remote-mcp:9100,9101", "db:5432"]
+
+
+def test_init_sends_a_backend_with_a_host_in_structured_form(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    created: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, [], created, _project(tmp_path))
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "init",
+            "--agent",
+            "clockbot",
+            "--backend",
+            "db:5432",
+            "--backend",
+            "ledger:8087,8088",
+            "--backend-host",
+            "ledger=ledger.ns.svc",
+            "--backend-allowed-ip",
+            "ledger=10.96.0.0/12",
+            "--backend-allowed-ip",
+            "ledger=10.97.0.4",
+            "--output",
+            str(tmp_path / "agent-hardener.yaml"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert created["backends"] == [
+        "db:5432",
+        {
+            "name": "ledger",
+            "ports": ["8087", "8088"],
+            "host": "ledger.ns.svc",
+            "allowed_ips": ["10.96.0.0/12", "10.97.0.4"],
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    ("flags", "message"),
+    [
+        (["--backend-host", "ledger=ledger.ns.svc"], "no --backend named ledger"),
+        (["--backend", "db:5432", "--backend-allowed-ip", "ledger=10.0.0.1"], "no --backend named ledger"),
+        (["--backend", "db:5432", "--backend-host", "db"], "--backend-host expects NAME=VALUE"),
+        (["--backend", "db:5432", "--backend-host", "db=a", "--backend-host", "db=b"], "more than once"),
+    ],
+)
+def test_init_rejects_backend_host_flags_that_name_no_backend(
+    flags: list[str], message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nemo_agent_hardener_plugin.cli import main as cli_main
+    from typer.testing import CliRunner
+
+    created: dict[str, Any] = {}
+    app = _patch_cli(cli_main, monkeypatch, [], created, _project(tmp_path))
+
+    result = CliRunner().invoke(app, ["init", "--agent", "clockbot", *flags, "--output", str(tmp_path / "o.yaml")])
+
+    assert result.exit_code == 1
+    assert message in result.output
+    assert created == {}
 
 
 def test_init_omits_backends_when_none_given(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

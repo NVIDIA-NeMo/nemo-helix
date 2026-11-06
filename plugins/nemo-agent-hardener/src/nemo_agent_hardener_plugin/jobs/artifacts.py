@@ -110,7 +110,8 @@ def _prepare_artifact_capture(capture: ArtifactCapture, manifest: str) -> str:
         run_id = f"nhx-agent-hardener-{uuid.uuid4().hex}"
         run_dir = _storage_scope(data, manifest_path, run_id)
         hitlog_dir, hitlog_prefix = _garak_scope(data, run_dir, run_id, manifest_path)
-        scoped_path = manifest_path.with_name(f".{manifest_path.stem}.{run_id}.yaml")
+        # agent-hardener leaves `.agent-hardener.*` out of the staged build context, so the copy can't change its digest.
+        scoped_path = manifest_path.with_name(f".agent-hardener.{run_id}.yaml")
         descriptor = os.open(scoped_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             yaml.safe_dump(data, stream, sort_keys=False)

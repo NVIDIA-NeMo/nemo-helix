@@ -10,9 +10,12 @@ from pathlib import Path
 
 import typer
 from nemo_agent_hardener_plugin.cli._shared import (
+    ALLOW_CONTEXT_DRIFT_OPTION,
     ATTACK_INTENSITIES,
+    VICTIM_IMAGE_OPTION,
     command_context,
     models_from_flags,
+    require_victim_image_for_drift,
     validated_defenders,
     validated_intensity,
 )
@@ -96,6 +99,8 @@ def register(app: typer.Typer) -> None:
         safety_key_secret: str | None = typer.Option(
             None, "--safety-key-secret", help="Secrets-store name holding the safety endpoint's API key."
         ),
+        victim_image: str | None = VICTIM_IMAGE_OPTION,
+        allow_context_drift: bool = ALLOW_CONTEXT_DRIFT_OPTION,
     ) -> None:
         """Run the attack/defend/validate war-game against a local manifest or a saved manifest.
 
@@ -103,7 +108,8 @@ def register(app: typer.Typer) -> None:
         can deviate from the frozen baseline without breaking comparability. Use
         `nemo agent-hardener manifest set` to change the stored defaults instead.
         """
-        ctx = command_context(workspace)
+        require_victim_image_for_drift(victim_image, allow_context_drift, manifest_id)
+        ctx = command_context(workspace, needs_docker=victim_image is None)
         if config_file and manifest_id:
             typer.secho("Pass either --config or --manifest-id, not both.", fg="red")
             raise typer.Exit(code=1)
@@ -157,6 +163,8 @@ def register(app: typer.Typer) -> None:
                     safety_base_url=safety_base_url,
                     safety_key_secret=safety_key_secret,
                 ),
+                victim_image=victim_image,
+                allow_context_drift=allow_context_drift,
             )
         except ValueError as exc:
             typer.secho(f"Error: {exc}", fg="red")
@@ -175,13 +183,15 @@ def register(app: typer.Typer) -> None:
             False, "--no-interactive", help="Skip the interview entirely (leaner, rules-only suite; use in CI)."
         ),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace of the manifest."),
+        victim_image: str | None = VICTIM_IMAGE_OPTION,
+        allow_context_drift: bool = ALLOW_CONTEXT_DRIFT_OPTION,
     ) -> None:
         """Synthesize the benign request suite for a saved manifest and cache it on the manifest.
 
         Brings the victim sandbox up, runs agent-hardener's interview/review (interactive by default), then
         tears it down — the reviewed suite is stored on the manifest so a later `run --manifest-id` reuses it.
         """
-        ctx = command_context(workspace)
+        ctx = command_context(workspace, needs_docker=victim_image is None)
         if yes and no_interactive:
             typer.secho("Pass either --yes or --no-interactive, not both.", fg="red")
             raise typer.Exit(code=1)
@@ -192,6 +202,8 @@ def register(app: typer.Typer) -> None:
             env_file=env_file,
             interview=interview,
             workspace=ctx.workspace,
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
         if result.get("status") == "completed":
             typer.secho(
@@ -221,6 +233,8 @@ def register(app: typer.Typer) -> None:
         exclude: list[str] = typer.Option(None, "--exclude", help="Defense id to drop (repeatable)."),
         env_file: str | None = typer.Option(None, "--env-file", help="Dotenv with the agent's secrets."),
         workspace: str | None = typer.Option(None, "--workspace", help="Workspace for the run."),
+        victim_image: str | None = VICTIM_IMAGE_OPTION,
+        allow_context_drift: bool = ALLOW_CONTEXT_DRIFT_OPTION,
     ) -> None:
         """Freeze a chosen subset of a run's recommended defenses and replay the recorded attacks + benign.
 
@@ -229,7 +243,7 @@ def register(app: typer.Typer) -> None:
         selection blocks and which benign requests it wrongly blocks (false positives). Get the
         ``mitigations.json`` and the hitlog fileset ref from a completed run (`nemo agent-hardener status`).
         """
-        ctx = command_context(workspace)
+        ctx = command_context(workspace, needs_docker=victim_image is None)
         if keep and exclude:
             typer.secho("Pass either --keep or --exclude, not both.", fg="red")
             raise typer.Exit(code=1)
@@ -254,5 +268,7 @@ def register(app: typer.Typer) -> None:
             replay_hitlog_fileset=replay_hitlog,
             env_file=env_file,
             workspace=ctx.workspace,
+            victim_image=victim_image,
+            allow_context_drift=allow_context_drift,
         )
         typer.echo(json.dumps(result, indent=2, default=str))

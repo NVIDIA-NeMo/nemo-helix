@@ -813,8 +813,8 @@ paths:
       tags:
       - Agent Hardener Manifests
       summary: Update Manifest
-      description: "Edit a manifest's cached benign suite, victim port, egress, or\
-        \ war-game settings.\n\nThe agent source itself is immutable \u2014 re-create\
+      description: "Edit a manifest's cached benign suite, victim port, egress, backends,\
+        \ or war-game settings.\n\nThe agent source itself is immutable \u2014 re-create\
         \ the manifest to point at a different agent, or\n`POST /manifests/{name}/refresh`\
         \ to re-resolve the one it already targets."
       operationId: update_manifest_apis_agent_hardener_v2_workspaces__workspace__manifests__name__patch
@@ -3347,6 +3347,47 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    ManifestBackend:
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*$
+          title: Name
+          description: Backend name, unique within the manifest.
+        ports:
+          items:
+            type: integer
+            maximum: 65535.0
+            minimum: 1.0
+          type: array
+          minItems: 1
+          title: Ports
+          description: Ports the victim may reach on the backend.
+        host:
+          title: Host
+          description: Hostname, IPv4 or IPv6 address of a backend that is not on
+            the operator's host, such as a Kubernetes service. Ports belong in `ports`.
+          type: string
+        allowed_ips:
+          items:
+            type: string
+          type: array
+          title: Allowed Ips
+          description: IP addresses or CIDR ranges the backend resolves to. OpenShell
+            blocks private addresses (e.g. a cluster service IP) unless they are listed
+            here.
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - ports
+      title: ManifestBackend
+      description: 'A service the victim''s tools call, opened as a route in the sandbox''s
+        network policy.
+
+
+        Without ``host`` it runs on the operator''s host and the sandbox reaches it
+        via ``host.docker.internal``.'
     ManifestFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.
@@ -3447,11 +3488,17 @@ components:
           type: object
         backends:
           title: Backends
-          description: Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]'
-            (e.g. 'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT
-            and opens the sandbox->host route.
+          description: Route-only backends the agent's tools call, each 'NAME:PORT[,PORT2]'
+            (e.g. 'finance:8086') for a service on the operator's host, or an object
+            with `name`, `ports` and optional `host` / `allowed_ips` for one elsewhere.
+            A host backend rewrites the agent's localhost:PORT to host.docker.internal:PORT;
+            either form opens the sandbox's route to it.
           items:
-            type: string
+            anyOf:
+            - type: string
+              title: Reference
+              description: A reference to ManifestBackend.
+            - $ref: '#/components/schemas/ManifestBackend'
           type: array
         models:
           allOf:
@@ -3491,6 +3538,21 @@ components:
           description: Allow-listed egress host[:port] entries the victim may reach.
           items:
             type: string
+          type: array
+        backends:
+          title: Backends
+          description: Replace the declared backends; the gateway's own route is kept.
+            Route-only backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g.
+            'finance:8086') for a service on the operator's host, or an object with
+            `name`, `ports` and optional `host` / `allowed_ips` for one elsewhere.
+            A host backend rewrites the agent's localhost:PORT to host.docker.internal:PORT;
+            either form opens the sandbox's route to it.
+          items:
+            anyOf:
+            - type: string
+              title: Reference
+              description: A reference to ManifestBackend.
+            - $ref: '#/components/schemas/ManifestBackend'
           type: array
         env:
           title: Env
@@ -3938,6 +4000,20 @@ components:
         source_run:
           title: Source Run
           type: string
+        victim_image:
+          title: Victim Image
+          description: Pre-built victim image to run instead of building it locally
+            with docker; overrides the manifest's `victim_image` for this job. Build
+            it from the context `nemo agent-hardener stage` writes for the same manifest.
+          type: string
+          pattern: ^[^\s-]\S*$
+        allow_context_drift:
+          type: boolean
+          title: Allow Context Drift
+          description: Run a victim image (this job's `victim_image` or the manifest's)
+            whose staged-context digest is missing or differs from a fresh stage,
+            with a warning instead of failing.
+          default: false
       type: object
       required:
       - manifest_id
@@ -4615,6 +4691,20 @@ components:
         source_run:
           title: Source Run
           type: string
+        victim_image:
+          title: Victim Image
+          description: Pre-built victim image to run instead of building it locally
+            with docker; overrides the manifest's `victim_image` for this job. Build
+            it from the context `nemo agent-hardener stage` writes for the same manifest.
+          type: string
+          pattern: ^[^\s-]\S*$
+        allow_context_drift:
+          type: boolean
+          title: Allow Context Drift
+          description: Run a victim image (this job's `victim_image` or the manifest's)
+            whose staged-context digest is missing or differs from a fresh stage,
+            with a warning instead of failing.
+          default: false
       type: object
       title: WarGameSpec
       description: "Canonical war-game inputs \u2014 the shape ``run()`` and ``compile()``\

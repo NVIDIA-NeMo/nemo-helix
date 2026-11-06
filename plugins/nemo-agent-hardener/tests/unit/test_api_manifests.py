@@ -614,6 +614,142 @@ def test_create_project_manifest_stores_backends(client, mock_entity_client, mon
     assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [REMOTE_MCP]
 
 
+LEDGER = {"name": "ledger", "ports": [8087], "host": "ledger.ns.svc", "allowed_ips": ["10.96.0.0/12"]}
+
+
+def test_create_agent_manifest_accepts_a_structured_backend_beside_a_string(
+    client, mock_entity_client, resolver_backends
+) -> None:
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "backends": ["remote-mcp:9100,9101", LEDGER]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert resolver_backends == [[REMOTE_MCP, LEDGER]]
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        {"name": "ledger", "ports": [8087], "host": "http://ledger.ns.svc"},
+        {"name": "ledger", "ports": [8087], "host": "ledger.ns.svc:8087"},
+        {"name": "ledger", "ports": [8087], "allowed_ips": ["10.96.0.1/12"]},
+        {"name": "ledger", "ports": [8087], "allowed_ips": ["not-an-ip"]},
+        {"name": "ledger", "ports": []},
+        {"name": "nemo-inference-gateway", "ports": [8080], "host": "igw.ns.svc"},
+    ],
+)
+def test_create_manifest_rejects_a_bad_structured_backend_with_422(client, resolver_backends, backend: dict) -> None:
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "m1", "source_type": "agent", "agent": "clockbot", "backends": [backend]},
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resolver_backends == []
+
+
+def test_create_project_manifest_writes_backend_host_and_allowed_ips(client, mock_entity_client, monkeypatch) -> None:
+    monkeypatch.setattr(manifests_module, "download_and_extract_project", lambda *_a, **_k: Path("/tmp/p"))
+    monkeypatch.setattr(
+        manifests_module,
+        "inspect_project",
+        lambda *_a, **_k: {"dockerfile": "Dockerfile", "start_command": "run", "binaries": ["/app/**"]},
+    )
+    mock_entity_client.create = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post(
+        "/apis/agent-hardener/v2/workspaces/default/manifests",
+        json={"name": "p1", "source_type": "project", "project_fileset": "default/proj", "backends": [LEDGER]},
+    )
+
+    assert resp.status_code == 201, resp.text
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [LEDGER]
+
+
+def test_patch_backends_replaces_declared_backends_and_keeps_the_gateway(client, mock_entity_client) -> None:
+    stored_yaml = yaml.safe_dump({"agent": {"name": "clockbot", "port": 8000}, "backends": [GATEWAY, REMOTE_MCP]})
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", port=8000, manifest_yaml=stored_yaml
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"backends": [LEDGER]})
+
+    assert resp.status_code == 200, resp.text
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [GATEWAY, LEDGER]
+
+
+def test_patch_with_an_empty_backend_list_clears_declared_backends(client, mock_entity_client) -> None:
+    stored_yaml = yaml.safe_dump({"agent": {"name": "clockbot", "port": 8000}, "backends": [GATEWAY, REMOTE_MCP]})
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", port=8000, manifest_yaml=stored_yaml
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"backends": []})
+
+    assert resp.status_code == 200, resp.text
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [GATEWAY]
+
+
+def test_patch_without_backends_leaves_them_unchanged(client, mock_entity_client) -> None:
+    stored_yaml = yaml.safe_dump({"agent": {"name": "clockbot", "port": 8000}, "backends": [GATEWAY, REMOTE_MCP]})
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", port=8000, manifest_yaml=stored_yaml
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"rounds": 2})
+
+    assert resp.status_code == 200, resp.text
+    assert yaml.safe_load(resp.json()["manifest_yaml"])["backends"] == [GATEWAY, REMOTE_MCP]
+
+
+def test_patch_rejects_a_reserved_backend_name_without_saving(client, mock_entity_client) -> None:
+    existing = AgentHardenerManifest(name="m1", workspace="default", agent="default/clockbot", port=8000)
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch(
+        "/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"backends": ["nemo-inference-gateway:8080"]}
+    )
+
+    assert resp.status_code == 422, resp.text
+    mock_entity_client.update.assert_not_awaited()
+
+
+def test_patch_backends_on_a_manifest_without_yaml_is_rejected(client, mock_entity_client) -> None:
+    existing = AgentHardenerManifest(name="m1", workspace="default", agent="default/clockbot", port=8000)
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.patch("/apis/agent-hardener/v2/workspaces/default/manifests/m1", json={"backends": [LEDGER]})
+
+    assert resp.status_code == 422, resp.text
+    mock_entity_client.update.assert_not_awaited()
+
+
+def test_refresh_keeps_a_patched_backend_host(client, mock_entity_client, resolver_backends) -> None:
+    stored_yaml = yaml.safe_dump({"agent": {"name": "clockbot"}, "backends": [GATEWAY, LEDGER]})
+    existing = AgentHardenerManifest(
+        name="m1", workspace="default", agent="default/clockbot", agent_fileset="default/old", manifest_yaml=stored_yaml
+    )
+    mock_entity_client.get = AsyncMock(return_value=existing)
+    mock_entity_client.update = AsyncMock(side_effect=lambda entity: entity)
+
+    resp = client.post("/apis/agent-hardener/v2/workspaces/default/manifests/m1/refresh")
+
+    assert resp.status_code == 200, resp.text
+    assert resolver_backends == [[LEDGER]]
+
+
 # ── agent staleness marker ───────────────────────────────────────────────────
 
 

@@ -329,6 +329,17 @@ Inference Gateway backend is added automatically and its name is reserved; your 
 `refresh`. Gateway-routed model URLs in the hardener's copy of the agent also use
 `host.docker.internal` rather than `localhost`.
 
+A backend that is not on the host, such as a Kubernetes service, takes a host of its own. OpenShell
+blocks private addresses, so list the IPs or CIDR ranges it resolves to:
+
+```bash
+uv run nemo agent-hardener init --agent react-agent --backend ledger:8087 \
+  --backend-host ledger=ledger.ns.svc --backend-allowed-ip ledger=10.96.0.0/12
+```
+
+`manifest set` takes the same three flags and replaces the stored backends. Over the API, a backend is
+either the `NAME:PORT` string or `{name, ports, host, allowed_ips}`.
+
 If the agent reads non-secret environment variables — a host-backend URL, a feature flag — set them
 at init too:
 
@@ -391,6 +402,21 @@ Your project supplies its own dependencies, so its `pyproject.toml`/`requirement
 
 Prefer `run --manifest-id` over `run --config`: the cached suite is looked up by manifest id, so the
 `--config` form needs you to pass `--benign-suite <csv>` yourself.
+
+### Run a pre-built victim image
+
+On a host without Docker, build the victim elsewhere. `stage` writes the victim's build context
+(your Dockerfile plus the injected Relay shim and guardrail plugin) as a `.tar.gz`:
+
+```bash
+uv run nemo agent-hardener stage --manifest-id react-agent     # or --config agent-hardener.yaml
+```
+
+Build and push it (`docker build -t <ref> - < <archive>`), then either record it on the manifest with
+`manifest set <manifest> --victim-image <ref>`, or pass `--victim-image <ref>` to `run`, `synth-benign` or
+`sanity-check` to override the manifest's image for one run. Stage again whenever the manifest or
+agent-hardener changes: the image carries a digest of the context, and a run fails when it differs from a
+fresh stage. Add `--allow-context-drift` to run it anyway with a warning.
 
 After a run produces mitigations, freeze a chosen subset and replay the recorded attacks against it:
 

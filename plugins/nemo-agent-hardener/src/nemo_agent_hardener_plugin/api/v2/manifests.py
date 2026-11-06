@@ -40,6 +40,7 @@ from nemo_agent_hardener_plugin.api.v2.schemas import (
     InspectAgentResponse,
     InspectProjectRequest,
     InspectProjectResponse,
+    ManifestBackend,
     ManifestFilter,
     ManifestInit,
     ManifestUpdate,
@@ -287,7 +288,7 @@ def _yaml_with_agent_settings(manifest_yaml: str, manifest: AgentHardenerManifes
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def _backends_or_422(specs: list[str] | None) -> list[dict[str, Any]]:
+def _backends_or_422(specs: list[str | ManifestBackend] | None) -> list[dict[str, Any]]:
     try:
         return parse_backends(specs)
     except ValueError as exc:
@@ -315,6 +316,27 @@ def _stored_user_backends(manifest_yaml: str) -> list[dict[str, Any]]:
     if not isinstance(entries, list):
         return []
     return [b for b in entries if isinstance(b, dict) and b.get("name") != GATEWAY_BACKEND_NAME]
+
+
+def _yaml_with_backends(manifest_yaml: str, backends: list[dict[str, Any]]) -> str:
+    """Return *manifest_yaml* with its declared backends replaced by *backends*, keeping the gateway's route."""
+    unusable = HTTPException(
+        status_code=422, detail="the saved manifest has no usable YAML to set backends on; recreate the manifest"
+    )
+    try:
+        data = yaml.safe_load(manifest_yaml)
+    except yaml.YAMLError as exc:
+        raise unusable from exc
+    if not (isinstance(data, dict) and isinstance(data.get("agent"), dict)):
+        raise unusable
+    entries = data.get("backends")
+    gateway = [
+        b
+        for b in (entries if isinstance(entries, list) else [])
+        if isinstance(b, dict) and b.get("name") == GATEWAY_BACKEND_NAME
+    ]
+    data["backends"] = [*gateway, *backends]
+    return yaml.safe_dump(data, sort_keys=False)
 
 
 @router.post("/manifests", response_model=AgentHardenerManifest, status_code=201, tags=["Agent Hardener Manifests"])
@@ -525,7 +547,7 @@ async def update_manifest(
     body: ManifestUpdate,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> AgentHardenerManifest:
-    """Edit a manifest's cached benign suite, victim port, egress, or war-game settings.
+    """Edit a manifest's cached benign suite, victim port, egress, backends, or war-game settings.
 
     The agent source itself is immutable — re-create the manifest to point at a different agent, or
     `POST /manifests/{name}/refresh` to re-resolve the one it already targets.
@@ -549,6 +571,8 @@ async def update_manifest(
         existing.port = body.port
     if body.victim_image is not None:
         existing.victim_image = body.victim_image
+    if body.backends is not None:
+        existing.manifest_yaml = _yaml_with_backends(existing.manifest_yaml, _backends_or_422(body.backends))
     existing.manifest_yaml = _yaml_with_agent_settings(existing.manifest_yaml, existing)
     try:
         return await entity_client.update(existing)

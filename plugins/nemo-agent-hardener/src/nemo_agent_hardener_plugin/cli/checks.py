@@ -131,15 +131,17 @@ def operator_env_ok(config: AgentHardenerConfig) -> tuple[bool, str]:
     )
 
 
-def run_checks(config: AgentHardenerConfig) -> list[CheckResult]:
-    """Run all preflight checks."""
-    return [
+def run_checks(config: AgentHardenerConfig, *, needs_docker: bool = True) -> list[CheckResult]:
+    """Run all preflight checks. *needs_docker* is false when the victim runs from a pre-built image."""
+    results = [
         CheckResult("agent-hardener venv", *venv_ok(config)),
         CheckResult("garak venv", *garak_venv_ok(config)),
         CheckResult("inference credential", *operator_env_ok(config)),
-        CheckResult("docker", *docker_ok()),
-        CheckResult("openshell gateway", *openshell_gateway_ok()),
     ]
+    if needs_docker:
+        results.append(CheckResult("docker", *docker_ok()))
+    results.append(CheckResult("openshell gateway", *openshell_gateway_ok()))
+    return results
 
 
 def print_checks(checks: list[CheckResult]) -> None:
@@ -148,11 +150,11 @@ def print_checks(checks: list[CheckResult]) -> None:
         typer.echo(f"  {mark} {check.label}: {check.detail}")
 
 
-def require_preflight(config: AgentHardenerConfig) -> None:
+def require_preflight(config: AgentHardenerConfig, *, needs_docker: bool = True) -> None:
     """Gate init/run on preflight when sandbox is required."""
     if not config.require_sandbox:
         return
-    checks = run_checks(config)
+    checks = run_checks(config, needs_docker=needs_docker)
     if not all(check.ok for check in checks):
         typer.secho("Preflight failed:", fg="red")
         print_checks(checks)

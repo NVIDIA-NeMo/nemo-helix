@@ -114,7 +114,7 @@ def _patch_cli(cli_main: Any, monkeypatch: pytest.MonkeyPatch, captured: dict[st
     fake_sdk = SimpleNamespace(
         agent_hardener=SimpleNamespace(run=lambda **kwargs: captured.update(kwargs) or {"status": "completed"})
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(war_game, "missing_secrets", lambda _p, env_files: [])

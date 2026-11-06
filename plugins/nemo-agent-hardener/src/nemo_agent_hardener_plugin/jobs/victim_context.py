@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import tarfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -79,27 +80,48 @@ class AgentHardenerVictimContextJob(NemoJob):
 
     def run(self, config: dict, *, ctx: JobContext, sdk: Any = None) -> dict:
         """Stage the context, classifying any failure into an operator-facing error result."""
-        try:
-            archive = self._execute(VictimContextSpec.model_validate(config), ctx=ctx, sdk=sdk)
-        except Exception as exc:
-            failure = classify_exception(exc)
-            logger.exception("agent-hardener stage failed [%s]: %s", failure.category, failure.message)
-            return {
-                "status": "failed",
-                "returncode": 1,
-                "error": {"category": failure.category, "message": failure.message, "remediation": failure.remediation},
-            }
-        return {"status": "completed", "returncode": 0, "context_archive": str(archive)}
+        spec = VictimContextSpec.model_validate(config)
+        return _staged_result(lambda: self._execute(spec, ctx=ctx, sdk=sdk))
 
     def _execute(self, spec: VictimContextSpec, *, ctx: JobContext, sdk: Any) -> Path:
         plugin_config = AgentHardenerConfig.get()
         _common.require_provisioned(plugin_config)
         manifest = _materialize_manifest(sdk, spec.manifest_id, ctx)
-        context_dir = _stage(plugin_config, manifest, ctx)
-        archive = ctx.storage.persistent / f"{spec.manifest_id}-{CONTEXT_RESULT}.tar.gz"
-        _archive_context(context_dir, archive)
-        ctx.results.save(CONTEXT_RESULT, archive)
-        return archive
+        return _stage_archive(plugin_config, manifest, spec.manifest_id, ctx)
+
+
+def stage_local_manifest(manifest: Path, ctx: JobContext) -> dict:
+    """Stage a local ``agent-hardener.yaml`` the way the job stages a saved manifest, returning the same result."""
+
+    def execute() -> Path:
+        plugin_config = AgentHardenerConfig.get()
+        _common.require_provisioned(plugin_config)
+        return _stage_archive(plugin_config, str(manifest.resolve()), manifest.stem, ctx)
+
+    return _staged_result(execute)
+
+
+def _staged_result(execute: Callable[[], Path]) -> dict:
+    try:
+        archive = execute()
+    except Exception as exc:
+        failure = classify_exception(exc)
+        logger.exception("agent-hardener stage failed [%s]: %s", failure.category, failure.message)
+        return {
+            "status": "failed",
+            "returncode": 1,
+            "error": {"category": failure.category, "message": failure.message, "remediation": failure.remediation},
+        }
+    return {"status": "completed", "returncode": 0, "context_archive": str(archive)}
+
+
+def _stage_archive(plugin_config: AgentHardenerConfig, manifest: str, name: str, ctx: JobContext) -> Path:
+    """Stage *manifest*'s victim build context and save it as the ``<name>-victim-context.tar.gz`` result."""
+    context_dir = _stage(plugin_config, manifest, ctx)
+    archive = ctx.storage.persistent / f"{name}-{CONTEXT_RESULT}.tar.gz"
+    _archive_context(context_dir, archive)
+    ctx.results.save(CONTEXT_RESULT, archive)
+    return archive
 
 
 def _stage(plugin_config: AgentHardenerConfig, manifest: str, ctx: JobContext) -> Path:

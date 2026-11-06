@@ -37,6 +37,7 @@ from nemo_agent_hardener_plugin.jobs.errors import (
 from nemo_agent_hardener_plugin.jobs.hitl import StatusDetailsChannel, drive_synth_hitl
 from nemo_agent_hardener_plugin.jobs.records import _create_run, _run_data, read_and_persist_suite
 from nemo_agent_hardener_plugin.jobs.synth_client import launch_synth_service
+from nemo_agent_hardener_plugin.jobs.victim_image import VictimImage, victim_image_args
 from nemo_agents_plugin.jobs.gateway_proxy import optional_platform_auth_proxy
 from nemo_helix_plugin.client.constants import WORKLOAD_IDENTITY_TOKEN_FILE_ENVVAR
 from nemo_helix_plugin.job_context import JobContext
@@ -181,6 +182,7 @@ def _run_command(
     rounds: int = 1,
     replay_args: list[str] | None = None,
     reuse: bool = False,
+    victim_image: VictimImage | None = None,
 ) -> list[str]:
     """Build an ``agent-hardener run`` command line (the single source of truth for its flags).
 
@@ -197,6 +199,7 @@ def _run_command(
         cmd += ["--env-file", env_file]
     if rounds > 1:
         cmd += ["--rounds", str(rounds)]
+    cmd += victim_image_args(victim_image)
     cmd += replay_args or []
     return cmd
 
@@ -240,6 +243,7 @@ def _prepare_invocation(
     benign_suite: str | None = None,
     model_env: dict[str, str] | None = None,
     rounds: int = 1,
+    victim_image: VictimImage | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Build the `agent-hardener run` command + subprocess env, failing fast on missing victim secrets."""
     cmd = _run_command(
@@ -249,6 +253,7 @@ def _prepare_invocation(
         env_file=env_file,
         rounds=rounds,
         replay_args=replay_args,
+        victim_image=victim_image,
     )
     _reject_platform_auth_sources(manifest, env_file)
     env = _build_native_subprocess_env(plugin_config, model_env)
@@ -265,6 +270,7 @@ def _run_one_shot(
     benign_suite: str | None = None,
     model_env: dict[str, str] | None = None,
     rounds: int = 1,
+    victim_image: VictimImage | None = None,
 ) -> RunOutcome:
     """The default path: one `agent-hardener run`, which consumes a benign suite but never generates one.
 
@@ -276,7 +282,9 @@ def _run_one_shot(
     ``rounds`` is honoured here too: iterative hardening is a property of the war-game, not of the
     driver, so the native (CLI) path is not limited to a single round.
     """
-    cmd, env = _prepare_invocation(manifest, env_file, plugin_config, replay_args, benign_suite, model_env, rounds)
+    cmd, env = _prepare_invocation(
+        manifest, env_file, plugin_config, replay_args, benign_suite, model_env, rounds, victim_image
+    )
     log_path = ctx.storage.persistent / "agent-hardener.log"
     completed, log_text, log_ref, failure = _run_agent_hardener(
         cmd, env, log_path, ctx, artifact_name="agent-hardener-log"
@@ -302,6 +310,7 @@ def _run_service_driven(
     benign_suite_override: str | None = None,
     source_run: str = "",
     model_env: dict[str, str] | None = None,
+    victim_image: VictimImage | None = None,
 ) -> RunOutcome:
     """Studio-driven path: build sandbox -> (reuse or generate the benign suite) -> replay it in the attack.
 
@@ -360,6 +369,7 @@ def _run_service_driven(
                 replay_args=replay_args,
                 benign_suite_override=benign_suite_override,
                 record_name=record_name,
+                victim_image=victim_image,
             )
     except Exception as exc:  # classify + finalize the record rather than orphaning it as `running`
         failure = classify_exception(exc)
@@ -384,6 +394,7 @@ def _drive_service_run(
     replay_args: list[str] | None,
     benign_suite_override: str | None,
     record_name: str | None,
+    victim_image: VictimImage | None = None,
 ) -> RunOutcome:
     """Execute the chosen service strategy against a warm/cold sandbox (assumes the record already exists)."""
     # Explicit-suite path: use an uploaded suite override, else the manifest's cached suite. Hand the CSV to
@@ -398,7 +409,13 @@ def _drive_service_run(
         suite_path = str(suite_csv)
     if suite_path and not stop_after_synth:
         cmd = _run_command(
-            bin_path, manifest, benign_suite=suite_path, env_file=env_file, rounds=rounds, replay_args=replay_args
+            bin_path,
+            manifest,
+            benign_suite=suite_path,
+            env_file=env_file,
+            rounds=rounds,
+            replay_args=replay_args,
+            victim_image=victim_image,
         )
         completed, log_text, log_ref, failure = _run_agent_hardener(
             cmd, env, ctx.storage.persistent / "agent-hardener.log", ctx, artifact_name="agent-hardener-log"
@@ -407,7 +424,14 @@ def _drive_service_run(
 
     # No cached suite (or regenerating): bring the sandbox up so synth can probe the live victim, run the
     # interview/review HITL, and cache the reviewed suite back on the manifest.
-    up_cmd = [str(bin_path), "up", "--config", manifest, *(["--env-file", env_file] if env_file else [])]
+    up_cmd = [
+        str(bin_path),
+        "up",
+        "--config",
+        manifest,
+        *(["--env-file", env_file] if env_file else []),
+        *victim_image_args(victim_image),
+    ]
     up_done, _t, _r, up_failure = _run_agent_hardener(
         up_cmd, env, ctx.storage.persistent / "up.log", ctx, artifact_name="up-log"
     )
@@ -451,6 +475,7 @@ def _drive_service_run(
             rounds=rounds,
             replay_args=replay_args,
             reuse=True,
+            victim_image=victim_image,
         )
         completed, log_text, log_ref, failure = _run_agent_hardener(
             cmd, env, ctx.storage.persistent / "agent-hardener.log", ctx, artifact_name="agent-hardener-log"
@@ -468,6 +493,7 @@ def run_synth_benign(
     ctx: JobContext,
     *,
     interview: str = "interactive",
+    victim_image: VictimImage | None = None,
 ) -> Path:
     """Run native ``agent-hardener synth-benign`` against *manifest* and return the produced ``requests.csv``.
 
@@ -484,6 +510,7 @@ def run_synth_benign(
         cmd.append("--yes")
     elif interview == "skip":
         cmd.append("--no-interactive")
+    cmd += victim_image_args(victim_image)
     _completed, _log, _ref, failure = _run_agent_hardener(
         cmd, env, ctx.storage.persistent / "synth-benign.log", ctx, artifact_name="synth-benign-log"
     )

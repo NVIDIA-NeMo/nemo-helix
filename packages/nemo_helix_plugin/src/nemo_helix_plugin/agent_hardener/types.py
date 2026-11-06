@@ -5,9 +5,11 @@
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
 
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from nemo_helix_plugin.jobs.types import validate_output_location
@@ -32,6 +34,48 @@ ANALYSIS_DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # agent-hardener's guardrail judge falls back to the analysis model, endpoint and key.
 SAFETY_DEFAULT_MODEL = ANALYSIS_DEFAULT_MODEL
 SAFETY_DEFAULT_BASE_URL = ANALYSIS_DEFAULT_BASE_URL
+
+# Passed to agent-hardener as an argv value, so it may not contain whitespace or start like a flag.
+VICTIM_IMAGE_PATTERN = r"^[^\s-]\S*$"
+BACKEND_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+_HOSTNAME_LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")
+_MAX_HOSTNAME_LENGTH = 253
+
+Port = Annotated[int, Field(ge=1, le=65535)]
+VictimImageRef = Annotated[
+    str | None,
+    Field(
+        pattern=VICTIM_IMAGE_PATTERN,
+        description="Pre-built victim image to run instead of building it locally with docker; overrides the "
+        "manifest's `victim_image` for this job. Build it from the context `nemo agent-hardener stage` writes "
+        "for the same manifest.",
+    ),
+]
+AllowContextDrift = Annotated[
+    bool,
+    Field(
+        description="Run a victim image (this job's `victim_image` or the manifest's) whose staged-context digest "
+        "is missing or differs from a fresh stage, with a warning instead of failing.",
+    ),
+]
+
+
+def _require_image_for_drift(victim_image: str | None, allow_context_drift: bool, manifest_id: str | None) -> None:
+    if allow_context_drift and not (victim_image or manifest_id):
+        raise ValueError("allow_context_drift requires victim_image or a manifest_id whose manifest has one")
+
+
+def _is_ip_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_hostname(value: str) -> bool:
+    labels = value.removesuffix(".").split(".")
+    return len(value) <= _MAX_HOSTNAME_LENGTH and all(_HOSTNAME_LABEL.fullmatch(label) for label in labels)
 
 
 class JobsSortField(str, Enum):
@@ -217,6 +261,8 @@ class WarGameSpec(BaseModel):
     defense_policy: str | None = None
     models: WarGameModels | None = None
     source_run: str | None = None
+    victim_image: VictimImageRef = None
+    allow_context_drift: AllowContextDrift = False
 
     @model_validator(mode="after")
     def _validate_target_and_replay(self) -> WarGameSpec:
@@ -224,6 +270,7 @@ class WarGameSpec(BaseModel):
             raise ValueError("pass exactly one of 'config' or 'manifest_id'")
         if self.validate_only and not (self.replay_hitlog_fileset and self.replay_hitlog_fileset.strip()):
             raise ValueError("validate_only requires replay_hitlog_fileset")
+        _require_image_for_drift(self.victim_image, self.allow_context_drift, self.manifest_id)
         return self
 
 
@@ -236,6 +283,13 @@ class SynthBenignSpec(BaseModel):
     interview: str = "interactive"
     run_name: str | None = None
     source_run: str | None = None
+    victim_image: VictimImageRef = None
+    allow_context_drift: AllowContextDrift = False
+
+    @model_validator(mode="after")
+    def _validate_victim_image(self) -> SynthBenignSpec:
+        _require_image_for_drift(self.victim_image, self.allow_context_drift, self.manifest_id)
+        return self
 
 
 class VictimContextSpec(BaseModel):
@@ -342,6 +396,57 @@ WarGameJobsSortField = JobsSortField
 SynthBenignJobsSortField = JobsSortField
 
 
+class ManifestBackend(BaseModel):
+    """A service the victim's tools call, opened as a route in the sandbox's network policy.
+
+    Without ``host`` it runs on the operator's host and the sandbox reaches it via ``host.docker.internal``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(pattern=BACKEND_NAME_PATTERN, description="Backend name, unique within the manifest.")
+    ports: list[Port] = Field(min_length=1, description="Ports the victim may reach on the backend.")
+    host: str | None = Field(
+        default=None,
+        description="Hostname, IPv4 or IPv6 address of a backend that is not on the operator's host, such as a "
+        "Kubernetes service. Ports belong in `ports`.",
+    )
+    allowed_ips: list[str] = Field(
+        default_factory=list,
+        description="IP addresses or CIDR ranges the backend resolves to. OpenShell blocks private addresses "
+        "(e.g. a cluster service IP) unless they are listed here.",
+    )
+
+    @field_validator("host")
+    @classmethod
+    def _bare_host(cls, value: str | None) -> str | None:
+        host = (value or "").strip()
+        if not host:
+            return None
+        if not (_is_ip_address(host) or _is_hostname(host)):
+            raise ValueError(f"backend host must be a bare hostname, IPv4 or IPv6 address, not {host!r}")
+        return host
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def _ip_or_cidr(cls, values: list[str]) -> list[str]:
+        cleaned = [value.strip() for value in values]
+        for value in cleaned:
+            try:
+                ipaddress.ip_network(value)
+            except ValueError as exc:
+                raise ValueError(f"allowed_ips entry {value!r} is not an IP address or CIDR range: {exc}") from exc
+        return cleaned
+
+
+_BACKENDS_DESCRIPTION = (
+    "Route-only backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. 'finance:8086') for a service on "
+    "the operator's host, or an object with `name`, `ports` and optional `host` / `allowed_ips` for one elsewhere. "
+    "A host backend rewrites the agent's localhost:PORT to host.docker.internal:PORT; either form opens the "
+    "sandbox's route to it."
+)
+
+
 class ManifestInit(BaseModel):
     """Body for ``POST /v2/workspaces/{workspace}/manifests`` — scaffold a named manifest.
 
@@ -411,11 +516,9 @@ class ManifestInit(BaseModel):
         "plaintext on the manifest — credentials belong in `secrets` as `NAME=workspace/secret`, read from "
         "the Secrets store at run time.",
     )
-    backends: list[str] | None = Field(
+    backends: list[str | ManifestBackend] | None = Field(
         default=None,
-        description="Route-only host backends the agent's tools call, each 'NAME:PORT[,PORT2]' (e.g. "
-        "'finance:8086'). Rewrites the agent's localhost:PORT to host.docker.internal:PORT and opens the "
-        "sandbox->host route.",
+        description=_BACKENDS_DESCRIPTION,
     )
     models: WarGameModels | None = Field(
         default=None,
@@ -459,6 +562,10 @@ class ManifestUpdate(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535, description="Victim port the war-game will target.")
     egress: list[str] | None = Field(
         default=None, description="Allow-listed egress host[:port] entries the victim may reach."
+    )
+    backends: list[str | ManifestBackend] | None = Field(
+        default=None,
+        description=f"Replace the declared backends; the gateway's own route is kept. {_BACKENDS_DESCRIPTION}",
     )
     env: StringMap | None = Field(
         default=None,

@@ -37,6 +37,7 @@ from nemo_agent_hardener_plugin.agent_resolver import (
     sandbox_reachable,
     shipped_dockerfile,
 )
+from nemo_helix_plugin.agent_hardener.types import ManifestBackend
 from nemo_helix_plugin.client.client import NemoClient
 
 # `list` is shadowed by the fake's own `list` method inside the class body, so the parameter type
@@ -505,6 +506,24 @@ def test_parse_backends_rejects_the_gateway_backend_name():
         parse_backends(["nemo-inference-gateway:9000"])
 
 
+def test_parse_backends_keeps_host_and_allowed_ips_of_a_structured_backend():
+    ledger = ManifestBackend(name="ledger", ports=[8087], host="ledger.ns.svc", allowed_ips=["10.96.0.0/12"])
+
+    assert parse_backends(["db:5432", ledger]) == [
+        {"name": "db", "ports": [5432]},
+        {"name": "ledger", "ports": [8087], "host": "ledger.ns.svc", "allowed_ips": ["10.96.0.0/12"]},
+    ]
+
+
+def test_parse_backends_omits_unset_host_fields_of_a_structured_backend():
+    assert parse_backends([ManifestBackend(name="db", ports=[5432])]) == [{"name": "db", "ports": [5432]}]
+
+
+def test_parse_backends_rejects_the_gateway_name_in_structured_form():
+    with pytest.raises(ValueError, match="nemo-inference-gateway"):
+        parse_backends([ManifestBackend(name="nemo-inference-gateway", ports=[8080], host="igw.ns.svc")])
+
+
 # --------------------------------------------------------------------------- sandbox_reachable
 @pytest.mark.parametrize(
     ("url", "expected"),
@@ -546,6 +565,20 @@ def test_resolve_appends_user_backends_after_the_gateway(tmp_path):
         {"name": "nemo-inference-gateway", "ports": [8080]},
         {"name": "remote-mcp", "ports": [9100]},
     ]
+
+
+def test_resolve_writes_a_backend_host_and_allowed_ips_into_the_manifest(tmp_path):
+    client = _client(_agent(), deployments=[])
+    ledger = {"name": "ledger", "ports": [8087], "host": "ledger.ns.svc", "allowed_ips": ["10.96.0.0/12"]}
+    resolved = resolve_agent_to_manifest(
+        "calc",
+        client=client,
+        base_url="https://gw.example.com",
+        default_workspace="default",
+        manifest_dir=tmp_path,
+        backends=parse_backends([ManifestBackend.model_validate(ledger)]),
+    )
+    assert resolved.manifest["backends"] == [ledger]
 
 
 def test_resolve_keeps_user_backends_for_a_remote_platform(tmp_path):

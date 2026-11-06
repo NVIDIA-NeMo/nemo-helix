@@ -21,4 +21,11 @@ export interface SynthBenignSpec {
   interview?: string;
   run_name?: string;
   source_run?: string;
+  /**
+     * Pre-built victim image to run instead of building it locally with docker; overrides the manifest's `victim_image` for this job. Build it from the context `nemo agent-hardener stage` writes for the same manifest.
+     * @pattern ^[^\s-]\S*$
+     */
+  victim_image?: string;
+  /** Run a victim image (this job's `victim_image` or the manifest's) whose staged-context digest is missing or differs from a fresh stage, with a warning instead of failing. */
+  allow_context_drift?: boolean;
 }

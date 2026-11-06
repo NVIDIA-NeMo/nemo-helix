@@ -96,7 +96,7 @@ def test_service_driven_flow_sequences_up_hitl_then_reuse_run(tmp_path: Path, mo
 
     commands: list[list[str]] = []
 
-    def fake_execute(cmd, _env, _log_path, _ctx, *, artifact_name):  # noqa: ANN001, ANN202 - test stub
+    def fake_execute(cmd, _env, _log_path, _ctx, *, artifact_name, capture=False):  # noqa: ANN001, ANN202 - test stub
         commands.append(cmd)
         return SimpleNamespace(returncode=0), "log-tail", None
 
@@ -387,6 +387,8 @@ async def test_compile_builds_subprocess_step_carrying_the_spec() -> None:
         "defense_policy": None,
         "source_run": None,
         "models": None,
+        "victim_image": None,
+        "allow_context_drift": False,
     }
 
 
@@ -493,7 +495,7 @@ def test_run_boundary_records_classified_subprocess_failure(tmp_path: Path, monk
     manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
     monkeypatch.setattr(run_module.AgentHardenerConfig, "get", lambda: _provisioned_config(tmp_path))
 
-    def failing_execute(_cmd, env, _log_path, _ctx, *, artifact_name):  # noqa: ANN001, ANN202 - test stub
+    def failing_execute(_cmd, env, _log_path, _ctx, *, artifact_name, capture=False):  # noqa: ANN001, ANN202 - test stub
         # agent-hardener writes a structured cause to the error file, then exits non-zero.
         Path(env["AGENT_HARDENER_ERROR_FILE"]).write_text(
             json.dumps({"category": "sandbox", "message": "docker down", "remediation": "start docker"}),
@@ -734,6 +736,16 @@ def test_service_driven_replay_appends_replay_to_run_command(tmp_path: Path, mon
     # Replay composes with the cached-suite fast path: still passes the benign suite, plus --replay <path>.
     assert "--benign-suite" in commands[0]
     assert commands[0][commands[0].index("--replay") + 1] == "/tmp/hits.hitlog.jsonl"
+
+
+def test_scoped_manifest_copy_is_named_for_the_staged_context_exclusion(tmp_path: Path) -> None:
+    manifest = tmp_path / "victim.yaml"
+    manifest.write_text("agent:\n  name: clockbot\n  port: 1\n", encoding="utf-8")
+
+    scoped = Path(artifacts._prepare_artifact_capture(artifacts.ArtifactCapture(), str(manifest)))
+
+    assert scoped.name.startswith(".agent-hardener.nhx-agent-hardener-")
+    assert scoped.suffix == ".yaml"
 
 
 def test_scoped_manifest_pins_exact_native_run_and_publishes_its_artifacts(

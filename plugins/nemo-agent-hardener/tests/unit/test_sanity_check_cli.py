@@ -49,7 +49,7 @@ def test_cli_rejects_malformed_mitigations(contents: str, tmp_path: Path, monkey
 
     mitigations_file = tmp_path / "mitigations.json"
     mitigations_file.write_text(contents, encoding="utf-8")
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _config: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _config, **_k: None)
     result = CliRunner().invoke(
         cli_main.AgentHardenerCLI().get_cli(),
         [
@@ -120,7 +120,7 @@ def test_cli_sanity_check_selects_and_submits(tmp_path: Path, monkeypatch: pytes
     fake_sdk = SimpleNamespace(
         agent_hardener=SimpleNamespace(sanity_check=lambda **kwargs: captured.update(kwargs) or {"name": "job-x"})
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: fake_sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
@@ -155,7 +155,7 @@ def test_cli_sanity_check_rejects_keep_and_exclude_together(tmp_path: Path, monk
 
     mitigations_file = tmp_path / "mitigations.json"
     mitigations_file.write_text(json.dumps(_mitigations()), encoding="utf-8")
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(
         _shared.AgentHardenerConfig, "get", classmethod(lambda _cls: SimpleNamespace(default_workspace="default"))
     )

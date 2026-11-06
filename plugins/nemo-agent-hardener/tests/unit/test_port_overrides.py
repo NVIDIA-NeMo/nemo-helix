@@ -212,6 +212,28 @@ def test_a_saved_victim_image_reaches_every_command_through_the_manifest(
     assert config == {"policy_path": "p.yaml", "image": "reg.example/victim:1"}
 
 
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        ({"victim_image": "reg.example/victim:1"}, {"image": "reg.example/victim:1", "allow_context_drift": True}),
+        ({}, None),
+    ],
+)
+def test_a_run_level_drift_override_applies_only_to_a_saved_image(
+    stored: dict[str, Any], expected: dict[str, Any] | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = SimpleNamespace(data={"agent_fileset": "default/bundle", **stored})
+    client = SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **kwargs: record))
+    monkeypatch.setattr(manifest_mod, "_materialize_from_bundle", lambda *_args: {"agent": {"port": 8000}})
+
+    path = manifest_mod._materialize_manifest(
+        client, "saved", make_job_context(tmp_path), {"allow_context_drift": True}
+    )
+
+    overrides = yaml.safe_load(Path(path).read_text()).get("overrides")
+    assert (overrides["victim_control"]["config"] if overrides else None) == expected
+
+
 def test_without_a_victim_image_the_run_builds_the_victim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     record = SimpleNamespace(data={"agent_fileset": "default/bundle"})
     client = SimpleNamespace(entities=SimpleNamespace(get_entity_by_name=lambda **kwargs: record))

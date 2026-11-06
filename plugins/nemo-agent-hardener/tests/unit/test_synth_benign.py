@@ -213,7 +213,7 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c, _e=None: {})
     monkeypatch.setattr(job_mod._common, "materialize_victim_env_file", lambda *a, **k: None)
     monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
-    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx, overrides=None: str(manifest))
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(
         job_mod.AgentHardenerConfig,
@@ -229,7 +229,7 @@ def test_synth_benign_job_execute_happy_path(tmp_path: Path, monkeypatch: pytest
     )
     seen: dict[str, Any] = {}
 
-    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview, victim_image=None):
         seen["interview"] = interview
         return tmp_path / "requests.csv"
 
@@ -271,7 +271,7 @@ def test_synth_benign_cli_path_uses_the_manifests_models(tmp_path: Path, monkeyp
     )
     seen: dict[str, str] = {}
 
-    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview, victim_image=None):
         seen.update(env)
         return tmp_path / "requests.csv"
 
@@ -342,7 +342,7 @@ def test_synth_benign_job_classifies_failure(tmp_path: Path, monkeypatch: pytest
         ),
     )
 
-    def _boom(sdk, mid, ctx):
+    def _boom(sdk, mid, ctx, overrides=None):
         raise AgentHardenerRunError("manifest", "no such manifest")
 
     monkeypatch.setattr(job_mod, "_materialize_manifest", _boom)
@@ -367,7 +367,7 @@ def test_synth_benign_job_service_driver_runs_serve_and_finalizes(
     monkeypatch.setattr(job_mod._common, "materialize_victim_env_file", lambda *a, **k: None)
     monkeypatch.setattr(job_mod._common, "check_victim_secrets", lambda *a, **k: None)
     monkeypatch.setattr(job_mod._common, "build_model_env", lambda *a, **k: {})
-    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx, overrides=None: str(manifest))
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(job_mod, "_effective_models", lambda sdk, config, ctx: None)
     monkeypatch.setattr(job_mod, "_manifest_facts", lambda mani: ("agent-x", 8000))
@@ -495,7 +495,7 @@ def _patch_cli(monkeypatch: pytest.MonkeyPatch, captured: dict[str, Any]) -> Any
         run=lambda **kw: captured.update(run=kw) or {"status": "completed"},
         synth_benign=lambda **kw: captured.update(synth=kw) or {"status": "completed", "suite_size": 4},
     )
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: SimpleNamespace(agent_hardener=fake_iron))
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(war_game, "missing_secrets", lambda _p, env_files: [])
@@ -519,6 +519,8 @@ def test_cli_synth_benign_defaults_to_interactive(monkeypatch: pytest.MonkeyPatc
         "env_file": None,
         "interview": "interactive",
         "workspace": "default",
+        "victim_image": None,
+        "allow_context_drift": False,
     }
 
 
@@ -570,7 +572,7 @@ def _patch_cli_context(
     monkeypatch: pytest.MonkeyPatch, cli_main: Any, sdk: Any, *, bin_path: Path | None = None
 ) -> None:
     """Stub the `_command_context` preamble so an init test never touches a host or a real binary."""
-    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c: None)
+    monkeypatch.setattr(_shared.checks, "require_preflight", lambda _c, **_k: None)
     monkeypatch.setattr(_shared, "make_sdk", lambda _u: sdk)
     monkeypatch.setattr(_shared, "base_url", lambda: "http://localhost:8080")
     monkeypatch.setattr(
@@ -699,7 +701,7 @@ def test_synth_benign_writes_the_victim_dotenv_when_env_file_is_given(
     user_env.write_text("REMOTE_TOKEN=from-user\n", encoding="utf-8")
     monkeypatch.setattr(job_mod._common, "require_provisioned", lambda _c: None)
     monkeypatch.setattr(job_mod._common, "build_subprocess_env", lambda _c, _e=None: {})
-    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx: str(manifest))
+    monkeypatch.setattr(job_mod, "_materialize_manifest", lambda sdk, mid, ctx, overrides=None: str(manifest))
     monkeypatch.setattr(job_mod, "_manifest_secret_values", lambda *_a: {})
     monkeypatch.setattr(
         job_mod.AgentHardenerConfig,
@@ -715,7 +717,7 @@ def test_synth_benign_writes_the_victim_dotenv_when_env_file_is_given(
     )
     seen: dict[str, Any] = {}
 
-    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview):
+    def _fake_run_synth(bin_path, mani, env_file, env, ctx, *, interview, victim_image=None):
         seen["env_file"] = env_file
         return tmp_path / "requests.csv"
 

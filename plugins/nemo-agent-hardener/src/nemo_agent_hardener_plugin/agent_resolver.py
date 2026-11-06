@@ -31,7 +31,7 @@ import logging
 import re
 import shutil
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,6 +40,7 @@ from urllib.parse import urlsplit
 import yaml
 from nemo_agent_hardener_plugin.project_resolver import HERMES_RUNTIME_ENV, derive_binaries, dockerfile_env
 from nemo_agents_plugin.sdk import AgentsResource
+from nemo_helix_plugin.agent_hardener.types import BACKEND_NAME_PATTERN, ManifestBackend
 from nemo_helix_plugin.client.client import NemoClient
 
 logger = logging.getLogger(__name__)
@@ -64,7 +65,7 @@ GATEWAY_BACKEND_NAME = "nemo-inference-gateway"
 _LOOPBACK_HOSTS = ("localhost", "127.0.0.1")
 #: How a container reaches the host's loopback.
 SANDBOX_HOST_ALIAS = "host.docker.internal"
-_BACKEND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+_BACKEND_NAME = re.compile(BACKEND_NAME_PATTERN)
 _ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _SECRET_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -118,19 +119,26 @@ def parse_agent_ref(ref: str, default_workspace: str) -> tuple[str, str]:
     return default_workspace, ref
 
 
-def parse_backends(specs: list[str] | None) -> list[dict[str, Any]]:
-    """Parse ``NAME:PORT[,PORT...]`` specs into manifest backend entries; ``ValueError`` on a bad spec."""
+def _parse_backend_spec(spec: str) -> ManifestBackend:
+    name, _, port_list = spec.partition(":")
+    ports = port_list.split(",")
+    if not _BACKEND_NAME.fullmatch(name) or not all(p.isascii() and p.isdigit() and 0 < int(p) < 65536 for p in ports):
+        raise ValueError(f"invalid backend {spec!r}: expected NAME:PORT[,PORT...] with ports 1-65535")
+    return ManifestBackend(name=name, ports=[int(p) for p in ports])
+
+
+def parse_backends(specs: Sequence[str | ManifestBackend] | None) -> list[dict[str, Any]]:
+    """Turn ``NAME:PORT[,PORT...]`` specs or structured backends into manifest entries; ``ValueError`` if invalid.
+
+    ``host`` and ``allowed_ips`` appear only when set, so a host backend's entry keeps its original shape.
+    """
     backends: list[dict[str, Any]] = []
     for spec in specs or []:
-        name, _, port_list = spec.partition(":")
-        ports = port_list.split(",")
-        if not _BACKEND_NAME.fullmatch(name) or not all(
-            p.isascii() and p.isdigit() and 0 < int(p) < 65536 for p in ports
-        ):
-            raise ValueError(f"invalid backend {spec!r}: expected NAME:PORT[,PORT...] with ports 1-65535")
-        if name == GATEWAY_BACKEND_NAME:
-            raise ValueError(f"invalid backend {spec!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
-        backends.append({"name": name, "ports": [int(p) for p in ports]})
+        backend = _parse_backend_spec(spec) if isinstance(spec, str) else spec
+        if backend.name == GATEWAY_BACKEND_NAME:
+            label = spec if isinstance(spec, str) else backend.name
+            raise ValueError(f"invalid backend {label!r}: {GATEWAY_BACKEND_NAME!r} is reserved for the gateway")
+        backends.append(backend.model_dump(exclude_defaults=True))
     return backends
 
 

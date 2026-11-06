@@ -104,3 +104,28 @@ def test_an_unprovisioned_host_is_told_to_run_setup(tmp_path: Path, monkeypatch:
 
 def _ctx(tmp_path: Path) -> Any:
     return make_job_context(tmp_path / "job", on_save=lambda *_a: None)
+
+
+@pytest.mark.usefixtures("plugin_config")
+def test_stages_a_local_manifest_into_the_same_archive(tmp_path: Path) -> None:
+    manifest = tmp_path / "agent-hardener.yaml"
+    manifest.write_text("agent: {}\n", encoding="utf-8")
+
+    result = victim_context.stage_local_manifest(manifest, make_job_context(tmp_path / "job"))
+
+    assert result["status"] == "completed", result
+    archive = Path(result["context_archive"])
+    assert archive.name == "agent-hardener-victim-context.tar.gz"
+    with tarfile.open(archive) as tar:
+        assert "Dockerfile" in tar.getnames()
+
+
+def test_a_local_manifest_on_an_unprovisioned_host_fails_with_a_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = AgentHardenerConfig(venv_path=tmp_path / "missing", garak_venv_path=tmp_path / "missing-garak")
+    monkeypatch.setattr(victim_context.AgentHardenerConfig, "get", lambda: config)
+
+    result = victim_context.stage_local_manifest(tmp_path / "agent-hardener.yaml", make_job_context(tmp_path))
+
+    assert result["status"] == "failed"
