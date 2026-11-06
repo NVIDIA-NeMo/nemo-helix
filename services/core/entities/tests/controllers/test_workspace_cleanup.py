@@ -485,7 +485,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             renewal_release.set()
@@ -536,7 +536,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -578,7 +578,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -632,7 +632,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()

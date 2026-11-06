@@ -20,7 +20,7 @@ def test_setup_maps_intake_endpoint_auth_resource_and_session(monkeypatch: pytes
     def fake_enable_tracing(*, exporters: list[object], extra_resource_attrs: dict[str, str]) -> None:
         seen["enable"] = (exporters, extra_resource_attrs)
 
-    monkeypatch.setattr(observability.exporters, "otlp", fake_otlp)
+    monkeypatch.setattr(observability, "otlp", fake_otlp)
     monkeypatch.setattr(observability, "enable_tracing", fake_enable_tracing)
     monkeypatch.setattr(observability, "set_session", lambda session_id: seen.setdefault("session", session_id))
     monkeypatch.setattr(observability, "_otlp_auth_headers", lambda base_url: {"Authorization": "Bearer test"})
@@ -59,7 +59,7 @@ def test_remote_http_export_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None
     def unexpected_otlp(*args: object, **kwargs: object) -> object:
         raise AssertionError("remote HTTP must be rejected before configuring the exporter")
 
-    monkeypatch.setattr(observability.exporters, "otlp", unexpected_otlp)
+    monkeypatch.setattr(observability, "otlp", unexpected_otlp)
 
     with pytest.raises(ValueError, match="must use HTTPS"):
         observability.setup_compass_observability(

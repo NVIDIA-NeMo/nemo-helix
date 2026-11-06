@@ -32,10 +32,16 @@ of step with the seed types the platform supports.
 
 from __future__ import annotations
 
-import duckdb
+from typing import TYPE_CHECKING
+
 from data_designer.engine.resources.person_reader import PersonReader
 from data_designer.engine.resources.seed_reader import SeedReader
 from data_designer_nemo.errors import NDDInternalError
+
+if TYPE_CHECKING:
+    # Annotation only: these placeholders never connect, and importing duckdb
+    # opens its default connection, which aborts in some sandboxes.
+    import duckdb
 
 _UNREACHED = "This component is not used by a model health check and has no sync SDK to work with."
 

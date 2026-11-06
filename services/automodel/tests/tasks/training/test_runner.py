@@ -4,32 +4,26 @@
 """Unit tests for the Automodel training runner."""
 
 import json
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 import yaml
-
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
-
-from nhx.automodel.entities.values import FinetuningType, TrainingType  # noqa: E402
-from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
-from nhx.automodel.tasks.training.distributed import DistributedContext, DistributedRole  # noqa: E402
-from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
-from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
-from nhx.automodel.tasks.training.runner import TrainingRunner  # noqa: E402
-from nhx.automodel.tasks.training.schemas import (  # noqa: E402
+from nhx.automodel.entities.values import FinetuningType, TrainingType
+from nhx.automodel.tasks.training.backends.backend import AutomodelBackend
+from nhx.automodel.tasks.training.distributed import DistributedContext, DistributedRole
+from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
+from nhx.automodel.tasks.training.protocol import LibraryConfig
+from nhx.automodel.tasks.training.runner import TrainingRunner
+from nhx.automodel.tasks.training.schemas import (
     DistillationConfig,
     ModelConfig,
     TrainingMetrics,
     TrainingResult,
     TrainingStepConfig,
 )
-from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
+from nhx.customization_common.service.context import NHXJobContext
 
 
 def _job_context(storage_path: Path) -> NHXJobContext:
@@ -295,7 +289,7 @@ def test_a_paused_worker_leaves_the_barriers_to_the_coordinator(
 def test_a_pause_fails_when_the_barriers_cannot_be_cleared(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The job then ends in error, and a rerun starts a new attempt with its own barriers."""
     monkeypatch.setattr(
-        "nhx.automodel.tasks.training.distributed.shutil.rmtree", MagicMock(side_effect=PermissionError("denied"))
+        "nhx.automodel.tasks.training.distributed.rmtree", MagicMock(side_effect=PermissionError("denied"))
     )
 
     result = _paused_multi_node_run(tmp_path, monkeypatch, DistributedRole.COORDINATOR)

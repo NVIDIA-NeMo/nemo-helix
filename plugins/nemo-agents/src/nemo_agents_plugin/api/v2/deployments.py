@@ -61,6 +61,7 @@ from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
@@ -323,8 +324,7 @@ def _mode_availability(agents_config: AgentsConfig, mode: DeploymentMode) -> Dep
 )
 async def list_deployments(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: DeploymentFilter = Depends(_deployment_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -335,8 +335,8 @@ async def list_deployments(
         result = await entity_client.list(
             AgentDeployment,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )

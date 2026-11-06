@@ -20,11 +20,11 @@ import asyncio
 import contextlib
 import logging
 import math
-import time
 from collections.abc import Awaitable, Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
+from time import time
 from typing import Any
 from uuid import uuid4
 
@@ -144,7 +144,7 @@ class CreateRequest:
         """
         if self.expires_at is None:
             return self.sandbox_timeout_sec
-        left = math.ceil(self.expires_at.timestamp() - time.time())
+        left = math.ceil(self.expires_at.timestamp() - time())
         if left <= 0:
             raise SandboxExpiredError(f"no sandbox is created after its expiry, {self.expires_at.isoformat()}")
         return min(self.sandbox_timeout_sec, left)

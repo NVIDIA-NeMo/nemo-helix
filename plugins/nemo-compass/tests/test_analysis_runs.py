@@ -31,6 +31,7 @@ from nemo_compass_plugin.config import CompassConfig
 from nemo_compass_plugin.entities import AnalysisRun
 from nemo_compass_plugin.schema import AnalysisRunPage
 from nemo_helix_plugin.agents.types import CreateExecuteJobRequest
+from nemo_helix_plugin.api.pagination import PageParams
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError, raise_for_status
 from nemo_helix_plugin.config import clear_nemo_config_override, set_nemo_config_override
@@ -644,8 +645,7 @@ async def _list(entities: _StubEntities, **overrides: Any) -> AnalysisRunPage:
     """
     return await list_analysis_runs(
         overrides.pop("workspace", "default"),
-        page=overrides.pop("page", 1),
-        page_size=overrides.pop("page_size", 20),
+        page_params=PageParams(page=overrides.pop("page", 1), page_size=overrides.pop("page_size", 20)),
         sort=overrides.pop("sort", DECLARED_SORT_DEFAULT),
         agent=overrides.pop("agent", None),
         entity_client=_entities(entities),
@@ -662,7 +662,11 @@ async def test_list_passes_the_page_and_sort_through_to_the_entity_query() -> No
     entities = _StubEntities(existing=_run())
 
     page = await list_analysis_runs(
-        "team-a", page=2, page_size=5, sort="created_at", agent=None, entity_client=_entities(entities)
+        "team-a",
+        page_params=PageParams(page=2, page_size=5),
+        sort="created_at",
+        agent=None,
+        entity_client=_entities(entities),
     )
 
     query = entities.list_queries[0]

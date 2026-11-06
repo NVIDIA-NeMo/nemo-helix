@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import base64
-import builtins
 import json
 import time
 from pathlib import Path
@@ -112,13 +111,7 @@ async def test_an_expired_key_is_refused(platform: AuthConfig) -> None:
 
 
 async def test_nothing_is_trusted_outside_the_platform(monkeypatch: pytest.MonkeyPatch) -> None:
-    real_import = builtins.__import__
-
-    def without_nhx_common(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name.startswith("nhx.common"):
-            raise ImportError(name)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", without_nhx_common)
+    # Without nhx_common the platform's access-key validator can't be imported.
+    monkeypatch.delattr(access_keys_mod, "validate_access_key_token")
 
     assert await verified_access_key_claims("a.b.c") is None

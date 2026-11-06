@@ -84,6 +84,9 @@ _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
     from google.protobuf.message import Message
+    from grpc import insecure_channel, secure_channel, ssl_channel_credentials
+    from grpc.aio import insecure_channel as aio_insecure_channel
+    from grpc.aio import secure_channel as aio_secure_channel
     from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
     from openshell._proto import datamodel_pb2 as dm
     from openshell._proto import openshell_pb2 as pb
@@ -316,8 +319,8 @@ class OpenShellDeploymentBackend(DeploymentBackend):
     def _create_channel(self) -> grpc.Channel:
         target = self._executor_config.grpc_target()
         if self._executor_config.use_insecure():
-            return grpc.insecure_channel(target)
-        return grpc.secure_channel(target, self._channel_credentials())
+            return insecure_channel(target)
+        return secure_channel(target, self._channel_credentials())
 
     def _channel_credentials(self) -> grpc.ChannelCredentials:
         tls = self._executor_config.tls
@@ -326,7 +329,7 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             ca = _read_bytes(tls.ca_cert_path)
             client_cert = _read_bytes(tls.client_cert_path)
             client_key = _read_bytes(tls.client_key_path)
-        return grpc.ssl_channel_credentials(
+        return ssl_channel_credentials(
             root_certificates=ca,
             private_key=client_key,
             certificate_chain=client_cert,
@@ -660,9 +663,9 @@ class OpenShellDeploymentBackend(DeploymentBackend):
             raise ValueError("Gateway credentials are not configured.")
         target = self._executor_config.grpc_target()
         channel = (
-            grpc.aio.insecure_channel(target)
+            aio_insecure_channel(target)
             if self._executor_config.use_insecure()
-            else grpc.aio.secure_channel(target, self._channel_credentials())
+            else aio_secure_channel(target, self._channel_credentials())
         )
         async with channel:
             yield DeploymentProviderProvisioner(

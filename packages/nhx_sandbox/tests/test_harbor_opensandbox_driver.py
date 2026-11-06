@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from nhx_sandbox import harbor_opensandbox_driver as driver_module
 from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.harbor_opensandbox_driver import (
     CREATE_ATTEMPT_METADATA_KEY,
@@ -152,7 +152,7 @@ async def test_each_retry_gets_only_the_time_left_before_the_expiry(
     the time the failed attempts took."""
     expires_at = datetime(2026, 10, 23, 13, tzinfo=UTC)
     now = [expires_at.timestamp() - 100]
-    monkeypatch.setattr(time, "time", lambda: now[0])
+    monkeypatch.setattr(driver_module, "time", lambda: now[0])
     server.create_failures.append(SandboxApiException("timed out"))
 
     def a_minute_later(attempt: int) -> float:
@@ -173,7 +173,7 @@ async def test_a_retry_after_the_expiry_is_not_sent(server: Server, monkeypatch:
     """A retry that would start past ``expires_at`` fails the create instead of making a one-second sandbox."""
     expires_at = datetime(2026, 10, 23, 13, tzinfo=UTC)
     now = [expires_at.timestamp() - 30]
-    monkeypatch.setattr(time, "time", lambda: now[0])
+    monkeypatch.setattr(driver_module, "time", lambda: now[0])
     server.create_failures.append(SandboxApiException("timed out"))
 
     def a_minute_later(attempt: int) -> float:

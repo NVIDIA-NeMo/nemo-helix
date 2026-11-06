@@ -32,6 +32,7 @@ from nemo_example_plugin.types.payloads import (
     CreateExampleMiddlewareConfigRequest,
     UpdateExampleMiddlewareConfigRequest,
 )
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -120,8 +121,7 @@ def build_middleware_config_router() -> APIRouter:
     )
     async def list_configs(
         workspace: str,
-        page: int = Query(default=1, ge=1),
-        page_size: int = Query(default=20, ge=1, le=100),
+        page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
         sort: str = Query(default="-created_at"),
         entity_client: NemoEntitiesClient = Depends(_get_entity_client),
     ) -> list[ExampleMiddlewareConfig]:
@@ -130,8 +130,8 @@ def build_middleware_config_router() -> APIRouter:
             result = await entity_client.list(
                 ExampleMiddlewareConfig,
                 workspace=workspace,
-                page=page,
-                page_size=page_size,
+                page=page_params.page,
+                page_size=page_params.page_size,
                 sort=sort,
             )
         except Exception:

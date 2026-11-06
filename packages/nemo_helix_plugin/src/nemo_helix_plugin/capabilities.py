@@ -23,6 +23,7 @@ import contextlib
 import logging
 import os
 from dataclasses import dataclass
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +101,23 @@ def docker_from_env_kwargs(*, timeout: float, docker_host: str | None = None) ->
     return kwargs
 
 
+class _DockerProbeClient(Protocol):
+    def ping(self) -> object: ...
+
+    def close(self) -> None: ...
+
+
+def _docker_from_env(**kwargs: object) -> _DockerProbeClient:
+    import docker
+
+    return docker.from_env(**kwargs)
+
+
 def _probe_docker_uncached(*, docker_host: str | None) -> ProbeResult:
     try:
         from docker.errors import DockerException
         from requests.exceptions import ConnectionError as RequestsConnectionError
         from requests.exceptions import Timeout as RequestsTimeout
-
-        import docker
     except ImportError as exc:
         detail = f"Docker Python package is not installed ({exc})"
         logger.debug(detail)
@@ -114,7 +125,7 @@ def _probe_docker_uncached(*, docker_host: str | None) -> ProbeResult:
 
     client = None
     try:
-        client = docker.from_env(
+        client = _docker_from_env(
             **docker_from_env_kwargs(timeout=_DOCKER_PROBE_TIMEOUT_SECONDS, docker_host=docker_host)
         )
         client.ping()

@@ -1002,9 +1002,13 @@ async def test_provider_revocation_uses_async_transport_and_timeout(
     channel = MagicMock()
     channel.__aenter__.return_value = channel
     with (
-        patch("grpc.aio.insecure_channel", return_value=channel) as insecure,
-        patch("grpc.aio.secure_channel", return_value=channel) as secure,
-        patch("grpc.ssl_channel_credentials") as credentials,
+        patch(
+            "nhx.core.jobs.controllers.backends.openshell.backend.aio_insecure_channel", return_value=channel
+        ) as insecure,
+        patch(
+            "nhx.core.jobs.controllers.backends.openshell.backend.aio_secure_channel", return_value=channel
+        ) as secure,
+        patch("nhx.core.jobs.controllers.backends.openshell.backend.ssl_channel_credentials") as credentials,
         patch("nemo_helix_plugin.openshell.provider_client.OpenShellStub", return_value=stub),
     ):
         async with backend._provider_provisioner() as provisioner:

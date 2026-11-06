@@ -16,8 +16,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import runpy
 import sys
+from runpy import run_module
 
 from nhx.common.config import get_common_service_config
 from nhx.common.jobs.constants import TASK_CONFIG_ENVVAR
@@ -44,7 +44,7 @@ def run_task(module_name: str, env_vars: list[str], config: str | None) -> int:
 
     sys.argv = [module_name]
     logger.info("Running task module: %s", module_name)
-    runpy.run_module(module_name, run_name="__main__")
+    run_module(module_name, run_name="__main__")
     return 0
 
 

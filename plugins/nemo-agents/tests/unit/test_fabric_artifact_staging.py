@@ -649,7 +649,7 @@ async def test_stage_fabric_ethos_dir_fails_when_stale_tree_cannot_be_removed(tm
     files_client.download = AsyncMock()
 
     with patch(
-        "nemo_agents_plugin.runner.fabric_artifact_staging.shutil.rmtree",
+        "nemo_agents_plugin.runner.fabric_artifact_staging.rmtree",
         side_effect=PermissionError("read-only"),
     ):
         with pytest.raises(FabricArtifactStagingError, match="stale source artifact"):

@@ -49,7 +49,7 @@ def fake_store(monkeypatch):
 
 
 def test_publish_mints_next_ref_and_uploads_metadata(fake_store, tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr("getpass.getuser", lambda: "ada")
+    monkeypatch.setattr("evaluation.publish.getuser", lambda: "ada")
     candidate = _make_bundle(tmp_path / "candidate.tar.zst")
     ref = publish.publish(candidate, reason="fresh\ncorpus", env={})
 
