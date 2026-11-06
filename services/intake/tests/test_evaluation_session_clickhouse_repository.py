@@ -163,6 +163,13 @@ async def test_list_sessions_binds_every_query_shape_to_created_after(
     for query in executor.queries:
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
         assert query.parameters["created_after_us"] == 1772366400123456
+    hydrate = executor.queries[2].statement
+    assert "span_versions.event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in hydrate
+    assert "ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_us)s), 3)" in hydrate
+    if page_query_name == "evaluation_sessions.metric_sort.page":
+        assert (
+            "span_versions.event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in executor.queries[1].statement
+        )
 
 
 @pytest.mark.asyncio

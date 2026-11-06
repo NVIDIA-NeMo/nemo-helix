@@ -365,7 +365,7 @@ def test_evaluation_rollups_count_missing_scores_as_zero(client: TestClient) -> 
 
 
 def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: TestClient) -> None:
-    """A recreated Evaluation sees only runs ingested since its own creation, even historical ones."""
+    """A recreated Evaluation sees only runs ingested since its own creation, even under a reused session id."""
     evaluation_name = f"rollup-recreate-{uuid4().hex}"
     group_id = _ensure_group(client)
     body = {
@@ -414,8 +414,8 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
         json=_atif_body(
             started_at=SESSION_STARTED_AT,
             evaluation_id=evaluation_name,
-            run_id="own-run",
-            test_case_id="own-case",
+            run_id="old-run",
+            test_case_id="old-case",
             score=1.0,
             cost_usd=0.10,
             latency_ms=100,
@@ -431,11 +431,16 @@ def test_recreated_evaluation_does_not_inherit_deleted_namesake_results(client: 
     assert recreated["test_case_count"] == 1
     assert recreated["aggregate_scores"]["reward"]["count"] == 1
     assert recreated["aggregate_scores"]["reward"]["mean"] == pytest.approx(1.0)
+    assert recreated["cost_usd"]["mean"] == pytest.approx(0.10)
+    assert recreated["latency_ms"]["mean"] == pytest.approx(100)
 
     sessions = client.get(f"{EVALUATIONS}/{evaluation_name}/sessions")
     assert sessions.status_code == 200, sessions.text
     assert sessions.json()["pagination"]["total_results"] == 1
-    assert [row["test_case_name"] for row in sessions.json()["data"]] == ["own-case"]
+    session = sessions.json()["data"][0]
+    assert session["test_case_name"] == "old-case"
+    assert session["evaluator_scores"] == {"reward": pytest.approx(1.0)}
+    assert session["cost_total_usd"] == pytest.approx(0.10)
 
 
 def _atif_body(

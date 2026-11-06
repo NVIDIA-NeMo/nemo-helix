@@ -207,6 +207,11 @@ async def test_evaluation_rollups_bound_sessions_to_created_after():
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
         assert "evaluation_name !=" not in query.statement
         assert query.parameters["created_after_0"] == _CREATED_AFTER_US
+    # Scores and span metrics join by session id, so they repeat the bound on the joined rows.
+    assert (
+        "ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_0)s), 3)" in executor.queries[1].statement
+    )
+    assert executor.queries[2].statement.count("event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)") == 2
 
 
 @pytest.mark.asyncio

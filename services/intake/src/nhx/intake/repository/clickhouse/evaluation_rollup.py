@@ -42,6 +42,8 @@ class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
 
         evaluation_names_sql, evaluation_parameters = _evaluation_name_parameters(evaluation_names)
         created_after_sql, created_after_parameters = _created_after_bound_sql(evaluation_names, created_after_by_name)
+        span_after_sql = _joined_lifetime_sql(_SPAN_INGESTED_AFTER, evaluation_names, created_after_by_name)
+        result_after_sql = _joined_lifetime_sql(_RESULT_INGESTED_AFTER, evaluation_names, created_after_by_name)
         parameters = {"workspace": workspace, **evaluation_parameters, **created_after_parameters}
         trace_index_table = self._executor.table(ClickHouseTable.TRACE_INDEX)
 
@@ -63,6 +65,7 @@ class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
                     evaluator_results_table=self._executor.table(ClickHouseTable.EVALUATOR_RESULTS),
                     evaluation_names_sql=evaluation_names_sql,
                     created_after_sql=created_after_sql,
+                    joined_after_sql=result_after_sql,
                 ),
                 parameters=parameters,
             )
@@ -86,6 +89,7 @@ class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
                     spans_table=self._executor.table(ClickHouseTable.SPANS),
                     evaluation_names_sql=evaluation_names_sql,
                     created_after_sql=created_after_sql,
+                    joined_after_sql=span_after_sql,
                 ),
                 parameters={
                     **parameters,
@@ -145,6 +149,36 @@ def _created_after_bound_sql(
             for index, _created_after in bounded
         ]
     return "".join(f" AND {clause}" for clause in clauses), parameters
+
+
+# Spans store ingest time at microseconds; evaluator results store it at milliseconds.
+_SPAN_INGESTED_AFTER = "event_ts >= fromUnixTimestamp64Micro(%(created_after_{index})s)"
+_RESULT_INGESTED_AFTER = "ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_{index})s), 3)"
+
+
+def _joined_lifetime_sql(
+    time_expr: str,
+    evaluation_names: list[str],
+    created_after_by_name: dict[str, datetime | None],
+) -> str:
+    """Restrict rows joined by session id to the session's own Evaluation lifetime.
+
+    A reused session id would otherwise pull in spans and scores ingested for the deleted namesake.
+    A name without a bound keeps every row.
+    """
+    bounded = [index for index, name in enumerate(evaluation_names) if created_after_by_name[name] is not None]
+    if not bounded:
+        return ""
+    parts = [
+        "(session_id IN (SELECT session_id FROM scoped_sessions"
+        f" WHERE evaluation_name = %(evaluation_name_{index})s) AND {time_expr.format(index=index)})"
+        for index in bounded
+    ]
+    unbounded = [index for index in range(len(evaluation_names)) if index not in bounded]
+    if unbounded:
+        names = ", ".join(f"%(evaluation_name_{index})s" for index in unbounded)
+        parts.append(f"session_id IN (SELECT session_id FROM scoped_sessions WHERE evaluation_name IN ({names}))")
+    return " AND (" + " OR ".join(parts) + ")"
 
 
 def _scoped_sessions_sql(trace_index_table: str, evaluation_names_sql: str, created_after_sql: str) -> str:
@@ -226,6 +260,7 @@ def _score_rollups_sql(
     evaluator_results_table: str,
     evaluation_names_sql: str,
     created_after_sql: str,
+    joined_after_sql: str = "",
 ) -> str:
     """Test-case-weighted score distribution per (evaluation, evaluator).
 
@@ -245,13 +280,13 @@ def _score_rollups_sql(
             {_scoped_sessions_sql(trace_index_table, evaluation_names_sql, created_after_sql)}
         ),
         session_scores AS (
-            {_session_scores_cte(evaluator_results_table)}
+            {_session_scores_cte(evaluator_results_table, joined_after_sql)}
         ),
         test_case_sessions AS (
             {_test_case_sessions_cte()}
         ),
         evaluators AS (
-            {_evaluators_cte(evaluator_results_table)}
+            {_evaluators_cte(evaluator_results_table, joined_after_sql)}
         ),
         test_case_scores AS (
             {_test_case_scores_cte()}
@@ -271,7 +306,9 @@ _SCORED_RESULT_PREDICATE = "data_type IN ('NUMERIC', 'BOOLEAN') AND value IS NOT
 _FAILED_RESULT_PREDICATE = "status = 'FAILED'"
 
 
-def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str, include_failed: bool = False) -> str:
+def _sessions_join_scored_results(
+    evaluator_results_table: str, *, columns: str, include_failed: bool = False, joined_after_sql: str = ""
+) -> str:
     """Join scoped ``sessions`` to their scored evaluator_results (NUMERIC/BOOLEAN, non-null values).
 
     ``columns`` is the projection taken from evaluator_results ("name, value" or "name"). The inner
@@ -291,7 +328,7 @@ def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str,
                     AND (workspace, session_id) IN (
                         SELECT DISTINCT workspace, session_id
                         FROM scoped_sessions
-                    )
+                    ){joined_after_sql}
                     AND {predicate}
             ) AS results
                 ON sessions.workspace = results.workspace
@@ -299,7 +336,7 @@ def _sessions_join_scored_results(evaluator_results_table: str, *, columns: str,
             WHERE sessions.test_case_name != ''"""
 
 
-def _session_scores_cte(evaluator_results_table: str) -> str:
+def _session_scores_cte(evaluator_results_table: str, joined_after_sql: str = "") -> str:
     """Stage 1 — reduce each (session, evaluator) to one value by averaging its result rows.
 
     Averaging first means a session that emitted the same evaluator more than once counts once, so it
@@ -314,7 +351,7 @@ def _session_scores_cte(evaluator_results_table: str) -> str:
                 results.name AS evaluator_name,
                 avg(results.value) AS value,
                 max(results.status = 'FAILED') AS failed
-            {_sessions_join_scored_results(evaluator_results_table, columns="name, value, status", include_failed=True)}
+            {_sessions_join_scored_results(evaluator_results_table, columns="name, value, status", include_failed=True, joined_after_sql=joined_after_sql)}
             GROUP BY sessions.evaluation_name, sessions.session_id, sessions.test_case_name, results.name"""
 
 
@@ -334,7 +371,7 @@ def _test_case_sessions_cte() -> str:
             GROUP BY evaluation_name, test_case_name"""
 
 
-def _evaluators_cte(evaluator_results_table: str) -> str:
+def _evaluators_cte(evaluator_results_table: str, joined_after_sql: str = "") -> str:
     """Distinct (evaluation, evaluator) pairs — the evaluator axis of the per-test-case grid.
 
     Sourced from evaluator_results rather than ``FROM session_scores``: ClickHouse re-executes a CTE on
@@ -345,7 +382,7 @@ def _evaluators_cte(evaluator_results_table: str) -> str:
             SELECT DISTINCT
                 sessions.evaluation_name AS evaluation_name,
                 results.name AS evaluator_name
-            {_sessions_join_scored_results(evaluator_results_table, columns="name", include_failed=True)}"""
+            {_sessions_join_scored_results(evaluator_results_table, columns="name", include_failed=True, joined_after_sql=joined_after_sql)}"""
 
 
 def _test_case_scores_cte() -> str:
@@ -376,7 +413,7 @@ def _test_case_scores_cte() -> str:
 _ROLLUP_USAGE = usage_sql(("input_tokens", "output_tokens", "cost_usd"), scaled=False)
 
 
-def _current_session_span_metrics_sql(spans_table: str) -> str:
+def _current_session_span_metrics_sql(spans_table: str, joined_after_sql: str = "") -> str:
     """Latest-version spans for the scoped sessions, projected to *only* the metric inputs.
 
     The shared ``current_spans_sql`` emits every span column, including the full ``attributes_*`` Maps.
@@ -409,7 +446,7 @@ def _current_session_span_metrics_sql(spans_table: str) -> str:
                 argMax(is_deleted, (event_ts, is_deleted)) AS del_flag
             FROM {spans_table}
             WHERE workspace = %(workspace)s
-                AND (workspace, session_id) IN (SELECT DISTINCT workspace, session_id FROM scoped_sessions)
+                AND (workspace, session_id) IN (SELECT DISTINCT workspace, session_id FROM scoped_sessions){joined_after_sql}
             GROUP BY workspace, source_format, trace_id, external_span_id, id
         )
     """
@@ -421,6 +458,7 @@ def _metric_rollups_sql(
     spans_table: str,
     evaluation_names_sql: str,
     created_after_sql: str,
+    joined_after_sql: str = "",
 ) -> str:
     # Two-level rollup: per-attempt cost/latency, then averaged per test case (avg per attempt — the
     # number must not scale with k), then the distribution across test cases (test-case-weighted).
@@ -431,7 +469,7 @@ def _metric_rollups_sql(
         scoped_sessions AS (
             {_scoped_sessions_sql(trace_index_table, evaluation_names_sql, created_after_sql)}
         ),
-        current_session_spans AS {_current_session_span_metrics_sql(spans_table)},
+        current_session_spans AS {_current_session_span_metrics_sql(spans_table, joined_after_sql)},
         span_tiers AS (
             SELECT
                 workspace,
