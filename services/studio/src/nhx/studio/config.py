@@ -76,6 +76,13 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
         default=False,
         description="Enable Studio UI browser telemetry export.",
     )
+    plugin_error_reports_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Accept plugin load-failure reports from Studio and write them to the platform log. "
+            "When unset, reports are accepted only while platform auth is disabled (local use)."
+        ),
+    )
     otel: StudioOtelConfig = Field(
         default_factory=StudioOtelConfig,
         description="Studio UI OpenTelemetry settings.",
