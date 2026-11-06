@@ -38,6 +38,7 @@ from urllib.parse import urljoin, urlparse, urlunparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
+from httpx import AsyncClient
 from nemo_agents_plugin.api.v2._perms import GatewayPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.api.v2.openai_errors import (
@@ -767,7 +768,7 @@ async def _proxy(
 
     async def _stream_with_headers() -> AsyncIterator[bytes]:
         read_timeout = float(os.environ.get("NEMO_AGENTS_GATEWAY_READ_TIMEOUT", "300"))
-        async with httpx.AsyncClient(
+        async with AsyncClient(
             timeout=httpx.Timeout(connect=10.0, read=read_timeout, write=60.0, pool=10.0),
             # SSRF defense in depth: never let an agent's 3xx response redirect
             # us off the validated origin.

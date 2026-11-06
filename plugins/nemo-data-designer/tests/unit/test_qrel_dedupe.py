@@ -34,7 +34,7 @@ def test_execute_conversion_rewrites_duplicate_eval_qrels(tmp_path: Path) -> Non
         )
         return SimpleNamespace(train_file=out / "train.json")
 
-    with patch("data_designer_retrieval_sdg.run_conversion_with_config", side_effect=_convert):
+    with patch("nemo_data_designer_plugin.retrieval.conversion._run_conversion", side_effect=_convert):
         execute_conversion(
             input_path=src,
             output_dir=out,

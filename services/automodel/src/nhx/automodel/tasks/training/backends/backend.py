@@ -8,6 +8,8 @@ import subprocess
 import threading
 from collections import deque
 from pathlib import Path
+from subprocess import Popen
+from threading import Thread
 from typing import Any
 
 from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
@@ -124,7 +126,7 @@ class AutomodelBackend:
                 # Continue this job's MLflow run after a resume or rerun, instead of starting another.
                 if mlflow_run_id := find_mlflow_run_id(library_config.config_dict.get("mlflow")):
                     training_env["MLFLOW_RUN_ID"] = mlflow_run_id
-                training_process = subprocess.Popen(
+                training_process = Popen(
                     command,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
@@ -134,7 +136,7 @@ class AutomodelBackend:
                 )
 
                 # Start reader thread to capture output without blocking
-                reader_thread = threading.Thread(
+                reader_thread = Thread(
                     target=read_subprocess_output,
                     args=(training_process, output_lines),
                     daemon=True,

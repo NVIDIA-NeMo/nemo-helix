@@ -9,6 +9,8 @@ import time
 
 import httpx
 import jwt
+from httpx import AsyncClient
+from jwt import decode, get_unverified_header
 from jwt.types import Options
 from nhx.common import http_clients
 from nhx.common.config import AuthConfig
@@ -61,7 +63,7 @@ class JWTValidator:
             return self._discovery_cache
 
         discovery_url = f"{self.config.oidc.issuer.rstrip('/')}/.well-known/openid-configuration"
-        async with httpx.AsyncClient() as client:
+        async with AsyncClient() as client:
             response = await client.get(discovery_url, timeout=10.0)
             response.raise_for_status()
             try:
@@ -268,7 +270,7 @@ class JWTValidator:
         try:
             token_alg = ""
             try:
-                token_header = jwt.get_unverified_header(token)
+                token_header = get_unverified_header(token)
                 token_alg = str(token_header.get("alg", "")).lower()
             except jwt.PyJWTError:
                 token_alg = ""
@@ -285,7 +287,7 @@ class JWTValidator:
                         "Unsigned JWTs are not accepted. Set auth.allow_unsigned_jwt=true for local development."
                     )
 
-                claims = jwt.decode(
+                claims = decode(
                     token,
                     algorithms=["none"],
                     options={
@@ -317,7 +319,7 @@ class JWTValidator:
                 decode_options: Options = {"require": ["exp", "iat", "sub"]}
                 if audience is None:
                     decode_options["verify_aud"] = False
-                claims = jwt.decode(
+                claims = decode(
                     token,
                     signing_key.key,
                     algorithms=["RS256", "ES256"],

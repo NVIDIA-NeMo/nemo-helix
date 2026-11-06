@@ -132,7 +132,7 @@ def _install_mock_transport(handler):
             kwargs["transport"] = transport
             super().__init__(*args, **kwargs)
 
-    return patch("nemo_agents_plugin.cli.httpx.Client", _Client)
+    return patch("nemo_helix_plugin.client.client.Client", _Client)
 
 
 def _scripted_responses(*responses: dict[str, Any]):
@@ -418,7 +418,7 @@ def test_session_chat_reports_missing_session() -> None:
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         patch(
-            "nemo_agents_plugin.cli.httpx.Client",
+            "nemo_helix_plugin.client.client.Client",
             side_effect=lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
         ),
         patch("nemo_agents_plugin.cli._run_resolved_session_chat") as run_chat,
@@ -508,7 +508,7 @@ def test_resolved_session_chat_streams_each_current_turn_with_session_and_auth_h
 
     with (
         patch(
-            "nemo_agents_plugin.cli.httpx.Client",
+            "nemo_helix_plugin.client.client.Client",
             side_effect=lambda **kwargs: real_client(transport=transport, **kwargs),
         ),
         patch("nemo_agents_plugin.cli.run_chat_tui", side_effect=exercise_tui),
@@ -541,7 +541,7 @@ def test_session_chat_interrupt_detaches_without_closing(exception: type[BaseExc
     with (
         patch("nemo_agents_plugin.cli._is_interactive_session_chat", return_value=True),
         transport,
-        patch("nemo_helix_ext.cli.chat_tui.Prompt.ask", side_effect=exception),
+        patch("nemo_helix_ext.cli.chat_tui.Prompt", **{"ask.side_effect": exception}),
     ):
         result = runner.invoke(AgentsCLI().get_cli(), ["chat", "--session", "debug-auth"])
 

@@ -325,7 +325,7 @@ async def test_resolve_model_clients_refreshes_auth_for_completion_calls(monkeyp
         captured_headers.append(kwargs["extra_headers"])
         return MagicMock()
 
-    monkeypatch.setattr(nooa_model_client.CompletionClient, "acall", _recording_acall)
+    monkeypatch.setattr(nooa_model_client, "_completion_acall", _recording_acall)
 
     with ctx:
         result = await resolve_model_clients(

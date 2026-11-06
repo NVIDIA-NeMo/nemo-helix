@@ -217,7 +217,7 @@ class TestCheckHelixReachable:
         mock_resp.status_code = 200
         with (
             patch(f"{SETUP_MOD}.httpx_tls_config_from_env", return_value={"verify": "/tmp/custom-ca.pem"}),
-            patch(f"{SETUP_MOD}.httpx.get", return_value=mock_resp) as mock_get,
+            patch(f"{SETUP_MOD}.http_get", return_value=mock_resp) as mock_get,
         ):
             assert _check_platform_reachable("http://localhost:8080") is True
         mock_get.assert_called_once_with(
@@ -231,7 +231,7 @@ class TestCheckHelixReachable:
         mock_resp.status_code = 200
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch(f"{SETUP_MOD}.httpx.get", return_value=mock_resp) as mock_get,
+            patch(f"{SETUP_MOD}.http_get", return_value=mock_resp) as mock_get,
         ):
             assert (
                 _check_platform_reachable(
@@ -252,7 +252,7 @@ class TestCheckHelixReachable:
         mock_resp.status_code = 200
         with (
             patch.dict("os.environ", {"NHX_CLIENT_SSL_CERT_FILE": "/env/ca.pem"}, clear=True),
-            patch(f"{SETUP_MOD}.httpx.get", return_value=mock_resp) as mock_get,
+            patch(f"{SETUP_MOD}.http_get", return_value=mock_resp) as mock_get,
         ):
             assert (
                 _check_platform_reachable(
@@ -285,7 +285,7 @@ class TestCheckHelixReachable:
 
         with (
             patch(f"{SETUP_MOD}.httpx_tls_config_from_env", return_value={"verify": "/tmp/custom-ca.pem"}),
-            patch(f"{SETUP_MOD}.httpx.get", side_effect=_get),
+            patch(f"{SETUP_MOD}.http_get", side_effect=_get),
         ):
             assert _check_platform_reachable("https://nemo-helix-freeplay.dev.aire.nvidia.com") is True
         assert calls == [
@@ -296,17 +296,17 @@ class TestCheckHelixReachable:
     def test_unreachable_when_all_probes_fail(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=mock_resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=mock_resp):
             assert _check_platform_reachable("http://localhost:8080") is False
 
     def test_unreachable(self):
-        with patch(f"{SETUP_MOD}.httpx.get", side_effect=Exception("conn refused")):
+        with patch(f"{SETUP_MOD}.http_get", side_effect=Exception("conn refused")):
             assert _check_platform_reachable("http://localhost:8080") is False
 
     def test_non_200_status_without_cluster_info_fallback(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 503
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=mock_resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=mock_resp):
             assert _check_platform_reachable("http://localhost:8080") is False
 
 
@@ -382,11 +382,11 @@ class TestCheckOllamaRunning:
     def test_ollama_running(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        with patch("nemo_helix_ext.cli.commands.setup.httpx.get", return_value=mock_resp):
+        with patch("nemo_helix_ext.cli.commands.setup.http_get", return_value=mock_resp):
             assert _check_ollama_running("http://localhost:11434/v1") is True
 
     def test_ollama_not_running(self):
-        with patch("nemo_helix_ext.cli.commands.setup.httpx.get", side_effect=Exception("conn refused")):
+        with patch("nemo_helix_ext.cli.commands.setup.http_get", side_effect=Exception("conn refused")):
             assert _check_ollama_running("http://localhost:11434/v1") is False
 
 
@@ -832,7 +832,7 @@ def maybe_start_preflight_mocks():
     """Shared mocks for ``_maybe_start_services`` preflight tests."""
     with (
         patch(f"{SETUP_MOD}._check_platform_reachable", return_value=False),
-        patch(f"{SETUP_MOD}.importlib.util.find_spec", return_value=MagicMock()),
+        patch(f"{SETUP_MOD}.find_spec", return_value=MagicMock()),
         patch(f"{SETUP_MOD}._start_services_background") as mock_start,
         patch(f"{SETUP_MOD}.prompt_choice", return_value="yes"),
         patch(f"{SETUP_MOD}._prompt_data_dir", return_value="/tmp/data"),
@@ -985,7 +985,7 @@ class TestMaybeStartServices:
     def test_exits_early_when_services_extra_missing(self, maybe_start_preflight_mocks, capsys):
         """Preflight aborts with install hint before spawning a subprocess."""
         with (
-            patch(f"{SETUP_MOD}.importlib.util.find_spec", return_value=None),
+            patch(f"{SETUP_MOD}.find_spec", return_value=None),
             pytest.raises(ClickExit),
         ):
             _maybe_start_services("http://localhost:8080", auto=False, start_services=True)
@@ -1531,7 +1531,7 @@ class TestDetectCodingAgents:
     def test_detects_cursor_directory(self, tmp_path):
         (tmp_path / ".cursor").mkdir()
         (tmp_path / ".git").mkdir()
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=tmp_path):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=tmp_path):
             detected = _detect_coding_agents()
         agent_names = [name for _, name in detected]
         assert "cursor" in agent_names
@@ -1539,7 +1539,7 @@ class TestDetectCodingAgents:
     def test_detects_agents_md(self, tmp_path):
         (tmp_path / "AGENTS.md").touch()
         (tmp_path / ".git").mkdir()
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=tmp_path):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=tmp_path):
             detected = _detect_coding_agents()
         agent_names = [name for _, name in detected]
         assert "codex" in agent_names
@@ -1549,7 +1549,7 @@ class TestDetectCodingAgents:
         (tmp_path / ".cursor").mkdir()
         (tmp_path / ".claude").mkdir()
         (tmp_path / ".git").mkdir()
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=tmp_path):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=tmp_path):
             detected = _detect_coding_agents()
         agent_names = [name for _, name in detected]
         assert "codex" in agent_names
@@ -1558,7 +1558,7 @@ class TestDetectCodingAgents:
 
     def test_returns_empty_when_none_found(self, tmp_path):
         (tmp_path / ".git").mkdir()
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=tmp_path):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=tmp_path):
             detected = _detect_coding_agents()
         assert detected == []
 
@@ -2058,12 +2058,12 @@ class TestFindProjectRoot:
         (tmp_path / ".git").mkdir()
         subdir = tmp_path / "a" / "b"
         subdir.mkdir(parents=True)
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=subdir):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=subdir):
             root = _find_project_root()
         assert root == tmp_path
 
     def test_falls_back_to_cwd(self, tmp_path):
-        with patch("nemo_helix_ext.cli.commands.setup.Path.cwd", return_value=tmp_path):
+        with patch("nemo_helix_ext.cli.commands.setup._cwd", return_value=tmp_path):
             root = _find_project_root()
         assert root == tmp_path
 
@@ -3318,14 +3318,14 @@ class TestValidateApiKey:
     def test_http_responses(self, provider_name, status_code, expected_status):
         host_url = _KNOWN_PROVIDERS_BY_NAME[provider_name].host_url
         mock_resp = _http_response(status_code, {"data": [{"id": "nvidia/nemotron-3-nano-30b-a3b"}]})
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp):
             result = _validate_api_key(provider_name, host_url, "test-key")
         assert result.status is expected_status
         assert result.passed is (expected_status != KeyValidationStatus.REJECTED)
 
     def test_openrouter_uses_key_probe_endpoint(self):
         mock_resp = _http_response(200, {"data": {"label": "test-key"}})
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp) as mock_req:
             result = _validate_api_key("openrouter", "https://openrouter.ai/api/v1", "test-key")
         assert result.passed is True
         mock_req.assert_called_once()
@@ -3353,7 +3353,7 @@ class TestValidateApiKey:
             assert kwargs["json"]["model"] == "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
             return chat_ok
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect) as mock_req:
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect) as mock_req:
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
         assert result.status is KeyValidationStatus.VALID
         assert result.message == ""
@@ -3378,7 +3378,7 @@ class TestValidateApiKey:
             posts.append(kwargs["json"]["model"])
             return chat_ok
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
         assert result.status is KeyValidationStatus.VALID
         assert posts == ["nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"]
@@ -3408,7 +3408,7 @@ class TestValidateApiKey:
                 return gone
             return chat_ok
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
         assert result.status is KeyValidationStatus.VALID
         assert result.message == ""
@@ -3439,7 +3439,7 @@ class TestValidateApiKey:
             posts.append(kwargs["json"]["model"])
             return gone
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
         assert result.status is KeyValidationStatus.INCONCLUSIVE
         assert len(posts) == 3
@@ -3454,7 +3454,7 @@ class TestValidateApiKey:
         def side_effect(method, url, **kwargs):
             return catalog if method == "GET" else rejected
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "bad-key")
         assert result.status is KeyValidationStatus.REJECTED
         assert "rejected the credentials" in result.message.lower()
@@ -3464,7 +3464,7 @@ class TestValidateApiKey:
     @pytest.mark.parametrize("status_code", [404, 405, 410, 429, 500, 502])
     def test_non_2xx_non_rejection_returns_inconclusive(self, status_code):
         mock_resp = _http_response(status_code)
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp):
             result = _validate_api_key("openai", "https://api.openai.com/v1", "test-key")
         assert result.status is KeyValidationStatus.INCONCLUSIVE
         assert result.passed is True
@@ -3484,7 +3484,7 @@ class TestValidateApiKey:
         def side_effect(method, url, **kwargs):
             return catalog if method == "GET" else gone
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nvidia-build", "https://integrate.api.nvidia.com", "test-key")
         assert result.status is KeyValidationStatus.INCONCLUSIVE
         assert "Could not verify API key" in result.message
@@ -3502,7 +3502,7 @@ class TestValidateApiKey:
         ids=["timeout", "connect-error", "no-api-key"],
     )
     def test_skip_and_error_paths(self, provider_name, api_key, side_effect, expected_status):
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect) as mock_req:
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect) as mock_req:
             result = _validate_api_key(provider_name, "https://example.com", api_key)
         assert result.status is expected_status
         if api_key is None:
@@ -3511,7 +3511,7 @@ class TestValidateApiKey:
     def test_custom_provider_probes_models_and_accepts(self):
         """An unknown name probes GET {base}/models and does not follow up with chat."""
         mock_resp = _http_response(200, {"data": [{"id": "meta/llama-3.1-8b-instruct"}]})
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp) as mock_req:
             result = _validate_api_key(
                 "nv-inference",
                 "https://inference-api.nvidia.com/v1/",
@@ -3538,34 +3538,34 @@ class TestValidateApiKey:
             assert url == "https://integrate.api.nvidia.com/v1/chat/completions"
             return rejected
 
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("my-build", "https://integrate.api.nvidia.com/v1/", "bad-key")
         assert result.status is KeyValidationStatus.REJECTED
         assert "rejected the credentials" in result.message.lower()
 
     def test_cleartext_remote_url_is_rejected_before_the_probe(self):
-        with patch(f"{self._MOD}.httpx.request") as mock_req:
+        with patch(f"{self._MOD}.http_request") as mock_req:
             result = _validate_api_key("nv-inference", "http://example.com/v1", "test-key")
         assert result.status is KeyValidationStatus.REJECTED
         assert "HTTPS" in result.message
         mock_req.assert_not_called()
 
     def test_cleartext_nvidia_build_url_is_rejected_before_the_probe(self):
-        with patch(f"{self._MOD}.httpx.request") as mock_req:
+        with patch(f"{self._MOD}.http_request") as mock_req:
             result = _validate_api_key("my-build", "http://integrate.api.nvidia.com/v1", "bad-key")
         assert result.status is KeyValidationStatus.REJECTED
         mock_req.assert_not_called()
 
     def test_loopback_http_url_is_still_probed(self):
         mock_resp = _http_response(200, {"data": [{"id": "local-model"}]})
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp) as mock_req:
             result = _validate_api_key("local-vllm", "http://127.0.0.1:8000/v1", "test-key")
         assert result.status is KeyValidationStatus.VALID
         assert mock_req.call_args.args[1] == "http://127.0.0.1:8000/v1/models"
 
     def test_custom_provider_rejects_unauthorized_key(self):
         mock_resp = _http_response(401, {"message": "Invalid proxy server token"})
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp):
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp):
             result = _validate_api_key("nv-inference", "https://example.com/v1", "bad-key")
         assert result.status is KeyValidationStatus.REJECTED
         assert result.passed is False
@@ -3580,7 +3580,7 @@ class TestValidateApiKey:
         ids=["timeout", "connect-error"],
     )
     def test_custom_provider_network_errors_are_inconclusive(self, side_effect, expected_fragment):
-        with patch(f"{self._MOD}.httpx.request", side_effect=side_effect):
+        with patch(f"{self._MOD}.http_request", side_effect=side_effect):
             result = _validate_api_key("nv-inference", "https://example.com/v1", "test-key")
         assert result.status is KeyValidationStatus.INCONCLUSIVE
         assert result.passed is True
@@ -3591,7 +3591,7 @@ class TestValidateApiKey:
         """Anthropic-style 'X-Api-Key: {{ auth_secret }}' header should be constructed."""
         mock_resp = MagicMock(status_code=400)
         mock_resp.is_success = False
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp) as mock_req:
             _validate_api_key(
                 "nvidia-build",
                 "https://integrate.api.nvidia.com",
@@ -3607,7 +3607,7 @@ class TestValidateApiKey:
         mock_resp = MagicMock(status_code=400)
         mock_resp.is_success = False
         extra = {"anthropic-version": "2023-06-01"}
-        with patch(f"{self._MOD}.httpx.request", return_value=mock_resp) as mock_req:
+        with patch(f"{self._MOD}.http_request", return_value=mock_resp) as mock_req:
             _validate_api_key(
                 "nvidia-build",
                 "https://integrate.api.nvidia.com",
@@ -3759,7 +3759,7 @@ class TestValidateApiKeyIntegration:
                 },
                 clear=True,
             ),
-            patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
+            patch(f"{self._MOD}.http_request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
         ):
             result = _auto_setup(client, "default")
@@ -3789,7 +3789,7 @@ class TestValidateApiKeyIntegration:
                 },
                 clear=True,
             ),
-            patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
+            patch(f"{self._MOD}.http_request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
             pytest.raises(ClickExit) as exc_info,
         ):
@@ -3816,7 +3816,7 @@ class TestValidateApiKeyIntegration:
                 },
                 clear=True,
             ),
-            patch(f"{self._MOD}.httpx.request", side_effect=side_effect),
+            patch(f"{self._MOD}.http_request", side_effect=side_effect),
             patch(f"{self._MOD}.console.print") as print_message,
         ):
             result = _auto_setup(client, "default")
@@ -4318,13 +4318,13 @@ def _patch_setup_command(
 class TestRequireSupportedPython:
     def test_accepts_3_12_through_3_14(self):
         for version in ((3, 12, 11, "final", 0), (3, 13, 5, "final", 0), (3, 14, 3, "final", 0)):
-            with patch.object(setup_commands.sys, "version_info", version):
+            with patch.object(setup_commands, "version_info", version):
                 _require_supported_python()
 
     def test_rejects_3_15_and_3_11(self, capsys):
         for version in ((3, 15, 0, "final", 0), (3, 11, 13, "final", 0)):
             with (
-                patch.object(setup_commands.sys, "version_info", version),
+                patch.object(setup_commands, "version_info", version),
                 pytest.raises(typer.Exit) as exc_info,
             ):
                 _require_supported_python()
@@ -4338,7 +4338,7 @@ class TestRequireSupportedPython:
         ctx, _cli_context = _make_setup_command_ctx()
         with (
             _patch_setup_command() as mocks,
-            patch.object(setup_commands.sys, "version_info", (3, 15, 0, "final", 0)),
+            patch.object(setup_commands, "version_info", (3, 15, 0, "final", 0)),
             pytest.raises(typer.Exit) as exc_info,
         ):
             setup_command(ctx, auto=False)
@@ -4545,7 +4545,7 @@ def _status_response(*, healthy: bool = True, controller_status: dict | None = N
 class TestCheckControllerHealth:
     def test_healthy_controllers(self):
         resp = _status_response(healthy=True, controller_status={"models_controller": True})
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=resp):
             ok, msg = _check_controller_health("http://localhost:8080")
         assert ok is True
         assert msg == ""
@@ -4554,7 +4554,7 @@ class TestCheckControllerHealth:
         resp = _status_response(healthy=True, controller_status={"models_controller": True})
         with (
             patch.dict("os.environ", {}, clear=True),
-            patch(f"{SETUP_MOD}.httpx.get", return_value=resp) as mock_get,
+            patch(f"{SETUP_MOD}.http_get", return_value=resp) as mock_get,
         ):
             ok, msg = _check_controller_health(
                 "https://nemo.example.com",
@@ -4573,7 +4573,7 @@ class TestCheckControllerHealth:
         resp = _status_response(healthy=True, controller_status={"models_controller": True})
         with (
             patch.dict("os.environ", {"NHX_CLIENT_SSL_CERT_FILE": "/env/ca.pem"}, clear=True),
-            patch(f"{SETUP_MOD}.httpx.get", return_value=resp) as mock_get,
+            patch(f"{SETUP_MOD}.http_get", return_value=resp) as mock_get,
         ):
             ok, msg = _check_controller_health(
                 "https://nemo.example.com",
@@ -4595,7 +4595,7 @@ class TestCheckControllerHealth:
         # same as the empty-status_map case below.
         resp = _status_response(healthy=False, controller_status={"models_controller": False})
         with (
-            patch(f"{SETUP_MOD}.httpx.get", return_value=resp),
+            patch(f"{SETUP_MOD}.http_get", return_value=resp),
             patch(f"{SETUP_MOD}._pause") as mock_pause,
         ):
             ok, msg = _check_controller_health("http://localhost:8080")
@@ -4607,7 +4607,7 @@ class TestCheckControllerHealth:
         starting_resp = _status_response(healthy=False, controller_status={"models_controller": False})
         healthy_resp = _status_response(healthy=True, controller_status={"models_controller": True})
         with (
-            patch(f"{SETUP_MOD}.httpx.get", side_effect=[starting_resp, healthy_resp]),
+            patch(f"{SETUP_MOD}.http_get", side_effect=[starting_resp, healthy_resp]),
             patch(f"{SETUP_MOD}._pause") as mock_pause,
         ):
             ok, msg = _check_controller_health("http://localhost:8080")
@@ -4619,7 +4619,7 @@ class TestCheckControllerHealth:
         empty_resp = _status_response(healthy=True, controller_status={})
         populated_resp = _status_response(healthy=True, controller_status={"models_controller": True})
         with (
-            patch(f"{SETUP_MOD}.httpx.get", side_effect=[empty_resp, populated_resp]),
+            patch(f"{SETUP_MOD}.http_get", side_effect=[empty_resp, populated_resp]),
             patch(f"{SETUP_MOD}._pause") as mock_pause,
         ):
             ok, msg = _check_controller_health("http://localhost:8080")
@@ -4630,7 +4630,7 @@ class TestCheckControllerHealth:
     def test_empty_controllers_retries_then_still_empty(self):
         empty_resp = _status_response(healthy=True, controller_status={})
         with (
-            patch(f"{SETUP_MOD}.httpx.get", return_value=empty_resp),
+            patch(f"{SETUP_MOD}.http_get", return_value=empty_resp),
             patch(f"{SETUP_MOD}._pause"),
         ):
             ok, msg = _check_controller_health("http://localhost:8080")
@@ -4638,7 +4638,7 @@ class TestCheckControllerHealth:
         assert "no controllers" in msg.lower()
 
     def test_endpoint_unreachable(self):
-        with patch(f"{SETUP_MOD}.httpx.get", side_effect=httpx.ConnectError("refused")):
+        with patch(f"{SETUP_MOD}.http_get", side_effect=httpx.ConnectError("refused")):
             ok, msg = _check_controller_health("http://localhost:8080")
         assert ok is False
         assert "could not reach" in msg.lower()
@@ -4646,7 +4646,7 @@ class TestCheckControllerHealth:
     def test_non_200_response(self):
         resp = MagicMock()
         resp.status_code = 500
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=resp):
             ok, _ = _check_controller_health("http://localhost:8080")
         assert ok is False
 
@@ -4663,7 +4663,7 @@ class TestCheckControllerHealth:
                 return cluster_resp
             raise AssertionError(f"unexpected url: {url}")
 
-        with patch(f"{SETUP_MOD}.httpx.get", side_effect=_get):
+        with patch(f"{SETUP_MOD}.http_get", side_effect=_get):
             ok, msg = _check_controller_health("https://nemo-helix-freeplay.dev.aire.nvidia.com")
         assert ok is True
         assert "does not publish /status" in msg
@@ -4681,7 +4681,7 @@ class TestCheckControllerHealth:
                 return cluster_resp
             raise AssertionError(f"unexpected url: {url}")
 
-        with patch(f"{SETUP_MOD}.httpx.get", side_effect=_get):
+        with patch(f"{SETUP_MOD}.http_get", side_effect=_get):
             ok, msg = _check_controller_health("http://localhost:8080")
         assert ok is False
         assert "404" in msg
@@ -4690,7 +4690,7 @@ class TestCheckControllerHealth:
         resp = MagicMock()
         resp.status_code = 200
         resp.json.side_effect = ValueError("not json")
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=resp):
             ok, msg = _check_controller_health("http://localhost:8080")
         assert ok is False
         assert "invalid json" in msg.lower()
@@ -4699,7 +4699,7 @@ class TestCheckControllerHealth:
         resp = MagicMock()
         resp.status_code = 200
         resp.json.return_value = {"status": "healthy", "controllers": None}
-        with patch(f"{SETUP_MOD}.httpx.get", return_value=resp):
+        with patch(f"{SETUP_MOD}.http_get", return_value=resp):
             ok, msg = _check_controller_health("http://localhost:8080")
         assert ok is False
         assert "invalid" in msg.lower()
@@ -4709,7 +4709,7 @@ class TestCheckControllerHealth:
         resp.status_code = 200
         resp.json.return_value = {"status": "healthy", "controllers": {"healthy": True, "status": [1, 2]}}
         with (
-            patch(f"{SETUP_MOD}.httpx.get", return_value=resp),
+            patch(f"{SETUP_MOD}.http_get", return_value=resp),
             patch(f"{SETUP_MOD}._pause"),
         ):
             ok, msg = _check_controller_health("http://localhost:8080")

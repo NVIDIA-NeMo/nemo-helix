@@ -3,10 +3,10 @@
 
 from contextvars import ContextVar
 
-import duckdb
 from data_designer.engine.resources.seed_reader import SeedReader
 from data_designer_nemo.fileset_file_seed_source import FilesetFileSeedSource
 from data_designer_nemo.filesystem import make_filesystem
+from duckdb import DuckDBPyConnection, connect
 from nemo_helix_plugin.client.client import NemoClient
 
 workspace_cvar = ContextVar[str | None]("workspace_cvar", default=None)
@@ -19,12 +19,12 @@ class FilesetFileSeedReader(SeedReader[FilesetFileSeedSource]):
     def __init__(self, client: NemoClient | None = None) -> None:
         self._client = client
 
-    def create_duckdb_connection(self) -> duckdb.DuckDBPyConnection:
+    def create_duckdb_connection(self) -> DuckDBPyConnection:
         if self._client is None:
             raise RuntimeError("FilesetFileSeedReader requires an injected NeMo Helix client")
 
         filesystem = make_filesystem(self._client)
-        conn = duckdb.connect()
+        conn = connect()
         conn.register_filesystem(filesystem)
         return conn
 

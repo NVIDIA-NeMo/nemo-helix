@@ -28,7 +28,7 @@ def _record_ray_start(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         calls.append(kwargs)
         return SimpleNamespace(returncode=0)
 
-    monkeypatch.setattr(ray_bootstrap.subprocess, "run", run)
+    monkeypatch.setattr(ray_bootstrap, "run", run)
     return calls
 
 
@@ -71,7 +71,7 @@ def test_the_driver_never_gets_the_node_env(tmp_path: Path, monkeypatch: pytest.
         envs.append(kwargs["env"])
         return SimpleNamespace(wait=lambda: 0, poll=lambda: 0, returncode=0, pid=7)
 
-    monkeypatch.setattr(ray_bootstrap.subprocess, "Popen", popen)
+    monkeypatch.setattr(ray_bootstrap, "Popen", popen)
 
     assert _bootstrap(tmp_path, 0, dict(NODE_ENV))._run_driver("driver.py", []) == 0
 

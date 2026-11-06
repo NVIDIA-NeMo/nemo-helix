@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 import urllib.error
-import urllib.request
 from collections.abc import Callable
 from email.message import Message
 from pathlib import Path
@@ -26,7 +25,6 @@ import pytest
 pytest.importorskip("harbor", reason="NemoFabricAgent subclasses Harbor's BaseAgent")
 
 from harbor.environments.base import BaseEnvironment
-from nemo_fabric.integrations.harbor.fabric_agent import FabricAgent
 from nhx_evals_sdk.agent_eval.runtimes.fabric import otlp_receiver, relay_cli_install, tcp_forwarder
 from nhx_evals_sdk.agent_eval.runtimes.harbor.fabric_agent import (
     RELAY_CLI_DIR,
@@ -157,7 +155,7 @@ async def test_the_receiver_listens_for_the_whole_run(
         if fails:
             raise RuntimeError("the harness failed")
 
-    monkeypatch.setattr(FabricAgent, "run", fabric_run)
+    monkeypatch.setattr(NemoFabricAgent, "_run_harness", fabric_run)
     environment = _Environment()
 
     if fails:
@@ -190,7 +188,7 @@ async def test_stopping_the_helpers_never_hides_how_the_harness_ended(
         if fails:
             raise RuntimeError("the harness failed")
 
-    monkeypatch.setattr(FabricAgent, "run", fabric_run)
+    monkeypatch.setattr(NemoFabricAgent, "_run_harness", fabric_run)
 
     if fails:
         with pytest.raises(RuntimeError, match="the harness failed"):
@@ -262,7 +260,7 @@ def _install_in_process(
 ) -> object:
     """Run the install script here with ``urlopen`` replaced; the exit code, or 0 when it runs to the end."""
     monkeypatch.setenv("PATH", "/nonexistent")
-    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(relay_cli_install, "urlopen", urlopen)
     try:
         return relay_cli_install.main(["-c", base_url, str(target), "0,0"])
     except SystemExit as exit_:
@@ -272,7 +270,7 @@ def _install_in_process(
 def test_a_download_that_fails_transiently_is_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A setup sandbox's egress drops connections and DNS answers now and then; one failure mustn't end the trial."""
     base_url, target = _release(tmp_path)
-    real_urlopen = urllib.request.urlopen
+    real_urlopen = relay_cli_install.urlopen
     failures = iter([urllib.error.URLError("[Errno -5] No address associated with hostname")])
 
     def flaky_urlopen(url: str, timeout: float) -> Any:
@@ -390,7 +388,7 @@ async def test_the_forwarder_runs_beside_the_harness_for_the_whole_run(
     async def fabric_run(self: Any, instruction: str, environment: _Environment, context: Any) -> None:
         environment.events.append("fabric run")
 
-    monkeypatch.setattr(FabricAgent, "run", fabric_run)
+    monkeypatch.setattr(NemoFabricAgent, "_run_harness", fabric_run)
     environment = _Environment()
 
     await _gateway_agent(tmp_path, f"http://host.docker.internal:8598{GATEWAY_PATH}").run("hi", environment, None)
@@ -403,7 +401,7 @@ async def test_the_forwarder_runs_beside_the_harness_for_the_whole_run(
 def test_the_forwarder_copies_bytes_both_ways_until_each_side_closes(monkeypatch: pytest.MonkeyPatch) -> None:
     client, client_end = socket.socketpair()
     upstream, upstream_end = socket.socketpair()
-    monkeypatch.setattr(tcp_forwarder.socket, "create_connection", lambda address, timeout: upstream_end)
+    monkeypatch.setattr(tcp_forwarder, "create_connection", lambda address, timeout: upstream_end)
     serving = threading.Thread(target=tcp_forwarder._serve, args=(client_end, "gateway", 8080))
     serving.start()
 
