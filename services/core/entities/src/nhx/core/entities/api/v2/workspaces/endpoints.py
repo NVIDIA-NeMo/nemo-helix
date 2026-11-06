@@ -25,6 +25,7 @@ import textwrap
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
@@ -336,6 +337,7 @@ async def list_workspaces(
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Workspace]:
     """List workspaces accessible to the current principal."""
+    validate_pagination(page, page_size)
     # Get accessible workspaces for access control
     accessible_workspaces = await get_accessible_workspaces(entity_repository)
 

@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nhx.common.api.common import DeleteResponse, Page
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -91,6 +92,7 @@ async def list_role_bindings(
     This endpoint requires Platform Admin permissions.
     """
     require_service_principal_for_iam_role_bindings(auth_client)
+    validate_pagination(page, page_size)
 
     # Translate is_active filter to revoked_at EXISTS filter for database query
     is_active_value = parsed.remove("is_active")

@@ -40,6 +40,16 @@ def _empty_page() -> MagicMock:
 
 
 class TestListingOneJobsImages:
+    def test_offset_overflow_is_rejected_before_listing(self) -> None:
+        entities = AsyncMock()
+        response = TestClient(_app(entities)).get(
+            "/v2/workspaces/team-a/container-images",
+            params={"page": 92233720368547760, "page_size": 100},
+        )
+        assert response.status_code == 422, response.text
+        assert "offset" in response.json()["detail"]
+        entities.list.assert_not_awaited()
+
     def test_a_job_and_a_status_filter_on_the_stored_fields(self) -> None:
         entities = AsyncMock()
         entities.list.return_value = _empty_page()

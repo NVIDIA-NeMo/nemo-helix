@@ -61,6 +61,7 @@ from nemo_agents_plugin.spec_revision import SpecRevision, read_spec_revision
 from nemo_deployments_plugin.entities import Deployment
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
@@ -325,6 +326,7 @@ async def list_deployments(
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> DeploymentPage:
     """List all deployments in the workspace with pagination and filter support."""
+    validate_pagination(page, page_size)
     filter_dict = filter if isinstance(filter, dict) else filter.model_dump(exclude_none=True)
     try:
         result = await entity_client.list(

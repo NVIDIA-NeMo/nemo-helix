@@ -16,6 +16,7 @@ import logging
 import textwrap
 
 from fastapi import APIRouter, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.core.entities.api.dependencies import EntityRepository
 from nhx.core.entities.api.v2.projects.schemas import (
@@ -143,6 +144,7 @@ async def list_projects(
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Project]:
     """List projects in the workspace."""
+    validate_pagination(page, page_size)
     try:
         entities, total = await repository.list_entities(
             workspace=workspace,

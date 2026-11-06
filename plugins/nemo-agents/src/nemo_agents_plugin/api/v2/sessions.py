@@ -25,6 +25,7 @@ from nemo_agents_plugin.entities import AgentDeployment, AgentSession, SessionSt
 from nemo_agents_plugin.schema import CreateSessionRequest, SessionFilter, SessionPage
 from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime as _cleanup_fabric_runtime
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entity_client import (
@@ -112,6 +113,7 @@ async def list_sessions(
     effective_principal_id: str = Depends(get_effective_principal_id),
 ) -> SessionPage:
     """List the current principal's sessions, optionally filtered by deployment ID."""
+    validate_pagination(page, page_size)
     filter_dict = dict(filter) if isinstance(filter, dict) else filter.model_dump(exclude_none=True)
     if effective_principal_id:
         filter_dict["created_by"] = effective_principal_id

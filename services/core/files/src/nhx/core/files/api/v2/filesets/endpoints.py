@@ -17,6 +17,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
 from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
@@ -426,6 +427,7 @@ async def list_filesets(
     Supports filtering by name, description, purpose, storage_type, created_at, and updated_at via query parameters.
     Returns paginated results with sorting options.
     """
+    validate_pagination(page, page_size)
     logger.info(f"GET /filesets - workspace={workspace}")
 
     res = await entity_store.list(

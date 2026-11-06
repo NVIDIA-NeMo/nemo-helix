@@ -36,6 +36,7 @@ from nemo_builder_plugin.submit import (
     submit_build_set,
 )
 from nemo_builder_plugin.upstream import UpstreamRegistry
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoHTTPError, NotFoundError, PermissionDeniedError
@@ -181,6 +182,7 @@ def _build_router() -> APIRouter:
         entity_client: NemoEntitiesClient = Depends(get_entity_client),
     ) -> list[ContainerImage]:
         """List the images in a workspace, in whatever state they are in, or only one job's or one build set's."""
+        validate_pagination(page, page_size)
         filters: dict[str, object] = {}
         if job is not None:
             filters["provenance.job"] = f"{workspace}/{job}"

@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nhx.common.api.common import ErrorResponse, Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
@@ -141,6 +142,7 @@ async def list_secrets(
     platform_config: HelixConfig = Depends(get_platform_config),
 ) -> Page[schemas.HelixSecretResponse]:
     """List available secrets"""
+    validate_pagination(page, page_size)
     with scoped_app_ctx(SecretsContext(namespace=workspace)):
         result = await entity_store.list(
             entity_type=HelixSecret,

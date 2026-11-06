@@ -23,6 +23,7 @@ import textwrap
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
@@ -403,6 +404,7 @@ async def list_entities(
     ),
 ) -> EntitiesPage:
     """List entities with filtering, supporting cross-workspace queries."""
+    validate_pagination(page, page_size)
     await require_control_entity_access(auth_client, workspace, entity_type, "list")
     await require_relationship_access(auth_client, filter)
     # Handle cross-workspace query (workspace = "*")

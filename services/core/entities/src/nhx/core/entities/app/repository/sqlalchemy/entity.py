@@ -7,8 +7,10 @@ from asyncio import Lock
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional
 
+from nemo_helix_plugin.entities.pagination import pagination_offset
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
+from nhx.common.entities.client import EntityValidationError
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
 from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
 from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
@@ -195,6 +197,10 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
         session: AsyncSession | None = None,
     ) -> tuple[List[Entity], int]:
         """List entities with filtering."""
+        try:
+            offset = pagination_offset(page, page_size)
+        except ValueError as exc:
+            raise EntityValidationError(str(exc)) from exc
         self.field_policy.validate_query(filter_op, sort)
         async with self._get_session(session) as sess:
             # Start with base query
@@ -229,7 +235,7 @@ class SQLAlchemyEntityRepository(EntityRepositoryInterface):
             # OFFSET pages require a total order even when the requested values
             # are equal or missing. IDs are unique across workspaces and types.
             query = query.order_by(DBEntity.id.asc())
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            query = query.offset(offset).limit(page_size)
 
             result = await sess.execute(query)
             db_entities = result.scalars().all()

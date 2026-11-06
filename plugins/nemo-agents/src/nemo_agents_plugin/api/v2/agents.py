@@ -28,6 +28,7 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity_client import (
@@ -122,6 +123,7 @@ async def list_agents(
 
     Filter on a label with ``filter[labels.<key>]=<value>``.
     """
+    validate_pagination(page, page_size)
     try:
         result = await entity_client.list(
             Agent,

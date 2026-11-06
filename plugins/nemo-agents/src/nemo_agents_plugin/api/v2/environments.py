@@ -35,6 +35,7 @@ from nemo_agents_plugin.schema import (
     EnvironmentSpecPage,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import validate_pagination
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import (
@@ -310,6 +311,7 @@ async def _list_entities(
     filter: FilterT,
     kind: str,
 ) -> PageT:
+    validate_pagination(page, page_size)
     filter_dict = filter if isinstance(filter, dict) else filter.model_dump(exclude_none=True)
     try:
         result = await entity_client.list(

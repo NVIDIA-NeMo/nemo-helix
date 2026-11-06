@@ -8,7 +8,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import AsyncIterator, List, Optional
 
+from nemo_helix_plugin.entities.pagination import pagination_offset
 from nhx.common.api.filter import FilterOperation
+from nhx.common.entities.client import EntityValidationError
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBWorkspace, _utcnow
 from nhx.core.entities.app.repository.workspace import WorkspaceRepositoryInterface
@@ -95,6 +97,10 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
         filter_op: Optional[FilterOperation] = None,
     ) -> tuple[List[Workspace], int]:
         """List workspaces with optional filtering."""
+        try:
+            offset = pagination_offset(page, page_size)
+        except ValueError as exc:
+            raise EntityValidationError(str(exc)) from exc
         async with self._get_session(session) as sess:
             query = select(DBWorkspace)
 
@@ -115,7 +121,7 @@ class SQLAlchemyWorkspaceRepository(WorkspaceRepositoryInterface):
             else:
                 query = query.order_by(DBWorkspace.created_at.desc())
 
-            query = query.offset((page - 1) * page_size).limit(page_size)
+            query = query.offset(offset).limit(page_size)
 
             result = await sess.execute(query)
             db_workspaces = result.scalars().all()
