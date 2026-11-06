@@ -23,6 +23,7 @@ from typing import Any, cast
 
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import otlp_endpoint_fields
 from nhx_evals_sdk.agent_eval.runtimes.fabric.skills import SkillProvenance
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import ArtifactView, declared_artifacts
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import AgentEvalTrial, AgentEvalTrialStatus, TrialMeasurements
 from nhx_evals_sdk.values.evidence import (
@@ -44,8 +45,6 @@ ATOF_FILENAME = "events.atof.jsonl"
 #: ATIF ``agent.version``. Reports the agent *framework* rather than a real version; the resolved
 #: nemo-fabric version would be the better answer.
 FABRIC_AGENT_VERSION = "fabric"
-#: ``kind`` Fabric stamps on the promoted Relay ATIF artifact.
-ATIF_ARTIFACT_KIND = "atif"
 
 
 def to_mapping(config: Any) -> dict[str, Any]:
@@ -146,16 +145,6 @@ def normalize_output(output: Any) -> JsonValue:
 
 
 @dataclass(frozen=True)
-class ArtifactView:
-    """One entry of a Fabric artifact manifest, with ``path`` already on the host filesystem."""
-
-    name: str
-    kind: str | None
-    path: str
-    media_type: str | None
-
-
-@dataclass(frozen=True)
 class ResultView:
     """A Fabric ``RunResult`` read the same way however it arrived.
 
@@ -211,23 +200,6 @@ class ResultView:
         returning ``None`` drops an artifact that was not brought across.
         """
         error = payload.get("error")
-        artifacts: list[ArtifactView] = []
-        manifest = payload.get("artifacts")
-        entries = manifest.get("artifacts") if isinstance(manifest, Mapping) else None
-        for entry in entries if isinstance(entries, list) else []:
-            if not isinstance(entry, Mapping) or not entry.get("name") or not entry.get("path"):
-                continue
-            path = artifact_path(str(entry["path"]))
-            if path is None:
-                continue
-            artifacts.append(
-                ArtifactView(
-                    name=str(entry["name"]),
-                    kind=_optional_str(entry.get("kind")),
-                    path=path,
-                    media_type=_optional_str(entry.get("media_type")),
-                )
-            )
         return cls(
             payload=payload,
             status=str(payload.get("status")),
@@ -239,7 +211,7 @@ class ResultView:
             adapter_id=_optional_str(payload.get("adapter_id")),
             adapter_kind=_optional_str(payload.get("adapter_kind")),
             invocation_id=_optional_str(payload.get("invocation_id")),
-            artifacts=tuple(artifacts),
+            artifacts=declared_artifacts(payload, artifact_path=artifact_path),
             telemetry=tuple(
                 {key: ref.get(key) for key in ("provider", "kind", "uri", "trace_id")}
                 for ref in _mapping_list(payload.get("telemetry"))
