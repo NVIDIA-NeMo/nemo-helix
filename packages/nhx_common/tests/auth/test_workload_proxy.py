@@ -361,7 +361,7 @@ def test_lifespan_closes_upstream_client() -> None:
         created.append(client)
         return client
 
-    with patch("nhx.common.auth.workload_proxy.main.httpx.AsyncClient", side_effect=_tracking_client):
+    with patch("nemo_helix_plugin.client.auth_proxy.AsyncClient", side_effect=_tracking_client):
         app = build_app(base_url="http://nemo-helix-api:8080", principal="agents")
 
     assert len(created) == 1
@@ -395,7 +395,7 @@ def test_run_registers_and_unregisters_healthy_loop_for_health_reporting(monkeyp
             while not self.should_exit:
                 threading.Event().wait(timeout=0.05)
 
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", _FakeServer)
+    monkeypatch.setattr(workload_proxy_main, "Server", _FakeServer)
 
     manager = ControllerManager.get_instance()
     for _ in range(2):
@@ -437,7 +437,7 @@ def test_run_leaves_controller_tracked_when_uvicorn_thread_outlives_shutdown(
             server_started.set()
             hang_forever.wait(timeout=5)
 
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", _HangingFakeServer)
+    monkeypatch.setattr(workload_proxy_main, "Server", _HangingFakeServer)
 
     manager = ControllerManager.get_instance()
     stop_signal = threading.Event()
@@ -470,7 +470,7 @@ def test_run_leaves_controller_tracked_when_uvicorn_thread_outlives_shutdown(
             while not self.should_exit:
                 threading.Event().wait(timeout=0.001)
 
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", _RestartedFakeServer)
+    monkeypatch.setattr(workload_proxy_main, "Server", _RestartedFakeServer)
 
     second_stop_signal = threading.Event()
     second_run_thread = threading.Thread(
@@ -545,7 +545,7 @@ def test_build_server_allows_explicit_non_loopback_override(monkeypatch: pytest.
     monkeypatch.setenv("NHX_AUTH_PROXY_ALLOW_NON_LOOPBACK", "true")
     monkeypatch.setattr(workload_proxy_main, "build_app", lambda **_kwargs: object())
     sentinel_server = object()
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", lambda _config: sentinel_server)
+    monkeypatch.setattr(workload_proxy_main, "Server", lambda _config: sentinel_server)
 
     _, _, _, host, _, server = workload_proxy_main._build_server()
 
@@ -570,7 +570,7 @@ def test_run_registration_failure_never_starts_server_and_remains_unhealthy(
             while not self.should_exit:
                 threading.Event().wait(timeout=0.01)
 
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", _FakeServer)
+    monkeypatch.setattr(workload_proxy_main, "Server", _FakeServer)
     manager = ControllerManager.get_instance()
 
     def _fail_registration(_name: str, _loop: object) -> None:
@@ -591,15 +591,14 @@ def test_run_uvicorn_thread_start_failure_removes_registered_loop_and_remains_un
     monkeypatch.setenv("NHX_AUTH_PROXY_PRINCIPAL", "agents")
     monkeypatch.setenv("NEMO_BASE_URL", "http://nemo-helix-api:8080")
 
-    real_start = threading.Thread.start
+    class _UnstartableThread(threading.Thread):
+        def start(self) -> None:
+            if self.name != "auth-proxy-uvicorn":
+                super().start()
+            else:
+                raise RuntimeError("thread start failed")
 
-    def _start(thread: threading.Thread) -> None:
-        if thread.name != "auth-proxy-uvicorn":
-            real_start(thread)
-        else:
-            raise RuntimeError("thread start failed")
-
-    monkeypatch.setattr(threading.Thread, "start", _start)
+    monkeypatch.setattr(workload_proxy_main, "Thread", _UnstartableThread)
     manager = ControllerManager.get_instance()
 
     with pytest.raises(RuntimeError, match="thread start failed"):
@@ -630,7 +629,7 @@ def test_run_health_loop_start_failure_tracks_uvicorn_until_delayed_exit(
     def _fail_health_loop_start(_loop: Loop) -> None:
         raise RuntimeError("health loop start failed")
 
-    monkeypatch.setattr(workload_proxy_main.uvicorn, "Server", _HangingFakeServer)
+    monkeypatch.setattr(workload_proxy_main, "Server", _HangingFakeServer)
     monkeypatch.setattr(Loop, "start", _fail_health_loop_start)
     manager = ControllerManager.get_instance()
 

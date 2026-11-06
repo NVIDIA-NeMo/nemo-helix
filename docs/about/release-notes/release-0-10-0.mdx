@@ -68,6 +68,8 @@ NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-
 ## Upgrade from v0.9.x
 
 - Intake recalculates usage for all stored non-gateway OTLP traces at query time, not only new Relay captures. Per metric, it now estimates the maximum of summed model-call counters and the largest recorded aggregate instead of preferring the model-call tier. A larger parent, tool, or chain measurement can therefore increase a displayed total; sibling aggregate measurements of 100 and 200 with no model calls produce 200, not 300. Gateway coverage and superseded-trace handling are unchanged. These estimates are not verified reconciliation; inspect original span measurements for conflicts and incomplete coverage. See [Usage Estimates](/documentation/agents/traces-and-insights/collect-agent-traces#usage-estimates).
+- Set `auth.oidc.audience` on every deployment that enables OIDC; config validation fails without it. If your identity provider sets `aud` to each client's ID, list the other IDs in `auth.oidc.additional_audiences`. If `auth.oidc.workload.audience` is unset, workload tokens use this value instead of `nemo-helix`; set it to `"nemo-helix"` to keep the old value. See [OIDC Setup](/documentation/access-control/authentication/oidc-setup#audience-and-opaque-token-migration).
+- Replace `auth.oidc.resolve_opaque_tokens_via_userinfo: true` with `introspect_opaque_tokens` and `introspection_endpoint`. The introspection response must include a matching `aud` claim.
 - Rename the execute-job field `extension` to `post_run_action`. Plugins that register execute extensions must move to the `nemo.agents.post_run_actions` entry-point group and the `PostRunAction` contract. No aliases are kept.
 - An agent registered without `post_run_actions`, including one registered before this release, allows only `agents.noop`. To use another post-run action, add it under `helix_registration.post_run_actions` and register the agent again. For a deployed agent, `nemo agents redeploy` re-registers and redeploys it.
 - Check harness `kind` values. Custom adapters must install their descriptor under `share/nemo-fabric` in the platform's Python environment, or be installed in the agent image, rather than relying on an `nvidia.fabric.` prefix.
@@ -76,6 +78,7 @@ NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-
 - For built-in Harbor agents, replace `model_name` with `model: {"name": ...}`. The old field is still accepted in 0.10 with a deprecation warning, and stops being accepted in the release after 0.10.
 - Pass `--yes` to `nemo workspaces delete` in scripts and other non-interactive shells.
 - If you used the `SandboxedCodex` Harbor agent, switch to the built-in `codex` agent.
+- `nemo-mcp` no longer registers the `delete_workspace` tool unless started with `--enable-destructive-tools`. `nemo-mcp --transport streamable-http` now refuses to start without `NHX_MCP_AUTH_TOKEN`; clients send it as `Authorization: Bearer <token>`. For local debugging on a loopback host, pass `--allow-unauthenticated` instead.
 
 ## Current constraints
 

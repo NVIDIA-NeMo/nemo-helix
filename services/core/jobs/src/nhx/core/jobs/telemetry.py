@@ -9,7 +9,8 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from importlib import metadata
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as installed_version
 from typing import Any
 
 from nemo_helix_plugin.jobs.telemetry import get_job_telemetry_plugins, get_job_telemetry_session_id
@@ -47,10 +48,14 @@ class JobRunTelemetry:
 
 
 def _source_client_version() -> str:
-    try:
-        return metadata.version("nhx-jobs")
-    except metadata.PackageNotFoundError:
-        return "undefined"
+    # Published Helix wheels bundle the jobs service without necessarily installing
+    # its standalone distribution metadata. Prefer the enclosing product version.
+    for distribution in ("nemo-helix", "nhx-jobs"):
+        try:
+            return installed_version(distribution)
+        except PackageNotFoundError:
+            continue
+    return "undefined"
 
 
 def _job_type_bucket(source: str) -> str:

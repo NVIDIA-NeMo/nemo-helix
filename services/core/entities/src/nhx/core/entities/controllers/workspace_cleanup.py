@@ -44,6 +44,7 @@ def _deletion_error_text(error: BaseException) -> str:
 
 _DELETION_LEASE_TIMEOUT_SECONDS = 60.0
 _DELETION_LEASE_RENEW_INTERVAL_SECONDS = 20.0
+_lease_renewal_sleep = async_sleep
 
 
 class WorkspaceJobCleanupError(RuntimeError):
@@ -303,7 +304,7 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         deadline = loop.time() + _DELETION_LEASE_TIMEOUT_SECONDS - _DELETION_LEASE_RENEW_INTERVAL_SECONDS
         try:
             while True:
-                await asyncio.sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
+                await _lease_renewal_sleep(_DELETION_LEASE_RENEW_INTERVAL_SECONDS)
                 renewed = await asyncio.wait_for(
                     self._workspace_repository.renew_workspace_deletion_lease(
                         name=lease.workspace_name,

@@ -28,6 +28,7 @@ from pathlib import Path
 
 import pytest
 from nemo_helix_ext.cli.app import app
+from nemo_helix_ext.local import process as process_module
 from nemo_helix_ext.local.process import (
     InstanceDescriptor,
     PortConflict,
@@ -648,10 +649,11 @@ class TestPortAvailability:
     ) -> None:
         """A sandbox denying bind(2) must not be reported as a port conflict."""
 
-        def _deny(self: socket.socket, address: object) -> None:
-            raise OSError(denied_errno, os.strerror(denied_errno))
+        class _DeniedSocket(socket.socket):
+            def bind(self, address: object, /) -> None:
+                raise OSError(denied_errno, os.strerror(denied_errno))
 
-        monkeypatch.setattr(socket.socket, "bind", _deny)
+        monkeypatch.setattr(process_module, "socket", _DeniedSocket)
         conflict = check_port_available_for_start("127.0.0.1", 8080, "scope-8080", base_dir=tmp_path / "state")
         assert conflict is not None
         assert conflict.kind == "not_permitted"
@@ -676,13 +678,14 @@ class TestPortAvailability:
             (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 8080, 0, 0)),
             (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 8080)),
         ]
-        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: infos)
+        monkeypatch.setattr(process_module, "getaddrinfo", lambda *a, **k: infos)
 
-        def _bind(self: socket.socket, address: object) -> None:
-            code = errno.EADDRINUSE if self.family == socket.AF_INET6 else errno.EPERM
-            raise OSError(code, os.strerror(code))
+        class _BusyOrDeniedSocket(socket.socket):
+            def bind(self, address: object, /) -> None:
+                code = errno.EADDRINUSE if self.family == socket.AF_INET6 else errno.EPERM
+                raise OSError(code, os.strerror(code))
 
-        monkeypatch.setattr(socket.socket, "bind", _bind)
+        monkeypatch.setattr(process_module, "socket", _BusyOrDeniedSocket)
         err = port_bind_error("localhost", 8080)
         assert err is not None
         assert err.errno == errno.EPERM

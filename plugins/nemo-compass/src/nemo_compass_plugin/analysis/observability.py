@@ -9,7 +9,8 @@ from uuid import uuid4
 
 from nemo_compass_plugin.platform_client import LOOPBACK_HOSTS
 from nemo_helix_ext.config.config import Config
-from nooa.tracing import enable_tracing, exporters, flush_traces, set_session
+from nooa.tracing import enable_tracing, flush_traces, set_session
+from nooa.tracing.exporters import otlp
 
 COMPASS_OBSERVABILITY_ENV = "NEMO_COMPASS_OBSERVABILITY"
 COMPASS_OBSERVABILITY_AGENT_NAME = "Compass"
@@ -73,7 +74,7 @@ def setup_compass_observability(
 
     otlp_headers = _otlp_auth_headers(base_url)
     enable_tracing(
-        exporters=[exporters.otlp(endpoint=endpoint, headers=otlp_headers)],
+        exporters=[otlp(endpoint=endpoint, headers=otlp_headers)],
         extra_resource_attrs=resource_attributes,
     )
     set_session(session_id)

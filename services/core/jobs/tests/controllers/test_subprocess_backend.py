@@ -5,8 +5,9 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from nhx.common.config import HelixConfig
@@ -574,7 +575,7 @@ def test_build_command_resolves_console_script_via_sys_executable_when_virtual_e
         command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
     )
 
-    with patch.object(sys, "executable", str(bin_dir / "python")):
+    with patch("nhx.core.jobs.controllers.backends.subprocess.python_executable", str(bin_dir / "python")):
         result = SubprocessJobBackend._build_command(executor, None)
 
     assert result == [
@@ -597,7 +598,7 @@ def test_build_command_leaves_console_script_unchanged_when_absent_from_sys_exec
         command=["nemo-helix", "run", "task", "--task", "nhx.hello_world.tasks.hello_world"],
     )
 
-    with patch.object(sys, "executable", str(bin_dir / "python")):
+    with patch("nhx.core.jobs.controllers.backends.subprocess.python_executable", str(bin_dir / "python")):
         result = SubprocessJobBackend._build_command(executor, None)
 
     assert result == [
@@ -945,7 +946,7 @@ def test_reclaim_raises_when_storage_cannot_be_removed(mock_nemo_client, tmp_pat
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
 
     with (
-        patch("nhx.core.jobs.controllers.backends.subprocess.shutil.rmtree", side_effect=PermissionError),
+        patch("nhx.core.jobs.controllers.backends.subprocess.rmtree", side_effect=PermissionError),
         pytest.raises(PermissionError),
     ):
         backend.reclaim_persistent_storage("default", "train-llama")
@@ -1121,10 +1122,11 @@ def test_failed_secret_injection_leaves_no_task_token_file(
 def test_task_token_file_removal_is_retried_after_a_failure(mock_nemo_client, tmp_path, mock_platform_config):
     backend = _subprocess_backend(mock_nemo_client, tmp_path, mock_platform_config)
     metadata = _auth_metadata(tmp_path, exited=True)
-    token_file = metadata.task_auth_token_file
+    token_file = MagicMock(spec=Path)
+    token_file.unlink.side_effect = PermissionError("denied")
+    metadata.task_auth_token_file = token_file
 
-    with patch("pathlib.Path.unlink", side_effect=PermissionError("denied")):
-        backend._refresh_task_auth(metadata)
+    backend._refresh_task_auth(metadata)
 
     assert metadata.task_auth_token_file == token_file
 

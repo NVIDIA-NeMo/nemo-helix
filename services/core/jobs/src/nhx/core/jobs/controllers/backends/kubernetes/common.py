@@ -9,9 +9,10 @@ import os
 import uuid
 from typing import Any
 
-from kubernetes import client, config
+from kubernetes import client
 from kubernetes.client.models import V1Pod
 from kubernetes.client.rest import ApiException
+from kubernetes.config import ConfigException, load_incluster_config, load_kube_config
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.constants import PAUSE_EXIT_CODE
@@ -143,10 +144,10 @@ def load_kubernetes_config():
 
     try:
         # Try to load in-cluster config first (for when running in K8s)
-        config.load_incluster_config()
-    except config.ConfigException:
+        load_incluster_config()
+    except ConfigException:
         # Fall back to kubeconfig file
-        config.load_kube_config()
+        load_kube_config()
 
     _load_kubernetes_config_once = True
 

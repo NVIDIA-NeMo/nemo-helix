@@ -6,11 +6,11 @@
 import hashlib
 import os
 import re
-import tempfile
 import zlib
 from collections.abc import Callable, Generator, Iterable, Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass
+from tempfile import TemporaryFile
 from typing import IO, Self
 
 from dulwich.object_store import DiskObjectStore
@@ -397,14 +397,14 @@ def _patched(
     temp_dir: str | os.PathLike[str],
     temp_files: ExitStack,
 ) -> Iterator[bytes]:
-    source: IO[bytes] = temp_files.enter_context(tempfile.TemporaryFile(dir=temp_dir))
+    source: IO[bytes] = temp_files.enter_context(TemporaryFile(dir=temp_dir))
     _write(source, base)
     source_size = base_size
     spare: IO[bytes] | None = None
     for entry in reversed(lower):
         delta = _Delta(entry)
         if spare is None:
-            spare = temp_files.enter_context(tempfile.TemporaryFile(dir=temp_dir))
+            spare = temp_files.enter_context(TemporaryFile(dir=temp_dir))
         spare.seek(0)
         spare.truncate()
         _write(spare, delta.apply(source.fileno(), source_size))

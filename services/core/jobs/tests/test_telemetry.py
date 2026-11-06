@@ -4,12 +4,34 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError
 from unittest.mock import patch
 
 import pytest
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nemo_helix_plugin.telemetry.handler import QueuedEvent, _redact_endpoint, build_payload
-from nhx.core.jobs.telemetry import _send_job_run_event, build_job_run_telemetry
+from nhx.core.jobs.telemetry import _send_job_run_event, _source_client_version, build_job_run_telemetry
+
+
+@pytest.mark.parametrize(
+    ("versions", "expected", "lookups"),
+    [
+        ({"nemo-helix": "0.10.0", "nhx-jobs": "0.0.0"}, "0.10.0", ["nemo-helix"]),
+        ({"nhx-jobs": "0.10.1"}, "0.10.1", ["nemo-helix", "nhx-jobs"]),
+        ({}, "undefined", ["nemo-helix", "nhx-jobs"]),
+    ],
+)
+def test_source_client_version_uses_available_distribution(
+    versions: dict[str, str], expected: str, lookups: list[str]
+) -> None:
+    def installed_version(distribution: str) -> str:
+        if distribution not in versions:
+            raise PackageNotFoundError(distribution)
+        return versions[distribution]
+
+    with patch("nhx.core.jobs.telemetry.installed_version", side_effect=installed_version) as version:
+        assert _source_client_version() == expected
+    assert [call.args[0] for call in version.call_args_list] == lookups
 
 
 def test_build_job_run_telemetry_uses_stamped_session_id() -> None:
@@ -99,7 +121,7 @@ async def test_send_job_run_event_skips_non_https_endpoint(monkeypatch: pytest.M
     assert event is not None
     monkeypatch.setenv("NEMO_TELEMETRY_ENDPOINT", "http://marker" + "@example.test/events?debug=value")
 
-    with patch("nemo_helix_plugin.telemetry.handler.httpx.AsyncClient") as async_client:
+    with patch("nemo_helix_plugin.telemetry.handler.AsyncClient") as async_client:
         await _send_job_run_event(event)
 
     async_client.assert_not_called()
@@ -122,7 +144,7 @@ async def test_send_job_run_event_logs_only_redacted_endpoint(monkeypatch: pytes
         raise RuntimeError("send failed")
 
     with (
-        patch("nemo_helix_plugin.telemetry.handler.httpx.AsyncClient") as async_client,
+        patch("nemo_helix_plugin.telemetry.handler.AsyncClient") as async_client,
         patch("nemo_helix_plugin.telemetry.handler.logger.debug") as debug,
     ):
         async_client.return_value.__aenter__.return_value.post.side_effect = raise_on_post

@@ -3,6 +3,7 @@
 
 """Integration tests for IAM role binding CRUD operations."""
 
+import json
 import uuid
 
 import pytest
@@ -35,6 +36,37 @@ class TestIAMRoleBindings:
         assert "data" in data
         assert "pagination" in data
         assert isinstance(data["data"], list)
+
+    @pytest.mark.parametrize(
+        "principal",
+        ["a" * 257, "user:" + "a" * 70000, "é" * 12000],
+        ids=["above-limit", "oversized-ascii", "oversized-unicode"],
+    )
+    def test_create_role_binding_rejects_long_principal(self, http_client: TestClient, principal: str) -> None:
+        response = http_client.post(
+            IAM_ROLE_BINDINGS_PATH,
+            json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": "Viewer"},
+            headers={"X-NHX-Principal-Id": SERVICE_PRINCIPAL},
+        )
+        assert response.status_code == 422, response.text
+        error = response.json()["detail"][0]
+        assert error["loc"] == ["body", "principal"]
+        assert error["type"] == "string_too_long"
+        assert error["ctx"]["max_length"] == 256
+
+    def test_create_role_binding_accepts_max_length_principal(self, http_client: TestClient) -> None:
+        principal = "user:" + "a" * 251
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        response = http_client.post(
+            f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false",
+            json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": "Viewer"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["principal"] == principal
+        name = response.json()["name"]
+        revoked = http_client.delete(f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers)
+        assert revoked.status_code == 200, revoked.text
 
     def test_role_binding_crud_lifecycle(self, http_client: TestClient):
         """Test full CRUD lifecycle for role bindings."""
@@ -294,3 +326,91 @@ class TestIAMRoleBindings:
         assert "pagination" in data
         assert data["pagination"]["page"] == 1
         assert data["pagination"]["page_size"] == 5
+
+    def test_active_filter_with_pagination(self, http_client: TestClient):
+        """Active filtering reaches entity storage before counting and pagination."""
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        principal = f"active-filter-{uuid.uuid4().hex[:8]}@example.com"
+        names: dict[str, str] = {}
+        try:
+            for role in ("Viewer", "Editor", "Admin"):
+                response = http_client.post(
+                    IAM_ROLE_BINDINGS_PATH,
+                    params={"wait_role_propagation": "false"},
+                    headers=headers,
+                    json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": role},
+                )
+                assert response.status_code == 200, response.text
+                names[role] = response.json()["name"]
+            response = http_client.delete(
+                f"{IAM_ROLE_BINDINGS_PATH}/{names['Viewer']}",
+                params={"wait_role_propagation": "false"},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+
+            base_params = {"filter[principal]": principal, "filter[workspace]": DEFAULT_WORKSPACE}
+            response = http_client.get(IAM_ROLE_BINDINGS_PATH, params=base_params, headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 3
+
+            active_names: set[str] = set()
+            for page in (1, 2):
+                response = http_client.get(
+                    IAM_ROLE_BINDINGS_PATH,
+                    params={
+                        **base_params,
+                        "filter[is_active]": "true",
+                        "page_size": "1",
+                        "page": str(page),
+                        "sort": "name",
+                    },
+                    headers=headers,
+                )
+                assert response.status_code == 200, response.text
+                body = response.json()
+                assert body["pagination"]["total_results"] == 2
+                assert body["pagination"]["total_pages"] == 2
+                assert len(body["data"]) == 1
+                assert body["data"][0]["revoked_at"] is None
+                active_names.add(body["data"][0]["name"])
+            assert active_names == {names["Editor"], names["Admin"]}
+
+            response = http_client.get(
+                IAM_ROLE_BINDINGS_PATH,
+                params={**base_params, "filter[is_active]": "false"},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 1
+            assert [binding["name"] for binding in response.json()["data"]] == [names["Viewer"]]
+
+            # An OR nested beneath the principal constraint must preserve active translation.
+            expression = {
+                "$and": [
+                    {"principal": principal},
+                    {"$or": [{"is_active": False}, {"role": "Editor"}]},
+                ]
+            }
+            response = http_client.get(
+                IAM_ROLE_BINDINGS_PATH,
+                params={"filter": json.dumps(expression)},
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["pagination"]["total_results"] == 2
+            assert {binding["name"] for binding in response.json()["data"]} == {
+                names["Viewer"],
+                names["Editor"],
+            }
+
+            for params in ({"filter[is_active]": "null"}, {"filter": '{"is_active":null}'}):
+                response = http_client.get(IAM_ROLE_BINDINGS_PATH, params=params, headers=headers)
+                assert response.status_code == 422, response.text
+        finally:
+            for name in names.values():
+                http_client.delete(
+                    f"{IAM_ROLE_BINDINGS_PATH}/{name}",
+                    params={"wait_role_propagation": "false"},
+                    headers=headers,
+                )

@@ -129,6 +129,10 @@ def _normalize_extra_headers(headers: object, *, label: str) -> dict[str, str]:
     return normalized
 
 
+# The parent call, bound here so tests can record what reaches Nooa without patching its class.
+_completion_acall = CompletionClient.acall
+
+
 class _AuthenticatedCompletionClient(CompletionClient):
     """CompletionClient that resolves Platform auth at each Nooa call boundary."""
 
@@ -179,7 +183,8 @@ class _AuthenticatedCompletionClient(CompletionClient):
     ) -> LLMResponse:
         token = await self._platform_auth.get_access_token_async()
         kwargs["extra_headers"] = self._extra_headers(token, kwargs.get("extra_headers"))
-        return await super().acall(
+        return await _completion_acall(
+            self,
             messages,
             tools=tools,
             output_model=output_model,

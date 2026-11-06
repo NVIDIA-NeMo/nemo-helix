@@ -15,7 +15,8 @@ Core Operations:
 import logging
 import textwrap
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import DeleteResponse, ErrorResponse, GenericSortField, Page, PaginationData
 from nhx.core.entities.api.dependencies import EntityRepository
 from nhx.core.entities.api.v2.projects.schemas import (
@@ -26,6 +27,7 @@ from nhx.core.entities.api.v2.projects.schemas import (
 from nhx.core.entities.app.repository.exceptions import (
     EntityNotFoundError,
     EntityVersionConflictError,
+    InvalidFilterError,
 )
 from nhx.core.entities.utils.filter import FilterDep
 from sqlalchemy.exc import IntegrityError
@@ -137,29 +139,31 @@ async def list_projects(
     workspace: str,
     repository: EntityRepository,
     filter: FilterDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Project]:
     """List projects in the workspace."""
-    entities, total = await repository.list_entities(
-        workspace=workspace,
-        entity_type=PROJECT_ENTITY_TYPE,
-        page=page,
-        page_size=page_size,
-        sort=sort,
-        filter_op=filter,
-    )
+    try:
+        entities, total = await repository.list_entities(
+            workspace=workspace,
+            entity_type=PROJECT_ENTITY_TYPE,
+            page=page_params.page,
+            page_size=page_params.page_size,
+            sort=sort,
+            filter_op=filter,
+        )
+    except InvalidFilterError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     projects = [_entity_to_project(e) for e in entities]
 
     return Page(
         data=projects,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
             current_page_size=len(projects),
         ),
         sort=sort,

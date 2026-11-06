@@ -335,10 +335,6 @@ def run_config(
             original_max_retries = http_backoff.__kwdefaults__.get("max_retries")
             http_backoff.__kwdefaults__["max_retries"] = 0
 
-        if not enable_synthesis:
-            job_config.config.data.holdout = 0
-            job_config.config.data.max_holdout = 0
-
         if enable_synthesis and is_adapter_reuse_requested(job_config):
             location = adapter_location or job_config.config.training.pretrained_model
             return run_generation_from_prior_adapter(
@@ -350,9 +346,17 @@ def run_config(
 
         nss_config = job_config.config
         if not enable_synthesis:
-            nss_config = nss_config.model_copy(deep=True)
-            if "dataset.size" not in nss_config.preflight.disabled_checks:
-                nss_config.preflight.disabled_checks.append("dataset.size")
+            disabled_checks = list(nss_config.preflight.disabled_checks)
+            if "dataset.size" not in disabled_checks:
+                disabled_checks.append("dataset.size")
+            # Auto-config resolution rebuilds from exclude_unset=True. Patch both
+            # sections explicitly so overrides survive even with a sparse spec.
+            nss_config = nss_config.with_config_patch(
+                {
+                    "data": {"holdout": 0, "max_holdout": 0},
+                    "preflight": {"disabled_checks": disabled_checks},
+                }
+            )
 
         ss: SafeSynthesizer = SafeSynthesizer(config=nss_config, save_path=save_path).with_data_source(data_source)
         if enable_synthesis:

@@ -10,10 +10,10 @@ malformed field away from failing to parse.
 
 from __future__ import annotations
 
-import json
 from base64 import b64encode
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
+from json import JSONDecodeError, loads
 from typing import Any, TypeAlias, cast
 
 from google.protobuf import json_format
@@ -108,14 +108,14 @@ def resource_spans_from_text(raw: str) -> list[dict[str, Any]]:
         return []
     try:
         requests = [_loads(raw)]
-    except json.JSONDecodeError:
+    except JSONDecodeError:
         requests = []
         for line_number, line in enumerate(raw.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 requests.append(_loads(line))
-            except json.JSONDecodeError as exc:
+            except JSONDecodeError as exc:
                 raise ValueError(f"invalid OTLP JSON on line {line_number}") from exc
 
     resource_spans: list[dict[str, Any]] = []
@@ -285,7 +285,7 @@ def _loads(text: str) -> Any:
     escape every caller's guard.
     """
     try:
-        return json.loads(text)
+        return loads(text)
     except RecursionError as error:
         raise ValueError("OTLP JSON is nested too deeply to parse") from error
 

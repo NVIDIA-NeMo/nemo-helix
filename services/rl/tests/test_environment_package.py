@@ -436,7 +436,7 @@ def test_download_hub_wheels_resolves_before_downloading(tmp_path: Path, monkeyp
             (dest / "xxhash-4.0.0-cp313-cp313-manylinux_2_17_x86_64.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     spec = convert_mod.ConvertEnvironmentSpec(
         hub_id="primeintellect/ascii-tree",
@@ -463,7 +463,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
     from nhx.rl.tasks.environment import convert as convert_mod
 
     commands: list[list[str]] = []
-    monkeypatch.setattr(convert_mod.sys, "executable", "/host/python3.12")
+    monkeypatch.setattr(convert_mod, "executable", "/host/python3.12")
 
     def _fake_run(cmd, **kwargs):
         commands.append(cmd)
@@ -482,7 +482,7 @@ def test_download_hub_wheels_builds_sdists_and_requires_complete_closure(tmp_pat
             (dest / "verifiers-0.1.14-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     wheels = convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -537,7 +537,7 @@ def test_install_hub_package_does_not_build_sdist_deps(tmp_path: Path, monkeypat
     def _fake_run(cmd, **kwargs):
         captured.append(cmd)
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     convert_mod._install_hub_package_from_wheels(wheels, "ascii_tree")
     assert captured and "--no-deps" in captured[0]
     assert "--find-links" not in " ".join(captured[0])
@@ -560,7 +560,7 @@ def test_download_hub_wheels_requirements_in_lists_env_and_verifiers(tmp_path: P
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -760,7 +760,7 @@ def test_gym_root_puts_fork_wheel_and_pins_in_the_closure(tmp_path: Path, monkey
             (dest / "nemo_gym-0.5.0rc0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     _write_gym_checkout(tmp_path / "Gym")
 
     convert_mod.download_hub_wheels(
@@ -793,7 +793,7 @@ def test_gym_root_version_mismatch_is_rejected(tmp_path: Path, monkeypatch) -> N
         (out / "nemo_gym-0.4.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
     _write_gym_checkout(tmp_path / "Gym", minor="4", pre="")
 
     with pytest.raises(RuntimeError, match="builds nemo-gym 0.4.0 but the image reports 0.5.0rc0"):
@@ -1049,7 +1049,7 @@ def test_download_hub_wheels_honours_hub_version(
             (dest / "ascii_tree-0.1.5-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(
@@ -1145,7 +1145,7 @@ def test_download_targets_the_training_image_not_the_host(tmp_path: Path, monkey
             (dest / "cffi-2.1.1-cp313-cp313-manylinux_2_17_x86_64.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
@@ -1235,7 +1235,7 @@ def test_compile_ignores_this_repo_dependency_policy(tmp_path: Path, monkeypatch
             (dest / "openai-2.54.0-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(hub_id="primeintellect/ascii-tree", out_dir=tmp_path / "env"),
@@ -1278,7 +1278,7 @@ def test_compile_applies_nemo_rl_dependency_policy(tmp_path: Path, monkeypatch) 
             (dest / "fastapi-0.136.3-py3-none-any.whl").write_bytes(b"PK\x03\x04")
         return None
 
-    monkeypatch.setattr(convert_mod.subprocess, "run", _fake_run)
+    monkeypatch.setattr(convert_mod, "run", _fake_run)
 
     convert_mod.download_hub_wheels(
         convert_mod.ConvertEnvironmentSpec(

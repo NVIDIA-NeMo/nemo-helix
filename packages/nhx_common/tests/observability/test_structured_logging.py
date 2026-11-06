@@ -11,6 +11,7 @@ from io import StringIO
 from unittest.mock import Mock
 
 import pytest
+from nhx.common.observability import structured_logging
 from nhx.common.observability.otel import OTELSettings, settings
 from nhx.common.observability.structured_logging import _sanitize_log_strings, initialize_logging
 from opentelemetry._logs import SeverityNumber
@@ -86,17 +87,13 @@ def test_otlp_logging_exports_trace_context_and_structured_fields(
     provider = LoggerProvider(resource=resource)
     exporter = InMemoryLogRecordExporter()
     tracer_provider = TracerProvider()
-    monkeypatch.setattr("opentelemetry.sdk._logs.LoggerProvider", Mock(return_value=provider))
-    monkeypatch.setattr("opentelemetry._logs.set_logger_provider", Mock())
+    monkeypatch.setattr(structured_logging, "_new_logger_provider", Mock(return_value=provider))
+    monkeypatch.setattr(structured_logging, "_set_logger_provider", Mock())
     exporter_factory = Mock(return_value=exporter)
     other_exporter_factory = Mock()
     other_transport = "http" if transport == "grpc" else "grpc"
-    monkeypatch.setattr(
-        f"opentelemetry.exporter.otlp.proto.{transport}._log_exporter.OTLPLogExporter", exporter_factory
-    )
-    monkeypatch.setattr(
-        f"opentelemetry.exporter.otlp.proto.{other_transport}._log_exporter.OTLPLogExporter", other_exporter_factory
-    )
+    exporter_factories = {transport: exporter_factory, other_transport: other_exporter_factory}
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", exporter_factories.__getitem__)
     monkeypatch.setattr(settings, "otel_sdk_disabled", False)
     monkeypatch.setattr(settings, "otel_logs_exporter", "otlp")
     monkeypatch.setattr(settings, "otel_exporter_otlp_logs_protocol", logs_protocol)
@@ -167,7 +164,7 @@ def test_log_protocol_settings_load_environment_and_default_to_grpc(monkeypatch)
 @pytest.mark.parametrize(("exporter", "sdk_disabled"), [("none", False), ("otlp", True)])
 def test_otlp_logging_respects_disabled_settings(monkeypatch, exporter, sdk_disabled):
     exporter_factory = Mock()
-    monkeypatch.setattr("opentelemetry.exporter.otlp.proto.grpc._log_exporter.OTLPLogExporter", exporter_factory)
+    monkeypatch.setattr(structured_logging, "_otlp_log_exporter_class", lambda transport: exporter_factory)
     monkeypatch.setattr(settings, "otel_logs_exporter", exporter)
     monkeypatch.setattr(settings, "otel_sdk_disabled", sdk_disabled)
     root = logging.getLogger()

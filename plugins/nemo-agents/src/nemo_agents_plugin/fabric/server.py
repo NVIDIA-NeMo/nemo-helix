@@ -11,7 +11,7 @@ import logging
 import sys
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import partial
@@ -50,8 +50,9 @@ from nemo_agents_plugin.fabric.streaming import (
     iter_fabric_chat_completion_sse,
     openai_chat_completion_error_sse,
 )
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_id_to_uuid
 from starlette.types import Receive, Scope, Send
+from uvicorn import run
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +90,17 @@ def _to_fabric_invocation_request(
         else "\n\n".join(f"{message.role}: {message.content}" for message in messages)
     )
     caller_context = {"session_id": session_id} if session_id is not None else {}
+    relay_session_root = None
+    if session_id is not None:
+        try:
+            relay_session_root = session_id_to_uuid(session_id)
+        except ValueError:
+            with suppress(ValueError):
+                relay_session_root = str(uuid.UUID(session_id))
     return FabricInvocationRequest(
         input=input_text,
         caller_context=caller_context,
+        relay_session_root=relay_session_root,
     )
 
 
@@ -513,10 +522,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    import uvicorn
-
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(
+    run(
         create_fabric_serving_app(
             args.agent_config,
             settings=FabricServingSettings(
