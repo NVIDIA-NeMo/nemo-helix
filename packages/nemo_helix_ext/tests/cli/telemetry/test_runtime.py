@@ -45,20 +45,44 @@ def test_command_origin_is_explicit_and_bounded(monkeypatch, value, expected):
         ("guardrail check", "guardrails"),
         ("guardrail configs list", "unknown"),
         ("models list", "unknown"),
-        ("optimize list-strategies", "unknown"),
-        ("optimize run-strategy", "agent-optimization"),
+        ("agents optimize list-strategies", "unknown"),
+        ("agents optimize run-strategy", "agent-optimization"),
+        ("optimize run-strategy", "unknown"),
         ("data-designer create", "data-designer"),
+        ("data-designer retrieval-generate", "data-designer"),
+        ("data-designer retrieval generate", "unknown"),
         ("private-customer run", "unknown"),
     ],
 )
 def test_command_categories_are_exact_operations(command, expected):
     assert command_tool_category(command) == expected
+    runtime.reset()
+    parts = command.split()
+    runtime.state.started = True
+    runtime.state.command_parts = [parts[0]]
+    try:
+        for part in parts[1:]:
+            runtime.note_subcommand(part)
+        with patch.object(emit, "emit_event") as send:
+            runtime.emit_command_invoked(TaskStatusEnum.COMPLETED, 0.1)
+        event = send.call_args.args[0]
+        assert event.command == command
+        assert event.tool_category == expected
+    finally:
+        runtime.reset()
 
 
 @pytest.mark.parametrize(
     "source,plugins,expected",
     [
-        ("evaluation", [], "evaluation"),
+        ("evaluation", [], "evals"),
+        ("evaluator", [], "evals"),
+        ("evals", [], "evals"),
+        ("audit", [], "garak"),
+        ("garak", [], "garak"),
+        ("customization", [], "post-training"),
+        ("post-training", [], "post-training"),
+        ("private-customer", ["evals"], "evals"),
         ("private-customer", [], "unknown"),
         ("private-customer", ["agent-optimization-plugin-run-strategy"], "agent-optimization"),
         ("data-designer", ["data-designer"], "data-designer"),

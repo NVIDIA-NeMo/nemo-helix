@@ -45,12 +45,33 @@ CLI callers may explicitly declare `NEMO_INVOCATION_ORIGIN=agent` or
 `NEMO_INVOCATION_ORIGIN=human`. Missing or unrecognized values are reported as
 `unknown`, not human. Helix does not inspect processes or detect agent harnesses.
 The legacy coding-agent flag is true only for an explicit `agent` declaration;
-false does not establish human use. This declaration never overrides telemetry
-opt-out settings.
+false does not establish human use. Events from before this field was introduced
+also have unknown origin; they must not be backfilled as human. This declaration
+never overrides telemetry opt-out settings.
+
+The common event envelope carries `sessionId`, indexed as `client.sessionId`, for
+commands, onboarding steps, and opted-in jobs submitted with CLI telemetry
+context. Jobs retain the submitting session ID even if they finish after the
+local CLI ID rotates. The local ID is reused across invocations until 30 days
+have elapsed since its creation, then replaced on the next lookup; it is not a
+30-day inactivity timeout or an identity for one terminal session. Clearing local
+state, using another machine, or a state-write failure can also change the ID.
+It identifies neither a person nor a permanent installation. `eventId` and
+`onboardingAttemptId` do not replace it.
+
+Current emitters supply `isCi` as a required boolean. Historical missing/null
+values indicate unknown classification, not false, and are not repaired by new
+emission. To exclude only known CI, retain unknown records separately; a strict
+`isCi=false` filter intentionally excludes unknown records too.
 
 Tool categories use a fixed allowlist of recognized operations. Administrative
 commands and unrecognized or mixed-tool workloads are not attributed to a single
-tool. A successful command submission is not proof that its workload succeeded.
+tool. Categories use current product names such as `garak`, `post-training`, and
+`evals`, even when a job uses an older source label. New plugins can be mapped to
+an existing category without a schema change; until explicitly mapped they remain
+`unknown`, not an arbitrary new category or automatically `other`. Adding a named
+category requires a schema change. A successful command submission is not proof
+that its workload succeeded.
 Job token counts describe the terminal job summary, not complete platform
 inference usage; unavailable measurements remain unknown (`-1`). They must not be
 added to underlying inference counts for the same work.
