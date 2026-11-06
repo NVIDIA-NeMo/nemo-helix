@@ -10,7 +10,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api import response_policy
-from nemo_helix_plugin.client.errors import NotFoundError
+from nemo_helix_plugin.client.errors import BadRequestError, InternalServerError, NotFoundError
 from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
@@ -100,83 +100,129 @@ ENDPOINTS = [
         "GET",
         "providers",
         None,
-        "boom",
+        None,  # the providers list echoes the error text as its 500 detail
         id="list-providers",
     ),
-]
-
-
-# These catches already have 403/unexpected-500 coverage in test_permission_denied.py.
-# Exercise each independently wired missing-workspace path without duplicating that matrix.
-REMAINING_WORKSPACE_ENDPOINTS = [
-    (deployments, get_model_deployment_service, "get_deployment", "GET", "deployments/test", None),
-    (deployments, get_model_deployment_service, "get_deployment", "GET", "deployments/test/models", None),
-    (deployments, get_model_deployment_service, "list_deployment_versions", "GET", "deployments/test/versions", None),
-    (
+    pytest.param(
+        deployments,
+        get_model_deployment_service,
+        "get_deployment",
+        "GET",
+        "deployments/x",
+        None,
+        "Failed to get deployment",
+        id="get-deployment",
+    ),
+    pytest.param(
+        deployments,
+        get_model_deployment_service,
+        "get_deployment",
+        "GET",
+        "deployments/x/models",
+        None,
+        "Failed to get deployment models",
+        id="get-deployment-models",
+    ),
+    pytest.param(
+        deployments,
+        get_model_deployment_service,
+        "list_deployment_versions",
+        "GET",
+        "deployments/x/versions",
+        None,
+        "Failed to list deployment versions",
+        id="list-deployment-versions",
+    ),
+    pytest.param(
         deployments,
         get_model_deployment_service,
         "create_deployment",
         "POST",
         "deployments",
         {"name": "test", "config": "cfg"},
+        "Failed to create deployment",
+        id="create-deployment",
     ),
-    (
+    pytest.param(
         deployments,
         get_model_deployment_service,
         "update_deployment_status",
         "POST",
-        "deployments/test/status",
+        "deployments/x/status",
         {"status": "READY"},
+        "Failed to update deployment status",
+        id="update-deployment-status",
     ),
-    (deployments, get_model_deployment_service, "delete_deployment", "DELETE", "deployments/test", None),
-    (
+    pytest.param(
+        deployments,
+        get_model_deployment_service,
+        "delete_deployment",
+        "DELETE",
+        "deployments/x",
+        None,
+        "Failed to delete deployment",
+        id="delete-deployment",
+    ),
+    pytest.param(
         deployment_configs,
         get_model_deployment_config_service,
         "list_deployment_config_versions",
         "GET",
-        "deployment-configs/test/versions",
+        "deployment-configs/x/versions",
         None,
+        "Failed to list deployment config versions",
+        id="list-deployment-config-versions",
     ),
-    (
+    pytest.param(
         deployment_configs,
         get_model_deployment_config_service,
         "delete_deployment_config",
         "DELETE",
-        "deployment-configs/test",
+        "deployment-configs/x",
         None,
+        "Failed to delete deployment config",
+        id="delete-deployment-config",
     ),
-    (
+    pytest.param(
         deployment_configs,
         get_model_deployment_config_service,
         "delete_deployment_config",
         "DELETE",
-        "deployment-configs/test/versions/0",
+        "deployment-configs/x/versions/1",
         None,
+        "Failed to delete deployment config version",
+        id="delete-deployment-config-version",
     ),
 ]
 
 
-@pytest.mark.parametrize("module,dependency,method,verb,path,payload", REMAINING_WORKSPACE_ENDPOINTS)
-def test_remaining_workspace_error_response(module, dependency, method, verb, path, payload, monkeypatch):
-    _assert_workspace_error(module, dependency, method, verb, path, payload, None, "sdk-not-found", monkeypatch)
+def _upstream(error_type, status: int, detail: str):
+    request = httpx.Request("GET", f"http://entities/apis/entities/v2/workspaces/{WS}/entities")
+    return error_type(httpx.Response(status, json={"detail": detail}, request=request))
+
+
+# error kind -> (raised error, expected status, expected detail or None for the route's generic 500 detail)
+ERROR_KINDS = {
+    "sdk-not-found": (lambda: _upstream(NotFoundError, 404, DETAIL), 404, DETAIL),
+    "entity-not-found": (lambda: EntityNotFoundError(DETAIL), 404, DETAIL),
+    "sdk-bad-request": (
+        lambda: _upstream(BadRequestError, 400, "Invalid sort field -name"),
+        400,
+        "Invalid sort field -name",
+    ),
+    "sdk-server-error": (lambda: _upstream(InternalServerError, 500, "database down"), 500, None),
+    "unexpected": (lambda: RuntimeError("boom"), 500, None),
+}
 
 
 @pytest.mark.parametrize("module,dependency,method,verb,path,payload,generic_detail", ENDPOINTS)
-@pytest.mark.parametrize("error_kind", ["sdk-not-found", "entity-not-found", "unexpected"])
+@pytest.mark.parametrize("error_kind", list(ERROR_KINDS))
 def test_workspace_error_response(
     module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch
 ):
-    _assert_workspace_error(module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch)
-
-
-def _assert_workspace_error(module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch):
-    if error_kind == "sdk-not-found":
-        request = httpx.Request("GET", f"http://entities/apis/entities/v2/workspaces/{WS}/entities")
-        error = NotFoundError(httpx.Response(404, json={"detail": DETAIL}, request=request))
-    elif error_kind == "entity-not-found":
-        error = EntityNotFoundError(DETAIL)
-    else:
-        error = RuntimeError("boom")
+    """Upstream client errors keep their status; server failures keep the route's generic 500."""
+    make_error, expected_status, expected_detail = ERROR_KINDS[error_kind]
+    error = make_error()
 
     service = Mock(spec=[method])
     service_method = AsyncMock(side_effect=error)
@@ -205,7 +251,5 @@ def _assert_workspace_error(module, dependency, method, verb, path, payload, gen
     assert service_method.await_args is not None
     args, kwargs = service_method.await_args
     assert WS in args or kwargs.get("workspace") == WS
-    expected_status = 500 if error_kind == "unexpected" else 404
-    expected_detail = generic_detail if error_kind == "unexpected" else DETAIL
     assert response.status_code == expected_status, response.text
-    assert response.json() == {"detail": expected_detail}
+    assert response.json() == {"detail": expected_detail or generic_detail or str(error)}
