@@ -54,7 +54,7 @@ export const AssistantMessage = ({
     <MessagePrimitive.Root
       data-testid="assistant-chat-message"
       data-testspeaker="assistant"
-      className="group/message flex w-full flex-col items-start gap-4 whitespace-normal"
+      className="group/message flex w-full flex-col items-start gap-density-xl whitespace-normal"
     >
       {hasRenderableContent && animateCompletion ? (
         <AssistantMessageContentTransition completed={completed} enabled={animateCompletion}>
@@ -76,7 +76,7 @@ export const AssistantMessage = ({
         </MessagePrimitive.If>
       ) : null}
       {!hideAssistantMessageActions ? (
-        <div className="flex h-5 items-center" data-testid="assistant-chat-message-actions">
+        <div className="flex items-center" data-testid="assistant-chat-message-actions">
           <ActionBarPrimitive.Root hideWhenRunning className={MESSAGE_ACTIONS_CLASS}>
             <CopyAction />
             <Tooltip slotContent="Regenerate response">

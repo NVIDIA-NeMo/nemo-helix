@@ -59,11 +59,10 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 Streamed reasoning (`reasoning_content` or `reasoning`) and `tool_calls` become reasoning and tool-call parts on the reply. Each run of adjacent reasoning and tool-call parts renders as one collapsed work group (`work/`), built on `MessagePrimitive.GroupedParts`:
 
-- the group label reads "Thinking…" while the run is still streaming, then the tool-call count and how long the run took, for example "Ran 3 tool calls · 12s" or "Thought · 4s";
-- expanding it shows one row per step: a **Thought** with the reasoning text, or a tool call with the arguments and result (or error). The row's icon and message come from the same `toolCall/` helpers the NeMo Assistant's tool rows used, such as **Ran `pnpm test`**, **Read `README.md`**, or **Used get_weather**, with the call's detail styled apart from the action. `Write`, `Edit`, and `MultiEdit` show as a file change with its line counts (**Wrote `MEMORY.md` +12 −0**) and the written content or the edit's arguments;
-- the runtime times each run from its first reasoning or tool delta until answer text arrives and stores the durations in `message.metadata.custom.workDurationsMs`. Seeded messages without durations show the count only.
+- the group label reads "Thinking…" while the run is still streaming, then the tool-call count, for example "Ran 3 tool calls" or "Thought";
+- expanding it shows one row per step: a **Thought** with the reasoning text, or a tool call with the arguments and result (or error). The row's icon and message come from the `toolCall/` helpers, such as **Ran `pnpm test`**, **Read `README.md`**, or **Used get_weather**, with the call's detail styled apart from the action. `Write`, `Edit`, and `MultiEdit` show as a file change with its line counts (**Wrote `MEMORY.md` +12 −0**) and the written content or the edit's arguments.
 
-Pass `toolCallPartComponent` to render tool calls your own way inside the group; the NeMo Assistant does this to unpack its synthetic thinking and grouped-tool parts. Job progress tool calls stay outside the group so their progress card remains visible. See the [Thinking and tools story](./AssistantChatThinkingAndTools.stories.tsx) for every state.
+Pass `toolCallPartComponent` to render tool calls your own way inside the group; the NeMo Assistant does this to unpack its synthetic thinking and grouped-tool parts. Job progress tool calls stay outside the group so their progress card remains visible.
 
 ### Failed replies
 

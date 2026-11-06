@@ -25,14 +25,11 @@ import {
 } from '@nemo/common/src/components/AssistantChat/work/workParts';
 import { WORK_ICON_SIZE, WorkStep } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { DocumentNew, Pencil } from '@nemo/icons/icons';
-import { Stack } from '@nvidia/foundations-react-core';
-import cn from 'classnames';
+import { Stack, Text } from '@nvidia/foundations-react-core';
 
-// The detail sits one step dimmer than the action and brightens with it on hover and when the
-// step is open. `leading-none` keeps the code font from growing the row past the title's height.
+// The detail sits one step dimmer than the action and brightens with the row on hover and open.
 const DETAIL_CLASS =
-  'leading-none text-subtle [summary:hover_&]:text-secondary [details[open]>summary_&]:text-secondary';
-const CODE_DETAIL_CLASS = 'font-mono text-[13px]';
+  'text-subtle group-hover/step:text-secondary group-data-[state=open]/step:text-secondary';
 
 // Tools whose detail is a command, path, pattern, or URL rather than prose.
 const CODE_DETAIL_TOOLS = new Set([
@@ -58,34 +55,7 @@ export interface ToolCallStepProps {
   readonly toolName: string;
 }
 
-const PayloadSection = ({
-  label,
-  tone,
-  value,
-}: {
-  readonly label: string;
-  readonly tone?: 'default' | 'danger';
-  readonly value: unknown;
-}) => {
-  const { language, text } = formatToolPayload(value);
-  return <WorkCodeSnippet label={label} language={language} tone={tone} value={text} />;
-};
-
-/** Lines added and removed by a file change, "+12 −3". */
-const FileChangeStats = ({
-  additions,
-  deletions,
-}: Pick<FileChangeSummary, 'additions' | 'deletions'>) => (
-  <span className="ml-1 text-[13px] tabular-nums" data-testid="assistant-work-edit-stats">
-    <span className="text-feedback-success">+{additions}</span>{' '}
-    <span className="text-feedback-danger">−{deletions}</span>
-  </span>
-);
-
-/**
- * Splits a tool message such as "Read README.md" into its action and the call's detail, using
- * the same helpers the NeMo Assistant's tool rows used, so the detail can be styled on its own.
- */
+/** Splits a tool message such as "Read README.md" into its action and the call's detail. */
 const getTitleParts = (
   toolName: string,
   args: AssistantToolArgs,
@@ -112,10 +82,10 @@ const getTitleParts = (
 };
 
 /**
- * A tool call: the message the NeMo Assistant's tool rows used ("Ran pwd", "Read README.md",
- * "Used get_weather") with the per-tool icon, then the arguments and result (or error) when
- * expanded. A successful `Write`/`Edit`/`MultiEdit` shows as a file change with its line counts
- * and the written content (or the edit's arguments); a failed one keeps the arguments and error.
+ * A tool call: its message ("Ran pwd", "Read README.md", "Used get_weather") with the per-tool
+ * icon, then the arguments and result (or error) when expanded. A successful
+ * `Write`/`Edit`/`MultiEdit` shows as a file change with its line counts and the written content
+ * (or the edit's arguments); a failed one keeps the arguments and error.
  */
 export const ToolCallStep = ({
   args,
@@ -137,6 +107,8 @@ export const ToolCallStep = ({
   const hasArgs = Object.keys(toolArgs).length > 0;
   const command =
     toolName === 'Bash' && hasArgs ? getToolInvocation(toolName, toolArgs) : undefined;
+  const payload = formatToolPayload(hasArgs ? toolArgs : argsText || '{}');
+  const resultPayload = result === undefined ? undefined : formatToolPayload(result);
 
   return (
     <WorkStep
@@ -149,15 +121,20 @@ export const ToolCallStep = ({
           {detail ? (
             <>
               {' '}
-              <span
-                className={cn(DETAIL_CLASS, CODE_DETAIL_TOOLS.has(toolName) && CODE_DETAIL_CLASS)}
-              >
-                {detail}
-              </span>
+              {CODE_DETAIL_TOOLS.has(toolName) ? (
+                <Text asChild kind="mono/sm" className={DETAIL_CLASS}>
+                  <span>{detail}</span>
+                </Text>
+              ) : (
+                <span className={DETAIL_CLASS}>{detail}</span>
+              )}
             </>
           ) : null}
           {fileChange ? (
-            <FileChangeStats additions={fileChange.additions} deletions={fileChange.deletions} />
+            <span className="ml-density-xs tabular-nums" data-testid="assistant-work-edit-stats">
+              <span className="text-feedback-success">+{fileChange.additions}</span>{' '}
+              <span className="text-feedback-danger">−{fileChange.deletions}</span>
+            </span>
           ) : null}
         </>
       }
@@ -173,13 +150,14 @@ export const ToolCallStep = ({
           {command ? (
             <WorkCodeSnippet label="Command" language="bash" value={command} />
           ) : (
-            <PayloadSection label="Arguments" value={hasArgs ? toolArgs : argsText || '{}'} />
+            <WorkCodeSnippet label="Arguments" language={payload.language} value={payload.text} />
           )}
-          {result !== undefined ? (
-            <PayloadSection
+          {resultPayload ? (
+            <WorkCodeSnippet
               label={isError ? 'Error' : 'Result'}
-              tone={isError ? 'danger' : 'default'}
-              value={result}
+              labelClassName={isError ? 'text-feedback-danger' : undefined}
+              language={resultPayload.language}
+              value={resultPayload.text}
             />
           ) : null}
         </Stack>

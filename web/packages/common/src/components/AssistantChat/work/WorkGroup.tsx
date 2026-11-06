@@ -4,33 +4,22 @@
 import { useAuiState } from '@assistant-ui/react';
 import {
   countToolCalls,
-  getWorkDurations,
   getWorkGroupLabel,
-  getWorkGroupOrdinal,
 } from '@nemo/common/src/components/AssistantChat/work/workParts';
-import {
-  WORK_ICON_SIZE,
-  WorkAccordion,
-} from '@nemo/common/src/components/AssistantChat/work/WorkStep';
+import { WORK_ICON_SIZE, WorkStep } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { Lightbulb, WindowCode } from '@nemo/icons/icons';
 import { Stack } from '@nvidia/foundations-react-core';
 import { type ReactNode, useRef, useState } from 'react';
 
 interface WorkGroupViewProps {
   readonly children: ReactNode;
-  readonly defaultOpen?: boolean;
   readonly hasToolCalls: boolean;
   readonly label: string;
 }
 
-/** The collapsed "Ran 3 tool calls · 12s" group that holds a reply's thinking and tool calls. */
-export const WorkGroupView = ({
-  children,
-  defaultOpen = false,
-  hasToolCalls,
-  label,
-}: WorkGroupViewProps) => {
-  const [open, setOpen] = useState(defaultOpen);
+/** The collapsed "Ran 3 tool calls" group that holds a reply's thinking and tool calls. */
+export const WorkGroupView = ({ children, hasToolCalls, label }: WorkGroupViewProps) => {
+  const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLElement>(null);
   const collapse = () => {
     setOpen(false);
@@ -39,8 +28,8 @@ export const WorkGroupView = ({
   };
 
   return (
-    <WorkAccordion
-      contentClassName="p-0"
+    <WorkStep
+      contentClassName="pb-0"
       data-testid="assistant-work-group"
       icon={
         hasToolCalls ? <WindowCode size={WORK_ICON_SIZE} /> : <Lightbulb size={WORK_ICON_SIZE} />
@@ -51,12 +40,15 @@ export const WorkGroupView = ({
       titleTestId="assistant-work-group-label"
       triggerRef={triggerRef}
     >
-      <Stack className="relative ml-1.5 pl-3" data-testid="assistant-work-group-steps">
-        {/* The 1px guide line doubles as a collapse control, with a 12px-wide hit area. */}
+      <Stack
+        className="relative ml-density-sm pl-density-md"
+        data-testid="assistant-work-group-steps"
+      >
+        {/* The 1px guide line doubles as a collapse control, with a wider hit area. */}
         <button
           type="button"
           aria-label={`Collapse ${label}`}
-          className="group/line absolute inset-y-0 -left-1.5 flex w-3 cursor-pointer justify-center rounded-sm bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--border-color-interaction-strong)]"
+          className="group/line absolute inset-y-0 -left-density-sm flex w-density-lg cursor-pointer justify-center rounded-sm bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--border-color-interaction-strong)]"
           data-testid="assistant-work-group-collapse"
           onClick={collapse}
           title="Collapse"
@@ -65,7 +57,7 @@ export const WorkGroupView = ({
         </button>
         {children}
       </Stack>
-    </WorkAccordion>
+    </WorkStep>
   );
 };
 
@@ -75,20 +67,16 @@ interface WorkGroupProps {
   readonly indices: readonly number[];
 }
 
-/** A `WorkGroupView` labelled from the current message: live while running, then count + time. */
+/** A `WorkGroupView` labelled from the current message: live while running, then the count. */
 export const WorkGroup = ({ children, indices }: WorkGroupProps) => {
-  const startIndex = indices[0] ?? 0;
-  const lastIndex = indices.at(-1) ?? startIndex;
+  const lastIndex = indices.at(-1) ?? 0;
   const label = useAuiState(({ message }) => {
     const running = message.status?.type === 'running' && lastIndex === message.parts.length - 1;
-    const durationMs = getWorkDurations(message.metadata.custom)[
-      getWorkGroupOrdinal(message.parts, startIndex)
-    ];
     const toolCallCount = indices.reduce(
       (total, index) => total + (message.parts[index] ? countToolCalls(message.parts[index]) : 0),
       0
     );
-    return getWorkGroupLabel({ durationMs, running, toolCallCount });
+    return getWorkGroupLabel({ running, toolCallCount });
   });
   const hasToolCalls = useAuiState(({ message }) =>
     indices.some((index) => (message.parts[index] ? countToolCalls(message.parts[index]) : 0) > 0)

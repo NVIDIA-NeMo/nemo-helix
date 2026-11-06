@@ -17,16 +17,16 @@ export const UserMessage = ({ messageContentProps, toolCallPartComponent }: Mess
   <MessagePrimitive.Root
     data-testid="assistant-chat-message"
     data-testspeaker="user"
-    className="group/message flex w-full flex-col items-end gap-2 whitespace-normal pl-20"
+    className="group/message flex w-full flex-col items-end gap-density-md whitespace-normal pl-density-5xl"
   >
-    {/* Prompts read at 16px where replies use MessageContent's 14px (KUI reserves `text-base`). */}
-    <div className="min-w-0 max-w-full rounded-xl rounded-br-none bg-surface-sunken px-4 py-3 dark:bg-surface-raised [&_[data-testid=chat-message-content-text]]:text-16 [&_li]:text-16 [&_p]:text-16">
+    {/* Prompts read at body/lg where replies use MessageContent's body/md. */}
+    <div className="min-w-0 max-w-full rounded-xl rounded-br-none bg-surface-raised px-density-xl py-density-lg [&_li]:text-body-regular-lg [&_p]:text-body-regular-lg">
       <AssistantChatMessageContent
         messageContentProps={messageContentProps}
         toolCallPartComponent={toolCallPartComponent}
       />
     </div>
-    <div className="flex h-5 shrink-0 items-center">
+    <div className="flex shrink-0 items-center">
       <ActionBarPrimitive.Root hideWhenRunning className={MESSAGE_ACTIONS_CLASS}>
         <Tooltip slotContent="Edit message">
           <ActionBarPrimitive.Edit asChild>

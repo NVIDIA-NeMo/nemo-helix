@@ -10,10 +10,8 @@ import {
 import {
   countToolCalls,
   formatToolPayload,
-  formatWorkDuration,
   getFileLanguage,
   getWorkGroupLabel,
-  getWorkGroupOrdinal,
   groupWorkParts,
 } from '@nemo/common/src/components/AssistantChat/work/workParts';
 
@@ -60,39 +58,12 @@ describe('countToolCalls', () => {
   });
 });
 
-describe('getWorkGroupOrdinal', () => {
-  it('numbers each run of work parts in order', () => {
-    const parts = [
-      { type: 'reasoning' },
-      { type: 'tool-call', toolName: 'a' },
-      { type: 'text' },
-      { type: 'tool-call', toolName: 'b' },
-    ];
-    expect(getWorkGroupOrdinal(parts, 0)).toBe(0);
-    expect(getWorkGroupOrdinal(parts, 3)).toBe(1);
-  });
-});
-
 describe('getWorkGroupLabel', () => {
-  it('reads Thinking while running, then the count and duration', () => {
-    expect(getWorkGroupLabel({ running: true, toolCallCount: 2, durationMs: 4000 })).toBe(
-      'Thinking…'
-    );
-    expect(getWorkGroupLabel({ running: false, toolCallCount: 3, durationMs: 12_400 })).toBe(
-      'Ran 3 tool calls · 12s'
-    );
+  it('reads Thinking while running, then the count', () => {
+    expect(getWorkGroupLabel({ running: true, toolCallCount: 2 })).toBe('Thinking…');
+    expect(getWorkGroupLabel({ running: false, toolCallCount: 3 })).toBe('Ran 3 tool calls');
     expect(getWorkGroupLabel({ running: false, toolCallCount: 1 })).toBe('Ran 1 tool call');
-    expect(getWorkGroupLabel({ running: false, toolCallCount: 0, durationMs: 300 })).toBe(
-      'Thought · <1s'
-    );
-  });
-});
-
-describe('formatWorkDuration', () => {
-  it('formats seconds and minutes', () => {
-    expect(formatWorkDuration(59_000)).toBe('59s');
-    expect(formatWorkDuration(60_000)).toBe('1m');
-    expect(formatWorkDuration(72_000)).toBe('1m 12s');
+    expect(getWorkGroupLabel({ running: false, toolCallCount: 0 })).toBe('Thought');
   });
 });
 

@@ -5,7 +5,7 @@ import { useAuiState } from '@assistant-ui/react';
 import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
 import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/work/WorkCodeSnippet';
-import { WorkAccordion } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
+import { WorkStep } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { Banner, Stack } from '@nvidia/foundations-react-core';
 
 // A failed reply's text parts hold the human-readable explanation (see `getFailedReply`), so they
@@ -30,11 +30,15 @@ export const ChatErrorBanner = () => {
       >
         <span className="whitespace-pre-wrap break-words">{explanation || GENERIC_CHAT_ERROR}</span>
       </Banner>
-      {/* Its own row under the banner, styled like the work steps above an answer. */}
       {error ? (
-        <WorkAccordion data-testid="assistant-chat-error-details" title="Show details">
-          <WorkCodeSnippet label="Raw error" language="text" value={error} wrap />
-        </WorkAccordion>
+        <WorkStep data-testid="assistant-chat-error-details" title="Show details">
+          <WorkCodeSnippet
+            className="[&_pre]:whitespace-pre-wrap [&_pre]:break-all"
+            label="Raw error"
+            language="text"
+            value={error}
+          />
+        </WorkStep>
       ) : null}
     </Stack>
   );

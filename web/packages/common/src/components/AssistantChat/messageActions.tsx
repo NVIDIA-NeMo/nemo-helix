@@ -9,7 +9,7 @@ import type { ComponentProps } from 'react';
 export const MESSAGE_ACTION_ICON_SIZE = '12';
 
 export const MESSAGE_ACTIONS_CLASS =
-  'flex gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100';
+  'flex gap-density-xxs opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100';
 
 /** The tiny tertiary icon button used in a message's hover action row. */
 export const MessageActionButton = (props: ComponentProps<typeof Button>) => (

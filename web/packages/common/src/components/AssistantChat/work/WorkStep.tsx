@@ -2,29 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  AccordionContent,
-  AccordionItem,
-  AccordionRoot,
-  AccordionTrigger,
-  Flex,
+  CollapsibleContent,
+  CollapsibleRoot,
+  CollapsibleTrigger,
+  Text,
 } from '@nvidia/foundations-react-core';
+import cn from 'classnames';
 import type { ReactNode, Ref } from 'react';
 
 export const WORK_ICON_SIZE = '12';
 
-// The work group reads as quiet rows on the canvas rather than KUI's default panel: no fill,
-// hover background, or dividers, regular-weight labels that brighten when open, and no horizontal
-// padding so rows line up with the edges of the reply. KUI shrinks nested accordion labels to
-// 12px; the design keeps every row at 14px. Titles have a fixed 16px line height so rows stay the
-// same height whatever fonts the title mixes.
-export const WORK_ACCORDION_CLASS = {
-  root: 'w-full min-w-0 bg-transparent [--nv-accordion-label-font-size:var(--text-14)] [--nv-accordion-trigger-bg-hover:transparent] [--nv-accordion-trigger-padding:calc(var(--spacing)*3)_0]',
-  item: 'border-b-0',
-  trigger: 'font-normal text-secondary hover:text-primary [[open]>&]:text-primary',
-  content: 'px-0 pb-2 pt-0',
-} as const;
-
-interface WorkAccordionProps {
+interface WorkStepProps {
   readonly children: ReactNode;
   readonly contentClassName?: string;
   readonly 'data-testid'?: string;
@@ -38,10 +26,14 @@ interface WorkAccordionProps {
   readonly triggerRef?: Ref<HTMLElement>;
 }
 
-/** A single collapsible row with a leading chevron, an icon, and a title. */
-export const WorkAccordion = ({
+/**
+ * One collapsible row in a reply's work group (the group header, a Thought, a tool call) with a
+ * leading chevron, an icon, and a title. Children of the title can use `group-hover/step` and
+ * `group-data-[state=open]/step` to follow the row's hover and open states.
+ */
+export const WorkStep = ({
   children,
-  contentClassName = WORK_ACCORDION_CLASS.content,
+  contentClassName,
   'data-testid': testId,
   defaultOpen = false,
   icon,
@@ -50,31 +42,26 @@ export const WorkAccordion = ({
   title,
   titleTestId,
   triggerRef,
-}: WorkAccordionProps) => (
-  <AccordionRoot
-    className={WORK_ACCORDION_CLASS.root}
+}: WorkStepProps) => (
+  <CollapsibleRoot
+    className="w-full min-w-0"
     data-testid={testId}
-    {...(open === undefined
-      ? { defaultValue: defaultOpen ? 'open' : undefined }
-      : { value: open ? 'open' : '', onValueChange: (value) => onOpenChange?.(value === 'open') })}
+    defaultOpen={defaultOpen}
+    open={open}
+    onOpenChange={onOpenChange}
   >
-    <AccordionItem value="open" className={WORK_ACCORDION_CLASS.item}>
-      <AccordionTrigger
-        ref={triggerRef}
-        chevronPosition="start"
-        className={WORK_ACCORDION_CLASS.trigger}
-      >
-        <Flex align="center" gap="inherit" className="min-w-0">
-          {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
-          <span className="h-4 min-w-0 truncate leading-4" data-testid={titleTestId}>
-            {title}
-          </span>
-        </Flex>
-      </AccordionTrigger>
-      <AccordionContent className={contentClassName}>{children}</AccordionContent>
-    </AccordionItem>
-  </AccordionRoot>
+    <CollapsibleTrigger
+      ref={triggerRef}
+      showChevron
+      className="group/step flex w-full cursor-pointer items-center gap-density-sm py-density-sm text-secondary hover:text-primary data-[state=open]:text-primary"
+    >
+      {icon ? <span className="flex shrink-0 items-center">{icon}</span> : null}
+      <Text asChild kind="body/regular/md" className="min-w-0 truncate">
+        <span data-testid={titleTestId}>{title}</span>
+      </Text>
+    </CollapsibleTrigger>
+    <CollapsibleContent className={cn('pb-density-sm', contentClassName)}>
+      {children}
+    </CollapsibleContent>
+  </CollapsibleRoot>
 );
-
-/** One step in a reply's work group: a Thought, a tool call, or a file edit. */
-export const WorkStep = WorkAccordion;

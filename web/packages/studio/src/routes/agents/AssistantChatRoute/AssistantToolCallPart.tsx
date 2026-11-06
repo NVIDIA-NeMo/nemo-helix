@@ -128,7 +128,6 @@ const AssistantToolCallPartContent = ({
   }
 
   if (toolName === ASSISTANT_SUBTLE_TOOL_GROUP_NAME) {
-    // The folded titles ("Read 3 files") come from the same helpers the old subtle rows used.
     const foldedTitles = new Map(
       summarizeRepeatedSubtleToolActions(getSubtleToolGroupActions(args))
         .filter((action) => action.details?.length)

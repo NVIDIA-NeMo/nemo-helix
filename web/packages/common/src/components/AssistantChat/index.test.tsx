@@ -346,7 +346,7 @@ describe('AssistantChat', () => {
     expect(within(group).getByTestId('tool-part')).toHaveTextContent('search:call_a');
     expect(within(group).getByTestId('assistant-work-thought')).toHaveTextContent('Plan.');
     expect(within(group).getByTestId('assistant-work-group-label')).toHaveTextContent(
-      /^Ran 1 tool call · /
+      'Ran 1 tool call'
     );
   });
 

@@ -35,7 +35,6 @@ import {
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
-import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/work/workParts';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -103,28 +102,12 @@ export const useAssistantChatRuntime = ({
       assistantMessageId: string,
       parts: readonly ThreadAssistantMessagePart[],
       images: readonly ImagePart[],
-      status: MessageStatus,
-      workDurationsMs?: readonly number[]
+      status: MessageStatus
     ) => {
       setThreadMessages(
         messagesRef.current.map((message) =>
           message.id === assistantMessageId
-            ? {
-                ...message,
-                content: getMessageContent(parts, images),
-                status,
-                ...(workDurationsMs?.length
-                  ? {
-                      metadata: {
-                        ...message.metadata,
-                        custom: {
-                          ...message.metadata?.custom,
-                          [WORK_DURATIONS_METADATA_KEY]: [...workDurationsMs],
-                        },
-                      },
-                    }
-                  : {}),
-              }
+            ? { ...message, content: getMessageContent(parts, images), status }
             : message
         )
       );
@@ -159,8 +142,6 @@ export const useAssistantChatRuntime = ({
       let generatedChunkCount = 0;
       let reasoningChars = 0;
       let usageTokens: number | undefined;
-      const workDurationsMs: number[] = [];
-      let workStartedMs: number | undefined;
 
       try {
         const result = await createChatCompletion({
@@ -203,16 +184,6 @@ export const useAssistantChatRuntime = ({
             if (!reasoningDelta && !delta && !toolCalls.length && !images.length) continue;
 
             if (firstTokenMs === 0) firstTokenMs = Math.round(performance.now() - startMs);
-            // Time each run of reasoning and tool calls (one work group in the UI): it starts at
-            // the first such delta and ends when answer text arrives.
-            const nowMs = performance.now();
-            if ((reasoningDelta || toolCalls.length) && workStartedMs === undefined) {
-              workStartedMs = nowMs;
-            }
-            if (delta && workStartedMs !== undefined) {
-              workDurationsMs.push(Math.round(nowMs - workStartedMs));
-              workStartedMs = undefined;
-            }
             generatedChunkCount += 1;
             reasoningChars += reasoningDelta.length;
             if (delta || images.length > 0) {
@@ -230,19 +201,14 @@ export const useAssistantChatRuntime = ({
               assistantMessage.id!,
               responseParts,
               responseImages,
-              RUNNING_STATUS,
-              workDurationsMs
+              RUNNING_STATUS
             );
-          }
-          if (workStartedMs !== undefined) {
-            workDurationsMs.push(Math.round(performance.now() - workStartedMs));
           }
           updateAssistantMessage(
             assistantMessage.id!,
             responseParts,
             responseImages,
-            runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS,
-            workDurationsMs
+            runController.signal.aborted ? CANCELLED_STATUS : COMPLETE_STATUS
           );
           if (!runController.signal.aborted && onMessageComplete) {
             const totalMs = Math.round(performance.now() - startMs);

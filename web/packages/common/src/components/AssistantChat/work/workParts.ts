@@ -13,9 +13,6 @@ import type { CodeSnippetLanguage } from '@nvidia/foundations-react-core';
 /** Group key for a run of adjacent reasoning and tool-call parts. */
 export const WORK_GROUP_KEY = 'group-work';
 
-/** `message.metadata.custom` key holding how long each work group in the reply took, in order. */
-export const WORK_DURATIONS_METADATA_KEY = 'workDurationsMs';
-
 interface WorkPartLike {
   readonly type: string;
   readonly toolName?: string;
@@ -65,50 +62,17 @@ export const countToolCalls = (part: WorkPartLike): number => {
   }
 };
 
-export const getWorkDurations = (custom: Record<string, unknown> | undefined): number[] => {
-  const durations = custom?.[WORK_DURATIONS_METADATA_KEY];
-  return Array.isArray(durations)
-    ? durations.map((duration) => (typeof duration === 'number' ? duration : Number.NaN))
-    : [];
-};
-
-/** The position of the work group starting at `startIndex` among the reply's work groups. */
-export const getWorkGroupOrdinal = (parts: readonly WorkPartLike[], startIndex: number): number => {
-  let ordinal = -1;
-  for (let index = 0; index <= startIndex && index < parts.length; index += 1) {
-    const startsGroup =
-      isWorkPart(parts[index]!) && (index === 0 || !isWorkPart(parts[index - 1]!));
-    if (startsGroup) ordinal += 1;
-  }
-  return Math.max(ordinal, 0);
-};
-
-export const formatWorkDuration = (durationMs: number): string => {
-  const seconds = Math.round(durationMs / 1000);
-  if (seconds < 1) return '<1s';
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
-};
-
 export const getWorkGroupLabel = ({
-  durationMs,
   running,
   toolCallCount,
 }: {
-  readonly durationMs?: number;
   readonly running: boolean;
   readonly toolCallCount: number;
 }): string => {
   if (running) return 'Thinking…';
-  const summary =
-    toolCallCount > 0
-      ? `Ran ${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}`
-      : 'Thought';
-  return durationMs !== undefined && Number.isFinite(durationMs)
-    ? `${summary} · ${formatWorkDuration(durationMs)}`
-    : summary;
+  return toolCallCount > 0
+    ? `Ran ${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}`
+    : 'Thought';
 };
 
 export const getFileName = (path: string): string => path.split(/[\\/]/).at(-1) || path;
