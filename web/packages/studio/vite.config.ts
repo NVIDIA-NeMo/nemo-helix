@@ -34,8 +34,9 @@ interface LicenseReportDependency {
   readonly licenseText: string | null;
 }
 
-// Shared deps externalized from Studio's and plugins' production builds: the
-// contract's singleton specifiers. At runtime, bare imports of these names
+// Shared deps externalized from Studio's own production builds: the contract's
+// singleton specifiers. (Plugin builds get their externals from `studioPlugin()`,
+// which also externalizes `@nemo/common`.) At runtime, bare imports of these names
 // resolve via an import map in index.html to bundles in public/vendor/, so
 // Studio and every loaded plugin use one shared React/react-dom/router instance.
 const VENDOR_EXTERNALS: readonly string[] = PLUGIN_CONTRACT.entries
