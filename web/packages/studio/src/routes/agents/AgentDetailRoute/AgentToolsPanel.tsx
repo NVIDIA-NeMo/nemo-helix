@@ -2,8 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
+import type { AgentConfig } from '@nemo/common/src/utils/agents';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
-import { Badge, Banner, Flex, Skeleton, Stack, Text } from '@nvidia/foundations-react-core';
+import {
+  Badge,
+  Banner,
+  CodeSnippet,
+  Flex,
+  Skeleton,
+  Stack,
+  Text,
+} from '@nvidia/foundations-react-core';
 import type {
   DeclaredMcpServer,
   KnownMcpServerState,
@@ -11,7 +20,6 @@ import type {
   McpServerStatus,
 } from '@studio/api/agents/types';
 import { getDeclaredMcpServers, useMcpStatus } from '@studio/api/agents/useMcpStatus';
-import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { ChatInfoSection } from '@studio/routes/agents/AgentDetailRoute/ChatInfoSection';
 import { McpToolRow } from '@studio/routes/agents/AgentDetailRoute/McpToolRow';
 import { AxiosError } from 'axios';
@@ -69,7 +77,7 @@ const ServerGroup: FC<ServerGroupProps> = ({ server, state, toolCount, children 
             {badge.label}
           </Badge>
         </Flex>
-        <Text kind="body/regular/xs" className="text-secondary">
+        <Text kind="body/regular/sm" className="text-secondary">
           {[server.transport, toolCount === undefined ? undefined : pluralize(toolCount, 'tool')]
             .filter(Boolean)
             .join(' · ')}
@@ -77,7 +85,7 @@ const ServerGroup: FC<ServerGroupProps> = ({ server, state, toolCount, children 
         {/* The command usually echoes the server name; it only helps diagnose a failed launch, and an
           unresolved one already names it in its error. */}
         {state === 'failed' ? (
-          <Text kind="body/regular/xs" className={`font-mono text-secondary ${WRAP_ANYWHERE}`}>
+          <Text kind="body/regular/sm" className={`font-mono text-secondary ${WRAP_ANYWHERE}`}>
             {server.target}
           </Text>
         ) : null}
@@ -103,16 +111,12 @@ const ServerSection: FC<{ server: McpServerStatus }> = ({ server }) => {
       {hasBody ? (
         <>
           {server.error ? (
-            <Text kind="body/regular/xs" className={`text-feedback-danger ${WRAP_ANYWHERE}`}>
+            <Text kind="body/regular/sm" className={`text-feedback-danger ${WRAP_ANYWHERE}`}>
               {server.error}
             </Text>
           ) : null}
           {server.stderr ? (
-            <pre
-              className={`max-h-40 overflow-auto whitespace-pre-wrap rounded bg-surface-sunken p-2 text-xs ${WRAP_ANYWHERE}`}
-            >
-              {server.stderr}
-            </pre>
+            <CodeSnippet value={server.stderr} language="text" copyButton="inline" rows={8} />
           ) : null}
           {server.tools.length > 0 ? (
             <Stack role="list" aria-label={`${server.name} tools`}>
@@ -138,7 +142,7 @@ const ProbeError: FC<{ error: Error }> = ({ error }) => (
           : 'Could not check MCP servers.'}
       </Text>
       {isNotFound(error) ? null : (
-        <Text kind="body/regular/xs" className={`text-secondary ${WRAP_ANYWHERE}`}>
+        <Text kind="body/regular/sm" className={`text-secondary ${WRAP_ANYWHERE}`}>
           {getErrorMessage(error)}
         </Text>
       )}
@@ -190,7 +194,7 @@ export const AgentToolsPanel: FC<AgentToolsPanelProps> = ({ workspace, config, d
   };
 
   return (
-    <ChatInfoSection title="Tools">
+    <ChatInfoSection title="MCP Servers">
       <Stack gap="density-md">{renderBody()}</Stack>
     </ChatInfoSection>
   );

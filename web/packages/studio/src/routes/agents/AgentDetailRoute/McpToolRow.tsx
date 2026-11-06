@@ -24,7 +24,7 @@ export const McpToolRow: FC<McpToolRowProps> = ({ tool, slotControl }) => {
     <Grid
       role="listitem"
       className={cn(
-        'border-border-subtle items-start gap-x-density-lg gap-y-density-xs border-b py-density-sm last:border-b-0',
+        'border-base items-start gap-x-density-lg gap-y-density-xs border-b py-density-sm last:border-b-0',
         slotControl ? 'grid-cols-[auto_1fr]' : 'grid-cols-1'
       )}
     >
