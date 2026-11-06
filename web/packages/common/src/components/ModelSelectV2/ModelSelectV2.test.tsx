@@ -43,6 +43,12 @@ describe('ModelSelectV2', () => {
     expect(screen.getByTestId('params-dropdown-trigger')).toBeEnabled();
   });
 
+  it('shows only the params icon with paramsIconOnly', () => {
+    renderSelect({ paramsIconOnly: true });
+    expect(screen.getByRole('button', { name: 'Model parameters' })).toBeInTheDocument();
+    expect(screen.queryByText('Params')).not.toBeInTheDocument();
+  });
+
   it('passes the field subset and metadata through to the params editor', async () => {
     const { onInferenceParamsChange } = renderSelect({
       paramsFields: ['temperature', 'max_tokens'],

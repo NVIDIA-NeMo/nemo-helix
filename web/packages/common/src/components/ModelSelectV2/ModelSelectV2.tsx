@@ -14,6 +14,7 @@ export const ModelSelectV2: FC<ModelSelectV2Props> = ({
   paramsDisabled,
   paramsFieldMetadata,
   paramsFields,
+  paramsIconOnly,
   onOpenChange,
   'aria-label': ariaLabel,
   ...dropdownProps
@@ -53,6 +54,7 @@ export const ModelSelectV2: FC<ModelSelectV2Props> = ({
         onInferenceParamsChange={onInferenceParamsChange}
         fieldMetadata={paramsFieldMetadata}
         fields={paramsFields}
+        iconOnly={paramsIconOnly}
       />
     </Group>
   );

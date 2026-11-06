@@ -15,6 +15,7 @@ import {
   Flex,
   Stack,
   Text,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
@@ -27,6 +28,8 @@ export interface ParamsDropdownProps {
   onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
   fieldMetadata?: InferenceParametersProps['fieldMetadata'];
   fields?: InferenceParametersProps['fields'];
+  /** Show only the icon, with the name in a tooltip, for tight layouts. */
+  iconOnly?: boolean;
 }
 
 export const ParamsDropdown: FC<ParamsDropdownProps> = ({
@@ -37,8 +40,9 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
   onInferenceParamsChange,
   fieldMetadata,
   fields,
-}) => (
-  <DropdownRoot open={open} onOpenChange={onOpenChange}>
+  iconOnly = false,
+}) => {
+  const trigger = (
     <DropdownTrigger asChild showChevron={false}>
       <Button
         kind="secondary"
@@ -47,31 +51,41 @@ export const ParamsDropdown: FC<ParamsDropdownProps> = ({
         data-testid="params-dropdown-trigger"
         className="shrink-0"
       >
-        <Flex align="center" gap="density-sm">
+        {iconOnly ? (
           <Sliders size="16" />
-          <Text>Params</Text>
-          <ChevronDown size="16" />
-        </Flex>
+        ) : (
+          <Flex align="center" gap="density-sm">
+            <Sliders size="16" />
+            <Text>Params</Text>
+            <ChevronDown size="16" />
+          </Flex>
+        )}
       </Button>
     </DropdownTrigger>
-    <DropdownContent
-      align="end"
-      side="bottom"
-      className="w-[250px] max-h-[600px] overflow-y-auto p-4"
-      data-testid="params-dropdown-content"
-    >
-      <Stack gap="4">
-        <Text kind="body/semibold/md" className="text-secondary">
-          Inference Params
-        </Text>
-        <InferenceParameters
-          value={inferenceParams}
-          onChange={onInferenceParamsChange ?? (() => {})}
-          disabled={disabled}
-          fieldMetadata={fieldMetadata}
-          fields={fields}
-        />
-      </Stack>
-    </DropdownContent>
-  </DropdownRoot>
-);
+  );
+
+  return (
+    <DropdownRoot open={open} onOpenChange={onOpenChange}>
+      {iconOnly ? <Tooltip slotContent="Model parameters">{trigger}</Tooltip> : trigger}
+      <DropdownContent
+        align="end"
+        side="bottom"
+        className="w-[250px] max-h-[600px] overflow-y-auto p-4"
+        data-testid="params-dropdown-content"
+      >
+        <Stack gap="4">
+          <Text kind="body/semibold/md" className="text-secondary">
+            Inference Params
+          </Text>
+          <InferenceParameters
+            value={inferenceParams}
+            onChange={onInferenceParamsChange ?? (() => {})}
+            disabled={disabled}
+            fieldMetadata={fieldMetadata}
+            fields={fields}
+          />
+        </Stack>
+      </DropdownContent>
+    </DropdownRoot>
+  );
+};
