@@ -31,7 +31,7 @@ Nemotron 3.5 Lightning 30B-A3B and Nemotron 3 Nano 30B-A3B share the `NemotronH`
 | | Full SFT, 8 GPUs, EP 8 | Automodel [`customizer_nemotron_nano_full_sft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft.yaml), [`customizer_nemotron_nano_full_sft_chat.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/customizer_nemotron_nano_full_sft_chat.yaml) |
 | | GRPO (DAPO), Lightning | NeMo-RL [`dapo-nanov3.5-30BA3B-4n8g-automodel.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/dapo-nanov3.5-30BA3B-4n8g-automodel.yaml) |
 | | GRPO LoRA / full weight | NeMo-RL [`grpo-nanov3-30BA3B-2n8g-fsdp2-lora.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nanov3-30BA3B-2n8g-fsdp2-lora.yaml), [`grpo-nanov3-30BA3B-1n8g-fsdp2.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nanov3-30BA3B-1n8g-fsdp2.v2.yaml) |
-| | DPO | NeMo-RL [`dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml). Only LR, β, batch, and length transfer, because customizer DPO has no `expert_parallel_size`. |
+| | DPO | NeMo-RL [`dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/dpo-nanov3-30B3AB-1n8g-fsdp8ep8-automodel.v2.yaml). LR, β, batch, length, and `expert_parallel_size` transfer. |
 | Nemotron 3 Super 120B-A12B | LoRA / full SFT | Automodel [`nemotron_super_v3_hellaswag_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_super_v3_hellaswag_peft.yaml), [`nemotron_super_v3_hellaswag.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/llm_finetune/nemotron/nemotron_super_v3_hellaswag.yaml) |
 | | GRPO | NeMo-RL [`grpo-nemotron3-super-120BA12B-16n8g-automodel-ep8.v2.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/r0.8.0/examples/configs/recipes/llm/grpo-nemotron3-super-120BA12B-16n8g-automodel-ep8.v2.yaml) |
 | Nemotron 3.5 Super VL 120B-A12B | LoRA (CORD-v2, rank 64, 8 GPUs, EP 8) | Automodel [`nemotron_3_5_super_vl_cord_v2_peft.yaml`](https://github.com/NVIDIA-NeMo/Automodel/blob/r0.6.0/examples/vlm_finetune/nemotron_3_5_super_vl/nemotron_3_5_super_vl_cord_v2_peft.yaml) |
@@ -106,7 +106,7 @@ All fields go under `training` unless noted.
 | `policy.max_total_sequence_length` | `max_seq_length` |
 | `policy.optimizer.kwargs.lr` / `weight_decay` / `eps` | `learning_rate` / `weight_decay` / `adam_eps` |
 | `policy.scheduler` min LR / warmup | `min_learning_rate` / `warmup_steps` |
-| `policy.automodel_cfg.{tensor,context,expert}_parallel_size` | `parallelism.*` (`expert_parallel_size` is GRPO-only) |
+| `policy.automodel_cfg.{tensor,context,expert}_parallel_size` | `parallelism.*` |
 | `policy.automodel_cfg.activation_checkpointing` | `activation_checkpointing` |
 | `policy.automodel_cfg.lora_cfg.{dim,alpha,dropout,exclude_modules}` | `finetuning_type: "lora"` + `lora.{rank,alpha,dropout,exclude_modules}` (GRPO-only) |
 | `policy.generation.temperature` / `max_new_tokens` / `top_k` | `temperature` / `max_new_tokens` / `top_k` |

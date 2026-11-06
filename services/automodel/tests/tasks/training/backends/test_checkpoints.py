@@ -40,6 +40,7 @@ def merged_lora_config(tmp_path: Path) -> MagicMock:
     customizer_config.model.path = str(tmp_path / "base")
     customizer_config.model.precision = None
     customizer_config.model.trust_remote_code = False
+    customizer_config.model.has_vision_tower = False
     return customizer_config
 
 
@@ -101,6 +102,38 @@ class TestCrossEncoderCheckpoint:
         assert call["load_trust_remote_code"] is False
         patched_checkpoint_io["sanitize"].assert_called_once_with(output_path, tmp_path / "base")
         assert patched_checkpoint_io["order"] == ["export", "sanitize", "restructure"]
+
+
+class TestLlmLoraMerged:
+    @pytest.mark.parametrize("has_vision_tower", [False, True])
+    def test_forwards_the_vision_tower(
+        self,
+        merged_lora_config: MagicMock,
+        mocker: MockerFixture,
+        tmp_path: Path,
+        has_vision_tower: bool,
+    ) -> None:
+        merged_lora_config.model.has_vision_tower = has_vision_tower
+        merge = mocker.patch(f"{CHECKPOINTS}.merge_lora_adapter")
+        mocker.patch(f"{CHECKPOINTS}.fix_fsdp2_architecture")
+        mocker.patch(f"{CHECKPOINTS}.extract_precision_from_model_config", return_value=None)
+        checkpoint_path = tmp_path / "adapter"
+        output_path = tmp_path / "output"
+
+        process_checkpoint(
+            checkpoint_path,
+            output_path,
+            merged_lora_config,
+            resolved_chat_template="",
+        )
+
+        merge.assert_called_once_with(
+            adapter_path=checkpoint_path,
+            base_model_path=str(tmp_path / "base"),
+            output_path=output_path,
+            trust_remote_code=False,
+            has_vision_tower=has_vision_tower,
+        )
 
 
 class TestRestructureEncoderOutput:

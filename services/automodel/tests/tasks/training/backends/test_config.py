@@ -1095,6 +1095,7 @@ def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
         },
     ]
     config = _vision_training_config(tmp_path, rows)
+    (tmp_path / "data" / "receipt.png").write_bytes(b"png")
     config.model.chat_template = "vision-template"
     compiled = _compile_vision(config, tmp_path)
 

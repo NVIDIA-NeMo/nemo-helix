@@ -213,7 +213,7 @@ def compile_dpo_config(
         "offload_policy_before_refit": False,
         "offload_optimizer_for_refit": True,
         # Training runs on AutomodelPolicyWorker. We propagate tensor / sequence /
-        # context parallelism from the parallelism config; the remaining keys are
+        # context / expert parallelism from the parallelism config; the remaining keys are
         # NeMo-RL defaults (LoRA disabled — DPO is full-weight here).
         "automodel_cfg": {
             "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "", **(parallelism.env_vars or {})},
@@ -263,6 +263,13 @@ def compile_dpo_config(
         # ``enabled`` is False.
         "megatron_cfg": _megatron_cfg_disabled(precision, dpo_hp.max_grad_norm),
     }
+    # Absent at 1 so NeMo-RL keeps its default. With activation checkpointing the router
+    # must be saved, not recomputed, or the backward pass dies on a mismatched permutation.
+    if parallelism.expert_parallel_size > 1:
+        automodel_cfg = cfg["policy"]["automodel_cfg"]
+        automodel_cfg["expert_parallel_size"] = parallelism.expert_parallel_size
+        if parallelism.activation_checkpointing:
+            automodel_cfg["moe_parallelizer"] = {"ignore_router_for_ac": True}
 
     # === Data Section ===
     cfg["data"] = _build_data_config(customizer_config, prepared)

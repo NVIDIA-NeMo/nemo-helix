@@ -310,6 +310,38 @@ def _compile(tmp_path: Path, step_config: TrainingStepConfig) -> dict[str, Any]:
     return compile_dpo_config(step_config, _job_ctx(tmp_path))
 
 
+def test_expert_parallel_size_reaches_automodel_cfg(tmp_path: Path) -> None:
+    cfg = _compile(
+        tmp_path,
+        _make_step_config(
+            parallelism=TrainingStepConfig.ParallelismConfig(num_gpus_per_node=8, expert_parallel_size=8)
+        ),
+    )
+
+    automodel_cfg = cfg["policy"]["automodel_cfg"]
+    assert automodel_cfg["expert_parallel_size"] == 8
+    assert "moe_parallelizer" not in automodel_cfg
+
+
+def test_expert_parallel_size_saves_the_router_when_checkpointing(tmp_path: Path) -> None:
+    cfg = _compile(
+        tmp_path,
+        _make_step_config(
+            parallelism=TrainingStepConfig.ParallelismConfig(
+                num_gpus_per_node=8,
+                expert_parallel_size=8,
+                activation_checkpointing=True,
+            )
+        ),
+    )
+
+    assert cfg["policy"]["automodel_cfg"]["moe_parallelizer"] == {"ignore_router_for_ac": True}
+
+
+def test_expert_parallel_size_is_omitted_at_one(tmp_path: Path) -> None:
+    assert "expert_parallel_size" not in _compile(tmp_path, _make_step_config())["policy"]["automodel_cfg"]
+
+
 def test_dtensor_checkpoint_requests_consolidated_safetensors(tmp_path: Path) -> None:
     """The DTensor policy worker fails with ``KeyError: 'checkpoint'`` without this block."""
     cfg = _compile(tmp_path, _make_step_config())

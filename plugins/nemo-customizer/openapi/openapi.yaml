@@ -4386,7 +4386,7 @@ components:
           exclusiveMinimum: 0.0
           title: Learning Rate
           description: Peak learning rate. Left unset, 5e-6 for finetuning_type 'all_weights'
-            and 1e-5 for 'lora'.
+            and 1e-5 for 'lora' and 'lora_merged'.
           default: 5.0e-06
         min_learning_rate:
           title: Min Learning Rate
@@ -4512,9 +4512,10 @@ components:
           enum:
           - all_weights
           - lora
+          - lora_merged
           title: Finetuning Type
-          description: Full-weight GRPO or LoRA adapter training. lora_merged is not
-            supported.
+          description: Full-weight GRPO, a LoRA adapter, or LoRA merged into the base
+            model at export.
           default: all_weights
         lora:
           allOf:
@@ -4858,13 +4859,18 @@ components:
       description: 'Group Relative Policy Optimization with NeMo Gym environments.
 
 
-        ``finetuning_type`` is ``all_weights`` (default) or ``lora`` only.
+        ``finetuning_type`` is ``all_weights`` (default), ``lora``, or ``lora_merged``.
 
-        ``lora_merged`` is not supported for GRPO on the Automodel path.'
+        ``lora`` publishes the HF PEFT adapter. ``lora_merged`` trains the same adapter
+
+        and folds it into the base model at export.'
       x-learning-rate-defaults:
       - value: 1.0e-05
         when:
           finetuning_type: lora
+      - value: 1.0e-05
+        when:
+          finetuning_type: lora_merged
     RlJobInput:
       properties:
         name:
@@ -5284,8 +5290,8 @@ components:
       additionalProperties: false
       type: object
       title: RlLoRAParams
-      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). No
-        merge-at-export.
+      description: LoRA hyperparameters for GRPO (``automodel_cfg.lora_cfg``). Merge-at-export
+        follows ``finetuning_type``.
     RlOutputRequest:
       properties:
         name:
@@ -5356,7 +5362,7 @@ components:
           type: integer
           exclusiveMinimum: 0.0
           title: Expert Parallel Size
-          description: Expert parallel size for MoE models. GRPO only.
+          description: Expert parallel size for MoE models. DPO and GRPO.
           default: 1
         sequence_parallel:
           type: boolean
