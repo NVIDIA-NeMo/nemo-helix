@@ -25,7 +25,7 @@ export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onC
   const templateGroups = useMemo(buildTemplateGroups, []);
   // Personas write messages for a chosen agent, so the tile is a dead end without one.
   // Only a confirmed-empty list disables it; a failed load stays reachable.
-  const noAgents = useHasPersonaAgents(workspace) === false;
+  const noAgents = useHasPersonaAgents(workspace, !!PERSONA_OPTION) === false;
   const options = useMemo(
     () =>
       START_OPTIONS.map((option) =>
