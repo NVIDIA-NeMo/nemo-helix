@@ -243,6 +243,14 @@ def test_build_request_body_accepts_aliases() -> None:
     assert body.schema_ == {"a": 1}
 
 
+def test_build_request_body_rejects_the_python_name_of_an_aliased_field() -> None:
+    # ``schema_`` would validate as unknown-but-ignored and silently vanish.
+    with pytest.raises(UnknownInputFieldsError) as excinfo:
+        build_request_body(_Body, {"name": "x", "schema_": {"a": 1}})
+
+    assert excinfo.value.unknown_fields == ["schema_"]
+
+
 def test_build_request_body_rejects_unknown_keys_with_accepted_list() -> None:
     with pytest.raises(UnknownInputFieldsError) as excinfo:
         build_request_body(_Body, {"name": "x", "descripton": "typo", "extra": 1}, command_name="things create")
