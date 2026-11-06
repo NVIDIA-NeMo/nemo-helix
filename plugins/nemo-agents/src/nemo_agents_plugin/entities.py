@@ -403,6 +403,13 @@ class AgentDeployment(NemoEntity, entity_type="agent_deployment"):
             "the platform-owned NAT/Fabric server command."
         ),
     )
+    remove_image_on_delete: bool = Field(
+        default=False,
+        description=(
+            "Set when the deployment is deleted: after teardown, also remove its platform-built image "
+            "if no other deployment uses it."
+        ),
+    )
     plugin_deployment: str = Field(
         default="",
         description=(

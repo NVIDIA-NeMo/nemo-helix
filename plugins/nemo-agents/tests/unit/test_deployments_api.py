@@ -862,6 +862,32 @@ class TestDeleteDeployment:
         assert resp.status_code == 204
         updated: AgentDeployment = mock_entity_client.update.call_args[0][0]
         assert updated.status == "deleting"
+        assert updated.remove_image_on_delete is True
+
+    def test_delete_can_keep_the_image(self) -> None:
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=_make_deployment(status="running"))
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep?remove_image=false")
+
+        assert resp.status_code == 204
+        updated: AgentDeployment = mock_entity_client.update.call_args[0][0]
+        assert updated.remove_image_on_delete is False
+
+    def test_redelete_records_the_latest_image_choice(self) -> None:
+        dep = _make_deployment(status="deleting")
+        dep.remove_image_on_delete = True
+        mock_entity_client = AsyncMock()
+        mock_entity_client.get = AsyncMock(return_value=dep)
+        client = _test_client(mock_entity_client)
+
+        resp = client.delete("/apis/agents/v2/workspaces/default/deployments/fabric-dep?remove_image=false")
+
+        assert resp.status_code == 204
+        updated: AgentDeployment = mock_entity_client.update.call_args[0][0]
+        assert updated.status == "deleting"
+        assert updated.remove_image_on_delete is False
 
     def test_delete_retries_concurrent_update_conflict(self) -> None:
         mock_entity_client = AsyncMock()
@@ -914,6 +940,7 @@ class TestDeleteDeployment:
     def test_delete_reopens_timed_out_backend_teardown_when_already_deleting(self) -> None:
         agent_dep = _make_deployment(status="deleting")
         agent_dep.deployment_mode = "docker"
+        agent_dep.remove_image_on_delete = True
         backend_dep = Deployment(
             name="fabric-dep",
             workspace="default",
