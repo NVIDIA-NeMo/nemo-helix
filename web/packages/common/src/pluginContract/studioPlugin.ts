@@ -165,7 +165,6 @@ export const studioPlugin = (
       const manifest: PluginSidecar = {
         contractVersion: PLUGIN_CONTRACT.version,
         specifiers: [...bare].sort(),
-        bundledPackages: [],
         builtAgainst,
       };
       this.emitFile({
