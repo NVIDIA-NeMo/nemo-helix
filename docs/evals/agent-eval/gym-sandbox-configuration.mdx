@@ -126,6 +126,8 @@ A package index is not needed for built-in environments, whose virtual environme
 install, and the package's `wheels/` directory supplies everything their `requirements.txt` files
 add. Only `native-v1` custom environments install from an index at job start; for those, allow
 `pypi.org:443` and `files.pythonhosted.org:443`, or whichever index mirror the cluster uses.
+The image also preinstalls the Codex CLI, so Gym's `codex_agent` does not download Node.js or
+`@openai/codex` at job start.
 
 When `sandbox_egress_allow` is empty and the job runs a `wheels-v1` environment on the OpenSandbox
 provider, Evaluator starts the host in offline mode: `uv` never consults an index and the Hugging Face libraries read only
