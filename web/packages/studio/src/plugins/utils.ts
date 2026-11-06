@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLUGIN_CONTRACT, diffContract, type PluginSidecar } from '@nemo/common/src/pluginContract';
+import {
+  CONTRACT_DOCS,
+  PLUGIN_CONTRACT,
+  diffContract,
+  type PluginSidecar,
+} from '@nemo/common/src/pluginContract';
 import { logger } from '@nemo/common/src/utils/logger';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -15,6 +20,9 @@ import type {
   PluginModule,
   PluginQueryData,
 } from '@studio/plugins/types';
+
+// One hung sidecar request must not delay every plugin's load.
+const SIDECAR_TIMEOUT_MS = 10_000;
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -43,7 +51,7 @@ const fail = (name: string, message: string): PluginLoadResult => {
           steps: [
             'Check the browser console for the underlying error.',
             'Rebuild the plugin and refresh Studio.',
-            'Contract and shared-dependency rules: plugins/example-plugin/web/AGENTS.md',
+            `Contract and shared-dependency rules: ${CONTRACT_DOCS}`,
           ],
         },
       ],
@@ -58,7 +66,6 @@ const isSidecar = (obj: unknown): obj is PluginSidecar => {
   return (
     typeof o.contractVersion === 'string' &&
     isStrings(o.specifiers) &&
-    isStrings(o.bundledPackages) &&
     typeof o.builtAgainst === 'object' &&
     o.builtAgainst !== null &&
     !Array.isArray(o.builtAgainst) &&
@@ -82,11 +89,22 @@ export async function loadPlugin(
   // Prefix with the API base URL so the import resolves against the backend
   // host, not the Studio dev server (which may run on a different origin).
   const absoluteUrl = `${baseUrl}${manifest.bundleUrl}`;
-  // The sidecar sits next to the validated bundle.
+  // The sidecar is plugin-authored: this check guards against build mistakes, not a
+  // malicious plugin (`isTrustedBundleUrl` above is the trust boundary).
+  // It sits next to the validated bundle.
   const sidecarUrl = absoluteUrl.replace(/[^/]*$/, 'plugin.manifest.json');
   let sidecar: PluginSidecar | null;
+  // Not AbortSignal.timeout: it ignores fake timers in tests.
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () =>
+      controller.abort(
+        new DOMException(`Request timed out after ${SIDECAR_TIMEOUT_MS / 1000}s`, 'TimeoutError')
+      ),
+    SIDECAR_TIMEOUT_MS
+  );
   try {
-    const res = await platformFetch(sidecarUrl);
+    const res = await platformFetch(sidecarUrl, { signal: controller.signal });
     if (res.status === 404) {
       sidecar = null;
     } else if (!res.ok) {
@@ -98,6 +116,8 @@ export async function loadPlugin(
     }
   } catch (err) {
     return fail(name, `Could not read ${sidecarUrl}: ${errorMessage(err)}`);
+  } finally {
+    clearTimeout(timer);
   }
   const issues = diffContract(sidecar, PLUGIN_CONTRACT, STUDIO_SHARED_VERSIONS);
   if (issues.length > 0) {

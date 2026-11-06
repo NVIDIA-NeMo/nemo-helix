@@ -6,15 +6,25 @@ import type { PluginLoadFailure, PluginLoadIssue } from '@studio/plugins/types';
 
 export const PLUGIN_LOAD_ERRORS_ENDPOINT = '/studio/api/plugin-load-errors';
 
-// Backend limits for POST /studio/api/plugin-load-errors; over-limit bodies are rejected (422).
+// Limits of POST /studio/api/plugin-load-errors, the same numbers as
+// services/studio/src/nhx/studio/plugin_reports.py: keep in sync. Over-limit
+// bodies are a silent 422.
+export const REPORT_LIMITS = {
+  issues: 10,
+  subject: 200,
+  message: 500,
+  steps: 8,
+  step: 300,
+} as const;
+
 const cut = (text: string, max: number) => text.slice(0, max);
 
 export const clampIssues = (issues: PluginLoadIssue[]): PluginLoadIssue[] =>
-  issues.slice(0, 10).map((i) => ({
+  issues.slice(0, REPORT_LIMITS.issues).map((i) => ({
     code: i.code,
-    subject: cut(i.subject, 200),
-    message: cut(i.message, 500),
-    steps: i.steps.slice(0, 8).map((s) => cut(s, 300)),
+    subject: cut(i.subject, REPORT_LIMITS.subject),
+    message: cut(i.message, REPORT_LIMITS.message),
+    steps: i.steps.slice(0, REPORT_LIMITS.steps).map((s) => cut(s, REPORT_LIMITS.step)),
   }));
 
 /** Fire-and-forget: one report per failure; every error and non-2xx is ignored. */
