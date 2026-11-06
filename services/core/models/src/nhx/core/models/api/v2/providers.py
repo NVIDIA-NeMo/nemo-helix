@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -17,7 +17,6 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.core.models.api.dependencies import get_model_provider_service, get_secrets_client
 from nhx.core.models.api.permissions import check_deployment_access, check_secret_access
 from nhx.core.models.api.service.model_provider_service import ModelProviderService, ModelProviderValidationError
-from nhx.core.models.api.v2.utils import LIST_REQUEST_ERRORS
 from nhx.core.models.schemas import (
     CreateModelProviderRequest,
     DeleteModelProviderRequest,
@@ -75,9 +74,7 @@ async def list_providers(
             filter_operation=parsed_filter.operation,
         )
         return result
-    except LIST_REQUEST_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to list model providers for workspace {workspace}")
@@ -147,7 +144,7 @@ async def create_provider(
             )
         logger.warning(f"Model provider creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception("Failed to create model provider")
@@ -219,7 +216,7 @@ async def upsert_provider(
     except ValueError as e:
         logger.warning(f"Model provider upsert validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception("Failed to upsert model provider")
@@ -267,7 +264,7 @@ async def update_provider_status(
         )
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception("Failed to update model provider status fields")
@@ -305,7 +302,7 @@ async def get_provider(
         return provider
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to get model provider {workspace}/{name}")
@@ -346,7 +343,7 @@ async def delete_provider(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception as e:
         logger.exception(f"Failed to delete model provider {workspace}/{name}")
