@@ -432,7 +432,11 @@ def _caller_identity(*, agent_name: str | None, agent_version: str, model_name: 
 
 def _boundary_kind(attributes: dict[str, AnyValue]) -> str:
     """Recognize payload-bearing kinds with the same standard-before-native precedence as Intake."""
-    kind = attributes.get("openinference.span.kind", AnyValue()).string_value.upper()
+    recorded_kind = attributes.get("openinference.span.kind", AnyValue())
+    kind = recorded_kind.string_value.upper()
+    kind_missing = recorded_kind.WhichOneof("value") is None or (
+        recorded_kind.WhichOneof("value") == "string_value" and not kind
+    )
     known = {"LLM", "AGENT", "TOOL", "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL", "EVALUATOR"}
     if kind in known:
         return kind
@@ -440,7 +444,7 @@ def _boundary_kind(attributes: dict[str, AnyValue]) -> str:
     operations = {"chat": "LLM", "generate_content": "LLM", "text_completion": "LLM", "invoke_agent": "AGENT"}
     if operation in operations:
         return operations[operation]
-    if not kind and "gen_ai.operation.name" not in attributes:
+    if kind_missing and "gen_ai.operation.name" not in attributes:
         scope = attributes.get("nemo_relay.scope_type", AnyValue()).string_value
         return {"llm": "LLM", "agent": "AGENT"}.get(scope, "UNKNOWN")
     return "UNKNOWN"
@@ -482,7 +486,7 @@ def _native_agent_input(attributes: dict[str, AnyValue]) -> AnyValue | None:
     if not payload:
         return None
     try:
-        return AnyValue(string_value=json.dumps(payload, separators=(",", ":"), allow_nan=False))
+        return AnyValue(string_value=json.dumps(payload, separators=(",", ":"), allow_nan=False, sort_keys=True))
     except (ValueError, RecursionError):
         return None
 

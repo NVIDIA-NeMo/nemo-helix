@@ -1180,6 +1180,42 @@ async def test_arbitrary_chain_research_subagent_and_final_model_are_not_task_bo
     assert attrs["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
 
 
+@pytest.mark.parametrize(
+    "recorded_kind",
+    [
+        {"intValue": "7"},
+        {"boolValue": False},
+        {"arrayValue": {"values": [{"stringValue": "AGENT"}]}},
+        {"kvlistValue": {"values": [{"key": "kind", "value": {"stringValue": "AGENT"}}]}},
+    ],
+)
+async def test_non_string_kind_does_not_fall_through_to_native_agent_input(recorded_kind) -> None:
+    child = _recorded_agent("aabbccddeeff0011")
+    child["attributes"][0]["value"] = recorded_kind
+    child["attributes"].append({"key": "nemo_relay.scope_type", "value": {"stringValue": "agent"}})
+    trial = _otlp_trial(extra_spans=[child], operation="invoke_agent")
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    root = _attributes(_published_spans(intake)[0])
+    assert "input.value" not in root
+    assert root["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
+
+
+async def test_equivalent_native_projected_inputs_agree_despite_attribute_order() -> None:
+    children = [_recorded_agent("aabbccddeeff0011"), _recorded_agent("aabbccddeeff0022")]
+    for child, fields in zip(children, [("z", "a"), ("a", "z")], strict=True):
+        child["attributes"] = [{"key": "nemo_relay.scope_type", "value": {"stringValue": "agent"}}] + [
+            {"key": f"nemo_relay.start.input.{field}", "value": {"intValue": "1" if field == "a" else "2"}}
+            for field in fields
+        ]
+    trial = _otlp_trial(extra_spans=children, operation="invoke_agent")
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    root = _attributes(_published_spans(intake)[0])
+    assert root["input.value"].string_value == '{"a":1,"z":2}'
+    assert root["nemo.evaluation.boundary.input"].string_value == "unambiguous_descendant"
+
+
 async def test_designated_invocation_uses_topmost_agent_input_not_internal_agents() -> None:
     outer = _recorded_agent("aabbccddeeff0011", input_text="outer task", output_text="outer final")
     inner = _recorded_agent("aabbccddeeff0022", input_text="internal input", output_text="internal partial")
