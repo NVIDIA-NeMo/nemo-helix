@@ -5,27 +5,19 @@
 
 import signal
 import subprocess
-import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from nhx.automodel.tasks.training.backends.backend import AutomodelBackend
+from nhx.automodel.tasks.training.backends.checkpoints import ModelType
+from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter
+from nhx.automodel.tasks.training.protocol import LibraryConfig
+from nhx.automodel.tasks.training.schemas import TrainingRecipe
+from nhx.customization_common.training.progress import TrainingWallClock
 from pytest_mock import MockerFixture
-
-# Mock nemo_automodel before importing backend/config modules
-# (nemo_automodel is only available in the training container)
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
-
-from nhx.automodel.tasks.training.backends.backend import AutomodelBackend  # noqa: E402
-from nhx.automodel.tasks.training.backends.checkpoints import ModelType  # noqa: E402
-from nhx.automodel.tasks.training.progress import JobsServiceProgressReporter  # noqa: E402
-from nhx.automodel.tasks.training.protocol import LibraryConfig  # noqa: E402
-from nhx.automodel.tasks.training.schemas import TrainingRecipe  # noqa: E402
-from nhx.customization_common.training.progress import TrainingWallClock  # noqa: E402
 
 
 class TestAutomodelBackend:
