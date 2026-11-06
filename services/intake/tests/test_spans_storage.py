@@ -3,12 +3,15 @@
 
 """Span storage helper tests."""
 
+from datetime import datetime, timezone
+
 from nhx.intake.spans.storage import (
     json_loads_or_none,
     stable_id,
     text_for_mode,
     text_query_parameters,
     text_select_for_mode,
+    to_unix_micros,
     truncated_text_select,
 )
 
@@ -50,3 +53,11 @@ def test_text_for_mode_bounds_api_values() -> None:
     assert text_for_mode("x" * 350, mode="preview") == "x" * 300
     assert text_for_mode("abcdef", mode="detailed") == "abcdef"
     assert text_for_mode(None, mode="preview") is None
+
+
+def test_to_unix_micros_keeps_microsecond_resolution_and_reads_naive_as_utc() -> None:
+    aware = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+    naive = datetime(2026, 3, 1, 12, 0, 0, 123456)
+
+    assert to_unix_micros(naive) == to_unix_micros(aware)
+    assert to_unix_micros(aware) % 1_000_000 == 123456
