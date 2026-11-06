@@ -213,7 +213,8 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: OpenSandbox server address; defaults to ``OPENSANDBOX_DOMAIN``.
         api_key: OpenSandbox API key; defaults to ``OPENSANDBOX_API_KEY``. An explicit ``""`` means no auth.
         protocol: ``http`` or ``https``.
-        use_server_proxy: Route execd traffic through the server instead of to the pod directly.
+        use_server_proxy: Route execd traffic through the server instead of to the pod directly. On by default:
+            a deployment that isolates sandbox pods admits only the server, so a direct connection can't reach them.
         ready_timeout_sec: How long a new sandbox may take to become healthy.
         sandbox_timeout_sec: The sandbox's server-side lifetime.
         sandbox_expires_at: ISO-8601 time, with its UTC offset, no sandbox may outlive. Each create gets ``sandbox_timeout_sec``
@@ -265,7 +266,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         domain: str | None = None,
         api_key: str | None = None,
         protocol: str = "https",
-        use_server_proxy: bool = False,
+        use_server_proxy: bool = True,
         ready_timeout_sec: float = DEFAULT_READY_TIMEOUT_SEC,
         sandbox_timeout_sec: float = DEFAULT_SANDBOX_TIMEOUT_SEC,
         sandbox_expires_at: str | None = None,
