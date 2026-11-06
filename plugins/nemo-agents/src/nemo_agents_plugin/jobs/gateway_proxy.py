@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from fastapi import FastAPI
 from nemo_agents_plugin.agent_config import AgentConfig, ModelConfig, TelemetryConfig
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.client.auth import EnvAccessToken, TokenProviderAuth
@@ -216,6 +217,13 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
             raise ValueError("NHX_PRINCIPAL must provide a principal ID for authenticated agent jobs")
         app = build_auth_proxy_app(base_url=base_url, headers=headers)
 
+    with serve_auth_proxy(app) as origin:
+        yield origin
+
+
+@contextmanager
+def serve_auth_proxy(app: FastAPI) -> Generator[str, None, None]:
+    """Serve ``app`` on a loopback port in a background thread, yielding its origin."""
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
@@ -237,15 +245,15 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
             except BaseException as error:
                 errors.append(error)
 
-        thread = threading.Thread(target=serve, name="agent-job-auth-proxy", daemon=True)
+        thread = threading.Thread(target=serve, name="auth-proxy", daemon=True)
         thread.start()
         try:
             deadline = time.monotonic() + _STARTUP_TIMEOUT_SECONDS
             while not server.started:
                 if not thread.is_alive():
-                    raise RuntimeError("Agent job auth proxy failed to start") from (errors[0] if errors else None)
+                    raise RuntimeError("Auth proxy failed to start") from (errors[0] if errors else None)
                 if time.monotonic() >= deadline:
-                    raise TimeoutError("Agent job auth proxy startup timed out")
+                    raise TimeoutError("Auth proxy startup timed out")
                 thread.join(timeout=0.01)
             yield f"http://127.0.0.1:{port}"
         finally:
@@ -257,7 +265,7 @@ def platform_auth_proxy() -> Generator[str | None, None, None]:
                 server.force_exit = True
                 thread.join(timeout=1)
             if thread.is_alive():
-                logger.error("Agent job auth proxy did not stop within its shutdown deadline")
+                logger.error("Auth proxy did not stop within its shutdown deadline")
 
 
 @contextmanager
