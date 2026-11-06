@@ -78,6 +78,20 @@ class TestManagedJobReservedEnvironment:
                 source="Job step environment keys",
             )
 
+    @pytest.mark.parametrize("name", ["NHX_PRINCIPAL", "NEMO_JOB_SECRETS"])
+    def test_step_validation_rejects_platform_injected_identity_and_secret_names(self, name):
+        assert find_reserved_managed_job_environment_variable_names([name]) == [name]
+        with pytest.raises(ValueError, match=name):
+            validate_no_reserved_managed_job_environment_variable_names([name], source="Job step environment keys")
+
+    @pytest.mark.parametrize(
+        "name",
+        ["X=default/a,NHX_PRINCIPAL", "A,B", "A=B", "1BAD", "BAD-NAME", "", "A B"],
+    )
+    def test_step_validation_rejects_malformed_names(self, name):
+        with pytest.raises(ValueError, match="must match"):
+            validate_no_reserved_managed_job_environment_variable_names([name], source="Job step environment keys")
+
     def test_profile_env_rejects_access_token(self):
         with pytest.raises(ValidationError, match="NHX_ACCESS_TOKEN"):
             JobExecutionProfileConfig(env={"NHX_ACCESS_TOKEN": "token"})
