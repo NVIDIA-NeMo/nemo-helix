@@ -842,3 +842,174 @@ async def test_member_rollup_does_not_overwrite_a_stored_cancelling_intent(mock_
 
     # The stored cancel intent is preserved, not overwritten with RUNNING.
     assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.CANCELLING
+
+
+# -- Group retry of non-succeeded members: a thin fan-out over job-level rerun. ERROR and
+# -- CANCELLED members are rerun; only COMPLETED (and still-running) members are left alone; the
+# -- group re-opens to a non-terminal status.
+
+
+async def _retriable_member_count(dispatcher: JobDispatcher, store: EntityClient, group_id: str) -> int:
+    """How many members are currently terminal non-succeeded (ERROR or CANCELLED) -- the sweep's input set."""
+    members = await _members_of(dispatcher, group_id)
+    statuses = [await _member_status(store, m) for m in members]
+    return sum(1 for s in statuses if s in (HelixJobStatus.ERROR, HelixJobStatus.CANCELLED))
+
+
+@pytest.mark.asyncio
+async def test_retry_group_reruns_failed_members_and_leaves_succeeded(mock_dispatcher, mock_store):
+    """The retry sweep reruns ERROR members (back to CREATED) and leaves succeeded ones untouched."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=3), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ERROR)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.COMPLETED)
+    # members[2] stays CREATED (never ran); only members[0] is a retry candidate.
+
+    rerun = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+
+    assert rerun == [members[0].id]
+    # The failed member is rerun: a fresh attempt back in CREATED (non-terminal), not deleted.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.CREATED
+    # Succeeded member untouched; never-ran member untouched.
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.COMPLETED
+    assert await _member_status(mock_store, members[2]) == HelixJobStatus.CREATED
+
+
+@pytest.mark.asyncio
+async def test_retry_group_reruns_cancelled_members_too(mock_dispatcher, mock_store):
+    """Retrying the group restarts CANCELLED members as well as ERROR ones.
+
+    Retry is a group-level operation: a cancelled member is unfinished work, so it restarts. Only
+    COMPLETED members are genuinely done and left alone.
+    """
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=3), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ERROR)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.CANCELLED)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[2], HelixJobStatus.COMPLETED)
+
+    rerun = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+
+    assert set(rerun) == {members[0].id, members[1].id}
+    # Both the errored and the cancelled member are rerun back to CREATED.
+    assert await _member_status(mock_store, members[0]) == HelixJobStatus.CREATED
+    assert await _member_status(mock_store, members[1]) == HelixJobStatus.CREATED
+    # The succeeded member is left untouched.
+    assert await _member_status(mock_store, members[2]) == HelixJobStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_retry_failfast_group_restarts_errored_and_cancelled_siblings_and_reopens(mock_dispatcher, mock_store):
+    """The core fail_fast case: one member errors, its siblings are fail-fast-cancelled, retry restarts all.
+
+    fail_fast cancels the siblings of a failed member, so the group settles to terminal FAILED with a
+    mix of ERROR and CANCELLED members. Retrying restarts BOTH the errored member and the cancelled
+    siblings (all unfinished work), and the group re-opens to a non-terminal status -- it does not stay
+    stuck at FAILED (which would otherwise block a later cancel).
+    """
+    group = await mock_dispatcher.create_job_group(_failfast_request(fail_fast=True, member_count=3), DEFAULT_WORKSPACE)
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ACTIVE)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[1], HelixJobStatus.ACTIVE)
+    # members[0] fails; fail_fast sweeps the siblings to cancelling/cancelled.
+    await _fail_member_via_rollup(mock_dispatcher, mock_store, members[0])
+    # Settle the swept siblings to the terminal CANCELLED so the group lands on terminal FAILED.
+    for sibling in members[1:]:
+        if await _member_status(mock_store, sibling) != HelixJobStatus.CANCELLED:
+            await _drive_member_via_rollup(mock_dispatcher, mock_store, sibling, HelixJobStatus.CANCELLED)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.FAILED
+
+    rerun = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+
+    # Every non-succeeded member (the errored one and the cancelled siblings) is restarted.
+    assert set(rerun) == {m.id for m in members}
+    for member in members:
+        assert await _member_status(mock_store, member) == HelixJobStatus.CREATED
+    # The group re-opens: no leftover CANCELLED member poisons the roll-up into CANCELLING.
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_retry_group_reopens_group_to_non_terminal(mock_dispatcher, mock_store):
+    """Retrying a FAILED group re-opens it: as members re-enter CREATED the status re-persists non-terminal."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.ERROR)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.FAILED
+
+    await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+
+    # rerun_job resets members to CREATED with a direct write; the sweep then re-persists the group
+    # status explicitly, re-opening the terminal FAILED to a non-terminal status (every member CREATED).
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_retry_group_members_is_idempotent_when_rerun(mock_dispatcher, mock_store):
+    """A second sweep is a no-op: after the first rerun members are CREATED, no longer retry candidates.
+
+    This is the natural idempotency that protects concurrent/repeated retries: rerun_job accepts only
+    a terminal non-succeeded member, so once a member is rerun back to CREATED a second sweep skips it.
+    """
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.ERROR)
+
+    first = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+    second = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+
+    assert set(first) == {m.id for m in members}
+    # No members are terminal non-succeeded anymore, so the second sweep reruns nothing.
+    assert second == []
+    assert await _retriable_member_count(mock_dispatcher, mock_store, group.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_retry_job_group_is_a_noop_when_no_failed_members(mock_dispatcher, mock_store):
+    """retry_job_group returns the group unchanged when there is nothing to retry (no 409)."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    for member in members:
+        await _drive_member_via_rollup(mock_dispatcher, mock_store, member, HelixJobStatus.COMPLETED)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.COMPLETED
+
+    response = await mock_dispatcher.retry_job_group(group.id, DEFAULT_WORKSPACE)
+
+    assert response is not None
+    # The completed group is returned unchanged; a no-ERROR-member sweep reruns nothing.
+    assert response.status == JobGroupStatus.COMPLETED
+    rerun = await mock_dispatcher.retry_group_members(group.id, DEFAULT_WORKSPACE)
+    assert rerun == []
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_retry_job_group_refuses_a_cancelling_group(mock_dispatcher, mock_store):
+    """A group mid-cancel is refused (409): retrying members would fight the cancel sweep."""
+    group = await mock_dispatcher.create_job_group(
+        _failfast_request(fail_fast=False, member_count=2), DEFAULT_WORKSPACE
+    )
+    members = await _members_of(mock_dispatcher, group.id)
+    await _drive_member_via_rollup(mock_dispatcher, mock_store, members[0], HelixJobStatus.ERROR)
+    await mock_dispatcher.cancel_job_group(group.id, DEFAULT_WORKSPACE)
+    assert await _group_status(mock_dispatcher, mock_store, group.id) == JobGroupStatus.CANCELLING
+
+    with pytest.raises(JobOperationConflictError):
+        await mock_dispatcher.retry_job_group(group.id, DEFAULT_WORKSPACE)
+
+
+@pytest.mark.asyncio
+async def test_retry_missing_group_returns_none(mock_dispatcher):
+    assert await mock_dispatcher.retry_job_group("does-not-exist", DEFAULT_WORKSPACE) is None
