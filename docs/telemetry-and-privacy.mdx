@@ -29,7 +29,7 @@ fingerprints, hostnames, or machine-derived identifiers.
 
 | Component | Identifier | Data collected |
 | --- | --- | --- |
-| NeMo Helix | Random session identifier stored in local platform state and rotated every 30 days. If the state file has no creation date, an invalid creation date, or an expired creation date, NeMo Helix creates a new identifier. | Session identifier; onboarding step name, outcome, and invocation method; CLI command name, duration, and outcome; job type, duration, plugin references, model-data present/absent bucket, and token counts when available; CI flag; coding-agent flag; package version; CPU architecture. |
+| NeMo Helix | Random session identifier stored in local platform state and rotated every 30 days. If the state file has no creation date, an invalid creation date, or an expired creation date, NeMo Helix creates a new identifier. Each event also has a random ID for transport-retry deduplication. Onboarding steps share a random attempt ID for one setup invocation only; it is not persisted for later setups or workloads. | Session/event identifiers; onboarding attempt identifier, step name, outcome, and invocation method; CLI command name, duration, outcome, explicitly declared invocation origin, and bounded tool category; job type, duration, plugin references, bounded tool category, model-data present/absent bucket, and token counts with their job-summary counting boundary when available; CI flag; legacy coding-agent flag; package version; CPU architecture. |
 | Anonymizer | Per-session rotating identifier, not persistent across sessions. | Job-level operational metrics, such as final run status, processing time, record counts, token counts, configuration parameters, deployment type, and model endpoint information. |
 | Data Designer | Per-session rotating identifier, not persistent across sessions. | Model names used and input/output token counts. |
 | Guardrails | Per-session rotating identifier, not persistent across sessions. | Configuration and environment metrics, such as library version, Python version, operating system, Colang version, LLM engine names, rail configuration, active features, and deployment context. |
@@ -38,6 +38,48 @@ fingerprints, hostnames, or machine-derived identifiers.
 Aggregate data, such as model usage distribution and total token counts, may be
 shared publicly with the community. Telemetry is used to prioritize product
 improvements, not to track individual users.
+
+### Invocation Attribution and Measurement Limits
+
+CLI callers may explicitly declare `NEMO_INVOCATION_ORIGIN=agent` or
+`NEMO_INVOCATION_ORIGIN=human`. Missing or unrecognized values are reported as
+`unknown`, not human. Helix does not inspect processes or detect agent harnesses.
+The legacy coding-agent flag is true only for an explicit `agent` declaration;
+false does not establish human use. Events from before this field was introduced
+also have unknown origin; they must not be backfilled as human. This declaration
+never overrides telemetry opt-out settings.
+
+The common event envelope carries `sessionId`, indexed as `client.sessionId`, for
+commands, onboarding steps, and opted-in jobs submitted with CLI telemetry
+context. Jobs retain the submitting session ID even if they finish after the
+local CLI ID rotates. The local ID is reused across invocations until 30 days
+have elapsed since its creation, then replaced on the next lookup; it is not a
+30-day inactivity timeout or an identity for one terminal session. Clearing local
+state, using another machine, or a state-write failure can also change the ID.
+It identifies neither a person nor a permanent installation. `eventId` and
+`onboardingAttemptId` do not replace it.
+
+Current emitters supply `isCi` as a required boolean. Historical missing/null
+values indicate unknown classification, not false, and are not repaired by new
+emission. To exclude only known CI, retain unknown records separately; a strict
+`isCi=false` filter intentionally excludes unknown records too.
+
+Tool categories use a fixed allowlist of recognized operations. Administrative
+commands and unrecognized or mixed-tool workloads are not attributed to a single
+tool. Categories use current product names such as `garak`, `post-training`, and
+`evals`, even when a job uses an older source label. New plugins can be mapped to
+an existing category without a schema change; until explicitly mapped they remain
+`unknown`, not an arbitrary new category or automatically `other`. Adding a named
+category requires a schema change. A successful command submission is not proof
+that its workload succeeded.
+Job token counts describe the terminal job summary, not complete platform
+inference usage; unavailable measurements remain unknown (`-1`). They must not be
+added to underlying inference counts for the same work.
+
+Event IDs identify logical telemetry events and remain unchanged on transport
+retries. They do not by themselves deduplicate repeated job terminal
+notifications. Setup-attempt IDs distinguish separate invocations, not installs
+or people. Session rotation remains unchanged.
 
 ## Opt Out
 
