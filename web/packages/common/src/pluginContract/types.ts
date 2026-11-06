@@ -37,8 +37,6 @@ export interface PluginSidecar {
   contractVersion: string;
   /** Bare imports the built bundle leaves for the browser to resolve. */
   specifiers: string[];
-  /** Packages whose source was found bundled into the output. */
-  bundledPackages: string[];
   /** Package name to the version the plugin built (typed) against. */
   builtAgainst: Record<string, string>;
 }

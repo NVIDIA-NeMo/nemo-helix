@@ -11,3 +11,4 @@ export type {
   PluginContract,
   PluginSidecar,
 } from '@nemo/common/src/pluginContract/types';
+export { CONTRACT_DOCS } from '@nemo/common/src/pluginContract/remediate';
