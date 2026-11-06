@@ -9954,6 +9954,40 @@ interface Props$3 {
  */
 export declare const TableEmptyState: FC<Props$3>;
 //#endregion
+//#region src/components/VirtualDropdownList/index.d.ts
+interface VirtualDropdownListProps<R extends {
+  key: string;
+}> {
+  /** Headings and items share one flat index space. */
+  rows: readonly R[];
+  renderRow: (row: R) => ReactNode;
+  /** First-guess row height in px; rows measure themselves once mounted. */
+  estimateSize: (row: R) => number;
+  loading?: boolean;
+  /**
+   * Called as the user scrolls near the end, and again after each page that resolves while the end
+   * is still in view. Each call should load a page; skipped when {@link hasMore} is false.
+   */
+  onLoadMore?: () => void | Promise<void>;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  /** Footer copy once every page has loaded. Omit to render nothing. */
+  doneLoadingMessage?: string;
+  emptyMessage: string;
+  loadingMessage: string;
+}
+/**
+ * The scrollable body of a searchable dropdown, virtualized so only the visible slice of a long,
+ * paged catalogue is in the DOM, and asking for the next page as the user nears the end.
+ *
+ * Rows that carry hover submenus mount a details panel each, so an unvirtualized list of a few
+ * hundred entries mounts thousands of nodes on open — this keeps that cost proportional to the
+ * viewport instead of the catalogue.
+ */
+export declare function VirtualDropdownList<R extends {
+  key: string;
+}>({ rows, renderRow, estimateSize, loading, onLoadMore, hasMore, isLoadingMore, doneLoadingMessage, emptyMessage, loadingMessage }: VirtualDropdownListProps<R>): import("react/jsx-runtime").JSX.Element;
+//#endregion
 //#region ../../node_modules/.pnpm/react-hook-form@7.71.2_react@19.2.7/node_modules/react-hook-form/dist/constants.d.ts
 declare const VALIDATION_MODE: {
   readonly onBlur: "onBlur";
@@ -11232,4 +11266,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type VirtualDropdownListProps, type WithFilterOperators };
