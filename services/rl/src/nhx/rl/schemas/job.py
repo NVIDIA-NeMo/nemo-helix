@@ -360,12 +360,6 @@ class GRPOTraining(_TrainingBase):
         "and full weights. A stored or submitted `dtensor` is read as `automodel`: full-weight "
         "jobs saved that value, and it is not a separate worker.",
     )
-    v4_compatible: bool = Field(
-        default=True,
-        description="Keep the base checkpoint's transformers-v4 config.json on the trained "
-        "export. The platform's vLLM cannot read the v5 config Automodel otherwise writes. "
-        "Set false to export that v5 config instead.",
-    )
     val_at_start: bool = Field(
         default=False,
         description="Run a validation pass before the first training step. Enable it to measure "
@@ -628,6 +622,19 @@ class GRPOTraining(_TrainingBase):
         """
         if isinstance(data, dict) and data.get("policy_backend") == "dtensor":
             return {**data, "policy_backend": PolicyBackend.AUTOMODEL}
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_v4_compatible(cls, data: Any) -> Any:
+        """Backwards compatibility for jobs saved with ``v4_compatible``.
+
+        GRPO used to persist that flag, and list, get, and submit all validate
+        this model. The export always writes the transformers v5 ``config.json``
+        now, so the stored value is ignored.
+        """
+        if isinstance(data, dict) and "v4_compatible" in data:
+            return {key: value for key, value in data.items() if key != "v4_compatible"}
         return data
 
     @model_validator(mode="before")

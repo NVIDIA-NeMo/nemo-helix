@@ -492,7 +492,6 @@ def _build_grpo_training_step_config(
             name=job_spec.model,
             max_seq_length=t.max_seq_length,
             trust_remote_code=trust_remote_code,
-            v4_compatible=t.v4_compatible,
             has_vision_tower=recorded.has_vision_tower,
             has_audio_tower=recorded.has_audio_tower,
             num_experts=recorded.expert_count,
