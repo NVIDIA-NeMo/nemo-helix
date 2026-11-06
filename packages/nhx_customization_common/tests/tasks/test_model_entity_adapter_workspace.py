@@ -16,6 +16,7 @@ BASE_WORKSPACE = "ws-base"
 
 
 def _config() -> ModelEntityTaskConfig:
+    """A task config whose output workspace differs from the base model's workspace."""
     return ModelEntityTaskConfig.model_validate(
         {
             "name": "my-adapter",
@@ -32,20 +33,30 @@ def _config() -> ModelEntityTaskConfig:
 
 
 class _Conflict(ConflictError):
+    """The error the platform raises when the adapter name already exists."""
+
     def __init__(self) -> None:
+        """Skip ``ConflictError``'s response-based constructor, which needs an HTTP response."""
         Exception.__init__(self, "already exists")
 
 
 class _Result:
+    """Stands in for a client response; ``data()`` returns the payload."""
+
     def __init__(self, value: Any) -> None:
+        """Hold the payload ``data()`` will return."""
         self._value = value
 
     def data(self) -> Any:
+        """Return the payload."""
         return self._value
 
 
 class _Adapter:
+    """A minimal adapter payload."""
+
     def model_dump(self) -> dict:
+        """Return the adapter as a plain dict."""
         return {"name": "my-adapter"}
 
 
@@ -53,17 +64,20 @@ class _RecordingModels:
     """Records adapter calls. Nested (base-model-workspace) adapter endpoints are not provided on purpose."""
 
     def __init__(self, *, conflict: bool = False, fail_update: bool = False) -> None:
+        """Choose whether create conflicts and whether the follow-up update fails."""
         self.conflict = conflict
         self.fail_update = fail_update
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def create_adapter(self, **kwargs: Any) -> _Result:
+        """Record the call, raising a conflict when configured to."""
         self.calls.append(("create_adapter", kwargs))
         if self.conflict:
             raise _Conflict()
         return _Result(_Adapter())
 
     def update_adapter(self, **kwargs: Any) -> _Result:
+        """Record the call, failing when configured to."""
         self.calls.append(("update_adapter", kwargs))
         if self.fail_update:
             raise RuntimeError("boom")
@@ -71,6 +85,7 @@ class _RecordingModels:
 
 
 def _run(models: _RecordingModels) -> tuple[dict, Any]:
+    """Run the runner's adapter step against ``models`` with the base model in a different workspace."""
     base_me: Any = SimpleNamespace(name="base-model", workspace=BASE_WORKSPACE)
     runner_args: Any = (models, None, None)
     runner = ModelEntityRunner(*runner_args)
@@ -79,6 +94,7 @@ def _run(models: _RecordingModels) -> tuple[dict, Any]:
 
 
 def test_create_registers_adapter_in_output_workspace_with_qualified_base_model():
+    """The adapter is created in the output workspace and names the base model as ``workspace/name``."""
     models = _RecordingModels()
 
     result, base = _run(models)
@@ -93,6 +109,7 @@ def test_create_registers_adapter_in_output_workspace_with_qualified_base_model(
 
 
 def test_conflict_updates_adapter_in_output_workspace():
+    """A name conflict updates the existing adapter in the output workspace."""
     models = _RecordingModels(conflict=True)
 
     _run(models)
@@ -105,11 +122,13 @@ def test_conflict_updates_adapter_in_output_workspace():
 
 
 def test_no_call_targets_the_base_model_workspace():
+    """No adapter call is made against the base model's workspace."""
     for models in (_RecordingModels(), _RecordingModels(conflict=True)):
         _run(models)
         assert all(kwargs["workspace"] != BASE_WORKSPACE for _, kwargs in models.calls)
 
 
 def test_update_failure_after_conflict_is_reported():
+    """A failed update after a conflict is raised, not swallowed."""
     with pytest.raises(ModelEntityCreationError, match="already exists but update failed"):
         _run(_RecordingModels(conflict=True, fail_update=True))
