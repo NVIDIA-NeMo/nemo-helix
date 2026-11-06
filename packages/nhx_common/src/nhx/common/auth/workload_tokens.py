@@ -15,7 +15,13 @@ from nhx.common.config import AuthConfig, get_platform_config
 
 from .models import Principal
 from .signing_keys import RSASigningKey, RSASigningKeyCache
-from .token_claims import ActorClaims, TokenClaims, groups_from_claim, scopes_from_claim
+from .token_claims import (
+    ActorClaims,
+    TokenClaims,
+    groups_from_claim,
+    scopes_from_claim,
+    trusted_email_from_claims,
+)
 from .token_resolver import ResolvedBearerToken
 
 WORKLOAD_TOKEN_PATH = "/apis/auth/token"
@@ -379,10 +385,16 @@ async def validate_workload_subject_token(
         subject = claims.get(config.oidc.subject_claim, claims.get("sub"))
         if not isinstance(subject, str) or not subject:
             return None
-        email = claims.get(config.oidc.email_claim)
+        email = trusted_email_from_claims(config, claims)
+        if (
+            email is None
+            and config.oidc.subject_claim == config.oidc.email_claim
+            and config.oidc.require_verified_email
+        ):
+            return None
         return TokenClaims(
             subject=subject,
-            email=email if isinstance(email, str) else None,
+            email=email,
             groups=groups_from_claim(claims.get(config.oidc.groups_claim, claims.get("groups", []))),
             scopes=scopes_from_claim(claims.get("scope") or claims.get("scp")),
             raw_claims=claims,

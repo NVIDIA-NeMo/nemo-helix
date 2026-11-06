@@ -135,6 +135,7 @@ def generate_unsigned_jwt(
 
     if email:
         claims["email"] = email
+        claims["email_verified"] = True
     if groups:
         claims["groups"] = groups
     if scopes:
