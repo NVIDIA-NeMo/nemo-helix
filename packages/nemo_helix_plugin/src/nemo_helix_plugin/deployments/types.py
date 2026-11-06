@@ -275,6 +275,7 @@ class DeploymentConfig(_EntityEnvelope):
     drift_recovery: DriftRecoveryPolicy = Field(default_factory=DriftRecoveryPolicy, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    shm_size: str | None = Field(default=None, alias="shmSize")
     auth_proxy_sidecar: bool = Field(default=False, alias="authProxySidecar")
     auth_proxy_sidecar_identity: str | None = Field(default=None, alias="authProxySidecarIdentity")
     auth_proxy_sidecar_on_behalf_of: str | None = Field(default=None, alias="authProxySidecarOnBehalfOf")
@@ -343,6 +344,7 @@ class CreateDeploymentConfigRequest(_AliasModel):
     drift_recovery: DriftRecoveryPolicy | None = Field(default=None, alias="driftRecovery")
     labels: dict[str, str] = Field(default_factory=dict)
     backend_config: DeploymentBackendConfig = Field(default_factory=DeploymentBackendConfig, alias="backendConfig")
+    shm_size: str | None = Field(default="8Gi", alias="shmSize")
     workload_identity: WorkloadIdentitySpec | None = Field(default=None, alias="workloadIdentity")
 
 

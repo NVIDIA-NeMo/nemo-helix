@@ -3,11 +3,11 @@
 
 import { parseFilesetLocation } from '@nemo/common/src/components/DatasetFileSelect/parseFilesetLocation';
 import { FABRIC_CONFIG_FORMAT } from '@nemo/common/src/utils/agents';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type { RunStrategySpec } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategySpec';
 import { filesDownloadFile } from '@nemo/sdk/generated/platform/files';
 import { parseOptimizeConfig } from '@studio/api/agents/optimizeBundle';
 import type { Trial } from '@studio/routes/agents/AgentOptimizationDetailRoute/studyResults';
-import { isPlainObject } from '@studio/util/functions';
 
 // translate_agent_config publishes the default harness's model under this key.
 const FABRIC_DEFAULT_MODEL_KEY = 'default';

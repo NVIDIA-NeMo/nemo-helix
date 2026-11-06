@@ -7,7 +7,7 @@ import {
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import {
   type UploadModalState,
-  initialState,
+  uploadModalInitialState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
 import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
@@ -28,7 +28,7 @@ const createWrapper = (
 
   const mockDispatch = dispatch || vi.fn();
   const state: UploadModalState = {
-    ...initialState,
+    ...uploadModalInitialState,
     ...stateOverrides,
   };
 

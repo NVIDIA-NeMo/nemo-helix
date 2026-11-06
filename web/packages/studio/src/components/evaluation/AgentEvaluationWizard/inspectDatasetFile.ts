@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { parseJsonOrJsonl, type ParsedJsonRecords } from '@nemo/common/src/utils/parseRecords';
 import { readParquetRows } from '@studio/api/datasets/filesetParquetRows';
 import {
@@ -17,9 +18,6 @@ export interface DatasetInspection {
   storedName?: string;
   error?: string;
 }
-
-const isRecord = (value: unknown): boolean =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const storedAs = (
   records: readonly unknown[],
@@ -47,7 +45,7 @@ const inspectJsonText = (rawText: string): DatasetInspection => {
   }
   const { records, format } = parsed;
 
-  if (records.length > 0 && !records.every(isRecord)) {
+  if (records.length > 0 && !records.every(isPlainObject)) {
     return { error: 'Every dataset record must be a JSON object.' };
   }
   return storedAs(records, format);
