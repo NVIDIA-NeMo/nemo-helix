@@ -10189,7 +10189,7 @@ paths:
         schema:
           type: string
           maxLength: 255
-          pattern: ^[\w\-.]+$
+          pattern: ^[\w.+@-]+$
           title: Workspace
       - name: sort
         in: query

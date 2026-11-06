@@ -5,6 +5,7 @@
 
 from datetime import UTC, datetime
 from importlib import import_module
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from urllib.parse import quote
 
@@ -18,6 +19,7 @@ from nemo_helix_plugin.entities.base import EntityBase, EntityNotFoundError, Ent
 from nemo_helix_plugin.iam.types import RoleBindingInput
 from nhx.common.auth.models import Principal
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
+from nhx.core.entities.api.v2.workspaces.schemas import WorkspaceInput
 from pydantic import ValidationError
 
 MODELS = "nhx.core.models.api.v2."
@@ -384,3 +386,22 @@ def test_remaining_provider_routes_preserve_service_errors(endpoint, method, bod
         assert operation.await_args.args[1] == workspace
     else:
         assert operation.await_args.args[0] == workspace
+
+
+@pytest.mark.parametrize("workspace", ["team+dev", "team@dev"])
+def test_provider_list_preserves_empty_workspaces_with_supported_punctuation(workspace):
+    """Collection reads must accept real workspace names even when no provider DTO exists."""
+    assert WorkspaceInput(name=workspace).name == workspace
+    module = import_module(MODELS + "providers")
+    client, path, _ = route_client(MODELS + "providers", "list_providers")
+    store = AsyncMock()
+    store.list.return_value = SimpleNamespace(
+        data=[], pagination=SimpleNamespace(page=1, page_size=100, total_pages=1, total_results=0)
+    )
+    client.app.dependency_overrides[module.get_model_provider_service] = override(module.ModelProviderService(store))
+    response = client.get(path.format(workspace=quote(workspace, safe="")))
+    assert response.status_code == 200, response.text
+    assert response.json()["data"] == []
+    assert response.json()["pagination"]["total_results"] == 0
+    store.list.assert_awaited_once()
+    assert store.list.await_args.kwargs["workspace"] == workspace

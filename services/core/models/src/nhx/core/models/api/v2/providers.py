@@ -53,7 +53,7 @@ provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth
     ),
 )
 async def list_providers(
-    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
+    workspace: Annotated[str, Path(pattern=RESOURCE_LOOKUP_NAME_PATTERN, max_length=MAX_LENGTH_255)],
     page_params: PageParams = Depends(make_page_dep()),
     sort: ModelProviderSort = Query(
         default=ModelProviderSort.CREATED_AT_ASC,
@@ -65,6 +65,7 @@ async def list_providers(
     """
     List model providers for a specific workspace.
     """
+    # Canonical workspace names may contain +/@ even when no provider DTO exists in an empty page.
     # Extract workspace — inject from path param if not in filter
     filter_workspace = parsed_filter.remove("workspace") or workspace
     try:
