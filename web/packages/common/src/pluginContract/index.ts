@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { PLUGIN_CONTRACT } from '@nemo/common/src/pluginContract/contract';
-export { diffContract, hasBlockingIssues } from '@nemo/common/src/pluginContract/diffContract';
+export { diffContract } from '@nemo/common/src/pluginContract/diffContract';
 export type {
   ContractEntry,
   ContractEntryKind,
   ContractIssue,
   IssueCode,
-  IssueSeverity,
   PluginContract,
   PluginSidecar,
 } from '@nemo/common/src/pluginContract/types';

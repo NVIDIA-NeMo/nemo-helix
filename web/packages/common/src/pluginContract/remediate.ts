@@ -38,14 +38,8 @@ export const contractUnsupported = (built: string, current: string): Fix =>
     `Rebuild the plugin against the current contract (${current}) with pnpm build.`
   );
 
-const versionFix = (pkg: string, built: string, studio: string, detail: string): Fix =>
+export const versionIncompatible = (pkg: string, built: string, studio: string): Fix =>
   fix(
-    `"${pkg}" was built against ${built}, but Studio ships ${studio}${detail}.`,
+    `"${pkg}" was built against ${built}, but Studio ships ${studio} (different major version).`,
     `Set "${pkg}" to "${studio}" in the plugin's web/package.json, then rebuild with pnpm build.`
   );
-
-export const versionIncompatible = (pkg: string, built: string, studio: string): Fix =>
-  versionFix(pkg, built, studio, ' (different major version)');
-
-export const versionDrift = (pkg: string, built: string, studio: string): Fix =>
-  versionFix(pkg, built, studio, '');
