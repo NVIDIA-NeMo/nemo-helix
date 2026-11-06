@@ -51,7 +51,6 @@ export const InferenceParameters: FC<InferenceParametersProps> = ({
               onChange({ ...value, [key]: v ?? value[key] ?? param.default }),
           }}
           defaultValue={param.default}
-          displayName={param.name}
           disabled={disabled}
           min={param.min}
           max={param.max}
