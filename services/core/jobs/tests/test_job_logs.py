@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from nemo_helix_plugin.files.client import AsyncFilesClient
 from nhx.common.entities import DEFAULT_WORKSPACE, EntityClient
 from nhx.common.jobs.log_client import dep_job_logs_client
 from nhx.common.jobs.schemas import HelixJobLog, HelixJobLogPage, InvalidPageCursorError
@@ -58,9 +59,11 @@ class TestJobLogsAPI:
         """Create a real dispatcher with test entity store and mock clients."""
         projects = ["default/test-project"]
         with create_test_client(client_type=EntityClient, projects=projects) as mock_store:
-            mock_files = AsyncMock()
+            mock_files = AsyncMock(spec=AsyncFilesClient)
+            mock_files.with_retry.return_value = mock_files
             mock_fileset_obj = MagicMock()
             mock_fileset_obj.name = "test-fileset-id"
+            mock_fileset_obj.id = "test-fileset-generation"
             mock_resp = MagicMock()
             mock_resp.data.return_value = mock_fileset_obj
             mock_files.create_fileset.return_value = mock_resp

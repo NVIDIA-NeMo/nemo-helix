@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class JobsStorageConfig(BaseModel):
-    """How long a paused or failed job keeps its storage, and how often that is checked.
+    """Creation cleanup deadlines and storage retention for stopped jobs.
 
     These are platform settings under ``jobs.storage`` in the platform config, and
     each deployment can set its own values. The numbers here are only the defaults.
@@ -24,6 +24,13 @@ class JobsStorageConfig(BaseModel):
     job always uses ``failed_storage_ttl_seconds``.
     """
 
+    creation_timeout_seconds: int = Field(
+        default=900,
+        ge=1,
+        description="Age after Job persistence at which unfinished setup becomes eligible for cleanup. "
+        "The controller claims expired setup with version checks before cleanup; "
+        "an ambiguous Files allocation keeps its ownership reference until reconciled.",
+    )
     paused_storage_ttl_seconds: int = Field(
         default=7 * 24 * 3600,
         ge=0,
@@ -85,7 +92,7 @@ class JobsServiceConfig(create_service_config_class("jobs")):  # type: ignore
     )
     storage: JobsStorageConfig = Field(
         default_factory=JobsStorageConfig,
-        description="How long paused and failed jobs keep their storage.",
+        description="Cleanup timeout for incomplete creation and storage retention for stopped jobs.",
     )
     include_job_logs_in_diagnostics: bool = Field(
         default=False,

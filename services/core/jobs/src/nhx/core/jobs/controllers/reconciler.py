@@ -6,11 +6,13 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from typing import cast
+from typing import TypeVar, cast
 
 from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NemoHTTPError
+from nemo_helix_plugin.client.errors import NotFoundError as ClientNotFoundError
 from nemo_helix_plugin.entities.client import EntitiesClient
+from nemo_helix_plugin.files.client import FilesClient
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.types import (
     HelixJobStatusUpdateRequest,
@@ -20,10 +22,18 @@ from nemo_helix_plugin.jobs.types import (
     ListStepsQueryParams,
 )
 from nhx.common.controller import Controller, HeartbeatMixin
-from nhx.common.entities import SYSTEM_WORKSPACE, EntityConflictError, SyncEntityClient
+from nhx.common.entities import (
+    ALL_WORKSPACES,
+    SYSTEM_WORKSPACE,
+    EntityConflictError,
+    EntityNotFoundError,
+    SyncEntityClient,
+)
+from nhx.common.entities.client import EntityBase
 from nhx.common.jobs.schemas import HelixJobStatus
 from nhx.common.observability import scoped_app_ctx, start_span_with_ctx
 from nhx.core.jobs.app.constants import (
+    JOB_CREATION_PENDING_KEY,
     JOB_TASK_CLEANUP_PENDING_KEY,
     STOPPED_AT,
     STORAGE_RECLAIMED_AT,
@@ -41,12 +51,14 @@ from nhx.core.jobs.config import config as jobs_config
 from nhx.core.jobs.controllers.backends import extract_provider_profile
 from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.diagnostics import log_job_diagnostics_if_debug
-from nhx.core.jobs.entities import HelixJobStorageReclaim, JobStorageTarget
+from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep, HelixJobStorageReclaim, JobStorageTarget
 from opentelemetry import metrics, trace
 
 tracer = trace.get_tracer(__name__)
 meter = metrics.get_meter(__name__)
 logger = logging.getLogger(__name__)
+
+CleanupEntityT = TypeVar("CleanupEntityT", bound=EntityBase)
 
 
 class JobReconciler(HeartbeatMixin, Controller):
@@ -65,10 +77,12 @@ class JobReconciler(HeartbeatMixin, Controller):
         # ``workspace=`` explicitly (incl. cross-workspace "-"), so the client's
         # default workspace is never relied upon.
         self._jobs = JobsClient.from_client(nemo_client)
+        self._files = FilesClient.from_client(nemo_client)
         self._stop_signal = stop_signal
         self._is_healthy = False
         self._logger = logger
         self._last_retention_at: float | None = None
+        self._reclaim_page = 1
         # Storage reclaim records outlive the jobs they describe, so they are read from the
         # entity store as the jobs service rather than through the jobs API.
         self._system_entities = system_entity_client or SyncEntityClient(
@@ -114,6 +128,8 @@ class JobReconciler(HeartbeatMixin, Controller):
             except NemoClientError:
                 self._is_healthy = False
                 logger.exception("Could not fetch job steps for reconciliation", exc_info=True)
+                # Queued cleanup uses the Entity and Files services directly.
+                self._enforce_storage_retention()
                 return
 
         with tracer.start_as_current_span("jobs_reconciler/fetch_summary") as span:
@@ -241,6 +257,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         if self._last_retention_at is not None and now - self._last_retention_at < interval:
             return
         self._last_retention_at = now
+        self._discover_failed_creations()
         try:
             steps = self._list_steps_with_status(
                 [HelixJobStatus.PAUSED.value, HelixJobStatus.ERROR.value, HelixJobStatus.CANCELLED.value],
@@ -263,29 +280,211 @@ class JobReconciler(HeartbeatMixin, Controller):
             finally:
                 self.emit_heartbeat()
 
-    def _reclaim_queued_storage(self) -> None:
-        """Reclaim the storage of deleted and stopped jobs, and clear each record once it is gone.
+    def _cleanup_entities(
+        self, entity_type: type[CleanupEntityT], workspace: str, filters: dict[str, str | bool]
+    ) -> list[CleanupEntityT]:
+        """Read every page without tying incomplete-Job discovery to steps."""
+        result: list[CleanupEntityT] = []
+        page = 1
+        while True:
+            response = self._system_entities.list(
+                entity_type, workspace=workspace, filter_obj=filters, page=page, page_size=100
+            )
+            result.extend(response.data)
+            self.emit_heartbeat()
+            if len(response.data) < 100:
+                return result
+            page += 1
 
-        Runs every tick: a deleted job's record holds its name, and some backends remove storage
-        in the background, so a record stays until a later tick finds the removal done.
-        """
+    def _discover_failed_creations(self) -> None:
+        """Repair a failed request's queue handoff from the retained Job marker."""
         try:
-            # One page per tick. Anything beyond it is picked up on the next tick.
-            reclaims = list(self._system_entities.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE).data)
+            jobs = self._cleanup_entities(HelixJob, ALL_WORKSPACES, {"creation_failed": True})
+            pending = self._cleanup_entities(HelixJob, ALL_WORKSPACES, {"creation_pending": True})
+            known = {job.id for job in jobs}
+            for candidate in pending:
+                if (
+                    candidate.id in known
+                    or candidate.created_at is None
+                    or not storage_window_expired(candidate.created_at, self._storage_config.creation_timeout_seconds)
+                ):
+                    continue
+                # Age only selects a candidate. The CAS claim fences a creator's
+                # subsequent Job writes; step claims below fence an in-flight release.
+                self.emit_heartbeat()
+                try:
+                    current = self._system_entities.get_by_id(HelixJob, candidate.id)
+                except EntityNotFoundError:
+                    continue
+                if not current.creation_pending:
+                    continue
+                current.creation_failed = True
+                current.fileset_allocation_uncertain = (
+                    current.fileset_creation_pending
+                    and current.fileset_creation_started
+                    and current.output_location is None
+                )
+                try:
+                    current = self._system_entities.update(current)
+                except EntityConflictError:
+                    continue
+                jobs.append(current)
+        except Exception:
+            logger.exception("Could not discover failed Job creations")
+            return
+        for job in jobs:
+            try:
+                self._system_entities.create(HelixJobStorageReclaim.for_failed_creation(job))
+            except EntityConflictError:
+                pass
+            except Exception:
+                logger.exception("Could not queue failed Job creation", extra={"job": job.id})
+            finally:
+                self.emit_heartbeat()
+
+    def _prepare_failed_creation(self, reclaim: HelixJobStorageReclaim) -> HelixJobStorageReclaim | None:
+        """Fence unpublished steps, reconcile ownership and remove only this failed Job."""
+        try:
+            job = self._system_entities.get_by_id(HelixJob, reclaim.job_id)
+        except EntityNotFoundError:
+            return reclaim
+        if job.workspace != reclaim.job_workspace or job.name != reclaim.job_name:
+            raise RuntimeError("Failed creation cleanup identity does not match its Job.")
+        attempts = self._cleanup_entities(HelixJobAttempt, job.workspace, {"job": job.id})
+        steps = [
+            step
+            for attempt in attempts
+            for step in self._cleanup_entities(HelixJobStep, job.workspace, {"attempt_id": attempt.id})
+        ]
+        if any(not step.status_details.get(JOB_CREATION_PENDING_KEY) for step in steps):
+            # The final release committed, possibly losing its response. It is a
+            # submitted Job: preserve its resources and let its ordinary lifecycle run.
+            job.creation_failed = False
+            job.creation_pending = False
+            self._system_entities.update(job)
+            self._delete_reclaim(reclaim)
+            return None
+        for step in steps:
+            if step.status != HelixJobStatus.CANCELLED:
+                # CAS competes with final release. If release wins, the next pass
+                # sees it above. If cleanup wins, that stale release cannot commit.
+                step.status = HelixJobStatus.CANCELLED
+                self._system_entities.update(step)
+                self.emit_heartbeat()
+        job.creation_failed = True
+        job = self._system_entities.update(job)
+        fileset_name = reclaim.fileset_name
+        if fileset_name is not None:
+            try:
+                fileset = (
+                    self._files.get_fileset_by_id(fileset_id=reclaim.fileset_id, workspace=job.workspace)
+                    if reclaim.fileset_id is not None
+                    else self._files.get_fileset(name=fileset_name, workspace=job.workspace)
+                ).data()
+            except ClientNotFoundError:
+                if reclaim.fileset_id is None and reclaim.fileset_allocation_uncertain:
+                    logger.warning("Retaining a Job whose Files allocation outcome is unknown", extra={"job": job.id})
+                    return None
+                fileset_name = None
+            else:
+                if reclaim.fileset_id is None and fileset.custom_fields.get("job_id") != job.id:
+                    if reclaim.fileset_allocation_uncertain:
+                        return None
+                    fileset_name = None
+                else:
+                    reclaim.fileset_id = fileset.id
+        reclaim.fileset_name = fileset_name
+        reclaim = self._system_entities.update(reclaim)
+        # The Job is the ownership root. Cascading its never-released execution
+        # tree is safe only after the CAS step claims above and durable handoff.
+        self._system_entities.delete_by_id(HelixJob, job.id, expected_db_version=job.db_version)
+        return reclaim
+
+    def _reclaim_queued_storage(self) -> None:
+        """Run all queued Job resource cleanup, preserving unfinished targets."""
+        try:
+            response = self._system_entities.list(
+                HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE, page=self._reclaim_page, page_size=100
+            )
+            reclaims = list(response.data)
+            if not reclaims and self._reclaim_page != 1:
+                self._reclaim_page = 1
+                reclaims = list(
+                    self._system_entities.list(
+                        HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE, page=1, page_size=100
+                    ).data
+                )
+            self._reclaim_page = self._reclaim_page + 1 if len(reclaims) == 100 else 1
         except Exception:
             logger.exception("Could not list job storage to reclaim")
             return
         for reclaim in reclaims:
             extra = {"job": reclaim.job_name, "workspace": reclaim.job_workspace}
             try:
+                if reclaim.failed_creation:
+                    prepared = self._prepare_failed_creation(reclaim)
+                    if prepared is None:
+                        continue
+                    reclaim = prepared
                 if not self._reclaim_storage(reclaim):
                     continue
-                self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id)
-                logger.info("Reclaimed job storage", extra=extra)
+                # _reclaim_storage persists backend progress; use its current
+                # record so a later fileset retry never reintroduces finished targets.
+                reclaim = self._system_entities.get_by_id(HelixJobStorageReclaim, reclaim.id)
+                if reclaim.targets:
+                    continue
+                completed = self._reclaim_fileset(reclaim)
+                if completed is None:
+                    continue
+                self._delete_reclaim(completed)
+                logger.info("Reclaimed job resources", extra=extra)
+            except EntityNotFoundError:
+                pass  # Another worker completed this exact record.
             except Exception:
-                logger.exception("Could not reclaim job storage", extra=extra)
+                logger.exception("Could not reclaim job resources", extra=extra)
             finally:
                 self.emit_heartbeat()
+
+    def _delete_reclaim(self, reclaim: HelixJobStorageReclaim) -> None:
+        """Do not discard ownership added concurrently by a Job deletion."""
+        self._system_entities.delete_by_id(HelixJobStorageReclaim, reclaim.id, expected_db_version=reclaim.db_version)
+
+    def _reclaim_fileset(self, reclaim: HelixJobStorageReclaim) -> HelixJobStorageReclaim | None:
+        """Remove owned artifacts only after the Job is gone; retain failures."""
+        fileset_name = reclaim.fileset_name
+        if fileset_name is None and reclaim.fileset_id is None:
+            return reclaim
+        try:
+            self._system_entities.get_by_id(HelixJob, reclaim.job_id)
+        except EntityNotFoundError:
+            pass
+        else:
+            return None
+        try:
+            if reclaim.fileset_id is not None:
+                fileset = self._files.get_fileset_by_id(
+                    fileset_id=reclaim.fileset_id, workspace=reclaim.job_workspace
+                ).data()
+            elif fileset_name is not None:
+                fileset = self._files.get_fileset(name=fileset_name, workspace=reclaim.job_workspace).data()
+            else:
+                return reclaim
+        except ClientNotFoundError:
+            return reclaim
+        if reclaim.fileset_id is None:
+            # A legacy name is discovery input, not evidence of the original generation.
+            if fileset.custom_fields.get("job_id") != reclaim.job_id:
+                logger.warning(
+                    "Retaining cleanup with unresolved legacy Files ownership", extra={"job": reclaim.job_id}
+                )
+                return None
+            reclaim.fileset_id = fileset.id
+            reclaim = self._system_entities.update(reclaim)
+        try:
+            self._files.delete_fileset_by_id(fileset_id=fileset.id, workspace=reclaim.job_workspace)
+        except ClientNotFoundError:
+            pass
+        return reclaim
 
     def _reclaim_storage(self, reclaim: HelixJobStorageReclaim) -> bool:
         """Persist each completed target before moving on to another one.
@@ -294,6 +493,14 @@ class JobReconciler(HeartbeatMixin, Controller):
         them again would start a new cleanup, so only unfinished targets may run on later ticks.
         This also lets provider aliases sharing a cleanup workload make forward progress.
         """
+        if reclaim.targets:
+            try:
+                current_job = self._system_entities.get(HelixJob, reclaim.job_name, workspace=reclaim.job_workspace)
+            except EntityNotFoundError:
+                pass
+            else:
+                if current_job.id != reclaim.job_id:
+                    return False
         for target in reclaim.targets:
             try:
                 backend = self._backend_registry.get_backend(provider=target.provider, profile=target.profile)

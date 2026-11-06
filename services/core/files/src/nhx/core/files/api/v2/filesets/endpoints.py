@@ -6,6 +6,7 @@
 import logging
 from dataclasses import dataclass
 from typing import ClassVar
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -300,7 +301,7 @@ async def create_fileset(
     try:
         if create_request.storage is None:
             default_config = config.default_storage_config
-            storage = default_config.copy_config(f"filesets/{workspace}/{create_request.name}")
+            storage = default_config.copy_config(f"fileset-generations/{workspace}/{uuid4().hex}")
             secrets = {}  # Local storage doesn't have any secrets
         else:
             _validate_user_storage_config(create_request.storage, config)

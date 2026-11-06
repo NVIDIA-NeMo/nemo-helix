@@ -76,6 +76,8 @@ Fileset management operations (create, retrieve, list, delete) are available thr
 
 When retaining a reference across requests, use the fileset ID with the SDK's `get_fileset_by_id` and `delete_fileset_by_id` methods. A delayed request for a deleted ID cannot affect a new fileset with the same name. Deletion by ID performs the same reference checks and storage cleanup as deletion by name.
 
+Filesets created with default storage receive a separate directory or prefix for each generation. Reusing a name does not reuse the previous generation's storage location. Existing filesets and explicitly supplied storage configurations keep their stored locations.
+
 <Tip>
 
 CLI commands use the workspace from your current context by default. Use `--workspace` to specify a different workspace:

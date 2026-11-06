@@ -686,13 +686,15 @@ class TestFilesBasic:
                 pass
 
     def test_fileset_default_storage_path(self, client: NemoClient):
-        """Test that fileset created without storage uses default with workspace/name subpath."""
+        """Default storage uses a generation directory instead of the reusable fileset name."""
         with create_fileset(FilesClient.from_client(client), purpose="generic") as fileset:
             # Verify storage config was set with the expected subpath
             assert fileset.storage is not None
             assert fileset.storage.type == "local"
-            # The path should end with filesets/{workspace}/{name}
-            assert fileset.storage.path.endswith(f"filesets/{DEFAULT_WORKSPACE_ID}/{fileset.name}")
+            root = Path(fileset.storage.path)
+            assert root.parent.name == DEFAULT_WORKSPACE_ID
+            assert root.parent.parent.name == "fileset-generations"
+            assert root.name != fileset.name
 
     def test_fileset_delete_removes_storage_data(self, client: NemoClient):
         """Test that deleting a fileset also deletes the underlying storage directory."""
