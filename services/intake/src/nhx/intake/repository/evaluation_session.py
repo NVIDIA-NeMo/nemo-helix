@@ -66,12 +66,5 @@ class EvaluationSessionRepository(ABC):
         mode: IntakeResponseMode,
         sort_keys: list[tuple[str, bool]] | None = None,
     ) -> EvaluationSessionPage:
-        """Return one page of sessions for an Evaluation.
-
-        ``created_after`` bounds the sessions to those whose ``root_started_at`` is at or after that
-        instant (inclusive, floored to the whole second so second-truncated producer timestamps do
-        not lose the first run). ``None`` keeps the name-only match. Callers pass the Evaluation
-        entity's ``created_at`` so an Evaluation recreated under a deleted Evaluation's name does not
-        list the deleted one's sessions.
-        """
+        """Return one page of sessions for an Evaluation, limited to runs ingested since ``created_after``."""
         pass

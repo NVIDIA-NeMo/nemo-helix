@@ -126,50 +126,23 @@ async def test_list_sessions_maps_rows_and_binds_all_request_values() -> None:
     assert executor.queries[2].parameters["page_storage_keys"] == [
         (1767225600000000, "trace-session-a", "root-session-a")
     ]
-    # No created_after bound: no clause, no parameter, in any query shape.
     for query in executor.queries:
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" not in query.statement
         assert "created_after_us" not in query.parameters
 
 
+@pytest.mark.parametrize(
+    "sort_keys,page_query_name",
+    [
+        pytest.param([("cost_total_usd", True)], "evaluation_sessions.metric_sort.page", id="metric-sort"),
+        pytest.param(None, "evaluation_sessions.page", id="plain"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_list_sessions_binds_every_query_shape_to_created_after() -> None:
-    created_after = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
-    executor = _Executor(
-        [
-            [{"count()": 2}],
-            [_page_ref("session-a"), _page_ref("session-b")],
-            [_session_record("session-a"), _session_record("session-b")],
-        ]
-    )
-
-    page = await _repository(executor).list_sessions(
-        workspace="default",
-        evaluation_name="evaluation-a",
-        created_after=created_after,
-        page=1,
-        page_size=2,
-        mode="summary",
-        sort_keys=[("cost_total_usd", True)],
-    )
-
-    assert page.total == 2
-    assert [query.name for query in executor.queries] == [
-        "evaluation_sessions.count",
-        "evaluation_sessions.metric_sort.page",
-        "evaluation_sessions.hydrate",
-    ]
-    created_after_us = int(created_after.timestamp() * 1_000_000)
-    for query in executor.queries:
-        # The inclusive lower bound appears on every session query shape that lists this
-        # evaluation: the count, the metric-sort page query, and the hydration re-read.
-        assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
-        assert query.parameters["created_after_us"] == created_after_us
-
-
-@pytest.mark.asyncio
-async def test_list_sessions_bound_applies_to_plain_page_query() -> None:
-    created_after = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
+async def test_list_sessions_binds_every_query_shape_to_created_after(
+    sort_keys: list[tuple[str, bool]] | None, page_query_name: str
+) -> None:
+    created_after = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
     executor = _Executor([[{"count()": 1}], [_page_ref("session-a")], [_session_record("session-a")]])
 
     await _repository(executor).list_sessions(
@@ -179,38 +152,17 @@ async def test_list_sessions_bound_applies_to_plain_page_query() -> None:
         page=1,
         page_size=10,
         mode="summary",
+        sort_keys=sort_keys,
     )
 
-    # The plain page query (no metric sort) carries the same bound as count and hydrate.
     assert [query.name for query in executor.queries] == [
         "evaluation_sessions.count",
-        "evaluation_sessions.page",
+        page_query_name,
         "evaluation_sessions.hydrate",
     ]
     for query in executor.queries:
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" in query.statement
-        assert query.parameters["created_after_us"] == int(created_after.timestamp() * 1_000_000)
-
-
-@pytest.mark.asyncio
-async def test_list_sessions_floors_created_after_to_whole_second() -> None:
-    created_after = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
-    executor = _Executor([[{"count()": 0}]])
-
-    await _repository(executor).list_sessions(
-        workspace="default",
-        evaluation_name="evaluation-a",
-        created_after=created_after,
-        page=1,
-        page_size=10,
-        mode="summary",
-    )
-
-    # A sub-second created_at must not drop a session whose whole-second start time falls in
-    # the same second as the Evaluation's creation.
-    assert executor.queries[0].parameters["created_after_us"] == int(
-        created_after.replace(microsecond=0).timestamp() * 1_000_000
-    )
+        assert query.parameters["created_after_us"] == 1772366400123456
 
 
 @pytest.mark.asyncio

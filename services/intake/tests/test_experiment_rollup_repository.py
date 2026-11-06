@@ -3,7 +3,7 @@
 
 """Evaluation rollup repository tests."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 from nhx.intake.repository.clickhouse.evaluation_rollup import ClickHouseEvaluationRollupRepository
@@ -175,8 +175,6 @@ async def test_evaluation_rollups_anchor_on_root_session_membership():
     assert "tokens_p99" in statements[2]
     assert "sessions.trace_id = spans.trace_id" not in statements[2]
     assert executor.queries[0].parameters["evaluation_name_0"] == "exp-a"
-    # An unbounded (None) created_at keeps today's name-only match: no lower-bound clause,
-    # no created_after parameter, in any of the three rollup queries.
     for query in executor.queries:
         assert "event_ts >=" not in query.statement
         assert not any(key.startswith("created_after_") for key in query.parameters)
@@ -189,8 +187,8 @@ def _empty_results() -> list[list[dict[str, object]]]:
     return [[], [], []]
 
 
-_CREATED_AFTER = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
-_CREATED_AFTER_US = int(_CREATED_AFTER.timestamp() * 1_000_000)
+_CREATED_AFTER = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
+_CREATED_AFTER_US = 1772366400123456
 
 
 @pytest.mark.asyncio
@@ -204,29 +202,10 @@ async def test_evaluation_rollups_bound_sessions_to_created_after():
         created_after_by_name={"exp-a": _CREATED_AFTER},
     )
 
-    # The bound lands on the scoped-session SQL, so every rollup query (run counts,
-    # scores, metrics) sees it, with the instant as an inclusive lower bound. One requested
-    # name emits a bare conjunct — the OR form would block partition pruning on root_started_at.
+    # A single name gets a bare conjunct; the OR form would block partition pruning.
     for query in executor.queries:
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
         assert "evaluation_name !=" not in query.statement
-        assert query.parameters["created_after_0"] == _CREATED_AFTER_US
-
-
-@pytest.mark.asyncio
-async def test_evaluation_rollups_floor_created_after_to_whole_second():
-    executor = _Executor(_empty_results())
-    repository = _repository(executor)
-
-    await repository.get_rollups(
-        workspace="default",
-        evaluation_names=["exp-a"],
-        # A sub-second created_at must not drop a run whose whole-second start time falls in
-        # the same second as the Evaluation's creation.
-        created_after_by_name={"exp-a": _CREATED_AFTER + timedelta(microseconds=123456)},
-    )
-
-    for query in executor.queries:
         assert query.parameters["created_after_0"] == _CREATED_AFTER_US
 
 
@@ -241,8 +220,6 @@ async def test_evaluation_rollups_bound_only_names_with_created_after():
         created_after_by_name={"exp-a": _CREATED_AFTER, "exp-b": None},
     )
 
-    # exp-a is bounded; exp-b keeps the name-only match. The bound for one name must not
-    # leak onto the other.
     for query in executor.queries:
         assert "event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)" in query.statement
         assert "%(created_after_1)s" not in query.statement

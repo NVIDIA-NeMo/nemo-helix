@@ -122,9 +122,6 @@ class EvaluationReadService:
 
         rollups, available = await self._get_rollups(
             workspace=workspace,
-            # Bound each evaluation's rollup to its own creation so a name reused after a delete
-            # does not inherit the deleted evaluation's runs. created_at is None for legacy rows;
-            # that keeps the name-only match.
             created_after_by_name={evaluation.name: evaluation.created_at for evaluation in evaluations},
             evaluation_names=[evaluation.name for evaluation in evaluations],
         )
@@ -148,8 +145,6 @@ class EvaluationReadService:
         mode: IntakeResponseMode,
         sort_keys: list[tuple[str, bool]] | None,
     ) -> EvaluationSessionPage:
-        # The live entity is loaded first (it also 404s missing/deleted evaluations); its created_at
-        # bounds the session list to this evaluation's own lifetime, not its deleted namesake's.
         evaluation = await self._get_live_evaluation(workspace=workspace, name=evaluation_name)
         if self._sessions is None:
             raise EvaluationTelemetryUnavailableError(configured=False)
@@ -209,7 +204,7 @@ class EvaluationReadService:
                 True,
             )
         except MissingCreatedAfterError:
-            # A caller bug, not a ClickHouse outage: fail loudly instead of reporting rollups unavailable.
+            # A caller bug, not a ClickHouse outage.
             raise
         except Exception:
             logger.exception("Skipping evaluation rollup hydration because ClickHouse is unavailable")

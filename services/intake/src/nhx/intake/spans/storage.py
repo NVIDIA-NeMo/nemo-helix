@@ -25,27 +25,13 @@ def utc_now() -> datetime:
 
 
 def to_unix_micros(value: datetime) -> int:
-    """Datetime to Unix microseconds, as consumed by ``fromUnixTimestamp64Micro``.
+    """Datetime to Unix microseconds for ``fromUnixTimestamp64Micro``; naive values are UTC.
 
-    Naive values read as UTC: entity-store timestamps are UTC, and a local-time reading would
-    silently shift an Evaluation lifetime bound by the server's offset. Integer arithmetic keeps
-    exact microsecond resolution (a float seconds product can round at current epoch scale).
+    Integer arithmetic, because a float seconds product loses microseconds at current epoch scale.
     """
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return (value - datetime(1970, 1, 1, tzinfo=timezone.utc)) // timedelta(microseconds=1)
-
-
-def created_after_bound_micros(created_after: datetime) -> int:
-    """Inclusive ``event_ts`` lifetime lower bound, floored to the whole second.
-
-    The bound is on ingest time, not the producer's span start time: runs are often published after
-    they happened, under an Evaluation created after the run. Ingest requires the Evaluation to
-    exist, so a run's ``event_ts`` follows its ``created_at``; the floor absorbs sub-second clock
-    skew between the entity store and intake. Rows of a deleted namesake ingested in the same
-    second as the recreation still match.
-    """
-    return to_unix_micros(created_after.replace(microsecond=0))
 
 
 def stable_id(*parts: str, prefix: str | None = None) -> str:

@@ -111,17 +111,12 @@ class EvaluationDenormalizer(BackgroundWorker):
                     self.mark_dirty(workspace=workspace, evaluation_name=evaluation_name)
 
     async def _refresh_workspace(self, workspace: str, evaluation_names: list[str]) -> None:
-        # Load the live entities first: the rollup must be bounded to each evaluation's own
-        # created_at, so a name freed by a delete and recreated does not inherit the deleted
-        # evaluation's facets. A missing (or deleted) entity is skipped — it writes no facets
-        # and must not trigger an unbounded rollup. created_at is None for legacy rows; that
-        # keeps the name-only match.
+        # Each rollup is bounded by its entity's created_at, so a missing entity must not trigger one.
         live_evaluations: list[Experiment] = []
         for evaluation_name in evaluation_names:
             try:
                 evaluation = await self._entity_client.get(Experiment, name=evaluation_name, workspace=workspace)
             except EntityNotFoundError:
-                # Deleted between ingest and refresh; nothing to update.
                 continue
             if evaluation.is_deleted:
                 continue
@@ -140,22 +135,16 @@ class EvaluationDenormalizer(BackgroundWorker):
             await self._write_names(evaluation, rollup)
 
     async def _write_names(self, evaluation: Experiment, rollup: EvaluationRollup) -> None:
-        # Skip the write when nothing changed, so a burst of re-ingests that add no new names doesn't
-        # churn the entity store (and doesn't lose an optimistic-lock race for no reason).
+        # Unchanged facets skip the write, so re-ingest bursts don't churn the entity store.
         if _facets_match(evaluation, rollup):
             return
-        # update() resolves the row by name and only checks db_version, and a recreated namesake
-        # starts at the same db_version, so writing the pre-rollup object could stamp the deleted
-        # evaluation's payload onto the recreated entity. Re-read, verify identity, write the fresh copy.
+        # update() matches by name and db_version, which a recreated namesake shares; re-read and check the id.
         try:
             current = await self._entity_client.get(Experiment, name=evaluation.name, workspace=evaluation.workspace)
         except EntityNotFoundError:
-            # Deleted between the rollup and the write; nothing to update.
             return
         if current.id != evaluation.id:
-            # Deleted and recreated during the rollup: this rollup is bounded to the deleted
-            # lifetime, so its facets belong to the old entity. Requeue; the next cycle refreshes
-            # the recreated entity with its own created_at bound.
+            # Recreated mid-rollup: these facets belong to the deleted entity, so refresh again.
             self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
             return
         if _facets_match(current, rollup):

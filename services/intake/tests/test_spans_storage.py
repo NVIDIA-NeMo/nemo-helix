@@ -6,7 +6,6 @@
 from datetime import datetime, timezone
 
 from nhx.intake.spans.storage import (
-    created_after_bound_micros,
     json_loads_or_none,
     stable_id,
     text_for_mode,
@@ -60,13 +59,5 @@ def test_to_unix_micros_keeps_microsecond_resolution_and_reads_naive_as_utc() ->
     aware = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
     naive = datetime(2026, 3, 1, 12, 0, 0, 123456)
 
-    # The entity store keeps naive UTC timestamps; both spellings of the same instant must
-    # convert identically, with the microseconds intact (no float rounding).
     assert to_unix_micros(naive) == to_unix_micros(aware)
     assert to_unix_micros(aware) % 1_000_000 == 123456
-
-
-def test_created_after_bound_floors_to_whole_second() -> None:
-    value = datetime(2026, 3, 1, 12, 0, 0, 123456, tzinfo=timezone.utc)
-
-    assert created_after_bound_micros(value) == to_unix_micros(value.replace(microsecond=0))

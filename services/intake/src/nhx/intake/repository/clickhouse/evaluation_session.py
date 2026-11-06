@@ -26,13 +26,13 @@ from nhx.intake.repository.evaluation_session import (
 from nhx.intake.spans.domain import IntakeResponseMode, SpanStatus
 from nhx.intake.spans.span_rollups import summed_metric_columns, usage_sql
 from nhx.intake.spans.storage import (
-    created_after_bound_micros,
     float_or_none,
     int_or_none,
     normalize_span_status,
     str_or_none,
     text_query_parameters,
     text_select_for_mode,
+    to_unix_micros,
 )
 
 # Sort fields that require a pre-pagination spans join to compute. These values live in the
@@ -106,16 +106,11 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         evaluator_results_table = self._executor.table(ClickHouseTable.EVALUATOR_RESULTS)
 
         scoped_filter_sql, scoped_filter_parameters = _scoped_filter(test_case_name=test_case_name, status=status)
-        # Inclusive lower bound on event_ts: an Evaluation recreated under a freed name must
-        # not list the deleted namesake's sessions. None keeps the name-only match.
+        # Ingest time, not span start: runs are often published after the Evaluation is created.
         created_after_sql = (
-            "\n            AND event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)"
-            if created_after is not None
-            else ""
+            " AND event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" if created_after is not None else ""
         )
-        created_after_parameters = (
-            {} if created_after is None else {"created_after_us": created_after_bound_micros(created_after)}
-        )
+        created_after_parameters = {} if created_after is None else {"created_after_us": to_unix_micros(created_after)}
 
         base_parameters: dict[str, Any] = {
             "workspace": workspace,

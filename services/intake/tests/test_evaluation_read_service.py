@@ -122,8 +122,6 @@ async def test_list_evaluations_batches_rollup_enrichment() -> None:
 
 @pytest.mark.asyncio
 async def test_list_evaluations_passes_each_created_at_as_rollup_bound() -> None:
-    # A recreated Evaluation must not inherit the deleted one's runs: its rollup is bounded
-    # to its own created_at. A None created_at stays unbounded.
     first_created_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
     first = _evaluation("eval-1", created_at=first_created_at)
     second = _evaluation("eval-2")
@@ -175,8 +173,6 @@ async def test_list_evaluations_degrades_when_rollups_fail() -> None:
 
 @pytest.mark.asyncio
 async def test_missing_created_after_entry_is_raised_not_masked_as_clickhouse_outage() -> None:
-    # A missing created_after_by_name entry is a caller bug, not a ClickHouse outage: it must
-    # surface instead of silently reading as "rollups unavailable".
     client, _, get_mock = _entity_client()
     get_mock.return_value = _evaluation("eval-1")
     service = EvaluationReadService(

@@ -18,7 +18,7 @@ from nhx.intake.repository.evaluation_rollup import (
 )
 from nhx.intake.spans.span_attribute_catalog import COST_SCALE, SpanAttributeField, spec_for_field
 from nhx.intake.spans.span_rollups import USAGE_SUPERSEDED_EXPRESSION, USAGE_TIER_EXPRESSION, session_total, usage_sql
-from nhx.intake.spans.storage import created_after_bound_micros, float_or_none
+from nhx.intake.spans.storage import float_or_none, to_unix_micros
 
 
 class ClickHouseEvaluationRollupRepository(EvaluationRollupRepository):
@@ -127,12 +127,7 @@ def _created_after_bound_sql(
     evaluation_names: list[str],
     created_after_by_name: dict[str, datetime | None],
 ) -> tuple[str, dict[str, int]]:
-    """Inclusive ``event_ts`` lower bounds, one per name that carries a created_at.
-
-    Deleting an Evaluation frees its name, so rows under one name can span more than one entity
-    lifetime. A name with a bound only sees sessions at or after its Evaluation's creation; ``None``
-    keeps the name-only match (legacy entities carry no created_at, and the bound must not invent one).
-    """
+    """Per-name ``event_ts`` lower bounds; a deleted Evaluation's name can be reused by a new one."""
     bounded: list[tuple[int, datetime]] = []
     for index, name in enumerate(evaluation_names):
         created_after = created_after_by_name[name]
@@ -140,11 +135,8 @@ def _created_after_bound_sql(
             bounded.append((index, created_after))
     if not bounded:
         return "", {}
-    parameters = {
-        f"created_after_{index}": created_after_bound_micros(created_after) for index, created_after in bounded
-    }
+    parameters = {f"created_after_{index}": to_unix_micros(created_after) for index, created_after in bounded}
     if len(bounded) == 1 and len(evaluation_names) == 1:
-        # One requested name: the name filter is already an equality, so a bare conjunct is equivalent.
         clauses = ["event_ts >= fromUnixTimestamp64Micro(%(created_after_0)s)"]
     else:
         clauses = [
@@ -152,7 +144,7 @@ def _created_after_bound_sql(
             f" OR event_ts >= fromUnixTimestamp64Micro(%(created_after_{index})s))"
             for index, _created_after in bounded
         ]
-    return "".join(f"\n            AND {clause}" for clause in clauses), parameters
+    return "".join(f" AND {clause}" for clause in clauses), parameters
 
 
 def _scoped_sessions_sql(trace_index_table: str, evaluation_names_sql: str, created_after_sql: str) -> str:
