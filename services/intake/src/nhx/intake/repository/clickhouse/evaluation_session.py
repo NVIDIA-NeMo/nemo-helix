@@ -11,6 +11,7 @@ cost), plus per-evaluator session-mean scores from ``evaluator_results``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from nhx.intake.repository.clickhouse.executor import ClickHouseExecutor, ClickHouseQuery
@@ -31,6 +32,7 @@ from nhx.intake.spans.storage import (
     str_or_none,
     text_query_parameters,
     text_select_for_mode,
+    to_unix_micros,
 )
 
 # Sort fields that require a pre-pagination spans join to compute. These values live in the
@@ -93,6 +95,7 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         evaluation_name: str,
         status: SpanStatus | None = None,
         test_case_name: str | None = None,
+        created_after: datetime | None,
         page: int,
         page_size: int,
         mode: IntakeResponseMode,
@@ -103,16 +106,34 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
         evaluator_results_table = self._executor.table(ClickHouseTable.EVALUATOR_RESULTS)
 
         scoped_filter_sql, scoped_filter_parameters = _scoped_filter(test_case_name=test_case_name, status=status)
+        # Ingest time, not span start: runs are often published after the Evaluation is created.
+        created_after_sql = (
+            " AND event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)" if created_after is not None else ""
+        )
+        created_after_parameters = {} if created_after is None else {"created_after_us": to_unix_micros(created_after)}
+        # The same lifetime, applied to the rows joined only by session id. Results are stored to milliseconds.
+        span_after_sql = (
+            " AND span_versions.event_ts >= fromUnixTimestamp64Micro(%(created_after_us)s)"
+            if created_after is not None
+            else ""
+        )
+        result_after_sql = (
+            " AND ingested_at >= toDateTime64(fromUnixTimestamp64Micro(%(created_after_us)s), 3)"
+            if created_after is not None
+            else ""
+        )
 
         base_parameters: dict[str, Any] = {
             "workspace": workspace,
             "evaluation_name": evaluation_name,
             **_SESSION_USAGE.parameters,
+            **created_after_parameters,
         }
 
         count_sql = _count_sql(
             trace_index_table=trace_index_table,
             scoped_filter_sql=scoped_filter_sql,
+            created_after_sql=created_after_sql,
         )
         count_value = await self._executor.fetch_scalar(
             ClickHouseQuery(
@@ -137,6 +158,8 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
                 trace_index_table=trace_index_table,
                 spans_table=spans_table,
                 scoped_filter_sql=scoped_filter_sql,
+                created_after_sql=created_after_sql,
+                span_after_sql=span_after_sql,
                 sort_keys=sort_keys,
             )
             page_query_name = "evaluation_sessions.metric_sort.page"
@@ -144,6 +167,7 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
             page_refs_sql = _page_refs_sql(
                 trace_index_table=trace_index_table,
                 scoped_filter_sql=scoped_filter_sql,
+                created_after_sql=created_after_sql,
                 sort_keys=sort_keys or [],
             )
             page_query_name = "evaluation_sessions.page"
@@ -171,6 +195,9 @@ class ClickHouseEvaluationSessionRepository(EvaluationSessionRepository):
                     trace_index_table=trace_index_table,
                     spans_table=spans_table,
                     evaluator_results_table=evaluator_results_table,
+                    created_after_sql=created_after_sql,
+                    span_after_sql=span_after_sql,
+                    result_after_sql=result_after_sql,
                     mode=mode,
                 ),
                 parameters={
@@ -203,6 +230,7 @@ def _scoped_sessions_sql(
     trace_index_table: str,
     *,
     scoped_filter_sql: str,
+    created_after_sql: str,
     mode: IntakeResponseMode,
 ) -> str:
     select_columns = [
@@ -231,7 +259,7 @@ def _scoped_sessions_sql(
         WHERE workspace = %(workspace)s
             AND is_deleted = 0
             AND evaluation_name = %(evaluation_name)s
-            {scoped_filter_sql}
+            {scoped_filter_sql}{created_after_sql}
         ORDER BY root_started_at ASC, root_span_id ASC
         LIMIT 1 BY workspace, session_id, evaluation_name
     """
@@ -241,10 +269,12 @@ def _count_sql(
     *,
     trace_index_table: str,
     scoped_filter_sql: str,
+    created_after_sql: str,
 ) -> str:
     scoped_sessions_sql = _scoped_sessions_sql(
         trace_index_table,
         scoped_filter_sql=scoped_filter_sql,
+        created_after_sql=created_after_sql,
         mode="summary",
     )
     return f"""
@@ -273,6 +303,7 @@ def _page_refs_sql(
     *,
     trace_index_table: str,
     scoped_filter_sql: str,
+    created_after_sql: str,
     sort_keys: list[tuple[str, bool]],
 ) -> str:
     """Select one ordered page without reading root payload columns."""
@@ -280,6 +311,7 @@ def _page_refs_sql(
     scoped_sessions_sql = _scoped_sessions_sql(
         trace_index_table,
         scoped_filter_sql=scoped_filter_sql,
+        created_after_sql=created_after_sql,
         mode="summary",
     )
     order_by = (
@@ -307,6 +339,8 @@ def _metric_sort_page_refs_sql(
     trace_index_table: str,
     spans_table: str,
     scoped_filter_sql: str,
+    created_after_sql: str,
+    span_after_sql: str,
     sort_keys: list[tuple[str, bool]],
 ) -> str:
     """Select an ordered page after computing cost/token metrics for all sessions.
@@ -324,12 +358,14 @@ def _metric_sort_page_refs_sql(
     scoped_sessions_sql = _scoped_sessions_sql(
         trace_index_table,
         scoped_filter_sql=scoped_filter_sql,
+        created_after_sql=created_after_sql,
         mode="summary",
     )
     all_scoped_spans = current_spans_sql(
         spans_table,
         extra_where_sql=(
             "(span_versions.workspace, span_versions.session_id) IN (SELECT workspace, session_id FROM scoped_sessions)"
+            + span_after_sql
         ),
     )
     order_by = _build_order_by(sort_keys, _SORT_EXPR_PAGE, "s.root_span_id ASC")
@@ -370,6 +406,9 @@ def _hydrate_by_refs_sql(
     trace_index_table: str,
     spans_table: str,
     evaluator_results_table: str,
+    created_after_sql: str,
+    span_after_sql: str,
+    result_after_sql: str,
     mode: IntakeResponseMode,
 ) -> str:
     """Hydrate payloads, span metrics, and evaluator scores for one selected page."""
@@ -395,7 +434,7 @@ def _hydrate_by_refs_sql(
 
     page_spans = current_spans_sql(
         spans_table,
-        extra_where_sql="span_versions.session_id IN %(page_session_ids)s",
+        extra_where_sql="span_versions.session_id IN %(page_session_ids)s" + span_after_sql,
     )
 
     return f"""
@@ -417,7 +456,7 @@ def _hydrate_by_refs_sql(
                     toUnixTimestamp64Micro(root_started_at),
                     trace_id,
                     root_span_id
-                ) IN %(page_storage_keys)s
+                ) IN %(page_storage_keys)s{created_after_sql}
             LIMIT 1 BY workspace, session_id, evaluation_name
         ),
         current_page_spans AS (
@@ -455,7 +494,7 @@ def _hydrate_by_refs_sql(
                     SELECT workspace, session_id, name, value, status
                     FROM {evaluator_results_table} FINAL
                     WHERE workspace = %(workspace)s
-                        AND session_id IN %(page_session_ids)s
+                        AND session_id IN %(page_session_ids)s{result_after_sql}
                         AND ((data_type IN ('NUMERIC', 'BOOLEAN') AND value IS NOT NULL) OR status = 'FAILED')
                 ) AS results
                 GROUP BY results.workspace, results.session_id, results.name

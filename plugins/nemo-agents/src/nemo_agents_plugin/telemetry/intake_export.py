@@ -23,8 +23,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import nemo_fabric as fabric
 from nemo_agents_plugin.agent_config import TelemetryConfig
+from nemo_fabric import Fabric
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ def supports_intake_atif_export(config: dict[str, Any], *, base_dir: Path | None
 
         agent_config = AgentConfig.model_validate(config)
         with _plan_directory(base_dir) as resolved_base:
-            plan = fabric.Fabric().plan(translate_agent_config(agent_config), base_dir=resolved_base)
+            plan = Fabric().plan(translate_agent_config(agent_config), base_dir=resolved_base)
         descriptor = plan.to_dict().get("adapter_descriptor") or {}
         relay = descriptor.get("descriptor", descriptor).get("telemetry", {}).get("providers", {}).get("relay")
     except Exception:

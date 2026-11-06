@@ -10,6 +10,7 @@ import {
   useUnpinEvaluation,
 } from '@nemo/sdk/generated/platform/evaluations';
 import {
+  canRemoveFromGroup,
   type EvaluationRow,
   useExperimentEvaluations,
   type UseExperimentEvaluationsParams,
@@ -247,7 +248,7 @@ describe('useExperimentEvaluations', () => {
     } as unknown as EvaluationRow);
 
     expect(patch).not.toHaveBeenCalled();
-    expect(error).toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it('removes this group from an evaluation that has others, patching the remaining ids', () => {
@@ -268,5 +269,21 @@ describe('useExperimentEvaluations', () => {
       name: 'multi',
       data: { experiment_ids: ['other'] },
     });
+  });
+});
+
+describe('canRemoveFromGroup', () => {
+  it('returns false when the evaluation belongs to a single experiment', () => {
+    expect(canRemoveFromGroup({ experiment_ids: ['grp'] } as unknown as EvaluationRow)).toBe(false);
+  });
+
+  it('returns false for a loading placeholder row without experiment_ids', () => {
+    expect(canRemoveFromGroup({} as EvaluationRow)).toBe(false);
+  });
+
+  it('returns true when the evaluation belongs to multiple experiments', () => {
+    expect(
+      canRemoveFromGroup({ experiment_ids: ['grp', 'other'] } as unknown as EvaluationRow)
+    ).toBe(true);
   });
 });

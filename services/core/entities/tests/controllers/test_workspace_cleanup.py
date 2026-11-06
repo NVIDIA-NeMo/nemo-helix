@@ -216,6 +216,25 @@ class TestWorkspaceCleanupStep:
         controller.step()
         assert not controller.is_healthy
 
+    def test_failed_step_pins_unhealthy_until_the_next_successful_step_clears_it(self):
+        repo = AsyncMock()
+        failures = {"count": 0}
+
+        def _list_workspaces(*args, **kwargs):
+            if failures["count"] == 0:
+                failures["count"] += 1
+                raise Exception("db error")
+            return ([], None)
+
+        repo.list_workspaces.side_effect = _list_workspaces
+        controller = _make_controller(workspace_repo=repo)
+
+        controller.step()
+        assert not controller.is_healthy
+
+        controller.step()
+        assert controller.is_healthy
+
 
 class TestWorkspaceCleanupAsyncStep:
     @pytest.mark.asyncio
@@ -466,7 +485,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             renewal_release.set()
@@ -517,7 +536,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -559,7 +578,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()
@@ -613,7 +632,7 @@ class TestWorkspaceCleanupAsyncStep:
 
         with (
             _patch_clients(jobs_client, _make_mock_files_client([]), _make_models_client([])),
-            patch("nhx.core.entities.controllers.workspace_cleanup.asyncio.sleep", side_effect=controlled_sleep),
+            patch("nhx.core.entities.controllers.workspace_cleanup._lease_renewal_sleep", side_effect=controlled_sleep),
         ):
             cleanup_task = asyncio.create_task(controller._async_step())
             await cleanup_started.wait()

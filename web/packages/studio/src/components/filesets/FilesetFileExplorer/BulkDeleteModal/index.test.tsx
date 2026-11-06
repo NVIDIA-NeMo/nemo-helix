@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { BulkDeleteModal } from '@studio/components/filesets/FilesetFileExplorer/BulkDeleteModal';
 import { extractFilePathsFromDirectory } from '@studio/components/filesets/FilesetFileExplorer/extractFilePathsFromDirectory';
 import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { render } from '@studio/tests/util/render';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-import { BulkDeleteModal } from '.';
 
 // Mock the mutation hook
 const mockMutateAsync = vi.fn();

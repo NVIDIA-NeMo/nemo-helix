@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from asyncio import current_task
 from collections.abc import Sequence
 from dataclasses import dataclass
 from logging import getLogger
@@ -272,7 +273,7 @@ async def _put_pipeline_sentinels(
     shutdown. Best-effort sentinel insertion is sufficient because sibling
     tasks are being cancelled anyway.
     """
-    current = asyncio.current_task()
+    current = current_task()
     cancelling = current is not None and current.cancelling() > 0
     for pipeline in pipelines:
         for _ in range(worker_count):

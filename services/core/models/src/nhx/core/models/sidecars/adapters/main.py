@@ -3,7 +3,6 @@
 
 """Expected to run as a sidecar to the NIM container with the same ENV Vars"""
 
-import asyncio
 import json
 import logging
 import os
@@ -12,6 +11,7 @@ import signal
 import threading
 import urllib.error
 import urllib.request
+from asyncio import new_event_loop
 
 from filesets import transfer
 from nemo_helix_plugin.client.client import NemoClient
@@ -87,7 +87,7 @@ class AdaptersController(HeartbeatMixin, Controller):
 
         self._stop_signal = stop_signal
 
-        self._loop = asyncio.new_event_loop()
+        self._loop = new_event_loop()
 
         self.platform_config = get_platform_config()
 

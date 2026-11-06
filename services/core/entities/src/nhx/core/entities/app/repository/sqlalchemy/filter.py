@@ -100,7 +100,12 @@ class SQLAlchemyFilterRepository(FilterRepository):
         mapped = inspect(self.model)
         mapper = mapped.mapper
         if field in mapper.column_attrs:
-            return getattr(self.model, field), False
+            column = getattr(self.model, field)
+            if isinstance(column.type, JSON):
+                raise InvalidFilterError(
+                    f"Cannot filter on JSON column '{field}' directly; use dotted data paths such as 'data.key'"
+                )
+            return column, False
 
         if field.startswith("data.") and "data" in mapper.column_attrs:
             column = getattr(self.model, "data")

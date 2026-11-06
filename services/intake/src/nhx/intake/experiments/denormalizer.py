@@ -111,32 +111,57 @@ class EvaluationDenormalizer(BackgroundWorker):
                     self.mark_dirty(workspace=workspace, evaluation_name=evaluation_name)
 
     async def _refresh_workspace(self, workspace: str, evaluation_names: list[str]) -> None:
-        rollups = await self._rollup_repository.get_rollups(workspace=workspace, evaluation_names=evaluation_names)
+        # Each rollup is bounded by its entity's created_at, so a missing entity must not trigger one.
+        live_evaluations: list[Experiment] = []
         for evaluation_name in evaluation_names:
-            rollup = rollups.get(evaluation_name)
+            try:
+                evaluation = await self._entity_client.get(Experiment, name=evaluation_name, workspace=workspace)
+            except EntityNotFoundError:
+                continue
+            if evaluation.is_deleted:
+                continue
+            live_evaluations.append(evaluation)
+        if not live_evaluations:
+            return
+        rollups = await self._rollup_repository.get_rollups(
+            workspace=workspace,
+            evaluation_names=[evaluation.name for evaluation in live_evaluations],
+            created_after_by_name={evaluation.name: evaluation.created_at for evaluation in live_evaluations},
+        )
+        for evaluation in live_evaluations:
+            rollup = rollups.get(evaluation.name)
             if rollup is None:
                 continue
-            await self._write_names(workspace, evaluation_name, rollup)
+            await self._write_names(evaluation, rollup)
 
-    async def _write_names(self, workspace: str, evaluation_name: str, rollup: EvaluationRollup) -> None:
+    async def _write_names(self, evaluation: Experiment, rollup: EvaluationRollup) -> None:
+        # Unchanged facets skip the write, so re-ingest bursts don't churn the entity store.
+        if _facets_match(evaluation, rollup):
+            return
+        # update() matches by name and db_version, which a recreated namesake shares; re-read and check the id.
         try:
-            evaluation = await self._entity_client.get(Experiment, name=evaluation_name, workspace=workspace)
+            current = await self._entity_client.get(Experiment, name=evaluation.name, workspace=evaluation.workspace)
         except EntityNotFoundError:
-            # Deleted between ingest and refresh; nothing to update.
             return
-        # Skip the write when nothing changed, so a burst of re-ingests that add no new names doesn't
-        # churn the entity store (and doesn't lose an optimistic-lock race for no reason).
-        if (
-            evaluation.agent_names == rollup.agent_names
-            and evaluation.agent_versions == rollup.agent_versions
-            and evaluation.model_names == rollup.model_names
-        ):
+        if current.id != evaluation.id:
+            # Recreated mid-rollup: these facets belong to the deleted entity, so refresh again.
+            self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
             return
-        evaluation.agent_names = rollup.agent_names
-        evaluation.agent_versions = rollup.agent_versions
-        evaluation.model_names = rollup.model_names
+        if _facets_match(current, rollup):
+            return
+        current.agent_names = rollup.agent_names
+        current.agent_versions = rollup.agent_versions
+        current.model_names = rollup.model_names
         try:
-            await self._entity_client.update(evaluation)
+            await self._entity_client.update(current)
         except EntityConflictError:
             # A concurrent user edit won the optimistic lock; re-queue for the next cycle.
-            self.mark_dirty(workspace=workspace, evaluation_name=evaluation_name)
+            self.mark_dirty(workspace=current.workspace, evaluation_name=current.name)
+
+
+def _facets_match(evaluation: Experiment, rollup: EvaluationRollup) -> bool:
+    return (
+        evaluation.agent_names == rollup.agent_names
+        and evaluation.agent_versions == rollup.agent_versions
+        and evaluation.model_names == rollup.model_names
+    )

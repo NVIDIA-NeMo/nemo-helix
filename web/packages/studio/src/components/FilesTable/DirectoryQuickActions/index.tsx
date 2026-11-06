@@ -78,16 +78,14 @@ export const DirectoryQuickActions: FC<Props> = ({
           },
         ]
       : []),
-    {
-      label: 'Delete',
-      onSelect: () => setOpenModal('delete'),
-      danger: true,
-    },
   ];
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot
+        actions={actions}
+        deleteAction={{ onSelect: () => setOpenModal('delete') }}
+      />
       <DeleteConfirmationModal
         open={openModal === 'delete'}
         onDelete={handleDeleteDirectory}

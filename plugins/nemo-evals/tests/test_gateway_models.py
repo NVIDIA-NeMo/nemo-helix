@@ -40,9 +40,11 @@ from nemo_evals.jobs.gateway_models import (
     agent_gateway_origin,
     check_gateway_model,
     check_tasks_reach_the_gateway,
+    closed_book_run,
     fabric_gateway_key_envs,
     fabric_gateway_models,
     fabric_gateway_route,
+    open_book_notice,
     point_agent_at_gateway_model,
     require_closed_book_route,
     trust_the_gateway_ca,
@@ -591,7 +593,7 @@ def test_the_compiled_job_carries_the_placeholder_key(harbor_resolved_task) -> N
 def test_an_agent_whose_connection_names_no_variables_cannot_call_the_gateway(monkeypatch: pytest.MonkeyPatch) -> None:
     """Evals would have nowhere to put the gateway's URL or key, so the agent is refused like one with no connection."""
     agent = SimpleNamespace(MODEL_CONNECTION=ModelConnectionSpec(default_provider="anthropic"))
-    monkeypatch.setattr(gateway_agents.AgentFactory, "get_agent_class", lambda name: agent)
+    monkeypatch.setattr(gateway_agents, "AgentFactory", SimpleNamespace(get_agent_class=lambda name: agent))
     monkeypatch.setitem(
         gateway_agents.PROVIDERS, "anthropic", ProviderAccess(api_key_envs=(), base_url="https://x", base_url_envs=())
     )
@@ -607,6 +609,11 @@ _ROUTER = MiddlewareCall(name="nemo-switchyard", config_type="routellm_config", 
 _NO_NETWORK_TASKS = [("open", {}), ("offline", {"environment": {"network_mode": "no-network"}})]
 
 
+def _closed(target: HarborRunnerTarget) -> HarborRunnerTarget:
+    """``target`` labelled closed-book (``closed_book: true``), the only way a run is closed-book."""
+    return target.model_copy(update={"closed_book": True})
+
+
 def _virtual_models(monkeypatch: pytest.MonkeyPatch, virtual_model: VirtualModel | Exception) -> AsyncMock:
     get = AsyncMock(
         side_effect=virtual_model
@@ -617,12 +624,12 @@ def _virtual_models(monkeypatch: pytest.MonkeyPatch, virtual_model: VirtualModel
     return get
 
 
-async def test_a_closed_book_virtual_model_serves_no_network_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_closed_book_virtual_model_serves_a_closed_book_run(monkeypatch: pytest.MonkeyPatch) -> None:
     get = _virtual_models(
         monkeypatch, VirtualModel(name="cb-gpt", workspace="ws", request_middleware=[_ROUTER, _CLOSED_BOOK])
     )
 
-    await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+    await require_closed_book_route(_closed(_codex()), async_sdk=AsyncMock(), authorize=None)
 
     get.assert_awaited_once_with(name="cb-gpt", workspace="ws")
 
@@ -643,8 +650,8 @@ async def test_a_gateway_model_that_is_not_closed_book_is_refused(
     """Only the last request middleware checks the model the request is sent to; an entity alone passes tools on."""
     _virtual_models(monkeypatch, virtual_model)
 
-    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\] need a closed-book"):
-        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+    with pytest.raises(ValueError, match=r"closed_book_required: closed_book runs need a closed-book"):
+        await require_closed_book_route(_closed(_codex()), async_sdk=AsyncMock(), authorize=None)
 
 
 async def test_a_model_a_closed_book_router_routes_to_must_be_closed_book_too(
@@ -662,7 +669,7 @@ async def test_a_model_a_closed_book_router_routes_to_must_be_closed_book_too(
     monkeypatch.setattr(gateway_models, "client_from_platform", lambda *_: SimpleNamespace(get_virtual_model=get))
 
     with pytest.raises(ValueError, match=r"ws/open-target isn't one"):
-        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+        await require_closed_book_route(_closed(_codex()), async_sdk=AsyncMock(), authorize=None)
 
 
 @pytest.mark.parametrize(
@@ -678,9 +685,9 @@ async def test_a_model_a_closed_book_router_routes_to_must_be_closed_book_too(
     ],
     ids=["model-by-name", "built-in-default-model", "imported-agent", "registered-agent"],
 )
-async def test_a_model_route_evals_cannot_check_is_refused_for_no_network_tasks(target: HarborRunnerTarget) -> None:
-    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\]"):
-        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=None, authorize=None)
+async def test_a_model_route_evals_cannot_check_is_refused_for_closed_book_runs(target: HarborRunnerTarget) -> None:
+    with pytest.raises(ValueError, match=r"closed_book_required: closed_book runs"):
+        await require_closed_book_route(_closed(target), async_sdk=None, authorize=None)
 
 
 _IGW = "http://h/apis/inference-gateway/v2/workspaces/ws"
@@ -692,24 +699,35 @@ def _registered(config: dict[str, object]) -> HarborRunnerTarget:
     )
 
 
-async def test_a_registered_agent_whose_gateway_models_are_closed_book_serves_no_network_tasks(
+async def test_a_closed_book_registered_agent_whose_gateway_models_are_closed_book_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every model the agent calls through the gateway is checked; one it calls elsewhere can't leave the sandbox."""
+    """Every model the agent calls through the gateway is checked."""
     get = _virtual_models(monkeypatch, VirtualModel(name="cb", workspace="ws", request_middleware=[_CLOSED_BOOK]))
     target = _registered(
         {
-            "models": {
-                "default": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"},
-                "elsewhere": {"base_url": "https://integrate.api.nvidia.com/v1", "model": "x"},
-            },
+            "models": {"default": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"}},
             "harnesses": {"codex": {"model": {"base_url": f"{_IGW}/model/cb-harness/-/v1"}}},
         }
     )
 
-    await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+    await require_closed_book_route(_closed(target), async_sdk=AsyncMock(), authorize=None)
 
     assert [call.kwargs["name"] for call in get.await_args_list] == ["cb", "cb-harness"]
+
+
+async def test_an_open_book_registered_agent_with_a_model_elsewhere_is_not_checked() -> None:
+    """Unlabelled, a run with no-network tasks and a model off the gateway is accepted without any lookup."""
+    target = _registered(
+        {
+            "models": {
+                "default": {"base_url": f"{_IGW}/openai/-/v1", "model": "open"},
+                "elsewhere": {"base_url": "https://integrate.api.nvidia.com/v1", "model": "x"},
+            },
+        }
+    )
+
+    await require_closed_book_route(target, async_sdk=None, authorize=None)
 
 
 async def test_a_closed_book_registered_agent_that_calls_a_model_elsewhere_is_refused_at_submit(
@@ -722,13 +740,13 @@ async def test_a_closed_book_registered_agent_that_calls_a_model_elsewhere_is_re
             "models": {"default": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"}},
             "harnesses": {"codex": {"model": {"base_url": "https://integrate.api.nvidia.com/v1", "model": "x"}}},
         }
-    ).model_copy(update={"closed_book": True})
+    )
 
     with pytest.raises(ValueError, match=r"closed_book_required: closed_book runs need every model"):
-        await require_closed_book_route(target, [], async_sdk=AsyncMock(), authorize=None)
+        await require_closed_book_route(_closed(target), async_sdk=AsyncMock(), authorize=None)
 
 
-async def test_a_no_network_run_whose_agents_default_model_is_off_the_gateway_is_refused_at_submit(
+async def test_a_closed_book_run_whose_agents_default_model_is_off_the_gateway_is_refused_at_submit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Its trials are issued credentials through the default model's gateway route; without one the run fails later."""
@@ -740,8 +758,8 @@ async def test_a_no_network_run_whose_agents_default_model_is_off_the_gateway_is
         }
     )
 
-    with pytest.raises(ValueError, match=r"no-network tasks \['offline'\] need the agent's default model"):
-        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+    with pytest.raises(ValueError, match=r"closed_book runs need the agent's default model"):
+        await require_closed_book_route(_closed(target), async_sdk=AsyncMock(), authorize=None)
 
 
 def test_a_read_only_fabric_config_is_read_like_a_dict() -> None:
@@ -769,7 +787,7 @@ async def test_a_registered_agent_with_a_harness_model_that_is_not_closed_book_i
     )
 
     with pytest.raises(ValueError, match=r"ws/open isn't one"):
-        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+        await require_closed_book_route(_closed(target), async_sdk=AsyncMock(), authorize=None)
 
 
 @pytest.mark.parametrize(
@@ -799,40 +817,69 @@ async def test_a_registered_agent_model_evals_cannot_check_is_refused(
     target = _registered({"models": {"default": {"base_url": f"{_IGW}/openai/-/v1", "model": "cb"}, "other": model}})
 
     with pytest.raises(ValueError, match=match):
-        await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=None)
+        await require_closed_book_route(_closed(target), async_sdk=AsyncMock(), authorize=None)
 
 
 @pytest.mark.parametrize("agent", ["oracle", "nop"])
-async def test_agents_that_call_no_model_run_no_network_tasks(agent: str) -> None:
-    target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent))
+async def test_agents_that_call_no_model_are_never_closed_book(agent: str) -> None:
+    target = _closed(HarborRunnerTarget(source=HarborBuiltinAgentSource(name=agent)))
 
-    await require_closed_book_route(target, _NO_NETWORK_TASKS, async_sdk=None, authorize=None)
+    assert not closed_book_run(target)
+    await require_closed_book_route(target, async_sdk=None, authorize=None)
+    assert open_book_notice(target, _NO_NETWORK_TASKS) is None
 
 
-async def test_runs_without_no_network_tasks_are_not_checked() -> None:
+async def test_unlabelled_runs_are_not_checked_even_with_no_network_tasks() -> None:
+    """No-network tasks don't make a run closed-book: the run is held closed-book only when labelled so."""
     target = HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5")))
 
-    await require_closed_book_route(target, [("open", {})], async_sdk=None, authorize=None)
+    assert not closed_book_run(target)
+    await require_closed_book_route(target, async_sdk=None, authorize=None)
 
 
 @pytest.mark.parametrize(
     "config",
     [
+        {"environment": {"network_mode": "no-network"}},
         {"environment": {"allow_internet": False}},
         {"agent": {"network_mode": "no-network"}},
         {"steps": [{"name": "build"}, {"name": "solve", "agent": {"network_mode": "no-network"}}]},
     ],
-    ids=["deprecated-allow-internet", "agent-phase", "one-step"],
+    ids=["environment", "deprecated-allow-internet", "agent-phase", "one-step"],
 )
-async def test_every_way_a_task_takes_the_agent_offline_is_checked(config: dict[str, object]) -> None:
+def test_every_way_a_task_takes_the_agent_offline_gets_the_open_book_notice(config: dict[str, object]) -> None:
     """Harbor runs the agent under its own or a step's network mode, ahead of the environment's."""
-    with pytest.raises(ValueError, match=r"closed_book_required: no-network tasks \['offline'\]"):
-        await require_closed_book_route(
-            HarborRunnerTarget(source=HarborBuiltinAgentSource(name="codex", model=HarborModelName(name="gpt-5"))),
-            [("offline", config)],
-            async_sdk=None,
-            authorize=None,
-        )
+    notice = open_book_notice(_codex(), [("offline", config)])
+
+    assert notice is not None
+    assert notice.startswith("This run has 1 no-network task and runs open-book. Its sandbox has no network")
+
+
+def test_the_open_book_notice_is_one_per_run_and_names_no_tasks() -> None:
+    tasks = [(f"offline-{i}", {"environment": {"network_mode": "no-network"}}) for i in range(500)] + [("open", {})]
+
+    notice = open_book_notice(_codex(), tasks)
+
+    assert notice is not None
+    assert notice.startswith("This run has 500 no-network tasks and runs open-book. Their sandboxes have no network")
+    assert "offline-" not in notice
+    assert notice.endswith(
+        'set "closed_book": true on the target and use a virtual model that includes closed-book middleware '
+        "(must be last middleware entry)."
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "tasks"),
+    [
+        (_closed(_codex()), _NO_NETWORK_TASKS),
+        (_codex(), [("open", {})]),
+        (_codex(), []),
+    ],
+    ids=["labelled-closed-book", "no-no-network-tasks", "no-tasks"],
+)
+def test_the_open_book_notice_is_left_out(target: HarborRunnerTarget, tasks: list) -> None:
+    assert open_book_notice(target, tasks) is None
 
 
 async def test_the_caller_must_be_able_to_read_the_virtual_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -841,7 +888,7 @@ async def test_the_caller_must_be_able_to_read_the_virtual_model(monkeypatch: py
     authorize = AsyncMock(side_effect=PermissionError("denied"))
 
     with pytest.raises(PermissionError):
-        await require_closed_book_route(_codex(), _NO_NETWORK_TASKS, async_sdk=AsyncMock(), authorize=authorize)
+        await require_closed_book_route(_closed(_codex()), async_sdk=AsyncMock(), authorize=authorize)
 
     authorize.assert_awaited_once_with("GET", "/apis/inference-gateway/v2/workspaces/ws/virtual-models/cb-gpt")
     get.assert_not_awaited()

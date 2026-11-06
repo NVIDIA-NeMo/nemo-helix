@@ -1089,7 +1089,7 @@ class TestExtractAgentMetadata:
     def test_parses_agent_config_once(self, agent_config: Path) -> None:
         import nemo_agents_plugin.container.metadata as metadata
 
-        with patch.object(metadata.yaml, "safe_load", wraps=metadata.yaml.safe_load) as mock_safe_load:
+        with patch.object(metadata, "safe_load", wraps=metadata.safe_load) as mock_safe_load:
             metadata.extract_agent_metadata(agent_config, agent_author="x")
 
         mock_safe_load.assert_called_once()
@@ -3213,27 +3213,25 @@ class TestFabricWheelInstall:
         mock_build: MagicMock,
         fabric_agent_config: Path,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from nemo_agents_plugin.container.builder import build_fabric_agent_image
 
+        source_reads = 0
+
+        class _CountingPath(Path):
+            def open(self, *args: Any, **kwargs: Any) -> Any:
+                nonlocal source_reads
+                mode = args[0] if args else kwargs.get("mode", "r")
+                if mode == "rb":
+                    source_reads += 1
+                return super().open(*args, **kwargs)
+
         source = tmp_path / "dist"
         source.mkdir()
-        wheel = source / "nemo_helix-0.4.0-py3-none-any.whl"
+        wheel = _CountingPath(source / "nemo_helix-0.4.0-py3-none-any.whl")
         wheel.write_bytes(b"not really a wheel")
         context = fabric_agent_config.parent
         staged_during_build: dict[str, bool] = {}
-        source_reads = 0
-        original_open = Path.open
-
-        def _count_source_reads(self: Path, *args: Any, **kwargs: Any) -> Any:
-            nonlocal source_reads
-            mode = args[0] if args else kwargs.get("mode", "r")
-            if self == wheel and mode == "rb":
-                source_reads += 1
-            return original_open(self, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "open", _count_source_reads)
         mock_build.side_effect = lambda **kwargs: staged_during_build.setdefault(
             "present", (context / wheel.name).exists()
         )
@@ -3608,18 +3606,18 @@ class TestFabricWheelInstall:
     def test_exclusive_dockerfile_create_handles_a_race(
         self, mock_build: MagicMock, fabric_agent_config: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        import nemo_agents_plugin.container.metadata as metadata
         from nemo_agents_plugin.container.builder import build_fabric_agent_image
 
         generated = fabric_agent_config.parent / "Dockerfile.generated"
-        generated.write_text("USER OWNED\n")
-        original_exists = Path.exists
+        original_extract = metadata.extract_agent_metadata
 
-        def _miss_generated(self: Path) -> bool:
-            if self == generated:
-                return False
-            return original_exists(self)
+        def _create_generated_concurrently(*args: Any, **kwargs: Any) -> Any:
+            # Another writer creates the file after the build has looked for it.
+            generated.write_text("USER OWNED\n")
+            return original_extract(*args, **kwargs)
 
-        monkeypatch.setattr(Path, "exists", _miss_generated)
+        monkeypatch.setattr(metadata, "extract_agent_metadata", _create_generated_concurrently)
 
         with pytest.raises(ManagedFileConflictError):
             build_fabric_agent_image(fabric_agent_config, skip_validation=True, agent_author="x")

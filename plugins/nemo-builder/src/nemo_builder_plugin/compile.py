@@ -40,14 +40,13 @@ WORK_MOUNT = DEFAULT_JOB_STORAGE_PATH
 
 
 def _fetch_sources(plan: BuildPlan) -> list[ContextSource]:
-    builds = [image for image in plan.images if image.upstream is None]
-    whole_filesets = {
-        image.source.fileset for image in builds if image.source.archive is None and image.source.context_path is None
-    }
+    """Each context and mount to download, once: a whole fileset covers its directories, and an archive unpacks
+    whole."""
+    wanted = plan.sources
+    whole_filesets = {source.fileset for source in wanted if source.archive is None and source.context_path is None}
 
     sources: list[ContextSource] = []
-    for image in builds:
-        source = image.source
+    for source in wanted:
         if source.archive is not None:
             # Unpacked whole, once, whichever directory of it each image builds from.
             source = ContextSource(fileset=source.fileset, archive=source.archive)
@@ -97,12 +96,13 @@ def _build_step(
     groups = [
         SandboxGroup(
             source=source,
+            mounts=list(mounts),
             images=[
                 SandboxImage(image=image.name, platform=image.platform, dockerfile=image.spec.dockerfile)
                 for image in images
             ],
         )
-        for source, images in plan.groups()
+        for source, mounts, images in plan.groups()
     ]
 
     return HelixJobStepSpec(

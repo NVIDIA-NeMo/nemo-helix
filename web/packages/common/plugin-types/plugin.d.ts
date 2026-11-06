@@ -4,6 +4,7 @@ import * as React$1 from "react";
 import react__default, { AriaAttributes, CSSProperties, ChangeEvent, ComponentProps, ComponentPropsWithRef, ComponentPropsWithoutRef, ComponentType, ElementType, FC, ForwardRefExoticComponent, JSX as JSX$1, JSXElementConstructor, MouseEventHandler, PropsWithChildren, ReactElement, ReactNode, RefAttributes, RefObject, SVGProps } from "react";
 import { ThreadMessageLike, ThreadPrimitive, ToolCallMessagePartComponent } from "@assistant-ui/react";
 import { HelixJobLog, HelixJobStatus, PromptData } from "@nemo/sdk/generated/platform/schema";
+import { Agent } from "@nemo/sdk/generated/agents/schema";
 import { VariantProps } from "class-variance-authority";
 //#endregion
 //#region src/components/AccessibleTitle/index.d.ts
@@ -795,6 +796,83 @@ interface AccordionSectionProps {
  * AccordionItem implementation to support a custom icon in the header of an accordion section.
  */
 export declare const AccordionSection: FC<PropsWithChildren<AccordionSectionProps>>;
+//#endregion
+//#region src/components/AgentSelect/types.d.ts
+interface AgentSelectBaseProps {
+  /**
+   * The loaded page(s) of agents. The dropdown renders exactly what it is given — pair with
+   * {@link onSearchChange} and {@link onLoadMore} (see `useAgentSearch`, or just use
+   * `WorkspaceAgentSelect`) so a large workspace arrives one page at a time.
+   */
+  agents?: Agent[];
+  /**
+   * Heading for each agent; agents sharing one render together under it, in first-seen order.
+   * Omit for a flat list. `groupAgentsByFormat` groups by Fabric / NAT workflow.
+   */
+  groupBy?: (agent: Agent) => string;
+  /**
+   * Server-side search. When set, the dropdown stops filtering {@link agents} itself and reports
+   * the debounced filter text instead; the caller re-queries and passes back new `agents`.
+   */
+  onSearchChange?: (search: string) => void;
+  /** How long the filter box settles before {@link onSearchChange} fires. */
+  searchDebounceMs?: number;
+  /** Called as the list scrolls near its end. Ignored unless {@link hasMore} is true. */
+  onLoadMore?: () => void | Promise<void>;
+  /** Whether another page is available for {@link onLoadMore} to fetch. */
+  hasMore?: boolean;
+  /** Whether the next page is in flight. */
+  isLoadingMore?: boolean;
+  /** Footer copy shown once every page has loaded. Omit to render nothing. */
+  doneLoadingMessage?: string;
+  /** Copy shown when no agents match. */
+  emptyMessage?: string;
+  /** Whether the first page of agents is still loading. */
+  loading?: boolean;
+  /**
+   * Why an agent cannot be picked here, or undefined when it can. Disabled agents stay listed
+   * (dimmed) and show the reason in their hover details, rather than silently disappearing.
+   */
+  getDisabledReason?: (agent: Agent) => string | undefined;
+  disabled?: boolean;
+  placeholder?: string;
+  fullWidth?: boolean;
+  dropdownSide?: 'top' | 'bottom';
+  onOpenChange?: (open: boolean) => void;
+  'aria-label'?: string;
+}
+interface SingleAgentSelectProps extends AgentSelectBaseProps {
+  multiple?: false;
+  /** Selected agent name. */
+  value: string | null;
+  onValueChange: (name: string, agent: Agent) => void;
+}
+interface MultiAgentSelectProps extends AgentSelectBaseProps {
+  multiple: true;
+  /** Selected agent names, in selection order. */
+  value: readonly string[];
+  /**
+   * Called with the full new selection. `agents` holds the entity for every selected name the
+   * dropdown has seen; names restored from elsewhere and never loaded are left out.
+   */
+  onValueChange: (names: string[], agents: Agent[]) => void;
+  /** Cap on how many agents can be selected; further rows are disabled once it is reached. */
+  maxSelected?: number;
+}
+type AgentSelectProps = SingleAgentSelectProps | MultiAgentSelectProps;
+//#endregion
+//#region src/components/AgentSelect/AgentSelect.d.ts
+/**
+ * The one picker for agents, single or multiple (`multiple`). Rows show each agent's details on
+ * hover, can be grouped (`groupBy`), and the list is virtualized with search-as-you-type and
+ * scroll paging. Use `WorkspaceAgentSelect` to have it fetch its own agents.
+ */
+export declare const AgentSelect: FC<AgentSelectProps>;
+//#endregion
+//#region src/components/AgentSelect/utils.d.ts
+export declare const groupAgentsByFormat: (agent: Agent) => string;
+/** Client-side match for when the caller does not search server-side. */
+export declare const matchesAgentSearch: (agent: Agent, search: string) => boolean;
 declare namespace clsx_d_exports {
   export { ClassArray, ClassDictionary, ClassValue$1 as ClassValue, clsx, clsx as default };
 }
@@ -6059,14 +6137,25 @@ interface ActionMenuItem {
     className?: string;
   }>;
   disabled?: boolean;
+  disabledReason?: string;
   danger?: boolean;
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
+}
+type DeleteActionLabel = 'Delete' | 'Remove' | `Delete ${string}` | `Remove ${string}`;
+interface DeleteAction {
+  onSelect: () => void;
+  label?: DeleteActionLabel;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 //#endregion
 //#region src/components/QuickActionsMenu/QuickActionsMenuRoot/index.d.ts
 type QuickActionItem = ActionMenuItem;
 interface QuickActionsMenuProps {
   actions: QuickActionItem[];
+  deleteAction?: DeleteAction;
+  ariaLabel?: string;
+  disabled?: boolean;
 }
 export declare const QuickActionsMenuRoot: FC<QuickActionsMenuProps>;
 //#endregion
@@ -11143,4 +11232,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type AgentSelectProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type MultiAgentSelectProps, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type SingleAgentSelectProps, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import base64
 
-import hvac
+from hvac import Client as HvacClient
 from hvac.exceptions import VaultError
 from nhx.common.secrets.encryption.base import HelixEncryptor
 from nhx.common.secrets.exceptions import EncryptionError
@@ -32,7 +32,7 @@ class VaultEncryptor(HelixEncryptor):
     def __init__(self, name: str, key_name: str, *, address: str | None, token: str | None):
         super().__init__(name=name)
         self._key_name = key_name
-        self._client = hvac.Client(url=address, token=token)
+        self._client = HvacClient(url=address, token=token)
         if not self._client.is_authenticated():
             raise ValueError("Vault client failed to authenticate. Check your Vault address and/or token.")
 

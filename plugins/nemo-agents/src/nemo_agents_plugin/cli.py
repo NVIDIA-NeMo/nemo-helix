@@ -43,6 +43,7 @@ import logging
 import os
 import re
 import shlex
+import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Generator, Iterator, Mapping
@@ -51,6 +52,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from pkgutil import resolve_name
+from subprocess import run as run_command
 from time import monotonic, sleep
 from typing import Any, ClassVar, Optional, TypeVar, cast
 
@@ -409,8 +411,6 @@ def _register_local_commands(app: typer.Typer) -> None:
         port: int = typer.Option(8080, "--port", "-p"),
     ) -> None:
         """Run an agent locally as a persistent FastAPI server."""
-        import subprocess
-
         config = _load_yaml(agent_config)
         if not isinstance(config, dict):
             typer.echo(f"Error: agent config {agent_config} root must be a YAML mapping.", err=True)
@@ -437,7 +437,7 @@ def _register_local_commands(app: typer.Typer) -> None:
 
         typer.echo(f"Starting agent server: {' '.join(cmd)}")
         try:
-            subprocess.run(cmd, check=True, cwd=agent_config.parent)
+            run_command(cmd, check=True, cwd=agent_config.parent)
         except subprocess.CalledProcessError as exc:
             typer.echo(f"Agent server exited with code {exc.returncode}.", err=True)
             raise typer.Exit(code=exc.returncode)
@@ -2416,8 +2416,6 @@ def _local_invoke(
     ``nemo-agents-spec-v1`` configs translate to an in-memory ``FabricConfig``
     and use Fabric's one-shot runtime lifecycle.
     """
-    import subprocess
-
     from nemo_agents_plugin.utils import temp_injected_config
 
     if input_file:
@@ -2443,7 +2441,7 @@ def _local_invoke(
         for query in queries:
             cmd = ["nat", "run", "--config_file", injected_path.name, "--input", query]
             try:
-                subprocess.run(cmd, check=True, cwd=injected_path.parent)
+                run_command(cmd, check=True, cwd=injected_path.parent)
             except subprocess.CalledProcessError as exc:
                 typer.echo(f"Error: nat run exited with code {exc.returncode}.", err=True)
                 raise typer.Exit(code=exc.returncode)
@@ -3352,7 +3350,9 @@ def _upload_ethos_fileset(
     fileset = ethos_fileset_name(agent_name)
     sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
-        staged = Path(directory) / agent_root.name
+        # The upload uses directory contents, not its basename. A fixed child
+        # also keeps relative roots like '.' and '..' inside the temp directory.
+        staged = Path(directory) / "agent"
         staged.mkdir()
         for relative_path, content in artifacts:
             destination = staged / relative_path

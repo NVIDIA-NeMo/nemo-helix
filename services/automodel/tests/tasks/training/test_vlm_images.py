@@ -33,6 +33,10 @@ def _rewrite(tmp_path: Path, url: str) -> dict:
 
 
 def test_a_relative_image_url_stays_under_the_dataset(tmp_path: Path) -> None:
+    image = tmp_path / "data" / "scans" / "receipt.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"png")
+
     row = _rewrite(tmp_path, "scans/receipt.png")
 
     assert row["conversation"][0]["content"][0] == {
@@ -83,6 +87,11 @@ def test_thinking_tool_calls_and_tools_survive_the_rewrite(tmp_path: Path) -> No
     assert loaded[0]["tools"] == tools
     assert loaded[0]["conversation"][1]["thinking"] == "check the map"
     assert loaded[0]["conversation"][2]["tool_calls"] == [tool_call]
+
+
+def test_a_missing_image_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(DatasetFormatError, match="does not exist"):
+        _rewrite(tmp_path, "scans/receipt.png")
 
 
 def test_an_absolute_image_url_is_rejected(tmp_path: Path) -> None:

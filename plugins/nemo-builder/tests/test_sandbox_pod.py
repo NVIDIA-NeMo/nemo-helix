@@ -25,7 +25,14 @@ from nemo_builder_plugin.run.supervise import (
     _results_from_log,
     sandbox_pod_name,
 )
-from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, SandboxSpec, WorkLayout
+from nemo_builder_plugin.steps import (
+    ContextSource,
+    SandboxGroup,
+    SandboxImage,
+    SandboxMount,
+    SandboxSpec,
+    WorkLayout,
+)
 
 
 def _sandbox(**overrides: object) -> SandboxSpec:
@@ -146,6 +153,24 @@ class TestMounts:
         assert mounts["/nhx-work/context/ws/fs-a"].sub_path == "jobs/default/abc/context/ws/fs-a"
         assert mounts["/nhx-work/out/demo-1-0"].sub_path == "jobs/default/abc/out/demo-1-0"
 
+    def test_a_groups_mounts_are_read_only_at_their_targets(self) -> None:
+        group = _group(1).model_copy(
+            update={
+                "mounts": [SandboxMount(source=ContextSource(fileset="ws/tools", context_path="bin"), target="/opt/t")]
+            }
+        )
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g0",
+            namespace="nhx-builds",
+            group=group,
+            sandbox=_sandbox(),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        mounts = {m.mount_path: m for m in pod.spec.containers[0].volume_mounts}
+        assert mounts["/opt/t"].read_only is True
+        assert mounts["/opt/t"].sub_path == "jobs/default/abc/context/ws/tools/bin"
+
     def test_only_this_groups_outputs_are_mounted(self) -> None:
         mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
         assert "/nhx-work/out" not in mounts
@@ -174,6 +199,14 @@ class TestMounts:
         assert f"--context=dir://{WorkLayout(SANDBOX_ROOT).context(ContextSource(fileset='ws/fs-a'))}" in script
         assert "--oci-layout-path=/nhx-work/out/demo-1-0" in script
         assert {"/nhx-work/context/ws/fs-a", "/nhx-work/out/demo-1-0", "/nhx-work/out/demo-1-1"} == mounts
+
+    def test_a_dockerfile_in_a_mount_is_passed_by_its_absolute_path(self) -> None:
+        group = SandboxGroup(
+            source=ContextSource(fileset="ws/fs-a"),
+            mounts=[SandboxMount(source=ContextSource(fileset="ws/tools"), target="/opt/t")],
+            images=[SandboxImage(image="demo-1-0", platform="linux/amd64", dockerfile="/opt/t/Dockerfile")],
+        )
+        assert "--dockerfile=/opt/t/Dockerfile" in _build_script(group, _sandbox())
 
 
 class TestPodNames:
@@ -216,18 +249,25 @@ class TestTheBuildScriptRuns:
     @staticmethod
     def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dockerfiles: list[str]) -> dict[str, int]:
         executor = tmp_path / "executor"
-        # Exits 3 for a "broken*" Dockerfile, else 0: not 1, so only kaniko's own status matches. For an
-        # "unterminated*" one, its output ends without a newline, as a `RUN printf done` does.
+        # Records its arguments, one invocation a line. Exits 3 for a "broken*" Dockerfile, else 0: not 1, so only
+        # kaniko's own status matches. For an "unterminated*" one, its output ends without a newline, as a
+        # `RUN printf done` does. A "writes-product-name*" one writes that root file, as a `RUN` there would.
         executor.write_text(
-            '#!/bin/sh\nfor arg in "$@"; do case "$arg" in\n'
+            f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{tmp_path / 'calls'}'\n"
+            'for arg in "$@"; do case "$arg" in\n'
             "  --dockerfile=broken*) exit 3;;\n"
             "  --dockerfile=unterminated*) printf done; exit 0;;\n"
+            f"  --dockerfile=writes-product-name*) : > '{tmp_path / 'product_name'}';;\n"
             "esac; done\nexit 0\n"
         )
         executor.chmod(0o755)
         monkeypatch.setattr(supervise, "KANIKO_EXECUTOR", str(executor))
         # The script empties each image's output directory; point it somewhere of the test's own.
         monkeypatch.setattr(supervise, "SANDBOX_ROOT", PurePosixPath(tmp_path))
+        # And it looks for the files kind puts at the root; look in the test's own directory instead.
+        monkeypatch.setattr(
+            supervise, "_RUNTIME_ROOT_FILES", (str(tmp_path / "product_uuid"), str(tmp_path / "product_name"))
+        )
 
         group = SandboxGroup(
             source=ContextSource(fileset="ws/fs-a"),
@@ -267,6 +307,34 @@ class TestTheBuildScriptRuns:
         results = self._run(tmp_path, monkeypatch, ["unterminated.Dockerfile", "unterminated.Dockerfile"])
         assert results == {"demo-1-0": 0, "demo-1-1": 0}
 
+    @staticmethod
+    def _ignored(tmp_path: Path) -> list[set[str]]:
+        """The paths each kaniko invocation was told to ignore, in order."""
+        calls = (tmp_path / "calls").read_text().splitlines()
+        return [
+            {arg.removeprefix("--ignore-path=") for arg in call.split() if arg.startswith("--ignore-path=")}
+            for call in calls
+        ]
+
+    def test_a_root_file_the_runtime_put_there_is_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # As kind's createContainer hook leaves it: there before the script starts.
+        (tmp_path / "product_uuid").write_text("the node's uuid")
+        results = self._run(tmp_path, monkeypatch, ["Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 0, "demo-1-1": 0}
+        assert self._ignored(tmp_path) == [{str(tmp_path / "product_uuid")}] * 2
+
+    def test_without_them_no_path_is_kept_out_of_the_image(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # `--ignore-path` also keeps a path out of every layer, so here a file a `RUN` writes there must not be
+        # ignored: not even by the next build, after the first one wrote it.
+        results = self._run(tmp_path, monkeypatch, ["writes-product-name.Dockerfile", "Dockerfile"])
+        assert results == {"demo-1-0": 0, "demo-1-1": 0}
+        assert (tmp_path / "product_name").exists()
+        assert self._ignored(tmp_path) == [set(), set()]
+
 
 class _Api:
     """The pod calls a sandbox makes, failing where told to."""
@@ -296,7 +364,7 @@ class _Api:
 
 
 class _Clock:
-    """Stands in for supervise's ``time`` module.
+    """Stands in for supervise's locally bound clock functions.
 
     Patching ``supervise.time.sleep`` would patch the shared ``time`` module, so every other thread in the
     worker would record its sleeps here and spin, and a failing assert would then format a list too long to
@@ -335,7 +403,7 @@ class TestEachSandboxFailsAlone:
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
         clock = _Clock()
-        monkeypatch.setattr(supervise, "time", clock)
+        monkeypatch.setattr(supervise, "sleep", clock.sleep)
         api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
@@ -344,7 +412,8 @@ class TestEachSandboxFailsAlone:
     def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
         clock = _Clock()
         sleeps = clock.sleeps
-        monkeypatch.setattr(supervise, "time", clock)
+        monkeypatch.setattr(supervise, "monotonic", clock.monotonic)
+        monkeypatch.setattr(supervise, "sleep", clock.sleep)
         quota = ApiException(status=403, reason="Forbidden")
         quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
         api = _Api(create=quota, create_failures=3)
@@ -406,7 +475,7 @@ def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, cap
         def stop(self) -> None:
             pass
 
-    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "Watch", Watch)
     monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
     with caplog.at_level(logging.ERROR, logger=supervise.__name__):
         failures = _build_group(

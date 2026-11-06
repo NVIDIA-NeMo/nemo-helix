@@ -70,7 +70,6 @@ def _make_grpo_step(
     activation_checkpointing: bool = False,
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
-    v4_compatible: bool = True,
     integrations: TrainingStepConfig.IntegrationsConfig | None = None,
     has_vision_tower: bool = False,
     has_audio_tower: bool = False,
@@ -89,7 +88,6 @@ def _make_grpo_step(
         model=ModelConfig(
             path=str(tmp_path / "model"),
             max_seq_length=512,
-            v4_compatible=v4_compatible,
             has_vision_tower=has_vision_tower,
             has_audio_tower=has_audio_tower,
             num_experts=num_experts,
@@ -135,7 +133,6 @@ def _prepared_step(
     activation_checkpointing: bool = False,
     grpo: GRPOConfig | None = None,
     policy_backend: PolicyBackend = PolicyBackend.AUTOMODEL,
-    v4_compatible: bool = True,
     integrations: TrainingStepConfig.IntegrationsConfig | None = None,
     has_vision_tower: bool = False,
     has_audio_tower: bool = False,
@@ -157,7 +154,6 @@ def _prepared_step(
             activation_checkpointing=activation_checkpointing,
             grpo=grpo,
             policy_backend=policy_backend,
-            v4_compatible=v4_compatible,
             integrations=integrations,
             has_vision_tower=has_vision_tower,
             has_audio_tower=has_audio_tower,
@@ -373,8 +369,17 @@ def test_compile_grpo_config_enables_lora(
     assert lora_cfg["dim"] == 32
     assert lora_cfg["alpha"] == 64
     assert lora_cfg["use_triton"] is True
+    assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
     assert "_v2" not in cfg["policy"]["automodel_cfg"]
     assert cfg["policy"]["generation"]["lora_refit_mode"] == "merged"
+
+
+def test_full_weight_generation_omits_lora_refit_mode(
+    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
+    step, _ = _prepared_step(tmp_path)
+    assert "lora_refit_mode" not in compile_grpo_config(step, job_ctx)["policy"]["generation"]
 
 
 def test_compiled_config_has_master_config_required_fields(
@@ -484,6 +489,7 @@ def test_compiled_vllm_cfg_has_required_typeddict_fields(
     [
         (FinetuningType.ALL_WEIGHTS, None, False),
         (FinetuningType.LORA, LoRAConfig(rank=8), True),
+        (FinetuningType.LORA_MERGED, LoRAConfig(rank=8), True),
         # finetuning_type is what enables LoRA; an omitted lora block just takes defaults.
         (FinetuningType.LORA, None, True),
     ],
@@ -505,6 +511,11 @@ def test_lora_cfg_follows_finetuning_type_under_automodel(
     # equivalent here and the test does not depend on which one we emit.
     assert dtensor_cfg.get("lora_cfg", {}).get("enabled", False) is expected
     assert "_v2" not in dtensor_cfg
+    generation = compile_grpo_config(step, job_ctx)["policy"]["generation"]
+    if expected:
+        assert generation["lora_refit_mode"] == "merged"
+    else:
+        assert "lora_refit_mode" not in generation
 
 
 @pytest.mark.parametrize(
@@ -983,77 +994,10 @@ def test_automodel_all_weights_requests_consolidated_safetensors(
     checkpoint = compiled["policy"]["automodel_cfg"]["checkpoint"]
 
     assert "_v2" not in compiled["policy"]["automodel_cfg"]
-    assert checkpoint["model_save_format"] == "safetensors"
-    assert checkpoint["save_consolidated"] == "every"
+    # No v4_compatible: the export writes the in-memory transformers v5 config.json.
+    assert checkpoint == {"model_save_format": "safetensors", "save_consolidated": "every"}
     assert "model_save_format" not in compiled["checkpointing"]
     assert "save_consolidated" not in compiled["checkpointing"]
-
-
-def test_v4_compatible_defaults_on_for_consolidated_export(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Without this the consolidated export carries a transformers v5 config.json, which the
-    vLLM the platform serves the published model with cannot read."""
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path)
-    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["checkpoint"]
-
-    assert checkpoint["v4_compatible"] is True
-
-
-def test_v4_compatible_can_be_turned_off(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    step, _ = _prepared_step(tmp_path, v4_compatible=False)
-    checkpoint = compile_grpo_config(step, job_ctx)["policy"]["automodel_cfg"]["checkpoint"]
-
-    assert checkpoint["v4_compatible"] is False
-
-
-def _write_base_model_config(tmp_path: Path, transformers_version: str | None) -> None:
-    model_dir = tmp_path / "model"
-    model_dir.mkdir(exist_ok=True)
-    config: dict[str, object] = {"architectures": ["Qwen3ForCausalLM"]}
-    if transformers_version is not None:
-        config["transformers_version"] = transformers_version
-    (model_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
-
-
-def test_v4_compatible_warns_when_the_base_checkpoint_is_v5(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    _write_base_model_config(tmp_path, "5.1.0")
-    step, _ = _prepared_step(tmp_path)
-    with caplog.at_level("WARNING"):
-        compile_grpo_config(step, job_ctx)
-
-    assert any("base checkpoint is transformers v5" in record.message for record in caplog.records)
-
-
-def test_v4_compatible_does_not_warn_for_a_v4_checkpoint(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    _write_base_model_config(tmp_path, "4.51.0")
-    step, _ = _prepared_step(tmp_path)
-    with caplog.at_level("WARNING"):
-        compile_grpo_config(step, job_ctx)
-
-    assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
-
-
-def test_v4_compatible_off_does_not_warn_for_a_v5_checkpoint(
-    tmp_path: Path, job_ctx: NHXJobContext, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    monkeypatch.setenv("NHX_JOB_STORAGE_PVC_CLAIM", "nhx-job-storage")
-    _write_base_model_config(tmp_path, "5.1.0")
-    step, _ = _prepared_step(tmp_path, v4_compatible=False)
-    with caplog.at_level("WARNING"):
-        compile_grpo_config(step, job_ctx)
-
-    assert not any("base checkpoint is transformers v" in record.message for record in caplog.records)
 
 
 def test_automodel_lora_still_requests_consolidated_export(

@@ -14,6 +14,7 @@ from collections import deque
 from pathlib import Path
 
 import typer
+from httpx import get as http_get
 from rich import box
 from rich.console import Console, Group
 from rich.live import Live
@@ -88,10 +89,8 @@ def _check_ready_endpoint(port: int, timeout: float = 2.0) -> bool:
     Returns:
         True if the ready endpoint returns HTTP 200, False otherwise.
     """
-    import httpx
-
     try:
-        response = httpx.get(f"http://localhost:{port}/status", timeout=timeout)
+        response = http_get(f"http://localhost:{port}/status", timeout=timeout)
         return response.status_code == 200
     except Exception:
         return False
@@ -291,8 +290,6 @@ quickstart_app = typer.Typer(help="Quickstart commands for managing the NeMo Hel
 @cluster_info_app.callback(invoke_without_command=True)
 def cluster_info(ctx: typer.Context) -> None:
     """Show information about the connected platform cluster."""
-    import httpx
-
     from nemo_helix_ext.cli.version import client_version
 
     base_url: str | None = None
@@ -318,7 +315,7 @@ def cluster_info(ctx: typer.Context) -> None:
     console.print(f"• CLI Version: {client_version()}")
 
     try:
-        response = httpx.get(f"{base_url.rstrip('/')}/status", timeout=5.0)
+        response = http_get(f"{base_url.rstrip('/')}/status", timeout=5.0)
     except Exception as e:
         console.print(f"\n[red]✗[/red] Could not reach cluster: {e}")
         raise typer.Exit(code=1)

@@ -24,6 +24,7 @@ from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from nemo_helix_plugin.scheduler import NemoJobScheduler
 from nhx.customization_common.contributor.jobs import BaseSubmitJob
 from nhx.customization_common.dry_run import check_local_dataset_rows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 
 # A full dry run answers only once it has read the whole dataset.
 _FULL_DRY_RUN_TIMEOUT = 1800.0
@@ -105,7 +106,8 @@ def dry_run_local(
     checks = [JobDryRunCheck(name="job JSON", passed=True, message="Matches the schema.")]
     if dataset_source is not None:
         input_spec = job_cls._job_input_schema().model_validate(validated_spec)
-        [training, *_] = job_cls._dry_run_datasets(input_spec, workspace)
+        # The model may not exist yet, so its traits are unknown: rows are checked as for a text model.
+        [training, *_] = job_cls._dry_run_datasets(input_spec, workspace, CheckpointTraits())
         path = Path(dataset_source).expanduser()
         if path.exists():
             with _waiting(full, f"Checking every row of {path}"):

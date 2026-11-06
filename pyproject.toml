@@ -658,6 +658,8 @@ extra-paths = [
   "plugins/nemo-agent-hardener/tests/unit",
   # So ``helpers`` and ``reconciler.conftest`` resolve in the deployments plugin's unit tests.
   "plugins/nemo-deployments/tests/unit",
+  # Match pytest's sibling-module resolution for the deployments K8s integration fixtures.
+  "plugins/nemo-deployments/tests/integration",
   # nemo-evals plugin is not a workspace member; add its src so ty can
   # resolve nemo_evals imports when checking plugin test files.
   "plugins/nemo-evals/src",

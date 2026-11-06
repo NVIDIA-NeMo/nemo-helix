@@ -25,6 +25,12 @@ auth:
   oidc:
     enabled: true
     issuer: "http://authentik-server:9000/application/o/nemo-user/"
+    # Authentik sets aud to the issuing provider's client_id: "nemo-helix" for setup/e2e
+    # tokens, and nemo-helix-user / nemo-helix-cli for browser and CLI logins.
+    audience: "nemo-helix"
+    additional_audiences:
+      - "nemo-helix-user"
+      - "nemo-helix-cli"
     additional_issuers:
       - "http://authentik-server:9000/application/o/nemo/"
       - "http://authentik-server:9000/application/o/nemo-cli/"

@@ -22,7 +22,6 @@ from nemo_helix_plugin.telemetry.handler import (
     build_payload,
     httpx,
     logger,
-    platform,
 )
 
 __all__ = [
@@ -43,5 +42,4 @@ __all__ = [
     "build_payload",
     "httpx",
     "logger",
-    "platform",
 ]

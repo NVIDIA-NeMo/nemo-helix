@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -75,8 +76,7 @@ async def list_spans(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: SpanSortField = Query(default=SpanSortField.STARTED_AT_DESC),
     mode: SpanMode = Query(
         default="detailed",
@@ -91,8 +91,8 @@ async def list_spans(
     filters = _span_filter(workspace, parsed)
     result = await service.list_spans(
         filters=filters,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         mode=mode,
     )
@@ -140,8 +140,7 @@ async def list_span_groups(
         description="Comma-separated span fields to group by, e.g. trace_id or session_id,trace_id.",
         examples=["trace_id"],
     ),
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: SpanGroupSortField = Query(
         default=SpanGroupSortField.SPAN_COUNT_DESC,
         description=(
@@ -159,8 +158,8 @@ async def list_span_groups(
     result = await service.list_span_groups(
         filters=filters,
         group_by=[field.value for field in grouped_by],
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
     )
     groups = [SpanGroup.from_domain(group) for group in result.data]

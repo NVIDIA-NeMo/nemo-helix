@@ -2,17 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import {
-  type QuickActionItem,
-  QuickActionsMenuRoot,
-} from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
+import { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 import { useGuardrailsDeleteConfig } from '@nemo/sdk/generated/platform/guardrails';
 import type { GuardrailConfig } from '@nemo/sdk/generated/platform/schema';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { CreateGuardrailModal } from '@studio/routes/guardrails/CreateGuardrailModal';
 import { getGuardrailsRoute } from '@studio/routes/utils';
 import { useQueryClient } from '@tanstack/react-query';
-import { type FC, useCallback, useMemo, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 interface GuardrailDetailActionsProps {
@@ -43,24 +40,12 @@ export const GuardrailDetailActions: FC<GuardrailDetailActionsProps> = ({ config
     return true;
   }, [config.name, deleteConfig, navigate, queryClient, workspace]);
 
-  const actions = useMemo<QuickActionItem[]>(
-    () => [
-      {
-        label: 'Duplicate',
-        onSelect: () => setShowDuplicateModal(true),
-      },
-      {
-        label: 'Delete',
-        onSelect: () => setShowDeleteModal(true),
-        danger: true,
-      },
-    ],
-    []
-  );
-
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot
+        actions={[{ label: 'Duplicate', onSelect: () => setShowDuplicateModal(true) }]}
+        deleteAction={{ onSelect: () => setShowDeleteModal(true) }}
+      />
       {showDuplicateModal ? (
         <CreateGuardrailModal
           open

@@ -1,21 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type {
-  GenericSortField,
-  PaginationData,
-  ValidationError,
-} from '@nemo/sdk/generated/platform/schema';
+import type { PaginationData, ValidationError } from '@nemo/sdk/generated/platform/schema';
 import { AxiosError } from 'axios';
-
-export const GENERIC_SORT_FIELDS = ['created_at', '-created_at'] as readonly GenericSortField[];
-
-export const isSupportedSortField = <T extends string>(
-  unionArray: readonly T[],
-  value?: string
-): value is T => {
-  return unionArray.includes(value as T);
-};
 
 export const getNextPageParam = <T extends { pagination?: PaginationData }>(lastPage: T) => {
   if (!lastPage.pagination || lastPage.pagination.total_pages <= lastPage.pagination.page) {

@@ -116,7 +116,7 @@ def test_run_platform_marks_loaded_services_local_before_starting_controllers(mo
             {"keep_alive_timeout_seconds": str(keep_alive_timeout_seconds)}
         ),
     )
-    monkeypatch.setattr(runner.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(runner, "signal", lambda *args: None)
 
     def capture_controller_start(
         controller_run_funcs,

@@ -251,7 +251,7 @@ class TestFormatLicenses:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(generator.subprocess, "run", fake_run)
+        monkeypatch.setattr(generator, "run", fake_run)
 
         generator.generate_lockfile_without_dev_dependencies(
             tmp_path,
@@ -672,7 +672,7 @@ class TestPypiMetadata:
             calls.append((url, timeout))
             return responses.pop(0)
 
-        monkeypatch.setattr(generator.requests, "get", fake_get)
+        monkeypatch.setattr(generator, "http_get", fake_get)
 
         assert generator._get_pypi_json("demo", "1.2.3") == {"info": {"name": "demo"}}
         assert calls == [

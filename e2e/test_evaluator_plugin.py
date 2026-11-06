@@ -941,6 +941,8 @@ def _greeting_wheels_v1_package(root: Path) -> dict[str, bytes]:
 
 
 def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]]:
+    # Each row needs distinct content: the Gym runner treats row content as task identity and collapses
+    # identical rows into one task, so `count` copies of the same row would yield a single trial.
     bundled_reward = bundle_metric(GymRewardMetric(), InlineMetricBundlePackager()).model_dump(mode="json")
     rows_path = Path(os.environ.get("TMPDIR", "/tmp")) / f"greeting-rows-{short_unique_name('e2e')}.jsonl"
     rows_path.write_text(
@@ -951,7 +953,7 @@ def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]
                         "input": [
                             {
                                 "role": "user",
-                                "content": f"Reply with exactly this greeting and nothing else: {greeting}",
+                                "content": f"Request {index}: reply with exactly this greeting and nothing else: {greeting}",
                             }
                         ]
                     },
@@ -959,7 +961,7 @@ def _greeting_task_payloads(greeting: str, count: int) -> list[dict[str, object]
                 }
             )
             + "\n"
-            for _ in range(count)
+            for index in range(count)
         ),
         encoding="utf-8",
     )

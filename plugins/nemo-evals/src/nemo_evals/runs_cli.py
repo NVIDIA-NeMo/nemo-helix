@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from harbor.registry.client.git_repo import GitRepoRegistryClient
 from harbor.registry.client.package import PackageDatasetClient
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TaskInput, TasksetInput
@@ -170,7 +171,7 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
     Raises:
         RuntimeError: The selected tasks didn't come from one commit.
     """
-    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+    from harbor.registry.client.git_repo import resolve_repo_source
 
     check_git_source(source)
     repo = resolve_repo_source(source)
@@ -189,7 +190,7 @@ def download_git_tasks(source: str, names: str | None, output_dir: Path) -> tupl
 
 
 def list_git_tasks(source: str) -> list[str]:
-    from harbor.registry.client.git_repo import GitRepoRegistryClient, resolve_repo_source
+    from harbor.registry.client.git_repo import resolve_repo_source
 
     check_git_source(source)
     metadata = _run_git(GitRepoRegistryClient(resolve_repo_source(source)).get_dataset_metadata(""))
@@ -796,8 +797,13 @@ def _is_stream(path: Path) -> bool:
     return (
         parts[:3] in {("/", "dev", "stdin"), ("/", "dev", "fd")}
         or (parts[:2] == ("/", "proc") and parts[3:4] == ("fd",))  # /proc/<pid or self>/fd/<n>
-        or not path.is_file()
+        or not _is_file(path)
     )
+
+
+def _is_file(path: Path) -> bool:
+    """``path.is_file()``, behind a seam so tests can fake a regular file under ``/dev`` or ``/proc``."""
+    return path.is_file()
 
 
 def _load_spec(spec_file: Path) -> dict[str, Any]:

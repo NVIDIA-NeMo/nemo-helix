@@ -10,8 +10,8 @@ retries on its own, under these same rules.
 
 from __future__ import annotations
 
-import email.utils
 from datetime import timezone
+from email.utils import parsedate_to_datetime
 from time import time as wall_time
 
 import httpx
@@ -90,7 +90,7 @@ def _retry_after(response: httpx.Response) -> float | None:
             # Retry-After may instead be an RFC 5322 / HTTP-date, e.g.
             # "Fri, 31 Dec 2027 23:59:59 GMT"; convert that to a delta.
             try:
-                retry_date = email.utils.parsedate_to_datetime(retry_after)
+                retry_date = parsedate_to_datetime(retry_after)
             except (TypeError, ValueError, OverflowError):
                 return None
             if retry_date.tzinfo is None:

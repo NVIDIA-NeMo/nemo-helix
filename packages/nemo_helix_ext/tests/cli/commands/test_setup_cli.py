@@ -94,7 +94,7 @@ def test_local_choice_starts_services_and_keeps_local_connection(
         patch(f"{SETUP_MOD}._check_platform_reachable", return_value=False),
         patch(f"{SETUP_MOD}.prompt_choice", return_value="yes"),
         patch(f"{SETUP_MOD}._prompt_data_dir", return_value="/tmp/nemo-demo"),
-        patch(f"{SETUP_MOD}.importlib.util.find_spec", return_value=MagicMock()),
+        patch(f"{SETUP_MOD}.find_spec", return_value=MagicMock()),
         patch(f"{SETUP_MOD}._ensure_port_available_for_start"),
         patch(f"{SETUP_MOD}._start_services_background", return_value=process) as start_services,
         patch(f"{SETUP_MOD}._wait_for_platform", return_value=True),
