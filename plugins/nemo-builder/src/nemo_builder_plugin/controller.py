@@ -4,7 +4,7 @@
 """``builder-settle``: fail the ``pending`` images no job will complete, in every workspace.
 
 Each pass reads every ``pending`` image, then :func:`~nemo_builder_plugin.settle.settle`\\ s them as the builder: an
-image whose job has ended, or that has had no job for :data:`~nemo_builder_plugin.settle.JOB_GRACE`, is written
+image whose job has ended, or that is :data:`~nemo_builder_plugin.settle.JOB_GRACE` old and has no job, is written
 ``failed``. It reads them all before writing any, so a write can't move a row out of a page it hasn't read yet.
 
 Reading one image settles it too; listing doesn't, so a listing's ``status`` is only as fresh as this controller's
