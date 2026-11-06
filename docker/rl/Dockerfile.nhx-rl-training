@@ -79,6 +79,26 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     -e "/app/packages/sandboxed_gym[server,ray]" \
     -e "/app/services/rl[integrations]"
 
+# The base ships its own non-editable nemo-sandboxed-gym, and the freeze above passes that exact
+# version as an override. The editable install is then satisfied by the base's copy, so the driver
+# venv kept an older tree without sandboxed_gym.job_reaper. The training task needs it to delete a
+# cancelled job's sandboxes: Ray kills the actor that created them, and the task is the process the
+# container runtime signals. Replace the package explicitly (no dependency changes, so the pinned
+# RL stack is untouched), then fail the build if this venv does not run the tree in /app.
+RUN --mount=type=cache,target=/root/.cache/uv <<"EOF" bash -eu
+umask 022
+export UV_CACHE_DIR=/root/.cache/uv
+uv-glue pip install --python /opt/nemo_rl_venv/bin/python --no-cache --no-deps \
+    --reinstall-package nemo-sandboxed-gym \
+    -e "/app/packages/sandboxed_gym[server,opensandbox,ray]"
+/opt/nemo_rl_venv/bin/python - <<"PY"
+import sandboxed_gym
+import sandboxed_gym.job_reaper  # noqa: F401
+
+assert sandboxed_gym.__file__.startswith("/app/packages/sandboxed_gym/"), sandboxed_gym.__file__
+PY
+EOF
+
 # Same package as the driver venv. These workers import sandboxed_gym.
 RUN --mount=type=cache,target=/root/.cache/uv <<"EOF" bash -eu
 umask 022
