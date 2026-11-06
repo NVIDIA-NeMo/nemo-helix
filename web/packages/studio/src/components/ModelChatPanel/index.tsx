@@ -15,6 +15,7 @@ import {
   CHAT_INFERENCE_PARAM_FIELDS,
   CHAT_INFERENCE_PARAM_METADATA,
   DEFAULT_CHAT_INFERENCE_PARAMS,
+  mergeChatParams,
 } from '@studio/components/chat/params';
 import { ModelChat } from '@studio/components/ModelChat';
 import { useModelChatAvailability } from '@studio/hooks/useModelChatAvailability';
@@ -167,7 +168,9 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
           paramsFields={CHAT_INFERENCE_PARAM_FIELDS}
           paramsFieldMetadata={CHAT_INFERENCE_PARAM_METADATA}
           inferenceParams={inferenceParams}
-          onInferenceParamsChange={setInferenceParams}
+          onInferenceParamsChange={(next) =>
+            setInferenceParams((prev) => mergeChatParams(prev, next))
+          }
         />
       </Flex>
 

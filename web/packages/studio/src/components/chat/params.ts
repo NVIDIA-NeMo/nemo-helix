@@ -23,3 +23,22 @@ export const DEFAULT_CHAT_INFERENCE_PARAMS: InferenceParams = {
   temperature: CHAT_INFERENCE_PARAM_METADATA.temperature.default,
   max_tokens: CHAT_INFERENCE_PARAM_METADATA.max_tokens.default,
 };
+
+/** Chat's bounds for a surface that starts at its own max_tokens, so reset returns there too. */
+export const chatParamMetadataWithMaxTokens = (maxTokens: number) =>
+  ({
+    ...CHAT_INFERENCE_PARAM_METADATA,
+    max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: maxTokens },
+  }) satisfies NonNullable<InferenceParametersProps['fieldMetadata']>;
+
+/**
+ * Apply a params edit, ignoring a cleared number box: chat keeps sending the last value rather than
+ * silently dropping the param and falling back to the server's default.
+ */
+export const mergeChatParams = (
+  previous: InferenceParams,
+  next: Partial<InferenceParams>
+): InferenceParams => ({
+  ...previous,
+  ...Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined)),
+});
