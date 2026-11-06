@@ -240,7 +240,7 @@ async def test_a_layer_is_the_setup_of_a_bare_container_committed_with_its_start
 
     run = next(call for call in calls if call[0] == "run")
     # The task's entrypoint doesn't run: state it initializes belongs to each trial, not the shared layer.
-    assert run[-5:] == ("--entrypoint", "sh", "task-image", "-c", "sleep infinity")
+    assert run[-6:] == ("--entrypoint", "", "task-image", "sh", "-c", "sleep infinity")
     (environment,) = set_up
     assert isinstance(environment, ContainerExecEnvironment) and environment.default_user == "agent"
     assert environment.env == {"HTTPS_PROXY": "http://proxy.example:3128"}

@@ -278,25 +278,36 @@ class ModelDeploymentService:
                 filter=None,
             )
         else:
-            # Get all deployments and filter to latest versions client-side
-            # Note: For large datasets, this should use server-side aggregation
-            result = await self.entity_client.list(
-                ModelDeploymentEntity,
-                workspace=workspace,
-                filter_operation=filter_operation,
-                sort=sort,
-                page=1,
-                page_size=1000,  # Get all to filter latest versions (max allowed)
-            )
+            # EntityClient has no latest-per-group query. Scan every page rather
+            # than silently truncating at the entity API's maximum page size.
+            # Preserve each winning row's position in the backend sort, including
+            # its scalar/null semantics and existing unique-ID tie-breaker.
+            # This is O(version rows) scan work and O(deployment names) memory;
+            # it is not a snapshot across concurrent writes.
+            latest_by_name: dict[str, tuple[int, ModelDeploymentEntity]] = {}
+            scan_page = 1
+            position = 0
+            while True:
+                result = await self.entity_client.list(
+                    ModelDeploymentEntity,
+                    workspace=workspace,
+                    filter_operation=filter_operation,
+                    sort=sort,
+                    page=scan_page,
+                    page_size=1000,
+                )
+                for dep in result.data:
+                    existing = latest_by_name.get(dep.base_name)
+                    if existing is None or (dep.entity_version, dep.id) > (existing[1].entity_version, existing[1].id):
+                        latest_by_name[dep.base_name] = (position, dep)
+                    position += 1
+                if scan_page >= result.pagination.total_pages:
+                    break
+                scan_page += 1
 
-            # Group by base_name and keep highest version
-            latest_by_name: dict[str, ModelDeploymentEntity] = {}
-            for dep in result.data:
-                existing = latest_by_name.get(dep.base_name)
-                if existing is None or dep.entity_version > existing.entity_version:
-                    latest_by_name[dep.base_name] = dep
-
-            all_latest = list(latest_by_name.values())
+            # An update can move a deployment to a different sort position.
+            # Dict insertion order instead retains the position of an old version.
+            all_latest = [dep for _, dep in sorted(latest_by_name.values(), key=lambda item: item[0])]
 
             # Apply pagination
             total_results = len(all_latest)

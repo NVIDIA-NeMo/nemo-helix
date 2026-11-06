@@ -301,10 +301,6 @@ export const GenerateJobsDataView: FC = () => {
                       },
                     ]
                   : []),
-                {
-                  label: 'Delete',
-                  onSelect: () => setDeleteJobs([row.original]),
-                },
                 ...(isCancellableJob(row.original.status)
                   ? [
                       {
@@ -314,6 +310,7 @@ export const GenerateJobsDataView: FC = () => {
                     ]
                   : []),
               ]}
+              deleteAction={{ onSelect: () => setDeleteJobs([row.original]) }}
             />
           ),
         }),

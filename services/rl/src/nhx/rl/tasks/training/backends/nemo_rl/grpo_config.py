@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from copy import deepcopy
 from pathlib import Path
@@ -60,7 +59,7 @@ logger = logging.getLogger(__name__)
 
 def _build_lora_cfg(customizer_config: TrainingStepConfig, is_vlm: bool = False) -> dict[str, Any]:
     """Map TrainingStepConfig LoRA settings onto NeMo-RL DTensor lora_cfg."""
-    enabled = customizer_config.training.finetuning_type == FinetuningType.LORA
+    enabled = customizer_config.training.finetuning_type in (FinetuningType.LORA, FinetuningType.LORA_MERGED)
     lora = customizer_config.training.lora
     tp = customizer_config.parallelism.tensor_parallel_size
     # Triton is the faster LoRA path but only works at TP 1 (its kernel has no DTensor
@@ -222,22 +221,6 @@ def _count_jsonl_rows(path: Path) -> int:
             if line.strip():
                 count += 1
     return count
-
-
-def _warn_if_v4_compatible_on_v5_checkpoint(model_path: str, v4_compatible: bool) -> None:
-    if not v4_compatible:
-        return
-    try:
-        version = json.loads((Path(model_path) / "config.json").read_text(encoding="utf-8")).get("transformers_version")
-        major = int(str(version).split(".")[0])
-    except (OSError, ValueError, AttributeError):
-        return
-    if major >= 5:
-        logger.warning(
-            "v4_compatible is enabled but the base checkpoint is transformers v%s; "
-            "set training.v4_compatible=false to keep the v5 config.json.",
-            major,
-        )
 
 
 # Formats whose wheels/ can be a complete closure. This is capability, not policy:
@@ -704,9 +687,7 @@ def compile_grpo_config(
     cfg["policy"]["automodel_cfg"]["checkpoint"] = {
         "model_save_format": "safetensors",
         "save_consolidated": "every",
-        "v4_compatible": customizer_config.model.v4_compatible,
     }
-    _warn_if_v4_compatible_on_v5_checkpoint(model_path, customizer_config.model.v4_compatible)
 
     # NeMo-RL forwards these to the training model as HF config kwargs and to vLLM as
     # `hf_overrides`, so one setting covers both. The passthrough is copied rather than

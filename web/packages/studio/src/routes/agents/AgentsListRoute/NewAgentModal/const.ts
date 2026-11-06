@@ -18,8 +18,6 @@ export const NEW_AGENT_TABS = [
 export const isNewAgentTab = (value: string | null): value is NewAgentTab =>
   NEW_AGENT_TABS.some((tab) => tab === value);
 
-export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
-
 // Container staging skips this file, so its bytes never reach a deployment.
 export const AGENT_SPEC_FILENAME = 'AGENT-SPEC.md';
 

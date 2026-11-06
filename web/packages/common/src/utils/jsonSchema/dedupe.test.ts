@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { buildDatasetMetadata } from './dedupe';
+import { buildDatasetMetadata } from '@nemo/common/src/utils/jsonSchema/dedupe';
 
 const S1 = { type: 'object', properties: { a: { type: 'integer' } } };
 const S2 = { type: 'object', properties: { b: { type: 'string' } } };

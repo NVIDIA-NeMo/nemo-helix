@@ -8,13 +8,14 @@ from __future__ import annotations
 import hashlib
 import io
 import tarfile
+from collections.abc import Sequence
 from typing import Literal
 from unittest.mock import Mock
 
 import httpx
 import pytest
 from nemo_builder_plugin.entities import ContainerImage, ImageRuntimeConfig, Provenance
-from nemo_builder_plugin.schema import FileSetSource, ImageSource, SubmitBuildResponse
+from nemo_builder_plugin.schema import BuildMount, FileSetSource, ImageSource, SubmitBuildResponse
 from nemo_evals.api.task_definitions.harbor import HarborArchiveSource, HarborTaskDefinition
 from nemo_evals.entities import TaskEntity, TaskRevisionEntity
 from nemo_evals.image_builds.builder import builder_name, copy_builder_name
@@ -109,6 +110,7 @@ class _Builder:
         source: FileSetSource | ImageSource,
         dockerfile: str | None,
         platform: str | None,
+        mounts: Sequence[BuildMount] = (),
     ) -> SubmitBuildResponse:
         self.platforms[name] = platform
         if self.refuse:

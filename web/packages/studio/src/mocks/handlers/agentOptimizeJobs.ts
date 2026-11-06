@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import type {
   OptimizationStrategyList,
   RunStrategyJob,
@@ -75,17 +76,14 @@ interface FilterQuery {
   name?: { $like: string };
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const isAgentClause = (value: unknown): value is { $in: string[] } =>
-  isRecord(value) &&
+  isPlainObject(value) &&
   Object.keys(value).length === 1 &&
   Array.isArray(value.$in) &&
   value.$in.every((entry) => typeof entry === 'string');
 
 const isNameClause = (value: unknown): value is { $like: string } =>
-  isRecord(value) && Object.keys(value).length === 1 && typeof value.$like === 'string';
+  isPlainObject(value) && Object.keys(value).length === 1 && typeof value.$like === 'string';
 
 /**
  * The slice of the platform filter syntax this endpoint is called with: exact `$in` on the dotted
@@ -101,7 +99,7 @@ const parseFilter = (raw: string): FilterQuery | null => {
   } catch {
     return null;
   }
-  if (!isRecord(parsed)) return null;
+  if (!isPlainObject(parsed)) return null;
   const entries = Object.entries(parsed);
   if (entries.length === 0) return null;
 

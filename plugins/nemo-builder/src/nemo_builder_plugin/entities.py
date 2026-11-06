@@ -69,6 +69,14 @@ class ImageRuntimeConfig(BaseModel):
     working_dir: str | None = Field(
         default=None, max_length=4096, description="The image's `WORKDIR`, or None when it sets none."
     )
+    user: str | None = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "The image's `USER`, as `name`, `uid` or either with `:group`; an empty string when it sets none, so it "
+            "runs as root. None when Builder didn't record it, as for an image it built before it started to."
+        ),
+    )
 
 
 class ContainerImage(NemoEntity, entity_type="container_image"):

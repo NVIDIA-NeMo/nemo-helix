@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  buildWorkspaceGroup,
+  type ModelWorkspaceGroup,
+} from '@nemo/common/src/api/models/useModels';
+import { getURNFromNamedEntityRef } from '@nemo/common/src/namedEntity';
+import type { ResourceRef } from '@nemo/common/src/types';
+import {
   type Adapter,
   FinetuningType,
   ModelDeploymentStatus,
   type ModelEntity,
 } from '@nemo/sdk/generated/platform/schema';
-
-import { buildWorkspaceGroup, type ModelWorkspaceGroup } from '../api/models/useModels';
-import { getURNFromNamedEntityRef } from '../namedEntity';
-import type { ResourceRef } from '../types';
 
 const DEFAULT_WORKSPACE = 'default';
 

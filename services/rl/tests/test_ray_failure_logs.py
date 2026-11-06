@@ -94,6 +94,53 @@ def test_an_agent_killed_by_the_os_is_not_the_hint(tmp_path: Path) -> None:
     assert get_classifier().classify_output([diagnosis], 1).cause == "ray_agent_killed"
 
 
+def test_a_worker_exit_137_beside_a_fate_share_is_not_an_agent_kill(tmp_path: Path) -> None:
+    logs = _logs(
+        tmp_path,
+        **{
+            "raylet.out": "\n".join(
+                [
+                    'reason_message: "runtime_env_agent failed and raylet fate-shares with it."',
+                    "Worker pid=412 exited with exit code 137",
+                ]
+            )
+            + "\n",
+            "raylet.err": "Killed\n",
+            "gcs_server.err": "signal 9\n",
+        },
+    )
+
+    diagnosis = diagnose_ray_startup(logs, startup_failure=False)
+
+    assert diagnosis == "RuntimeError: runtime_env_agent failed and raylet fate-shares with it"
+    training = "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB."
+    assert get_classifier().classify_output([training, diagnosis], 1).cause == "gpu_out_of_memory"
+
+
+def test_the_raylet_records_an_agent_exit_137_as_the_agent_being_killed(tmp_path: Path) -> None:
+    logs = _logs(
+        tmp_path,
+        **{
+            "raylet.out": (
+                "Agent process with name runtime_env_agent exited, exit code 137.\n"
+                'reason_message: "runtime_env_agent failed and raylet fate-shares with it."\n'
+            ),
+        },
+    )
+
+    diagnosis = diagnose_ray_startup(logs, startup_failure=False)
+
+    assert diagnosis is not None
+    assert "killed by the operating system" in diagnosis
+    assert get_classifier().classify_output([diagnosis], 1).cause == "ray_agent_killed"
+
+
+def test_a_worker_exit_137_during_startup_is_not_an_agent_kill(tmp_path: Path) -> None:
+    logs = _logs(tmp_path, **{"raylet.out": "Worker pid=9 exited with exit code 137\n"})
+
+    assert diagnose_ray_startup(logs, startup_failure=True) is None
+
+
 def test_a_stale_port_error_without_a_fate_share_is_not_reported_during_training(tmp_path: Path) -> None:
     logs = _logs(tmp_path, **{"runtime_env_agent.log": "OSError: [Errno 98] Address already in use\n"})
 

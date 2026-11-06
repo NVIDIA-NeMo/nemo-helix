@@ -7,7 +7,7 @@ description = "Model Context Protocol server for NeMo Helix"
 dependencies = [
     "nhx-common",
     "nhx-entities",
-    "fastmcp>=3.2.0",  # GHSA-vv7q-7jx5-f767 (Critical) + GHSA-rww4-4w9c-7733 (High): fix in >=3.2.0
+    "fastmcp>=3.4.4",  # host_origin_protection (>=3.4.4); GHSA-vv7q-7jx5-f767 + GHSA-rww4-4w9c-7733 fixed in >=3.2.0
 ]
 requires-python = ">=3.11,<3.15"
 readme = "README.md"

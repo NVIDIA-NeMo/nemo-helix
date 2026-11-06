@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { AgentConfig } from '@nemo/common/src/utils/agents';
 import { customFetch } from '@nemo/sdk/generated/fetchers/agents';
 import type { DeclaredMcpServer, McpStatusResponse } from '@studio/api/agents/types';
-import type { AgentConfig } from '@studio/components/dataViews/AgentsDataView';
 import { useQuery } from '@tanstack/react-query';
 
 /** Probing spawns every stdio server, so keep results instead of re-probing on each render. */

@@ -1,17 +1,16 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import DeepSeek from '@nemo/common/src/svgs/model_icon_deepseek.svg?react';
+import Google from '@nemo/common/src/svgs/model_icon_google.svg?react';
+import Meta from '@nemo/common/src/svgs/model_icon_meta.svg?react';
+import Microsoft from '@nemo/common/src/svgs/model_icon_microsoft.svg?react';
+import Mistral from '@nemo/common/src/svgs/model_icon_mistral.svg?react';
+import Nvidia from '@nemo/common/src/svgs/model_icon_nvidia.svg?react';
+import Qwen from '@nemo/common/src/svgs/model_icon_qwen.svg?react';
 import { Cube, NeuralNetwork, Toolbox } from '@nemo/icons/icons';
 import type { FinetuningType } from '@nemo/sdk/generated/platform/schema';
 import type { ReactNode } from 'react';
-
-import DeepSeek from '../svgs/model_icon_deepseek.svg?react';
-import Google from '../svgs/model_icon_google.svg?react';
-import Meta from '../svgs/model_icon_meta.svg?react';
-import Microsoft from '../svgs/model_icon_microsoft.svg?react';
-import Mistral from '../svgs/model_icon_mistral.svg?react';
-import Nvidia from '../svgs/model_icon_nvidia.svg?react';
-import Qwen from '../svgs/model_icon_qwen.svg?react';
 
 export type TagLabel = 'tool-calling' | 'reasoning';
 

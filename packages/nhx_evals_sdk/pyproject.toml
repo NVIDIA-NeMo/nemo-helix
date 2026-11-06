@@ -26,7 +26,7 @@ dependencies = [
   # pieces are extras -- so this adds request/response models, not a web stack.
   # Published on its own version line; see `[tool.bundle-package-published]` in
   # packages/nemo_helix/pyproject.toml. The workspace resolves it from source.
-  "nemo-sandboxed-gym==0.1.0",
+  "nemo-sandboxed-gym==0.2.0",
   "jinja2>=3.1.6",
   "jsonschema>=4.23.0",
   "jsonpath-ng>=1.7.0",

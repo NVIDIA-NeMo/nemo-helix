@@ -3,7 +3,6 @@
 
 """Integration coverage for online stable-account identity materialization."""
 
-import asyncio
 import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -87,8 +86,13 @@ async def _read_identity_rows(*, issuer: str, subject: str) -> list[IdentityRow]
         ]
 
 
-def _identity_rows(*, issuer: str, subject: str) -> list[IdentityRow]:
-    return asyncio.run(_read_identity_rows(issuer=issuer, subject=subject))
+def _identity_rows(client: TestClient, *, issuer: str, subject: str) -> list[IdentityRow]:
+    # Read on the platform's portal loop: the per-loop engine registry only knows the
+    # loop the service initialized on, so a fresh asyncio.run() loop would raise.
+    assert client.portal is not None
+    # BlockingPortal.call() forwards positional args only, so wrap in a lambda
+    # to pass the keyword arguments to the async helper.
+    return client.portal.call(lambda: _read_identity_rows(issuer=issuer, subject=subject))
 
 
 def _create_workspace(client: TestClient, workspace: str) -> None:
@@ -117,7 +121,7 @@ def test_first_bearer_request_materializes_account_and_uses_legacy_alias_binding
     workspace = f"account-migration-{uuid.uuid4().hex[:8]}"
     token = generate_unsigned_jwt(principal_id=subject, email=email, issuer=AUTHENTIK_ISSUER)
 
-    assert _identity_rows(issuer=AUTHENTIK_ISSUER, subject=subject) == []
+    assert _identity_rows(account_migration_client, issuer=AUTHENTIK_ISSUER, subject=subject) == []
 
     _create_workspace(account_migration_client, workspace)
     _grant_workspace_role(account_migration_client, workspace=workspace, principal=email, role="Viewer")
@@ -130,7 +134,7 @@ def test_first_bearer_request_materializes_account_and_uses_legacy_alias_binding
         assert response.status_code == 200, response.text
         assert response.json()["name"] == workspace
 
-        rows = _identity_rows(issuer=AUTHENTIK_ISSUER, subject=subject)
+        rows = _identity_rows(account_migration_client, issuer=AUTHENTIK_ISSUER, subject=subject)
         assert len(rows) == 1
         row = rows[0]
         assert row.account_id.startswith("account-")
@@ -144,7 +148,7 @@ def test_first_bearer_request_materializes_account_and_uses_legacy_alias_binding
             headers={"Authorization": f"Bearer {token}"},
         )
         assert repeat_response.status_code == 200, repeat_response.text
-        assert _identity_rows(issuer=AUTHENTIK_ISSUER, subject=subject) == rows
+        assert _identity_rows(account_migration_client, issuer=AUTHENTIK_ISSUER, subject=subject) == rows
     finally:
         account_migration_client.delete(f"{WORKSPACES_PATH}/{workspace}", headers=SERVICE_HEADERS)
 
@@ -155,8 +159,8 @@ def test_pdp_materializes_service_actor_and_delegated_subject_accounts(
     subject = f"delegated-sub-{uuid.uuid4().hex[:8]}"
     email = f"delegated-user-{uuid.uuid4().hex[:8]}@example.com"
 
-    assert _identity_rows(issuer="nemo:service", subject="jobs") == []
-    assert _identity_rows(issuer="nemo:trusted-header", subject=subject) == []
+    assert _identity_rows(account_migration_client, issuer="nemo:service", subject="jobs") == []
+    assert _identity_rows(account_migration_client, issuer="nemo:trusted-header", subject=subject) == []
 
     response = account_migration_client.post(
         "/apis/auth/v2/authz/allow",
@@ -180,13 +184,13 @@ def test_pdp_materializes_service_actor_and_delegated_subject_accounts(
     assert result["subject_account_id"].startswith("account-")
     assert result["subject_aliases"] == [subject, email]
 
-    service_rows = _identity_rows(issuer="nemo:service", subject="jobs")
+    service_rows = _identity_rows(account_migration_client, issuer="nemo:service", subject="jobs")
     assert len(service_rows) == 1
     assert service_rows[0].account_id == result["actor_account_id"]
     assert service_rows[0].account_type == "service"
     assert service_rows[0].subject_claim == "service"
 
-    subject_rows = _identity_rows(issuer="nemo:trusted-header", subject=subject)
+    subject_rows = _identity_rows(account_migration_client, issuer="nemo:trusted-header", subject=subject)
     assert len(subject_rows) == 1
     assert subject_rows[0].account_id == result["subject_account_id"]
     assert subject_rows[0].account_type == "user"

@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { FABRIC_CONFIG_FORMAT } from '@nemo/common/src/utils/agents';
 import type { RegisterAgentRequestConfig } from '@nemo/sdk/generated/agents/schema/RegisterAgentRequestConfig';
 import {
   AGENT_CONFIG_FILENAME,
   AGENT_SPEC_FILENAME,
-  FABRIC_CONFIG_FORMAT,
   IGNORED_DIRECTORIES,
   IGNORED_EXTENSIONS,
   IGNORED_FILENAMES,
