@@ -19,7 +19,13 @@ from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
 from nhx.studio.config import StudioConfig
-from nhx.studio.plugin_reports import PluginLoadErrorReport, ReportThrottle, format_report
+from nhx.studio.plugin_reports import (
+    MAX_BODY_BYTES,
+    PluginLoadErrorReport,
+    ReportThrottle,
+    format_report,
+    is_loopback_origin,
+)
 from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
 from pydantic import ValidationError
@@ -177,15 +183,29 @@ class StudioService(Service[StudioConfig]):
         async def report_plugin_load_errors(request: Request) -> Response:
             if not self._plugin_error_reports_enabled():
                 return Response(status_code=status.HTTP_404_NOT_FOUND)
+            # A browser page on any site can POST text/plain without a preflight, and the platform's CORS
+            # reflects every origin, so the endpoint itself must refuse non-loopback origins.
+            origin = request.headers.get("origin")
+            if origin is not None and not is_loopback_origin(origin):
+                return Response(status_code=status.HTTP_403_FORBIDDEN)
+            # Bound the body even without Content-Length (chunked): count bytes as they arrive.
+            if int(request.headers.get("content-length", 0)) > MAX_BODY_BYTES:
+                return Response(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
+            body = bytearray()
+            async for chunk in request.stream():
+                body += chunk
+                if len(body) > MAX_BODY_BYTES:
+                    return Response(status_code=status.HTTP_413_CONTENT_TOO_LARGE)
             try:
-                report = PluginLoadErrorReport.model_validate_json(await request.body())
+                report = PluginLoadErrorReport.model_validate_json(body)
             except ValidationError:
                 return Response(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
-            verdict = throttle.check(report)
+            rendered = format_report(report)
+            verdict = throttle.check(report.plugin, rendered)
             if verdict == "limited":
                 return Response(status_code=status.HTTP_429_TOO_MANY_REQUESTS)
             if verdict == "log":
-                logger.warning("%s", format_report(report))
+                logger.warning("%s", rendered)
             return Response(status_code=status.HTTP_204_NO_CONTENT)
 
         app.add_api_route(
