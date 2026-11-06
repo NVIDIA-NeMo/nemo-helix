@@ -20,6 +20,7 @@ passed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -44,6 +45,10 @@ NO_JOB = "not built: its build job was not found (never created, or deleted)"
 _ENDED = frozenset(HelixJobStatus.terminals())
 #: The statuses a job may still complete. ``queued`` is deprecated (see the module docstring).
 WAITING = ("pending", "queued")
+
+#: How many build jobs :func:`settle` asks Jobs about at once. One at a time, a pass over about 100 pending images
+#: took longer than the controller's 90-second health window (3 × its 30-second interval) on a loaded cluster.
+JOB_READS = 8
 
 #: The status of the job ``(workspace, name)``, or None when there is no such job.
 JobStatus = Callable[[str, str], Awaitable[HelixJobStatus | None]]
@@ -74,29 +79,37 @@ async def settle(
 ) -> list[ContainerImage]:
     """``images`` as they stand once each abandoned waiting one is failed. Each job is asked about once.
 
-    A job that can't be read leaves its images as they are, for the next read to settle.
+    The jobs are read first, :data:`JOB_READS` at a time, then the abandoned images are written one by one. A job
+    that can't be read leaves its images as they are, for the next read to settle.
     """
     now = now or datetime.now(UTC)
-    statuses: dict[str, HelixJobStatus | None] = {}
-    unreadable: set[str] = set()
+    statuses = await _job_statuses([image.provenance.job for image in images if image.status in WAITING], job_status)
     settled: list[ContainerImage] = []
     for image in images:
         job = image.provenance.job
-        if image.status not in WAITING or job in unreadable:
+        if image.status not in WAITING or job not in statuses:
             settled.append(image)
             continue
-        if job not in statuses:
-            workspace, _, name = job.partition("/")
-            try:
-                statuses[job] = await job_status(workspace, name)
-            except Exception:
-                logger.exception("could not read build job %s; leaving its images pending", sanitize_for_log(job))
-                unreadable.add(job)
-                settled.append(image)
-                continue
         detail = _abandoned(image, statuses[job], now)
         settled.append(image if detail is None else await _fail(rows, image, detail))
     return settled
+
+
+async def _job_statuses(jobs: list[str], job_status: JobStatus) -> dict[str, HelixJobStatus | None]:
+    """Each distinct job's status, read :data:`JOB_READS` at a time; a job that can't be read is left out."""
+    limit = asyncio.Semaphore(JOB_READS)
+
+    async def read(job: str) -> tuple[str, HelixJobStatus | None] | None:
+        workspace, _, name = job.partition("/")
+        async with limit:
+            try:
+                return job, await job_status(workspace, name)
+            except Exception:
+                logger.exception("could not read build job %s; leaving its images pending", sanitize_for_log(job))
+                return None
+
+    read_jobs = await asyncio.gather(*(read(job) for job in dict.fromkeys(jobs)))
+    return dict(found for found in read_jobs if found is not None)
 
 
 def _abandoned(image: ContainerImage, status: HelixJobStatus | None, now: datetime) -> str | None:
