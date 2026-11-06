@@ -6137,6 +6137,7 @@ interface ActionMenuItem {
     className?: string;
   }>;
   disabled?: boolean;
+  disabledReason?: string;
   danger?: boolean;
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
 }
@@ -6145,6 +6146,7 @@ interface DeleteAction {
   onSelect: () => void;
   label?: DeleteActionLabel;
   disabled?: boolean;
+  disabledReason?: string;
 }
 //#endregion
 //#region src/components/QuickActionsMenu/QuickActionsMenuRoot/index.d.ts

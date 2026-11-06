@@ -5,8 +5,9 @@ import {
   ActionsMenu,
   type ActionMenuItem,
   type DeleteAction,
+  type DeleteActionLabel,
 } from '@nemo/common/src/components/ActionsMenu';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const openMenu = async (actions: ActionMenuItem[], deleteAction?: DeleteAction) => {
@@ -53,7 +54,21 @@ describe('ActionsMenu', () => {
     expect(screen.queryByRole('separator')).not.toBeInTheDocument();
   });
 
-  it('uses the given label and disabled state for the delete action', async () => {
+  it.each<DeleteActionLabel>(['Remove', 'Remove from experiment', 'Delete all versions'])(
+    'renders the full "%s" label for the delete action',
+    async (label) => {
+      await openMenu([{ label: 'Add to experiment', onSelect: vi.fn() }], {
+        onSelect: vi.fn(),
+        label,
+      });
+
+      expect(screen.getByRole('menuitem', { name: label })).toHaveTextContent(
+        new RegExp(`^${label}$`)
+      );
+    }
+  );
+
+  it('uses the given disabled state for the delete action', async () => {
     await openMenu([{ label: 'Add to experiment', onSelect: vi.fn() }], {
       onSelect: vi.fn(),
       label: 'Remove from experiment',
@@ -61,5 +76,51 @@ describe('ActionsMenu', () => {
     });
 
     expect(screen.getByRole('menuitem', { name: 'Remove from experiment' })).toBeDisabled();
+  });
+
+  it('explains a disabled delete action in a tooltip on hover', async () => {
+    const reason = 'This evaluation must belong to at least one experiment.';
+    const user = await openMenu([], {
+      onSelect: vi.fn(),
+      label: 'Remove',
+      disabled: true,
+      disabledReason: reason,
+    });
+
+    await user.hover(screen.getByTestId('nv-tooltip-trigger'));
+
+    await waitFor(() =>
+      expect(screen.getByRole('tooltip', { name: reason })).toHaveAttribute('data-state', 'open')
+    );
+  });
+
+  it('keeps clicks on a disabled delete action with a reason from reaching the parent', async () => {
+    const onDelete = vi.fn();
+    const onParentClick = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <div onClick={onParentClick}>
+        <ActionsMenu
+          actions={[]}
+          deleteAction={{ onSelect: onDelete, disabled: true, disabledReason: 'Not allowed' }}
+        />
+      </div>
+    );
+    await user.click(screen.getByTestId('actions-menu-trigger'));
+
+    await user.click(screen.getByTestId('nv-tooltip-trigger'));
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(onParentClick).not.toHaveBeenCalled();
+  });
+  it('shows no tooltip for an enabled delete action with a disabled reason', async () => {
+    const user = await openMenu([], {
+      onSelect: vi.fn(),
+      disabledReason: 'Not shown while enabled',
+    });
+
+    await user.hover(screen.getByRole('menuitem', { name: 'Delete' }));
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 });
