@@ -4,6 +4,7 @@
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import {
   CHAT_INFERENCE_PARAM_METADATA,
+  chatParamDefaults,
   chatParamMetadataWithMaxTokens,
   mergeChatParams,
 } from '@studio/components/chat/params';
@@ -36,6 +37,15 @@ describe('chatParamMetadataWithMaxTokens', () => {
     expect(chatParamMetadataWithMaxTokens(4096)).toEqual({
       ...CHAT_INFERENCE_PARAM_METADATA,
       max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: 4096 },
+    });
+  });
+});
+
+describe('chatParamDefaults', () => {
+  it("starts from each param's default", () => {
+    expect(chatParamDefaults(chatParamMetadataWithMaxTokens(4096))).toEqual({
+      temperature: CHAT_INFERENCE_PARAM_METADATA.temperature.default,
+      max_tokens: 4096,
     });
   });
 });

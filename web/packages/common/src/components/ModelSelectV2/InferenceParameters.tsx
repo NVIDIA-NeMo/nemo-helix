@@ -16,7 +16,7 @@ export const INFERENCE_PARAMETER_FIELDS = [
 
 export type InferenceParameterField = (typeof INFERENCE_PARAMETER_FIELDS)[number];
 
-type FieldMetadata = HyperparameterFieldMetadata<
+export type FieldMetadata = HyperparameterFieldMetadata<
   Record<InferenceParameterField, number>
 >[InferenceParameterField];
 

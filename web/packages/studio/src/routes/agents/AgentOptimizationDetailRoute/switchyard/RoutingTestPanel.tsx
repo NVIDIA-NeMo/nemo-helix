@@ -5,7 +5,6 @@ import type { AssistantMessageCompletion } from '@nemo/common/src/components/Ass
 import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
 import { ChatMulti } from '@nemo/icons/icons';
 import { useModelsListProviders } from '@nemo/sdk/generated/platform/model-providers';
-import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import {
   Anchor,
   Badge,
@@ -21,8 +20,8 @@ import {
 } from '@nvidia/foundations-react-core';
 import {
   CHAT_INFERENCE_PARAM_FIELDS,
+  chatParamDefaults,
   chatParamMetadataWithMaxTokens,
-  DEFAULT_CHAT_INFERENCE_PARAMS,
   mergeChatParams,
 } from '@studio/components/chat/params';
 import {
@@ -118,10 +117,7 @@ export interface RoutingTestPanelProps {
  */
 export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }) => {
   const { virtualModel } = route;
-  const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
-    ...DEFAULT_CHAT_INFERENCE_PARAMS,
-    max_tokens: PARAM_METADATA.max_tokens.default,
-  });
+  const [inferenceParams, setInferenceParams] = useState(() => chatParamDefaults(PARAM_METADATA));
   // Kept per VirtualModel, so switching routes and back keeps what was already observed.
   const [responsesByModel, setResponsesByModel] = useState<Record<string, RoutedResponse[]>>({});
   const responses = useMemo(

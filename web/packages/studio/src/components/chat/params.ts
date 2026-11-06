@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type {
+  FieldMetadata,
   InferenceParameterField,
-  InferenceParametersProps,
 } from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
 import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 
@@ -13,23 +13,26 @@ export const CHAT_INFERENCE_PARAM_FIELDS = [
   'max_tokens',
 ] as const satisfies readonly InferenceParameterField[];
 
-/** Chat's bounds differ from the shared ones: greedy decoding (0) is allowed, tokens move by 32. */
-export const CHAT_INFERENCE_PARAM_METADATA = {
-  temperature: { min: 0, max: 2, step: 0.05, default: 0.7 },
-  max_tokens: { min: 32, max: 4096, step: 32, default: 512 },
-} as const satisfies NonNullable<InferenceParametersProps['fieldMetadata']>;
-
-export const DEFAULT_CHAT_INFERENCE_PARAMS: InferenceParams = {
-  temperature: CHAT_INFERENCE_PARAM_METADATA.temperature.default,
-  max_tokens: CHAT_INFERENCE_PARAM_METADATA.max_tokens.default,
-};
-
-/** Chat's bounds for a surface that starts at its own max_tokens, so reset returns there too. */
 type ChatParamMetadata = Record<
   (typeof CHAT_INFERENCE_PARAM_FIELDS)[number],
-  { min: number; max: number; step: number; default: number }
+  Partial<FieldMetadata> & Pick<FieldMetadata, 'default'>
 >;
 
+/** Chat's bounds differ from the shared ones: greedy decoding (0) is allowed, tokens move by 32. */
+export const CHAT_INFERENCE_PARAM_METADATA: ChatParamMetadata = {
+  temperature: { min: 0, max: 2, step: 0.05, default: 0.7 },
+  max_tokens: { min: 32, max: 4096, step: 32, default: 512 },
+};
+
+/** The params a chat surface starts from, and resets to, given its metadata. */
+export const chatParamDefaults = (metadata: ChatParamMetadata): InferenceParams => ({
+  temperature: metadata.temperature.default,
+  max_tokens: metadata.max_tokens.default,
+});
+
+export const DEFAULT_CHAT_INFERENCE_PARAMS = chatParamDefaults(CHAT_INFERENCE_PARAM_METADATA);
+
+/** Chat's bounds for a surface that starts at its own max_tokens, so reset returns there too. */
 export const chatParamMetadataWithMaxTokens = (maxTokens: number): ChatParamMetadata => ({
   ...CHAT_INFERENCE_PARAM_METADATA,
   max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: maxTokens },
