@@ -9,6 +9,7 @@ import logging
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.config import Configuration
 from nhx.studio.config import StudioConfig
@@ -49,8 +50,10 @@ def _reset_config_cache():
 
 
 def _client(flag: bool | None = None) -> TestClient:
-    """Fresh service (and therefore fresh limiter state) per call."""
-    return TestClient(StudioService().with_config(StudioConfig(plugin_error_reports_enabled=flag)).app)
+    """Fresh FastAPI app + service per call, wired via configure_app like production."""
+    app = FastAPI()
+    StudioService().with_config(StudioConfig(plugin_error_reports_enabled=flag)).configure_app(app)
+    return TestClient(app)
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:

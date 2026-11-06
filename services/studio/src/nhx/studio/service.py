@@ -14,10 +14,12 @@ from typing import ClassVar
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 from nemo_helix_plugin.authz import Permission
+from nhx.common.config.base import get_auth_config
 from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
 from nhx.studio.config import StudioConfig
+from nhx.studio.plugin_reports import build_report_handler
 from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
 from starlette.responses import Response
@@ -67,7 +69,7 @@ PACKAGED_INSTALL_NOTICE_HTML = f"""      <p>This install ships with the Studio b
 
 def _bundle_asset_media_type(filename: str) -> str | None:
     """Media type for an allowed plugin bundle asset; None for disallowed suffixes."""
-    if filename.endswith(".js.map"):
+    if filename == "plugin.manifest.json" or filename.endswith(".js.map"):
         return "application/json"
     if filename.endswith(".js"):
         return "text/javascript"
@@ -97,6 +99,7 @@ class StudioService(Service[StudioConfig]):
     def __init__(self):
         """Initialize the studio service."""
         super().__init__(name="studio", module_name="nhx.studio")
+        self._plugin_report_handler = build_report_handler(self._plugin_error_reports_enabled)
 
     @property
     def title(self) -> str:
@@ -142,6 +145,7 @@ class StudioService(Service[StudioConfig]):
             app: The platform's FastAPI application
         """
         self._mount_telemetry_proxy(app)
+        self._mount_plugin_error_reports(app)
         self._mount_assistant_mcp(app)
         self._mount_static_files(app)
         self._configure_plugins(app)
@@ -161,6 +165,20 @@ class StudioService(Service[StudioConfig]):
         if self.service_config is not None:
             return self.service_config
         return StudioConfig()
+
+    def _mount_plugin_error_reports(self, app: FastAPI) -> None:
+        """Mount the browser plugin load-error report endpoint (before the /studio static mount)."""
+
+        app.add_api_route(
+            "/studio/api/plugin-load-errors",
+            self._plugin_report_handler,
+            methods=["POST"],
+            include_in_schema=False,
+        )
+
+    def _plugin_error_reports_enabled(self) -> bool:
+        flag = self._get_config().plugin_error_reports_enabled
+        return flag if flag is not None else not get_auth_config().enabled
 
     def _mount_telemetry_proxy(self, app: FastAPI) -> None:
         """Mount OTLP/HTTP telemetry proxy routes that replace the old nginx behavior."""
