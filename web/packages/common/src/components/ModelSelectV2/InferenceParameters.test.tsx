@@ -44,6 +44,18 @@ describe('InferenceParameters', () => {
     );
   });
 
+  it('keeps the current value when a box is cleared', () => {
+    const { onChange } = renderComponent({ value: { temperature: 0.4, max_tokens: 512 } });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ temperature: 0.4, max_tokens: 512 });
+  });
+
+  it('sends the default when a box with no value is cleared', () => {
+    const { onChange } = renderComponent({ value: {}, fieldMetadata: { temperature: { default: 0.3 } } });
+    fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '' } });
+    expect(onChange).toHaveBeenLastCalledWith({ temperature: 0.3 });
+  });
+
   it('calls onChange with updated max_tokens only (not max_completion_tokens)', () => {
     const { onChange } = renderComponent({ value: { temperature: 0.5 } });
     const inputs = screen.getAllByRole('spinbutton');

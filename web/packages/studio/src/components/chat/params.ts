@@ -36,8 +36,8 @@ export const chatParamMetadataWithMaxTokens = (maxTokens: number): ChatParamMeta
 });
 
 /**
- * Apply params over the current ones, skipping any left unset (a cleared number box, or a null in a
- * saved prompt): chat keeps sending the last value rather than dropping the param or sending null.
+ * Apply params over the current ones, skipping any left unset (a null in a saved prompt): chat keeps
+ * sending the last value rather than dropping the param or sending null.
  */
 export const mergeChatParams = (
   previous: InferenceParams,
