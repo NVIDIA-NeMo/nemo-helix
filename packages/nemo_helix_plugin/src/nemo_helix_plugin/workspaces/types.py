@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import NotRequired, TypedDict
 
+from nemo_helix_plugin.auth.types import MAX_PRINCIPAL_ID_LENGTH
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, Field
 
@@ -82,7 +83,7 @@ class UpdateWorkspaceRequest(BaseModel):
 class CreateWorkspaceMemberRequest(BaseModel):
     """Schema for adding a new workspace member."""
 
-    principal: str
+    principal: str = Field(max_length=MAX_PRINCIPAL_ID_LENGTH)
     roles: list[str] = Field(default_factory=lambda: ["Editor"])
 
 
