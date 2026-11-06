@@ -43,6 +43,7 @@ const renderWithPlugins = (plugins: LoadedPlugin[]) => {
     <PluginContext.Provider
       value={{
         plugins,
+        failed: [],
         installedNames: new Set(plugins.map((p) => p.name)),
         isLoaded: true,
         isError: false,
