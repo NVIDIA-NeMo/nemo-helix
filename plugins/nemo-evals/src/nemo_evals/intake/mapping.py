@@ -487,6 +487,27 @@ def _native_agent_input(attributes: dict[str, AnyValue]) -> AnyValue | None:
         return None
 
 
+def _has_boundary_payload(
+    attributes: dict[str, AnyValue], *, kind: str, direction: str, aliases: tuple[str, ...]
+) -> bool:
+    """Check one payload layer, as Intake does, without borrowing a native scope from another layer."""
+    if any(key in attributes and attributes[key].WhichOneof("value") is not None for key in aliases):
+        return True
+    if kind == "LLM" and any(
+        key.startswith(f"llm.{direction}_messages.")
+        and key.removeprefix(f"llm.{direction}_messages.").partition(".message.")[0].isdigit()
+        and ".message." in key
+        for key in attributes
+    ):
+        return True
+    if "nemo_relay.scope_type" not in attributes:
+        return False
+    prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+    if prefix in attributes:
+        return attributes[prefix].WhichOneof("value") is not None
+    return any(key.startswith(prefix + ".") for key in attributes)
+
+
 def _enrich_trial_boundary(
     resource_spans: list[ResourceSpans],
     *,
@@ -510,7 +531,8 @@ def _enrich_trial_boundary(
     if root is None:
         return
     resource_attributes = next(attrs for span, attrs in spans if span is root)
-    root_attributes = {**resource_attributes, **{attribute.key: attribute.value for attribute in root.attributes}}
+    root_span_attributes = {attribute.key: attribute.value for attribute in root.attributes}
+    root_attributes = {**resource_attributes, **root_span_attributes}
     # Follow actual parent links, rather than treating unrelated spans as descendants.
     connected = {bytes(root.span_id)}
     while True:
@@ -539,26 +561,9 @@ def _enrich_trial_boundary(
             ("output.value", "gen_ai.output.messages", "final_result", "gen_ai.tool.call.result", "tool_response"),
         ),
     ):
-        native_prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
-        if (
-            any(key in root_attributes and root_attributes[key].WhichOneof("value") is not None for key in aliases)
-            or (
-                root_kind == "LLM"
-                and any(
-                    key.startswith(f"llm.{direction}_messages.")
-                    and key.removeprefix(f"llm.{direction}_messages.").partition(".message.")[0].isdigit()
-                    and ".message." in key
-                    for key in root_attributes
-                )
-            )
-            or (
-                "nemo_relay.scope_type" in root_attributes
-                and (
-                    root_attributes[native_prefix].WhichOneof("value") is not None
-                    if native_prefix in root_attributes
-                    else any(key.startswith(f"{native_prefix}.") for key in root_attributes)
-                )
-            )
+        if any(
+            _has_boundary_payload(layer, kind=root_kind, direction=direction, aliases=aliases)
+            for layer in (root_span_attributes, resource_attributes)
         ):
             continue
         value = AnyValue(string_value=authoritative) if isinstance(authoritative, str) and authoritative else None
@@ -576,11 +581,17 @@ def _enrich_trial_boundary(
                 attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in span.attributes}}
                 if _boundary_kind(attrs) != "AGENT" or _has_agent_ancestor(span, root=root, by_id=by_id):
                     continue
+                recorded = {attribute.key: attribute.value for attribute in span.attributes}
                 candidate = next(
-                    (attrs[key] for key in aliases if key in attrs and attrs[key].WhichOneof("value") is not None), None
+                    (
+                        recorded[key]
+                        for key in aliases
+                        if key in recorded and recorded[key].WhichOneof("value") is not None
+                    ),
+                    None,
                 )
-                if candidate is None and attrs.get("nemo_relay.scope_type", AnyValue()).string_value == "agent":
-                    candidate = _native_agent_input(attrs)
+                if candidate is None and recorded.get("nemo_relay.scope_type", AnyValue()).string_value == "agent":
+                    candidate = _native_agent_input(recorded)
                 if candidate is not None:
                     candidates[candidate.SerializeToString(deterministic=True)] = candidate
                 else:

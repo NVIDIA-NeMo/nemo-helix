@@ -1202,15 +1202,21 @@ async def test_designated_invocation_uses_topmost_agent_input_not_internal_agent
         {"nemo_relay.start.input.instruction": "no scope", "nemo_relay.end.output": "no scope"},
     ],
 )
-async def test_ignored_root_metadata_does_not_hide_a_missing_boundary(ignored: dict[str, str]) -> None:
+@pytest.mark.parametrize("resource_scope", [False, True])
+async def test_ignored_root_metadata_does_not_hide_a_missing_boundary(
+    ignored: dict[str, str], resource_scope: bool
+) -> None:
     from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 
     trial = _otlp_trial()
-    root = trial.evidence.descriptors["trace"].data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    resource = trial.evidence.descriptors["trace"].data["resourceSpans"][0]
+    root = resource["scopeSpans"][0]["spans"][0]
     root["attributes"] = [
         {"key": key, "value": {"stringValue": value}}
         for key, value in {"openinference.span.kind": "CHAIN", **ignored}.items()
     ]
+    if resource_scope:
+        resource["resource"] = {"attributes": [{"key": "nemo_relay.scope_type", "value": {"stringValue": "agent"}}]}
     result = _result([trial], [])
     result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "task request"})]
     intake = InMemoryIntakeService()
@@ -1274,6 +1280,35 @@ async def test_boundary_enrichment_uses_canonical_run_root_beside_an_earlier_eve
     assert run_attrs["output.value"].string_value == "retained answer"
     assert run_attrs["nemo.evaluation.boundary.output"].string_value == "trial.output"
     assert "output.value" not in _attributes(mark_span)
+
+
+async def test_unset_root_attribute_does_not_overwrite_recorded_resource_payload() -> None:
+    trial = _otlp_trial()
+    resource = trial.evidence.descriptors["trace"].data["resourceSpans"][0]
+    resource["resource"] = {"attributes": [{"key": "input.value", "value": {"stringValue": "resource request"}}]}
+    resource["scopeSpans"][0]["spans"][0]["attributes"] = [{"key": "input.value", "value": {}}]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert attrs["input.value"].WhichOneof("value") is None
+    assert "nemo.evaluation.boundary.input" not in attrs
+
+
+async def test_descendant_resource_payload_is_not_mistaken_for_a_recorded_agent_input() -> None:
+    child = _recorded_agent("aabbccddeeff0011")
+    child["attributes"] = [item for item in child["attributes"] if item["key"] not in {"input.value", "output.value"}]
+    trial = _otlp_trial(operation="invoke_agent").model_copy(update={"output": AgentOutput(output_text=None)})
+    trial.evidence.descriptors["trace"].data["resourceSpans"].append(
+        {
+            "resource": {"attributes": [{"key": "input.value", "value": {"stringValue": "not a span payload"}}]},
+            "scopeSpans": [{"spans": [child]}],
+        }
+    )
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert "input.value" not in attrs
+    assert attrs["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
 
 
 @pytest.mark.parametrize("scope", ["agent", "function", "tool"])
