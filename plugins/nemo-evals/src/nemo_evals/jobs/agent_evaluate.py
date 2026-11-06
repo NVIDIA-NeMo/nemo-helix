@@ -624,6 +624,13 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
+        result_directories = {name: Path(path).resolve() for name, path in spec.result_directories.items()}
+        for directory in result_directories.values():
+            if not directory.is_dir():
+                raise ValueError("result directory must exist before execution")
+            for storage in (ctx.storage.persistent.resolve(), ctx.storage.ephemeral.resolve()):
+                if directory.is_relative_to(storage) or storage.is_relative_to(directory):
+                    raise ValueError("result directory must not overlap job storage")
         prepare_ctx = PrepareContext(
             storage_root=ctx.storage.persistent,
             client=platform_client if isinstance(platform_client, NemoClient) else None,
@@ -691,8 +698,28 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
-        ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
+        artifact = None
+        finalization_errors: list[Exception] = []
+        for name, path in {
+            DEFAULT_RESULT_NAME: files.bundle_dir,
+            SUMMARY_RESULT_NAME: files.summary,
+            **result_directories,
+        }.items():
+            try:
+                if name == DEFAULT_RESULT_NAME:
+                    artifact = ctx.results.save(name, path)
+                else:
+                    if name in result_directories and (not path.is_dir() or path.resolve() != path):
+                        raise ValueError("result directory disappeared or was redirected during execution")
+                    ctx.results.save(name, path)
+            except Exception as error:
+                error.add_note(f"Failed to save result {name!r}")
+                finalization_errors.append(error)
+                logger.exception("Failed to save result %r; attempting remaining results", name)
+
+        # Publication requires a durable bundle, but its failure must not prevent other saves.
+        if artifact is None:
+            raise ExceptionGroup("Evaluation bundle retention failed", finalization_errors)
 
         outcome = agent_eval_outcome(result)
         report_run_outcome(outcome, ctx=ctx, async_client=async_client)
@@ -721,27 +748,34 @@ class _AgentEvalJobBase(NemoJob):
         if outcome.failed:
             output["reason"] = outcome.message
 
-        # Publication runs last, after the bundle and the queryable record are both durable, so a
-        # failed publish costs a re-publish rather than a re-run. Nothing depends on its result.
+        # A supplementary save failure must not block publication of the durable bundle.
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
-            intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
-            publication_outcome = publish_agent_eval_result(
-                result,
-                spec=publication,
-                target=spec.target,
-                workspace=ctx.workspace,
-                intake=intake,
-                record_durations=self.record_publication_durations,
-                usage_superseded_by_gateway=trial_issuer is not None and trial_issuer.records_calls,
-            )
-            output["publication"] = publication_outcome.model_dump(exclude_none=True)
-            # The job output isn't persisted; status details are, so `runs status` can say what was published.
-            report_status_details(
-                {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
-                ctx=ctx,
-                async_client=async_client,
-            )
+            try:
+                intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
+                publication_outcome = publish_agent_eval_result(
+                    result,
+                    spec=publication,
+                    target=spec.target,
+                    workspace=ctx.workspace,
+                    intake=intake,
+                    record_durations=self.record_publication_durations,
+                    usage_superseded_by_gateway=trial_issuer is not None and trial_issuer.records_calls,
+                )
+                output["publication"] = publication_outcome.model_dump(exclude_none=True)
+                # The job output isn't persisted; status details are, so `runs status` can say what was published.
+                report_status_details(
+                    {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
+                    ctx=ctx,
+                    async_client=async_client,
+                )
+            except Exception as error:
+                finalization_errors.append(error)
+
+        if len(finalization_errors) == 1:
+            raise finalization_errors[0]
+        if finalization_errors:
+            raise ExceptionGroup("Evaluation finalization failed", finalization_errors)
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.

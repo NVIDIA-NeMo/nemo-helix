@@ -199,7 +199,7 @@ JSON/JSONL artifacts and skips the HTML. The `.json` and `.jsonl` files are alwa
 ## Results from platform jobs
 
 An `agent-evaluate` platform job persists the same JSON and JSONL data without `report.html`. It
-publishes two named job results:
+publishes two named job results by default:
 
 - `agent-eval-results` — the complete bundle, including tasks, trials, scores, metadata, and summary.
   It also holds each runner's evidence, which `trials.jsonl` references by bundle-relative path:
@@ -207,7 +207,33 @@ publishes two named job results:
   job output under `evidence/harbor/`.
 - `summary` — `summary.json` by itself for lightweight retrieval.
 
-Wait for the platform job to reach a terminal state before reading either result:
+### Choose what the job retains
+
+An `agent-evaluate` job spec can retain additional local directories as separate named results:
+
+```yaml
+result_directories:
+  workspace: /workspace
+  task_output: /platform-output/task-a
+```
+
+Each `result_directories` entry is saved through the job's native result API in the same fileset
+and attempt. Paths refer to the job's filesystem, must be absolute, must exist before execution,
+and must not overlap persistent or ephemeral job storage. Names cannot replace `agent-eval-results`
+or `summary`. Retention includes nested and hidden regular files. Keep credentials and service
+state outside the captured directories: their contents are sensitive and unredacted. Broader
+capture also retains inputs and caches and increases transfer time and storage use.
+
+After successful evaluations and handled failed trials, the job attempts the bundle and summary,
+then additional directories in declaration order. Ordinary save failures do not prevent remaining
+saves. If the bundle is saved, result-record persistence and configured publication are still
+attempted before required failures propagate, preserving multiple errors together. Publication
+requires a saved bundle. Result-record persistence remains best effort. Cancellation stops
+finalization immediately; an uncaught error or allocation loss before saving can also lose outputs.
+
+### Download job results
+
+Wait for the platform job to reach a terminal state before reading its results:
 
 ```python
 from pathlib import Path

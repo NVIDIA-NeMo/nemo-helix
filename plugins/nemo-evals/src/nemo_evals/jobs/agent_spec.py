@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, Self, TypeAlias
 
 # Imported for their registration side effects: each module registers its bundle
@@ -938,6 +939,28 @@ class _AgentEvalSpecCommon(BaseModel):
         default_factory=dict,
         description="Caller-supplied tags recorded on the run's metadata (e.g. benchmark, mode, backend).",
     )
+    result_directories: dict[str, str] = Field(
+        default_factory=dict,
+        description="Additional local directories to save as named native job results in the same fileset. "
+        "Saved in declaration order; failures do not stop remaining results. "
+        "Paths must be absolute and outside job storage. Directories must exist before execution. "
+        "All regular files are retained. "
+        "These results are sensitive and unredacted; keep credentials and service state outside them.",
+    )
+
+    @field_validator("result_directories")
+    @classmethod
+    def _validate_result_directories(cls, value: dict[str, str]) -> dict[str, str]:
+        """Require safe supplementary result names and absolute source paths before submission."""
+        for name, path in value.items():
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", name) or name in {"agent-eval-results", "summary"}:
+                raise ValueError(
+                    "result directory names must be safe, unique result names, not agent-eval-results or summary"
+                )
+            if not PurePosixPath(path).is_absolute() or "\x00" in path:
+                raise ValueError("result directories must be absolute paths")
+        return value
+
     publication: PublicationSpec | None = Field(
         default=None,
         description="Where the completed run publishes its results, beyond its own result bundle. "

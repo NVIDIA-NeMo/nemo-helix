@@ -232,13 +232,16 @@ def request_digest(req: TasksetRunInput) -> str:
         req: Validated caller request, with model defaults filled.
 
     Returns:
-        SHA-256 of compact JSON with sorted keys and only idempotency_key excluded. An omitted
-        ``publication``, and a Harbor target's unset ``closed_book``, are left out too, so requests from before
-        those fields existed keep their digest.
+        SHA-256 of compact JSON with sorted keys, excluding idempotency_key. An omitted
+        ``publication``, a Harbor target's unset ``closed_book``, and empty result-retention
+        settings are left out too, so requests from before those fields existed keep their digest.
     """
     exclude = {"idempotency_key"} if req.publication is not None else {"idempotency_key", "publication"}
     body = req.model_dump(mode="json", exclude=exclude)
-    target = body["spec"].get("target")
+    spec = body["spec"]
+    if not req.spec.result_directories:
+        spec.pop("result_directories", None)
+    target = spec.get("target")
     if isinstance(req.spec.target, HarborRunnerTarget) and not req.spec.target.closed_book and isinstance(target, dict):
         target.pop("closed_book", None)
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))

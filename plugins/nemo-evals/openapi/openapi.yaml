@@ -3623,6 +3623,17 @@ components:
           title: Labels
           description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
             mode, backend).
+        result_directories:
+          additionalProperties:
+            type: string
+          type: object
+          title: Result Directories
+          description: Additional local directories to save as named native job results
+            in the same fileset. Saved in declaration order; failures do not stop
+            remaining results. Paths must be absolute and outside job storage. Directories
+            must exist before execution. All regular files are retained. These results
+            are sensitive and unredacted; keep credentials and service state outside
+            them.
         publication:
           allOf:
           - $ref: '#/components/schemas/PublicationSpec'
@@ -3878,6 +3889,17 @@ components:
           title: Labels
           description: Caller-supplied tags recorded on the run's metadata (e.g. benchmark,
             mode, backend).
+        result_directories:
+          additionalProperties:
+            type: string
+          type: object
+          title: Result Directories
+          description: Additional local directories to save as named native job results
+            in the same fileset. Saved in declaration order; failures do not stop
+            remaining results. Paths must be absolute and outside job storage. Directories
+            must exist before execution. All regular files are retained. These results
+            are sensitive and unredacted; keep credentials and service state outside
+            them.
         publication:
           allOf:
           - $ref: '#/components/schemas/PublicationSpec'
