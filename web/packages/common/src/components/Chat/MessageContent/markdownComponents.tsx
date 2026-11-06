@@ -9,40 +9,43 @@ import { Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
 import type { Components } from 'react-markdown';
 
+// Headings step down from 18px so each level reads above the 14px reply text. Their top margin
+// is only dropped at the very start of a reply (see MessageContent), not after a code block.
 export const messageMarkdownComponents: Components = {
   h1: ({ children }) => (
-    <Text asChild kind="label/bold/lg">
-      <h1 className="mb-density-sm mt-density-2xl first:mt-0">{children}</h1>
+    <Text asChild kind="title/xs">
+      <h1 className="mb-density-sm mt-density-2xl">{children}</h1>
     </Text>
   ),
   h2: ({ children }) => (
-    <Text asChild kind="label/bold/md">
-      <h2 className="mb-density-sm mt-density-xl first:mt-0">{children}</h2>
+    <Text asChild kind="label/bold/lg">
+      <h2 className="mb-density-sm mt-density-xl">{children}</h2>
     </Text>
   ),
   h3: ({ children }) => (
     <Text asChild kind="label/bold/md">
-      <h3 className="mb-density-xs mt-density-lg first:mt-0">{children}</h3>
+      <h3 className="mb-density-xs mt-density-lg">{children}</h3>
     </Text>
   ),
   h4: ({ children }) => (
-    <Text asChild kind="label/bold/sm">
-      <h4 className="mb-density-sm mt-density-md first:mt-0">{children}</h4>
+    <Text asChild kind="label/bold/md">
+      <h4 className="mb-density-sm mt-density-md">{children}</h4>
     </Text>
   ),
   h5: ({ children }) => (
     <Text asChild kind="label/bold/sm">
-      <h5 className="mb-density-sm mt-density-md first:mt-0">{children}</h5>
+      <h5 className="mb-density-sm mt-density-md">{children}</h5>
     </Text>
   ),
   h6: ({ children }) => (
     <Text asChild kind="label/bold/sm">
-      <h6 className="mb-density-sm mt-density-md first:mt-0">{children}</h6>
+      <h6 className="mb-density-sm mt-density-md">{children}</h6>
     </Text>
   ),
   p: MarkdownParagraph,
+  // Same indent as ordered lists so the disc marker sits inside the reply, not on its edge.
   ul: ({ children, className }) => (
-    <ul className={cn('my-density-md list-disc pl-density-lg', className)}>{children}</ul>
+    <ul className={cn('my-density-md list-disc pl-density-2xl', className)}>{children}</ul>
   ),
   ol: ({ children, className, start }) => (
     <ol className={cn('my-density-md list-decimal pl-density-2xl', className)} start={start}>
@@ -63,7 +66,7 @@ export const messageMarkdownComponents: Components = {
   blockquote: ({ children, className }) => (
     <blockquote
       className={cn(
-        'my-density-sm rounded-r border-l-4 border-l-[var(--border-color-brand)] bg-[var(--background-color-accent-green-subtle)] px-density-sm py-density-xs text-primary',
+        'my-density-sm border-l-2 border-base py-density-xs pl-density-md text-primary',
         className
       )}
     >

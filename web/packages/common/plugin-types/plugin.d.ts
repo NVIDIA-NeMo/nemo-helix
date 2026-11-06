@@ -692,8 +692,8 @@ interface AssistantChatProps {
   onError?: (error: Error) => void;
   /**
    * Explains a failed reply. Called with the raw error message; a returned title and hint become
-   * the message body, while the raw error stays in the error banner and is what "Copy error"
-   * copies. Omit it (or return `undefined`) to show the generic line above the raw error.
+   * the error banner's message, while the raw error sits behind the "Show details" row below it.
+   * Omit it (or return `undefined`) to show the generic line instead.
    */
   describeError?: DescribeChatError;
   /**

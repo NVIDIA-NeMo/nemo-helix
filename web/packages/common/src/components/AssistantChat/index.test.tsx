@@ -255,7 +255,7 @@ describe('AssistantChat', () => {
     );
   });
 
-  it('renders streamed reasoning as a collapsible thinking block', async () => {
+  it('renders streamed reasoning as a Thought step in a collapsed work group', async () => {
     const stream = {
       controller: new AbortController(),
       async *[Symbol.asyncIterator]() {
@@ -272,8 +272,9 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('Done.')).toBeInTheDocument();
-    expect(screen.getByTestId('assistant-collapsed-thinking')).toHaveTextContent(
-      'Thought processWeighing options.'
+    expect(screen.getByTestId('assistant-work-group-label')).toHaveTextContent(/^Thought/);
+    expect(screen.getByTestId('assistant-work-thought')).toHaveTextContent(
+      'ThoughtWeighing options.'
     );
   });
 
@@ -302,7 +303,7 @@ describe('AssistantChat', () => {
     expect(onMessageComplete.mock.calls[0][0].tokensPerSec).toBeGreaterThan(0);
   });
 
-  it('passes streamed reasoning and tool calls to the tool call part component', async () => {
+  it('groups streamed reasoning and tool calls and hands tool calls to the part component', async () => {
     const toolCallChunk = {
       ...createCompletionChunk(''),
       choices: [
@@ -330,8 +331,8 @@ describe('AssistantChat', () => {
       <AssistantChat
         model="test-model"
         workspace="default"
-        toolCallPartComponent={({ toolName, args }) => (
-          <div data-testid="tool-part">{`${toolName}:${String(args.label ?? '')}`}</div>
+        toolCallPartComponent={({ toolName, toolCallId }) => (
+          <div data-testid="tool-part">{`${toolName}:${toolCallId}`}</div>
         )}
       />
     );
@@ -340,10 +341,12 @@ describe('AssistantChat', () => {
     await userEvent.click(screen.getByRole('button', { name: /Submit/i }));
 
     expect(await screen.findByText('It is sunny.')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getByTestId('tool-part')).toHaveTextContent(
-        'AssistantCollapsedStudioDetails:Work details'
-      )
+    const group = screen.getByTestId('assistant-work-group');
+    // Finished replies keep their real parts instead of folding into a "Work details" part.
+    expect(within(group).getByTestId('tool-part')).toHaveTextContent('search:call_a');
+    expect(within(group).getByTestId('assistant-work-thought')).toHaveTextContent('Plan.');
+    expect(within(group).getByTestId('assistant-work-group-label')).toHaveTextContent(
+      'Ran 1 tool call'
     );
   });
 
@@ -809,7 +812,7 @@ describe('AssistantChat', () => {
   );
 
   it(
-    'explains a recognised failure in a red-barred message and keeps the raw error in the banner',
+    'explains a recognised failure in the error banner and keeps the raw error behind details',
     async () => {
       const user = userEvent.setup({ delay: null });
       const retired =
@@ -822,11 +825,13 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
-      expect(surface).toHaveClass('border-l-feedback-danger');
-      expect(surface).not.toHaveClass('border-l-[var(--border-color-brand)]');
-      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent(/The model "acme\/old-model" has been retired\./);
+      const details = screen.getByTestId('assistant-chat-error-details');
+      expect(banner).not.toContainElement(details);
+      expect(within(details).getByText('Show details')).toBeInTheDocument();
+      expect(within(banner).queryByRole('button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('assistant-chat-message-surface')).not.toBeInTheDocument();
       expect(
         screen.queryByText('There was an error generating a response.')
       ).not.toBeInTheDocument();
@@ -835,7 +840,7 @@ describe('AssistantChat', () => {
   );
 
   it(
-    'shows the generic line in the message and the raw error in the banner when no rule matches',
+    'shows the generic line in the error banner when no rule matches',
     async () => {
       const user = userEvent.setup({ delay: null });
       mocks.createChatCompletion.mockRejectedValueOnce(new Error('Something nobody mapped'));
@@ -844,28 +849,30 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent('There was an error generating a response.');
-      expect(surface).toHaveClass('border-l-feedback-danger');
-      expect(await screen.findByText('Something nobody mapped')).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent('There was an error generating a response.');
+      expect(screen.getByTestId('assistant-chat-error-details')).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
 
   it(
-    'copies the raw error, not the explanation, from a failed reply',
+    'offers Regenerate response on a failed reply instead of a retry button in the banner',
     async () => {
       const user = userEvent.setup({ delay: null });
-      const raw = 'RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited';
-      mocks.createChatCompletion.mockRejectedValueOnce(new Error(raw));
+      mocks.createChatCompletion.mockRejectedValueOnce(
+        new Error('RuntimeError: internal error: APIStatusError: Error code: 429 - rate limited')
+      );
 
       renderAssistantChat(<AssistantChat model="test-model" workspace="default" />);
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      await user.click(await screen.findByRole('button', { name: 'Copy error' }));
-
-      await expect(navigator.clipboard.readText()).resolves.toBe(raw);
+      await screen.findByTestId('assistant-chat-error-banner');
+      const actions = screen.getByTestId('assistant-chat-message-actions');
+      expect(
+        within(actions).getByRole('button', { name: /Regenerate response/i })
+      ).toBeInTheDocument();
     },
     interactionTimeoutMs
   );
@@ -882,9 +889,9 @@ describe('AssistantChat', () => {
       await user.type(screen.getByRole('textbox', { name: /Task prompt/i }), 'hello');
       await user.click(screen.getByRole('button', { name: /Submit/i }));
 
-      const surface = await screen.findByTestId('assistant-chat-message-surface');
-      expect(surface).toHaveTextContent('There was an error generating a response.');
-      expect(await screen.findByText(/APIStatusError: Error code: 410/)).toBeInTheDocument();
+      const banner = await screen.findByTestId('assistant-chat-error-banner');
+      expect(banner).toHaveTextContent('There was an error generating a response.');
+      expect(banner).not.toHaveTextContent(/APIStatusError: Error code: 410/);
     },
     interactionTimeoutMs
   );
