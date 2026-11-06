@@ -670,18 +670,6 @@ test-markers: ## List all available pytest markers
 test-policy: ## Run the shared Rego policy corpus with the embedded evaluator
 	$(UV) run --frozen pytest services/core/auth/tests/test_regorus_compatibility.py -v
 
-.PHONY: test-policy-opa
-test-policy-opa: ## Run the shared Rego policy corpus with OPA as a compatibility oracle
-	@if ! command -v opa >/dev/null 2>&1; then \
-		echo ""; \
-		echo "ERROR: OPA (Open Policy Agent) is not installed."; \
-		echo ""; \
-		echo "For more info: https://www.openpolicyagent.org/docs/latest/#running-opa"; \
-		exit 1; \
-	fi
-	@echo "Running OPA policy tests..."
-	opa test services/core/auth/src/nhx/core/auth/app/policies services/core/auth/src/nhx/core/auth/app/policy_tests services/core/auth/src/nhx/core/auth/assets/static-authz.yaml -v
-
 .PHONY: build-jobs-launcher
 build-jobs-launcher:
 	@echo "Building jobs launcher binary..."

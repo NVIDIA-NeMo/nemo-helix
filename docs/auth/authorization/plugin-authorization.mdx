@@ -232,7 +232,7 @@ make test-policy
 
 <Note>
 
-The embedded PDP loads the Rego sources shipped with the auth package using Regorus; there is no generated policy artifact to rebuild. Restart the auth service after changing Rego sources. `make test-policy` tests the shared policy with the embedded evaluator; `make test-policy-opa` runs OPA as an independent compatibility oracle.
+The embedded PDP loads the Rego sources shipped with the auth package using Regorus; there is no generated policy artifact to rebuild. Restart the auth service after changing Rego sources. `make test-policy` runs the shared Rego assertions with the embedded evaluator through pytest.
 
 </Note>
 

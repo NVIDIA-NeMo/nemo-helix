@@ -41,24 +41,6 @@ auth:
  policy_data_refresh_interval: 30 # seconds
 ```
 
-### Binary Distribution and Updates
-
-The embedded engine is installed through the pinned
-[`gordon-to-regorus`](https://pypi.org/project/gordon-to-regorus/) Python
-distribution, currently version `0.13.0`. Its Python import remains `regorus`.
-This is a third-party wheel distribution of upstream Regorus 0.13.0, not a
-Microsoft-published Python package. Supported platforms install a native wheel
-through the package manager; the auth service does not download executables or
-start an OPA subprocess.
-
-Updates require rerunning the shared Rego corpus, auth integration tests, and
-native-dependency/advisory checks. The pin does not automatically track later
-upstream fixes. If the wheel publisher falls behind, NeMo maintainers can build
-and publish separately named wheels from a reviewed upstream commit, preserving
-license notices and recording source, toolchain, artifact hashes, and build
-provenance. That fallback requires its own release and security-update ownership;
-it is not an automatic runtime download or an existing release guarantee.
-
 ### Runtime and Resource Boundaries
 
 Regorus evaluates policy in native Rust through Python bindings inside the auth

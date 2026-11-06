@@ -247,12 +247,22 @@ class TestPolicyLifecycle:
         assert output[0]["result"]["allowed"] is True
         assert json.loads(json.dumps(output)) == output
 
-    def test_failed_compile_invalidates_previous_grants(self, minimal_authz_data):
+    @pytest.mark.parametrize(
+        "broken_policy",
+        [
+            "package authz\nthis is not valid rego !!!",
+            'package authz\nallow := {"allowed": true}\nhas_permissions := {"allowed": false}\n'
+            "has_role := true\nhas_role := false",
+            'package authz\nallow := {"allowed": true}\nhas_role := {"has_role": false}\n'
+            "has_permissions := true\nhas_permissions := false",
+        ],
+    )
+    def test_failed_compile_invalidates_previous_grants(self, minimal_authz_data, broken_policy):
         policy = RegoPolicy()
         policy.set_data(minimal_authz_data)
         request = {"principal_id": "viewer@example.com", "workspace": "test-workspace", "role": "Viewer"}
         assert policy.evaluate(request, 2)[0]["result"]["has_role"] is True
-        policy._modules = {"broken.rego": "package authz\nthis is not valid rego !!!"}
+        policy._modules = {"broken.rego": broken_policy}
         with pytest.raises(PolicyEngineError):
             policy.set_data(minimal_authz_data)
         with pytest.raises(PolicyEngineError):

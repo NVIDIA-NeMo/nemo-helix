@@ -8,7 +8,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
-    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -44,10 +43,8 @@ jobs:
     name: Detect Path Changes
     runs-on: ubuntu-latest
     outputs:
-      # Preserve post-merge/manual behavior; only explicitly labeled trusted PRs opt into e2e.
+      # Keep container builds and deployed/process e2e out of PRs and the merge queue.
       post-merge: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
-      # Current labels retain opt-in on synchronize/other label events; absent draft must fail closed.
-      pr-e2e: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && toJSON(github.event.pull_request.draft) == 'false' && contains(github.event.pull_request.labels.*.name, 'e2e') }}
       openapi: ${{ steps.changes.outputs.openapi }}
       test: ${{ steps.changes.outputs.test }}
       deps: ${{ steps.changes.outputs.deps }}
@@ -135,11 +132,6 @@ jobs:
           enable-cache: false
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
-      - name: Test e2e opt-in policy
-        run: >-
-          uv run --isolated --no-project --with pytest==9.1.1 --with pyyaml==6.0.3
-          python -m pytest -c /dev/null -p no:cacheprovider --confcutdir=.github/scripts/tests
-          .github/scripts/tests/test_ci_e2e_policy.py -q
       - name: Check for test gates no workflow sets
         run: uv run --no-cache .github/scripts/check_test_gates.py
 
@@ -201,9 +193,8 @@ jobs:
     name: Build CPU smoke images
     needs: [changes]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true' ||
         needs.changes.outputs.customization-auth == 'true'
@@ -496,7 +487,7 @@ jobs:
     name: Kind CPU e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -571,7 +562,7 @@ jobs:
     name: Kind Gym agent-evaluate e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -646,10 +637,10 @@ jobs:
     name: Kind customizer auth e2e
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' &&
-      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.pr-e2e == 'true' || needs.changes.outputs.customization-auth == 'true')
+      (github.event_name == 'workflow_dispatch' || needs.changes.outputs.customization-auth == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -702,11 +693,10 @@ jobs:
     name: Kind NetworkPolicy smoke
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true' && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.e2e == 'true'
       )
@@ -997,7 +987,7 @@ jobs:
             diff.txt
 
   opa-policy-test:
-    name: Test OPA Policy
+    name: Test shared Rego policy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -1007,7 +997,7 @@ jobs:
         uses: flox/install-flox-action@c94e7e1ab56ae14fe98bae4fd84384fd135f0c2a # v2.4.0
         with:
           disable-metrics: "true"
-      - name: Test OPA policy
+      - name: Test shared Rego policy
         uses: flox/activate-action@410568008895a0f2e09a34bbd9523f8ef1f2d292 # v1.1.0
         with:
           dir: ./tools/open-policy-agent
@@ -1459,7 +1449,6 @@ jobs:
     if: >
       !cancelled() && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.helm == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
@@ -1506,9 +1495,8 @@ jobs:
     name: Python auth-idp ${{ matrix.runtime }} tests
     needs: [changes, build-cpu-smoke-images, python-auth-idp-static-test]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') && (
+      !cancelled() && needs.changes.outputs.post-merge == 'true' && (
         github.event_name == 'workflow_dispatch' ||
-        needs.changes.outputs.pr-e2e == 'true' ||
         needs.changes.outputs.cpu-smoke == 'true' ||
         needs.changes.outputs.auth-idp == 'true'
       ) &&
@@ -1732,7 +1720,7 @@ jobs:
     name: Python e2e tests
     needs: [changes]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true')
+      !cancelled() && needs.changes.outputs.post-merge == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -1784,7 +1772,7 @@ jobs:
     name: Python e2e tests (prebuilt image)
     needs: [changes, build-cpu-smoke-images]
     if: >
-      !cancelled() && (needs.changes.outputs.post-merge == 'true' || needs.changes.outputs.pr-e2e == 'true') &&
+      !cancelled() && needs.changes.outputs.post-merge == 'true' &&
       needs.build-cpu-smoke-images.result == 'success' &&
       needs.build-cpu-smoke-images.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
@@ -1858,8 +1846,8 @@ jobs:
       - python-auth-idp-e2e-test
       - python-e2e-test
       - python-e2e-image-test
-    # Independent of ci-status: separate garak/Safe Synthesizer image builds
-    # are not in that gate's needs list. Still report prerequisite failures.
+    # Independent of ci-status: image builds and auth/image e2e are not all in
+    # that gate's needs list. Still report when a prerequisite prevents e2e.
     if: >
       always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -2503,8 +2491,6 @@ jobs:
       # - python-integration-test
       - wheel-build
       - python-e2e-test
-      - python-e2e-image-test
-      - python-auth-idp-e2e-test
       - github-scripts
       - web-typecheck
       - web-test
