@@ -98,18 +98,10 @@ the data document (`app/scope_families.py`). If it is missing, scope validation 
 ## Testing
 
 ```bash
-make test-policy      # Regorus: embedded-evaluator compatibility tests
-make test-policy-opa  # OPA compatibility oracle (requires the opa executable)
+make test-policy
 ```
 
-The shared Rego tests use native `with` modifiers to install request and
-authorization-data fixtures. The embedded compatibility tests in
-`services/core/auth/tests/test_regorus_compatibility.py` evaluate the shared
-Rego test rules directly with Regorus, without a custom lowering runner.
-Production policies and the OPA compatibility oracle use the same Rego sources.
-The embedded Python import is `regorus`, supplied by the pinned third-party
-`gordon-to-regorus==0.13.0` distribution, not a source-built `regorus` package.
-
-When adding or changing policy behavior, run both evaluators. A passing native
-OPA test alone does not verify the embedded evaluator's behavior.
+This runs the shared Rego assertions with the embedded Regorus evaluator through
+pytest. Tests use native `with` modifiers for fixtures and `every` for tables so
+that all cases must pass. Run it after changing policy behavior.
 

@@ -153,7 +153,7 @@ uv run python services/core/auth/scripts/auth-tools.py sync-plugins --dry-run
 make test-policy
 ```
 
-> **Local dev:** The embedded PDP loads packaged Rego sources with regopy; no policy build step is required. Restart the auth service after changing Rego sources. `make test-policy` uses OPA to test the shared policy independently.
+> **Local dev:** The embedded PDP loads packaged Rego sources with Regorus; no policy build step is required. Restart the auth service after changing Rego sources and run `make test-policy` to test the shared policy with the embedded evaluator.
 
 For a fast in-process check with no running platform, add a `tests/test_authz.py` that derives your service's contribution and asserts it's clean (copy any plugin's `tests/test_authz.py`):
 

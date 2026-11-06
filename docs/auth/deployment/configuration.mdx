@@ -323,7 +323,7 @@ auth:
 The embedded PDP evaluates the Rego sources shipped in the auth package's
 `app/policies` directory using Regorus. No OPA binary, policy build step, or
 network download is required at runtime. Restart the auth service after changing
-policy sources. OPA is only needed for the external PDP or `make test-policy-opa`.
+policy sources. An OPA executable is only needed when deploying an external PDP.
 
 ### Production with embedded PDP
 

@@ -47,9 +47,10 @@ class RegoPolicy:
         # strings/object keys, including embedded NUL and non-ASCII characters.
         engine.add_data_json(json.dumps(data, allow_nan=False))
         engine.set_input_json('{"method":"GET","path":"/health/live"}')
-        # Regorus prepares rules lazily. Validate the source during initialization
-        # or refresh, before publishing a runtime with an unprepared policy.
-        engine.eval_rule_as_json("data.authz.allow")
+        # Prepare each entrypoint before publishing the runtime. Undefined
+        # decisions are valid here; evaluation exceptions are load failures.
+        for entrypoint in ENTRYPOINTS:
+            engine.eval_rule_as_json(f"data.authz.{entrypoint}")
         return engine
 
     def set_data(self, data: dict[str, Any]) -> None:
