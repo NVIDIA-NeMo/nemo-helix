@@ -480,7 +480,7 @@ def test_the_job_gives_each_trial_its_own_gateway_credential(
 
     runtime = _runtime(tmp_path, _codex(), sandboxed=sandboxed, trial_issuer=issuer)
 
-    assert getattr(runtime, "_job_scope") is not None
+    assert len(getattr(runtime, "_job_scopes")) == 1
     assert getattr(runtime, "_config").agent_name == "codex"
 
 
