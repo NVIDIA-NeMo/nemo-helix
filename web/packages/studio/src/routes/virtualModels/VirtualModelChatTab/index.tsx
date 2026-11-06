@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ParamsDropdown } from '@nemo/common/src/components/ModelSelectV2/ParamsDropdown';
-import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import { Block, Flex, Stack } from '@nvidia/foundations-react-core';
 import {
   CHAT_INFERENCE_PARAM_FIELDS,
+  chatParamDefaults,
   chatParamMetadataWithMaxTokens,
-  DEFAULT_CHAT_INFERENCE_PARAMS,
   mergeChatParams,
 } from '@studio/components/chat/params';
 import { ModelChat } from '@studio/components/ModelChat';
@@ -22,10 +21,7 @@ export const VirtualModelChatTab: FC = () => {
   const workspace = useWorkspaceFromPath();
   const { virtualModelName } = useRequiredPathParams([ROUTE_PARAMS.virtualModelName]);
 
-  const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
-    ...DEFAULT_CHAT_INFERENCE_PARAMS,
-    max_tokens: PARAM_METADATA.max_tokens.default,
-  });
+  const [inferenceParams, setInferenceParams] = useState(() => chatParamDefaults(PARAM_METADATA));
 
   return (
     <Stack className="min-h-0 flex-1">
