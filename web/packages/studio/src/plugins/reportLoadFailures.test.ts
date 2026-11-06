@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { clampIssues } from '@studio/plugins/reportLoadFailures';
+import { REPORT_LIMITS, clampIssues } from '@studio/plugins/reportLoadFailures';
 import type { PluginLoadIssue } from '@studio/plugins/types';
 
 describe('clampIssues', () => {
@@ -41,5 +41,40 @@ describe('clampIssues', () => {
     };
 
     expect(clampIssues([small])).toEqual([small]);
+  });
+
+  describe('REPORT_LIMITS', () => {
+    const limitIssue = (extra = 0): PluginLoadIssue => ({
+      code: 'PLUGIN_LOAD_FAILED',
+      subject: 's'.repeat(REPORT_LIMITS.subject + extra),
+      message: 'm'.repeat(REPORT_LIMITS.message + extra),
+      steps: Array.from({ length: REPORT_LIMITS.steps + extra }, () =>
+        't'.repeat(REPORT_LIMITS.step + extra)
+      ),
+    });
+
+    it('are the documented backend limits', () => {
+      expect(REPORT_LIMITS).toEqual({
+        issues: 10,
+        subject: 200,
+        message: 500,
+        steps: 8,
+        step: 300,
+      });
+    });
+
+    it('leaves an input exactly at every limit unchanged', () => {
+      const input = Array.from({ length: REPORT_LIMITS.issues }, () => limitIssue());
+
+      expect(clampIssues(input)).toEqual(input);
+    });
+
+    it('cuts an input one over every limit back to the limits', () => {
+      const input = Array.from({ length: REPORT_LIMITS.issues + 1 }, () => limitIssue(1));
+
+      const clamped = clampIssues(input);
+
+      expect(clamped).toEqual(Array.from({ length: REPORT_LIMITS.issues }, () => limitIssue()));
+    });
   });
 });

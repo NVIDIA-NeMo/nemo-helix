@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLUGIN_CONTRACT, diffContract, type PluginSidecar } from '@nemo/common/src/pluginContract';
+import {
+  CONTRACT_DOCS,
+  PLUGIN_CONTRACT,
+  diffContract,
+  type PluginSidecar,
+} from '@nemo/common/src/pluginContract';
 import type { PluginManifest } from '@studio/plugins/types';
 import { fetchPlugins, loadPlugin } from '@studio/plugins/utils';
 
@@ -23,7 +28,6 @@ const bundleUrl = (name = 'pr-review') => `${BASE}/plugin-ui/${name}/index.js`;
 const goodSidecar = (over: Partial<PluginSidecar> = {}): PluginSidecar => ({
   contractVersion: '1.0.0',
   specifiers: ['react', 'react-router'],
-  bundledPackages: [],
   builtAgainst: { react: '19.2.7', 'react-router': '8.3.0' },
   ...over,
 });
@@ -47,8 +51,16 @@ const MALFORMED_SIDECARS: [string, unknown][] = [
   ['an object builtAgainst value', { builtAgainst: { react: { version: '19.2.7' } } }],
   ['a null builtAgainst value', { builtAgainst: { react: null } }],
   ['a numeric specifier', { specifiers: [1] }],
-  ['a null bundled package', { bundledPackages: [null] }],
 ];
+
+/** A fetch that never answers; like real fetch, it rejects with the signal's reason on abort. */
+const hangUntilAborted = (init?: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+  });
+
+const SIDECAR_TIMEOUT_MS = 10_000;
+const DOCS_STEP = `Contract and shared-dependency rules: ${CONTRACT_DOCS}`;
 
 const goodModule = { Root: () => null, navItems: () => [] };
 
@@ -126,7 +138,6 @@ describe('loadPlugin', () => {
   });
 
   it.each<[string, Partial<PluginSidecar>]>([
-    ['PLUGIN_SINGLETON_BUNDLED', { bundledPackages: ['react-router'] }],
     ['PLUGIN_SPECIFIER_UNMAPPED', { specifiers: ['react', 'lodash'] }],
     ['PLUGIN_CONTRACT_UNSUPPORTED', { contractVersion: '2.0.0' }],
     ['PLUGIN_VERSION_INCOMPATIBLE', { builtAgainst: { react: '18.3.1' } }],
@@ -141,6 +152,77 @@ describe('loadPlugin', () => {
     expect(expected.map((i) => i.code)).toEqual([code]);
     expect(result).toEqual({ failure: { name: 'pr-review', issues: expected } });
     expect(importModule).not.toHaveBeenCalled();
+  });
+
+  it('loads a plugin whose sidecar has no bundledPackages field', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json(goodSidecar()));
+    const importModule = vi.fn().mockResolvedValue(goodModule);
+
+    const result = await loadPlugin(manifest(), BASE, importModule);
+
+    expect(result).toMatchObject({ plugin: { name: 'pr-review' } });
+    expect(importModule).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores unknown sidecar keys such as a legacy bundledPackages', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(
+      json({ ...goodSidecar(), bundledPackages: ['x'], somethingNew: 1 })
+    );
+    const importModule = vi.fn().mockResolvedValue(goodModule);
+
+    const result = await loadPlugin(manifest(), BASE, importModule);
+
+    expect(result).toMatchObject({ plugin: { name: 'pr-review' } });
+    expect(importModule).toHaveBeenCalledTimes(1);
+  });
+
+  describe('sidecar request never answers', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('gives up after 10 seconds with a timed-out PLUGIN_LOAD_FAILED and does not import', async () => {
+      vi.mocked(global.fetch).mockImplementation((_url, init) => hangUntilAborted(init));
+      const importModule = vi.fn();
+      let result: Awaited<ReturnType<typeof loadPlugin>> | undefined;
+      void loadPlugin(manifest(), BASE, importModule).then((r) => {
+        result = r;
+      });
+
+      await vi.advanceTimersByTimeAsync(SIDECAR_TIMEOUT_MS);
+
+      expect(vi.mocked(global.fetch).mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
+      expect(result).toMatchObject({
+        failure: {
+          name: 'pr-review',
+          issues: [
+            { code: 'PLUGIN_LOAD_FAILED', message: expect.stringMatching(/timed out|timeout/i) },
+          ],
+        },
+      });
+      expect(importModule).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('generic load failures', () => {
+    it.each<[string, () => Promise<Awaited<ReturnType<typeof loadPlugin>>>]>([
+      [
+        'an untrusted bundle URL',
+        () => loadPlugin({ name: 'evil', bundleUrl: 'https://evil.com/x.js' }, BASE, vi.fn()),
+      ],
+      [
+        'a bundle that fails to import',
+        () => {
+          vi.mocked(global.fetch).mockResolvedValue(json(goodSidecar()));
+          return loadPlugin(manifest(), BASE, vi.fn().mockRejectedValue(new Error('nope')));
+        },
+      ],
+    ])('ends the steps with the contract docs pointer for %s', async (_label, run) => {
+      const result = await run();
+
+      if (!result || !('failure' in result)) throw new Error('expected a failure result');
+      expect(result.failure.issues[0].code).toBe('PLUGIN_LOAD_FAILED');
+      expect(result.failure.issues[0].steps.at(-1)).toBe(DOCS_STEP);
+    });
   });
 
   describe('sidecar cannot be read', () => {
@@ -244,14 +326,14 @@ describe('fetchPlugins', () => {
   const routeFetch = (
     manifests: PluginManifest[],
     opts: {
-      sidecar?: (url: string) => Promise<Response>;
+      sidecar?: (url: string, init?: RequestInit) => Promise<Response>;
       report?: () => Promise<Response>;
     } = {}
   ) => {
-    vi.mocked(global.fetch).mockImplementation(async (input) => {
+    vi.mocked(global.fetch).mockImplementation(async (input, init) => {
       const url = urlOf(input);
       if (url.endsWith('/apis/plugins')) return json(manifests);
-      if (url.endsWith('plugin.manifest.json')) return opts.sidecar?.(url) ?? json({}, 404);
+      if (url.endsWith('plugin.manifest.json')) return opts.sidecar?.(url, init) ?? json({}, 404);
       if (url.endsWith(REPORT_PATH)) return opts.report?.() ?? json({}, 202);
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -363,6 +445,31 @@ describe('fetchPlugins', () => {
         nomanifest: ['PLUGIN_MANIFEST_MISSING'],
       });
       expect(callsTo(REPORT_PATH)).toHaveLength(2);
+    });
+  });
+
+  describe('a plugin whose sidecar request never answers', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('is reported as failed after 10 seconds without blocking the other plugins', async () => {
+      routeFetch([manifest('hung'), { name: 'headless', bundleUrl: null }], {
+        sidecar: (_url, init) => hangUntilAborted(init),
+      });
+      let result: Awaited<ReturnType<typeof fetchPlugins>> | undefined;
+      void fetchPlugins().then((r) => {
+        result = r;
+      });
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(result).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(SIDECAR_TIMEOUT_MS);
+
+      expect(result?.failed.map((f) => [f.name, f.issues.map((i) => i.code)])).toEqual([
+        ['hung', ['PLUGIN_LOAD_FAILED']],
+      ]);
+      expect([...(result?.installedNames ?? [])].sort()).toEqual(['headless', 'hung']);
+      expect(callsTo(REPORT_PATH)).toHaveLength(1);
     });
   });
 
