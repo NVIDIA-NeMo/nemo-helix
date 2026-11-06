@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -309,6 +311,30 @@ class TestReadingOneImage:
         assert TestClient(app).get(IMAGE).status_code == 403
         job_status.assert_not_awaited()
         builder.update.assert_not_awaited()
+
+    @pytest.mark.parametrize("fails", ["constructing", "entering"])
+    def test_a_builder_client_that_cant_be_had_returns_the_image_as_stored(
+        self, fails: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Settling is best effort: the next read, or builder-settle, settles it."""
+
+        @asynccontextmanager
+        async def unenterable(**_kwargs: object) -> AsyncGenerator[AsyncNemoClient]:
+            raise RuntimeError("no service token")
+            yield
+
+        def unconstructible(**_kwargs: object) -> object:
+            raise RuntimeError("no service token")
+
+        monkeypatch.setattr(
+            service, "get_async_nemo_client", unconstructible if fails == "constructing" else unenterable
+        )
+        app = _app(_entities(_row()))
+        del app.dependency_overrides[get_settle]
+        response = TestClient(app).get(IMAGE)
+        assert response.status_code == 200
+        assert response.json()["status"] == "pending"
+        assert "could not settle image ws-a/" in caplog.text
 
 
 class TestSubmitting:

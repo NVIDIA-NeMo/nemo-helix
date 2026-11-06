@@ -72,9 +72,19 @@ Settle = Callable[[ContainerImage], Awaitable[ContainerImage]]
 async def _settle_as_builder(image: ContainerImage) -> ContainerImage:
     # As the builder, not the reader: a reader who may not see the job must not have it taken for missing, and one
     # who may not write the image must not be refused, nor have the failure written in their name.
-    async with get_async_nemo_client(as_service="builder", internal=True) as client:
-        rows = EntityClient(AsyncEntitiesClient.from_client(client))
-        return (await settle(rows, [image], job_status_from(AsyncJobsClient.from_client(client))))[0]
+    try:
+        async with get_async_nemo_client(as_service="builder", internal=True) as client:
+            rows = EntityClient(AsyncEntitiesClient.from_client(client))
+            return (await settle(rows, [image], job_status_from(AsyncJobsClient.from_client(client))))[0]
+    except Exception:
+        # Settling is best effort, as `settle` is: the read still returns the row, and the next read or
+        # builder-settle pass settles it.
+        logger.exception(
+            "could not settle image %s/%s as the builder; returning it as stored",
+            sanitize_for_log(image.workspace),
+            sanitize_for_log(image.name),
+        )
+        return image
 
 
 def get_settle() -> Settle:
@@ -237,7 +247,7 @@ def _build_router() -> APIRouter:
     ) -> ContainerImage:
         """Read one image. This is what a caller polls until `status` leaves `pending`.
 
-        A `pending` image whose job has ended, or that has had no job for five minutes, is failed as it is read.
+        A `pending` image whose job has ended, or that is five minutes old and has no job, is failed as it is read.
         """
         row = await _get_row(entity_client, workspace, name)
         refusal = read_refusal(row, caller)

@@ -388,7 +388,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it has had no job for five minutes (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
+| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -759,9 +759,11 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
 ### Reliability
 
 - **A row whose build fails is failed by `builder-settle`, or when it's read.** Once a `pending`
-  image's job has ended, or once it has had no job for five minutes (a submit that died, or that
-  Jobs refused, between writing its rows and creating its job; or a job deleted before it ended), it
-  is written `failed`, with the reason in `status_detail`. The `builder-settle` controller does that
+  image's job has ended, or once the image is five minutes old and has no job (a submit that died, or
+  that Jobs refused, between writing its rows and creating its job; or a job deleted before it
+  ended), it is written `failed`, with the reason in `status_detail`. The five minutes count from
+  the row's creation, not from when its job went missing: a job deleted when its image is four
+  minutes old fails the image within about a minute. The `builder-settle` controller does that
   for every `pending` image every 30 seconds, and reading one image does it for that image at once.
   Listing doesn't, so a listing's `status` lags by up to a pass, and without `builder-settle` such
   rows stay `pending` in listings for good: the chart refuses a controller selection that leaves it
