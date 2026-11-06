@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { PLUGIN_CONTRACT } from '@nemo/common/src/pluginContract/contract';
 import { baseTestConfig } from '@nemo/testing/react/config';
 import tailwindPostcss from '@tailwindcss/postcss';
 import react from '@vitejs/plugin-react';
@@ -33,30 +34,20 @@ interface LicenseReportDependency {
   readonly licenseText: string | null;
 }
 
-// Shared deps externalized from Studio's and plugins' production builds. At
-// runtime, bare imports of these names resolve via an import map in index.html
-// to bundles in public/vendor/, so Studio and every loaded plugin use one
-// shared React/react-dom/router instance.
-const VENDOR_EXTERNALS = [
-  'react',
-  'react/jsx-runtime',
-  'react-dom',
-  'react-dom/client',
-  'react-router',
-  // The design system is shared so plugins render KUI components against the
-  // same theme context Studio's KaizenThemeProvider populates (native look +
-  // dark mode) instead of bundling their own foundations copy.
-  '@nvidia/foundations-react-core',
-  // Shared so a plugin's useQuery reads Studio's QueryClientProvider — one
-  // query cache across Studio and every plugin.
-  '@tanstack/react-query',
-] as const;
+// Shared deps externalized from Studio's and plugins' production builds: the
+// contract's singleton specifiers. At runtime, bare imports of these names
+// resolve via an import map in index.html to bundles in public/vendor/, so
+// Studio and every loaded plugin use one shared React/react-dom/router instance.
+const VENDOR_EXTERNALS: readonly string[] = PLUGIN_CONTRACT.entries
+  .filter((entry) => entry.kind === 'singleton')
+  .map((entry) => entry.specifier);
 
 const DEV_VENDOR_DIR = 'node_modules/.vendor';
 
-// Each import specifier in the map resolves to a single vendor bundle.
-// 'react/jsx-runtime' shares react.js and 'react-dom/client' shares
-// react-dom.js so there's exactly one copy of each package's internals.
+// The contract decides which specifiers are shared; this map only adds the
+// vendor bundle each one resolves to. 'react/jsx-runtime' shares react.js and
+// 'react-dom/client' shares react-dom.js so there's exactly one copy of each
+// package's internals.
 const VENDOR_IMPORT_MAP: Record<string, string> = {
   react: 'react.js',
   'react/jsx-runtime': 'react.js',
@@ -67,6 +58,19 @@ const VENDOR_IMPORT_MAP: Record<string, string> = {
   '@tanstack/react-query': 'react-query.js',
   '@nemo/common': 'common.js',
 };
+
+{
+  const contractSpecifiers = PLUGIN_CONTRACT.entries.map((entry) => entry.specifier);
+  const missing = contractSpecifiers.filter((s) => !(s in VENDOR_IMPORT_MAP));
+  const extra = Object.keys(VENDOR_IMPORT_MAP).filter((s) => !contractSpecifiers.includes(s));
+  if (missing.length > 0 || extra.length > 0) {
+    throw new Error(
+      `VENDOR_IMPORT_MAP is out of sync with the plugin contract. ` +
+        `Missing: [${missing.join(', ')}]. Extra: [${extra.join(', ')}]. ` +
+        `Update VENDOR_IMPORT_MAP (or the contract in @nemo/common/src/pluginContract/contract.ts).`
+    );
+  }
+}
 
 // Virtual modules have no filesystem location. Rolldown's resolver falls
 // back to the build's cwd for bare specifiers, which is set to projectRoot
