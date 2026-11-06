@@ -9,7 +9,7 @@ from httpx import AsyncClient
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-@pytest.mark.parametrize("method", ["DELETE"])
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
 @pytest.mark.parametrize("scope", ["missing-id", "wrong-type", "wrong-workspace", "wrong-parent"])
 async def test_id_mutation_does_not_retarget(client: AsyncClient, repos, ctx, method: str, scope: str) -> None:
     await repos["workspace"].create_workspace(name="other")
@@ -33,7 +33,7 @@ async def test_id_mutation_does_not_retarget(client: AsyncClient, repos, ctx, me
     assert survivor["data"] == {"colour": "red"}
 
 
-@pytest.mark.parametrize("method", ["DELETE"])
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
 async def test_id_mutation_enforces_version(client: AsyncClient, ctx, method: str) -> None:
     created = (
         await client.post(
