@@ -344,6 +344,7 @@ def _build_nemo_gym_env_config(
     customizer_config: TrainingStepConfig,
     job_ctx: NHXJobContext,
 ) -> dict[str, Any]:
+    """Build the NeMo-Gym environment section of the GRPO config."""
     gym = customizer_config.gym
     if gym is None:
         raise ValueError("GRPO jobs require gym configuration on TrainingStepConfig")
