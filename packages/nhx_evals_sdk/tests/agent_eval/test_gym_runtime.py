@@ -1667,7 +1667,7 @@ async def test_collection_failure_points_at_the_server_log_too(tmp_path: Path) -
     gym = _stub_gym(tmp_path, exit_code=1, message="ClientResponseError: 500, Internal Server Error")
 
     with pytest.raises(RuntimeError) as excinfo:
-        await runner._collect_rollouts(gym, tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {})
+        await runner._collect_rollouts(gym, [], tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {})
 
     message = str(excinfo.value)
     assert str(tmp_path / "gym_env.log") in message
@@ -1675,16 +1675,62 @@ async def test_collection_failure_points_at_the_server_log_too(tmp_path: Path) -
 
 
 @pytest.mark.asyncio
-async def test_collection_redirects_hydra_output_under_the_run_work_dir(tmp_path: Path) -> None:
-    # `gym eval run` does not go through selection_args, so it needs its own redirect — without it
-    # every collection drops an `outputs/<date>/<time>/` into the caller's cwd.
-    runner = GymAgentTaskRunner(config=_config())
-    gym = _stub_gym(tmp_path, exit_code=0, message="done")
+async def test_two_step_uses_the_same_selection_for_all_commands(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(hydra_params={"mcqa": {"port": 8123}}, startup_timeout_s=10, shutdown_grace_s=1)
+    gym = tmp_path / "gym"
+    invocations = tmp_path / "invocations.jsonl"
+    gym.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys, time\n"
+        f"with pathlib.Path({str(invocations)!r}).open('a') as log:\n"
+        "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1:3] == ['env', 'start']:\n"
+        "    print('All 1 / 1 servers ready!', flush=True)\n"
+        "    time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    gym.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path), prepend=":")
 
-    await runner._collect_rollouts(gym, tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {})
+    await GymAgentTaskRunner(config=config)._run_two_step(tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {})
+
+    validate, start, collect = [json.loads(line) for line in invocations.read_text(encoding="utf-8").splitlines()]
+    assert validate[:2] == ["env", "validate"]
+    assert start[:2] == ["env", "start"]
+    assert collect[:3] == ["eval", "run", "--no-serve"]
+    selection = selection_args(config, tmp_path)
+    assert validate[2:] == start[2:] == collect[-len(selection) :] == selection
+
+
+@pytest.mark.asyncio
+async def test_collection_uses_the_authored_selection(tmp_path: Path) -> None:
+    # Standalone collection composes its own config, even when servers are already running.
+    config = GymRuntimeConfig(
+        agent="simple_agent",
+        agent_config="custom.yaml",
+        resources_server="custom_server",
+        model_type="custom_model",
+        hydra_params={"custom_server": {"port": 8123}},
+    )
+    runner = GymAgentTaskRunner(config=config)
+    gym = _stub_gym(tmp_path, exit_code=0, message="done")
+    selection = selection_args(config, tmp_path)
+
+    await runner._collect_rollouts(gym, selection, tmp_path / "in.jsonl", tmp_path / "out.jsonl", tmp_path, {})
 
     argv = (tmp_path / "argv.txt").read_text().splitlines()
-    assert f"hydra.run.dir={hydra_scalar(str(tmp_path / 'gym_hydra'))}" in argv
+    assert argv[-len(selection) :] == selection
+    assert argv[argv.index("--config") + 1] == "custom.yaml"
+    assert argv[argv.index("--model-type") + 1] == "custom_model"
+    assert argv[argv.index("--resources-server") + 1] == "custom_server"
+    assert "++custom_server.port=8123" in argv
+    assert "++observability_enabled=true" in argv
+    assert f"++model_call_capture_dir={hydra_scalar(str(model_call_capture_dir(tmp_path)))}" in argv
+    assert [arg for arg in argv if arg.startswith("hydra.run.dir=")] == [
+        f"hydra.run.dir={hydra_scalar(str(tmp_path / 'gym_hydra'))}"
+    ]
 
 
 def test_leftover_captures_refuse_a_second_run_into_the_same_dir(tmp_path: Path) -> None:
