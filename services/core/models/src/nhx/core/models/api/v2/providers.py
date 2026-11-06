@@ -5,6 +5,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.entities import CLIENT_ERRORS
@@ -51,8 +52,7 @@ provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth
 )
 async def list_providers(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: ModelProviderSort = Query(
         default=ModelProviderSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -68,8 +68,8 @@ async def list_providers(
     try:
         result = await service.list_model_providers(
             workspace=filter_workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )

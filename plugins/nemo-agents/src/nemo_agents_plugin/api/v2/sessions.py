@@ -25,6 +25,7 @@ from nemo_agents_plugin.entities import AgentDeployment, AgentSession, SessionSt
 from nemo_agents_plugin.schema import CreateSessionRequest, SessionFilter, SessionPage
 from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime as _cleanup_fabric_runtime
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
 from nemo_helix_plugin.entities import CLIENT_ERRORS
@@ -107,8 +108,7 @@ async def create_session(
 )
 async def list_sessions(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: SessionFilter | dict[str, object] = Depends(_session_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -122,8 +122,8 @@ async def list_sessions(
         result = await entity_client.list(
             AgentSession,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_obj=filter_dict or None,
         )

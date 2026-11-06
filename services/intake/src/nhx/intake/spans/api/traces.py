@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import Page
 from nhx.common.api.filter import FilterOperator
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -59,8 +60,7 @@ async def list_traces(
     workspace: str,
     request: Request,
     service: SpansServiceDep,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: TraceSortField = Query(default=TraceSortField.STARTED_AT_DESC),
     mode: TraceMode = Query(
         default="preview",
@@ -75,8 +75,8 @@ async def list_traces(
     filters = _trace_filter(workspace, parsed)
     result = await service.list_traces(
         filters=filters,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         mode=mode,
     )

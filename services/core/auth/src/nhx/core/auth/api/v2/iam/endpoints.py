@@ -8,6 +8,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import DeleteResponse, Page
 from nhx.common.api.filter import ComparisonOperation, FilterOperation, FilterOperator, LogicalOperation
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -99,8 +100,7 @@ def _translate_active_filter(operation: FilterOperation) -> FilterOperation:
     ),
 )
 async def list_role_bindings(
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=10, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     # TODO(v2): Support sorting by granted_at once entities API supports custom sort fields
     sort: str = Query(
         default="created_at",
@@ -122,8 +122,8 @@ async def list_role_bindings(
     res = await entities_client.list(
         RoleBindingEntity,
         workspace=ALL_WORKSPACES,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter_operation=parsed.operation,
     )

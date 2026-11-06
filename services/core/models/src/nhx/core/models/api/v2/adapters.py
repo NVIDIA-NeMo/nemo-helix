@@ -6,6 +6,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nhx.common.api.common import ErrorResponse, Page
@@ -106,8 +107,7 @@ async def create_adapter(
 )
 async def list_adapters(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size.", ge=1, le=1000),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str = Query(
         default="created_at",
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -118,8 +118,8 @@ async def list_adapters(
     try:
         return await service.list_adapters(
             adapter_workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             parsed_filter=parsed_filter,
         )
