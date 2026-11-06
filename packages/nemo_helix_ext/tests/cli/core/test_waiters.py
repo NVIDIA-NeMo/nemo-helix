@@ -156,7 +156,7 @@ def test_wait_for_platform_job_returns_true_on_completed(frozen_time: MagicMock)
 
     assert waiters.wait_for_platform_job(jobs, "job-a", workspace="default") is True
 
-    jobs.get_job_status.assert_called_once_with(workspace="default", name="job-a")
+    jobs.get_job_status.assert_called_once_with(workspace="default", name="job-a", job_reference_kind=None)
     frozen_time.assert_called()
 
 

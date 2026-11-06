@@ -47,6 +47,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.errors import NemoClientError, NotFoundError
 from nemo_helix_plugin.jobs.archive import safe_extract_tar
 from nemo_helix_plugin.jobs.client import JobsClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import HelixJobResponse
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel
@@ -985,8 +986,8 @@ def download_run_bundle(
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f".{run_id}-", dir=output_dir) as scratch:
         archive = Path(scratch) / "bundle.tar.gz"
-        response = JobsClient.from_client(client).download_job_result(
-            workspace=workspace, job=job, name=DEFAULT_RESULT_NAME
+        response = JobsClient.from_client(client).download_job_result_by_name(
+            workspace=workspace, job_name=job, name=DEFAULT_RESULT_NAME
         )
         with archive.open("wb") as handle, response.stream() as chunks:
             for chunk in chunks:
@@ -1047,7 +1048,9 @@ def newest_bundle_job(client: NemoClient, run_id: str, *, workspace: str) -> Bun
     newest = None
     for attempt in range(1, MAX_BUNDLE_ATTEMPTS + 1):
         try:
-            job = jobs.get_job(workspace=workspace, name=bundle_job_name(run_id, attempt)).data()
+            job = jobs.get_job(
+                workspace=workspace, name=bundle_job_name(run_id, attempt), job_reference_kind=JobReferenceKind.NAME
+            ).data()
         except NotFoundError:
             continue
         status = job.status.value if hasattr(job.status, "value") else str(job.status)

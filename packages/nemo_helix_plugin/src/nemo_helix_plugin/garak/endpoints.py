@@ -25,6 +25,8 @@ from nemo_helix_plugin.garak.types import (
     UpdateAuditConfigRequest,
     UpdateAuditTargetRequest,
 )
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
+from nemo_helix_plugin.jobs.types import JobSelectorQueryParams
 
 _CONFIGS = "/apis/garak/v2/workspaces/{workspace}/configs"
 _TARGETS = "/apis/garak/v2/workspaces/{workspace}/targets"
@@ -130,4 +132,55 @@ def list_audit_jobs(
 
 @get(f"{_JOBS}/{{name}}")
 @abstractmethod
-def get_audit_job(*, workspace: str | None = None, name: str) -> AuditJobResponse: ...
+def _raw_get_audit_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> AuditJobResponse: ...
+
+
+def get_audit_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AuditJobResponse]:
+    return _raw_get_audit_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_audit_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AuditJobResponse]:
+    return _raw_get_audit_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_audit_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AuditJobResponse]:
+    return _raw_get_audit_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
+def _compose_job_selector_query_params(
+    query: JobSelectorQueryParams | None, mode: JobReferenceKind | None
+) -> JobSelectorQueryParams:
+    result: JobSelectorQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result

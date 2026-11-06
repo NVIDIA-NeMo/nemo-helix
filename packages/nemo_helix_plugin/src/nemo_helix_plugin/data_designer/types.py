@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Literal, NotRequired, TypedDict
 
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.types import JobSelectorQueryParams
 from nemo_helix_plugin.schema import Page
 from pydantic import BaseModel, Field, JsonValue
 
@@ -120,7 +121,7 @@ class ListDataDesignerJobsQueryParams(TypedDict, total=False):
     filter: NotRequired[str]
 
 
-class DataDesignerJobLogsQueryParams(TypedDict, total=False):
+class DataDesignerJobLogsQueryParams(JobSelectorQueryParams, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
     tail: NotRequired[int]

@@ -16,7 +16,7 @@ from __future__ import annotations
 from abc import abstractmethod
 
 from nemo_helix_plugin.client.endpoint import delete, get, post, put
-from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated
+from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest
 from nemo_helix_plugin.evals.types import (
     AgentEvalJob,
     AgentEvalResult,
@@ -52,8 +52,10 @@ from nemo_helix_plugin.evals.types import (
     Taskset,
 )
 from nemo_helix_plugin.jobs.schemas import HelixJobLog, HelixJobResultResponse, HelixJobStatusResponse
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import (
     HelixJobListResultResponse,
+    JobSelectorQueryParams,
     ListJobsQueryParams,
 )
 
@@ -102,44 +104,338 @@ def list_evaluate_jobs(
 
 @get(f"{_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def get_evaluate_job(*, workspace: str | None = None, name: str) -> EvaluateJob: ...
+def _raw_get_evaluate_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> EvaluateJob: ...
+
+
+def get_evaluate_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_get_evaluate_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_evaluate_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_get_evaluate_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_evaluate_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_get_evaluate_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_EVAL_JOBS}/{{name}}/status")
 @abstractmethod
-def get_evaluate_job_status(*, workspace: str | None = None, name: str) -> HelixJobStatusResponse: ...
+def _raw_get_evaluate_job_status(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobStatusResponse: ...
+
+
+def get_evaluate_job_status(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_evaluate_job_status(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_evaluate_job_status_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_evaluate_job_status(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_evaluate_job_status_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_evaluate_job_status(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @delete(f"{_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def delete_evaluate_job(*, workspace: str | None = None, name: str) -> None: ...
+def _raw_delete_evaluate_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> None: ...
+
+
+def delete_evaluate_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_evaluate_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def delete_evaluate_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_evaluate_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def delete_evaluate_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_evaluate_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @post(f"{_EVAL_JOBS}/{{name}}/cancel")
 @abstractmethod
-def cancel_evaluate_job(*, workspace: str | None = None, name: str) -> EvaluateJob: ...
+def _raw_cancel_evaluate_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> EvaluateJob: ...
+
+
+def cancel_evaluate_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_cancel_evaluate_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def cancel_evaluate_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_cancel_evaluate_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def cancel_evaluate_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[EvaluateJob]:
+    return _raw_cancel_evaluate_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_EVAL_JOBS}/{{name}}/logs")
 @abstractmethod
-def list_evaluate_job_logs(
+def _raw_list_evaluate_job_logs(
     *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
 ) -> Paginated[HelixJobLog, CursorPagination]: ...
 
 
+def list_evaluate_job_logs(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: EvaluatorJobLogsQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_evaluate_job_logs(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_evaluate_job_logs_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_evaluate_job_logs(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_evaluate_job_logs_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_evaluate_job_logs(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
 @get(f"{_EVAL_JOBS}/{{name}}/results")
 @abstractmethod
-def list_evaluate_job_results(*, workspace: str | None = None, name: str) -> HelixJobListResultResponse: ...
+def _raw_list_evaluate_job_results(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobListResultResponse: ...
+
+
+def list_evaluate_job_results(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_evaluate_job_results(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_evaluate_job_results_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_evaluate_job_results(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_evaluate_job_results_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_evaluate_job_results(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_EVAL_JOBS}/{{job}}/results/{{name}}")
 @abstractmethod
-def get_evaluate_job_result(*, workspace: str | None = None, job: str, name: str) -> HelixJobResultResponse: ...
+def _raw_get_evaluate_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobResultResponse: ...
+
+
+def get_evaluate_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_evaluate_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_evaluate_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_evaluate_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_evaluate_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_evaluate_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_EVAL_JOBS}/{{job}}/results/{{name}}/download")
 @abstractmethod
-def download_evaluate_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
+def _raw_download_evaluate_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> BinaryContent: ...
+
+
+def download_evaluate_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_evaluate_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def download_evaluate_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_evaluate_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def download_evaluate_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_evaluate_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -161,44 +457,338 @@ def list_agent_eval_jobs(
 
 @get(f"{_AGENT_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def get_agent_eval_job(*, workspace: str | None = None, name: str) -> AgentEvalJob: ...
+def _raw_get_agent_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> AgentEvalJob: ...
+
+
+def get_agent_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_get_agent_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_get_agent_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_get_agent_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_AGENT_EVAL_JOBS}/{{name}}/status")
 @abstractmethod
-def get_agent_eval_job_status(*, workspace: str | None = None, name: str) -> HelixJobStatusResponse: ...
+def _raw_get_agent_eval_job_status(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobStatusResponse: ...
+
+
+def get_agent_eval_job_status(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_agent_eval_job_status(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_eval_job_status_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_agent_eval_job_status(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_eval_job_status_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_agent_eval_job_status(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @delete(f"{_AGENT_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def delete_agent_eval_job(*, workspace: str | None = None, name: str) -> None: ...
+def _raw_delete_agent_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> None: ...
+
+
+def delete_agent_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def delete_agent_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def delete_agent_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @post(f"{_AGENT_EVAL_JOBS}/{{name}}/cancel")
 @abstractmethod
-def cancel_agent_eval_job(*, workspace: str | None = None, name: str) -> AgentEvalJob: ...
+def _raw_cancel_agent_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> AgentEvalJob: ...
+
+
+def cancel_agent_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_cancel_agent_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def cancel_agent_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_cancel_agent_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def cancel_agent_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[AgentEvalJob]:
+    return _raw_cancel_agent_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_AGENT_EVAL_JOBS}/{{name}}/logs")
 @abstractmethod
-def list_agent_eval_job_logs(
+def _raw_list_agent_eval_job_logs(
     *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
 ) -> Paginated[HelixJobLog, CursorPagination]: ...
 
 
+def list_agent_eval_job_logs(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: EvaluatorJobLogsQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_agent_eval_job_logs(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_agent_eval_job_logs_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_agent_eval_job_logs(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_agent_eval_job_logs_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_agent_eval_job_logs(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
 @get(f"{_AGENT_EVAL_JOBS}/{{name}}/results")
 @abstractmethod
-def list_agent_eval_job_results(*, workspace: str | None = None, name: str) -> HelixJobListResultResponse: ...
+def _raw_list_agent_eval_job_results(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobListResultResponse: ...
+
+
+def list_agent_eval_job_results(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_agent_eval_job_results(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_agent_eval_job_results_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_agent_eval_job_results(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_agent_eval_job_results_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_agent_eval_job_results(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_AGENT_EVAL_JOBS}/{{job}}/results/{{name}}")
 @abstractmethod
-def get_agent_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> HelixJobResultResponse: ...
+def _raw_get_agent_eval_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobResultResponse: ...
+
+
+def get_agent_eval_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_agent_eval_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_eval_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_agent_eval_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_eval_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_agent_eval_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_AGENT_EVAL_JOBS}/{{job}}/results/{{name}}/download")
 @abstractmethod
-def download_agent_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
+def _raw_download_agent_eval_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> BinaryContent: ...
+
+
+def download_agent_eval_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_eval_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def download_agent_eval_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_eval_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def download_agent_eval_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_eval_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -222,44 +812,338 @@ def list_retrieve_eval_jobs(
 
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def get_retrieve_eval_job(*, workspace: str | None = None, name: str) -> RetrieveEvalJob: ...
+def _raw_get_retrieve_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> RetrieveEvalJob: ...
+
+
+def get_retrieve_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_get_retrieve_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_retrieve_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_get_retrieve_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_retrieve_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_get_retrieve_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/status")
 @abstractmethod
-def get_retrieve_eval_job_status(*, workspace: str | None = None, name: str) -> HelixJobStatusResponse: ...
+def _raw_get_retrieve_eval_job_status(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobStatusResponse: ...
+
+
+def get_retrieve_eval_job_status(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_retrieve_eval_job_status(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_retrieve_eval_job_status_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_retrieve_eval_job_status(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_retrieve_eval_job_status_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobStatusResponse]:
+    return _raw_get_retrieve_eval_job_status(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @delete(f"{_RETRIEVE_EVAL_JOBS}/{{name}}")
 @abstractmethod
-def delete_retrieve_eval_job(*, workspace: str | None = None, name: str) -> None: ...
+def _raw_delete_retrieve_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> None: ...
+
+
+def delete_retrieve_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_retrieve_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def delete_retrieve_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_retrieve_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def delete_retrieve_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[None]:
+    return _raw_delete_retrieve_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @post(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/cancel")
 @abstractmethod
-def cancel_retrieve_eval_job(*, workspace: str | None = None, name: str) -> RetrieveEvalJob: ...
+def _raw_cancel_retrieve_eval_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> RetrieveEvalJob: ...
+
+
+def cancel_retrieve_eval_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_cancel_retrieve_eval_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def cancel_retrieve_eval_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_cancel_retrieve_eval_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def cancel_retrieve_eval_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[RetrieveEvalJob]:
+    return _raw_cancel_retrieve_eval_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/logs")
 @abstractmethod
-def list_retrieve_eval_job_logs(
+def _raw_list_retrieve_eval_job_logs(
     *, workspace: str | None = None, name: str, query_params: EvaluatorJobLogsQueryParams | None = None
 ) -> Paginated[HelixJobLog, CursorPagination]: ...
 
 
+def list_retrieve_eval_job_logs(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: EvaluatorJobLogsQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_retrieve_eval_job_logs(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_retrieve_eval_job_logs_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_retrieve_eval_job_logs(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_retrieve_eval_job_logs_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: EvaluatorJobLogsQueryParams | None = None
+) -> PreparedRequest[Paginated[HelixJobLog, CursorPagination]]:
+    return _raw_list_retrieve_eval_job_logs(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_evaluator_job_logs_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{name}}/results")
 @abstractmethod
-def list_retrieve_eval_job_results(*, workspace: str | None = None, name: str) -> HelixJobListResultResponse: ...
+def _raw_list_retrieve_eval_job_results(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobListResultResponse: ...
+
+
+def list_retrieve_eval_job_results(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_retrieve_eval_job_results(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_retrieve_eval_job_results_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_retrieve_eval_job_results(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_retrieve_eval_job_results_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobListResultResponse]:
+    return _raw_list_retrieve_eval_job_results(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{job}}/results/{{name}}")
 @abstractmethod
-def get_retrieve_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> HelixJobResultResponse: ...
+def _raw_get_retrieve_eval_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> HelixJobResultResponse: ...
+
+
+def get_retrieve_eval_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_retrieve_eval_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_retrieve_eval_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[HelixJobResultResponse]:
+    return _raw_get_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_RETRIEVE_EVAL_JOBS}/{{job}}/results/{{name}}/download")
 @abstractmethod
-def download_retrieve_eval_job_result(*, workspace: str | None = None, job: str, name: str) -> BinaryContent: ...
+def _raw_download_retrieve_eval_job_result(
+    *, workspace: str | None = None, job: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> BinaryContent: ...
+
+
+def download_retrieve_eval_job_result(
+    *,
+    workspace: str | None = None,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def download_retrieve_eval_job_result_by_id(
+    *, workspace: str | None = None, job_id: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def download_retrieve_eval_job_result_by_name(
+    *, workspace: str | None = None, job_name: str, name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_retrieve_eval_job_result(
+        workspace=workspace,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -496,3 +1380,33 @@ def list_agent_eval_results(
 @delete(f"{_AGENT_EVAL_RESULTS}/{{name}}")
 @abstractmethod
 def delete_agent_eval_result(*, workspace: str | None = None, name: str) -> None: ...
+
+
+def _compose_job_selector_query_params(
+    query: JobSelectorQueryParams | None, mode: JobReferenceKind | None
+) -> JobSelectorQueryParams:
+    result: JobSelectorQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result
+
+
+def _compose_evaluator_job_logs_query_params(
+    query: EvaluatorJobLogsQueryParams | None, mode: JobReferenceKind | None
+) -> EvaluatorJobLogsQueryParams:
+    result: EvaluatorJobLogsQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result

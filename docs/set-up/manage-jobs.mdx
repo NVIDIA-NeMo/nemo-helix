@@ -9,6 +9,34 @@ description: ""
 
 This section describes how to configure jobs in NeMo Helix. The Jobs service is responsible for scheduling batch jobs, collecting telemetry and managing job results.
 
+## Selecting a Job
+
+Use `--job-id` when you have a Job's immutable ID, or `--job-name` for an exact name lookup:
+
+```bash
+nemo jobs get --job-id platform-job-example --workspace default
+nemo jobs cancel --job-name training --workspace default
+nemo jobs results get report --job-id platform-job-example --workspace default
+```
+
+Choose one selector form. The explicit flags cannot be combined with each other, a positional Job reference, or `--job`. Explicit ID selection never falls back to a matching name. Explicit name selection searches root Jobs in the workspace; address a parented Job by ID.
+
+Existing positional references and `--job` retain their previous behavior. Interfaces that accepted both IDs and names continue to try an ID first, then an exact workspace name. Steps listing retains its existing name filter and `-` listing sentinel when no explicit selector is supplied.
+
+The Python SDK provides matching operations on both synchronous and asynchronous clients:
+
+```python
+from nemo_helix_plugin.jobs.client import JobsClient
+
+jobs = JobsClient.from_config()
+job = jobs.get_job_by_name(job_name="training").data()
+jobs.cancel_job_by_id(job_id=job.id)
+```
+
+Every Job-addressed operation has `_by_id` and `_by_name` variants. Existing methods also accept `job_reference_kind="id"` or `"name"`. Conflicting modes in that argument and `query_params` raise an error before sending a request. Handles returned after creating or retrieving a Job retain its ID for later status, logs, and artifact requests; the name remains available for display.
+
+Once an operation resolves a Job, it carries the immutable ID through nested operations. If that Job is deleted, the operation cannot act on a replacement with the same name. Mutation locks coordinate within one API worker; operations across replicas continue to rely on the Entity Store's conflict and uniqueness checks.
+
 ## Viewing Job Attempts
 
 Each job run creates an attempt. The job response includes `attempt_id` for the current attempt. List the attempt history or retrieve the current attempt without first looking up its ID:

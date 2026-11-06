@@ -18,6 +18,7 @@ from nemo_helix_plugin.client.errors import ConflictError
 from nemo_helix_plugin.client_provider import get_async_nemo_client
 from nemo_helix_plugin.entities.base import EntityConflictError, SyncEntityClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
 from nemo_scaled_evals_plugin.entities import ScaledEvaluationExecution
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
@@ -103,7 +104,11 @@ class EvaluationSubmitter:
                 await asyncio.to_thread(self._write_inputs, claimed_id, execution_number, name)
             platform_job = await self.create_job(name, EvaluationExecutionJob, spec)
         except ConflictError:
-            platform_job = (await self.jobs.get_job(workspace=settings.platform_jobs_workspace, name=name)).data()
+            platform_job = (
+                await self.jobs.get_job(
+                    workspace=settings.platform_jobs_workspace, name=name, job_reference_kind=JobReferenceKind.NAME
+                )
+            ).data()
         except Exception:
             await asyncio.to_thread(self._retry, claimed_id, execution_number)
             raise

@@ -395,6 +395,7 @@ class TestSyncRun:
 # ---------------------------------------------------------------------------
 
 _JOB_PAYLOAD = {
+    "id": "job-immutable-id",
     "name": "audit-job-abc123",
     "workspace": "default",
     "status": "created",
@@ -595,6 +596,7 @@ class TestGarakJobResource:
         platform = _SyncHelix()
         resource = GarakJobResource(
             job_name="audit-job-abc123",
+            job_id="job-immutable-id",
             platform=platform,
             workspace="default",
         )
@@ -612,7 +614,8 @@ class TestGarakJobResource:
 
         assert result == _JOB_PAYLOAD
         platform.http.get.assert_called_once_with(
-            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/audit-job-abc123"
+            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/job-immutable-id",
+            params={"job_reference_kind": "id"},
         )
 
     def test_get_job_status_hits_status_url(self) -> None:
@@ -623,7 +626,8 @@ class TestGarakJobResource:
 
         assert status == "active"
         platform.http.get.assert_called_once_with(
-            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/audit-job-abc123/status"
+            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/job-immutable-id/status",
+            params={"job_reference_kind": "id"},
         )
 
     def test_check_if_complete_returns_true_when_completed(self) -> None:
@@ -695,7 +699,8 @@ class TestGarakJobResource:
 
         assert result == tmp_path
         platform.http.get.assert_called_with(
-            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/audit-job-abc123/results/artifacts/download"
+            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/job-immutable-id/results/artifacts/download",
+            params={"job_reference_kind": "id"},
         )
 
     def test_poll_safe_returns_fallback_on_transient_error(self) -> None:
@@ -726,6 +731,7 @@ class TestAsyncGarakJobResource:
         platform = _AsyncHelix()
         resource = AsyncGarakJobResource(
             job_name="audit-job-abc123",
+            job_id="job-immutable-id",
             platform=platform,
             workspace="default",
         )
@@ -743,7 +749,8 @@ class TestAsyncGarakJobResource:
 
         assert status == "completed"
         platform.http.get.assert_called_once_with(
-            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/audit-job-abc123/status"
+            "http://test:8000/apis/garak/v2/workspaces/default/jobs/audit/job-immutable-id/status",
+            params={"job_reference_kind": "id"},
         )
 
     async def test_check_if_complete_returns_true_when_completed(self) -> None:

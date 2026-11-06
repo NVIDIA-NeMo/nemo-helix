@@ -35,6 +35,7 @@ from nemo_helix_plugin.entity_client import (
 )
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import HelixJobResponse, ListJobsQueryParams
 from nemo_helix_plugin.models.client import AsyncModelsClient
 
@@ -172,7 +173,11 @@ class CompassAnalysisController(NemoController):
             return status
         updated = status.model_copy()
         try:
-            job = (await self.jobs.get_job(workspace=config.workspace, name=status.last_submitted_job)).data()
+            job = (
+                await self.jobs.get_job(
+                    workspace=config.workspace, name=status.last_submitted_job, job_reference_kind=JobReferenceKind.NAME
+                )
+            ).data()
         except NotFoundError:
             updated.status = AnalysisConfigStatus.ERROR
             updated.last_error = "Analysis job was not submitted or no longer exists"

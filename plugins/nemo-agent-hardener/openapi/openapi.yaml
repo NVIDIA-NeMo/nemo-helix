@@ -139,6 +139,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -177,6 +184,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -212,6 +226,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -243,6 +264,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -280,6 +308,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '204':
           description: Successful Response
@@ -312,6 +347,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: page
         in: query
         required: false
@@ -382,6 +424,13 @@ paths:
         schema:
           type: string
           title: Attempt
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -414,6 +463,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -446,6 +502,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: limit
         in: query
         required: false
@@ -516,6 +579,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: attempt_id
         in: query
         required: false
@@ -554,6 +624,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1389,6 +1466,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1427,6 +1511,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1462,6 +1553,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1493,6 +1591,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -1530,6 +1635,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '204':
           description: Successful Response
@@ -1562,6 +1674,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: page
         in: query
         required: false
@@ -1632,6 +1751,13 @@ paths:
         schema:
           type: string
           title: Attempt
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1664,6 +1790,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -1696,6 +1829,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: limit
         in: query
         required: false
@@ -1766,6 +1906,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: attempt_id
         in: query
         required: false
@@ -1804,6 +1951,13 @@ paths:
         schema:
           type: string
           title: Name
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -2749,6 +2903,12 @@ components:
         a
 
         control update, an omitted or null value keeps the job''s current value.'
+    JobReferenceKind:
+      type: string
+      enum:
+      - id
+      - name
+      title: JobReferenceKind
     ManifestFilter:
       additionalProperties: false
       description: Query filter for ``GET /v2/workspaces/{workspace}/manifests``.

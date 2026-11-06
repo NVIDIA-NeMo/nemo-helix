@@ -1033,10 +1033,10 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         poll_interval = 2
         elapsed = 0
         status = "pending"
-        job_status = jobs_client.get_job(name=job.name).data()
+        job_status = jobs_client.get_job_by_id(job_id=job.id).data()
 
         while elapsed < max_wait:
-            job_status = jobs_client.get_job(name=job.name).data()
+            job_status = jobs_client.get_job_by_id(job_id=job.id).data()
             status = job_status.status
 
             if status in ("completed", "error", "cancelled"):
@@ -1063,7 +1063,7 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         # Fetch and display logs
         console.print("\n  [bold]Job output:[/bold]")
         try:
-            logs = jobs_client.list_job_logs(name=job.name)
+            logs = jobs_client.list_job_logs_by_id(job_id=job.id)
             log_lines = []
             for log_entry in logs.items():
                 if hasattr(log_entry, "message"):
@@ -1080,7 +1080,7 @@ def _run_job_diagnostic(port: int, registry: str, tag: str, *, admin_email: str 
         # Clean up the job (only if successful)
         if status == "completed":
             try:
-                jobs_client.delete_job(name=job.name)
+                jobs_client.delete_job_by_id(job_id=job.id)
             except Exception:
                 pass  # Ignore cleanup errors
         else:

@@ -6843,6 +6843,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: page
         in: query
         required: false
@@ -6919,6 +6926,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -6958,6 +6972,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: expected_step_id
         in: query
         required: false
@@ -7028,6 +7049,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: page
         in: query
         required: false
@@ -7108,6 +7136,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7153,6 +7188,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7204,6 +7246,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7255,6 +7304,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7311,6 +7367,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7318,6 +7381,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HelixJobTask'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/jobs/v2/workspaces/{workspace}/jobs/{job}/metadata:
+    get:
+      tags:
+      - Jobs
+      summary: Get Job Metadata
+      description: Read Job identity and collection metadata without requiring an
+        attempt.
+      operationId: get_job_metadata_apis_jobs_v2_workspaces__workspace__jobs__job__metadata_get
+      parameters:
+      - name: job
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Job
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: true
+        schema:
+          $ref: '#/components/schemas/JobMetadataReferenceKind'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobMetadataResponse'
         '422':
           description: Validation Error
           content:
@@ -7344,6 +7446,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7387,6 +7496,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7433,6 +7549,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7474,6 +7597,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7558,6 +7688,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7599,6 +7736,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7648,6 +7792,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7695,6 +7846,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7730,6 +7888,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7764,6 +7929,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7806,6 +7978,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '204':
           description: Successful Response
@@ -7882,6 +8061,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -7919,6 +8105,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       requestBody:
         required: true
         content:
@@ -7958,6 +8151,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: limit
         in: query
         required: false
@@ -8048,6 +8248,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -8105,6 +8312,13 @@ paths:
           title: Attempt Id
           type: string
         description: Producing attempt ID or 'current'
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -8140,6 +8354,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -8178,6 +8399,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       responses:
         '200':
           description: Successful Response
@@ -8213,6 +8441,13 @@ paths:
         schema:
           type: string
           title: Workspace
+      - name: job_reference_kind
+        in: query
+        required: false
+        schema:
+          allOf:
+          - $ref: '#/components/schemas/JobReferenceKind'
+          title: Job Reference Kind
       - name: page
         in: query
         required: false
@@ -18417,6 +18652,50 @@ components:
             these variables.
       type: object
       title: JobExecutionProfileConfig
+    JobMetadataReferenceKind:
+      type: string
+      enum:
+      - id
+      - name
+      - legacy
+      title: JobMetadataReferenceKind
+    JobMetadataResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          title: Name
+        workspace:
+          type: string
+          title: Workspace
+        parent_id:
+          title: Parent Id
+          type: string
+        source:
+          type: string
+          title: Source
+        spec:
+          additionalProperties: true
+          type: object
+          title: Spec
+      type: object
+      required:
+      - id
+      - name
+      - workspace
+      - parent_id
+      - source
+      - spec
+      title: JobMetadataResponse
+      description: Job identity and collection fields, independent of attempt lifecycle.
+    JobReferenceKind:
+      type: string
+      enum:
+      - id
+      - name
+      title: JobReferenceKind
     JsonValue:
       title: JsonValue
     JsonWebKey:

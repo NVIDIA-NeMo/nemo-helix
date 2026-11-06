@@ -19,6 +19,7 @@ from nemo_helix_plugin.client.response import AsyncNemoBinaryResponse, NemoBinar
 from nemo_helix_plugin.client.types import PreparedRequest
 from nemo_helix_plugin.evals import endpoints
 from nemo_helix_plugin.evals.types import CreateMetricRequest, FlatQueryParams, Metric, ProjectQueryParams
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 
 _AGGREGATE_SCORES_RESULT_NAME = "aggregate-scores"
 _ROW_SCORES_RESULT_NAME = "row-scores"
@@ -50,35 +51,83 @@ class _EvaluatorMethods:
     list_evaluate_jobs = method(endpoints.list_evaluate_jobs)
     submit_evaluate_job = method(endpoints.submit_evaluate_job)
     get_evaluate_job = method(endpoints.get_evaluate_job)
+    get_evaluate_job_by_id = method(endpoints.get_evaluate_job_by_id)
+    get_evaluate_job_by_name = method(endpoints.get_evaluate_job_by_name)
     get_evaluate_job_status = method(endpoints.get_evaluate_job_status)
+    get_evaluate_job_status_by_id = method(endpoints.get_evaluate_job_status_by_id)
+    get_evaluate_job_status_by_name = method(endpoints.get_evaluate_job_status_by_name)
     delete_evaluate_job = method(endpoints.delete_evaluate_job)
+    delete_evaluate_job_by_id = method(endpoints.delete_evaluate_job_by_id)
+    delete_evaluate_job_by_name = method(endpoints.delete_evaluate_job_by_name)
     cancel_evaluate_job = method(endpoints.cancel_evaluate_job)
+    cancel_evaluate_job_by_id = method(endpoints.cancel_evaluate_job_by_id)
+    cancel_evaluate_job_by_name = method(endpoints.cancel_evaluate_job_by_name)
     list_evaluate_job_logs = method(endpoints.list_evaluate_job_logs)
+    list_evaluate_job_logs_by_id = method(endpoints.list_evaluate_job_logs_by_id)
+    list_evaluate_job_logs_by_name = method(endpoints.list_evaluate_job_logs_by_name)
     list_evaluate_job_results = method(endpoints.list_evaluate_job_results)
+    list_evaluate_job_results_by_id = method(endpoints.list_evaluate_job_results_by_id)
+    list_evaluate_job_results_by_name = method(endpoints.list_evaluate_job_results_by_name)
     get_evaluate_job_result = method(endpoints.get_evaluate_job_result)
+    get_evaluate_job_result_by_id = method(endpoints.get_evaluate_job_result_by_id)
+    get_evaluate_job_result_by_name = method(endpoints.get_evaluate_job_result_by_name)
     download_evaluate_job_result = method(endpoints.download_evaluate_job_result)
+    download_evaluate_job_result_by_id = method(endpoints.download_evaluate_job_result_by_id)
+    download_evaluate_job_result_by_name = method(endpoints.download_evaluate_job_result_by_name)
 
     list_agent_eval_jobs = method(endpoints.list_agent_eval_jobs)
     submit_agent_eval_job = method(endpoints.submit_agent_eval_job)
     get_agent_eval_job = method(endpoints.get_agent_eval_job)
+    get_agent_eval_job_by_id = method(endpoints.get_agent_eval_job_by_id)
+    get_agent_eval_job_by_name = method(endpoints.get_agent_eval_job_by_name)
     get_agent_eval_job_status = method(endpoints.get_agent_eval_job_status)
+    get_agent_eval_job_status_by_id = method(endpoints.get_agent_eval_job_status_by_id)
+    get_agent_eval_job_status_by_name = method(endpoints.get_agent_eval_job_status_by_name)
     delete_agent_eval_job = method(endpoints.delete_agent_eval_job)
+    delete_agent_eval_job_by_id = method(endpoints.delete_agent_eval_job_by_id)
+    delete_agent_eval_job_by_name = method(endpoints.delete_agent_eval_job_by_name)
     cancel_agent_eval_job = method(endpoints.cancel_agent_eval_job)
+    cancel_agent_eval_job_by_id = method(endpoints.cancel_agent_eval_job_by_id)
+    cancel_agent_eval_job_by_name = method(endpoints.cancel_agent_eval_job_by_name)
     list_agent_eval_job_logs = method(endpoints.list_agent_eval_job_logs)
+    list_agent_eval_job_logs_by_id = method(endpoints.list_agent_eval_job_logs_by_id)
+    list_agent_eval_job_logs_by_name = method(endpoints.list_agent_eval_job_logs_by_name)
     list_agent_eval_job_results = method(endpoints.list_agent_eval_job_results)
+    list_agent_eval_job_results_by_id = method(endpoints.list_agent_eval_job_results_by_id)
+    list_agent_eval_job_results_by_name = method(endpoints.list_agent_eval_job_results_by_name)
     get_agent_eval_job_result = method(endpoints.get_agent_eval_job_result)
+    get_agent_eval_job_result_by_id = method(endpoints.get_agent_eval_job_result_by_id)
+    get_agent_eval_job_result_by_name = method(endpoints.get_agent_eval_job_result_by_name)
     download_agent_eval_job_result = method(endpoints.download_agent_eval_job_result)
+    download_agent_eval_job_result_by_id = method(endpoints.download_agent_eval_job_result_by_id)
+    download_agent_eval_job_result_by_name = method(endpoints.download_agent_eval_job_result_by_name)
 
     list_retrieve_eval_jobs = method(endpoints.list_retrieve_eval_jobs)
     submit_retrieve_eval_job = method(endpoints.submit_retrieve_eval_job)
     get_retrieve_eval_job = method(endpoints.get_retrieve_eval_job)
+    get_retrieve_eval_job_by_id = method(endpoints.get_retrieve_eval_job_by_id)
+    get_retrieve_eval_job_by_name = method(endpoints.get_retrieve_eval_job_by_name)
     get_retrieve_eval_job_status = method(endpoints.get_retrieve_eval_job_status)
+    get_retrieve_eval_job_status_by_id = method(endpoints.get_retrieve_eval_job_status_by_id)
+    get_retrieve_eval_job_status_by_name = method(endpoints.get_retrieve_eval_job_status_by_name)
     delete_retrieve_eval_job = method(endpoints.delete_retrieve_eval_job)
+    delete_retrieve_eval_job_by_id = method(endpoints.delete_retrieve_eval_job_by_id)
+    delete_retrieve_eval_job_by_name = method(endpoints.delete_retrieve_eval_job_by_name)
     cancel_retrieve_eval_job = method(endpoints.cancel_retrieve_eval_job)
+    cancel_retrieve_eval_job_by_id = method(endpoints.cancel_retrieve_eval_job_by_id)
+    cancel_retrieve_eval_job_by_name = method(endpoints.cancel_retrieve_eval_job_by_name)
     list_retrieve_eval_job_logs = method(endpoints.list_retrieve_eval_job_logs)
+    list_retrieve_eval_job_logs_by_id = method(endpoints.list_retrieve_eval_job_logs_by_id)
+    list_retrieve_eval_job_logs_by_name = method(endpoints.list_retrieve_eval_job_logs_by_name)
     list_retrieve_eval_job_results = method(endpoints.list_retrieve_eval_job_results)
+    list_retrieve_eval_job_results_by_id = method(endpoints.list_retrieve_eval_job_results_by_id)
+    list_retrieve_eval_job_results_by_name = method(endpoints.list_retrieve_eval_job_results_by_name)
     get_retrieve_eval_job_result = method(endpoints.get_retrieve_eval_job_result)
+    get_retrieve_eval_job_result_by_id = method(endpoints.get_retrieve_eval_job_result_by_id)
+    get_retrieve_eval_job_result_by_name = method(endpoints.get_retrieve_eval_job_result_by_name)
     download_retrieve_eval_job_result = method(endpoints.download_retrieve_eval_job_result)
+    download_retrieve_eval_job_result_by_id = method(endpoints.download_retrieve_eval_job_result_by_id)
+    download_retrieve_eval_job_result_by_name = method(endpoints.download_retrieve_eval_job_result_by_name)
 
     get_metric = method(endpoints.get_metric)
     list_metrics = method(endpoints.list_metrics)
@@ -116,27 +165,36 @@ class _EvaluatorMethods:
 class EvaluatorClient(_EvaluatorMethods, NemoClient):
     """Sync client for the Evals service API."""
 
-    def download_evaluate_job_aggregate_scores(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+    def download_evaluate_job_aggregate_scores(
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> NemoBinaryResponse:
         """Download the aggregate-scores artifact for an evaluate job."""
         return self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_AGGREGATE_SCORES_RESULT_NAME,
         )
 
-    def download_evaluate_job_row_scores(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+    def download_evaluate_job_row_scores(
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> NemoBinaryResponse:
         """Download the row-scores artifact for an evaluate job."""
         return self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_ROW_SCORES_RESULT_NAME,
         )
 
-    def download_evaluate_job_artifacts(self, *, workspace: str | None = None, name: str) -> NemoBinaryResponse:
+    def download_evaluate_job_artifacts(
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> NemoBinaryResponse:
         """Download the artifacts bundle for an evaluate job."""
         return self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_ARTIFACTS_RESULT_NAME,
         )
 
@@ -159,37 +217,76 @@ class EvaluatorClient(_EvaluatorMethods, NemoClient):
             )
         )
 
+    def download_evaluate_job_aggregate_scores_by_id(
+        self, *, workspace: str | None = None, job_id: str
+    ) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_id(
+            workspace=workspace, job_id=job_id, name=_AGGREGATE_SCORES_RESULT_NAME
+        )
+
+    def download_evaluate_job_aggregate_scores_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_AGGREGATE_SCORES_RESULT_NAME
+        )
+
+    def download_evaluate_job_row_scores_by_id(
+        self, *, workspace: str | None = None, job_id: str
+    ) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_id(workspace=workspace, job_id=job_id, name=_ROW_SCORES_RESULT_NAME)
+
+    def download_evaluate_job_row_scores_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_ROW_SCORES_RESULT_NAME
+        )
+
+    def download_evaluate_job_artifacts_by_id(self, *, workspace: str | None = None, job_id: str) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_id(workspace=workspace, job_id=job_id, name=_ARTIFACTS_RESULT_NAME)
+
+    def download_evaluate_job_artifacts_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> NemoBinaryResponse:
+        return self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_ARTIFACTS_RESULT_NAME
+        )
+
 
 class AsyncEvaluatorClient(_EvaluatorMethods, AsyncNemoClient):
     """Async client for the Evals service API."""
 
     async def download_evaluate_job_aggregate_scores(
-        self, *, workspace: str | None = None, name: str
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
     ) -> AsyncNemoBinaryResponse:
         """Download the aggregate-scores artifact for an evaluate job."""
         return await self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_AGGREGATE_SCORES_RESULT_NAME,
         )
 
     async def download_evaluate_job_row_scores(
-        self, *, workspace: str | None = None, name: str
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
     ) -> AsyncNemoBinaryResponse:
         """Download the row-scores artifact for an evaluate job."""
         return await self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_ROW_SCORES_RESULT_NAME,
         )
 
     async def download_evaluate_job_artifacts(
-        self, *, workspace: str | None = None, name: str
+        self, *, workspace: str | None = None, name: str, job_reference_kind: JobReferenceKind | None = None
     ) -> AsyncNemoBinaryResponse:
         """Download the artifacts bundle for an evaluate job."""
         return await self.download_evaluate_job_result(
             workspace=workspace,
             job=name,
+            job_reference_kind=job_reference_kind,
             name=_ARTIFACTS_RESULT_NAME,
         )
 
@@ -210,4 +307,46 @@ class AsyncEvaluatorClient(_EvaluatorMethods, AsyncNemoClient):
                 query_params=query_params,
                 exist_ok=exist_ok,
             )
+        )
+
+    async def download_evaluate_job_aggregate_scores_by_id(
+        self, *, workspace: str | None = None, job_id: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_id(
+            workspace=workspace, job_id=job_id, name=_AGGREGATE_SCORES_RESULT_NAME
+        )
+
+    async def download_evaluate_job_aggregate_scores_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_AGGREGATE_SCORES_RESULT_NAME
+        )
+
+    async def download_evaluate_job_row_scores_by_id(
+        self, *, workspace: str | None = None, job_id: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_id(
+            workspace=workspace, job_id=job_id, name=_ROW_SCORES_RESULT_NAME
+        )
+
+    async def download_evaluate_job_row_scores_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_ROW_SCORES_RESULT_NAME
+        )
+
+    async def download_evaluate_job_artifacts_by_id(
+        self, *, workspace: str | None = None, job_id: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_id(
+            workspace=workspace, job_id=job_id, name=_ARTIFACTS_RESULT_NAME
+        )
+
+    async def download_evaluate_job_artifacts_by_name(
+        self, *, workspace: str | None = None, job_name: str
+    ) -> AsyncNemoBinaryResponse:
+        return await self.download_evaluate_job_result_by_name(
+            workspace=workspace, job_name=job_name, name=_ARTIFACTS_RESULT_NAME
         )

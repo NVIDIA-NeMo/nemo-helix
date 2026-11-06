@@ -48,6 +48,8 @@ from nemo_helix_plugin.agents.types import (
 )
 from nemo_helix_plugin.client.endpoint import delete, get, post
 from nemo_helix_plugin.client.types import BinaryContent, CursorPagination, Paginated, PreparedRequest, Stream
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
+from nemo_helix_plugin.jobs.types import JobSelectorQueryParams
 
 _PREFIX = "/apis/agents/v2/workspaces/{workspace}"
 _AGENTS = f"{_PREFIX}/agents"
@@ -280,12 +282,84 @@ def create_execute_job(*, workspace: str | None = None, body: CreateExecuteJobRe
 
 @get(f"{_EXECUTE_JOBS}/{{name}}")
 @abstractmethod
-def get_execute_job(*, workspace: str | None = None, name: str) -> JsonObject: ...
+def _raw_get_execute_job(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> JsonObject: ...
+
+
+def get_execute_job(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[JsonObject]:
+    return _raw_get_execute_job(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_execute_job_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[JsonObject]:
+    return _raw_get_execute_job(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_execute_job_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[JsonObject]:
+    return _raw_get_execute_job(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_EXECUTE_JOBS}/{{name}}/results")
 @abstractmethod
-def list_execute_job_results(*, workspace: str | None = None, name: str) -> JsonObject: ...
+def _raw_list_execute_job_results(
+    *, workspace: str | None = None, name: str, query_params: JobSelectorQueryParams | None = None
+) -> JsonObject: ...
+
+
+def list_execute_job_results(
+    *,
+    workspace: str | None = None,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[JsonObject]:
+    return _raw_list_execute_job_results(
+        workspace=workspace,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_execute_job_results_by_id(
+    *, workspace: str | None = None, job_id: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[JsonObject]:
+    return _raw_list_execute_job_results(
+        workspace=workspace,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_execute_job_results_by_name(
+    *, workspace: str | None = None, job_name: str, query_params: JobSelectorQueryParams | None = None
+) -> PreparedRequest[JsonObject]:
+    return _raw_list_execute_job_results(
+        workspace=workspace,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -312,22 +386,178 @@ def list_agent_jobs(
 
 @get(f"{_JOBS}/{{name}}")
 @abstractmethod
-def get_agent_job(*, workspace: str | None = None, collection: AgentJobCollection, name: str) -> AgentJob: ...
+def _raw_get_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> AgentJob: ...
+
+
+def get_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_get_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_job_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_get_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_job_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_get_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @delete(f"{_JOBS}/{{name}}")
 @abstractmethod
-def delete_agent_job(*, workspace: str | None = None, collection: AgentJobCollection, name: str) -> None: ...
+def _raw_delete_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> None: ...
+
+
+def delete_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def delete_agent_job_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def delete_agent_job_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[None]:
+    return _raw_delete_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @post(f"{_JOBS}/{{name}}/cancel")
 @abstractmethod
-def cancel_agent_job(*, workspace: str | None = None, collection: AgentJobCollection, name: str) -> AgentJob: ...
+def _raw_cancel_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> AgentJob: ...
+
+
+def cancel_agent_job(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_cancel_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def cancel_agent_job_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_cancel_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def cancel_agent_job_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJob]:
+    return _raw_cancel_agent_job(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_JOBS}/{{name}}/logs")
 @abstractmethod
-def list_agent_job_logs(
+def _raw_list_agent_job_logs(
     *,
     workspace: str | None = None,
     collection: AgentJobCollection,
@@ -336,9 +566,55 @@ def list_agent_job_logs(
 ) -> Paginated[AgentJobLog, CursorPagination]: ...
 
 
+def list_agent_job_logs(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: AgentJobLogsQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[Paginated[AgentJobLog, CursorPagination]]:
+    return _raw_list_agent_job_logs(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_agent_job_logs_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_agent_job_logs_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: AgentJobLogsQueryParams | None = None,
+) -> PreparedRequest[Paginated[AgentJobLog, CursorPagination]]:
+    return _raw_list_agent_job_logs(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_agent_job_logs_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_agent_job_logs_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: AgentJobLogsQueryParams | None = None,
+) -> PreparedRequest[Paginated[AgentJobLog, CursorPagination]]:
+    return _raw_list_agent_job_logs(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_agent_job_logs_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
 @get(f"{_JOBS}/{{name}}/results")
 @abstractmethod
-def list_agent_job_results(
+def _raw_list_agent_job_results(
     *,
     workspace: str | None = None,
     collection: AgentJobCollection,
@@ -347,22 +623,277 @@ def list_agent_job_results(
 ) -> AgentJobResultListResponse: ...
 
 
+def list_agent_job_results(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: ListAgentJobResultsQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentJobResultListResponse]:
+    return _raw_list_agent_job_results(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_list_agent_job_results_query_params(query_params, job_reference_kind),
+    )
+
+
+def list_agent_job_results_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: ListAgentJobResultsQueryParams | None = None,
+) -> PreparedRequest[AgentJobResultListResponse]:
+    return _raw_list_agent_job_results(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_list_agent_job_results_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def list_agent_job_results_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: ListAgentJobResultsQueryParams | None = None,
+) -> PreparedRequest[AgentJobResultListResponse]:
+    return _raw_list_agent_job_results(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_list_agent_job_results_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
 @get(f"{_JOBS}/{{name}}/status")
 @abstractmethod
-def get_agent_job_status(
-    *, workspace: str | None = None, collection: AgentJobCollection, name: str
+def _raw_get_agent_job_status(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
 ) -> AgentJobStatusResponse: ...
+
+
+def get_agent_job_status(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentJobStatusResponse]:
+    return _raw_get_agent_job_status(
+        workspace=workspace,
+        collection=collection,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_job_status_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJobStatusResponse]:
+    return _raw_get_agent_job_status(
+        workspace=workspace,
+        collection=collection,
+        name=job_id,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_job_status_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJobStatusResponse]:
+    return _raw_get_agent_job_status(
+        workspace=workspace,
+        collection=collection,
+        name=job_name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_JOBS}/{{job}}/results/{{name}}")
 @abstractmethod
-def get_agent_job_result(
-    *, workspace: str | None = None, collection: AgentJobCollection, job: str, name: str
+def _raw_get_agent_job_result(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
 ) -> AgentJobResult: ...
+
+
+def get_agent_job_result(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[AgentJobResult]:
+    return _raw_get_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def get_agent_job_result_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJobResult]:
+    return _raw_get_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def get_agent_job_result_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[AgentJobResult]:
+    return _raw_get_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
 
 
 @get(f"{_JOBS}/{{job}}/results/{{name}}/download")
 @abstractmethod
-def download_agent_job_result(
-    *, workspace: str | None = None, collection: AgentJobCollection, job: str, name: str
+def _raw_download_agent_job_result(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
 ) -> BinaryContent: ...
+
+
+def download_agent_job_result(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+    job_reference_kind: JobReferenceKind | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, job_reference_kind),
+    )
+
+
+def download_agent_job_result_by_id(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_id: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job_id,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.ID),
+    )
+
+
+def download_agent_job_result_by_name(
+    *,
+    workspace: str | None = None,
+    collection: AgentJobCollection,
+    job_name: str,
+    name: str,
+    query_params: JobSelectorQueryParams | None = None,
+) -> PreparedRequest[BinaryContent]:
+    return _raw_download_agent_job_result(
+        workspace=workspace,
+        collection=collection,
+        job=job_name,
+        name=name,
+        query_params=_compose_job_selector_query_params(query_params, JobReferenceKind.NAME),
+    )
+
+
+def _compose_job_selector_query_params(
+    query: JobSelectorQueryParams | None, mode: JobReferenceKind | None
+) -> JobSelectorQueryParams:
+    result: JobSelectorQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result
+
+
+def _compose_agent_job_logs_query_params(
+    query: AgentJobLogsQueryParams | None, mode: JobReferenceKind | None
+) -> AgentJobLogsQueryParams:
+    result: AgentJobLogsQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result
+
+
+def _compose_list_agent_job_results_query_params(
+    query: ListAgentJobResultsQueryParams | None, mode: JobReferenceKind | None
+) -> ListAgentJobResultsQueryParams:
+    result: ListAgentJobResultsQueryParams = {} if query is None else query.copy()
+    existing = result.pop("job_reference_kind", None)
+    existing_mode = JobReferenceKind(existing) if existing is not None else None
+    selected_mode = JobReferenceKind(mode) if mode is not None else None
+    if existing_mode is not None and selected_mode is not None and existing_mode != selected_mode:
+        raise ValueError("Conflicting Job reference modes")
+    selected_mode = selected_mode if selected_mode is not None else existing_mode
+    if selected_mode is not None:
+        result["job_reference_kind"] = selected_mode
+    return result

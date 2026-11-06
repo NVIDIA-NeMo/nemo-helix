@@ -19,6 +19,7 @@ import pytest
 from nemo_helix_plugin.entity_naming import NAME_MAX_LENGTH, NAME_PATTERN
 from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
+from nemo_helix_plugin.jobs.selectors import JobByName
 from nemo_helix_plugin.jobs.telemetry import build_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import JobControl, derive_job_fileset_name
 from nhx.common.api.filter import ComparisonOperation, FilterOperator, LogicalOperation, parse_json_filter
@@ -519,7 +520,11 @@ async def test_terminal_post_save_sweep_catches_other_replica_task(
         nonlocal late_task
         if isinstance(entity, HelixJobStep) and entity.status == final_status and late_task is None:
             late_task = await replica._create_or_update_task_locked(
-                job_name, "other-replica", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+                (await mock_dispatcher.resolve_job(JobByName(job_name), workspace=step.workspace)).job_id,
+                "other-replica",
+                step.workspace,
+                HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE),
+                step,
             )
             assert late_task.status == HelixJobStatus.ACTIVE
         return await original_update(entity, *args, **kwargs)
@@ -616,7 +621,11 @@ async def test_other_replica_task_write_after_final_sweep_rechecks_parent(
     with patch.object(mock_store, "create", side_effect=delay_task_write):
         late_report = asyncio.create_task(
             replica._create_or_update_task_locked(
-                job_name, "delayed-task", step.workspace, HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE), step
+                (await mock_dispatcher.resolve_job(JobByName(job_name), workspace=step.workspace)).job_id,
+                "delayed-task",
+                step.workspace,
+                HelixJobTaskUpdate(status=HelixJobStatus.ACTIVE),
+                step,
             )
         )
         try:
@@ -3958,7 +3967,7 @@ async def test_update_job_returns_none_when_job_is_deleted_after_resolution(
 
     with (
         patch.object(mock_dispatcher, "_resolve_job", new=AsyncMock(return_value=resolved)),
-        patch.object(mock_store, "get", new=AsyncMock(side_effect=EntityNotFoundError("deleted"))),
+        patch.object(mock_store, "get_by_id", new=AsyncMock(side_effect=EntityNotFoundError("deleted"))),
     ):
         updated = await mock_dispatcher.update_job(
             created.name,

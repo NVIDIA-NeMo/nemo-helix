@@ -30,6 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobResultResponse,
     HelixJobStatus,
 )
+from nemo_helix_plugin.jobs.selectors import JobMetadataReferenceKind, JobReferenceKind
 from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
 from nemo_helix_plugin.k8s_naming import k8s_safe_name, workspace_name_identity
 from nemo_helix_plugin.schema import Value
@@ -511,6 +512,10 @@ class JobStatusDetailsUpdate(RootModel[dict[str, Any]]):
 # ---------------------------------------------------------------------------
 
 
+class JobSelectorQueryParams(TypedDict, total=False):
+    job_reference_kind: JobReferenceKind
+
+
 class ListJobsQueryParams(TypedDict, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
@@ -518,34 +523,49 @@ class ListJobsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | dict[str, Any]]
 
 
-class ListStepsQueryParams(TypedDict, total=False):
+class ListStepsQueryParams(JobSelectorQueryParams, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
     sort: NotRequired[str]
     filter: NotRequired[str | dict[str, Any]]
 
 
-class ListAttemptsQueryParams(TypedDict, total=False):
+class ListAttemptsQueryParams(JobSelectorQueryParams, total=False):
     page: NotRequired[int]
     page_size: NotRequired[int]
     sort: NotRequired[str]
     filter: NotRequired[str | dict[str, Any]]
 
 
-class ListJobResultsQueryParams(TypedDict, total=False):
+class ListJobResultsQueryParams(JobSelectorQueryParams, total=False):
     sort: NotRequired[str]
     attempt_id: NotRequired[str]
 
 
-class JobStatusDetailsQueryParams(TypedDict, total=False):
+class JobStatusDetailsQueryParams(JobSelectorQueryParams, total=False):
     expected_step_id: NotRequired[str]
     expected_step_status: NotRequired[str]
 
 
-class JobLogsQueryParams(TypedDict, total=False):
+class JobLogsQueryParams(JobSelectorQueryParams, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
     attempt_id: NotRequired[str | int]
     step_id: NotRequired[str]
     task_id: NotRequired[str]
     tail: NotRequired[int]
+
+
+class JobMetadataQueryParams(TypedDict):
+    job_reference_kind: JobMetadataReferenceKind
+
+
+class JobMetadataResponse(BaseModel):
+    """Job identity and collection fields, independent of attempt lifecycle."""
+
+    id: str
+    name: str
+    workspace: str
+    parent_id: str | None
+    source: str
+    spec: dict[str, Any]

@@ -17,6 +17,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.jobs.types import JobSelectorQueryParams
 from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
@@ -732,11 +733,11 @@ class ListAgentJobsQueryParams(TypedDict, total=False):
     filter: NotRequired[str | JsonMap]
 
 
-class AgentJobLogsQueryParams(TypedDict, total=False):
+class AgentJobLogsQueryParams(JobSelectorQueryParams, total=False):
     limit: NotRequired[int]
     page_cursor: NotRequired[str]
     tail: NotRequired[int]
 
 
-class ListAgentJobResultsQueryParams(TypedDict, total=False):
+class ListAgentJobResultsQueryParams(JobSelectorQueryParams, total=False):
     sort: NotRequired[str]

@@ -12,6 +12,7 @@ from nemo_helix_plugin.client.client import NemoClient
 from nemo_helix_plugin.client.types import RetryPolicy
 from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
@@ -240,7 +241,7 @@ def _generate_jobs_python_code(
     return "\n".join(lines)
 
 
-def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[str, Any]) -> list[str]:
+def _render_source_jobs_call_compat(resource_path: list[str], method: str, args: dict[str, Any]) -> list[str]:
     operation = (tuple(resource_path), method)
     if operation == (("jobs",), "create"):
         return [
@@ -278,7 +279,7 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
         ]
     if operation == (("jobs",), "update"):
         return [
-            "request = {key: value for key, value in args.items() if key not in {'workspace', 'name'}}",
+            "request = {key: value for key, value in args.items() if key not in {'workspace', 'name', 'job_reference_kind'}}",
             "response = jobs_client.update_job(",
             "    name=args['name'],",
             "    workspace=args.get('workspace'),",
@@ -345,7 +346,7 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
         ]
     if operation == (("jobs", "results"), "create"):
         return [
-            "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name'}}",
+            "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name', 'job_reference_kind'}}",
             "response = jobs_client.create_job_result(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
@@ -426,9 +427,9 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
         attempt_line = "    attempt=args['attempt_id']," if has_attempt else None
         request_line = (
             "request = {key: value for key, value in args.items() if key not in "
-            "{'workspace', 'job', 'name', 'attempt_id'}}"
+            "{'workspace', 'job', 'name', 'attempt_id', 'job_reference_kind'}}"
             if has_attempt
-            else "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name'}}"
+            else "request = {key: value for key, value in args.items() if key not in {'workspace', 'job', 'name', 'job_reference_kind'}}"
         )
         return [
             request_line,
@@ -444,7 +445,7 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
     if operation == (("jobs", "tasks"), "create_or_update"):
         return [
             "request = {key: value for key, value in args.items() if key not in "
-            "{'workspace', 'job', 'step', 'name', 'attempt_id'}}",
+            "{'workspace', 'job', 'step', 'name', 'attempt_id', 'job_reference_kind'}}",
             "response = jobs_client.update_attempt_step_task(",
             "    workspace=args.get('workspace'),",
             "    job=args['job'],",
@@ -499,11 +500,12 @@ def _render_lifecycle_code(
     workspace = _format_python_literal(args["workspace"]) if args.get("workspace") is not None else "None"
     if mode == "watch":
         return [
-            'resource_name = getattr(response, "name", None) or args.get("name")',
+            "resource_name = response.data().id",
             "if not resource_name:",
             '    raise RuntimeError("Unable to determine created resource name for --watch")',
             "for event in jobs_client.watch_job(",
             "    resource_name,",
+            '    job_reference_kind="id",',
             f"    workspace={workspace},",
             f"    timeout={timeout},",
             f"    poll_interval={poll_interval},",
@@ -513,13 +515,14 @@ def _render_lifecycle_code(
     if mode == "wait":
         resource_label = (wait_config or {}).get("resource_label", "job")
         return [
-            'resource_name = getattr(response, "name", None) or args.get("name")',
+            "resource_name = response.data().id",
             "if not resource_name:",
             '    raise RuntimeError("Unable to determine created resource name for --wait")',
             f"resource_label = {_format_python_literal(resource_label)}",
             "try:",
             "    for event in jobs_client.watch_job(",
             "        resource_name,",
+            '        job_reference_kind="id",',
             f"        workspace={workspace},",
             f"        timeout={timeout},",
             f"        poll_interval={poll_interval},",
@@ -545,20 +548,29 @@ def _render_lifecycle_code(
 @handle_errors
 def cancel_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Cancel a platform job by name or ID."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "cancel", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "cancel",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.cancel_job(name=name, workspace=workspace).data()
+    result = jobs_client.cancel_job(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     format_output(
         result,
@@ -714,10 +726,10 @@ def create_jobs(
         timestamp_format=state.get_timestamp_format(),
     )
     if wait or watch:
-        wait_name = getattr(result, "name", None) or all_kwargs.get("name")
+        wait_name = result.id
         if not wait_name:
             raise RuntimeError("Unable to determine created resource name for --wait/--watch")
-        wait_workspace = getattr(result, "workspace", None) or request_workspace
+        wait_workspace = result.workspace or request_workspace
         if wait_workspace is None:
             wait_workspace = platform_client.require_workspace()
         if wait:
@@ -725,6 +737,7 @@ def create_jobs(
                 jobs_client,
                 wait_name,
                 workspace=wait_workspace,
+                job_reference_kind=JobReferenceKind.ID,
                 resource_label="job",
                 timeout=timeout if timeout is not None else 1200,
                 poll_interval=poll_interval,
@@ -733,6 +746,7 @@ def create_jobs(
             return
         events = jobs_client.watch_job(
             wait_name,
+            job_reference_kind=JobReferenceKind.ID,
             workspace=wait_workspace,
             timeout=timeout,
             poll_interval=poll_interval,
@@ -750,17 +764,26 @@ def create_jobs(
 @handle_errors
 def delete_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Delete a platform job by name or ID."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "delete", kwargs, "json", state):
+    if handle_code_generation(
+        ["jobs"],
+        "delete",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        "json",
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    jobs_client.delete_job(name=name, workspace=workspace).data()
+    jobs_client.delete_job(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     typer.echo("✓ Deleted successfully")
 
@@ -770,7 +793,7 @@ def delete_jobs(
 @handle_errors
 def get_logs_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str | None, typer.Argument()] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     attempt_id: Annotated[
         str | None, typer.Option("--attempt-id", help="Filter logs by attempt ID or 'current'")
@@ -785,8 +808,11 @@ def get_logs_jobs(
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get paginated logs for a platform job."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
@@ -811,12 +837,23 @@ def get_logs_jobs(
         task_id=task_id,
     )
     codegen_kwargs = {"name": name, **kwargs}
-    if handle_code_generation(["jobs"], "get_logs", codegen_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "get_logs",
+        {
+            **codegen_kwargs,
+            **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {}),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     query_params = cast(JobLogsQueryParams, _without_keys(kwargs, {"workspace"})) or None
-    response = jobs_client.list_job_logs(workspace=workspace, name=name, query_params=query_params)
+    response = jobs_client.list_job_logs(
+        workspace=workspace, name=name, query_params=query_params, job_reference_kind=job_reference_kind
+    )
     pagination_type = PaginationType.CURSOR
     items = collect_cursor_pages(response, all_pages=all_pages, limit=limit)
 
@@ -838,20 +875,29 @@ def get_logs_jobs(
 @handle_errors
 def get_status_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str | None, typer.Argument()] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get the status of a platform job."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "get_status", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "get_status",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.get_job_status(name=name, workspace=workspace).data()
+    result = jobs_client.get_job_status(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     format_output(
         result,
@@ -1008,20 +1054,29 @@ def list_execution_profiles_jobs(
 @handle_errors
 def pause_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Pause a platform job by name or ID."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "pause", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "pause",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.pause_job(name=name, workspace=workspace).data()
+    result = jobs_client.pause_job(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     format_output(
         result,
@@ -1037,20 +1092,29 @@ def pause_jobs(
 @handle_errors
 def resume_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Resume a paused platform job by name or ID."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "resume", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "resume",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.resume_job(name=name, workspace=workspace).data()
+    result = jobs_client.resume_job(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     format_output(
         result,
@@ -1066,21 +1130,34 @@ def resume_jobs(
 @handle_errors
 def rerun_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Rerun a failed platform job from surviving storage."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "rerun", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "rerun",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     # Sent once: a retry after a lost response would find the new attempt and fail with 409.
-    result = jobs_client.with_retry(RetryPolicy(max_retries=0)).rerun_job(job=name, workspace=workspace).data()
+    result = (
+        jobs_client.with_retry(RetryPolicy(max_retries=0))
+        .rerun_job(job=name, workspace=workspace, job_reference_kind=job_reference_kind)
+        .data()
+    )
 
     format_output(
         result,
@@ -1106,13 +1183,22 @@ def update_job_control(
     ],
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Change mutable job behavior, such as how long a pause keeps storage."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, "pause_ttl_seconds": pause_ttl_seconds, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "control", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "control",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1120,6 +1206,7 @@ def update_job_control(
         name=name,
         workspace=workspace,
         body=JobControl(pause_ttl_seconds=pause_ttl_seconds),
+        job_reference_kind=job_reference_kind,
     ).data()
 
     format_output(
@@ -1136,20 +1223,29 @@ def update_job_control(
 @handle_errors
 def retrieve_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get a platform job by name or ID."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs"], "retrieve", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "retrieve",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    result = jobs_client.get_job(name=name, workspace=workspace).data()
+    result = jobs_client.get_job(name=name, workspace=workspace, job_reference_kind=job_reference_kind).data()
 
     format_output(
         result,
@@ -1165,7 +1261,7 @@ def retrieve_jobs(
 @handle_errors
 def update_jobs(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Job name or ID (both are accepted).")],
+    name: Annotated[str | None, typer.Argument(help="Job name or ID (both are accepted).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
     spec: Annotated[str | None, typer.Option("--spec", help="JSON string")] = None,
@@ -1179,8 +1275,11 @@ def update_jobs(
         typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
     ] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Update a job description or the definition used by future attempts."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     input_payload = (
         read_data_input_with_flags(input_file=input_file, input_data=input_data) if input_file or input_data else {}
     )
@@ -1200,7 +1299,13 @@ def update_jobs(
     all_kwargs = {"name": name, **input_payload}
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
-    if handle_code_generation(["jobs"], "update", all_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs"],
+        "update",
+        {**all_kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1208,6 +1313,7 @@ def update_jobs(
         name=name,
         workspace=cast(str | None, input_payload.get("workspace")),
         body=UpdateHelixJobRequest.model_validate(request_payload),
+        job_reference_kind=job_reference_kind,
     ).data()
     format_output(
         result,
@@ -1223,7 +1329,7 @@ def update_jobs(
 @handle_errors
 def watch_platform_job(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Name of the platform job to watch")],
+    name: Annotated[str | None, typer.Argument(help="Name of the platform job to watch")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
     attempt_id: Annotated[
         str | None, typer.Option("--attempt-id", help="Filter logs to an attempt ID or 'current'")
@@ -1240,8 +1346,11 @@ def watch_platform_job(
         bool,
         typer.Option("--history/--no-history", help="Include logs already present before watching"),
     ] = True,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Watch a platform job until it reaches a terminal status."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     platform_client, jobs_client = _jobs_client_from_state(state)
     if workspace is None:
@@ -1257,6 +1366,7 @@ def watch_platform_job(
         timeout=timeout,
         poll_interval=poll_interval,
         include_history=include_history,
+        job_reference_kind=job_reference_kind,
     )
     watch_result = render_job_watch_events(events, resource_label="job")
     if watch_result is JobWatchRenderResult.INTERRUPTED:
@@ -1270,7 +1380,7 @@ def watch_platform_job(
 @handle_errors
 def tail_platform_job(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument(help="Name of the platform job whose logs to tail")],
+    name: Annotated[str | None, typer.Argument(help="Name of the platform job whose logs to tail")] = None,
     lines: Annotated[int, typer.Option("-n", "--lines", min=1, max=10_000, help="Number of lines to show")] = 100,
     workspace: Annotated[str | None, typer.Option("--workspace", help="Workspace containing the job")] = None,
     attempt_id: Annotated[
@@ -1278,8 +1388,11 @@ def tail_platform_job(
     ] = None,
     step_id: Annotated[str | None, typer.Option("--step-id", help="Filter logs to a step ID")] = None,
     task_id: Annotated[str | None, typer.Option("--task-id", help="Filter logs to a task ID")] = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Print the newest lines from a platform job log."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     platform_client, jobs_client = _jobs_client_from_state(state)
     if workspace is None:
@@ -1293,7 +1406,9 @@ def tail_platform_job(
     if task_id is not None:
         query_params["task_id"] = task_id
 
-    response = jobs_client.list_job_logs(workspace=workspace, name=name, query_params=query_params)
+    response = jobs_client.list_job_logs(
+        workspace=workspace, name=name, query_params=query_params, job_reference_kind=job_reference_kind
+    )
     render_job_logs(response.page().items)
 
 
@@ -1302,7 +1417,7 @@ def tail_platform_job(
 @handle_errors
 def list_attempts(
     ctx: typer.Context,
-    job: Annotated[str, typer.Argument(help="Job name or ID.")],
+    job: Annotated[str | None, typer.Argument(help="Job name or ID.")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     filter: Annotated[str | None, typer.Option("--filter", metavar="FILTER_JSON")] = None,
     page: Annotated[int | None, typer.Option("--page", min=1)] = None,
@@ -1313,8 +1428,11 @@ def list_attempts(
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """List execution attempts for a job."""
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
@@ -1336,11 +1454,19 @@ def list_attempts(
         sort=sort,
     )
     kwargs = {"job": job, **build_kwargs(workspace=workspace, **(query_params or {}))}
-    if handle_code_generation(["jobs", "attempts"], "list", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "attempts"],
+        "list",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    response = jobs_client.list_job_attempts(workspace=workspace, job=job, query_params=query_params)
+    response = jobs_client.list_job_attempts(
+        workspace=workspace, job=job, query_params=query_params, job_reference_kind=job_reference_kind
+    )
     items = collect_offset_pages(response, all_pages=all_pages)
     format_output(
         items,
@@ -1364,21 +1490,26 @@ def retrieve_attempt(
     job: Annotated[str | None, typer.Option("--job", help="Job name or ID (required).")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get one execution attempt."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     kwargs = {"attempt": attempt, "job": job, **build_kwargs(workspace=workspace)}
-    if handle_code_generation(["jobs", "attempts"], "retrieve", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "attempts"],
+        "retrieve",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     result = jobs_client.get_job_attempt(
-        workspace=workspace,
-        job=job,
-        attempt=attempt,
+        workspace=workspace, job=job, attempt=attempt, job_reference_kind=job_reference_kind
     ).data()
     format_output(
         result,
@@ -1411,6 +1542,8 @@ def create_results(
         typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
     ] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Create a new result for a job.
 
@@ -1438,6 +1571,10 @@ def create_results(
     if artifact_url is not None:
         input_payload["artifact_url"] = artifact_url
 
+    selected_job, job_reference_kind = _select_job_reference(
+        cast(str | None, input_payload.get("job")), job_id, job_name
+    )
+    input_payload["job"] = selected_job
     validate_required_fields(
         input_payload,
         ["job", "attempt_id", "artifact_storage_type", "artifact_url"],
@@ -1454,7 +1591,13 @@ def create_results(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["jobs", "results"], "create", all_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "results"],
+        "create",
+        {**all_kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1464,6 +1607,7 @@ def create_results(
         job=cast(str, input_payload["job"]),
         name=name,
         body=result_body,
+        job_reference_kind=job_reference_kind,
     ).data()
 
     format_output(
@@ -1485,10 +1629,11 @@ def download_results(
     output_file: Annotated[
         Path | None, typer.Option("--output-file", "-o", help="Output file path (required).")
     ] = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Download a job result file."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
     if output_file is None:
         raise typer.BadParameter("--output-file is required")
 
@@ -1498,11 +1643,19 @@ def download_results(
         **build_kwargs(workspace=workspace, job=job),
         "output_file": str(output_file),
     }
-    if handle_code_generation(["jobs", "results"], "download", kwargs, "json", state):
+    if handle_code_generation(
+        ["jobs", "results"],
+        "download",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        "json",
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
-    response = jobs_client.download_job_result(workspace=workspace, job=job, name=name)
+    response = jobs_client.download_job_result(
+        workspace=workspace, job=job, name=name, job_reference_kind=job_reference_kind
+    )
     with output_file.open("wb") as handle:
         with response.stream() as chunks:
             for chunk in chunks:
@@ -1515,7 +1668,7 @@ def download_results(
 @handle_errors
 def list_results(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str | None, typer.Argument()] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     sort: Annotated[
@@ -1526,8 +1679,11 @@ def list_results(
     no_truncate: NoTruncateOption = None,
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """List results for a job."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
@@ -1550,12 +1706,23 @@ def list_results(
     )
     codegen_kwargs = {"name": name, **kwargs}
 
-    if handle_code_generation(["jobs", "results"], "list", codegen_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "results"],
+        "list",
+        {
+            **codegen_kwargs,
+            **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {}),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     query_params = cast(ListJobResultsQueryParams, _without_keys(kwargs, {"workspace"})) or None
-    items = jobs_client.list_job_results(workspace=workspace, name=name, query_params=query_params).data()
+    items = jobs_client.list_job_results(
+        workspace=workspace, name=name, query_params=query_params, job_reference_kind=job_reference_kind
+    ).data()
 
     format_output(
         items,
@@ -1574,24 +1741,31 @@ def list_results(
 def retrieve_results(
     ctx: typer.Context,
     name: Annotated[str, typer.Argument()],
-    job: Annotated[str, typer.Option("--job", help="Job name or ID")],
+    job: Annotated[str | None, typer.Option("--job", help="Job name or ID")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get a result by its job-wide unique name."""
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job)}
-    if handle_code_generation(["jobs", "results"], "retrieve", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "results"],
+        "retrieve",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     result = jobs_client.get_job_result(
-        workspace=workspace,
-        job=job,
-        name=name,
+        workspace=workspace, job=job, name=name, job_reference_kind=job_reference_kind
     ).data()
 
     format_output(
@@ -1608,7 +1782,7 @@ def retrieve_results(
 @handle_errors
 def list_steps(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str | None, typer.Argument()] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
     attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     filter: Annotated[
@@ -1635,8 +1809,11 @@ def list_steps(
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
     all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """List job steps with pagination and filtering."""
+    name, job_reference_kind = _select_job_reference(name, job_id, job_name, default=None)
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
     validate_stream_output_format(resolved_output_format, stream)
@@ -1661,7 +1838,16 @@ def list_steps(
     )
     codegen_kwargs = {"name": name, **kwargs}
 
-    if handle_code_generation(["jobs", "steps"], "list", codegen_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "steps"],
+        "list",
+        {
+            **codegen_kwargs,
+            **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {}),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1671,9 +1857,12 @@ def list_steps(
             job=name,
             attempt=attempt_id,
             query_params=query_params,
+            job_reference_kind=job_reference_kind,
         )
     else:
-        response = jobs_client.list_steps(workspace=workspace, name=name, query_params=query_params)
+        response = jobs_client.list_steps(
+            workspace=workspace, name=name, query_params=query_params, job_reference_kind=job_reference_kind
+        )
     pagination_type = PaginationType.PAGE_NUMBER
     items = collect_offset_pages(response, all_pages=all_pages)
 
@@ -1700,28 +1889,34 @@ def retrieve_steps(
     job: Annotated[str | None, typer.Option("--job", help="(required)")] = None,
     attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get a specific job step."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
     kwargs = {"name": name, **build_kwargs(workspace=workspace, job=job, attempt_id=attempt_id)}
-    if handle_code_generation(["jobs", "steps"], "retrieve", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "steps"],
+        "retrieve",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     if attempt_id is not None:
         result = jobs_client.get_attempt_step(
-            workspace=workspace,
-            job=job,
-            attempt=attempt_id,
-            name=name,
+            workspace=workspace, job=job, attempt=attempt_id, name=name, job_reference_kind=job_reference_kind
         ).data()
     else:
-        result = jobs_client.get_job_step(workspace=workspace, job=job, name=name).data()
+        result = jobs_client.get_job_step(
+            workspace=workspace, job=job, name=name, job_reference_kind=job_reference_kind
+        ).data()
 
     format_output(
         result,
@@ -1765,6 +1960,8 @@ def update_status_steps(
         typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
     ] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Update a job step status.
 
@@ -1794,6 +1991,10 @@ def update_status_steps(
     if status_details is not None:
         input_payload["status_details"] = read_payload("status_details", status_details)
 
+    selected_job, job_reference_kind = _select_job_reference(
+        cast(str | None, input_payload.get("job")), job_id, job_name
+    )
+    input_payload["job"] = selected_job
     validate_required_fields(
         input_payload,
         ["job", "status"],
@@ -1808,7 +2009,13 @@ def update_status_steps(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["jobs", "steps"], "update_status", all_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "steps"],
+        "update_status",
+        {**all_kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1823,6 +2030,7 @@ def update_status_steps(
             attempt=selected_attempt,
             name=name,
             body=update_body,
+            job_reference_kind=job_reference_kind,
         ).data()
     else:
         result = jobs_client.update_job_step_status(
@@ -1830,6 +2038,7 @@ def update_status_steps(
             job=cast(str, input_payload["job"]),
             name=name,
             body=update_body,
+            job_reference_kind=job_reference_kind,
         ).data()
 
     format_output(
@@ -1870,6 +2079,8 @@ def create_or_update_tasks(
         typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
     ] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Update a job step task.
 
@@ -1905,6 +2116,10 @@ def create_or_update_tasks(
 
     input_payload.setdefault("attempt_id", "current")
 
+    selected_job, job_reference_kind = _select_job_reference(
+        cast(str | None, input_payload.get("job")), job_id, job_name
+    )
+    input_payload["job"] = selected_job
     validate_required_fields(
         input_payload,
         ["job", "step"],
@@ -1919,7 +2134,13 @@ def create_or_update_tasks(
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
 
-    if handle_code_generation(["jobs", "tasks"], "create_or_update", all_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "tasks"],
+        "create_or_update",
+        {**all_kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -1933,6 +2154,7 @@ def create_or_update_tasks(
         step=cast(str, input_payload["step"]),
         name=name,
         body=update_body,
+        job_reference_kind=job_reference_kind,
     ).data()
 
     format_output(
@@ -1957,10 +2179,11 @@ def list_tasks(
     no_truncate: NoTruncateOption = None,
     columns: OutputColumnsOption = None,
     stream: StreamOutputOption = False,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """List tasks for a job step."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
 
     state: CLIContext = ctx.obj
     resolved_output_format = state.get_output_format(output_format)
@@ -1984,19 +2207,27 @@ def list_tasks(
     )
     codegen_kwargs = {"name": name, **kwargs}
 
-    if handle_code_generation(["jobs", "tasks"], "list", codegen_kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "tasks"],
+        "list",
+        {
+            **codegen_kwargs,
+            **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {}),
+        },
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
     if attempt_id is not None:
         items = jobs_client.list_attempt_step_tasks(
-            workspace=workspace,
-            job=job,
-            attempt=attempt_id,
-            step=name,
+            workspace=workspace, job=job, attempt=attempt_id, step=name, job_reference_kind=job_reference_kind
         ).data()
     else:
-        items = jobs_client.list_job_step_tasks(workspace=workspace, job=job, name=name).data()
+        items = jobs_client.list_job_step_tasks(
+            workspace=workspace, job=job, name=name, job_reference_kind=job_reference_kind
+        ).data()
 
     format_output(
         items,
@@ -2020,10 +2251,11 @@ def retrieve_tasks(
     attempt_id: Annotated[str | None, typer.Option("--attempt-id", help="Attempt ID or 'current'")] = None,
     step: Annotated[str | None, typer.Option("--step", help="(required)")] = None,
     output_format: EntityOutputFormatOption = None,
+    job_id: Annotated[str | None, typer.Option("--job-id", help="Select an immutable Job ID")] = None,
+    job_name: Annotated[str | None, typer.Option("--job-name", help="Select an exact Job name")] = None,
 ) -> None:
     """Get a specific job step task."""
-    if job is None:
-        raise typer.BadParameter("--job is required")
+    job, job_reference_kind = _select_job_reference(job, job_id, job_name, default=None)
     if step is None:
         raise typer.BadParameter("--step is required")
 
@@ -2034,7 +2266,13 @@ def retrieve_tasks(
         "name": name,
         **build_kwargs(workspace=workspace, job=job, attempt_id=attempt_id, step=step),
     }
-    if handle_code_generation(["jobs", "tasks"], "retrieve", kwargs, resolved_output_format, state):
+    if handle_code_generation(
+        ["jobs", "tasks"],
+        "retrieve",
+        {**kwargs, **({"job_reference_kind": job_reference_kind.value} if job_reference_kind is not None else {})},
+        resolved_output_format,
+        state,
+    ):
         return
 
     _, jobs_client = _jobs_client_from_state(state)
@@ -2045,9 +2283,12 @@ def retrieve_tasks(
             attempt=attempt_id,
             step=step,
             name=name,
+            job_reference_kind=job_reference_kind,
         ).data()
     else:
-        result = jobs_client.get_job_step_task(workspace=workspace, job=job, step=step, name=name).data()
+        result = jobs_client.get_job_step_task(
+            workspace=workspace, job=job, step=step, name=name, job_reference_kind=job_reference_kind
+        ).data()
 
     format_output(
         result,
@@ -2056,3 +2297,33 @@ def retrieve_tasks(
         no_truncate=state.get_no_truncate(),
         timestamp_format=state.get_timestamp_format(),
     )
+
+
+def _select_job_reference(
+    reference: str | None, job_id: str | None, job_name: str | None, *, default: str | None = None
+) -> tuple[str, JobReferenceKind | None]:
+    if job_id is not None and job_name is not None:
+        raise typer.BadParameter("--job-id and --job-name are mutually exclusive")
+    if reference is not None and reference != default and (job_id is not None or job_name is not None):
+        raise typer.BadParameter("Choose a positional/--job reference or one explicit Job selector")
+    if job_id is not None:
+        return job_id, JobReferenceKind.ID
+    if job_name is not None:
+        return job_name, JobReferenceKind.NAME
+    if reference is None:
+        raise typer.BadParameter("A Job reference, --job-id or --job-name is required")
+    return reference, None
+
+
+def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[str, Any]) -> list[str]:
+    lines = _render_source_jobs_call_compat(resource_path, method, args)
+    if args.get("job_reference_kind") is None:
+        return lines
+    rendered = []
+    for line in lines:
+        if "jobs_client." in line and "(" in line:
+            prefix, call = line.split("jobs_client.", 1)
+            operation, _, arguments = call.partition("(")
+            line = f"{prefix}jobs_client.{operation}(job_reference_kind=args['job_reference_kind'], {arguments}"
+        rendered.append(line)
+    return rendered

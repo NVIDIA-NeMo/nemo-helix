@@ -210,9 +210,9 @@ def _create_job_result(
     artifact_url: str,
 ):
     """Create a job result record."""
-    JobsClient.from_client(client).create_job_result(
+    JobsClient.from_client(client).create_job_result_by_name(
         name=result_name,
-        job=job_name,
+        job_name=job_name,
         workspace=workspace,
         body=HelixJobResultCreateRequest(
             attempt_id=attempt_id,

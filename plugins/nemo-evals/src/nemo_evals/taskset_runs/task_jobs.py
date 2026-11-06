@@ -106,7 +106,7 @@ class RegistrationJobs(Protocol):
 
     async def get(self, name: str) -> HelixJobResponse | None: ...
 
-    async def has_steps(self, name: str) -> bool: ...
+    async def has_steps_by_id(self, job_id: str) -> bool: ...
 
 
 async def adoption(
@@ -119,7 +119,7 @@ async def adoption(
     """
     if not runs_request(job, request):
         return "foreign"
-    if not await jobs.has_steps(job.name):
+    if not await jobs.has_steps_by_id(job.id):
         return "stepless"
     return "ours"
 

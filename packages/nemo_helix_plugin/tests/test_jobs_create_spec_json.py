@@ -25,6 +25,7 @@ from nemo_helix_plugin.jobs.api_factory import (
     job_route_factory,
 )
 from nemo_helix_plugin.jobs.docker import spec_has_gpu_step
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, UpdateHelixJobRequest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.testclient import TestClient
@@ -82,6 +83,7 @@ def _mock_create_response(spec: dict[str, object]) -> MagicMock:
     job = SimpleNamespace(
         id="job-1",
         name="test-job",
+        source="test-source",
         description=None,
         project="project-a",
         workspace="default",
@@ -133,11 +135,20 @@ class _RecordingJobsClient:
         expected_spec = {"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")}
         return _mock_create_response(expected_spec)
 
-    async def get_job(self, *, name: str, workspace: str) -> MagicMock:
+    async def get_job(
+        self, *, name: str, workspace: str, job_reference_kind: JobReferenceKind | None = None
+    ) -> MagicMock:
         self.get_job_call = {"name": name, "workspace": workspace}
         return _mock_create_response({"blob": base64.b64encode(_PICKLE_BYTES).decode("ascii")})
 
-    async def update_job(self, *, name: str, workspace: str, body: UpdateHelixJobRequest) -> MagicMock:
+    async def update_job(
+        self,
+        *,
+        name: str,
+        workspace: str,
+        body: UpdateHelixJobRequest,
+        job_reference_kind: JobReferenceKind | None = None,
+    ) -> MagicMock:
         del workspace
         self.updated_name = name
         self.updated_body = body
@@ -481,10 +492,16 @@ def test_factory_attempt_routes_preserve_typed_specs_and_current_selector() -> N
         "workspace": "default",
         "job": "test-job",
         "query_params": {"page": 1, "page_size": 25, "sort": "-seq"},
+        "job_reference_kind": None,
     }
     assert current.status_code == 200, current.text
     assert current.json()["is_current"] is True
-    assert mock_jobs.get_attempt_call == {"workspace": "default", "job": "test-job", "attempt": "current"}
+    assert mock_jobs.get_attempt_call == {
+        "workspace": "default",
+        "job": "test-job",
+        "attempt": "current",
+        "job_reference_kind": None,
+    }
 
 
 def test_factory_update_rejects_internal_version_without_mutation() -> None:

@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 
 import anyio.to_thread
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from nemo_garak.authz import scope
 from nemo_helix_plugin.authz import CallerKind, path_rule
@@ -27,6 +27,7 @@ from nemo_helix_plugin.dependencies import get_nemo_client
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.result_manager import download_artifact_from_url
+from nemo_helix_plugin.jobs.selectors import JobMetadataReferenceKind, JobReferenceKind
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +60,24 @@ async def download_audit_artifacts(
     workspace: str,
     job: str,
     background_tasks: BackgroundTasks,
+    job_reference_kind: JobReferenceKind | None = Query(default=None),
     client: AsyncNemoClient = Depends(get_nemo_client),
 ) -> FileResponse:
     """Stream an aggregate tar.gz of all garak report artifacts for an audit job."""
     jobs_client = AsyncJobsClient.from_client(client)
     files_client = AsyncFilesClient.from_client(client)
+    try:
+        metadata = (
+            await jobs_client.get_job_metadata(
+                job=job,
+                workspace=workspace,
+                job_reference_kind=JobMetadataReferenceKind(job_reference_kind.value)
+                if job_reference_kind is not None
+                else JobMetadataReferenceKind.LEGACY,
+            )
+        ).data()
+    except NotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
 
     tmp_dir = tempfile.TemporaryDirectory()
     artifact_tmps = []
@@ -73,9 +87,9 @@ async def download_audit_artifacts(
         for result_name in _REPORT_RESULT_NAMES:
             try:
                 result_info = (
-                    await jobs_client.get_job_result(
+                    await jobs_client.get_job_result_by_id(
                         name=result_name,
-                        job=job,
+                        job_id=metadata.id,
                         workspace=workspace,
                     )
                 ).data()

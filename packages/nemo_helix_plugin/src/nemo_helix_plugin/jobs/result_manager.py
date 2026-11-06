@@ -78,10 +78,10 @@ class ResultManager(BaseResultManager):
     jobs_client: JobsClient
     attempt_id: str
 
-    def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
+    def _fetch_job_metadata(self) -> tuple[str, str, str, str | None]:
         """Fetch job and return (attempt_id, fileset_name, output_location)."""
-        job = self.jobs_client.get_job(name=self.job_name, workspace=self.workspace).data()
-        return self.attempt_id, job.fileset, job.output_location
+        job = self.jobs_client.get_job_by_name(job_name=self.job_name, workspace=self.workspace).data()
+        return job.id, self.attempt_id, job.fileset, job.output_location
 
     def _create_file_manager(self, fileset_name: str) -> FilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -97,7 +97,7 @@ class ResultManager(BaseResultManager):
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
     ) -> HelixJobResultResponse:
-        attempt_id, fileset_name, output_location = self._fetch_job_metadata()
+        job_id, attempt_id, fileset_name, output_location = self._fetch_job_metadata()
         file_manager = self._create_file_manager(fileset_name)
         file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
@@ -108,9 +108,9 @@ class ResultManager(BaseResultManager):
             local_path=artifact_local_path, remote_path=remote_path, ignore_patterns=ignore_patterns
         )
         try:
-            job_result = self.jobs_client.create_job_result(
+            job_result = self.jobs_client.create_job_result_by_id(
                 name=result_name,
-                job=self.job_name,
+                job_id=job_id,
                 workspace=self.workspace,
                 body=HelixJobResultCreateRequest(
                     attempt_id=attempt_id,
@@ -121,9 +121,9 @@ class ResultManager(BaseResultManager):
         except ClientConflictError:
             # Result already exists - fetch and return the existing one
             # This supports the use case of saving partial results across multiple batches
-            job_result = self.jobs_client.get_job_result(
+            job_result = self.jobs_client.get_job_result_by_id(
                 name=result_name,
-                job=self.job_name,
+                job_id=job_id,
                 workspace=self.workspace,
             ).data()
         except NemoClientError as e:
@@ -149,10 +149,10 @@ class AsyncResultManager(BaseResultManager):
     jobs_client: AsyncJobsClient
     attempt_id: str
 
-    async def _fetch_job_metadata(self) -> tuple[str, str, str | None]:
+    async def _fetch_job_metadata(self) -> tuple[str, str, str, str | None]:
         """Fetch job and return (attempt_id, fileset_name, output_location)."""
-        job = (await self.jobs_client.get_job(name=self.job_name, workspace=self.workspace)).data()
-        return self.attempt_id, job.fileset, job.output_location
+        job = (await self.jobs_client.get_job_by_name(job_name=self.job_name, workspace=self.workspace)).data()
+        return job.id, self.attempt_id, job.fileset, job.output_location
 
     def _create_file_manager(self, fileset_name: str) -> AsyncFilesetFileManager:
         """Create a file manager for the given fileset."""
@@ -168,7 +168,7 @@ class AsyncResultManager(BaseResultManager):
         artifact_local_path: str | Path,
         ignore_patterns: list[str] | str | None = None,
     ) -> HelixJobResultResponse:
-        attempt_id, fileset_name, output_location = await self._fetch_job_metadata()
+        job_id, attempt_id, fileset_name, output_location = await self._fetch_job_metadata()
         file_manager = self._create_file_manager(fileset_name)
         await file_manager.validate_storage()
         artifact_local_path = self._validate_local_path(artifact_local_path)
@@ -180,9 +180,9 @@ class AsyncResultManager(BaseResultManager):
         )
         try:
             job_result = (
-                await self.jobs_client.create_job_result(
+                await self.jobs_client.create_job_result_by_id(
                     name=result_name,
-                    job=self.job_name,
+                    job_id=job_id,
                     workspace=self.workspace,
                     body=HelixJobResultCreateRequest(
                         attempt_id=attempt_id,
@@ -195,9 +195,9 @@ class AsyncResultManager(BaseResultManager):
             # Result already exists - fetch and return the existing one
             # This supports the use case of saving partial results across multiple batches
             job_result = (
-                await self.jobs_client.get_job_result(
+                await self.jobs_client.get_job_result_by_id(
                     name=result_name,
-                    job=self.job_name,
+                    job_id=job_id,
                     workspace=self.workspace,
                 )
             ).data()

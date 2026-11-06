@@ -243,6 +243,7 @@ class AgentEvaluatorJobResource:
         workspace: str,
     ) -> None:
         """Store the job identity and typed client used for status calls."""
+        self._job_id = job.id
         self._job = job
         self._client = client
         self._workspace = workspace
@@ -257,9 +258,20 @@ class AgentEvaluatorJobResource:
         """Return the raw job payload captured at resource creation."""
         return self._job
 
+    def _require_job_id(self) -> str:
+        if self._job_id is None:
+            response = self._client.get_agent_eval_job(workspace=self._workspace, name=self._job.name)
+            job_id = response.data().id
+            if job_id is None:
+                raise ValueError("Jobs response is missing its immutable ID")
+            self._job_id = job_id
+        return self._job_id
+
     def get_job_status(self) -> HelixJobStatusResponse:
         """Fetch the current job status from the evals plugin API."""
-        return self._client.get_agent_eval_job_status(workspace=self._workspace, name=self.name).data()
+        return self._client.get_agent_eval_job_status_by_id(
+            workspace=self._workspace, job_id=self._require_job_id()
+        ).data()
 
     def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Return whether the job has completed.
@@ -307,6 +319,7 @@ class EvaluatorJobResource:
         workspace: str,
     ) -> None:
         """Store the job identity and typed client used for status and result calls."""
+        self._job_id = job.id
         self._job = job
         self._client = client
         self._workspace = workspace
@@ -321,9 +334,20 @@ class EvaluatorJobResource:
         """Return the raw evaluator job payload captured at resource creation."""
         return self._job
 
+    def _require_job_id(self) -> str:
+        if self._job_id is None:
+            response = self._client.get_evaluate_job(workspace=self._workspace, name=self._job.name)
+            job_id = response.data().id
+            if job_id is None:
+                raise ValueError("Jobs response is missing its immutable ID")
+            self._job_id = job_id
+        return self._job_id
+
     def get_job_status(self) -> HelixJobStatusResponse:
         """Fetch the current evaluator job status from the evals plugin API."""
-        return self._client.get_evaluate_job_status(workspace=self._workspace, name=self.name).data()
+        return self._client.get_evaluate_job_status_by_id(
+            workspace=self._workspace, job_id=self._require_job_id()
+        ).data()
 
     def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
         """Return whether the evaluator job has completed.
@@ -361,13 +385,13 @@ class EvaluatorJobResource:
 
     def get_result(self, aggregate_fields: tuple[AggregateFieldName, ...] | None = None) -> EvaluationResult:
         """Get aggregate and row-score artifacts as an ``EvaluationResult``."""
-        aggregate_payload = self._client.download_evaluate_job_aggregate_scores(
+        aggregate_payload = self._client.download_evaluate_job_aggregate_scores_by_id(
             workspace=self._workspace,
-            name=self.name,
+            job_id=self._require_job_id(),
         ).read()
-        row_scores_payload = self._client.download_evaluate_job_row_scores(
+        row_scores_payload = self._client.download_evaluate_job_row_scores_by_id(
             workspace=self._workspace,
-            name=self.name,
+            job_id=self._require_job_id(),
         ).read()
         aggregate_scores = filter_aggregate_scores(
             _parse_aggregate_scores_json(aggregate_payload),
@@ -387,7 +411,9 @@ class EvaluatorJobResource:
         Returns:
             The job-specific directory that contains the extracted artifacts.
         """
-        payload = self._client.download_evaluate_job_artifacts(workspace=self._workspace, name=self.name).read()
+        payload = self._client.download_evaluate_job_artifacts_by_id(
+            workspace=self._workspace, job_id=self._require_job_id()
+        ).read()
         return _extract_artifacts_tarball(
             payload,
             _artifact_output_path(path, self.name),
@@ -414,6 +440,7 @@ class AsyncAgentEvaluatorJobResource:
         workspace: str,
     ) -> None:
         """Store the job identity and typed async client used for status calls."""
+        self._job_id = job.id
         self._job = job
         self._client = client
         self._workspace = workspace
@@ -428,9 +455,20 @@ class AsyncAgentEvaluatorJobResource:
         """Return the raw job payload captured at resource creation."""
         return self._job
 
+    async def _require_job_id(self) -> str:
+        if self._job_id is None:
+            response = await self._client.get_agent_eval_job(workspace=self._workspace, name=self._job.name)
+            job_id = response.data().id
+            if job_id is None:
+                raise ValueError("Jobs response is missing its immutable ID")
+            self._job_id = job_id
+        return self._job_id
+
     async def get_job_status(self) -> HelixJobStatusResponse:
         """Fetch the current job status from the evals plugin API."""
-        response = await self._client.get_agent_eval_job_status(workspace=self._workspace, name=self.name)
+        response = await self._client.get_agent_eval_job_status_by_id(
+            workspace=self._workspace, job_id=await self._require_job_id()
+        )
         return response.data()
 
     async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
@@ -482,6 +520,7 @@ class AsyncEvaluatorJobResource:
         workspace: str,
     ) -> None:
         """Store the job identity and typed client used for async status and result calls."""
+        self._job_id = job.id
         self._job = job
         self._client = client
         self._workspace = workspace
@@ -496,9 +535,20 @@ class AsyncEvaluatorJobResource:
         """Return the raw evaluator job payload captured at resource creation."""
         return self._job
 
+    async def _require_job_id(self) -> str:
+        if self._job_id is None:
+            response = await self._client.get_evaluate_job(workspace=self._workspace, name=self._job.name)
+            job_id = response.data().id
+            if job_id is None:
+                raise ValueError("Jobs response is missing its immutable ID")
+            self._job_id = job_id
+        return self._job_id
+
     async def get_job_status(self) -> HelixJobStatusResponse:
         """Fetch the current evaluator job status from the evals plugin API."""
-        response = await self._client.get_evaluate_job_status(workspace=self._workspace, name=self.name)
+        response = await self._client.get_evaluate_job_status_by_id(
+            workspace=self._workspace, job_id=await self._require_job_id()
+        )
         return response.data()
 
     async def check_if_complete(self, *, raise_if_not_complete: bool = False) -> bool:
@@ -578,21 +628,23 @@ class AsyncEvaluatorJobResource:
 
     async def _read_aggregate_scores(self) -> bytes:
         """Read aggregate scores through the async typed client."""
-        response = await self._client.download_evaluate_job_aggregate_scores(
+        response = await self._client.download_evaluate_job_aggregate_scores_by_id(
             workspace=self._workspace,
-            name=self.name,
+            job_id=await self._require_job_id(),
         )
         return await response.read()
 
     async def _read_row_scores(self) -> bytes:
         """Read row scores through the async typed client."""
-        response = await self._client.download_evaluate_job_row_scores(
+        response = await self._client.download_evaluate_job_row_scores_by_id(
             workspace=self._workspace,
-            name=self.name,
+            job_id=await self._require_job_id(),
         )
         return await response.read()
 
     async def _read_artifacts(self) -> bytes:
         """Read job artifacts through the async typed client."""
-        response = await self._client.download_evaluate_job_artifacts(workspace=self._workspace, name=self.name)
+        response = await self._client.download_evaluate_job_artifacts_by_id(
+            workspace=self._workspace, job_id=await self._require_job_id()
+        )
         return await response.read()

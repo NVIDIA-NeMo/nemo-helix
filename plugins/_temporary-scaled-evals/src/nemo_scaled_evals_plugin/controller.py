@@ -19,6 +19,7 @@ from nemo_helix_plugin.controller import NemoController
 from nemo_helix_plugin.entities.base import SyncEntityClient
 from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
+from nemo_helix_plugin.jobs.selectors import JobReferenceKind
 from nemo_scaled_evals_plugin.jobs.benchmark_archive_build import BenchmarkArchiveBuildJob
 from nemo_scaled_evals_plugin.jobs.naming import benchmark_archive_job_name, task_image_build_job_name
 from nemo_scaled_evals_plugin.jobs.specs import BenchmarkArchiveBuildSpec, TaskImageBuildSpec
@@ -179,7 +180,11 @@ class ScaledEvalsJobsController(NemoController):
         for row in await asyncio.to_thread(self._list_builds):
             name = str(row["job_name"])
             try:
-                status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
+                status = (
+                    await self.jobs.get_job_status(
+                        workspace=settings.platform_jobs_workspace, name=name, job_reference_kind=JobReferenceKind.NAME
+                    )
+                ).data()
             except NotFoundError:
                 await asyncio.to_thread(
                     self._fail_build_row,
@@ -204,7 +209,11 @@ class ScaledEvalsJobsController(NemoController):
             return False
         name = str(row["dispatch_job_name"])
         try:
-            status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
+            status = (
+                await self.jobs.get_job_status(
+                    workspace=settings.platform_jobs_workspace, name=name, job_reference_kind=JobReferenceKind.NAME
+                )
+            ).data()
         except NotFoundError:
             await asyncio.to_thread(self._fail_evaluation_job, row, "Platform evaluation job was not found")
             return True
@@ -286,7 +295,9 @@ class ScaledEvalsJobsController(NemoController):
                 )
             except ConflictError:
                 try:
-                    response = await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)
+                    response = await self.jobs.get_job_status(
+                        workspace=settings.platform_jobs_workspace, name=name, job_reference_kind=JobReferenceKind.NAME
+                    )
                 except NotFoundError:
                     continue  # deleted since the conflict; the next pass creates it
                 if response.data().status not in _ACTIVE_JOB_STATUSES:
@@ -324,7 +335,11 @@ class ScaledEvalsJobsController(NemoController):
         for row in await asyncio.to_thread(self._list_cancelled_evaluations):
             name = str(row["dispatch_job_name"])
             try:
-                status = (await self.jobs.get_job_status(workspace=settings.platform_jobs_workspace, name=name)).data()
+                status = (
+                    await self.jobs.get_job_status(
+                        workspace=settings.platform_jobs_workspace, name=name, job_reference_kind=JobReferenceKind.NAME
+                    )
+                ).data()
             except NotFoundError:
                 await asyncio.to_thread(self._settle_cancel_teardown, row, name)
                 continue
@@ -334,7 +349,7 @@ class ScaledEvalsJobsController(NemoController):
                 # Cancelling an ACTIVE Job instead would race a task that has
                 # launched a sandbox but not yet persisted its handle.
                 with suppress(ConflictError):
-                    await self.jobs.cancel_job(workspace=settings.platform_jobs_workspace, name=name)
+                    await self.jobs.cancel_job_by_id(workspace=settings.platform_jobs_workspace, job_id=status.id)
                 continue
             if status.status in _ACTIVE_JOB_STATUSES:
                 # The task observes durable cancellation and performs runtime

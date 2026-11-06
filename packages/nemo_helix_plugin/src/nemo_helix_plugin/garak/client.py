@@ -26,6 +26,8 @@ class _GarakMethods:
     submit_audit = method(endpoints.submit_audit)
     list_audit_jobs = method(endpoints.list_audit_jobs)
     get_audit_job = method(endpoints.get_audit_job)
+    get_audit_job_by_id = method(endpoints.get_audit_job_by_id)
+    get_audit_job_by_name = method(endpoints.get_audit_job_by_name)
 
 
 class GarakClient(_GarakMethods, NemoClient):
