@@ -77,27 +77,27 @@ export const getWorkGroupLabel = ({
 
 export const getFileName = (path: string): string => path.split(/[\\/]/).at(-1) || path;
 
-const LANGUAGE_BY_EXTENSION: Record<string, CodeSnippetLanguage> = {
-  bash: 'bash',
-  css: 'css',
-  go: 'go',
-  html: 'html',
-  js: 'javascript',
-  json: 'json',
-  jsonl: 'json',
-  jsx: 'jsx',
-  md: 'markdown',
-  py: 'python',
-  rs: 'rust',
-  sh: 'shell',
-  ts: 'typescript',
-  tsx: 'tsx',
-  yaml: 'yaml',
-  yml: 'yaml',
-};
+const LANGUAGE_BY_EXTENSION = new Map<string, CodeSnippetLanguage>([
+  ['bash', 'bash'],
+  ['css', 'css'],
+  ['go', 'go'],
+  ['html', 'html'],
+  ['js', 'javascript'],
+  ['json', 'json'],
+  ['jsonl', 'json'],
+  ['jsx', 'jsx'],
+  ['md', 'markdown'],
+  ['py', 'python'],
+  ['rs', 'rust'],
+  ['sh', 'shell'],
+  ['ts', 'typescript'],
+  ['tsx', 'tsx'],
+  ['yaml', 'yaml'],
+  ['yml', 'yaml'],
+]);
 
 export const getFileLanguage = (path: string): CodeSnippetLanguage =>
-  LANGUAGE_BY_EXTENSION[getFileName(path).split('.').at(-1)?.toLowerCase() ?? ''] ?? 'text';
+  LANGUAGE_BY_EXTENSION.get(getFileName(path).split('.').at(-1)?.toLowerCase() ?? '') ?? 'text';
 
 /** Pretty-prints a tool payload: JSON values and JSON strings as JSON, anything else as text. */
 export const formatToolPayload = (

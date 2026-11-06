@@ -77,7 +77,7 @@ const getTitleParts = (
     action: running
       ? (TOOL_RUNNING_ACTIONS[toolName] ?? `Using ${TOOL_LABELS[toolName] ?? toolName}`)
       : action,
-    detail: hasDetail ? detail : undefined,
+    detail: detail !== message ? detail : undefined,
   };
 };
 
