@@ -22,8 +22,8 @@ reusable actions, and supporting docs.
 ### CI Check Workflows
 
 - `ci.yaml`
-  Main source validation workflow. It runs linting, shared Rego policy tests,
-  Python unit tests, Python integration tests, Studio web
+  Main source validation workflow. It runs linting,
+  Python unit tests (including the shared Rego assertions), Python integration tests, Studio web
   checks for relevant web changes, and PR coverage comments. It runs on pushes
   to `main`, pull requests to `main` or `release/*`, merge queue checks, and
   manual dispatch.
