@@ -4,11 +4,13 @@
 """Prepare the private Helix workspace for gateway-owned credential values."""
 
 import io
+import re
 import tarfile
 
 from nemo_helix_plugin.auth import is_service_principal_id
 from nemo_helix_plugin.auth.client import AsyncAuthenticationClient
 from nemo_helix_plugin.client.errors import ConflictError, NemoClientError, NotFoundError
+from nemo_helix_plugin.entity_naming import NAME_PATTERN
 from nemo_helix_plugin.iam.client import AsyncIAMClient
 from nemo_helix_plugin.iam.types import AuthzRequest, RoleBindingInput
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
@@ -16,7 +18,7 @@ from nemo_helix_plugin.workspaces.client import AsyncWorkspacesClient
 from nemo_helix_plugin.workspaces.types import CreateWorkspaceRequest
 from pydantic import BaseModel, ValidationError
 
-OWNED_SECRETS_WORKSPACE = "openshell-internal"
+DEFAULT_OWNED_SECRETS_WORKSPACE = "openshell-internal"
 
 
 class OwnedWorkspaceError(ValueError):
@@ -35,7 +37,7 @@ class _PolicyBundle(BaseModel):
     authz: _AuthorizationPolicy
 
 
-async def _private_policy(iam_client: AsyncIAMClient) -> set[str]:
+async def _private_policy(iam_client: AsyncIAMClient, workspace: str) -> set[str]:
     # Workspace members omit static grants. The bundle includes both sources.
     response = await iam_client.get_opa_bundle()
     with tarfile.open(fileobj=io.BytesIO(await response.read()), mode="r:gz") as archive:
@@ -49,24 +51,29 @@ async def _private_policy(iam_client: AsyncIAMClient) -> set[str]:
         if principal != "*" and "HelixAdmin" in roles.workspaces.get("system", [])
     }
     if any(
-        roles.workspaces.get(OWNED_SECRETS_WORKSPACE)
-        and not is_service_principal_id(principal)
-        and principal not in administrators
+        roles.workspaces.get(workspace) and not is_service_principal_id(principal) and principal not in administrators
         for principal, roles in policy.principals.items()
     ):
         raise OwnedWorkspaceError("Owned-credential workspace grants access to ordinary principals.")
     return administrators
 
 
-async def ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_enabled: bool) -> str:
+async def ensure_owned_workspace(
+    secrets_client: AsyncSecretsClient,
+    *,
+    auth_enabled: bool,
+    workspace: str = DEFAULT_OWNED_SECRETS_WORKSPACE,
+) -> str:
     """Create the storage scope or validate it without changing existing access grants."""
+    if re.fullmatch(NAME_PATTERN, workspace) is None:
+        raise OwnedWorkspaceError("Invalid owned-credential workspace name.")
     try:
-        return await _ensure_owned_workspace(secrets_client, auth_enabled=auth_enabled)
+        return await _ensure_owned_workspace(secrets_client, auth_enabled=auth_enabled, workspace=workspace)
     except (NemoClientError, ValidationError, tarfile.TarError, KeyError):
         raise OwnedWorkspaceError("Could not validate the owned-credential workspace.") from None
 
 
-async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_enabled: bool) -> str:
+async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_enabled: bool, workspace: str) -> str:
     workspaces_client = AsyncWorkspacesClient.from_client(secrets_client)
     iam_client = AsyncIAMClient.from_client(secrets_client)
     principal: str | None = None
@@ -81,23 +88,21 @@ async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_en
         ):
             raise OwnedWorkspaceError("Owned credentials require a direct internal service workload identity.")
         principal = identity.principal
-        administrators = await _private_policy(iam_client)
+        administrators = await _private_policy(iam_client, workspace)
 
     created = False
     try:
-        await workspaces_client.get_workspace(name=OWNED_SECRETS_WORKSPACE)
+        await workspaces_client.get_workspace(name=workspace)
     except NotFoundError:
         response = await workspaces_client.create_workspace(
-            body=CreateWorkspaceRequest(
-                name=OWNED_SECRETS_WORKSPACE, description="OpenShell gateway-owned credentials."
-            ),
+            body=CreateWorkspaceRequest(name=workspace, description="OpenShell gateway-owned credentials."),
             exist_ok=True,
         )
         created = response.http_response.status_code == 201
     if not auth_enabled:
-        return OWNED_SECRETS_WORKSPACE
+        return workspace
 
-    members = (await workspaces_client.list_workspace_members(workspace=OWNED_SECRETS_WORKSPACE)).data()
+    members = (await workspaces_client.list_workspace_members(workspace=workspace)).data()
     if any(
         member.roles and not is_service_principal_id(member.principal) and member.principal not in administrators
         for member in members.data
@@ -109,7 +114,7 @@ async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_en
         assert principal is not None
         try:
             await iam_client.create_role_binding(
-                body=RoleBindingInput(principal=principal, workspace=OWNED_SECRETS_WORKSPACE, role="ServiceSystem"),
+                body=RoleBindingInput(principal=principal, workspace=workspace, role="ServiceSystem"),
                 query_params={"wait_role_propagation": True},
             )
         except ConflictError:
@@ -120,7 +125,7 @@ async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_en
             body=AuthzRequest(
                 input={
                     "principal_id": principal,
-                    "workspace": OWNED_SECRETS_WORKSPACE,
+                    "workspace": workspace,
                     "permissions": ["secrets.create", "secrets.access", "secrets.update", "secrets.delete"],
                 }
             ),
@@ -128,4 +133,4 @@ async def _ensure_owned_workspace(secrets_client: AsyncSecretsClient, *, auth_en
     ).data()
     if permissions.result.get("allowed") is not True:
         raise OwnedWorkspaceError("The internal service lacks owned-credential storage permissions.")
-    return OWNED_SECRETS_WORKSPACE
+    return workspace

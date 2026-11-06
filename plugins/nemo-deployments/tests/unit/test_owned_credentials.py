@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+from argparse import Namespace
 from collections.abc import AsyncIterator
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 import pytest
-from nemo_deployments_plugin.backends.openshell.credential_driver import wire
+from nemo_deployments_plugin.backends.openshell.credential_driver import server, wire
 from nemo_deployments_plugin.backends.openshell.credential_driver.owned import OwnedCredentials
 from nemo_deployments_plugin.backends.openshell.credential_driver.registry import (
     OWNED_HANDLE_PREFIX,
     BindingRegistry,
+    OwnedState,
     ProviderOwner,
 )
 from nemo_deployments_plugin.backends.openshell.credential_driver.service import CredentialDriver
@@ -29,7 +32,7 @@ from nemo_helix_plugin.client.errors import NemoHTTPError, NemoTransportError
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import SecretStr
 
-WORKSPACE = "openshell-internal"
+WORKSPACE = "gateway-private"
 VALUE = SecretStr("synthetic-internal-key-not-for-production")
 USER_SECRET = ("users", "provider-token")
 
@@ -123,6 +126,55 @@ async def test_retry_and_restart_reuse_handle_without_persisting_value(harness: 
     with pytest.raises(RegistrationDenied):
         await restarted.store(harness.owner, VALUE, object_id="operation")
     assert harness.values == {USER_SECRET: "synthetic-provider-token"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["pending", "active", "deleting", "deleted"])
+async def test_startup_rejects_workspace_change_for_persisted_handles(harness: Harness, state: OwnedState) -> None:
+    binding = harness.registry.reserve_owned(
+        harness.owner, VALUE, workspace=WORKSPACE, object_id="operation", existing_handle=""
+    )
+    if state == "active":
+        harness.registry.activate_owned(harness.owner, binding.handle, retain_uncertainty=False)
+    elif state in {"deleting", "deleted"}:
+        harness.registry.revoke_owned(harness.owner, binding.handle)
+        if state == "deleted":
+            harness.registry.finish_owned_delete(harness.owner, binding.handle)
+    restarted = BindingRegistry(harness.registry.path, harness.tickets)
+    restarted.require_owned_workspace(WORKSPACE)
+    key_path = harness.registry.path.parent / "registration.key"
+    key_path.touch(mode=0o600)
+    key_path.write_bytes(b"test-only-registration-key-32-bytes")
+    args = Namespace(
+        helix_url="https://helix.example",
+        gateway_id="gateway",
+        registration_key_file=key_path,
+        state_path=harness.registry.path,
+        owned_secrets_workspace="openshell-internal",
+        auth_disabled=True,
+        cache_lifetime_seconds=30,
+        socket_path=harness.registry.path.parent / "driver.sock",
+    )
+    with (
+        patch.object(server, "AsyncSecretsClient", side_effect=AssertionError("Startup contacted Helix")),
+        pytest.raises(RegistrationDenied, match="workspace differs"),
+    ):
+        await server.serve(args)
+    assert restarted.get_owned(harness.owner, binding.handle).state == state
+
+
+@pytest.mark.asyncio
+async def test_first_store_prevents_another_driver_selecting_a_different_workspace(harness: Harness) -> None:
+    second = BindingRegistry(harness.registry.path, harness.tickets)
+    harness.registry.require_owned_workspace(WORKSPACE)
+    second.require_owned_workspace("other-private")
+    handle = await harness.owned.store(harness.owner, VALUE, object_id="first")
+    before = len(harness.calls)
+    other = OwnedCredentials(second, harness.client, "other-private")
+    with pytest.raises(RegistrationDenied, match="workspace differs"):
+        await other.store(harness.owner, VALUE, object_id="second")
+    assert len(harness.calls) == before
+    assert await harness.owned.resolve(harness.owner, handle) == VALUE.get_secret_value()
 
 
 @pytest.mark.asyncio

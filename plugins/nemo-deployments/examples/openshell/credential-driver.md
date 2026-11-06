@@ -14,9 +14,9 @@ The driver needs a signing key shared with the Helix controller and, when authen
 - `registration.key` contains at least 32 random bytes. The controller uses this key to sign credential registrations, and the driver uses it to verify them.
 - `helix.token` contains a platform-issued internal service workload access token. Its identity needs Secrets value access, read access to relevant Jobs and deployment entities, and permission to initialize the internal workspace and inspect its access grants. An ordinary user or service-account token is not sufficient.
 
-At startup, the driver creates or validates `openshell-internal` for encrypted gateway-owned values. It rejects workspace grants to ordinary users and ensures its service identity can store, read and delete these values. Deleting an internal handle removes its owned Secret; deleting a provider binding leaves the user's source Secret intact.
+At startup, the driver creates or validates a private workspace for encrypted gateway-owned values. It defaults to `openshell-internal`; `NEMO_DRIVER_OWNED_SECRETS_WORKSPACE` selects another name in Compose, or `--owned-secrets-workspace` when running the driver directly. It rejects workspace grants to ordinary users and ensures its service identity can store, read and delete these values. Deleting an internal handle removes its owned Secret; deleting a provider binding leaves the user's source Secret intact.
 
-The driver does not increase service permissions in an existing workspace. If initial setup stops between workspace creation and granting service access, an operator must grant the driver `ServiceSystem` in `openshell-internal` before restarting it.
+The workspace is fixed once the driver stores an internal credential. Changing the setting does not migrate keys; startup rejects a name that differs from the existing state. The driver does not increase service permissions in an existing workspace. If initial setup stops between workspace creation and granting service access, an operator must grant the driver `ServiceSystem` in the selected workspace before restarting it.
 
 The initializer copies these files into the driver's private credential volume. Each must be a regular file rather than a symlink, no larger than 64 KiB, with mode `0600`.
 

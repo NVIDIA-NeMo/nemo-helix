@@ -54,6 +54,7 @@ class CredentialTestConfig(BaseModel):
     platform_sandbox_url: str
     gateway_endpoint: str
     gateway_workspace: str = "default"
+    owned_secrets_workspace: str = "openshell-internal"
     job_profile: str
     deployment_executor: str
     provider_profile: str
@@ -217,12 +218,10 @@ def assert_placeholder(rows: list[Observation], original: Observation, values: t
     assert all(row.public_status == 200 for row in rows), "The authored external-service policy must remain usable"
 
 
-def owned_secret_names(secrets_client: SecretsClient) -> set[str]:
+def owned_secret_names(secrets_client: SecretsClient, workspace: str) -> set[str]:
     return {
         secret.name
-        for secret in secrets_client.list_secrets(
-            workspace="openshell-internal", query_params={"page_size": 100}
-        ).items()
+        for secret in secrets_client.list_secrets(workspace=workspace, query_params={"page_size": 100}).items()
     }
 
 
@@ -272,7 +271,7 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
     probe_id = f"credential-e2e-{uuid.uuid4().hex[:12]}"
     first, rotated = f"synthetic-first-{uuid.uuid4().hex}", f"synthetic-rotated-{uuid.uuid4().hex}"
     secrets = SecretsClient.from_client(client)
-    internal_secrets_before = owned_secret_names(secrets)
+    internal_secrets_before = owned_secret_names(secrets, credential_config.owned_secrets_workspace)
     secrets.create_secret(
         workspace=config.workspace, body=HelixSecretCreateRequest(name=probe_id, value=SecretStr(first))
     )
@@ -316,7 +315,9 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
         assert_placeholder(rows, original, (first, rotated))
         sandboxes = gateway.sandboxes(workload)
         assert len(sandboxes) == 1
-        assert owned_secret_names(secrets) - internal_secrets_before, "Sandbox keys must be stored in Helix Secrets"
+        assert owned_secret_names(secrets, credential_config.owned_secrets_workspace) - internal_secrets_before, (
+            "Sandbox keys must be stored in Helix Secrets"
+        )
         providers = set(sandboxes[0].spec.providers)
         assert providers, "The actual controller must attach a provider"
 
@@ -421,7 +422,7 @@ def test_original_placeholder_survives_rotation_then_secret_deletion_revokes_acc
                     deadline=cleanup_deadline,
                 )
                 wait_until(
-                    lambda: owned_secret_names(secrets),
+                    lambda: owned_secret_names(secrets, credential_config.owned_secrets_workspace),
                     lambda names: not names - internal_secrets_before,
                     timeout=config.timeout_seconds,
                     description="deletion of sandbox-owned keys from Helix Secrets",

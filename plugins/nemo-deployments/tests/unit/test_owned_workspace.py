@@ -15,7 +15,7 @@ import pytest
 from nemo_deployments_plugin.backends.openshell.credential_driver import server
 from nemo_deployments_plugin.backends.openshell.credential_driver.owned import OwnedCredentials
 from nemo_deployments_plugin.backends.openshell.credential_driver.workspace import (
-    OWNED_SECRETS_WORKSPACE,
+    DEFAULT_OWNED_SECRETS_WORKSPACE,
     OwnedWorkspaceError,
     ensure_owned_workspace,
 )
@@ -29,6 +29,7 @@ TIMESTAMP = "2026-11-06T00:00:00Z"
 
 @dataclass
 class WorkspaceAPI:
+    workspace: str = DEFAULT_OWNED_SECRETS_WORKSPACE
     exists: bool = True
     identity: AuthenticateResponse = field(
         default_factory=lambda: AuthenticateResponse(principal=SERVICE, token_kind="workload_access_token")
@@ -55,14 +56,14 @@ class WorkspaceAPI:
         if path == "/apis/auth/v2/authz/has_permissions":
             body = json.loads(request.content)["input"]
             assert body["principal_id"] == SERVICE
-            assert body["workspace"] == OWNED_SECRETS_WORKSPACE
+            assert body["workspace"] == self.workspace
             assert "secrets.access" in body["permissions"]
             roles = [role for member in self.members if member.principal == SERVICE for role in member.roles]
             return httpx.Response(200, json={"result": {"allowed": not roles or "ServiceSystem" in roles}})
         if path == "/apis/auth/v2/iam/role-bindings":
             assert request.method == "POST"
             body = json.loads(request.content)
-            assert body == {"principal": SERVICE, "workspace": OWNED_SECRETS_WORKSPACE, "role": "ServiceSystem"}
+            assert body == {"principal": SERVICE, "workspace": self.workspace, "role": "ServiceSystem"}
             self.members.append(WorkspaceMember(principal=SERVICE, roles=["ServiceSystem"]))
             return httpx.Response(
                 201,
@@ -76,23 +77,25 @@ class WorkspaceAPI:
                 },
             )
         if path.endswith("/members"):
+            assert path == f"/apis/entities/v2/workspaces/{self.workspace}/members"
             assert request.method == "GET"
             return httpx.Response(200, json={"data": [member.model_dump() for member in self.members]})
         status = 200
         if request.method == "POST":
             assert path == "/apis/entities/v2/workspaces"
+            assert json.loads(request.content)["name"] == self.workspace
             self.exists = True
             self.members.append(WorkspaceMember(principal=SERVICE, roles=["Admin"]))
             status = 201
         else:
-            assert path == f"/apis/entities/v2/workspaces/{OWNED_SECRETS_WORKSPACE}"
+            assert path == f"/apis/entities/v2/workspaces/{self.workspace}"
             if not self.exists:
                 return httpx.Response(404, json={"detail": "Not found"})
         return httpx.Response(
             status,
             json={
                 "id": "workspace-id",
-                "name": OWNED_SECRETS_WORKSPACE,
+                "name": self.workspace,
                 "created_by": SERVICE,
                 "created_at": TIMESTAMP,
                 "updated_at": TIMESTAMP,
@@ -132,37 +135,43 @@ async def test_bootstrap_requires_authenticated_direct_service(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("principal", ["*", "user@example.com", "service-account:agent"])
 @pytest.mark.parametrize("static", [True, False])
-async def test_rejects_ordinary_grants_without_rewriting_them(principal: str, static: bool) -> None:
-    api = WorkspaceAPI()
+@pytest.mark.parametrize("workspace", [DEFAULT_OWNED_SECRETS_WORKSPACE, "gateway-storage"])
+async def test_rejects_ordinary_grants_without_rewriting_them(principal: str, static: bool, workspace: str) -> None:
+    api = WorkspaceAPI(workspace=workspace)
     if static:
-        api.policy[principal] = {OWNED_SECRETS_WORKSPACE: ["Editor"]}
+        api.policy[principal] = {workspace: ["Editor"]}
     else:
         api.members.append(WorkspaceMember(principal=principal, roles=["Editor"]))
     async with api.client() as client:
         with pytest.raises(OwnedWorkspaceError, match="ordinary principals"):
-            await ensure_owned_workspace(client, auth_enabled=True)
+            await ensure_owned_workspace(client, auth_enabled=True, workspace=workspace)
     assert all(request.method == "GET" for request in api.calls)
 
 
 @pytest.mark.asyncio
 async def test_existing_workspace_preserves_service_and_platform_admin_grants() -> None:
     api = WorkspaceAPI(
+        workspace="gateway-storage",
         members=[
             WorkspaceMember(principal=SERVICE, roles=["ServiceSystem"]),
             WorkspaceMember(principal="operator@example.com", roles=["Admin"]),
         ],
-        policy={"operator@example.com": {"system": ["HelixAdmin"], OWNED_SECRETS_WORKSPACE: ["Admin"]}},
+        policy={
+            "operator@example.com": {"system": ["HelixAdmin"], "gateway-storage": ["Admin"]},
+            "other-user@example.com": {DEFAULT_OWNED_SECRETS_WORKSPACE: ["Editor"]},
+        },
     )
     async with api.client() as client:
-        assert await ensure_owned_workspace(client, auth_enabled=True) == OWNED_SECRETS_WORKSPACE
+        assert await ensure_owned_workspace(client, auth_enabled=True, workspace=api.workspace) == api.workspace
     assert not any(request.url.path.endswith("/role-bindings") for request in api.calls)
 
 
 @pytest.mark.asyncio
-async def test_new_workspace_adds_service_access_lost_by_creator_admin_binding() -> None:
-    api = WorkspaceAPI(exists=False)
+@pytest.mark.parametrize("workspace", [DEFAULT_OWNED_SECRETS_WORKSPACE, "gateway-storage"])
+async def test_new_workspace_adds_service_access_lost_by_creator_admin_binding(workspace: str) -> None:
+    api = WorkspaceAPI(workspace=workspace, exists=False)
     async with api.client() as client:
-        await ensure_owned_workspace(client, auth_enabled=True)
+        assert await ensure_owned_workspace(client, auth_enabled=True, workspace=workspace) == workspace
     assert [member.roles for member in api.members] == [["Admin"], ["ServiceSystem"]]
     assert not any(request.method in {"DELETE", "PUT", "PATCH"} for request in api.calls)
 
@@ -178,10 +187,21 @@ async def test_existing_restricted_service_is_not_silently_elevated() -> None:
 
 @pytest.mark.asyncio
 async def test_auth_disabled_bootstrap_does_not_depend_on_iam() -> None:
-    api = WorkspaceAPI(exists=False)
+    api = WorkspaceAPI(workspace="gateway-storage", exists=False)
     async with api.client() as client:
-        await ensure_owned_workspace(client, auth_enabled=False)
+        assert await ensure_owned_workspace(client, auth_enabled=False, workspace=api.workspace) == api.workspace
     assert all(request.url.path.startswith("/apis/entities/") for request in api.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workspace", ["-", "team/keys"])
+@pytest.mark.parametrize("auth_enabled", [True, False])
+async def test_invalid_workspace_is_rejected_before_http(workspace: str, auth_enabled: bool) -> None:
+    api = WorkspaceAPI()
+    async with api.client() as client:
+        with pytest.raises(ValueError, match="(?i)workspace"):
+            await ensure_owned_workspace(client, auth_enabled=auth_enabled, workspace=workspace)
+    assert not api.calls
 
 
 @pytest.mark.asyncio

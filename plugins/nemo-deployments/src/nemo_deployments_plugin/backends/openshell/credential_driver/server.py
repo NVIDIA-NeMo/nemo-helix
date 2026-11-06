@@ -26,7 +26,7 @@ from .owned import OwnedCredentials
 from .registry import BindingRegistry, require_private_directory
 from .service import CredentialDriver
 from .tickets import RegistrationTickets
-from .workspace import ensure_owned_workspace
+from .workspace import DEFAULT_OWNED_SECRETS_WORKSPACE, ensure_owned_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -157,12 +157,15 @@ async def serve(args: argparse.Namespace) -> None:
         raise ValueError("Use an HTTPS NeMo endpoint, or explicitly allow HTTP localhost for development.")
     tickets = RegistrationTickets(read_private_file(args.registration_key_file), args.gateway_id)
     registry = BindingRegistry(args.state_path, tickets)
+    await asyncio.to_thread(registry.require_owned_workspace, args.owned_secrets_workspace)
     auth = None
     if not args.auth_disabled:
         auth = FileTokenProvider(args.helix_token_file)
         await auth.get_access_token_async()
     async with AsyncSecretsClient(base_url=args.helix_url, auth=auth) as secrets_client:
-        workspace = await ensure_owned_workspace(secrets_client, auth_enabled=not args.auth_disabled)
+        workspace = await ensure_owned_workspace(
+            secrets_client, auth_enabled=not args.auth_disabled, workspace=args.owned_secrets_workspace
+        )
         owned = OwnedCredentials(registry, secrets_client, workspace)
         driver = CredentialDriver(
             registry,
@@ -190,6 +193,11 @@ def main() -> None:
     parser.add_argument("--gateway-id", required=True)
     parser.add_argument("--registration-key-file", type=Path, required=True)
     parser.add_argument("--helix-url", required=True)
+    parser.add_argument(
+        "--owned-secrets-workspace",
+        default=DEFAULT_OWNED_SECRETS_WORKSPACE,
+        help="Private workspace for gateway-owned credentials (default: %(default)s); fixed once state is stored.",
+    )
     parser.add_argument(
         "--cache-lifetime-seconds",
         type=int,

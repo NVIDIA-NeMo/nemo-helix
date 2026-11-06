@@ -307,6 +307,21 @@ class BindingRegistry:
             raise RegistrationDenied("Owned credential belongs to another owner.")
         return row
 
+    @staticmethod
+    def _require_owned_workspace(session: Session, workspace: str) -> None:
+        if (
+            session.scalar(
+                select(OwnedCredentialRecord.handle).where(OwnedCredentialRecord.workspace != workspace).limit(1)
+            )
+            is not None
+        ):
+            raise RegistrationDenied("Configured owned-credential workspace differs from the existing registry.")
+
+    def require_owned_workspace(self, workspace: str) -> None:
+        """Keep persisted handles and cleanup intent in their original workspace."""
+        with self._session() as session:
+            self._require_owned_workspace(session, workspace)
+
     def reserve_owned(
         self,
         owner: ProviderOwner,
@@ -323,6 +338,7 @@ class BindingRegistry:
             ).encode()
         ).hexdigest()
         with self._session(write=True) as session:
+            self._require_owned_workspace(session, workspace)
             row = session.get(OwnedCredentialRecord, operation_id)
             if row is not None:
                 if (
