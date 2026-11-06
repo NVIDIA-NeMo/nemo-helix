@@ -7,7 +7,7 @@ import { DescribeWithAiPanel } from '@studio/components/CreateFilesetStart/Descr
 import { PersonaTestSetPanel } from '@studio/components/CreateFilesetStart/PersonaTestSetPanel';
 import { buildTemplateGroups } from '@studio/components/CreateFilesetStart/templateGroups';
 import type { CreateFilesetStartProps } from '@studio/components/CreateFilesetStart/types';
-import { usePersonaAgents } from '@studio/components/CreateFilesetStart/usePersonaAgents';
+import { useHasPersonaAgents } from '@studio/components/CreateFilesetStart/useHasPersonaAgents';
 import { StartPage } from '@studio/components/StartOptions/StartPage';
 import { StartSubPage } from '@studio/components/StartOptions/StartSubPage';
 import { TemplateGroups } from '@studio/components/StartOptions/TemplateGroups';
@@ -23,10 +23,9 @@ export const CreateFilesetStart: FC<CreateFilesetStartProps> = ({ workspace, onC
     null
   );
   const templateGroups = useMemo(buildTemplateGroups, []);
-  const { agents, isSuccess } = usePersonaAgents(workspace);
   // Personas write messages for a chosen agent, so the tile is a dead end without one.
-  // Only a confirmed-empty list disables it; a failed load stays reachable for the panel's Retry.
-  const noAgents = isSuccess && !agents.length;
+  // Only a confirmed-empty list disables it; a failed load stays reachable.
+  const noAgents = useHasPersonaAgents(workspace) === false;
   const options = useMemo(
     () =>
       START_OPTIONS.map((option) =>

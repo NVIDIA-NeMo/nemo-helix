@@ -27,21 +27,19 @@ const PERSONAS_FILESET = 'nemotron-personas-dataset-en_us';
 const mockApis = (personasExist: boolean) => {
   let registered = personasExist;
   server.use(
-    http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), ({ request }) => {
-      const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
-      const agent = { name: page === 1 ? 'first-page-agent' : agentName, workspace };
-      return HttpResponse.json({
+    http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), () =>
+      HttpResponse.json({
         data: [
-          page === 1
-            ? agent
-            : {
-                ...agent,
-                config: { instructions: { system: { content: 'Return only the answer.' } } },
-              },
+          { name: 'other-agent', workspace },
+          {
+            name: agentName,
+            workspace,
+            config: { instructions: { system: { content: 'Return only the answer.' } } },
+          },
         ],
-        pagination: { total: 2, total_pages: 2, page, page_size: 1 },
-      });
-    }),
+        pagination: { total: 2, total_pages: 1, page: 1, page_size: 25 },
+      })
+    ),
     http.get(mockApiUrl(getFilesRetrieveFilesetQueryKey, 'system', ':name'), () =>
       registered
         ? HttpResponse.json({ name: PERSONAS_FILESET, workspace: 'system' })
@@ -69,8 +67,9 @@ const openPanel = async () => {
 };
 
 const pickAgent = async (user: ReturnType<typeof userEvent.setup>) => {
-  await user.click(await screen.findByRole('combobox', { name: /Agent/ }));
-  await user.click(await screen.findByRole('option', { name: agentName }));
+  await user.click(screen.getByRole('button', { name: 'Agent' }));
+  const rows = await screen.findAllByTestId('agent-dropdown-item');
+  await user.click(rows.find((row) => row.textContent?.includes(agentName))!);
 };
 
 describe('PersonaTestSetPanel', () => {
@@ -125,26 +124,5 @@ describe('PersonaTestSetPanel', () => {
     await waitFor(() => expect(screen.getByRole('radio', { name: /Personas/ })).toBeDisabled());
     await user.hover(screen.getByText('Personas'));
     expect((await screen.findAllByText(/Create an agent first/)).length).toBeGreaterThan(0);
-  });
-
-  it('shows agent-list failures and recovers on retry', async () => {
-    mockApis(true);
-    let fail = true;
-    server.use(
-      http.get(mockApiUrl(getAgentsListAgentsQueryKey, ':workspace'), () =>
-        fail
-          ? HttpResponse.json({ detail: 'boom' }, { status: 500 })
-          : HttpResponse.json({
-              data: [{ name: agentName, workspace }],
-              pagination: { total: 1, total_pages: 1, page: 1, page_size: 1 },
-            })
-      )
-    );
-    const { user } = await openPanel();
-
-    await screen.findByText('Could not load agents.');
-    fail = false;
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
-    await pickAgent(user);
   });
 });

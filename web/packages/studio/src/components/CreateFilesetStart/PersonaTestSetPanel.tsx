@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { WorkspaceAgentSelect } from '@nemo/common/src/components/AgentSelect';
 import { ControlledSelect } from '@nemo/common/src/components/form/ControlledSelect';
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
+import type { Agent } from '@nemo/sdk/generated/agents/schema';
 import type { CreateJobRequest as DataDesignerJobRequest } from '@nemo/sdk/generated/data-designer/schema';
-import { Banner, Button, Flex, Stack, Text } from '@nvidia/foundations-react-core';
+import { Flex, FormField, Stack } from '@nvidia/foundations-react-core';
 import { NEMOTRON_PERSONAS_LOCALES } from '@studio/components/agents/PersonaTestSet/nemotronPersonas';
 import {
   buildPersonaTestSetRequest,
@@ -12,8 +14,7 @@ import {
 } from '@studio/components/agents/PersonaTestSet/personaTestSetRequest';
 import type { NemotronPersonasLocale } from '@studio/components/agents/PersonaTestSet/types';
 import { useNemotronPersonasSetup } from '@studio/components/agents/PersonaTestSet/useNemotronPersonasSetup';
-import { usePersonaAgents } from '@studio/components/CreateFilesetStart/usePersonaAgents';
-import { useEffect, useMemo, type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 
 const DEFAULT_ROWS = '50';
@@ -25,7 +26,6 @@ const LOCALE_ITEMS = NEMOTRON_PERSONAS_LOCALES.map((locale) => ({
 }));
 
 interface FormValues {
-  agent: string;
   locale: NemotronPersonasLocale;
   rows: string;
 }
@@ -44,43 +44,40 @@ const parseRows = (rows: string): number | undefined => {
 /** Picks the agent, population and row count for a Nemotron persona test set. */
 export const PersonaTestSetPanel: FC<PersonaTestSetPanelProps> = ({ workspace, onValidConfig }) => {
   const { control } = useForm<FormValues>({
-    defaultValues: { agent: '', locale: 'en_US', rows: DEFAULT_ROWS },
+    defaultValues: { locale: 'en_US', rows: DEFAULT_ROWS },
   });
-  const [agentName, locale, rows] = useWatch({ control, name: ['agent', 'locale', 'rows'] });
+  const [locale, rows] = useWatch({ control, name: ['locale', 'rows'] });
+  const [agent, setAgent] = useState<Agent>();
   const personas = useNemotronPersonasSetup(workspace, locale);
-  const { agents, isLoading, isError, refetch } = usePersonaAgents(workspace);
-  const agentItems = useMemo(
-    () => agents.map((agent) => ({ value: agent.name as string, children: agent.name as string })),
-    [agents]
-  );
   const rowCount = parseRows(rows);
-  const agent = agents.find((candidate) => candidate.name === agentName);
 
   useEffect(() => {
     onValidConfig(
       agent && rowCount && personas.status === 'ready'
         ? buildPersonaTestSetRequest({
-            agent: personaTestSetAgent(agentName, agent),
+            agent: personaTestSetAgent(agent.name ?? '', agent),
             locale,
             rows: rowCount,
           })
         : null
     );
-  }, [agent, agentName, locale, rowCount, personas.status, onValidConfig]);
+  }, [agent, locale, rowCount, personas.status, onValidConfig]);
 
   return (
     <>
       <Stack gap="density-lg">
-        <ControlledSelect
-          useControllerProps={{ name: 'agent', control }}
-          formFieldProps={{
-            slotLabel: 'Agent',
-            slotInfo: 'Personas write messages this agent is meant to handle.',
-          }}
-          items={agentItems}
-          placeholder={isLoading ? 'Loading agents…' : 'Select an agent'}
-          disabled={isLoading}
-        />
+        <FormField
+          slotLabel="Agent"
+          slotInfo="Personas write messages this agent is meant to handle."
+        >
+          <WorkspaceAgentSelect
+            workspace={workspace}
+            value={agent?.name ?? null}
+            onValueChange={(_, picked) => setAgent(picked)}
+            aria-label="Agent"
+            fullWidth
+          />
+        </FormField>
         <Flex gap="density-lg">
           <ControlledSelect
             useControllerProps={{ name: 'locale', control }}
@@ -102,16 +99,6 @@ export const PersonaTestSetPanel: FC<PersonaTestSetPanelProps> = ({ workspace, o
             }}
           />
         </Flex>
-        {isError && !agents.length ? (
-          <Banner kind="inline" status="error" className="shrink-0">
-            <Flex gap="density-md" align="center" justify="between">
-              <Text kind="body/regular/sm">Could not load agents.</Text>
-              <Button type="button" kind="secondary" size="small" onClick={() => void refetch()}>
-                Retry
-              </Button>
-            </Flex>
-          </Banner>
-        ) : null}
         {personas.banner}
       </Stack>
       {personas.secretModal}
