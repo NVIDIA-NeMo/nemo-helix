@@ -91,8 +91,8 @@ def route_client(module_name, endpoint_name):
     app.include_router(module.router, prefix="/v2/workspaces/{workspace}" if module_name == AGENTS else "")
     dependencies = {}
     for dependency in route.dependant.dependencies:
-        # Keep the actual query parser for collection routes as well as request validators.
-        if dependency.name == "parsed_filter":
+        # Keep actual query parsing/validation for collections, including shared PageParams.
+        if dependency.name in {"parsed_filter", "page_params"}:
             continue
         mock = AsyncMock()
         mock.auth_enabled = False
@@ -405,3 +405,14 @@ def test_provider_list_preserves_empty_workspaces_with_supported_punctuation(wor
     assert response.json()["pagination"]["total_results"] == 0
     store.list.assert_awaited_once()
     assert store.list.await_args.kwargs["workspace"] == workspace
+
+
+@pytest.mark.parametrize("params", [{"page": 0}, {"page": 2**63, "page_size": 2}])
+def test_provider_route_client_preserves_real_page_validation(params):
+    """The test app must retain the upstream PageParams checks rather than mock them away."""
+    module = import_module(MODELS + "providers")
+    client, path, dependencies = route_client(MODELS + "providers", "list_providers")
+    response = client.get(path.format(workspace="default"), params=params)
+    assert response.status_code == 422, response.text
+    assert [error["loc"] for error in response.json()["detail"]] == [["query", "page"]]
+    dependencies[module.get_model_provider_service].list_model_providers.assert_not_awaited()
