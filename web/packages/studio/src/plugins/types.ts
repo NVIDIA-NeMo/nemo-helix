@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ContractIssue } from '@nemo/common/src/pluginContract';
 import type { ComponentType, ReactNode } from 'react';
 
 /**
@@ -131,15 +132,32 @@ export interface PluginModule {
   navItems: LoadedPlugin['navItems'];
 }
 
+/** One reason a plugin failed to load: a contract issue, or a generic load error. */
+export interface PluginLoadIssue extends Omit<ContractIssue, 'code'> {
+  code: ContractIssue['code'] | 'PLUGIN_LOAD_FAILED';
+}
+
+/** A plugin that is installed and has a web bundle but could not be loaded. */
+export interface PluginLoadFailure {
+  name: string;
+  issues: PluginLoadIssue[];
+}
+
+/** `null` for a headless plugin (no web bundle): neither a plugin nor a failure. */
+export type PluginLoadResult = { plugin: LoadedPlugin } | { failure: PluginLoadFailure } | null;
+
 /** Result of fetching the manifest and loading each plugin's bundle. */
 export interface PluginQueryData {
   plugins: LoadedPlugin[];
+  failed: PluginLoadFailure[];
   installedNames: ReadonlySet<string>;
 }
 
 /** Value exposed by the plugin React context. */
 export interface PluginContextValue {
   plugins: LoadedPlugin[];
+  /** Plugins with a web bundle that failed to load, with the reasons. */
+  failed: PluginLoadFailure[];
   /** All plugin names returned by /apis/plugins, including headless ones. */
   installedNames: ReadonlySet<string>;
   isLoaded: boolean;

@@ -7,7 +7,7 @@ import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { PLUGINS_MANIFEST_ENDPOINT } from '@studio/plugins/consts';
 import { isTrustedBundleUrl } from '@studio/plugins/security';
 import type {
-  LoadedPlugin,
+  PluginLoadResult,
   PluginManifest,
   PluginModule,
   PluginQueryData,
@@ -27,8 +27,9 @@ export function isPluginModule(mod: unknown): mod is PluginModule {
 
 export async function loadPlugin(
   manifest: PluginManifest,
-  baseUrl: string
-): Promise<LoadedPlugin | null> {
+  baseUrl: string,
+  importModule: (url: string) => Promise<unknown> = (url) => import(/* @vite-ignore */ url)
+): Promise<PluginLoadResult> {
   if (manifest.bundleUrl === null) {
     // Plugin registered without a web bundle — no UI to mount or nav to show.
     return null;
@@ -41,12 +42,12 @@ export async function loadPlugin(
   // host, not the Studio dev server (which may run on a different origin).
   const absoluteUrl = `${baseUrl}${manifest.bundleUrl}`;
   try {
-    const module: unknown = await import(/* @vite-ignore */ absoluteUrl);
+    const module: unknown = await importModule(absoluteUrl);
     if (!isPluginModule(module)) {
       logger.warn(`[plugins] Plugin "${manifest.name}" missing required exports (Root, navItems)`);
       return null;
     }
-    return { name: manifest.name, Root: module.Root, navItems: module.navItems };
+    return { plugin: { name: manifest.name, Root: module.Root, navItems: module.navItems } };
   } catch (err) {
     logger.warn(`[plugins] Failed to load plugin "${manifest.name}":`, err);
     return null;
@@ -75,6 +76,7 @@ export async function fetchPlugins(): Promise<PluginQueryData> {
   const loaded = await Promise.all(manifests.map((m) => loadPlugin(m, baseUrl)));
   return {
     installedNames: new Set(manifests.map((m) => m.name)),
-    plugins: loaded.filter((p): p is LoadedPlugin => p !== null),
+    plugins: loaded.flatMap((r) => (r && 'plugin' in r ? [r.plugin] : [])),
+    failed: loaded.flatMap((r) => (r && 'failure' in r ? [r.failure] : [])),
   };
 }
