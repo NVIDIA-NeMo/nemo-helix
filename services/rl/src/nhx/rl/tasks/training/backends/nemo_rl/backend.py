@@ -45,7 +45,7 @@ from nhx.rl.tasks.training.backends.nemo_rl.checkpoints import (
     is_peft_publication,
 )
 from nhx.rl.tasks.training.backends.nemo_rl.dpo_config import compile_dpo_config
-from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config
+from nhx.rl.tasks.training.backends.nemo_rl.grpo_config import compile_grpo_config, sandbox_host_provider_options
 from nhx.rl.tasks.training.backends.nemo_rl.ray_bootstrap import create_bootstrap_from_env
 from nhx.rl.tasks.training.chat_templates import apply_chat_template_to_checkpoint
 from nhx.rl.tasks.training.integrations import find_logger_mlflow_run_id
@@ -55,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 # Path to driver scripts (relative to this module)
 _DRIVER_DIR = Path(__file__).parent
+
+# Upper bound on one sandbox sweep. A cancelled step pod gets a 30s termination grace period, and
+# the driver wait that follows can use all of it, so the sweep has to leave room.
+SANDBOX_REAP_TIMEOUT_S = 10.0
 
 
 class NemoRLBackend(TrainingBackend):
@@ -181,6 +185,10 @@ class NemoRLBackend(TrainingBackend):
         # to trigger Ray cluster cleanup in the bootstrap's finally block.
         def cleanup(signum, frame):
             logger.warning(f"Signal {signum} received, terminating driver and cleaning up")
+            # Reap before waiting on the driver, which can take the whole termination grace
+            # period. The sandbox belongs to a Ray actor that is killed without running its
+            # own teardown, and this process is the one the container runtime signals.
+            self._reap_job_sandboxes(customizer_config)
             bootstrap.terminate_driver(signum)
             raise SystemExit(signum)
 
@@ -197,6 +205,9 @@ class NemoRLBackend(TrainingBackend):
 
             exit_code = bootstrap.run_with_driver(str(driver_path), driver_args)
         finally:
+            # Whatever ended the driver (a cancel, a crash, an ordinary exit), no sandbox this
+            # job created outlives it. A no-op when the Gym actor already tore its own down.
+            self._reap_job_sandboxes(customizer_config)
             signal.signal(signal.SIGINT, previous_sigint)
             signal.signal(signal.SIGTERM, previous_sigterm)
             for key, original in saved_env.items():
@@ -215,6 +226,28 @@ class NemoRLBackend(TrainingBackend):
 
         # Return empty metrics (actual metrics are logged during training)
         return TrainingMetrics(total_steps=0, total_epochs=0)
+
+    def _reap_job_sandboxes(self, config: TrainingStepConfig) -> None:
+        """Destroy every OpenSandbox resource labelled with this job's id. Never raises.
+
+        Only GRPO jobs that run the Gym in a sandbox have anything to reap. Failures are logged
+        rather than raised: this runs from a signal handler and a ``finally``, and an error here
+        must not replace the training outcome or skip the rest of the teardown.
+        """
+        gym = getattr(config, "gym", None)
+        if gym is None or not getattr(gym, "sandboxed", False):
+            return
+        try:
+            from sandboxed_gym.job_reaper import reap_job_sandboxes
+
+            reap_job_sandboxes(
+                self._job_ctx.job_id,
+                host_provider="opensandbox",
+                host_provider_options=sandbox_host_provider_options(gym),
+                timeout_s=SANDBOX_REAP_TIMEOUT_S,
+            )
+        except Exception:
+            logger.exception(f"Could not reap sandboxes for job {self._job_ctx.job_id}")
 
     def _get_driver_path(self, config: TrainingStepConfig) -> Path:
         """Get the appropriate driver script path based on training type.

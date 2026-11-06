@@ -321,8 +321,12 @@ def _resolve_gym_paths(
     )
 
 
-def _sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
-    """``create.resource`` must match ``sandbox.resources``."""
+def sandbox_host_provider_options(gym: TrainingStepConfig.GymConfig) -> dict[str, Any]:
+    """OpenSandbox host-provider options for a GRPO job.
+
+    ``create.resource`` must match ``sandbox.resources``. The training task passes the same
+    options to the sandbox reaper, so it reaches the server the Gym actor created sandboxes on.
+    """
     connection: dict[str, Any] = {}
     if gym.sandbox_server_protocol:
         connection["protocol"] = gym.sandbox_server_protocol
@@ -427,7 +431,7 @@ def _build_nemo_gym_env_config(
             # Only emitted when the operator declared it, so an unset value leaves
             # NeMo-RL's own default in place rather than this compiler asserting one.
             # create.resource must match resources.
-            host_provider_options=_sandbox_host_provider_options(gym),
+            host_provider_options=sandbox_host_provider_options(gym),
             # Same rule: unset leaves the OpenSandbox server's default in place.
             resources=gym.sandbox_resources or None,
             environment_pvc_claim=mounts.environment_pvc_claim,
