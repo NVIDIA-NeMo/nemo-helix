@@ -85,22 +85,32 @@ export function VirtualDropdownList<R extends { key: string }>({
   const lastVisibleIndex =
     virtualItems.length > 0 ? virtualItems[virtualItems.length - 1].index : -1;
 
+  // Refs keep `loadMore` stable so a failed page doesn't re-fire the effect as loading state flips.
+  const latest = useRef({ onLoadMore, hasMore, isLoadingMore });
+  const inFlight = useRef(false);
+  useLayoutEffect(() => {
+    latest.current = { onLoadMore, hasMore, isLoadingMore };
+  }, [onLoadMore, hasMore, isLoadingMore]);
+
   const loadMore = useCallback(async () => {
-    if (!onLoadMore || !hasMore || isLoadingMore || isLoadingMoreLocal) return;
+    const { onLoadMore: load, hasMore: more, isLoadingMore: busy } = latest.current;
+    if (!load || !more || busy || inFlight.current) return;
+    inFlight.current = true;
     setIsLoadingMoreLocal(true);
     try {
-      await onLoadMore();
+      await load();
     } finally {
+      inFlight.current = false;
       setIsLoadingMoreLocal(false);
     }
-  }, [hasMore, isLoadingMore, isLoadingMoreLocal, onLoadMore]);
+  }, []);
 
   useEffect(() => {
     if (lastVisibleIndex < 0) return;
     if (lastVisibleIndex >= rows.length - LOAD_MORE_THRESHOLD) {
-      void loadMore();
+      loadMore().catch(() => undefined);
     }
-  }, [lastVisibleIndex, loadMore, rows.length]);
+  }, [hasMore, lastVisibleIndex, loadMore, rows.length]);
 
   const loadingMore = isLoadingMore || isLoadingMoreLocal;
   const showDoneMessage = Boolean(doneLoadingMessage) && !hasMore && !loading && !loadingMore;

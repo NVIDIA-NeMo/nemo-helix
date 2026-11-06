@@ -99,10 +99,17 @@ export const useAgentSearch = ({
 
   // `include` can empty a whole page, leaving no rows to scroll and so no way to ask for more.
   useEffect(() => {
-    if (isEnabled && agents.length === 0 && hasNextPage && !isFetchingNextPage && !isLoading) {
+    if (
+      isEnabled &&
+      agents.length === 0 &&
+      hasNextPage &&
+      !isFetchingNextPage &&
+      !isLoading &&
+      !error
+    ) {
       void fetchNextPage();
     }
-  }, [agents.length, fetchNextPage, hasNextPage, isEnabled, isFetchingNextPage, isLoading]);
+  }, [agents.length, error, fetchNextPage, hasNextPage, isEnabled, isFetchingNextPage, isLoading]);
 
   return {
     agents,
