@@ -1107,10 +1107,8 @@ paths:
     get:
       tags:
       - Entity Store
-      summary: Get entity by ID (debug/internal)
+      summary: Get entity by ID
       description: 'Get a specific entity by its unique identifier.
-
-        This endpoint is primarily for debugging and internal use.
 
 
         Example:
@@ -1653,6 +1651,68 @@ paths:
                 $ref: '#/components/schemas/EntitiesPage'
         '403':
           description: Not allowed to list entities in the requested workspace.
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
+    delete:
+      tags:
+      - Entity Store
+      summary: Delete entity by ID
+      description: Delete the selected ID while preserving scope and optional version
+        checks.
+      operationId: delete_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      - name: expected_db_version
+        in: query
+        required: false
+        schema:
+          description: Delete only this entity version.
+          title: Expected Db Version
+          type: integer
+        description: Delete only this entity version.
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '403':
+          description: Not allowed to delete entities in the requested workspace.
+        '404':
+          description: Entity not found in the requested scope.
+        '409':
+          description: Entity version conflict.
         '422':
           description: Validation Error
           content:

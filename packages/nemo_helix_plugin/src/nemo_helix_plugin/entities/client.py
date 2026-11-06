@@ -27,6 +27,7 @@ class _EntitiesMethods:
     update_entity_by_name = method(endpoints.update_entity_by_name)
     delete_entity_by_name = method(endpoints.delete_entity_by_name)
     get_entity_by_id = method(endpoints.get_entity_by_id)
+    delete_entity_by_id = method(endpoints.delete_entity_by_id)
 
 
 class EntitiesClient(_EntitiesMethods, NemoClient):

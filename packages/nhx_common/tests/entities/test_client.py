@@ -1182,13 +1182,13 @@ async def test_delete_by_id_passes_fetched_db_version():
             )
         )
     )
-    mock_api.delete_entity_by_name = AsyncMock(return_value=_data_resp(DeleteResponse(id="123")))
+    mock_api.delete_entity_by_id = AsyncMock(return_value=_data_resp(DeleteResponse(id="123")))
     client = EntityClient(mock_api)
 
     await client.delete_by_id(TestEntity, "123")
 
-    mock_api.delete_entity_by_name.assert_awaited_once()
-    call_kwargs = mock_api.delete_entity_by_name.call_args.kwargs
+    mock_api.delete_entity_by_id.assert_awaited_once()
+    call_kwargs = mock_api.delete_entity_by_id.call_args.kwargs
     assert call_kwargs["query_params"]["expected_db_version"] == 7
 
 
