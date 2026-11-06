@@ -76,6 +76,18 @@ def delete_entity_by_name(
 def get_entity_by_id(*, entity_id: str) -> Entity: ...
 
 
+@put("/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}")
+@abstractmethod
+def update_entity_by_id(
+    *,
+    workspace: str,
+    entity_type: str,
+    entity_id: str,
+    body: EntityUpdate,
+    query_params: EntityByNameQueryParams | None = None,
+) -> Entity: ...
+
+
 @delete("/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}")
 @abstractmethod
 def delete_entity_by_id(

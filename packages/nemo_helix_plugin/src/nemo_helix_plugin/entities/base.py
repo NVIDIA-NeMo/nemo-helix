@@ -879,14 +879,14 @@ class EntityClient:
             raise EntityNotFoundError(f"Entity with id '{entity_id}' not found") from e
 
     async def update(self, entity: EntityT, *, original_name: str | None = None) -> EntityT:
-        """Update an entity by name.
+        """Update an existing entity by its immutable ID.
 
         Automatically includes db_version for optimistic locking if the entity was
         fetched via get(). This ensures updates only succeed if the entity hasn't
         been modified by another request.
 
         Args:
-            entity: Entity with updated data (must have valid workspace and name)
+            entity: Persisted entity with updated data, immutable ID and workspace
             original_name: Original name if renaming entity (use entity.name for current name)
 
         Returns:
@@ -897,21 +897,20 @@ class EntityClient:
             EntityConflictError: Version mismatch (entity was modified by another request)
         """
         entity_type = type(entity)
-        path_name = original_name or entity.name
-
-        query_params: EntityByNameQueryParams | None = {"parent": entity._parent} if entity._parent else None
+        if not entity.id:
+            raise EntityValidationError("Update requires a persisted entity ID; fetch or create the entity first.")
 
         try:
-            response = await self._client.update_entity_by_name(
+            response = await self._client.update_entity_by_id(
                 entity_type=_get_entity_type(entity_type),
-                name=path_name,
+                entity_id=entity.id,
                 workspace=entity.workspace,
                 body=EntityUpdate(**_entity_update_fields(entity, original_name=original_name)),
-                query_params=query_params,
+                query_params={"parent": entity._parent} if entity._parent else None,
             )
             return self._convert_api_entity_to_model(response.data(), entity_type)
         except NotFoundError as e:
-            raise EntityNotFoundError(f"Entity '{path_name}' not found in workspace '{entity.workspace}'") from e
+            raise EntityNotFoundError(f"Entity with id '{entity.id}' not found") from e
         except ConflictError as e:
             raise EntityConflictError(str(e)) from e
         except UnprocessableEntityError as e:
@@ -1339,22 +1338,22 @@ class SyncEntityClient:
             raise EntityNotFoundError(f"Entity with id '{entity_id}' not found") from e
 
     def update(self, entity: EntityT, *, original_name: str | None = None) -> EntityT:
-        """Update an entity by name."""
+        """Update an existing entity by its immutable ID."""
         entity_type = type(entity)
-        path_name = original_name or entity.name
-        query_params: EntityByNameQueryParams | None = {"parent": entity._parent} if entity._parent else None
+        if not entity.id:
+            raise EntityValidationError("Update requires a persisted entity ID; fetch or create the entity first.")
 
         try:
-            response = self._client.update_entity_by_name(
+            response = self._client.update_entity_by_id(
                 entity_type=_get_entity_type(entity_type),
-                name=path_name,
+                entity_id=entity.id,
                 workspace=entity.workspace,
                 body=EntityUpdate(**_entity_update_fields(entity, original_name=original_name)),
-                query_params=query_params,
+                query_params={"parent": entity._parent} if entity._parent else None,
             )
             return self._convert_api_entity_to_model(response.data(), entity_type)
         except NotFoundError as e:
-            raise EntityNotFoundError(f"Entity '{path_name}' not found in workspace '{entity.workspace}'") from e
+            raise EntityNotFoundError(f"Entity with id '{entity.id}' not found") from e
         except ConflictError as e:
             raise EntityConflictError(str(e)) from e
         except UnprocessableEntityError as e:

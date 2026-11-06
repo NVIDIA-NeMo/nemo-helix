@@ -1658,6 +1658,58 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
   /apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}:
+    put:
+      tags:
+      - Entity Store
+      summary: Update entity by ID
+      operationId: update_entity_by_id_apis_entities_v2_workspaces__workspace__entities__entity_type__by_id__entity_id__put
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: entity_type
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Type
+      - name: entity_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Entity Id
+      - name: parent
+        in: query
+        required: false
+        schema:
+          description: Optional parent scope for the selected ID.
+          title: Parent
+          type: string
+        description: Optional parent scope for the selected ID.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityUpdate'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+        '422':
+          description: Request validation error, or a referenced resource such as
+            the workspace does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityWriteValidationErrorResponse'
     delete:
       tags:
       - Entity Store

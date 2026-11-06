@@ -645,6 +645,12 @@ authz:
         scopes:
         - entities:write
         - platform:write
+      put:
+        permissions:
+        - entities.update
+        scopes:
+        - entities:write
+        - platform:write
     /apis/entities/v2/workspaces/{workspace}/members:
       get:
         permissions:

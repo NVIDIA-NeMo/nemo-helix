@@ -80,7 +80,7 @@ async def id_repository(request: pytest.FixtureRequest, tmp_path: Path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("operation", ["delete"])
+@pytest.mark.parametrize("operation", ["update", "delete"])
 async def test_id_mutation_rejects_a_stale_process(id_repository, operation: str) -> None:
     repo, workspace, url = id_repository
     original = await repo.create_entity(
@@ -99,7 +99,9 @@ async def test_id_mutation_rejects_a_stale_process(id_repository, operation: str
     await worker.stdin.drain()
     try:
         assert await asyncio.wait_for(worker.stdout.readline(), 20) == b"ready\n"
-        updated = await repo.update_entity(entity_id=original.id, data={"value": "fresh"})
+        updated = await repo.update_entity(
+            entity_id=original.id, data={"value": "fresh"}, expected_db_version=original.db_version
+        )
         worker.stdin.write(b"continue\n")
         await worker.stdin.drain()
         stdout, stderr = await asyncio.wait_for(worker.communicate(), 20)
