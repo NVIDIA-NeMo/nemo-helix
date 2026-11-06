@@ -257,14 +257,20 @@ class TestDeleteConfig:
         )
 
     def test_404_when_missing(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+        mock_entity_client.get = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
         resp = client.delete("/apis/garak/v2/workspaces/default/configs/missing")
         assert resp.status_code == 404
+        mock_entity_client.delete_by_id.assert_not_awaited()
 
     def test_409_when_changed(self, client, mock_entity_client) -> None:
+        config = _make_config("cfg-1")
+        mock_entity_client.get = AsyncMock(return_value=config)
         mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityConflictError("changed"))
         resp = client.delete("/apis/garak/v2/workspaces/default/configs/cfg-1")
         assert resp.status_code == 409
+        mock_entity_client.delete_by_id.assert_awaited_once_with(
+            AuditConfig, config.id, expected_db_version=config.db_version
+        )
 
 
 class TestListConfigsFiltering:
