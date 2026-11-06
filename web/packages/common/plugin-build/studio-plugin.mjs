@@ -57,7 +57,7 @@ const fix = (message, ...steps) => ({
 });
 const DEV_RUNTIME = "react/jsx-dev-runtime";
 /** `specifier` is what the plugin imported, when it differs from the package (a deep import). */
-const singletonBundled = (pkg, specifier = pkg) => fix(`The singleton "${pkg}" is bundled into the plugin; a second copy breaks shared context.`, `Import "${pkg}" only by a contract specifier (e.g. react-router), never a deep path (e.g. react-router/dom) and never from node_modules directly. The build helper externalizes contract specifiers for you.`, ...specifier === DEV_RUNTIME ? [`A development-mode build emits the dev JSX runtime ("${DEV_RUNTIME}"), which Studio does not provide. Build in production mode (e.g. vite build without --mode development).`] : [], "Rebuild the plugin.");
+const singletonBundled = (pkg, specifier = pkg) => fix(`The singleton "${pkg}" is bundled into the plugin; a second copy breaks shared context.`, `Import "${pkg}" only by a contract specifier (e.g. react-router), never a deep path (e.g. react-router/dom) and never from node_modules directly. The build helper externalizes contract specifiers for you.`, ...specifier === DEV_RUNTIME ? [`The build ran with NODE_ENV=development, which makes the React plugin import the development JSX runtime ("${DEV_RUNTIME}"); Studio does not provide it. Run the build with NODE_ENV unset or set to production (the default for vite build).`] : [], "Rebuild the plugin.");
 /** A deep import of a provided package (e.g. `@nemo/common/components/Foo`). */
 const providedDeepImport = (specifier, pkg) => fix(`Studio does not provide "${specifier}" (it is not in the plugin contract); "${pkg}" is provided only through its bare specifier.`, `Import from the bare "${pkg}" specifier instead of "${specifier}", then rebuild.`, `If the name you need is not exported from "${pkg}", add it to web/packages/common/src/plugin.ts.`);
 /** Render an issue as build-error text: code, message, optional importer, numbered steps. */
@@ -81,12 +81,26 @@ const specifiers = new Set(entries.map((e) => e.specifier));
 const packages = [...new Set(entries.map((e) => e.package))];
 const singletons = new Set(entries.filter((e) => e.kind === "singleton").map((e) => e.package));
 const bundledSingletonIn = (moduleIds) => {
+	const nameByDir = /* @__PURE__ */ new Map();
+	const packageName = (dir) => {
+		const cached = nameByDir.get(dir);
+		if (cached !== void 0) return cached;
+		let name = null;
+		try {
+			const parsed = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+			name = typeof parsed.name === "string" ? parsed.name : null;
+		} catch {}
+		const parent = path.dirname(dir);
+		if (name === null && path.basename(parent) === "node_modules") name = path.basename(dir);
+		else if (name === null && path.basename(path.dirname(parent)) === "node_modules" && path.basename(parent).startsWith("@")) name = `${path.basename(parent)}/${path.basename(dir)}`;
+		if (name === null && parent !== dir) name = packageName(parent);
+		nameByDir.set(dir, name);
+		return name;
+	};
 	for (const id of moduleIds) {
-		const segments = id.replaceAll("\\", "/").split("/");
-		for (let i = segments.indexOf("node_modules"); i !== -1; i = segments.indexOf("node_modules", i + 1)) {
-			const name = segments[i + 1]?.startsWith("@") ? `${segments[i + 1]}/${segments[i + 2]}` : segments[i + 1];
-			if (singletons.has(name)) return name;
-		}
+		if (id.startsWith("\0")) continue;
+		const name = packageName(path.dirname(id.replace(/[?#].*$/, "")));
+		if (name !== null && singletons.has(name)) return name;
 	}
 };
 const readVersion = (root, pkg) => {

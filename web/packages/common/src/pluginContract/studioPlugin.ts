@@ -24,22 +24,50 @@ const specifiers = new Set(entries.map((e) => e.specifier));
 const packages = [...new Set(entries.map((e) => e.package))];
 const singletons = new Set(entries.filter((e) => e.kind === 'singleton').map((e) => e.package));
 
+// Identifies each bundled module by the `name` in its nearest package.json (not by path), so
+// pnpm layouts, symlinks and `link:` checkouts outside node_modules are caught. A package
+// directory installed in node_modules without a package.json falls back to its directory
+// name. Results are cached per directory so a bundle of thousands of modules reads each
+// package.json once.
 const bundledSingletonIn = (moduleIds: Iterable<string>): string | undefined => {
-  for (const id of moduleIds) {
-    // Whole path segments only (`react-dom` must not match `react-dom-foo`); this also covers the
-    // pnpm layout `node_modules/.pnpm/<x>/node_modules/<pkg>/`.
-    const segments = id.replaceAll('\\', '/').split('/');
-    for (
-      let i = segments.indexOf('node_modules');
-      i !== -1;
-      i = segments.indexOf('node_modules', i + 1)
+  const nameByDir = new Map<string, string | null>();
+  const packageName = (dir: string): string | null => {
+    const cached = nameByDir.get(dir);
+    if (cached !== undefined) {
+      return cached;
+    }
+    let name: string | null = null;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
+      name = typeof parsed.name === 'string' ? parsed.name : null;
+    } catch {
+      // No (or unparsable) package.json here.
+    }
+    const parent = path.dirname(dir);
+    if (name === null && path.basename(parent) === 'node_modules') {
+      name = path.basename(dir);
+    } else if (
+      name === null &&
+      path.basename(path.dirname(parent)) === 'node_modules' &&
+      path.basename(parent).startsWith('@')
     ) {
-      const name = segments[i + 1]?.startsWith('@')
-        ? `${segments[i + 1]}/${segments[i + 2]}`
-        : segments[i + 1];
-      if (singletons.has(name)) {
-        return name;
-      }
+      name = `${path.basename(parent)}/${path.basename(dir)}`;
+    }
+    // A nested package.json without a name (e.g. `{ "type": "module" }`) belongs to its parent.
+    if (name === null && parent !== dir) {
+      name = packageName(parent);
+    }
+    nameByDir.set(dir, name);
+    return name;
+  };
+
+  for (const id of moduleIds) {
+    if (id.startsWith('\0')) {
+      continue; // Virtual module: no file on disk.
+    }
+    const name = packageName(path.dirname(id.replace(/[?#].*$/, '')));
+    if (name !== null && singletons.has(name)) {
+      return name;
     }
   }
   return undefined;
@@ -90,7 +118,9 @@ export const studioPlugin = (
     },
 
     // Singletons are checked twice: here, deep imports are caught with an actionable importer;
-    // in generateBundle, source reached by paths that bypass resolution (relative node_modules).
+    // in generateBundle, the scan identifies bundled packages by their package.json name, so
+    // paths that bypass resolution (relative imports, links, checkouts outside node_modules)
+    // are caught too.
     resolveId(source, importer) {
       if (source.startsWith('.') || path.isAbsolute(source)) {
         return null;
