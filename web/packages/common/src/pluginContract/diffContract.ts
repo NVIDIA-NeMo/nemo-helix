@@ -6,32 +6,21 @@ import {
   manifestMissing,
   singletonBundled,
   specifierUnmapped,
-  versionDrift,
   versionIncompatible,
 } from '@nemo/common/src/pluginContract/remediate';
 import { parseVersion } from '@nemo/common/src/pluginContract/semver';
 import type {
   ContractIssue,
   IssueCode,
-  IssueSeverity,
   PluginContract,
   PluginSidecar,
 } from '@nemo/common/src/pluginContract/types';
-
-const SEVERITY: Record<IssueCode, IssueSeverity> = {
-  PLUGIN_MANIFEST_MISSING: 'error',
-  PLUGIN_SPECIFIER_UNMAPPED: 'error',
-  PLUGIN_SINGLETON_BUNDLED: 'error',
-  PLUGIN_CONTRACT_UNSUPPORTED: 'error',
-  PLUGIN_VERSION_INCOMPATIBLE: 'error',
-  PLUGIN_VERSION_DRIFT: 'warning',
-};
 
 const issue = (
   code: IssueCode,
   subject: string,
   fix: Pick<ContractIssue, 'message' | 'steps'>
-): ContractIssue => ({ code, severity: SEVERITY[code], subject, ...fix });
+): ContractIssue => ({ code, subject, ...fix });
 
 const bySubject = (a: ContractIssue, b: ContractIssue) =>
   a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0;
@@ -86,26 +75,13 @@ export const diffContract = (
     const studio = studioVersions[pkg];
     const b = parseVersion(builtVersion);
     const s = studio === undefined ? null : parseVersion(studio);
-    if (!b || !s) continue;
-    if (b[0] !== s[0]) {
+    if (b && s && b[0] !== s[0]) {
       versionIssues.push(
         issue('PLUGIN_VERSION_INCOMPATIBLE', pkg, versionIncompatible(pkg, builtVersion, studio))
-      );
-    } else if (b[1] !== s[1] || b[2] !== s[2]) {
-      versionIssues.push(
-        issue('PLUGIN_VERSION_DRIFT', pkg, versionDrift(pkg, builtVersion, studio))
       );
     }
   }
   issues.push(...versionIssues.sort(bySubject));
 
-  // Stable sort: errors first, rule order preserved within a severity.
-  return [
-    ...issues.filter((i) => i.severity === 'error'),
-    ...issues.filter((i) => i.severity === 'warning'),
-  ];
+  return issues;
 };
-
-/** True when any issue should stop the plugin from loading. */
-export const hasBlockingIssues = (issues: readonly ContractIssue[]): boolean =>
-  issues.some((i) => i.severity === 'error');

@@ -48,14 +48,10 @@ export type IssueCode =
   | 'PLUGIN_SPECIFIER_UNMAPPED'
   | 'PLUGIN_SINGLETON_BUNDLED'
   | 'PLUGIN_CONTRACT_UNSUPPORTED'
-  | 'PLUGIN_VERSION_DRIFT'
   | 'PLUGIN_VERSION_INCOMPATIBLE';
-
-export type IssueSeverity = 'error' | 'warning';
 
 export interface ContractIssue {
   code: IssueCode;
-  severity: IssueSeverity;
   /** The package or specifier the issue is about; empty for a missing sidecar. */
   subject: string;
   message: string;
