@@ -23,6 +23,7 @@ from nemo_customizer.api.v2.schemas import (
     UpdateCustomizationJobTemplateRequest,
 )
 from nemo_customizer.entities import CustomizationJobTemplate
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import AuthzScope, CallerKind, PermissionSet, path_rule, perm
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -97,8 +98,7 @@ async def create_job_template(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[CustomizationJobTemplatePerms.LIST])
 async def list_job_templates(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> CustomizationJobTemplatePage:
@@ -107,8 +107,8 @@ async def list_job_templates(
         result = await entity_client.list(
             CustomizationJobTemplate,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
         )
     except Exception as exc:

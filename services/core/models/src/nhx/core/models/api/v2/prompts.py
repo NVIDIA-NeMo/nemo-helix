@@ -4,6 +4,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
@@ -46,8 +47,7 @@ router = APIRouter()
 )
 async def list_prompts(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: PromptSort = Query(
         default=PromptSort.CREATED_AT_ASC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -61,8 +61,8 @@ async def list_prompts(
     try:
         return await service.list_prompts(
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_operation=parsed_filter.operation,
         )

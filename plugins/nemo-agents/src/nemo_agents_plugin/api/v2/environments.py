@@ -35,6 +35,7 @@ from nemo_agents_plugin.schema import (
     EnvironmentSpecPage,
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity import NemoEntity
@@ -90,8 +91,7 @@ async def create_environment(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentPerms.LIST])
 async def list_environments(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: EnvironmentFilter = Depends(_environment_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -102,8 +102,8 @@ async def list_environments(
         AgentEnvironment,
         EnvironmentPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="environments",
@@ -159,8 +159,7 @@ async def create_environment_spec(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[EnvironmentSpecPerms.LIST])
 async def list_environment_specs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: EnvironmentSpecFilter = Depends(_environment_spec_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -171,8 +170,8 @@ async def list_environment_specs(
         AgentEnvironmentSpec,
         EnvironmentSpecPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="environment specs",
@@ -228,8 +227,7 @@ async def create_compute_spec(
 @path_rule(callers=[CallerKind.PRINCIPAL], permissions=[ComputeSpecPerms.LIST])
 async def list_compute_specs(
     workspace: str,
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
+    page_params: PageParams = Depends(make_page_dep(default_size=20, max_size=100)),
     sort: str = Query(default="-created_at"),
     filter: ComputeSpecFilter = Depends(_compute_spec_filter_dep),
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
@@ -240,8 +238,8 @@ async def list_compute_specs(
         AgentComputeSpec,
         ComputeSpecPage,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort,
         filter=filter,
         kind="compute specs",

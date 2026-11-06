@@ -17,6 +17,7 @@ from fastapi import (
     Response,
 )
 from fastapi.responses import FileResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.client.client import AsyncNemoClient
 from nemo_helix_plugin.client.errors import NemoClientError
 from nhx.common.api.common import ErrorResponse, GenericSortField, PaginationData
@@ -411,8 +412,7 @@ async def create_fileset(
 )
 async def list_filesets(
     workspace: str,
-    page: int = Query(default=1, ge=1, description="Page number."),
-    page_size: int = Query(default=10, ge=1, le=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10, max_size=100)),
     sort: GenericSortField = Query(
         default=GenericSortField.CREATED_AT_DESC,
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -431,8 +431,8 @@ async def list_filesets(
     res = await entity_store.list(
         Fileset,
         workspace=workspace,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         filter_operation=parsed.operation,
     )
