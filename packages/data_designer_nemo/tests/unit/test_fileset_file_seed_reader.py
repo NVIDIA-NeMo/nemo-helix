@@ -42,7 +42,7 @@ def test_create_duckdb_connection_uses_injected_client() -> None:
     filesystem = Mock()
 
     with (
-        patch("data_designer_nemo.fileset_file_seed_reader.connect", return_value=conn),
+        patch("data_designer_nemo.fileset_file_seed_reader._connect", return_value=conn),
         patch("data_designer_nemo.fileset_file_seed_reader.make_filesystem", return_value=filesystem),
     ):
         assert FilesetFileSeedReader(client).create_duckdb_connection() is conn
