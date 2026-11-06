@@ -73,6 +73,7 @@ export function VirtualDropdownList<R extends { key: string }>({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: (index) => estimateSize(rows[index]),
+    getItemKey: (index) => rows[index].key,
     overscan: OVERSCAN,
     initialRect: INITIAL_RECT,
   });
@@ -124,7 +125,7 @@ export function VirtualDropdownList<R extends { key: string }>({
         >
           {virtualItems.map((virtualRow) => (
             <div
-              key={rows[virtualRow.index].key}
+              key={virtualRow.key}
               ref={virtualizer.measureElement}
               data-index={virtualRow.index}
               className="absolute top-0 left-0 w-full"
