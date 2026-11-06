@@ -166,7 +166,17 @@ def test_download_wheels_hands_pip_a_constraints_file_and_cleans_it_up(tmp_path:
     assert not (tmp_path / ".wheel-constraints.txt").exists()
 
 
-def test_host_gym_constraints_returns_sorted_distribution_pins() -> None:
+def test_the_bundled_host_lock_is_the_gym_host_images_lock() -> None:
+    """The plugin ships a copy of docker/locks/nhx-gym-host/uv.lock; a Gym bump in the image must copy it over again."""
+    repo_lock = Path(__file__).resolve().parents[3] / "docker" / "locks" / "nhx-gym-host" / "uv.lock"
+    bundled = (
+        Path(__file__).resolve().parents[1] / "src" / "nemo_evals" / "gym_registered_agent" / "nhx-gym-host.uv.lock"
+    )
+    assert bundled.read_bytes() == repo_lock.read_bytes(), (
+        "nemo_evals/gym_registered_agent/nhx-gym-host.uv.lock differs from docker/locks/nhx-gym-host/uv.lock; "
+        "copy the lock over: cp docker/locks/nhx-gym-host/uv.lock "
+        "plugins/nemo-evals/src/nemo_evals/gym_registered_agent/nhx-gym-host.uv.lock"
+    )
     pins = host_gym_constraints()
     assert any(pin.startswith("nemo-gym==") for pin in pins)
     assert any(pin.startswith("openai==") for pin in pins)
