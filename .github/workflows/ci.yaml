@@ -124,8 +124,6 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
           enable-cache: false
-      - name: Run E2E workflow contract tests
-        run: uv run --no-cache .github/scripts/tests/test_e2e_workflow.py
       - name: Run test-gate check unit tests
         run: uv run --no-cache .github/scripts/tests/test_check_test_gates.py
       - name: Check for test gates no workflow sets

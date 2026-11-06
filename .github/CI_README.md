@@ -91,9 +91,10 @@ Manual runs retain the `image_tag` and `publish` inputs.
 
 For PRs to `main` or `release/*`, maintainers can opt in by adding **`e2e`** to a
 **non-draft, same-repository PR**. Forks and missing/invalid PR context cannot opt
-in. Current labels are checked on synchronize, reopen, ready-for-review, and
-label events. Unlabeling or converting to draft does not trigger a new run or
-cancel an existing run; subsequent triggered runs recheck eligibility. No
+in. PR runs are triggered only by label additions, checking current labels and
+draft status. New commits, reopening, and readiness changes do not rerun E2E;
+remove and reapply `e2e` to test a newer commit or a previously draft PR.
+Unlabeling or converting to draft does not cancel an existing run. No
 `pull_request_target` or new permissions are used.
 
 The label enables CPU image publication, all Kind suites, Authentik/ZITADEL

@@ -8,7 +8,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main, "release/*"]
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [labeled]
   workflow_dispatch:
     inputs:
       image_tag:
@@ -38,7 +38,7 @@ jobs:
     name: Check E2E eligibility
     # Never run secret-bearing tests or publish images for forks/drafts. Do not
     # use pull_request_target: PR code runs only in the pull_request context.
-    # Read current labels so opt-in survives synchronize and unrelated label events.
+    # Recheck current labels and draft status on each label event.
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
