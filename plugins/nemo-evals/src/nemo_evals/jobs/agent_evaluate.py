@@ -624,6 +624,13 @@ class _AgentEvalJobBase(NemoJob):
     ) -> dict:
         """Run the agent evaluation with one platform client color chosen by the concrete class."""
         spec = AgentEvalSpec.model_validate(config)
+        result_directories = {name: Path(path).resolve() for name, path in spec.result_directories.items()}
+        for directory in result_directories.values():
+            if not directory.is_dir():
+                raise ValueError("result directory must exist before execution")
+            for storage in (ctx.storage.persistent.resolve(), ctx.storage.ephemeral.resolve()):
+                if directory.is_relative_to(storage) or storage.is_relative_to(directory):
+                    raise ValueError("result directory must not overlap job storage")
         prepare_ctx = PrepareContext(
             storage_root=ctx.storage.persistent,
             client=platform_client if isinstance(platform_client, NemoClient) else None,
@@ -696,11 +703,15 @@ class _AgentEvalJobBase(NemoJob):
         for name, path in {
             DEFAULT_RESULT_NAME: files.bundle_dir,
             SUMMARY_RESULT_NAME: files.summary,
+            **result_directories,
         }.items():
             try:
-                saved = ctx.results.save(name, path)
                 if name == DEFAULT_RESULT_NAME:
-                    artifact = saved
+                    artifact = ctx.results.save(name, path)
+                else:
+                    if name in result_directories and (not path.is_dir() or path.resolve() != path):
+                        raise ValueError("result directory disappeared or was redirected during execution")
+                    ctx.results.save(name, path)
             except Exception as error:
                 error.add_note(f"Failed to save result {name!r}")
                 finalization_errors.append(error)

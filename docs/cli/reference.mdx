@@ -9537,7 +9537,7 @@ nemo evals agent-evaluate [OPTIONS] [COMMAND] [ARGS]...
 
 Job Spec flags are generated from the AgentEvalInputSpec Pydantic schema. Precedence: `--spec-file` (base) → `--spec` JSON (overlay) → per-flag values (top).
 
-Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
+Some spec fields cannot be represented as CLI flags: `target`, `trials`, `labels`, `result_directories`, `tasks`. Supply them with `--spec` or `--spec-file`. Individual flags override values from the supplied spec.
 ​
 
 **Commands:**

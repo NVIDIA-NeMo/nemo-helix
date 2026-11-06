@@ -347,6 +347,24 @@ Use the in-memory result for programmatic follow-up and the bundle for
 inspection, sharing, or rescoring. Platform jobs persist the bundle and create
 a queryable record under `evaluator.agent_eval_results`.
 
+A job can also save local directories outside the bundle through the same native job fileset:
+
+```yaml
+result_directories:
+  workspace: /workspace
+```
+
+Each entry becomes a separate named job result beside `agent-eval-results` and `summary`.
+Names cannot replace those two results. Paths must be absolute, must exist before execution,
+and must not overlap persistent or ephemeral job storage. Keep credentials and service state
+outside these sensitive, unredacted directories.
+The bundle and summary are attempted first, then directories in declaration order; place essential
+outputs before large workspaces or caches. A save failure does not stop remaining uploads. If the
+bundle is durable, the job still attempts its result record and configured publication. Required
+upload/publication failures fail the job after these attempts, preserving all errors. Publication
+is skipped when the bundle upload fails. Cancellation is not suppressed. A completed bundle or
+published trace alone does not prove the additional results arrived; download and verify them.
+
 A platform job hands back an `AgentEvaluatorJobResource`, which is not the
 dataset-driven job handle: it offers `name`, `job`, `get_job_status()`,
 `check_if_complete()`, and `wait_until_done()`, but no `get_result()` or
