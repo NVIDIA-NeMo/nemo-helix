@@ -10,17 +10,28 @@ cluster; this policy is the second layer, for clusters whose CNI enforces it. It
 ports other than execd, such as Compose services, and sandboxes created by other clients. OpenSandbox creates no NetworkPolicy, and its
 egress sidecar filters only what leaves a sandbox. Platform clients reach sandboxes through the OpenSandbox server's
 proxy, so the server's namespace is the only source a sandbox needs to admit.
+
+Every install with OpenSandbox gets it, whatever networkPolicies.enabled says, because execd takes commands from anyone
+who reaches it. It has no off switch: opensandbox.sandboxNetworkPolicy.extraIngress admits anything else that needs in.
 */}}
-{{- $sandboxes := .Values.networkPolicies.sandboxes }}
+{{- $sandboxes := .Values.opensandbox.sandboxNetworkPolicy }}
 {{- $sandboxCapable := or .Values.sandboxClusterCapable (dig "platform" "sandbox_cluster_capable" false .Values.platformConfig) }}
-{{- if and .Values.networkPolicies.enabled $sandboxes.enabled $sandboxCapable }}
+{{- if $sandboxCapable }}
 {{- $serverNamespace := .Values.opensandbox.namespace }}
 {{- if not $serverNamespace }}
-{{- fail "opensandbox.namespace is required when networkPolicies.sandboxes.enabled: sandbox pods admit traffic only from that namespace" }}
+{{- fail "opensandbox.namespace is required with OpenSandbox: sandbox pods admit traffic only from that namespace" }}
+{{- end }}
+{{- /* An in-cluster domain names the server's namespace. If it disagrees, the policy would shut the server out of every sandbox. */}}
+{{- $domain := .Values.opensandbox.domain | default "" }}
+{{- if regexMatch "^[^.]+\\.[^.]+\\.svc(\\.|:|$)" $domain }}
+{{- $domainNamespace := index (splitList "." $domain) 1 }}
+{{- if ne $domainNamespace $serverNamespace }}
+{{- fail (printf "opensandbox.namespace (%s) doesn't match the namespace in opensandbox.domain (%s): sandbox pods would admit traffic only from a namespace the server isn't in" $serverNamespace $domainNamespace) }}
+{{- end }}
 {{- end }}
 {{- $sandboxNamespace := .Values.opensandbox.composeServices.sandboxNamespace | default .Release.Namespace }}
 {{- if and (eq $serverNamespace $sandboxNamespace) (not $sandboxes.serverPodSelector) }}
-{{- fail "networkPolicies.sandboxes.serverPodSelector is required when the OpenSandbox server runs in the sandbox namespace: admitting the whole namespace would admit the sandboxes themselves" }}
+{{- fail "opensandbox.sandboxNetworkPolicy.serverPodSelector is required when the OpenSandbox server runs in the sandbox namespace: admitting the whole namespace would admit the sandboxes themselves" }}
 {{- end }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

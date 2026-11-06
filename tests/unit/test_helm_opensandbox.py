@@ -77,7 +77,7 @@ def test_sandbox_cluster_capable_wires_domain_protocol_and_secret() -> None:
     assert _has_opensandbox_deployment(documents) is False
 
 
-SANDBOX_POLICIES = ("--set", "networkPolicies.enabled=true", "--set", "sandboxClusterCapable=true")
+SANDBOX_POLICIES = ("--set", "sandboxClusterCapable=true")
 
 
 def _sandbox_policies(documents: list[dict]) -> list[dict]:
@@ -110,7 +110,7 @@ def test_sandbox_policy_goes_to_the_sandbox_namespace_and_narrows_to_the_server_
             "--set",
             "opensandbox.composeServices.sandboxNamespace=nemo-sandboxes",
             "--set",
-            "networkPolicies.sandboxes.serverPodSelector.matchLabels.app=opensandbox-server",
+            "opensandbox.sandboxNetworkPolicy.serverPodSelector.matchLabels.app=opensandbox-server",
         )
     )
 
@@ -127,21 +127,58 @@ def test_sandbox_policy_goes_to_the_sandbox_namespace_and_narrows_to_the_server_
     ]
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        pytest.param(("--set", "networkPolicies.enabled=true"), id="no-opensandbox"),
-        pytest.param(("--set", "sandboxClusterCapable=true"), id="network-policies-off"),
-        pytest.param((*SANDBOX_POLICIES, "--set", "networkPolicies.sandboxes.enabled=false"), id="sandbox-policy-off"),
-    ],
-)
-def test_sandbox_policy_is_not_rendered(args: tuple[str, ...]) -> None:
-    assert _sandbox_policies(_helm_template(*args)) == []
+def test_sandbox_policy_is_rendered_whatever_the_chart_wide_network_policy_switch_says() -> None:
+    """OpenSandbox alone turns the policy on: execd takes commands from anyone who reaches it."""
+    assert _sandbox_policies(_helm_template(*SANDBOX_POLICIES, "--set", "networkPolicies.enabled=false"))
+
+
+def test_sandbox_policy_is_not_rendered_without_opensandbox() -> None:
+    assert _sandbox_policies(_helm_template("--set", "networkPolicies.enabled=true")) == []
+
+
+def test_extra_ingress_can_admit_everything() -> None:
+    """With no off switch, an empty rule is how an operator opens sandboxes up."""
+    (policy,) = _sandbox_policies(
+        _helm_template(*SANDBOX_POLICIES, "--set-json", "opensandbox.sandboxNetworkPolicy.extraIngress=[{}]")
+    )
+
+    assert policy["spec"]["ingress"][-1] == {}
 
 
 def test_sandbox_policy_refuses_to_admit_the_whole_sandbox_namespace() -> None:
     """A server in the sandbox namespace needs a pod selector, or the policy would admit the sandboxes themselves."""
     with pytest.raises(subprocess.CalledProcessError) as refused:
-        _helm_template(*SANDBOX_POLICIES, "--set", "opensandbox.namespace=default")
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.namespace=default",
+            "--set",
+            "opensandbox.domain=opensandbox-server.default.svc.cluster.local",
+        )
 
-    assert "networkPolicies.sandboxes.serverPodSelector is required" in refused.value.stderr
+    assert "opensandbox.sandboxNetworkPolicy.serverPodSelector is required" in refused.value.stderr
+
+
+def test_sandbox_policy_refuses_a_namespace_the_server_domain_contradicts() -> None:
+    """A wrong opensandbox.namespace would shut the server out of every sandbox, so the chart refuses it."""
+    with pytest.raises(subprocess.CalledProcessError) as refused:
+        _helm_template(*SANDBOX_POLICIES, "--set", "opensandbox.namespace=elsewhere")
+
+    assert "doesn't match the namespace in opensandbox.domain" in refused.value.stderr
+
+
+def test_sandbox_policy_skips_the_domain_check_for_an_external_domain() -> None:
+    """A gateway or external hostname names no namespace, so only opensandbox.namespace decides."""
+    (policy,) = _sandbox_policies(
+        _helm_template(
+            *SANDBOX_POLICIES,
+            "--set",
+            "opensandbox.domain=sandbox.example.com",
+            "--set",
+            "opensandbox.namespace=elsewhere",
+        )
+    )
+
+    assert policy["spec"]["ingress"][0]["from"][0]["namespaceSelector"]["matchLabels"] == {
+        "kubernetes.io/metadata.name": "elsewhere"
+    }
