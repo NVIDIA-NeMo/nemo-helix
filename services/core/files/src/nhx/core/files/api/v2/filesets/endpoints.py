@@ -486,6 +486,7 @@ async def delete_fileset(
     entity_store: EntityClient = Depends(get_entity_client),
     client: AsyncNemoClient = Depends(get_nemo_client),
     auth_client: AuthClient = Depends(get_auth_client),
+    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
 ) -> FilesetOutput:
     """
     Delete Fileset.
@@ -494,9 +495,77 @@ async def delete_fileset(
     Referencing model or adapter entities must be relinked or deleted first.
     For local storage backends, this also deletes the underlying files.
     """
-    logger.info(f"DELETE /filesets/{name} - workspace={workspace}")
     fileset = await get_fileset(workspace, name, entity_store)
+    return await _delete_fileset_target(workspace, fileset.id, entity_store, client, auth_client, config)
 
+
+async def _get_fileset_entity_by_id(workspace: str, fileset_id: str, entity_store: EntityClient) -> Fileset:
+    try:
+        fileset = await entity_store.get_by_id(Fileset, fileset_id)
+    except EntityNotFoundError as exc:
+        raise HTTPException(HTTP_404_NOT_FOUND, "Fileset not found") from exc
+    if fileset.workspace != workspace:
+        raise HTTPException(HTTP_404_NOT_FOUND, "Fileset not found")
+    return fileset
+
+
+@router.get(
+    "/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}",
+    response_model=FilesetOutput,
+    summary="Get Fileset by ID",
+)
+async def get_fileset_by_id(
+    workspace: str,
+    fileset_id: str,
+    entity_store: EntityClient = Depends(get_entity_client),
+) -> FilesetOutput:
+    fileset = await _get_fileset_entity_by_id(workspace, fileset_id, entity_store)
+    return fileset_output_from_entity(fileset)
+
+
+@router.delete(
+    "/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}",
+    response_model=FilesetOutput,
+    summary="Delete Fileset by ID",
+)
+async def delete_fileset_by_id(
+    workspace: str,
+    fileset_id: str,
+    entity_store: EntityClient = Depends(get_entity_client),
+    client: AsyncNemoClient = Depends(get_nemo_client),
+    auth_client: AuthClient = Depends(get_auth_client),
+    config: FilesConfig = Depends(get_service_config_factory(FilesConfig)),
+) -> FilesetOutput:
+    return await _delete_fileset_target(workspace, fileset_id, entity_store, client, auth_client, config)
+
+
+async def _delete_fileset_target(
+    workspace: str,
+    fileset_id: str,
+    entity_store: EntityClient,
+    client: AsyncNemoClient,
+    auth_client: AuthClient,
+    config: FilesConfig,
+) -> FilesetOutput:
+    # Key the existing lock by the resource generation, including name-addressed callers.
+    await _get_fileset_entity_by_id(workspace, fileset_id, entity_store)
+    manager = _get_cache_lock_manager(entity_store.as_service("files", internal=True), config)
+    async with manager.acquire(f"fileset-delete:{workspace}:{fileset_id}") as acquired:
+        if not acquired:
+            raise HTTPException(HTTP_409_CONFLICT, "Fileset deletion is in progress; retry later.")
+        fileset = await _get_fileset_entity_by_id(workspace, fileset_id, entity_store)
+        return await _delete_fileset_locked(workspace, fileset, entity_store, client, auth_client)
+
+
+async def _delete_fileset_locked(
+    workspace: str,
+    fileset: Fileset,
+    entity_store: EntityClient,
+    client: AsyncNemoClient,
+    auth_client: AuthClient,
+) -> FilesetOutput:
+    name = fileset.name
+    logger.info("Deleting Fileset", extra={"workspace": workspace, "fileset_id": fileset.id})
     try:
         # Referential checks and deletion are separate Entity Store requests. Model
         # consumers revalidate the fileset before use so a concurrent write cannot
@@ -562,7 +631,14 @@ async def delete_fileset(
             f"nothing to delete on the source, proceeding with entity deletion: {exc}"
         )
 
-    await entity_store.delete(Fileset, fileset.name, workspace=workspace)
+    try:
+        await entity_store.delete_by_id(Fileset, fileset.id, expected_db_version=fileset.db_version)
+    except EntityNotFoundError:
+        pass  # Another delete completed this same ID.
+    except EntityConflictError as exc:
+        raise HTTPException(
+            HTTP_409_CONFLICT, "Fileset changed during deletion; retry with its current identity."
+        ) from exc
 
     # Return the fileset data that was captured before deletion
     return fileset_output_from_entity(fileset)

@@ -118,6 +118,13 @@ async def delete_deployment_config(
     name: str,
     entity_client: NemoEntitiesClient = Depends(get_entity_client),
 ) -> None:
+    try:
+        _delete_target = await entity_client.get(DeploymentConfig, name=name, workspace=workspace)
+    except NemoEntityNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail=f"DeploymentConfig '{name}' not found in workspace '{workspace}'."
+        ) from exc
+
     # Best-effort referential check before delete. The version check below protects the
     # config row itself, but cannot make this relationship check atomic against a
     # concurrent deployment create.
@@ -136,7 +143,9 @@ async def delete_deployment_config(
         )
 
     try:
-        await entity_client.delete(DeploymentConfig, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            DeploymentConfig, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

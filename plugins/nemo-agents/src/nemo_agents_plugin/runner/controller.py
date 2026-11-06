@@ -787,12 +787,7 @@ class AgentDeploymentController(NemoController):
         if dep.id is not None:
             self._pending_restart_reconciliations.pop(dep.id, None)
         try:
-            await self.entities.delete(
-                AgentDeployment,
-                name=dep.name,
-                workspace=dep.workspace,
-                expected_db_version=dep.db_version,
-            )
+            await self.entities.delete_by_id(AgentDeployment, dep.id, expected_db_version=dep.db_version)
         except Exception:
             logger.exception("Failed to delete deployment entity '%s'", dep.name)
         else:

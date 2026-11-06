@@ -48,7 +48,12 @@ from nemo_agent_hardener_plugin.api.v2.schemas import (
 from nemo_agent_hardener_plugin.authz import scope
 from nemo_agent_hardener_plugin.cli.client import base_url
 from nemo_agent_hardener_plugin.entities import AgentHardenerManifest
-from nemo_agent_hardener_plugin.filesets import delete_fileset, download_and_extract_project, upload_project_dir
+from nemo_agent_hardener_plugin.filesets import (
+    UploadedFileset,
+    delete_fileset,
+    download_and_extract_project,
+    upload_project_dir,
+)
 from nemo_agent_hardener_plugin.jobs._common import resolve_model_key
 from nemo_agent_hardener_plugin.jobs.errors import AgentHardenerRunError
 from nemo_agent_hardener_plugin.jobs.manifest import _apply_agent_port
@@ -346,7 +351,7 @@ async def _resolve_and_store_scaffold(
     secrets: list[str] | None,
     backends: list[dict[str, Any]],
     env: dict[str, str] | None = None,
-) -> tuple[ResolvedManifest, str]:
+) -> tuple[ResolvedManifest, UploadedFileset]:
     """Resolve *agent_ref* and persist its scaffold as a fileset; return the resolution and the ref.
 
     Resolution *writes* a runnable agent package (``materialize_agent_package``), so
@@ -358,7 +363,7 @@ async def _resolve_and_store_scaffold(
 
     # resolve_agent_to_manifest is sync + network-bound (AgentsResource(client).get), and so is the upload;
     # keep both off the event loop. The temp dir must outlive the upload, hence one closure.
-    def _resolve_and_upload() -> tuple[ResolvedManifest, str]:
+    def _resolve_and_upload() -> tuple[ResolvedManifest, UploadedFileset]:
         with tempfile.TemporaryDirectory() as tmp:
             resolved = resolve_agent_to_manifest(
                 agent_ref,
@@ -404,7 +409,8 @@ async def _build_agent_manifest(workspace: str, body: ManifestInit) -> AgentHard
         workspace=workspace,
         agent_ref=f"{resolved.workspace}/{resolved.agent_name}",
         manifest_yaml=yaml.safe_dump(resolved.manifest, sort_keys=False),
-        agent_fileset=fileset,
+        agent_fileset=fileset.ref,
+        agent_fileset_id=fileset.fileset_id,
         port=resolved.port,
         secrets=resolved.secrets,
         egress=resolved.egress,  # what was actually written, including hosts derived from the config
@@ -581,8 +587,10 @@ async def refresh_manifest(
         env=existing.env,
     )
     stale = existing.agent_fileset
+    stale_id = existing.agent_fileset_id
 
-    existing.agent_fileset = fileset
+    existing.agent_fileset = fileset.ref
+    existing.agent_fileset_id = fileset.fileset_id
     existing.port = resolved.port
     existing.secrets = resolved.secrets
     existing.deployed_secret_refs = resolved.deployed_secret_refs
@@ -591,8 +599,10 @@ async def refresh_manifest(
     existing.manifest_yaml = _yaml_with_agent_settings(yaml.safe_dump(resolved.manifest, sort_keys=False), existing)
     updated = await entity_client.update(existing)
 
-    if stale and stale != fileset:
-        await run_in_threadpool(delete_fileset, get_nemo_client(as_service="agent-hardener", internal=True), stale)
+    if stale and stale_id != fileset.fileset_id:
+        await run_in_threadpool(
+            delete_fileset, get_nemo_client(as_service="agent-hardener", internal=True), stale, stale_id
+        )
     return updated
 
 
@@ -607,7 +617,7 @@ async def delete_manifest(
     """Delete a saved manifest by name, along with the victim bundle the service created for it."""
     existing = await _get_manifest_or_404(entity_client, workspace, name)
     try:
-        await entity_client.delete(AgentHardenerManifest, name=name, workspace=workspace)
+        await entity_client.delete_by_id(AgentHardenerManifest, existing.id, expected_db_version=existing.db_version)
     except Exception as exc:
         logger.exception("Failed to delete agent-hardener manifest '%s'", sanitize_for_log(name))
         raise HTTPException(status_code=500, detail="Failed to delete agent-hardener manifest.") from exc
@@ -618,4 +628,4 @@ async def delete_manifest(
     # The service uploads `agent_fileset` itself, so it owns it and is safe to remove it here.
     client = get_nemo_client(as_service="agent-hardener", internal=True)
     if existing.agent_fileset:
-        await run_in_threadpool(delete_fileset, client, existing.agent_fileset)
+        await run_in_threadpool(delete_fileset, client, existing.agent_fileset, existing.agent_fileset_id)

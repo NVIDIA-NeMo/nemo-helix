@@ -16,7 +16,7 @@ The Files service supports multiple storage backends and can be used to store da
 
 - **Fileset**: A named container that holds files.
 
- Filesets are uniquely identified by a **name** within a given **workspace**.
+ Fileset names are unique within a workspace. Each fileset also has a permanent ID. Reusing a deleted fileset's name creates a new ID.
 
 - **Storage Backend**: Each fileset is backed by a storage backend where the files are actually persisted. Supported backends include:
  - `local`: Local filesystem storage (default, read/write)
@@ -73,6 +73,8 @@ The Files service supports multiple storage backends and can be used to store da
 ## Managing Filesets
 
 Fileset management operations (create, retrieve, list, delete) are available through the CLI (`nemo files filesets`) or the SDK (`client.files`, for example `create_fileset`, `list_filesets`, `get_fileset`, `delete_fileset`).
+
+When retaining a reference across requests, use the fileset ID with the SDK's `get_fileset_by_id` and `delete_fileset_by_id` methods. A delayed request for a deleted ID cannot affect a new fileset with the same name. Deletion by ID performs the same reference checks and storage cleanup as deletion by name.
 
 <Tip>
 

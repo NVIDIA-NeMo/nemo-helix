@@ -220,7 +220,7 @@ async def test_rollback_failure_does_not_mask_the_original_error(
         raise RuntimeError("rollback failed too")
 
     entity_store.create = _boom
-    entity_store.delete = _delete_also_fails
+    entity_store.delete_by_id = _delete_also_fails
 
     with pytest.raises(RuntimeError, match="the original failure"):
         await service.create_taskset("ts-1", _taskset_input(), workspace="default")

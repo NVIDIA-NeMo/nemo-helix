@@ -570,17 +570,17 @@ async def test_update_model_entity_non_verbose_keeps_adapters(model_entity_servi
 async def test_delete_model_entity_success(model_entity_service, mock_entity_client, sample_model):
     """Test successful model entity deletion."""
     # Arrange
-    mock_entity_client.delete.return_value = None
+    mock_entity_client.delete_by_id.return_value = None
 
     # Act
     result = await model_entity_service.delete_model_entity("default", "test-model")
 
     # Assert
     assert result is True
-    mock_entity_client.delete.assert_called_once_with(
+    mock_entity_client.delete_by_id.assert_called_once_with(
         Model,
-        "test-model",
-        workspace="default",
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
     )
 
 
@@ -588,14 +588,18 @@ async def test_delete_model_entity_success(model_entity_service, mock_entity_cli
 async def test_delete_model_entity_not_found(model_entity_service, mock_entity_client):
     """Test deleting a non-existent model entity."""
     # Arrange
-    mock_entity_client.delete.side_effect = EntityNotFoundError("Entity not found")
+    mock_entity_client.delete_by_id.side_effect = EntityNotFoundError("Entity not found")
 
     # Act
     result = await model_entity_service.delete_model_entity("default", "nonexistent")
 
     # Assert
     assert result is False
-    mock_entity_client.delete.assert_called_once_with(Model, "nonexistent", workspace="default")
+    mock_entity_client.delete_by_id.assert_called_once_with(
+        Model,
+        mock_entity_client.get.return_value.id,
+        expected_db_version=mock_entity_client.get.return_value.db_version,
+    )
 
 
 @pytest.mark.asyncio
@@ -1095,12 +1099,7 @@ async def test_delete_model_adapter_success(
     result = await adapter_entity_service.delete_adapter("default", "test-model", "lora-adapter")
 
     assert result == 0
-    mock_entity_client.delete.assert_called_once_with(
-        Adapter,
-        adapter.name,
-        workspace="default",
-        parent=adapter.parent,
-    )
+    mock_entity_client.delete_by_id.assert_called_once_with(Adapter, adapter.id, expected_db_version=adapter.db_version)
 
 
 @pytest.mark.asyncio

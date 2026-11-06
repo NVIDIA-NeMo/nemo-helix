@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol, Self, cast
 
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.taskset_runs.entities import (
     TERMINAL_RUN_PHASES,
     MemberPhase,
@@ -108,7 +109,7 @@ class RunAcceptance:
     timeout_seconds: int
     execution_deadline_at: datetime
     finalization_deadline_at: datetime
-    discard_on_loss: tuple[str, ...] = ()
+    discard_on_loss: tuple[FilesetReceipt, ...] = ()
     auth_context: AuthContext | None = None
 
 
@@ -303,15 +304,15 @@ class TasksetRunStore:
             return AcceptedRun(run=run, created=True)
         except NemoEntityConflictError:
             existing = await self.entity_client.get(TasksetRunEntity, name=plan.run_id, workspace=plan.workspace)
-        if existing.plan_ref == stored.ref:
+        if existing.plan_fileset_id == stored.fileset_id:
             return AcceptedRun(run=existing, created=True)
-        await delete_fileset_ref(self.files_client, stored.ref)
+        await delete_fileset_ref(self.files_client, stored.ref, fileset_id=stored.fileset_id)
         await self._discard(acceptance.discard_on_loss)
         if existing.request_digest != acceptance.request_digest:
             raise RunRequestConflict(existing.name) from None
         return AcceptedRun(run=existing, created=False)
 
-    async def _discard(self, refs: tuple[str, ...]) -> None:
+    async def _discard(self, refs: tuple[FilesetReceipt, ...]) -> None:
         """Delete losing-request filesets without masking the acceptance outcome.
 
         Args:
@@ -322,7 +323,7 @@ class TasksetRunStore:
             attempts to proceed; cancellation still propagates.
         """
         for ref in refs:
-            await delete_fileset_ref(self.files_client, ref)
+            await delete_fileset_ref(self.files_client, ref.ref, fileset_id=ref.fileset_id)
 
     @staticmethod
     def _new_run(acceptance: RunAcceptance, plan: TasksetRunPlan, stored: StoredPlan) -> TasksetRunEntity:
@@ -341,6 +342,7 @@ class TasksetRunStore:
             name=plan.run_id,
             workspace=plan.workspace,
             plan_ref=stored.ref,
+            plan_fileset_id=stored.fileset_id,
             plan_digest=stored.digest,
             taskset_ref=plan.taskset_ref,
             idempotency_key=acceptance.idempotency_key,

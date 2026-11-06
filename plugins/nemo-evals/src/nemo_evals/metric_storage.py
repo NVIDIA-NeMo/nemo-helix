@@ -16,10 +16,12 @@ from __future__ import annotations
 import logging
 import uuid
 
-# Importing the payload modules registers their bundle payload kinds in the
-# bundle registry so MetricBundle payloads round-trip through validation.
 import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
+
+# Importing the payload modules registers their bundle payload kinds in the
+# bundle registry so MetricBundle payloads round-trip through validation.
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.shared.metric_bundles.bundles import MetricBundle
 from nemo_helix_plugin.files.client import AsyncFilesClient
 from nemo_helix_plugin.files.types import CreateFilesetRequest
@@ -63,7 +65,7 @@ def parse_bundle_ref(bundle_ref: str) -> tuple[str, str, str]:
     return workspace, fileset, path
 
 
-async def store_bundle(client: AsyncFilesClient, workspace: str, name: str, bundle: MetricBundle) -> str:
+async def store_bundle(client: AsyncFilesClient, workspace: str, name: str, bundle: MetricBundle) -> FilesetReceipt:
     """Serialize and upload a metric bundle to a fresh fileset, returning its reference.
 
     Each call creates a new, uniquely-named fileset, so callers can safely roll
@@ -74,10 +76,12 @@ async def store_bundle(client: AsyncFilesClient, workspace: str, name: str, bund
     body = bundle.model_dump_json().encode("utf-8")
     try:
         description = f"Stored metric bundle for {workspace}/{name}."
-        await client.create_fileset(
-            workspace=workspace,
-            body=CreateFilesetRequest(name=fileset, description=description[:255]),
-        )
+        allocated = (
+            await client.create_fileset(
+                workspace=workspace,
+                body=CreateFilesetRequest(name=fileset, description=description[:255]),
+            )
+        ).data()
     except Exception as exc:
         raise MetricBundleStorageError(f"failed to create fileset for metric bundle {workspace}/{name}") from exc
     try:
@@ -91,7 +95,7 @@ async def store_bundle(client: AsyncFilesClient, workspace: str, name: str, bund
         # Roll back the just-created (now-empty) fileset so a failed upload
         # doesn't leak it, then surface a typed storage error.
         try:
-            await client.delete_fileset(name=fileset, workspace=workspace)
+            await client.delete_fileset_by_id(fileset_id=allocated.id, workspace=workspace)
         except Exception:
             logger.warning(
                 "Failed to clean up fileset after a failed metric bundle upload; storage may be leaked",
@@ -101,7 +105,7 @@ async def store_bundle(client: AsyncFilesClient, workspace: str, name: str, bund
         raise MetricBundleStorageError(f"failed to upload metric bundle to {workspace}/{fileset}") from exc
     # Construct the reference ourselves so storage/retrieval stay self-consistent
     # regardless of the service's file_ref string format.
-    return f"{workspace}/{fileset}#{BUNDLE_FILENAME}"
+    return FilesetReceipt(ref=f"{workspace}/{fileset}#{BUNDLE_FILENAME}", fileset_id=allocated.id)
 
 
 async def load_bundle(client: AsyncFilesClient, bundle_ref: str, *, expected_digest: str | None = None) -> MetricBundle:
@@ -129,7 +133,10 @@ async def load_bundle(client: AsyncFilesClient, bundle_ref: str, *, expected_dig
     return bundle
 
 
-async def delete_bundle_by_ref(client: AsyncFilesClient, bundle_ref: str) -> None:
+async def delete_bundle_by_ref(client: AsyncFilesClient, bundle_ref: str, *, fileset_id: str | None) -> None:
     """Delete the specific fileset a bundle reference points at."""
     workspace, fileset, _ = parse_bundle_ref(bundle_ref)
-    await client.delete_fileset(name=fileset, workspace=workspace)
+    if fileset_id is None:
+        logger.warning("Retaining legacy metric fileset without an allocation ID: %s", bundle_ref)
+        return
+    await client.delete_fileset_by_id(fileset_id=fileset_id, workspace=workspace)

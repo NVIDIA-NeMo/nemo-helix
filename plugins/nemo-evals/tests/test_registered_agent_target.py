@@ -122,9 +122,11 @@ def _platform(mocker: MockerFixture, agent: object, *, ethos_fileset: bool = Fal
     agents.get_agent = AsyncMock(return_value=response)
     files = mocker.Mock()
     files.get_fileset = AsyncMock(return_value=mocker.Mock()) if ethos_fileset else AsyncMock(side_effect=_not_found())
-    files.create_fileset = AsyncMock(return_value=mocker.Mock())
+    allocated = mocker.Mock()
+    allocated.data.return_value.id = "snapshot-id"
+    files.create_fileset = AsyncMock(return_value=allocated)
     files.upload_file = AsyncMock(return_value=mocker.Mock())
-    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    files.delete_fileset_by_id = AsyncMock(return_value=mocker.Mock())
 
     async def fake_download(ref: FilesetRef, destination: str, **_: Any) -> Path:
         root = Path(destination) / ref.root
@@ -239,8 +241,8 @@ async def test_a_submission_that_fails_after_resolution_discards_its_snapshot(mo
             input_spec, workspace="dev", entity_client=None, async_sdk=_async_platform(), is_local=False
         )
 
-    deleted = files.delete_fileset.await_args.kwargs
-    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
+    deleted = files.delete_fileset_by_id.await_args.kwargs
+    assert deleted == {"workspace": "dev", "fileset_id": "snapshot-id"}
 
 
 async def test_skills_without_an_ethos_fileset_are_a_submit_error(mocker: MockerFixture) -> None:
@@ -606,8 +608,8 @@ async def test_a_harbor_fill_that_fails_after_the_snapshot_discards_it(mocker: M
         await _resolve(_harbor_by_agent())
 
     files.create_fileset.assert_awaited_once()
-    deleted = files.delete_fileset.await_args.kwargs
-    assert deleted == {"workspace": "dev", "name": files.create_fileset.await_args.kwargs["body"].name}
+    deleted = files.delete_fileset_by_id.await_args.kwargs
+    assert deleted == {"workspace": "dev", "fileset_id": "snapshot-id"}
 
 
 async def test_harbor_environment_secrets_join_the_targets_own(mocker: MockerFixture) -> None:
@@ -811,7 +813,7 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
     from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 
     files = mocker.Mock()
-    files.delete_fileset = AsyncMock(return_value=mocker.Mock())
+    files.delete_fileset_by_id = AsyncMock(return_value=mocker.Mock())
     mocker.patch("nemo_evals.jobs.agent_evaluate.client_from_platform", return_value=files)
     mocker.patch.object(
         AgentEvalJob, "_execution_profile", side_effect=HelixJobCompilationError("no such execution profile")
@@ -822,7 +824,9 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
     ).model_copy(
         update={
             "source": RegisteredAgentSource(
-                agent=AgentRef(root="dev/calc"), files=FilesetRef(root="dev/agent-files-0123abcd4567")
+                agent=AgentRef(root="dev/calc"),
+                files=FilesetRef(root="dev/agent-files-0123abcd4567"),
+                fileset_id="snapshot-id",
             )
         }
     )
@@ -833,7 +837,7 @@ async def test_a_compile_time_refusal_discards_the_snapshot(mocker: MockerFixtur
             workspace="dev", spec=spec, entity_client=None, job_name=None, async_sdk=_async_platform()
         )
 
-    files.delete_fileset.assert_awaited_once_with(workspace="dev", name="agent-files-0123abcd4567")
+    files.delete_fileset_by_id.assert_awaited_once_with(workspace="dev", fileset_id="snapshot-id")
 
 
 # --- Spec boundary -------------------------------------------------------------------------------------

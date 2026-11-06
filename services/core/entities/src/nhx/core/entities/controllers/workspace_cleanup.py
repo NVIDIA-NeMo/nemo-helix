@@ -503,10 +503,10 @@ class WorkspaceCleanup(HeartbeatMixin, Controller):
         try:
             files = AsyncFilesClient.from_client(self._client)
             filesets_response = await files.list_filesets(workspace=workspace.name)
-            filesets = [fileset.name async for fileset in filesets_response.items()]
+            filesets = [fileset.id async for fileset in filesets_response.items()]
             errors = await self._delete_resources(
                 filesets,
-                lambda name: files.delete_fileset(name=name, workspace=workspace.name),
+                lambda fileset_id: files.delete_fileset_by_id(fileset_id=fileset_id, workspace=workspace.name),
                 kind="fileset",
             )
             self._raise_if_resource_deletes_failed(workspace.name, errors, "fileset(s)")

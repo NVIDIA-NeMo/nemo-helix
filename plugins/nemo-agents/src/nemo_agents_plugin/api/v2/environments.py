@@ -364,7 +364,8 @@ async def _delete_entity(
     kind: str,
 ) -> None:
     try:
-        await entity_client.delete(entity_type, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(entity_type, name=name, workspace=workspace)
+        await entity_client.delete_by_id(entity_type, _delete_target.id, expected_db_version=_delete_target.db_version)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

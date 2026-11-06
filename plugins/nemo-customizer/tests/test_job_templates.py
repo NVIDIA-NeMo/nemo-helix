@@ -46,6 +46,7 @@ class FakeEntityClient:
     async def create(self, entity: CustomizationJobTemplate) -> CustomizationJobTemplate:
         if entity.name in self.entities:
             raise NemoEntityConflictError(entity.name)
+        entity._id = f"template-{len(self.entities)}"
         self.entities[entity.name] = entity
         return entity
 
@@ -59,6 +60,12 @@ class FakeEntityClient:
             raise self.update_error
         self.entities[entity.name] = entity
         return entity
+
+    async def delete_by_id(self, model, entity_id, *, expected_db_version=None):
+        for entity in self.entities.values():
+            if entity.id == entity_id:
+                return await self.delete(model, entity.name, entity.workspace)
+        raise NemoEntityNotFoundError(entity_id)
 
     async def delete(self, _model: Any, name: str, workspace: str) -> None:
         if self.delete_error is not None:

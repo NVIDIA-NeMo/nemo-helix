@@ -118,17 +118,18 @@ class TestGetRun:
 
 class TestDeleteRun:
     def test_deletes_run(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(return_value=None)
+        mock_entity_client.delete_by_id = AsyncMock(return_value=None)
 
         resp = client.delete("/apis/agent-hardener/v2/workspaces/default/runs/run-1")
 
         assert resp.status_code == 204, resp.text
-        call = mock_entity_client.delete.await_args
+        call = mock_entity_client.delete_by_id.await_args
         assert call is not None
-        assert call.kwargs["name"] == "run-1"
+        assert call.args[1] == mock_entity_client.get.return_value.id
+        assert call.kwargs["expected_db_version"] == mock_entity_client.get.return_value.db_version
 
     def test_missing_run_returns_404(self, client, mock_entity_client) -> None:
-        mock_entity_client.delete = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
+        mock_entity_client.delete_by_id = AsyncMock(side_effect=NemoEntityNotFoundError("nope"))
 
         resp = client.delete("/apis/agent-hardener/v2/workspaces/default/runs/ghost")
 

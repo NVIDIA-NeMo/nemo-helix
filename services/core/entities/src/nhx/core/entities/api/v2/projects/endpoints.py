@@ -277,10 +277,11 @@ async def delete_project(
 ) -> DeleteResponse:
     """Delete project."""
     try:
-        deleted_count = await repository.delete_entity_by_name(
-            workspace=workspace,
-            entity_type=PROJECT_ENTITY_TYPE,
-            name=name,
+        selected = await repository.get_entity_by_name(workspace=workspace, entity_type=PROJECT_ENTITY_TYPE, name=name)
+        deleted_count = (
+            await repository.delete_entity(entity_id=selected.id, expected_db_version=selected.db_version)
+            if selected
+            else 0
         )
         if deleted_count == 0:
             raise HTTPException(
@@ -291,6 +292,8 @@ async def delete_project(
             id=f"{workspace}/{name}",
             message="Project deleted successfully",
         )
+    except EntityVersionConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except IntegrityError as e:
         error_msg = str(e.orig) if hasattr(e, "orig") else str(e)
         logger.warning(f"Integrity error deleting project: {error_msg}")

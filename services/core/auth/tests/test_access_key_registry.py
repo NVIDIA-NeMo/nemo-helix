@@ -178,22 +178,22 @@ async def test_registry_discards_unreturned_key() -> None:
 
     await registry.discard_unreturned("ak_orphaned")
 
-    entity_client.delete.assert_awaited_once_with(
+    entity_client.delete_by_id.assert_awaited_once_with(
         AccessKeyEntity,
-        name="ak_orphaned",
-        workspace="system",
+        entity_client.get.return_value.id,
+        expected_db_version=entity_client.get.return_value.db_version,
     )
 
 
 @pytest.mark.asyncio
 async def test_registry_discard_unreturned_is_idempotent_when_record_is_missing() -> None:
     entity_client = AsyncMock()
-    entity_client.delete.side_effect = EntityNotFoundError("missing")
+    entity_client.delete_by_id.side_effect = EntityNotFoundError("missing")
     registry = AccessKeyRegistry(entity_client)
 
     await registry.discard_unreturned("ak_missing")
 
-    entity_client.delete.assert_awaited_once()
+    entity_client.delete_by_id.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -303,7 +303,7 @@ async def test_registry_revokes_owned_key_without_deleting_audit_record() -> Non
     assert updated is not original
     assert original.status == "ACTIVE"
     assert updated.status == "REVOKED"
-    entity_client.delete.assert_not_awaited()
+    entity_client.delete_by_id.assert_not_awaited()
 
 
 @pytest.mark.asyncio

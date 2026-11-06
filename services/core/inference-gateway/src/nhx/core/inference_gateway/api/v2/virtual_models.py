@@ -489,11 +489,11 @@ async def delete_virtual_model(
     this VirtualModel.  IGW's model cache is refreshed on its next polling cycle.
     """
     try:
-        await entity_client.delete(
+        _delete_target = await entity_client.get(VirtualModel, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
             VirtualModel,
-            name=name,
-            workspace=workspace,
-            expected_db_version=expected_db_version,
+            _delete_target.id,
+            expected_db_version=_delete_target.db_version if expected_db_version is None else expected_db_version,
         )
     except EntityNotFoundError as exc:
         raise HTTPException(

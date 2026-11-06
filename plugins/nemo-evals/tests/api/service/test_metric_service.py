@@ -20,6 +20,7 @@ from nemo_evals.shared.metric_bundles.cloudpickle import (
 from nemo_evals.shared.metric_bundles.inline import InlineMetricBundlePackager
 from nemo_helix_plugin.entities import ListResponse, PaginationInfo
 from nemo_helix_plugin.entity_client import NemoEntityConflictError, NemoEntityNotFoundError
+from nemo_helix_plugin.files.types import CreateFilesetRequest
 from nemo_helix_plugin.filter_ops import FilterOperation
 from nhx.testing.files import InMemoryFilesService
 from nhx_evals_sdk.metrics.exact_match import ExactMatchMetric
@@ -60,6 +61,18 @@ class _FakeEntityClient:
         entity._updated_at = now
         self.entities[key] = entity
         return entity
+
+    async def delete_by_id(self, entity_type, entity_id, *, expected_db_version=None):
+        for key, entity in self.entities.items():
+            if isinstance(entity, entity_type) and entity.id == entity_id:
+                return await self.delete(
+                    entity_type,
+                    entity.name,
+                    workspace=entity.workspace,
+                    parent=entity._parent,
+                    expected_db_version=expected_db_version,
+                )
+        raise NemoEntityNotFoundError(entity_id)
 
     async def delete(
         self,
@@ -324,3 +337,29 @@ async def test_create_stores_cloudpickle_metric_without_loading_it_when_enabled(
     )
 
     assert created.payload_kind == "cloudpickle"
+
+
+async def test_delete_metric_keeps_a_replacement_fileset(service, fake_files, fake_entity_client) -> None:
+    """Cleanup of a persisted allocation must never select a replacement sharing its name."""
+    await service.create_metric("original", _bundle(), workspace="default")
+    entity = fake_entity_client.entities[("default", "original")]
+    workspace, name, _ = parse_bundle_ref(entity.bundle_ref)
+    files = fake_files.client()
+    await files.delete_fileset_by_id(workspace=workspace, fileset_id=entity.bundle_fileset_id)
+    replacement = (await files.create_fileset(workspace=workspace, body=CreateFilesetRequest(name=name))).data()
+    await files.upload_file(workspace=workspace, name=name, path="replacement.txt", content=b"keep me")
+
+    assert replacement.id != entity.bundle_fileset_id
+    assert await service.delete_metric("default", "original") is True
+    assert fake_files.filesets[(workspace, name)] == {"replacement.txt": b"keep me"}
+
+
+async def test_delete_legacy_metric_retains_storage_without_an_id(service, fake_files, fake_entity_client) -> None:
+    """A legacy name is insufficient evidence to delete the current allocation."""
+    await service.create_metric("legacy", _bundle(), workspace="default")
+    entity = fake_entity_client.entities[("default", "legacy")]
+    entity.bundle_fileset_id = None
+    workspace, name, _ = parse_bundle_ref(entity.bundle_ref)
+
+    assert await service.delete_metric("default", "legacy") is True
+    assert (workspace, name) in fake_files.filesets

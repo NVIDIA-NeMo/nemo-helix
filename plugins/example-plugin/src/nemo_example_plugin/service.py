@@ -480,7 +480,10 @@ def _build_items_router() -> APIRouter:
     ) -> None:
         """Delete an ExampleItem by name.  Returns 204 on success."""
         try:
-            await entity_client.delete(ExampleItem, name=name, workspace=workspace)
+            _delete_target = await entity_client.get(ExampleItem, name=name, workspace=workspace)
+            await entity_client.delete_by_id(
+                ExampleItem, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=404,

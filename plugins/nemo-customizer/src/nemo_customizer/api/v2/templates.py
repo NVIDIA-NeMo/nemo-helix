@@ -177,7 +177,10 @@ async def delete_job_template(
 ) -> None:
     """Delete a job template."""
     try:
-        await entity_client.delete(CustomizationJobTemplate, name=name, workspace=workspace)
+        _delete_target = await entity_client.get(CustomizationJobTemplate, name=name, workspace=workspace)
+        await entity_client.delete_by_id(
+            CustomizationJobTemplate, _delete_target.id, expected_db_version=_delete_target.db_version
+        )
     except NemoEntityNotFoundError as exc:
         raise HTTPException(
             status_code=404,

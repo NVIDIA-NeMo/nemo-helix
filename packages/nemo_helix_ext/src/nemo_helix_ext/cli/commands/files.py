@@ -446,7 +446,8 @@ def create_filesets(
 @handle_errors
 def delete_filesets(
     ctx: typer.Context,
-    name: Annotated[str, typer.Argument()],
+    name: Annotated[str | None, typer.Argument()] = None,
+    fileset_id: Annotated[str | None, typer.Option("--id", help="Delete the exact fileset allocation by ID.")] = None,
     workspace: Annotated[str | None, typer.Option("--workspace")] = None,
 ) -> None:
     """Delete Fileset.
@@ -457,7 +458,15 @@ def delete_filesets(
     or adapter entities must be relinked or deleted first. For local storage
     backends, this also deletes the underlying files."""
     state: CLIContext = ctx.obj
-    state.typed_client(FilesClient).delete_fileset(name=name, workspace=workspace)
+    files = state.typed_client(FilesClient)
+    if name is not None:
+        if fileset_id is not None:
+            raise typer.BadParameter("Provide a fileset name or --id, but not both.")
+        selected = files.get_fileset(name=name, workspace=workspace).data()
+        fileset_id, workspace = selected.id, selected.workspace
+    elif fileset_id is None:
+        raise typer.BadParameter("Provide a fileset name or --id.")
+    files.delete_fileset_by_id(fileset_id=fileset_id, workspace=workspace)
 
     typer.echo("✓ Deleted successfully")
 

@@ -230,7 +230,10 @@ def build_middleware_config_router() -> APIRouter:
         config or switch to inline config before deleting.
         """
         try:
-            await entity_client.delete(ExampleMiddlewareConfig, name=name, workspace=workspace)
+            _delete_target = await entity_client.get(ExampleMiddlewareConfig, name=name, workspace=workspace)
+            await entity_client.delete_by_id(
+                ExampleMiddlewareConfig, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except NemoEntityNotFoundError as exc:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
