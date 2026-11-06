@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { ENTITY_ICONS } from '@nemo/common/src/constants/entityIcons';
-import { Sparkle, Upload, Close } from '@nemo/icons/icons';
+import { Sparkle, ScmBranch, Upload, Close } from '@nemo/icons/icons';
 import { Button, Flex, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import {
   CUSTOMIZER_ENABLED,
@@ -103,7 +103,13 @@ export const QuickstartSection: FC<QuickstartSectionProps> = ({
           enabled: true,
           icon: <Upload className="size-4" />,
           label: 'Upload an Agent',
-          href: getAgentsListRoute(workspace),
+          href: getAgentsListRoute(workspace, { register: 'upload' }),
+        },
+        {
+          enabled: true,
+          icon: <ScmBranch className="size-4" />,
+          label: 'Import from GitHub',
+          href: getAgentsListRoute(workspace, { register: 'github' }),
         },
         {
           enabled: evalsEnabled,

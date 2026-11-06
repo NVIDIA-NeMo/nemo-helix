@@ -29,6 +29,7 @@ export type { FileUploadProps, RenderFileTagFn } from '@nemo/common/src/componen
 export { InputErrorText } from '@nemo/common/src/components/InputErrorText';
 export { QuickActionsMenuRoot } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
 export type { QuickActionItem } from '@nemo/common/src/components/QuickActionsMenu/QuickActionsMenuRoot';
+export type { DeleteAction, DeleteActionLabel } from '@nemo/common/src/components/ActionsMenu';
 
 export {
   StudioDataView,

@@ -19,9 +19,6 @@ import {
 import { type FC, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-/** The governed empty-state variants. Errors are handled separately by `ErrorPanel`. */
-export type EntityEmptyStateVariant = 'first-use' | 'no-results';
-
 export interface EntityEmptyStateBaseProps {
   entity: EmptyStateEntityKey;
   className?: string;

@@ -36,6 +36,7 @@ from nemo_agents_plugin.schema import (
 )
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity import NemoEntity
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
@@ -293,6 +294,8 @@ async def _create_entity(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to create agent {kind}.") from exc
@@ -320,6 +323,8 @@ async def _list_entities(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agent %s in workspace '%s'", kind, workspace)
         raise HTTPException(status_code=500, detail=f"Failed to list agent {kind}.") from exc
@@ -343,6 +348,8 @@ async def _get_entity(
             status_code=404,
             detail=f"Agent {kind} '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to get agent {kind}.") from exc
@@ -368,6 +375,8 @@ async def _delete_entity(
             status_code=409,
             detail=f"Agent {kind} '{name}' was modified by another request in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete agent %s '%s'", kind, name)
         raise HTTPException(status_code=500, detail=f"Failed to delete agent {kind}.") from exc

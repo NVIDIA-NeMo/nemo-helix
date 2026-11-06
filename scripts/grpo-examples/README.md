@@ -109,11 +109,11 @@ uv run --no-project --with datasets scripts/grpo-examples/prepare_math_with_judg
 ```bash
 .venv-conversion/bin/pi-to-gym-conversion --validate-only /tmp/mwj-env
 
-nemo files filesets create math-with-judge-env -w default --purpose environment --exist-ok
-nemo files upload /tmp/mwj-env/ math-with-judge-env -w default
+nemo files filesets create math-with-judge-env --workspace default --purpose environment --exist-ok
+nemo files upload /tmp/mwj-env/ math-with-judge-env --workspace default
 
-nemo files filesets create math-with-judge-gym-data -w default --purpose dataset --exist-ok
-nemo files upload /tmp/mwj-data/ math-with-judge-gym-data -w default
+nemo files filesets create math-with-judge-gym-data --workspace default --purpose dataset --exist-ok
+nemo files upload /tmp/mwj-data/ math-with-judge-gym-data --workspace default
 ```
 
 The trailing slash matters: it uploads the directory's *contents*. `--purpose
@@ -136,9 +136,9 @@ nemo customization rl --job-json plugins/nemo-rl/tests/fixtures/minimal_grpo_lor
 Each also needs the model entity it names. Create it the same way as for any other backend:
 
 ```bash
-nemo files filesets create qwen3-8b-base -w default --purpose model --exist-ok \
+nemo files filesets create qwen3-8b-base --workspace default --purpose model --exist-ok \
   --storage '{"type":"huggingface","repo_id":"Qwen/Qwen3-8B-Base","repo_type":"model","revision":"main"}'
-nemo models create qwen3-8b-base -w default --exist-ok \
+nemo models create qwen3-8b-base --workspace default --exist-ok \
   --input-data '{"name":"qwen3-8b-base","fileset":"default/qwen3-8b-base","custom_fields":{"hf_model_id":"Qwen/Qwen3-8B-Base"}}'
 ```
 
@@ -170,4 +170,4 @@ uv run --no-project --with datasets --with pillow \
 
 `--prompt nemotron-omni` uses the Super VL CLEVR prompt. A positive size keeps the first N rows of that split; `-1` loads the whole split. Upload `/tmp/clevr-env/` as an environment FileSet and `/tmp/clevr-data/` as a dataset FileSet, trailing slash on both. The agent name on every row is `clevr_cogent_simple_agent`.
 
-The published recipe is 8 GPUs, full weights, learning rate `5e-7`, 16 generations, and 1024 new tokens (`examples/configs/vlm_grpo_3B.yaml`). A one-GPU smoke keeps the same reward and the same row shape, and scales the batch down: LoRA rank 16, batch 8, 4 generations, 2 prompts per step, sequence length 2048, 512 new tokens, vLLM tensor parallel 1.
+The published recipe is 8 GPUs, full weights, learning rate `5e-7`, 16 generations, and 1024 new tokens ([`examples/configs/vlm_grpo_3B.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/main/examples/configs/vlm_grpo_3B.yaml) in NeMo-RL). A one-GPU smoke keeps the same reward and the same row shape, and scales the batch down: LoRA rank 16, batch 8, 4 generations, 2 prompts per step, sequence length 2048, 512 new tokens, vLLM tensor parallel 1.

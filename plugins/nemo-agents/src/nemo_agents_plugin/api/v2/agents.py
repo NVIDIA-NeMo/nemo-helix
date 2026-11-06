@@ -30,6 +30,7 @@ from nemo_helix_plugin.agents.types import ReferenceConfig
 from nemo_helix_plugin.agents.validation import resolve_agent_fileset
 from nemo_helix_plugin.api.parsed_filter import ParsedFilter, make_filter_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -90,6 +91,8 @@ async def register_agent(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to register agent '%s'", body.name)
         raise HTTPException(status_code=500, detail="Failed to register agent.") from exc
@@ -131,6 +134,8 @@ async def list_agents(
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agents in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list agents.") from exc
@@ -163,6 +168,8 @@ async def get_agent(
             status_code=404,
             detail=f"Agent '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get agent.") from exc
@@ -189,6 +196,8 @@ async def delete_agent(
     # Check for live deployments that would be orphaned by this deletion.
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments before deleting agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to check deployments.") from exc
@@ -219,6 +228,8 @@ async def delete_agent(
                 "Refresh the agent and try again."
             ),
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete agent.") from exc

@@ -162,10 +162,11 @@ def _resolve_image(url: str, dataset_root: Path, image_dir: Path) -> str:
     """Map an image URL onto a file under ``dataset_root``.
 
     A ``data:`` URL is decoded into ``image_dir``. Any other URL is a path
-    relative to the dataset. An ``http`` or ``https`` URL is not a path:
-    ``Path`` does not treat it as absolute, so joining it would look for a
-    file named after the URL. An absolute path is not joined either:
-    ``Path / "/etc/shadow"`` discards the root and opens that file.
+    relative to the dataset, and that file must already be in the fileset.
+    An ``http`` or ``https`` URL is not a path: ``Path`` does not treat it as
+    absolute, so joining it would look for a file named after the URL. An
+    absolute path is not joined either: ``Path / "/etc/shadow"`` discards the
+    root and opens that file.
     """
     if url.startswith("data:"):
         return _write_data_url(url, image_dir)
@@ -185,6 +186,8 @@ def _resolve_image(url: str, dataset_root: Path, image_dir: Path) -> str:
         raise DatasetFormatError(f"Image URL {url!r} is not a valid dataset-relative path.") from exc
     if not resolved.is_relative_to(root):
         raise DatasetFormatError(f"Image URL {url!r} resolves outside the dataset directory.")
+    if not resolved.is_file():
+        raise DatasetFormatError(f"Image URL {url!r} does not exist in the dataset.")
     return str(resolved)
 
 

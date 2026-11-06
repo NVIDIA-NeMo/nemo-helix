@@ -28,6 +28,7 @@ import {
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { ChevronRight, IconClipboard } from '@nemo/icons/icons';
 import { Text } from '@nvidia/foundations-react-core';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
@@ -62,9 +63,6 @@ type CollapsedStudioDetailsPart =
   | CollapsedStudioDetailsTextPart
   | CollapsedStudioDetailsToolPart;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const getCollapsedStudioDetailsParts = (
   args: AssistantToolArgs
 ): readonly CollapsedStudioDetailsPart[] => {
@@ -73,7 +71,7 @@ const getCollapsedStudioDetailsParts = (
 
   return parts
     .map((part): CollapsedStudioDetailsPart | undefined => {
-      if (!isRecord(part)) return undefined;
+      if (!isPlainObject(part)) return undefined;
 
       if (
         (part.type === 'text' || part.type === 'reasoning') &&
@@ -88,7 +86,7 @@ const getCollapsedStudioDetailsParts = (
         typeof part.toolName === 'string' &&
         typeof part.toolCallId === 'string'
       ) {
-        const toolArgs = isRecord(part.args) ? toAssistantToolArgs(part.args) : {};
+        const toolArgs = isPlainObject(part.args) ? toAssistantToolArgs(part.args) : {};
         return {
           type: 'tool-call',
           args: toolArgs,

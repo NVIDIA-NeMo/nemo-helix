@@ -17,6 +17,9 @@ commands with `uv run`.
 
 `oracle` applies each task's reference solution and calls no model. Run it first on a new deployment.
 
+Run this setup from the root of a source checkout. Without a checkout, set `SUITE_DIR` to an existing local
+Harbor suite and skip both the temporary-directory assignment and the copy below.
+
 ```bash
 SUITE_DIR="$(mktemp -d)/hello-world-suite"
 cp -R packages/nhx_evals_sdk/examples/harbor/hello_world_dataset "$SUITE_DIR"
@@ -52,15 +55,15 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
   `trial.error` is `None` on success; tokens are in `trial.measurements.prompt_tokens` / `completion_tokens`.
 - Submit may print `<run> is already running <taskset>`: another run uses the same taskset. Informational.
 
-## openhands with a closed-book model
+## openhands with a model
 
 `--agent` takes a built-in agent name only. A model-calling agent needs `--spec-file`.
 
-1. The model: either one the deployment serves (`nemo models list --workspace "$WS" | grep <name>`; pass
-   it as `<ws>/<name>` to `--default-model-entity`), or the user's own provider. For build.nvidia.com, the
+1. The model: either one the deployment serves (`nemo models list --workspace "$WS" | grep <name>`; use
+   it as `<ws>/<name>` in step 3's `source.model.ref`), or the user's own provider. For build.nvidia.com, the
    user picks a model ID from https://build.nvidia.com/models and creates a key at
    https://build.nvidia.com/settings/api-keys. For a model other than the example, replace its ID here and, in
-   step 2, the entity name `nemo inference providers get nvidia-build` lists under `served_models`. Never put a key in a command or file:
+   step 3, the entity name `nemo inference providers get nvidia-build` lists under `served_models`. Never put a key in a command or file:
 
    ```bash
    printenv NVIDIA_BUILD_API_KEY | nemo secrets create nvidia-build-api-key --workspace "$WS" --from-file -
@@ -70,24 +73,7 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
      --default-extra-body '{"chat_template_kwargs": {"enable_thinking": true}}'
    ```
 
-2. A closed-book virtual model that records trials. Closed-book is required for no-network tasks (all
-   DeepSWE tasks); without it submit returns a 422 naming those tasks. Trial recording puts each trial's
-   model calls and token usage in Intake; without it the job logs a warning and runs unrecorded. Closed-book
-   comes last in `request_middleware`:
-
-   ```bash
-   nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
-     --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
-     --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
-                            {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
-     --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
-   ```
-
-   With platform auth off, this model returns 401 to calls that don't carry an evaluation's credential. To
-   chat with the model, call the model entity instead. Closed-book holds against an agent that tries to get
-   around it only with platform auth on: with auth off, an agent can forge its credential or call another model.
-
-3. Platform auth on: an inference-scoped gateway key in a secret. Submit checks for it; trials don't use it.
+2. Platform auth on: an inference-scoped gateway key in a secret. Submit checks for it; trials don't use it.
    Each trial gets its own Scoped Access Key, created and revoked by the job, valid 24 hours from the task
    Job's start, so the deployment must have Scoped Access Keys enabled. Platform auth off: skip this and
    remove `env_secrets` from the spec.
@@ -97,8 +83,8 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
      | nemo secrets create evals-inference-key --workspace "$WS" --from-file -
    ```
 
-4. Copy `assets/specs/harbor_taskset_run_openhands.json` and set `source.model.ref` to the closed-book model in
-   your workspace, `<WS>/nemotron-super-closed-book` (the file says `default/…`; JSON doesn't expand `$WS`).
+3. Copy `assets/specs/harbor_taskset_run_openhands.json` and set `source.model.ref` to the model in your
+   workspace, `<WS>/nvidia-nemotron-3-5-super-vl-120b-a12b` (the file says `default/…`; JSON doesn't expand `$WS`).
    `agent_kwargs.temperature` and `top_p` set sampling; without them openhands uses 0.0 and 1.0 (greedy). For
    another model, ask the user for its provider's recommended values.
    Create the Experiment, then submit. The task source flag supplies `spec.tasks`:
@@ -110,6 +96,9 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
      --spec-file harbor_taskset_run_openhands.json --experiment harbor-runs
    ```
 
+   DeepSWE tasks are no-network; the run is open-book and submit warns once: the provider may still use hosted
+   tools such as web search. Closed-book is opt-in (below).
+
    Drop `--experiment` to skip Intake; otherwise create the Experiment first (see [Experiment](#experiment)).
 
 - `execution` is required in the spec; `{}` takes the deployment's defaults.
@@ -120,16 +109,46 @@ nemo evals runs download "$RUN_ID" --workspace "$WS" -o "$OUT_DIR"
 - Harbor's built-in agents aren't guaranteed to work with every agent release, model or Harbor version. Try a new
   combination on one task first, and pin `agent_kwargs.version` once it works.
 
+### Optional: closed-book
+
+Opt in when the model must not reach the web. A no-network sandbox doesn't stop the provider's hosted tools.
+
+1. A virtual model with `nemo-evals-closed-book` as the last `request_middleware` entry. To also record trials
+   (each trial's model calls and token usage in Intake; without it the job logs a warning and runs unrecorded),
+   add trial recording to both lists:
+
+   ```bash
+   nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
+     --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
+     --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
+                            {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
+     --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
+   ```
+
+2. In the spec's `target`, set `"closed_book": true` and `source.model.ref` to `<WS>/nemotron-super-closed-book`.
+
+- Submit returns 422 `closed_book_required` unless every virtual model the agent can reach ends its
+  `request_middleware` with `nemo-evals-closed-book`.
+- With platform auth off, a trial-recording model returns 401 to calls that don't carry an evaluation's
+  credential; to chat with the model, call the model entity instead. Closed-book holds against an agent that
+  tries to get around it only with platform auth on: with auth off, an agent can forge its credential or call
+  another model.
+
 ## Publish once, run many times
 
+With `jq` installed, capture the published taskset and its source Intake label:
+
 ```bash
-nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe --tasks 0,1,2
+TASKSET_INFO="$(nemo evals tasksets create --workspace "$WS" --harbor-hub datacurve/deep-swe --tasks 0,1,2 --json)"
+TASKSET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.taskset_ref')"
+INTAKE_DATASET="$(printf '%s\n' "$TASKSET_INFO" | jq -er '.intake_dataset')"
 nemo evals tasksets build-images "$TASKSET" --wait
 nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --spec-file harbor_taskset_run_openhands.json \
-  --experiment harbor-runs --intake-dataset 'datacurve/deep-swe@sha256:…'
+  --experiment harbor-runs --intake-dataset "$INTAKE_DATASET"
 ```
 
-- `tasksets create` prints the taskset ref last, and `Intake label: --intake-dataset …` for Hub and Git sources.
+- Keep these values for recovery. Without `--json`, `tasksets create` prints the taskset ref last and
+  `Intake label: --intake-dataset …` for Hub and Git sources; copy that complete label, not the taskset digest.
 - `--intake-dataset` is an Intake label on the run's Evaluation. It requires `--taskset` and `--experiment`.
 
 ## Experiment
@@ -151,10 +170,24 @@ trial appears when its task Job finishes.
   can't be read ends `failed` with a `plan_unreadable: …` error, even if tasks succeeded: ask the operator.
 - Trial errors (agent install fails, agent crashes) are stored on the trial; the task Job still succeeds.
   `max_retries` in the spec reruns an errored trial up to that many times, each in a new sandbox.
-- Failed task Jobs aren't rerun. Find them with `nemo evals runs tasks "$RUN_ID" --phase failed`, then
-  resubmit those indexes with `--taskset <taskset_ref>`; `runs status --json` has `taskset_ref`.
+- Failed task Jobs aren't rerun. Find them with
+  `nemo evals runs tasks "$RUN_ID" --workspace "$WS" --phase failed --page-size 1000` (if it ends with
+  `next: --page N`, list that page too), then resubmit those indexes with `--taskset <taskset_ref>`;
+  `runs status --json` has `taskset_ref`.
+  This starts a new run; use a fresh key if the spec pins an `idempotency_key`.
 - Same `--idempotency-key` and identical request → the existing run. Same key, changed request → HTTP 409.
-  After an unclear submit failure, rerun the same command with the key it printed.
+  After an unclear submit failure, use the already-published taskset, the original settings and publication
+  label, the same workspace, and the key it printed. For the publish-once example above:
+
+  ```bash
+  nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --spec-file harbor_taskset_run_openhands.json \
+    --experiment harbor-runs --intake-dataset "$INTAKE_DATASET" --idempotency-key '<original key>'
+  ```
+
+  For a direct-source submit, replace its source and selection flags with its published taskset reference;
+  do not import a source that may have changed. Keep the original spec content, including when resupplying
+  JSON that came from stdin. Ctrl-C during submit prints a full recovery command; transport/HTTP errors may
+  print only a key. Retain the original settings and source label: without them an identical replay is not guaranteed.
 
 ## Full example
 

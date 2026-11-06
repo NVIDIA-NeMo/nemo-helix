@@ -320,7 +320,8 @@ job, and each spec becomes one `ContainerImage` row.
 | `source.archive` | Optional. A tar archive in the fileset to build from, compressed or not, under any file name: the fetch step reads the format from the file, and a file that isn't a tar archive fails the build. Relative, with no `..`. |
 | `source.context_path` | Optional subdirectory to use as the context: of the fileset, or of the archive if `archive` is set. Relative, with no `..`. Omit it to use the whole fileset or archive. |
 | `source.image` | Instead of a fileset, a published image to copy unchanged: see [Copying a published image](#copying-a-published-image). |
-| `dockerfile` | Path relative to the context. Absolute paths and `..` are rejected. Defaults to `Dockerfile`. A copy takes none. |
+| `dockerfile` | Path relative to the context, or an absolute path to a file inside one of the spec's `mounts`. `..` is rejected. Defaults to `Dockerfile`. A copy takes none. |
+| `mounts` | Optional. Files the build's `RUN` instructions read that the context mustn't hold: see [Mounting files into a build](#mounting-files-into-a-build). A copy takes none. |
 | `platform` | Passed to kaniko. Defaults to `linux/amd64`. |
 | `output.repository`, `output.tag` | Optional. Where the image is published, within your workspace's part of the registry. Tags containing `--` or starting with `sha256-` are reserved for system tags and signatures. |
 
@@ -333,6 +334,27 @@ unpacks an archive once, however many of its specs use it:
 ```json
 {"name": "tests", "source": {"fileset": "tasks", "archive": "tb/hello-world.tar.gz", "context_path": "tests"}}
 ```
+
+#### Mounting files into a build
+
+A spec's `mounts` put files where its `RUN` instructions can read them, without putting them in the
+build context. The Dockerfile's `COPY . .` doesn't copy them, and its `.dockerignore` doesn't hide them.
+Each mount names a `source`, shaped like the spec's own, and an absolute `target`:
+
+```json
+{"mounts": [{"source": {"fileset": "tools", "context_path": "installer"}, "target": "/opt/installer"}]}
+```
+
+The fetch step downloads a mount like a context. The sandbox mounts it read-only at `target`, and
+kaniko leaves every mount out of its snapshots, so the image holds nothing of it. Files the base
+image has at `target` are hidden from the build's `RUN` instructions but kept in the image.
+
+A spec's `dockerfile` can be a file inside one of its mounts, by its absolute path, such as
+`/opt/installer/Dockerfile`. A generated Dockerfile kept there isn't in the context, so the build's own
+`COPY . .` doesn't copy it into the image.
+
+A target is a plain absolute path below `/`. It can't be in, or above, `/busybox`, `/dev`, `/kaniko`,
+`/nhx-work`, `/proc` or `/sys`. Two mounts of one spec can't nest.
 
 #### Copying a published image
 
@@ -506,12 +528,12 @@ sequenceDiagram
    Each row records a digest of the request, so the same request submitted again returns the same
    rows, and a different request under the same `name` and `revision` is refused.
 2. **`fetch`** clears what an earlier run left behind, then copies each fileset, or just its
-   `context_path`, onto the work volume. It calls Files as `service:builder`, acting for the
+   `context_path`, onto the work volume, for both contexts and mounts. It calls Files as `service:builder`, acting for the
    submitter: a fileset in a workspace where the submitter has no role fails here, and so the whole
    set does. It downloads each archive to the work volume and unpacks it, once, with Python's
    `data` filter, which keeps every entry inside the archive's directory. It refuses an archive that
    unpacks to more than 4 GiB or 100,000 entries.
-3. **`build`** creates one sandbox per distinct fileset, archive and `context_path`, one at a time,
+3. **`build`** creates one sandbox per distinct context and set of mounts, one at a time,
    and deletes each when it ends. The sandbox runs kaniko
    once per image with `--no-push`, writing an OCI layout to that image's output directory. The
    sandbox has:

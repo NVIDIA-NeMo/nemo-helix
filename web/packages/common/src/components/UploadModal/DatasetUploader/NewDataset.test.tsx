@@ -7,7 +7,7 @@ import {
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import {
   type UploadModalState,
-  initialState,
+  uploadModalInitialState,
 } from '@nemo/common/src/components/UploadModal/Context/useUploadModalReducer';
 import { NewDataset } from '@nemo/common/src/components/UploadModal/DatasetUploader/NewDataset';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -40,7 +40,7 @@ const createWrapper = (
 
   const mockDispatch = dispatch || vi.fn();
   const state: UploadModalState = {
-    ...initialState,
+    ...uploadModalInitialState,
     ...stateOverrides,
   };
 

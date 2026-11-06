@@ -2765,7 +2765,7 @@ def _create_session_for_deployment(
         ),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         created_session = AgentSession.model_validate(response)
@@ -2789,7 +2789,7 @@ def _resolve_existing_session(
         lambda: _json_from_response(client.get_session(workspace=workspace, name=session_name)),
     )
     try:
-        session_id = response["id"]
+        session_id = response.get("session_uuid") or response["id"]
         if not isinstance(session_id, str) or not session_id:
             raise ValueError
         resolved_session = AgentSession.model_validate(response)
@@ -3352,7 +3352,9 @@ def _upload_ethos_fileset(
     fileset = ethos_fileset_name(agent_name)
     sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
-        staged = Path(directory) / agent_root.name
+        # The upload uses directory contents, not its basename. A fixed child
+        # also keeps relative roots like '.' and '..' inside the temp directory.
+        staged = Path(directory) / "agent"
         staged.mkdir()
         for relative_path, content in artifacts:
             destination = staged / relative_path

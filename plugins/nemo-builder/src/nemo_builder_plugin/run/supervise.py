@@ -88,7 +88,9 @@ def _build_script(group: SandboxGroup, sandbox: SandboxSpec) -> str:
 
 
 def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeMount]:
-    """The group's own context, read-only, and an output directory for each of its images.
+    """The group's own context and mounts, read-only, and an output directory for each of its images.
+
+    kaniko leaves every mount point out of its snapshots, so a mount's files reach a ``RUN`` but never the image.
 
     Never the whole output directory, where a later group's ``RUN`` could rewrite an earlier group's layout.
     """
@@ -99,6 +101,12 @@ def _volume_mounts(group: SandboxGroup, job_sub_path: str) -> list[k8s.V1VolumeM
             sub_path=str(volume.context(group.source)),
             mount_path=str(view.context(group.source)),
             read_only=True,
+        ),
+        *(
+            k8s.V1VolumeMount(
+                name="work", sub_path=str(volume.context(mount.source)), mount_path=mount.target, read_only=True
+            )
+            for mount in group.mounts
         ),
         *(
             k8s.V1VolumeMount(

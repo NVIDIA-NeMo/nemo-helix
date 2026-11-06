@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Dict, Generic, List, Optional, Protocol, Self,
 
 from nemo_helix_plugin.client.errors import (
     ConflictError,
+    HTTPClientError,
     NotFoundError,
     UnprocessableEntityError,
     raise_for_status,
@@ -434,6 +435,12 @@ class EntityValidationError(EntityStoreError):
         body = error.body if isinstance(error.body, dict) else {}
         code = body.get("code")
         return cls(body.get("detail", str(error)), code=code if isinstance(code, str) else None)
+
+
+# Caller mistakes (4xx) from the typed and entity clients. The platform's registered
+# exception handlers turn these into the matching 4xx response, so a route's
+# catch-all 500 should re-raise them: ``except CLIENT_ERRORS: raise``.
+CLIENT_ERRORS = (HTTPClientError, EntityNotFoundError, EntityConflictError, EntityValidationError)
 
 
 def is_workspace_not_found(error: BaseException) -> bool:

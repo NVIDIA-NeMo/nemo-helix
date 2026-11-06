@@ -12260,6 +12260,7 @@ components:
       enum:
       - OPENAI_CHAT
       - ANTHROPIC_MESSAGES
+      - SYSTEMONE
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
@@ -20514,6 +20515,14 @@ components:
           type: string
           title: Family
           description: Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')
+        architectures:
+          title: Architectures
+          description: Architectures declared in the checkpoint's top-level config.json.
+            For a multimodal checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'),
+            while the other fields describe its language model.
+          items:
+            type: string
+          type: array
         num_layers:
           type: integer
           title: Num Layers
@@ -22268,6 +22277,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
         workspace:
@@ -24750,6 +24760,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
           examples:

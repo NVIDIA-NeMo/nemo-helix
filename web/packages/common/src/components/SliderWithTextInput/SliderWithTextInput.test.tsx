@@ -155,6 +155,8 @@ describe('SliderWithTextInput', () => {
           }}
         />
       );
+
+      expect(screen.getByText('Value must be between 0 and 100')).toBeInTheDocument();
     });
 
     it('should render as required field', () => {

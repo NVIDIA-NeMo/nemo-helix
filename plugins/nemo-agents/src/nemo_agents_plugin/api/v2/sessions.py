@@ -27,6 +27,7 @@ from nemo_agents_plugin.session_lifecycle import cleanup_fabric_runtime as _clea
 from nemo_helix_plugin.api.filters import make_filter_obj_dep
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -86,6 +87,8 @@ async def create_session(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create session for deployment '%s'", body.deployment_id)
         raise HTTPException(status_code=500, detail="Failed to create session.") from exc
@@ -124,6 +127,8 @@ async def list_sessions(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list sessions in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list sessions.") from exc
@@ -212,6 +217,8 @@ async def close_session(
                 effective_principal_id=effective_principal_id,
             )
             continue
+        except CLIENT_ERRORS:
+            raise
         except Exception as exc:
             logger.exception("Failed to close session '%s'", name)
             raise HTTPException(status_code=500, detail="Failed to close session.") from exc
@@ -257,6 +264,8 @@ async def delete_session(
             status_code=409,
             detail=f"Session '{name}' is being modified concurrently.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to delete session '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to delete session.") from exc
@@ -279,6 +288,8 @@ async def _get_deployment_for_session(
         )
     except NemoEntityNotFoundError as exc:
         raise _deployment_not_found(workspace, deployment_id) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment ID '%s'", deployment_id)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

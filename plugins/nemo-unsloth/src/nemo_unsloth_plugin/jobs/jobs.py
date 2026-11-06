@@ -24,6 +24,7 @@ from nemo_unsloth_plugin.schema import UnslothJobInput
 from nemo_unsloth_plugin.transform import transform_input_to_output
 from nhx.customization_common.contributor.jobs import BaseSubmitJob, require_container_runtime
 from nhx.customization_common.dry_run import DatasetRows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -57,8 +58,8 @@ class UnslothJob(BaseSubmitJob[UnslothJobInput, UnslothJobOutput]):
         return UnslothJobInput
 
     @classmethod
-    def _dry_run_datasets(cls, spec: UnslothJobOutput, workspace: str) -> list[DatasetRows]:
-        del workspace
+    def _dry_run_datasets(cls, spec: UnslothJobOutput, workspace: str, traits: CheckpointTraits) -> list[DatasetRows]:
+        del workspace, traits
         validate = partial(
             validate_lines,
             apply_chat_template=spec.dataset.apply_chat_template,
