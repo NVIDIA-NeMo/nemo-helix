@@ -36,6 +36,37 @@ class TestIAMRoleBindings:
         assert "pagination" in data
         assert isinstance(data["data"], list)
 
+    @pytest.mark.parametrize(
+        "principal",
+        ["a" * 257, "user:" + "a" * 70000, "é" * 12000],
+        ids=["above-limit", "oversized-ascii", "oversized-unicode"],
+    )
+    def test_create_role_binding_rejects_long_principal(self, http_client: TestClient, principal: str) -> None:
+        response = http_client.post(
+            IAM_ROLE_BINDINGS_PATH,
+            json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": "Viewer"},
+            headers={"X-NHX-Principal-Id": SERVICE_PRINCIPAL},
+        )
+        assert response.status_code == 422, response.text
+        error = response.json()["detail"][0]
+        assert error["loc"] == ["body", "principal"]
+        assert error["type"] == "string_too_long"
+        assert error["ctx"]["max_length"] == 256
+
+    def test_create_role_binding_accepts_max_length_principal(self, http_client: TestClient) -> None:
+        principal = "user:" + "a" * 251
+        headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
+        response = http_client.post(
+            f"{IAM_ROLE_BINDINGS_PATH}?wait_role_propagation=false",
+            json={"principal": principal, "workspace": DEFAULT_WORKSPACE, "role": "Viewer"},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["principal"] == principal
+        name = response.json()["name"]
+        revoked = http_client.delete(f"{IAM_ROLE_BINDINGS_PATH}/{name}?wait_role_propagation=false", headers=headers)
+        assert revoked.status_code == 200, revoked.text
+
     def test_role_binding_crud_lifecycle(self, http_client: TestClient):
         """Test full CRUD lifecycle for role bindings."""
         headers = {"X-NHX-Principal-Id": SERVICE_PRINCIPAL}
