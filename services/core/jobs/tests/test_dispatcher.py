@@ -2569,6 +2569,31 @@ async def test_rerun_job_by_id(mock_dispatcher: JobDispatcher, mock_store: Entit
 
 
 @pytest.mark.asyncio
+async def test_rerun_job_accepts_a_cancelled_job(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
+    """rerun reruns a CANCELLED job, not just an ERROR one.
+
+    The "don't resurrect a cancelled job" rule governs how a cancel settles; an explicit rerun
+    overrides that prior intent and starts a fresh attempt from surviving storage, the same as
+    rerunning an errored job.
+    """
+    job_id, job_name, attempt_id, step_id, _, _ = await create_test_job_data(mock_store, "rerun-cancelled")
+    attempt = await mock_store.get_by_id(HelixJobAttempt, attempt_id)
+    step = await mock_store.get_by_id(HelixJobStep, step_id)
+    attempt.status = HelixJobStatus.CANCELLED
+    step.status = HelixJobStatus.CANCELLED
+    await mock_store.update(attempt)
+    await mock_store.update(step)
+
+    result = await mock_dispatcher.rerun_job(job_name, DEFAULT_WORKSPACE)
+
+    assert result is not None
+    assert result.status == HelixJobStatus.CREATED
+    # A fresh attempt (seq+1) was created, not a mutation of the cancelled one.
+    attempts = await mock_store.list(HelixJobAttempt, filter_obj={"job": job_id})
+    assert len(attempts.data) == 2
+
+
+@pytest.mark.asyncio
 async def test_delete_job_by_id(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
     """delete_job resolves a job by its ID (and locks on the resolved name)."""
     job_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "delete-by-id")
@@ -2584,11 +2609,12 @@ async def test_delete_job_by_id(mock_dispatcher: JobDispatcher, mock_store: Enti
 async def test_delete_job_locked_rejects_same_name_replacement(
     mock_dispatcher: JobDispatcher, mock_store: EntityClient
 ):
-    """The ID guard stops a stale id-based delete from hitting a same-name replacement.
+    """An id-based delete cannot hit a same-name replacement.
 
     Simulates the TOCTOU window: the original job (resolved by id) is gone and a
-    new job now holds the same name. _delete_job_locked, given the ORIGINAL id,
-    must refuse to delete the replacement.
+    new job now holds the same name. _delete_job_locked re-fetches by the ORIGINAL
+    id, so it finds nothing and refuses -- the replacement (a different id) is never
+    at risk, because an id identifies one entity for all time.
     """
     original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-del-job")
     await mock_dispatcher.delete_job(original_id, DEFAULT_WORKSPACE)
@@ -2596,7 +2622,7 @@ async def test_delete_job_locked_rejects_same_name_replacement(
     replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
     assert replacement_id != original_id
 
-    deleted = await mock_dispatcher._delete_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+    deleted = await mock_dispatcher._delete_job_locked(original_id, DEFAULT_WORKSPACE)
 
     assert deleted is False
     # The replacement must be untouched.
@@ -2605,13 +2631,13 @@ async def test_delete_job_locked_rejects_same_name_replacement(
 
 @pytest.mark.asyncio
 async def test_rerun_job_locked_rejects_same_name_replacement(mock_dispatcher: JobDispatcher, mock_store: EntityClient):
-    """The ID guard stops a stale id-based rerun from hitting a same-name replacement."""
+    """An id-based rerun cannot hit a same-name replacement (the original id resolves to nothing)."""
     original_id, job_name, _, _, _, _ = await create_test_job_data(mock_store, "racing-rerun-job")
     await mock_dispatcher.delete_job(original_id, DEFAULT_WORKSPACE)
     replacement_id, _, _, _, _, _ = await create_test_job_data(mock_store, job_name)
     assert replacement_id != original_id
 
-    result = await mock_dispatcher._rerun_job_locked(job_name, DEFAULT_WORKSPACE, expected_id=original_id)
+    result = await mock_dispatcher._rerun_job_locked(original_id, DEFAULT_WORKSPACE)
 
     assert result is None
     # The replacement must not have gained a new attempt.

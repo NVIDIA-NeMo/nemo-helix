@@ -255,19 +255,23 @@ async def test_job_cancel_rerun_lifecycle(test_client: AsyncClient):
     assert response.status_code == 200
     assert response.json()["status"] == "cancelled"
 
-    # A cancelled job cannot be rerun.
+    # A cancelled job can be rerun: the rerun request overrides the prior cancel intent and
+    # starts a fresh attempt from surviving storage (the same as rerunning an errored job).
     response = await test_client.post(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/rerun")
-    assert response.status_code == 409
+    assert response.status_code == 200
+    rerun_attempt_id = response.json()["attempt_id"]
+    assert rerun_attempt_id != original_attempt_id
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}")
-    assert response.json()["attempt_id"] == original_attempt_id
-    assert response.json()["status"] == "cancelled"
+    assert response.json()["attempt_id"] == rerun_attempt_id
+    assert response.json()["status"] == "created"
 
+    # The new attempt has a fresh first step in created (not the old cancelled one).
     response = await test_client.get(f"/apis/jobs/v2/workspaces/default/jobs/{job_name}/steps/step1")
     assert response.status_code == 200
     step_data = response.json()
-    assert step_data["attempt_id"] == original_attempt_id
+    assert step_data["attempt_id"] == rerun_attempt_id
     assert step_data["name"] == "step1"
-    assert step_data["status"] == "cancelled"
+    assert step_data["status"] == "created"
 
 
 @pytest.mark.asyncio
