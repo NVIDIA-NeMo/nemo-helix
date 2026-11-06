@@ -41,6 +41,7 @@ from nhx.automodel.app.jobs.training.schemas import (
 from nhx.automodel.config import config
 from nhx.automodel.entities.values import Precision, TrainingType
 from nhx.automodel.images import AUTOMODEL_PYTHON_ENTRYPOINT, get_training_image
+from nhx.automodel.tasks.training.backends.registry import uses_custom_automodel_impl
 from nhx.common.jobs.exceptions import HelixJobCompilationError
 from nhx.common.model_utils import is_embedding_model
 from nhx.customization_common.integrations import (
@@ -188,6 +189,9 @@ def compile_training_step(
             expert_parallel_size=p.expert_parallel_size,
             num_gpus_per_node=p.num_gpus_per_node,
             num_nodes=p.num_nodes,
+            # Registered text MoE fails here, before the download step reserves GPUs.
+            # An architecture outside the map keeps the Hugging Face path.
+            enforce_text_moe_expert_parallel=uses_custom_automodel_impl(traits.checkpoint_model_name),
         )
     except ValueError as exc:
         raise HelixJobCompilationError(str(exc)) from exc

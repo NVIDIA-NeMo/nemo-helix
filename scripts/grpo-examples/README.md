@@ -170,4 +170,4 @@ uv run --no-project --with datasets --with pillow \
 
 `--prompt nemotron-omni` uses the Super VL CLEVR prompt. A positive size keeps the first N rows of that split; `-1` loads the whole split. Upload `/tmp/clevr-env/` as an environment FileSet and `/tmp/clevr-data/` as a dataset FileSet, trailing slash on both. The agent name on every row is `clevr_cogent_simple_agent`.
 
-The published recipe is 8 GPUs, full weights, learning rate `5e-7`, 16 generations, and 1024 new tokens (`examples/configs/vlm_grpo_3B.yaml`). A one-GPU smoke keeps the same reward and the same row shape, and scales the batch down: LoRA rank 16, batch 8, 4 generations, 2 prompts per step, sequence length 2048, 512 new tokens, vLLM tensor parallel 1.
+The published recipe is 8 GPUs, full weights, learning rate `5e-7`, 16 generations, and 1024 new tokens ([`examples/configs/vlm_grpo_3B.yaml`](https://github.com/NVIDIA-NeMo/RL/blob/main/examples/configs/vlm_grpo_3B.yaml) in NeMo-RL). A one-GPU smoke keeps the same reward and the same row shape, and scales the batch down: LoRA rank 16, batch 8, 4 generations, 2 prompts per step, sequence length 2048, 512 new tokens, vLLM tensor parallel 1.
