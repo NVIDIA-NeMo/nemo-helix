@@ -51,12 +51,13 @@ def _clean(text: str) -> str:
 
 
 def format_report(report: PluginLoadErrorReport) -> str:
-    """Render a report as one multi-line log message; every field is control-char free."""
-    lines = [f"Studio plugin '{_clean(report.plugin)}' reported {len(report.issues)} load issue(s)"]
+    """Render a report as one single-line log message (` | ` delimited); every field is control-char free."""
+    count = len(report.issues)
+    parts = [f"Studio plugin '{_clean(report.plugin)}' failed to load ({count} issue{'s' if count != 1 else ''})"]
     for issue in report.issues:
-        lines.append(f"  [{issue.code.value}] {_clean(issue.message)}")
-        lines.extend(f"    {i}. {_clean(step)}" for i, step in enumerate(issue.steps, 1))
-    return "\n".join(lines)
+        parts.append(f"[{issue.code.value}] {_clean(issue.message)}")
+        parts.extend(f"{i}. {_clean(step)}" for i, step in enumerate(issue.steps, 1))
+    return " | ".join(parts)
 
 
 class ReportThrottle:
