@@ -158,6 +158,7 @@ const createMockJobWithFilesetUrl = (overrides?: Partial<GenerateJob>): Generate
 
 describe('SafeSynthesizerFilesetPreview', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mockUseParams({
       workspace: 'test-workspace',
       safeSynthesizerJobName: 'test-job-id',
