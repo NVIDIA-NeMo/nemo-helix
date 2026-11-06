@@ -315,7 +315,7 @@ class TestEachSandboxFailsAlone:
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
         sleeps: list[float] = []
-        monkeypatch.setattr(supervise.time, "sleep", sleeps.append)
+        monkeypatch.setattr(supervise, "sleep", sleeps.append)
         api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
@@ -329,8 +329,8 @@ class TestEachSandboxFailsAlone:
             sleeps.append(seconds)
             now[0] += seconds
 
-        monkeypatch.setattr(supervise.time, "monotonic", lambda: now[0])
-        monkeypatch.setattr(supervise.time, "sleep", sleep)
+        monkeypatch.setattr(supervise, "monotonic", lambda: now[0])
+        monkeypatch.setattr(supervise, "sleep", sleep)
         quota = ApiException(status=403, reason="Forbidden")
         quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
         api = _Api(create=quota, create_failures=3)

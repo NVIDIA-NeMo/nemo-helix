@@ -29,7 +29,7 @@ def test_source_client_version_uses_available_distribution(
             raise PackageNotFoundError(distribution)
         return versions[distribution]
 
-    with patch("nhx.core.jobs.telemetry.metadata.version", side_effect=installed_version) as version:
+    with patch("nhx.core.jobs.telemetry.installed_version", side_effect=installed_version) as version:
         assert _source_client_version() == expected
     assert [call.args[0] for call in version.call_args_list] == lookups
 
