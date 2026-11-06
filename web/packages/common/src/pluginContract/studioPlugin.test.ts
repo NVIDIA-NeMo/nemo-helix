@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { diffContract, PLUGIN_CONTRACT } from '@nemo/common/src/pluginContract';
+import { CONTRACT_DOCS, diffContract, PLUGIN_CONTRACT } from '@nemo/common/src/pluginContract';
 import { studioPlugin } from '@nemo/common/src/pluginContract/studioPlugin';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,8 +14,6 @@ const INSTALLED: Record<string, string> = {
   'react-router': '8.3.0',
   '@tanstack/react-query': '5.90.21',
 };
-
-const DOCS = 'plugins/example-plugin/web/AGENTS.md';
 
 let root: string;
 
@@ -123,10 +121,11 @@ describe('studioPlugin', () => {
     );
 
     expect(fs.existsSync(manifestPath()), 'plugin.manifest.json emitted').toBe(true);
-    expect(JSON.parse(fs.readFileSync(manifestPath(), 'utf8'))).toEqual({
+    const manifest = JSON.parse(fs.readFileSync(manifestPath(), 'utf8'));
+    expect(manifest).not.toHaveProperty('bundledPackages');
+    expect(manifest).toEqual({
       contractVersion: PLUGIN_CONTRACT.version,
       specifiers: ['@tanstack/react-query', 'react', 'react-router', 'react/jsx-runtime'],
-      bundledPackages: [],
       builtAgainst: INSTALLED,
     });
   });
@@ -141,7 +140,7 @@ describe('studioPlugin', () => {
     expect(message).toContain(code);
     expect(message).toContain(subject);
     expect(message).toMatch(/1\./);
-    expect(message).toContain(DOCS);
+    expect(message).toContain(CONTRACT_DOCS);
     expect(fs.existsSync(manifestPath()), 'no manifest after failed build').toBe(false);
   });
 
@@ -259,6 +258,8 @@ describe('studioPlugin', () => {
     expect(message).toContain('PLUGIN_SPECIFIER_UNMAPPED');
     expect(message, 'advises the bare @nemo/common specifier').toMatch(/[`"']@nemo\/common[`"']/);
     expect(message).toContain('web/packages/common/src/plugin.ts');
+    // Wording check by necessity: the advice differs per case, and for the provided package
+    // "bundle your own copy" is the wrong fix (it would shadow Studio's @nemo/common).
     expect(message).not.toContain('bundles its own copy');
   });
 
@@ -267,6 +268,8 @@ describe('studioPlugin', () => {
     const message = await buildError();
 
     expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+    // Wording check by necessity: only this case needs build-mode advice (Studio does not
+    // provide the development JSX runtime); the next test guards against it leaking elsewhere.
     expect(message).toContain('production');
     expect(fs.existsSync(manifestPath()), 'no manifest after failed build').toBe(false);
   });
