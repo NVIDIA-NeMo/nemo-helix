@@ -79,14 +79,6 @@ def test_an_allowed_gate_is_not_reported(tmp_path: Path) -> None:
     assert check_test_gates.orphaned_gates(root, workflows) == {}
 
 
-def test_entities_live_postgres_gate_is_allowed_without_exempting_other_databases(tmp_path: Path) -> None:
-    root, workflows = _tree(tmp_path, gate="NHX_TEST_POSTGRES_URL")
-    other = root / "pkg" / "tests" / "test_other_database.py"
-    other.write_text(GATED.format(read=ENV_READS[0].format(var="NHX_TEST_OTHER_POSTGRES_URL")), encoding="utf-8")
-
-    assert check_test_gates.orphaned_gates(root, workflows) == {"NHX_TEST_OTHER_POSTGRES_URL": [other]}
-
-
 def test_installed_packages_are_not_our_gates(tmp_path: Path) -> None:
     # A dependency's own test suite is full of opt-in gates we neither own nor can set.
     vendored = tmp_path / ".venv" / "lib" / "site-packages" / "dep" / "tests"

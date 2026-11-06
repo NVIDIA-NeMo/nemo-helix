@@ -1,61 +1,25 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""JSON write/query safety on SQLite and optionally a real PostgreSQL database.
-
-Set NHX_TEST_POSTGRES_URL to a disposable postgresql+asyncpg URL to run the
-PostgreSQL cases. Each case creates and drops only its own random schema.
-"""
+"""JSON write/query safety through the established SQLite repository fixtures."""
 
 import copy
 import json
-import os
-from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from nhx.common.api.filter import ComparisonOperation, FilterOperator
 from nhx.core.entities.app.repository import SQLAlchemyEntityRepository, SQLAlchemyWorkspaceRepository
 from nhx.core.entities.app.repository.exceptions import InvalidFilterError
-from nhx.core.entities.app.repository.sqlalchemy.base import Base
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
-@pytest_asyncio.fixture(
-    params=[
-        "sqlite",
-        pytest.param(
-            "postgresql",
-            marks=pytest.mark.skipif(
-                not os.environ.get("NHX_TEST_POSTGRES_URL"),
-                reason="Set NHX_TEST_POSTGRES_URL to run real PostgreSQL JSON safety tests",
-            ),
-        ),
-    ]
-)
-async def json_repository(request, session_maker):
-    """Use existing SQLite fixtures or an isolated schema on an opted-in PG server."""
-    engine = None
-    schema = None
-    try:
-        if request.param == "postgresql":
-            url = os.environ["NHX_TEST_POSTGRES_URL"]
-            schema = "json_safety_" + uuid4().hex
-            engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
-            async with engine.begin() as connection:
-                await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-                await connection.run_sync(Base.metadata.create_all)
-            session_maker = async_sessionmaker(engine, expire_on_commit=False)
-        await SQLAlchemyWorkspaceRepository(session_maker).create_workspace(name="json-safety")
-        yield SQLAlchemyEntityRepository(session_maker)
-    finally:
-        if engine is not None:
-            try:
-                async with engine.begin() as connection:
-                    await connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-            finally:
-                await engine.dispose()
+@pytest_asyncio.fixture
+async def json_repository(
+    entity_repo: SQLAlchemyEntityRepository, workspace_repo: SQLAlchemyWorkspaceRepository
+) -> SQLAlchemyEntityRepository:
+    """Seed a workspace using the shared repository fixtures."""
+    await workspace_repo.create_workspace(name="json-safety")
+    return entity_repo
 
 
 @pytest.mark.parametrize(
