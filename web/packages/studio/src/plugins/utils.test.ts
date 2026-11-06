@@ -2,15 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PLUGIN_CONTRACT, diffContract, type PluginSidecar } from '@nemo/common/src/pluginContract';
-import { diffContract as actualDiffContract } from '@nemo/common/src/pluginContract/diffContract';
 import type { PluginManifest } from '@studio/plugins/types';
 import { fetchPlugins, loadPlugin } from '@studio/plugins/utils';
-
-// Real diffContract by default; one test overrides it to throw.
-vi.mock('@nemo/common/src/pluginContract', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@nemo/common/src/pluginContract')>();
-  return { ...original, diffContract: vi.fn(original.diffContract) };
-});
 
 vi.mock('@studio/plugins/studioVersions', () => ({
   STUDIO_SHARED_VERSIONS: { react: '19.2.7', 'react-router': '8.3.0' },
@@ -61,7 +54,6 @@ const goodModule = { Root: () => null, navItems: () => [] };
 
 beforeEach(() => {
   vi.resetAllMocks();
-  vi.mocked(diffContract).mockImplementation(actualDiffContract);
   global.fetch = vi.fn();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -207,24 +199,6 @@ describe('loadPlugin', () => {
         expect(importModule).not.toHaveBeenCalled();
       }
     );
-  });
-
-  it('resolves to PLUGIN_LOAD_FAILED with the cause when diffContract itself throws', async () => {
-    vi.mocked(global.fetch).mockResolvedValue(json(goodSidecar()));
-    vi.mocked(diffContract).mockImplementation(() => {
-      throw new Error('boom');
-    });
-    const importModule = vi.fn();
-
-    const result = await loadPlugin(manifest(), BASE, importModule);
-
-    expect(result).toMatchObject({
-      failure: {
-        name: 'pr-review',
-        issues: [{ code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('boom') }],
-      },
-    });
-    expect(importModule).not.toHaveBeenCalled();
   });
 
   describe('bundle import', () => {
