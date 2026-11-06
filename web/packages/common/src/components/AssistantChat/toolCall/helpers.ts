@@ -37,7 +37,7 @@ const getRawStringArg = (args: Record<string, unknown>, keys: string[]): string 
   return undefined;
 };
 
-export const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
+const getToolSummary = (toolName: string, args: AssistantToolArgs): string | undefined => {
   switch (toolName) {
     case 'Bash':
       return getStringArg(args, ['command']);
@@ -68,14 +68,14 @@ export const getToolSummary = (toolName: string, args: AssistantToolArgs): strin
   }
 };
 
-export const compactSubtleDetail = (detail: string | undefined): string | undefined => {
+const compactSubtleDetail = (detail: string | undefined): string | undefined => {
   const compacted = detail?.replace(/\s+/g, ' ').trim();
   if (!compacted) return undefined;
   if (compacted.length <= SUBTLE_MESSAGE_MAX_LENGTH) return compacted;
   return `${compacted.slice(0, SUBTLE_MESSAGE_MAX_LENGTH - 3).trimEnd()}...`;
 };
 
-export const formatSubtleToolMessage = (
+const formatSubtleToolMessage = (
   action: string,
   detail: string | undefined,
   fallback: string
@@ -140,13 +140,6 @@ const getEditStats = (args: Record<string, unknown>): { additions: number; delet
   additions: getLineCount(getRawStringArg(args, ['new_string']) ?? ''),
   deletions: getLineCount(getRawStringArg(args, ['old_string']) ?? ''),
 });
-
-export const splitCollapsedThinkingParagraphs = (text: string): readonly string[] =>
-  text
-    .trim()
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
 
 const getAskUserQuestionSummary = (args: AssistantToolArgs): string | undefined => {
   const questions = args.questions;
