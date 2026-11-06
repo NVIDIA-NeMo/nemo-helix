@@ -15,6 +15,7 @@ import {
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
 import { AgentEvaluationWizard } from '@studio/components/evaluation/AgentEvaluationWizard';
+import type { WizardDataset } from '@studio/components/evaluation/AgentEvaluationWizard/types';
 import { createRunEvaluation } from '@studio/components/evaluation/experimentEvalConfig';
 import type { DownloadFileAsArrayBufferArgs } from '@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer';
 import { ROUTES } from '@studio/constants/routes';
@@ -155,13 +156,15 @@ const pickFilesetFile = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(await screen.findByRole('option', { name: 'output/part-0.parquet' }));
 };
 
-const renderWizard = () =>
+const renderWizard = (dataset?: WizardDataset) =>
   renderRoute(undefined, {
     history: `/workspaces/${DEFAULT_WORKSPACE}`,
     routes: [
       {
         path: '/workspaces/:workspace',
-        element: <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} />,
+        element: (
+          <AgentEvaluationWizard workspace={DEFAULT_WORKSPACE} agent={AGENT} dataset={dataset} />
+        ),
       },
       { path: ROUTES.workspace.agentDetail, element: <div>Agent page</div> },
     ],
@@ -248,6 +251,39 @@ describe('AgentEvaluationWizard dataset from a fileset', () => {
     expect(vi.mocked(filesUploadFile).mock.calls.map(([, , name]) => name)).not.toContain(
       'dataset.parquet'
     );
+  });
+
+  it('starts from a handed-in dataset already picked', async () => {
+    server.use(
+      http.get(mockApiUrl(getFilesListFilesetFilesQueryKey, ':workspace', ':name'), () =>
+        HttpResponse.json({
+          data: ['output/part-0.parquet', 'output/part-1.parquet'].map((path) =>
+            filesetFile('generated', path)
+          ),
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderWizard({
+      fileset: 'generated',
+      file: 'output/part-0.parquet',
+      batchGlob: 'output/*.parquet',
+    });
+
+    await openDatasetStep(user);
+    expect(datasetSource().getByRole('radio', { name: 'Choose from a fileset' })).toBeChecked();
+    await user.upload(
+      screen.getByLabelText('Eval configuration file'),
+      new File([EVAL_CONFIG], 'eval-config.yaml', { type: 'application/yaml' })
+    );
+
+    await nameAndRun(user);
+
+    await waitFor(() => expect(evalsCreateEvaluateJob).toHaveBeenCalledTimes(1));
+    const [, spec] = vi.mocked(evalsCreateEvaluateJob).mock.calls[0];
+    expect(spec.spec).toMatchObject({
+      dataset: `${DEFAULT_WORKSPACE}/generated#output/*.parquet`,
+    });
   });
 
   it('forgets the fileset file after switching back to upload', async () => {

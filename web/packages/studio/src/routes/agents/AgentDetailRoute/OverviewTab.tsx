@@ -77,9 +77,9 @@ export const OverviewTab: FC<OverviewTabProps> = ({
 
   if (!INTAKE_ENABLED) {
     return (
-      <div className="w-full pb-6">
+      <Stack gap="density-2xl" className="w-full pb-6">
         <AgentSummaryPanel agent={agent} modelNames={modelNames} />
-      </div>
+      </Stack>
     );
   }
 

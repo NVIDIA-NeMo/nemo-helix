@@ -30,7 +30,8 @@ export const NewDataDesignerJobRoute: FC = () => {
       case 'template':
         navigate(`${getDataDesignerJobBuildRoute(workspace)}?template=${selection.templateId}`);
         break;
-      case 'ai': {
+      case 'ai':
+      case 'persona': {
         const state: DataDesignerGeneratedState = { generatedJobRequest: selection.jobRequest };
         navigate(getDataDesignerJobBuildRoute(workspace), { state });
         break;

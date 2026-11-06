@@ -12,7 +12,7 @@ import type {
 import type { GeneratedConfigValidation } from '@studio/routes/DataDesignerJobBuildRoute/aiSeed';
 import type { FC } from 'react';
 
-export type StartOptionId = 'ai' | 'template' | 'scratch';
+export type StartOptionId = 'ai' | 'persona' | 'template' | 'scratch';
 
 export type { StartOptionTag };
 
@@ -90,7 +90,8 @@ export interface GeneratedConfigPanelProps {
 export type StartSelection =
   | { optionId: 'scratch' }
   | { optionId: 'template'; templateId: string }
-  | { optionId: 'ai'; jobRequest: DataDesignerJobRequest };
+  | { optionId: 'ai'; jobRequest: DataDesignerJobRequest }
+  | { optionId: 'persona'; jobRequest: DataDesignerJobRequest };
 
 export interface CreateFilesetStartProps {
   /** Workspace whose models the "Describe with AI" option draws from. */
