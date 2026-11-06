@@ -181,6 +181,7 @@ class EntityRepositoryInterface(ABC):
         self,
         *,
         entity_id: str,
+        expected_db_version: int | None = None,
         session: AsyncSession | None = None,
     ) -> int:
         """Delete an entity by ID."""

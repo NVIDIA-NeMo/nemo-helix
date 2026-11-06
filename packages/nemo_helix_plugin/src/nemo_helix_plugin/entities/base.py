@@ -871,7 +871,10 @@ class EntityClient:
         """
         try:
             response = await self._client.get_entity_by_id(entity_id=entity_id)
-            return self._convert_api_entity_to_model(response.data(), entity_type)
+            entity = response.data()
+            if entity.entity_type != _get_entity_type(entity_type):
+                raise EntityNotFoundError(f"Entity with id '{entity_id}' has a different type")
+            return self._convert_api_entity_to_model(entity, entity_type)
         except NotFoundError as e:
             raise EntityNotFoundError(f"Entity with id '{entity_id}' not found") from e
 
@@ -964,14 +967,17 @@ class EntityClient:
         self,
         entity_type: EntityTypeLike,
         entity_id: str,
+        *,
+        expected_db_version: int | None = None,
     ) -> DeleteResponse:
         """Delete an entity by ID.
 
-        First retrieves the entity to get its workspace and name, then deletes by name.
+        Reads the same ID for workspace/version metadata, then deletes that ID.
 
         Args:
             entity_type: The entity class (for type safety)
             entity_id: Entity UUID to delete
+            expected_db_version: Version to preserve; otherwise use the version read from that ID
 
         Returns:
             Deleted entity response
@@ -982,12 +988,14 @@ class EntityClient:
         """
         try:
             entity = (await self._client.get_entity_by_id(entity_id=entity_id)).data()
-            delete_params: EntityDeleteQueryParams = {"expected_db_version": entity.db_version}
+            delete_params: EntityDeleteQueryParams = {
+                "expected_db_version": entity.db_version if expected_db_version is None else expected_db_version,
+            }
             if entity.parent:
                 delete_params["parent"] = entity.parent
-            response = await self._client.delete_entity_by_name(
-                entity_type=entity.entity_type,
-                name=entity.name,
+            response = await self._client.delete_entity_by_id(
+                entity_type=_get_entity_type(entity_type),
+                entity_id=entity_id,
                 workspace=entity.workspace,
                 query_params=delete_params,
             )
@@ -1320,10 +1328,13 @@ class SyncEntityClient:
         entity_type: EntityTypeLike,
         entity_id: str,
     ) -> EntityT:
-        """Get entity by ID (for debugging/internal use)."""
+        """Get entity by its immutable ID."""
         try:
             response = self._client.get_entity_by_id(entity_id=entity_id)
-            return self._convert_api_entity_to_model(response.data(), entity_type)
+            entity = response.data()
+            if entity.entity_type != _get_entity_type(entity_type):
+                raise EntityNotFoundError(f"Entity with id '{entity_id}' has a different type")
+            return self._convert_api_entity_to_model(entity, entity_type)
         except NotFoundError as e:
             raise EntityNotFoundError(f"Entity with id '{entity_id}' not found") from e
 
@@ -1382,16 +1393,20 @@ class SyncEntityClient:
         self,
         entity_type: EntityTypeLike,
         entity_id: str,
+        *,
+        expected_db_version: int | None = None,
     ) -> DeleteResponse:
         """Delete an entity by ID."""
         try:
             entity = self._client.get_entity_by_id(entity_id=entity_id).data()
-            delete_params: EntityDeleteQueryParams = {"expected_db_version": entity.db_version}
+            delete_params: EntityDeleteQueryParams = {
+                "expected_db_version": entity.db_version if expected_db_version is None else expected_db_version,
+            }
             if entity.parent:
                 delete_params["parent"] = entity.parent
-            response = self._client.delete_entity_by_name(
-                entity_type=entity.entity_type,
-                name=entity.name,
+            response = self._client.delete_entity_by_id(
+                entity_type=_get_entity_type(entity_type),
+                entity_id=entity_id,
                 workspace=entity.workspace,
                 query_params=delete_params,
             )

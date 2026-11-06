@@ -67,10 +67,21 @@ def delete_entity_by_name(
 
 
 # ---------------------------------------------------------------------------
-# ID-based operations (debug/internal) — no workspace in the path
+# ID lookup and scoped ID mutations
 # ---------------------------------------------------------------------------
 
 
 @get("/apis/entities/v2/entities/{entity_id}")
 @abstractmethod
 def get_entity_by_id(*, entity_id: str) -> Entity: ...
+
+
+@delete("/apis/entities/v2/workspaces/{workspace}/entities/{entity_type}/by-id/{entity_id}")
+@abstractmethod
+def delete_entity_by_id(
+    *,
+    workspace: str,
+    entity_type: str,
+    entity_id: str,
+    query_params: EntityDeleteQueryParams | None = None,
+) -> DeleteResponse: ...
