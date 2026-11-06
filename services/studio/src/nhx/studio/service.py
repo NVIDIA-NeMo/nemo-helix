@@ -24,8 +24,12 @@ from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
 from pydantic import ValidationError
 from starlette.responses import Response
+from starlette.staticfiles import NotModifiedResponse, StaticFiles
 
 logger = logging.getLogger(__name__)
+
+# Directory-less StaticFiles, used only for its ETag/Last-Modified conditional-GET check.
+_CONDITIONAL_GET = StaticFiles(directory=None)
 
 TELEMETRY_ALLOWED_HEADERS = "Accept,Accept-Language,Content-Encoding,Content-Language,Content-Type"
 TELEMETRY_ALLOWED_METHODS = "POST, OPTIONS"
@@ -409,7 +413,7 @@ class StudioService(Service[StudioConfig]):
                 )
 
         @app.get("/plugin-ui/{plugin_name}/{filename}", include_in_schema=False)
-        async def serve_plugin_asset(plugin_name: str, filename: str) -> FileResponse:
+        async def serve_plugin_asset(plugin_name: str, filename: str, request: Request) -> Response:
             # Allowlist: only direct children of the bundle dir with bundle-asset
             # suffixes — never the plugin's Python source or subdirectories.
             bundle_dir = bundle_dirs.get(plugin_name)
@@ -421,7 +425,14 @@ class StudioService(Service[StudioConfig]):
             file_path = (bundle_dir / filename).resolve()
             if file_path.parent != bundle_dir.resolve() or not file_path.is_file():
                 raise HTTPException(status_code=404)
-            return FileResponse(file_path, media_type=media_type)
+            # no-cache = always revalidate (ETag/Last-Modified); otherwise browsers serve a stale bundle after a rebuild.
+            response = FileResponse(
+                file_path, media_type=media_type, headers={"Cache-Control": "no-cache"}, stat_result=file_path.stat()
+            )
+            # FileResponse sends validators but never answers conditional requests itself; StaticFiles' logic does.
+            if _CONDITIONAL_GET.is_not_modified(response.headers, request.headers):
+                return NotModifiedResponse(response.headers)
+            return response
 
         app.include_router(build_plugins_router(manifests))
 
