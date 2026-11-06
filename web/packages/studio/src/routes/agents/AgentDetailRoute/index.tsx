@@ -27,7 +27,6 @@ import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
   AGENT_OPTIMIZATION_FORM_ENABLED,
   AGENT_OPTIMIZATIONS_ENABLED,
-  AGENT_OVERVIEW_ENABLED,
   OPTIMIZER_ENABLED,
 } from '@studio/constants/environment';
 import { ROUTE_PARAMS } from '@studio/constants/routes';
@@ -333,7 +332,7 @@ export const AgentDetailRoute: FC = () => {
         >
           <Flex className="shrink-0" align="center" gap="4">
             <TabsList className="min-w-0 flex-1" ref={tabsRef}>
-              {AGENT_OVERVIEW_ENABLED && <TabsTrigger value="overview">Overview</TabsTrigger>}
+              <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="chat">Chat</TabsTrigger>
               <TabsTrigger value="evaluations">Evaluations</TabsTrigger>
               {OPTIMIZER_ENABLED && <TabsTrigger value="insights">Insights</TabsTrigger>}
@@ -369,19 +368,17 @@ export const AgentDetailRoute: FC = () => {
             </Flex>
           </Flex>
 
-          {AGENT_OVERVIEW_ENABLED && (
-            <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
-              <OverviewTab
-                workspace={workspace}
-                agent={agent}
-                modelNames={modelNames}
-                evals={agentEvals}
-                isEvalsPending={isAgentEvalsPending}
-                onRunAgent={() => setSelectedTab('chat')}
-                onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
-              />
-            </TabsContent>
-          )}
+          <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="overview">
+            <OverviewTab
+              workspace={workspace}
+              agent={agent}
+              modelNames={modelNames}
+              evals={agentEvals}
+              isEvalsPending={isAgentEvalsPending}
+              onRunAgent={() => setSelectedTab('chat')}
+              onRunEvaluation={canRunEvaluation ? runEvaluation : undefined}
+            />
+          </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-auto p-0 pt-6" value="evaluations">
             <EvaluationsTab

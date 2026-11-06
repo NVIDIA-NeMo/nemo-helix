@@ -32,7 +32,6 @@ export const AGENT_CONTAINER_DEPLOYMENTS_ENABLED =
   featureFlags.agentContainerDeploymentsEnabled !== false;
 export const AGENT_OPTIMIZATIONS_ENABLED = featureFlags.agentOptimizationsEnabled !== false;
 export const AGENT_OPTIMIZATION_FORM_ENABLED = featureFlags.agentOptimizationFormEnabled !== false;
-export const AGENT_OVERVIEW_ENABLED = featureFlags.agentOverviewEnabled !== false;
 export const ANONYMIZER_ENABLED = featureFlags.anonymizerEnabled !== false;
 export const ASSISTANT_STUDIO_ENABLED = featureFlags.assistantStudioEnabled !== false;
 export const CUSTOMIZER_ENABLED = featureFlags.customizerEnabled !== false;
