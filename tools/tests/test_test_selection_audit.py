@@ -49,8 +49,8 @@ def test_workflow_parser_finds_gated_test_commands() -> None:
     )
     # The per-runner Harbor step runs from the nhx-sandbox package, which owns harbor_opensandbox.
     assert scaled_evals.run_block_working_directories == ("", "packages/nhx_sandbox")
-    assert jobs["deployments-openshell-tests"].referenced_outputs == ("deps", "deployments-openshell")
-    assert jobs["deployments-openshell-tests"].run_blocks == ("make test-deployments-openshell",)
+    assert jobs["openshell-tests"].referenced_outputs == ("deps", "deployments-openshell", "jobs-openshell")
+    assert jobs["openshell-tests"].run_blocks == ("make test-deployments-openshell", "make test-jobs-openshell")
 
 
 def test_pytest_paths_resolve_against_the_step_working_directory() -> None:

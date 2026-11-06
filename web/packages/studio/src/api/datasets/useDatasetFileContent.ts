@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { toJsonl } from '@nemo/common/src/utils/download';
 import { logger } from '@nemo/common/src/utils/logger';
+import { readParquetObjects } from '@nemo/common/src/utils/parseRecords';
 import { customFetch } from '@nemo/sdk/generated/fetchers/platform';
 import {
   filesDownloadFile,
@@ -11,17 +13,12 @@ import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import type { EntityIdentifier } from '@studio/api/common/types';
 import { getDatasetFileContentQueryKey } from '@studio/api/datasets/invalidateDatasetCaches';
 import { isBinaryExtension } from '@studio/util/binaryFile';
-import { queryOptions, useQuery, UseQueryOptions, useSuspenseQuery } from '@tanstack/react-query';
-import { parquetRead } from 'hyparquet';
-
-/** Parquet INT64 (and similar) columns decode as BigInt; JSON.stringify rejects those by default. */
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return typeof value === 'bigint' ? value.toString() : value;
-}
-
-function serializeParquetRow(row: unknown): string {
-  return JSON.stringify(row, jsonReplacer);
-}
+import {
+  queryOptions,
+  useQuery,
+  type UseQueryOptions,
+  useSuspenseQuery,
+} from '@tanstack/react-query';
 
 /**
  * Parse a Content-Length header into a byte count, accepting only a strict
@@ -97,22 +94,10 @@ export const datasetFileContentQueryOptions = ({
 
       if (path.endsWith('parquet')) {
         try {
-          let data: string = '';
           const blob = await filesDownloadFile(workspace!, name, path);
           if (!blob) throw new Error('Invalid response while downloading parquet file');
-          const buffer = await blob.arrayBuffer();
-          await parquetRead({
-            file: buffer,
-            rowFormat: 'object',
-            rowStart: range?.[0],
-            rowEnd: range?.[1],
-            onComplete: (content) => {
-              for (const row of content) {
-                data += `${serializeParquetRow(row)}\n`;
-              }
-            },
-          });
-          return data;
+          const rows = await readParquetObjects(blob, { rowStart: range?.[0], rowEnd: range?.[1] });
+          return rows.length ? `${toJsonl(rows)}\n` : '';
         } catch (err) {
           logger.error('Invalid response while downloading parquet file', err);
           throw new Error('Invalid response while downloading parquet file');

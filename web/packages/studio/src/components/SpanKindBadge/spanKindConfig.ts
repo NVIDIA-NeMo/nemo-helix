@@ -8,7 +8,7 @@ import {
   CubeStack,
   HelpCircle,
   MagnifyingGlass,
-  Shield,
+  Secure,
   Sparkle,
   Wrench,
   IconClipboard,
@@ -35,7 +35,7 @@ const SPAN_KIND_CONFIG: Record<SpanKind, SpanKindConfig> = {
   [SpanKind.EMBEDDING]: { label: 'Embedding', color: 'blue', icon: CubeStack },
   [SpanKind.RERANKER]: { label: 'Reranker', color: 'blue', icon: ArrowUpDown },
   [SpanKind.EVALUATOR]: { label: 'Evaluator', color: 'green', icon: IconClipboard },
-  [SpanKind.GUARDRAIL]: { label: 'Guardrail', color: 'yellow', icon: Shield },
+  [SpanKind.GUARDRAIL]: { label: 'Guardrail', color: 'yellow', icon: Secure },
   [SpanKind.CHAIN]: { label: 'Chain', color: 'gray', icon: Link },
   [SpanKind.UNKNOWN]: { label: 'Unknown', color: 'gray', icon: HelpCircle },
 };

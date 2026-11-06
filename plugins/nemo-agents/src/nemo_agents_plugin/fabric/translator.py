@@ -311,6 +311,16 @@ def _apply_telemetry(fabric_config: Any, config: AgentConfig, model: ModelConfig
     if provider != "relay":
         raise FabricTranslationError(f"Unsupported telemetry provider {provider!r}. Only 'relay' is supported.")
 
+    if (
+        fabric_config.harness is not None
+        and fabric_config.harness.adapter_id == HARNESS_ADAPTER_IDS["hermes"]
+        and telemetry.insecure_http_hosts is not None
+    ):
+        raise FabricTranslationError(
+            "telemetry.insecure_http_hosts requires Relay 0.11; the Hermes harness uses Relay 0.10. "
+            "Remove this setting and use an HTTPS or loopback collector for Hermes."
+        )
+
     _default_relay_extension_path(fabric_config)
 
     fabric_config.enable_relay(
@@ -362,6 +372,9 @@ def _relay_observability_config(config: AgentConfig, model: ModelConfig) -> dict
     telemetry = config.telemetry
     agent_name = _telemetry_agent_name(config)
     observability: dict[str, Any] = {"version": RELAY_OBSERVABILITY_VERSION}
+    # None preserves omission across serialization; [] clears inherited allowances.
+    if telemetry.insecure_http_hosts is not None:
+        observability["insecure_http_hosts"] = list(telemetry.insecure_http_hosts)
 
     if telemetry.atif is not None:
         atif = dict(telemetry.atif)

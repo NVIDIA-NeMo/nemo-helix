@@ -28,8 +28,6 @@ export type Strategy =
   | typeof STRATEGY_HASH
   | typeof STRATEGY_REWRITE;
 
-export const REWRITE_STRATEGY: Strategy = STRATEGY_REWRITE;
-
 export const STRATEGY_OPTIONS: { children: string; value: Strategy }[] = [
   { children: 'Substitute', value: STRATEGY_SUBSTITUTE },
   { children: 'Redact', value: STRATEGY_REDACT },

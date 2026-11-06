@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { DeleteAction } from '@nemo/common/src/components/ActionsMenu';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import {
   type QuickActionItem,
@@ -15,10 +16,10 @@ import { useBulkDuplicate } from '@studio/components/filesets/hooks/useBulkDupli
 import { CreateFileSplitsModal } from '@studio/components/FilesTable/CreateFileSplitsModal';
 import { RenameFileModal } from '@studio/components/FilesTable/RenameFileModal';
 import { TransformFileModal } from '@studio/components/FilesTable/TransformFileModal';
-import { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemFile, FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useSelectedDatasetId } from '@studio/hooks/useSelectedDatasetId';
 import { resolveDatasetFilePath } from '@studio/util/files';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 type ModalType = 'createSplit' | 'rename' | 'delete' | 'info' | 'transform' | 'addToFolder';
 
@@ -110,27 +111,32 @@ export const FileQuickActions: FC<Props> = ({
     }
   };
 
-  const actions: QuickActionItem[] = isReadWriteDataset
-    ? [
-        ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
-        { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
-        { label: 'Copy Path', onSelect: handleCopyPath, divider: { width: 'large' } },
-        { label: 'Move', onSelect: openModalWithFile('addToFolder') },
-        { label: 'Duplicate', onSelect: handleDuplicate, disabled: isDuplicating },
-        { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
-        { label: 'Transform', onSelect: openModalWithFile('transform') },
-        { label: 'Rename', onSelect: openModalWithFile('rename'), divider: { width: 'large' } },
-        { label: 'Delete', onSelect: openModalWithFile('delete'), danger: true },
-      ]
-    : [
-        ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
-        { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
-        { label: 'Copy Path', onSelect: handleCopyPath },
-      ];
+  const { actions, deleteAction }: { actions: QuickActionItem[]; deleteAction?: DeleteAction } =
+    isReadWriteDataset
+      ? {
+          actions: [
+            ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
+            { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
+            { label: 'Copy Path', onSelect: handleCopyPath, divider: {} },
+            { label: 'Move', onSelect: openModalWithFile('addToFolder') },
+            { label: 'Duplicate', onSelect: handleDuplicate, disabled: isDuplicating },
+            { label: 'Create Split', onSelect: openModalWithFile('createSplit') },
+            { label: 'Transform', onSelect: openModalWithFile('transform') },
+            { label: 'Rename', onSelect: openModalWithFile('rename') },
+          ],
+          deleteAction: { onSelect: openModalWithFile('delete') },
+        }
+      : {
+          actions: [
+            ...(onViewFile ? [{ label: 'View File', onSelect: handleViewFile }] : []),
+            { label: 'Download', onSelect: downloadFile, disabled: isDownloading },
+            { label: 'Copy Path', onSelect: handleCopyPath },
+          ],
+        };
 
   return (
     <>
-      <QuickActionsMenuRoot actions={actions} />
+      <QuickActionsMenuRoot actions={actions} deleteAction={deleteAction} />
       {openModal === 'delete' && modalFile && (
         <DeleteConfirmationModal
           open

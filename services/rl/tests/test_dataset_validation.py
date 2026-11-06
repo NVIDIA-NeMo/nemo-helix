@@ -8,6 +8,14 @@ from pathlib import Path
 
 import jsonschema
 import pytest
+from nhx.customization_common.dataset_prepare import (
+    SPLIT_FILES,
+    DatasetFormat,
+    map_columns,
+    split_rows,
+    to_training_rows,
+    write_split,
+)
 from nhx.rl.entities.values import TrainingType
 from nhx.rl.schemas.environment import GymDatasetRow, GymVerifiersDatasetRow
 from nhx.rl.tasks.training.datasets import validation as validation_mod
@@ -62,9 +70,98 @@ def test_agent_specific_fields_are_preserved() -> None:
     assert parsed.model_dump()["expected_answer"] == "4"
 
 
+def test_image_count_reads_the_prompt_and_ignores_metadata(tmp_path: Path) -> None:
+    row = {
+        **VERIFIERS_ROW,
+        "responses_create_params": {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url", "image_url": {"url": "a.png"}},
+                        {"type": ["image"]},
+                        {"type": "text", "text": "read"},
+                    ],
+                }
+            ]
+        },
+        "info": {"type": ["image"], "nested": {"type": "image_url"}},
+    }
+    path = tmp_path / "train.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    validator = DatasetValidator(training_type=TrainingType.GRPO)
+    validator.validate_dataset(str(path))
+
+    assert validator.max_images_per_prompt == 1
+
+
+def test_vision_dpo_accepts_a_chat_only_preference_row(tmp_path: Path) -> None:
+    path = tmp_path / "train.jsonl"
+    path.write_text(
+        json.dumps({"prompt": "q", "chosen": "good", "rejected": "bad"}) + "\n",
+        encoding="utf-8",
+    )
+
+    DatasetValidator(training_type=TrainingType.DPO, reject_multimodal=True).validate_dataset(str(path))
+
+
+def test_vision_dpo_rejects_a_preference_row_with_an_image(tmp_path: Path) -> None:
+    path = tmp_path / "train.jsonl"
+    path.write_text(
+        json.dumps(
+            {
+                "prompt": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image_url", "image_url": {"url": "a.png"}},
+                            {"type": "text", "text": "q"},
+                        ],
+                    }
+                ],
+                "chosen": "good",
+                "rejected": "bad",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception, match="chat-only preference dataset"):
+        DatasetValidator(training_type=TrainingType.DPO, reject_multimodal=True).validate_dataset(str(path))
+
+
 def test_validate_dataset_compiles_schema_once(tmp_path: Path, mocker) -> None:
     path = tmp_path / "train.jsonl"
     path.write_text("".join(json.dumps(VERIFIERS_ROW) + "\n" for _ in range(50)))
     compile_spy = mocker.spy(validation_mod, "_compile_validator")
     DatasetValidator(training_type=TrainingType.GRPO).validate_dataset(str(path))
     assert compile_spy.call_count == 1
+
+
+def _prepared(tmp_path: Path, dataset_format: DatasetFormat, rows: list[dict], **named: str) -> Path:
+    """Write *rows* the way ``nemo customization dataset prepare --format`` uploads them."""
+    training_rows, _ = to_training_rows(rows, map_columns(dataset_format, rows[0].keys(), named))
+    splits = split_rows(training_rows, val_fraction=0.2, test_fraction=0.0, seed=0)
+    write_split(splits.train, tmp_path / SPLIT_FILES["train"])
+    write_split(splits.validation, tmp_path / SPLIT_FILES["validation"])
+    return tmp_path
+
+
+@pytest.mark.parametrize("system", [None, "persona"])
+def test_data_designer_preference_output_is_found_and_validates_for_dpo(tmp_path: Path, system: str | None) -> None:
+    """The Studio "Preference pairs" template, prepared by the CLI, is found by DPO's file discovery and validates."""
+    from nhx.rl.tasks.training.datasets.preparation import discover_dataset_files
+
+    rows = [
+        {"topic": "t", "persona": "Be brief.", "instruction": f"q{i}", "chosen": "good", "rejected": "bad"}
+        for i in range(10)
+    ]
+    dataset = _prepared(tmp_path, DatasetFormat.PREFERENCE, rows, **({"system": system} if system else {}))
+
+    train_files, val_files = discover_dataset_files(dataset)
+    assert ([f.name for f in train_files], [f.name for f in val_files]) == (["train.jsonl"], ["validation.jsonl"])
+    validator = DatasetValidator(TrainingType.DPO)
+    for path in (*train_files, *val_files):
+        validator.validate_dataset(str(path))

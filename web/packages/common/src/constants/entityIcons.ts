@@ -7,25 +7,24 @@ import {
   CubeStack,
   ChartBar,
   Db,
-  Layers,
   Beaker,
   FolderOpen,
-  Generate,
+  LayoutList,
   ListCheckmark,
   ScmCompare,
   Lightbulb,
   ChartTree,
   LockClosed,
-  Pulse,
+  ListBullet,
   Radar,
   Rocket,
-  Shield,
+  Secure,
   Sliders,
-  Sparkle,
+  Generate,
   Profile,
   ProfileGroup,
-  Network,
-  Wand,
+  Route,
+  Faders,
 } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
@@ -34,7 +33,7 @@ import type { FC } from 'react';
  *
  * One entity means one icon, everywhere it appears — sidebar nav, route header,
  * empty state, primary CTA. Import from here rather than reaching for
- * `lucide-react` at the callsite: a locally chosen glyph is how the surfaces
+ * `@nemo/icons/icons` at the callsite: a locally chosen glyph is how the surfaces
  * drifted apart in the first place (ASTD-447).
  *
  * Choosing a glyph for a new entity:
@@ -52,29 +51,29 @@ export const ENTITY_ICONS = {
   // Agents
   agents: Robot,
   // Monitor runs are agent telemetry, so they share the span glyph.
-  agentMonitorRuns: Pulse,
+  agentMonitorRuns: ListBullet,
   // Every run that tunes an agent — parameter sweeps, insight loops.
   agentOptimizations: Sliders,
 
   // Models
   baseModels: CubeStack,
-  customModels: Wand,
+  customModels: Faders,
   deployments: Rocket,
-  virtualModels: Network,
+  virtualModels: Route,
   inferenceProviders: Radar,
 
   // Data
   datasets: Db,
-  filesets: Layers,
+  filesets: FolderOpen,
   filesetFiles: FolderOpen,
   anonymizerJobs: Profile,
-  dataDesignerJobs: Generate,
-  safeSynthesizerJobs: Sparkle,
+  dataDesignerJobs: LayoutList,
+  safeSynthesizerJobs: Generate,
 
   // Governance. A config and its tests are one thing to the user, so the tests
   // take the config's glyph rather than a second shield.
-  guardrails: Shield,
-  guardrailChecks: Shield,
+  guardrails: Secure,
+  guardrailChecks: Secure,
 
   // Evaluation
   evaluationResults: ChartBar,
@@ -88,7 +87,7 @@ export const ENTITY_ICONS = {
   optimizerInsights: Lightbulb,
   telemetryTraces: ChartTree,
   insightTraces: ChartTree,
-  telemetrySpans: Pulse,
+  telemetrySpans: ListBullet,
 
   // System
   jobs: ListCheckmark,

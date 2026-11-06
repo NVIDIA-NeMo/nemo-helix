@@ -85,13 +85,17 @@ def test_submit_evaluate_job_endpoint_shape() -> None:
 def test_submit_agent_eval_job_endpoint_shape() -> None:
     prepared = endpoints.submit_agent_eval_job(
         workspace="team-a",
-        body=SubmitAgentEvalJobRequest(spec={"tasks": "default/suite", "target": {"kind": "gym"}}),
+        body=SubmitAgentEvalJobRequest(
+            spec={"tasks": "default/suite", "target": {"kind": "gym"}}, output_location="evaluation-files"
+        ),
     )
 
     assert prepared.method == "POST"
     assert prepared.path_template == "/apis/evals/v2/workspaces/{workspace}/agent-evaluate/jobs"
     assert prepared.path_params == {"workspace": "team-a"}
     assert prepared.response_type is AgentEvalJob
+    assert isinstance(prepared.content, bytes)
+    assert json.loads(prepared.content)["output_location"] == "evaluation-files"
 
 
 def test_health_endpoint_shape() -> None:
@@ -350,6 +354,27 @@ def test_metric_endpoint_shapes() -> None:
     _assert_paginated_model(endpoints.list_metrics(workspace="team-a").response_type, Metric)
     assert endpoints.get_metric(workspace="team-a", name="accuracy").response_type is Metric
     assert endpoints.delete_metric(workspace="team-a", name="accuracy").response_type is None
+
+
+def test_metric_create_serializes_optional_output() -> None:
+    body = _metric_create_request()
+    body.outputs.append(
+        BundledMetricOutputSpec(name="confidence", value_json_schema={"type": "number"}, required=False)
+    )
+
+    metric_create = endpoints.create_metric(workspace="team-a", name="accuracy", body=body)
+
+    assert isinstance(metric_create.content, bytes)
+    assert json.loads(metric_create.content)["outputs"] == [
+        {"name": "score", "value_json_schema": {"type": "number"}},
+        {"name": "confidence", "value_json_schema": {"type": "number"}, "required": False},
+    ]
+
+
+@pytest.mark.parametrize("extra", [{"required": "false"}, {"optional": True}])
+def test_bundled_metric_output_spec_rejects_invalid_fields(extra: dict[str, JsonValue]) -> None:
+    with pytest.raises(ValidationError):
+        BundledMetricOutputSpec.model_validate({"name": "score", "value_json_schema": {"type": "number"}, **extra})
 
 
 def test_task_endpoint_shapes() -> None:

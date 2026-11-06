@@ -129,10 +129,11 @@ async def test_callback_errors_clean_up_scope_and_middleware(error):
         raise error
 
     with nemo_relay.scope.scope("parent", nemo_relay.ScopeType.Agent) as parent:
-        # Relay 0.9 converts exceptions raised by its callback into RuntimeError.
-        with pytest.raises(RuntimeError, match=type(error).__name__):
+        # Relay 0.11 preserves callback exceptions, including cancellation.
+        with pytest.raises(type(error)) as raised:
             async with relay_compat.relay_scope(manager, "compiler"):
                 await manager.run_middleware(MIDDLEWARE_EXECUTE_PYTHON, ExecutePythonContext(code="fails"), execute)
+        assert raised.value is error
         assert nemo_relay.scope.get_handle().uuid == parent.uuid
     assert not any(manager._middleware.values())
 

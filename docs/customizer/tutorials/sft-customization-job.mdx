@@ -497,7 +497,7 @@ The deployment service automatically:
 
 **Multi-GPU Deployment:**
 
-For larger models requiring multiple GPUs, increase `gpu` in `deployment_config`. vLLM computes tensor parallelism from the GPU count and model architecture.
+For larger models requiring multiple GPUs, increase `gpu` in `deployment_config`. vLLM computes tensor parallelism from the GPU count and model architecture. On Kubernetes the model's files download into a `50Gi` volume by default; for a larger model, also set `disk_size` above its size (for example, `"disk_size": "300Gi"`).
 
 **Single-Node Constraint:** Model deployments are limited to a single node. The maximum `gpu` value depends on the total GPUs available on a single node in your cluster. Multi-node deployments are not supported.
 

@@ -21,8 +21,6 @@ import { featureFlags } from '@studio/constants/featureFlags';
  */
 const getEnvVar = (envVarKey: string) => import.meta.env[envVarKey] as string;
 
-// Special keyword env vars
-export const IS_PROD = import.meta.env.PROD;
 export const BASE_URL = import.meta.env.BASE_URL as string;
 
 // Platform base URL — single endpoint for all microservices

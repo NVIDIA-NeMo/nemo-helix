@@ -9,7 +9,7 @@ import { Button, Flex, Stack, TableToolbar, Text } from '@nvidia/foundations-rea
 import { SchemaSelectControl } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/SchemaSelectControl';
 import { SharedSchemaConfirmModal } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/SharedSchemaConfirmModal';
 import { useDatasetSchemaEditor } from '@studio/routes/FilesetDetailRoute/DatasetSchemaEditor/useDatasetSchemaEditor';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface DatasetSchemaEditorProps {
   workspace: string;

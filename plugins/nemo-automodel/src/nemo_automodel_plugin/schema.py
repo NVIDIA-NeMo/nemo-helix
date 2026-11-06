@@ -14,9 +14,14 @@ from nemo_helix_plugin.deployment import (
     reject_lora_without_lora_enabled,
 )
 from nemo_helix_plugin.integrations import IntegrationsSpec
-from nhx.customization_common.schema import NamespacedModel
+from nhx.customization_common.schema import (
+    LearningRateDefault,
+    NamespacedModel,
+    learning_rate_defaults_schema_extra,
+    match_learning_rate_default,
+)
 from nhx.customization_common.training.reporting import ProgressReportingConfig
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, model_validator
 
 __all__ = [
     "AutomodelJobInput",
@@ -331,6 +336,15 @@ RETRIEVAL_BATCH_DEFAULTS: dict[str, tuple[int, int]] = {
     "cross_encoder": (128, 8),
 }
 
+# Applied by ``with_resolved_recipe`` when the request leaves ``optimizer.learning_rate`` unset,
+# and published on ``AutomodelJobInput`` for Studio. A full-weight run updates every weight, so
+# it takes a smaller step than LoRA; the retrieval recipes use their own rate whatever the type.
+AUTOMODEL_LEARNING_RATE_DEFAULTS: list[LearningRateDefault] = [
+    {"when": {"training.recipe": "bi_encoder"}, "value": 1e-5},
+    {"when": {"training.recipe": "cross_encoder"}, "value": 3e-6},
+    {"when": {"training.finetuning_type": "all_weights"}, "value": 5e-6},
+]
+
 
 class BatchSpec(AutomodelSchema):
     global_batch_size: int = Field(default=8, gt=0)
@@ -413,6 +427,8 @@ class OutputResponse(AutomodelSchema):
 class AutomodelJobInput(AutomodelSchema):
     """POST body / CLI JSON."""
 
+    model_config = ConfigDict(json_schema_extra=learning_rate_defaults_schema_extra(AUTOMODEL_LEARNING_RATE_DEFAULTS))
+
     name: str | None = None
     model: str
     dataset: DatasetSpec
@@ -461,17 +477,20 @@ class AutomodelJobInput(AutomodelSchema):
             raise ValueError("distillation only supports the sft recipe")
 
         training = self.training.model_copy(update={"recipe": recipe})
+        learning_rate = match_learning_rate_default(
+            AUTOMODEL_LEARNING_RATE_DEFAULTS,
+            {"training.recipe": recipe, "training.finetuning_type": training.finetuning_type},
+        )
         if recipe == "bi_encoder":
-            learning_rate, warmup_steps = 1e-5, 5
+            warmup_steps = 5
             global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["bi_encoder"]
         elif recipe == "cross_encoder":
-            learning_rate, warmup_steps = 3e-6, 100
+            warmup_steps = 100
             global_batch_size, micro_batch_size = RETRIEVAL_BATCH_DEFAULTS["cross_encoder"]
         else:
-            # A full-weight run updates every weight, so it takes a smaller step than LoRA.
             optimizer = self.optimizer
-            if training.finetuning_type == "all_weights" and "learning_rate" not in optimizer.model_fields_set:
-                optimizer = optimizer.model_copy(update={"learning_rate": 5e-6})
+            if learning_rate is not None and "learning_rate" not in optimizer.model_fields_set:
+                optimizer = optimizer.model_copy(update={"learning_rate": learning_rate})
             return self.model_copy(update={"training": training, "optimizer": optimizer})
 
         batch_updates: dict[str, int] = {}
@@ -481,7 +500,7 @@ class AutomodelJobInput(AutomodelSchema):
             batch_updates["micro_batch_size"] = micro_batch_size
 
         optimizer_updates: dict[str, float | int] = {}
-        if "learning_rate" not in self.optimizer.model_fields_set:
+        if learning_rate is not None and "learning_rate" not in self.optimizer.model_fields_set:
             optimizer_updates["learning_rate"] = learning_rate
         if "warmup_steps" not in self.optimizer.model_fields_set:
             optimizer_updates["warmup_steps"] = warmup_steps

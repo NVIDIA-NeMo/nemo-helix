@@ -566,8 +566,10 @@ models:
         default_nimservice_image_tag: latest
         # Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names. | default: 'docker.io/vllm/vllm-openai'
         default_vllm_image: docker.io/vllm/vllm-openai
-        # default: 'v0.22.1'
-        default_vllm_image_tag: v0.22.1
+        # default: 'v0.32.0'
+        default_vllm_image_tag: v0.32.0
+        # --max-lora-rank for vLLM deployments with LoRA enabled, unless additional_args sets it. vLLM refuses adapters above this rank; set it to the highest rank you train. | default: 32
+        default_vllm_max_lora_rank: 32
         # default: 1000
         default_user_id: 1000
         # default: 2000

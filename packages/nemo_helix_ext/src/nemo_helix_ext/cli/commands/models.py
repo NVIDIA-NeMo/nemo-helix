@@ -129,7 +129,7 @@ def create_models(
         str | None, typer.Option("--api-endpoint", help="Data about an inference endpoint. (JSON string)")
     ] = None,
     backend_format: Annotated[
-        Literal["OPENAI_CHAT", "ANTHROPIC_MESSAGES"] | None,
+        Literal["OPENAI_CHAT", "ANTHROPIC_MESSAGES", "SYSTEMONE"] | None,
         typer.Option(
             "--backend-format", help="Inference backend API wire formats understood by IGW and middleware plugins."
         ),
@@ -451,7 +451,7 @@ def update_models(
         str | None, typer.Option("--api-endpoint", help="Data about an inference endpoint. (JSON string)")
     ] = None,
     backend_format: Annotated[
-        Literal["OPENAI_CHAT", "ANTHROPIC_MESSAGES"] | None,
+        Literal["OPENAI_CHAT", "ANTHROPIC_MESSAGES", "SYSTEMONE"] | None,
         typer.Option(
             "--backend-format", help="Inference backend API wire formats understood by IGW and middleware plugins."
         ),

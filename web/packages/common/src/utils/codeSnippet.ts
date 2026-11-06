@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { CodeSnippetLanguage } from '@nvidia/foundations-react-core';
+import type { CodeSnippetLanguage } from '@nvidia/foundations-react-core';
 
 /**
  * Maps all supported code snippet languages to their string identifiers.

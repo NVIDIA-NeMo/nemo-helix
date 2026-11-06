@@ -3,8 +3,6 @@
 
 export const EVALUATION_DEFAULT_OUTPUT_TEMPLATE_STRING = '{{sample.output_text | trim}}';
 
-export const DEFAULT_JUDGE_MODEL_NAME = 'meta/llama-3.3-70b-instruct';
-
 export const METRIC_NAMES_API = ['llm-judge', 'f1', 'bleu', 'rouge', 'string-check', 'em'] as const;
 export type MetricNameApi = (typeof METRIC_NAMES_API)[number];
 
@@ -13,7 +11,6 @@ export type MetricNameApi = (typeof METRIC_NAMES_API)[number];
  * Based on the Evaluator API validation
  */
 export const LLM_JUDGE_SCORE_TYPES = ['number', 'integer', 'boolean'] as const;
-export type LLMJudgeScoreType = (typeof LLM_JUDGE_SCORE_TYPES)[number];
 
 export const DEFAULT_LLM_JUDGE_DEFAULTS = {
   systemMessage: 'Your task is to evaluate the semantic similarity between two responses.',

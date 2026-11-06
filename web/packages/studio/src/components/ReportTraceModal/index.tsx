@@ -4,9 +4,9 @@
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import {
   TraceQueue,
-  TraceData,
-  TraceQueueEvent,
-  TraceSpan,
+  type TraceData,
+  type TraceQueueEvent,
+  type TraceSpan,
 } from '@nemo/common/src/utils/TraceQueue';
 import { CopyGeneric, Paperplane, ArrowLeft } from '@nemo/icons/icons';
 import { Modal, Button, Flex, Stack, Text, Badge, Switch } from '@nvidia/foundations-react-core';

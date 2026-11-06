@@ -219,7 +219,7 @@ class JobReconciler(HeartbeatMixin, Controller):
         for backend in self._backend_registry.get_all_backends():
             with tracer.start_as_current_span("jobs_reconciler/cleanup_backend_steps"):
                 try:
-                    backend.cleanup_steps()
+                    backend.cleanup_steps(on_progress=self.emit_heartbeat)
                 except Exception:
                     logger.exception("Could not complete cleanup steps for backend", exc_info=True)
                 finally:

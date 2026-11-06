@@ -4,7 +4,7 @@
 """OpenShell SDK client for the jobs backend.
 
 Imports the optional ``openshell`` package at module load, so the backend
-imports this module lazily (see ``backend._ensure_openshell``).
+guards its module-level imports (see ``backend._ensure_openshell``).
 """
 
 from __future__ import annotations

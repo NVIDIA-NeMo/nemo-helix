@@ -17,6 +17,7 @@ from nemo_helix_plugin.jobs.schemas import (
     HelixJobStatus,
     HelixJobStatusResponse,
 )
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from nemo_helix_plugin.refs import ENTITY_REF_PATTERN, FilesetRef
 from nemo_helix_plugin.schema import Page
 from pydantic import (
@@ -244,9 +245,11 @@ class EnvironmentSpecInline(BaseModel):
     the injected process environment.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     description: str = Field(default="", description="Human-readable description.")
     env: StringMap = Field(default_factory=dict, description="Plaintext, non-secret env vars.")
-    secrets: StringMap = Field(default_factory=dict, description="ENV_VAR_NAME -> Secrets-service/plugin ref.")
+    secrets: StringMap = Field(default_factory=dict, description="Secret alias -> Secrets-service/plugin ref.")
     model_provider_override: ModelProviderOverride | None = Field(
         default=None,
         description="Set only to point at a non-IGW external model provider.",
@@ -368,6 +371,9 @@ class AgentDeployment(EntityMetadata):
         description="Resolved compute snapshot from the referenced environment.",
     )
     secrets: StringMap = Field(default_factory=dict, description="Resolved secret env references.")
+    providers: dict[str, GatewayProviderBinding] = Field(
+        default_factory=dict, description="Resolved gateway credential bindings."
+    )
     source_fileset: FilesetRef | None = Field(
         default=None,
         description="Agent source fileset snapshotted at creation. When absent, stages <agent>-ethos.",
@@ -390,6 +396,12 @@ class AgentDeployment(EntityMetadata):
 
 class AgentSession(EntityMetadata):
     """A durable logical conversation associated with an AgentDeployment."""
+
+    session_uuid: str = Field(
+        default="",
+        description="Unique identifier for the session. Can be used to group and retrieve the session's traces in Intake.",
+        json_schema_extra={"readOnly": True},
+    )
 
     deployment_id: str = Field(
         min_length=1,

@@ -52,7 +52,6 @@ checkpoint:
   restore_from: LATEST
   save_consolidated: true
   dequantize_base_checkpoint: true
-  v4_compatible: false
 packed_sequence:
   packed_sequence_size: 212
 dataset:

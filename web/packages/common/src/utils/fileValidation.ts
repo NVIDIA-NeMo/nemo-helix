@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChatCompletionRole } from 'openai/resources/index.mjs';
-
-import { FileFormatType, InputFileSchemaType } from '../types';
-import { findMessagesArray, getFirstRow } from './file';
+import { type FileFormatType, InputFileSchemaType } from '@nemo/common/src/types';
+import { findMessagesArray, getFirstRow } from '@nemo/common/src/utils/file';
+import { parseJsonOrJsonl } from '@nemo/common/src/utils/parseRecords';
+import type { ChatCompletionRole } from 'openai/resources/index.mjs';
 
 export interface FileValidationResult {
   isValid: boolean;
@@ -96,29 +96,13 @@ export async function validateFileFormat(file: File): Promise<FileValidationResu
   try {
     const text = await file.text();
 
-    // Try to parse as JSON first
-    let data;
+    let items: unknown[];
     let format: FileFormatType;
     try {
-      data = JSON.parse(text);
-      format = 'json';
+      ({ records: items, format } = parseJsonOrJsonl(text));
     } catch {
-      // Try to parse as JSONL (one JSON object per line)
-      const lines = text.trim().split('\n');
-      if (lines.length === 0) {
-        return { isValid: false, format: null, error: 'File is empty' };
-      }
-
-      try {
-        data = lines.map((line) => JSON.parse(line));
-        format = 'jsonl';
-      } catch {
-        return { isValid: false, format: null, error: 'File is not valid JSON or JSONL' };
-      }
+      return { isValid: false, format: null, error: 'File is not valid JSON or JSONL' };
     }
-
-    // Check if it's an array or single object
-    const items = Array.isArray(data) ? data : [data];
 
     if (items.length === 0) {
       return { isValid: false, format: null, error: 'File contains no data' };

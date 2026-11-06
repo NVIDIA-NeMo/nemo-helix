@@ -5,10 +5,14 @@ import { ExpandableMessage } from '@nemo/common/src/components/ExpandableMessage
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { parametersToString } from '@nemo/common/src/components/ModelDetailsTooltip/utils';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
-import { getModelVersion, TagLabel, tagToIcon } from '@nemo/common/src/constants/modelMetadata';
+import {
+  getModelVersion,
+  type TagLabel,
+  tagToIcon,
+} from '@nemo/common/src/constants/modelMetadata';
 import { kebabCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import { isDefined } from '@nemo/common/src/utils/list';
-import { ChatMulti, Eye, EyeOff, Layers, HAlignLeft, IconWindow } from '@nemo/icons/icons';
+import { ChatMulti, Eye, EyeOff, Layers, TextAlignLeft, IconWindow } from '@nemo/icons/icons';
 import {
   ModelDeploymentStatus,
   type Adapter,
@@ -33,7 +37,7 @@ import {
 import { CopyButton } from '@studio/components/CopyButton';
 import { getWorkspaceCustomizationJobDetailsRoute } from '@studio/routes/utils';
 import { formatFinetuningType } from '@studio/util/customizations';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 export type ModelParameters = ModelDetailOverviewProps & ModelParametersAccordionProps;
 
@@ -96,7 +100,7 @@ export const ModelDetailOverview: FC<ModelDetailOverviewProps> = ({
         {parameters != null && (
           <Tooltip slotContent="Parameters">
             <Flex align="center" gap="1">
-              <HAlignLeft />
+              <TextAlignLeft />
               <Text kind="body/regular/sm">
                 {parametersToString(parameters, { format: 'short' })}
               </Text>

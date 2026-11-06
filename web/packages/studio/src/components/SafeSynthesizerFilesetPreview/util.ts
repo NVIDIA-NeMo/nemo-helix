@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Papa from 'papaparse';
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 export interface ParsedCSVTable {
   rows: { id: string; cells: { children: ReactNode }[] }[];

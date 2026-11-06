@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
+import { jsonlLines, parseJsonl } from '@nemo/common/src/utils/parseRecords';
+
 /** The Intake ingest endpoints a picked file can be sent to. */
 export type TraceFormat = 'atif' | 'spans' | 'chat-completions' | 'otlp-protobuf';
 
@@ -30,37 +33,28 @@ export const FORMAT_LABELS: Record<TraceFormat, string> = {
 export const isProtobufFileName = (fileName: string): boolean =>
   PROTOBUF_EXTENSIONS.some((extension) => fileName.toLowerCase().endsWith(extension));
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 const looksAtif = (value: Record<string, unknown>): boolean =>
   typeof value.schema_version === 'string' ||
-  (isRecord(value.agent) && typeof value.agent.name === 'string');
+  (isPlainObject(value.agent) && typeof value.agent.name === 'string');
 
 const looksSpan = (value: unknown): boolean =>
-  isRecord(value) &&
+  isPlainObject(value) &&
   typeof value.span_id === 'string' &&
   typeof value.trace_id === 'string' &&
   typeof value.started_at === 'string';
 
 /** Reads a JSONL body as one array, or null when any line is not a JSON value of its own. */
 const parseJsonLines = (text: string): unknown[] | null => {
-  const lines = text.split('\n').filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return null;
-
-  const records: unknown[] = [];
-  for (const line of lines) {
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      return null;
-    }
+  if (jsonlLines(text).length < 2) return null;
+  try {
+    return parseJsonl(text);
+  } catch {
+    return null;
   }
-  return records;
 };
 
 const looksChatCompletion = (value: Record<string, unknown>): boolean =>
-  isRecord(value.request) && isRecord(value.response);
+  isPlainObject(value.request) && isPlainObject(value.response);
 
 /**
  * Names the ingest endpoint a picked file belongs to.
@@ -101,7 +95,7 @@ export const detectTraceFormat = (fileName: string, text: string | null): Detect
 
   if (looksSpan(sample)) return { format: 'spans', document: parsed };
 
-  if (!isRecord(sample)) {
+  if (!isPlainObject(sample)) {
     return { format: null, message: 'Expected a JSON object, or an array of them.' };
   }
 

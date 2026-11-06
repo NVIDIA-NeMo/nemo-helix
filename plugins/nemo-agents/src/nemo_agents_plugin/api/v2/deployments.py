@@ -65,6 +65,8 @@ from nemo_helix_plugin.api.response_policy import PolicyRoutes
 from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
+from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -72,7 +74,9 @@ from nemo_helix_plugin.entity_client import (
     NemoEntityValidationError,
 )
 from nemo_helix_plugin.files.client import AsyncFilesClient
+from nemo_helix_plugin.openshell.authorization import authorize_provider_references
 from nemo_helix_plugin.schema import PaginationData
+from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -111,6 +115,8 @@ async def create_deployment(
             status_code=404,
             detail=f"Agent '{body.agent}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to look up agent.") from exc
@@ -161,7 +167,18 @@ async def create_deployment(
     resolved_environment = await _resolve_deployment_environment(
         body.environment, workspace=workspace, entity_client=entity_client
     )
-    merged = _merge_environment(resolved_config, resolved_environment.environment_spec)
+    merged = _merge_environment(
+        resolved_config, resolved_environment.environment_spec, workspace=workspace, backend=body.deployment_mode
+    )
+    if merged.providers:
+        try:
+            await authorize_provider_references(
+                merged.providers, workspace=workspace, secrets_client=AsyncSecretsClient.from_client(files_client)
+            )
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail="A provider secret was not found.") from exc
+        except PermissionDeniedError as exc:
+            raise HTTPException(status_code=403, detail="Access to a provider secret was denied.") from exc
     # An agent image may install adapters this server can't see; the container checks them itself.
     if agent.config_format == NEMO_AGENTS_SPEC_CONFIG_FORMAT and not (
         image and is_container_deployment_mode(body.deployment_mode)
@@ -195,6 +212,7 @@ async def create_deployment(
         environment=body.environment,
         compute=resolved_environment.compute_spec,
         secrets=merged.secrets,
+        providers=merged.providers,
         spec_revision=spec.revision,
         source_fileset=source_fileset,
         spec_tracked_revision=spec.tracked_revision,
@@ -213,6 +231,8 @@ async def create_deployment(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create deployment for agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to create deployment.") from exc
@@ -255,9 +275,13 @@ async def _resolve_deployment_environment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-def _merge_environment(config: dict[str, Any], env_spec: EnvironmentSpecInline | None) -> MergedEnvironment:
+def _merge_environment(
+    config: dict[str, Any], env_spec: EnvironmentSpecInline | None, *, workspace: str, backend: str = ""
+) -> MergedEnvironment:
     try:
-        return merge_environment_spec_into_agent_config(config, env_spec)
+        merged = merge_environment_spec_into_agent_config(config, env_spec, workspace=workspace)
+        merged.require_runtime_support(backend)
+        return merged
     except EnvironmentResolutionError as exc:
         # 422: e.g. a secret env var bound to conflicting references.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -316,6 +340,8 @@ async def list_deployments(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc
@@ -352,6 +378,8 @@ async def get_deployment(
             status_code=404,
             detail=f"Deployment '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get deployment '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get deployment.") from exc
@@ -392,6 +420,8 @@ async def delete_deployment(
                     detail=f"Deployment '{name}' is being modified concurrently.",
                 ) from exc
             logger.info("Retrying delete for deployment '%s' after concurrent update", name)
+        except CLIENT_ERRORS:
+            raise
         except Exception as exc:
             logger.exception("Failed to mark deployment '%s' as deleting", name)
             raise HTTPException(status_code=500, detail="Failed to update deployment.") from exc
@@ -414,6 +444,8 @@ async def _mark_deployment_deleting_once(
             status_code=404,
             detail=f"Deployment '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment '%s' before delete", name)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

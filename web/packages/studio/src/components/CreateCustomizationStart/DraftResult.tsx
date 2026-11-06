@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { KVPair } from '@nemo/common/src/components/KVPair';
-import { IconDocument, Pencil } from '@nemo/icons/icons';
+import { WindowCode, Pencil } from '@nemo/icons/icons';
 import {
   Banner,
   Button,
@@ -104,7 +104,7 @@ export const DraftResult: FC<DraftResultProps> = ({ summary, config, onEdit }) =
         </Stack>
         <Flex gap="density-sm" className="shrink-0">
           <Button type="button" kind="tertiary" size="small" onClick={() => setIsConfigOpen(true)}>
-            <IconDocument size="14" aria-hidden />
+            <WindowCode size="14" aria-hidden />
             View config
           </Button>
           <Button type="button" kind="secondary" size="small" onClick={onEdit}>

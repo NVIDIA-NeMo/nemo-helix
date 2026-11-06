@@ -4,6 +4,7 @@
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
+import { FABRIC_CONFIG_FORMAT, getAgentModelNames } from '@nemo/common/src/utils/agents';
 import { Cog, Commit, CopyDoc } from '@nemo/icons/icons';
 import type { OptimizationStrategy } from '@nemo/sdk/generated/agent-optimization/schema/OptimizationStrategy';
 import type { AgentDeployment } from '@nemo/sdk/generated/agents/schema/AgentDeployment';
@@ -20,9 +21,7 @@ import {
   Text,
 } from '@nvidia/foundations-react-core';
 import { hasAgentConfig } from '@studio/api/agents/hasAgentConfig';
-import { FABRIC_CONFIG_FORMAT } from '@studio/api/agents/packageAgent';
 import { agentSpecSource, useAgentSpecFileset } from '@studio/api/agents/useAgentSpecFileset';
-import { getAgentModelNames } from '@studio/components/dataViews/AgentsDataView/utils';
 import { ImportTracesModal } from '@studio/components/ImportTracesModal';
 import {
   AGENT_CONTAINER_DEPLOYMENTS_ENABLED,
@@ -54,6 +53,7 @@ import {
   ACTION_SEARCH_PARAM,
   type AgentDetailTab,
   DEFAULT_TAB,
+  EVAL_TABS,
   isAgentDetailTab,
   isOptimizationView,
   OptimizationView,
@@ -117,9 +117,21 @@ export const AgentDetailRoute: FC = () => {
     healthyDeployments,
     isDeploying,
     isDeploymentsLoading,
-  } = useAgentDetails({ workspace, agentName, selectedDeploymentName });
+    refetchDeployments,
+  } = useAgentDetails({
+    workspace,
+    agentName,
+    selectedDeploymentName,
+    evalsEnabled: EVAL_TABS.has(selectedTab),
+  });
   const { data: specFileset } = useAgentSpecFileset(workspace, agentName);
   const specSource = agentSpecSource(specFileset);
+
+  useEffect(() => {
+    if (selectedTab === 'chat' && agentName) {
+      void refetchDeployments({ cancelRefetch: false });
+    }
+  }, [selectedTab, agentName, refetchDeployments]);
 
   useBreadcrumbs({
     items: [

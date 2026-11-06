@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ChatSingle } from '@nemo/icons/icons';
+import { ChatMessage } from '@nemo/icons/icons';
 import { Button, Stack, Text } from '@nvidia/foundations-react-core';
 import type { FC } from 'react';
 
@@ -33,7 +33,7 @@ export const GetStartedOption: FC<GetStartedOptionProps> = ({
         {description}
       </Text>
       <Button kind="tertiary" aria-label={actionLabel} onClick={onGetPrompt}>
-        <ChatSingle size="16" className="text-brand" aria-hidden />
+        <ChatMessage size="16" className="text-brand" aria-hidden />
         Get coding agent prompt
       </Button>
     </Stack>

@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
+import { parseJsonOrJsonl, type ParsedJsonRecords } from '@nemo/common/src/utils/parseRecords';
 import { readParquetRows } from '@studio/api/datasets/filesetParquetRows';
 import {
   formatFromFileName,
@@ -16,9 +18,6 @@ export interface DatasetInspection {
   storedName?: string;
   error?: string;
 }
-
-const isRecord = (value: unknown): boolean =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const storedAs = (
   records: readonly unknown[],
@@ -38,22 +37,15 @@ const inspectJsonText = (rawText: string): DatasetInspection => {
   const text = rawText.trim();
   if (!text) return { error: 'File is empty' };
 
-  let records: unknown[];
-  let format: 'json' | 'jsonl';
+  let parsed: ParsedJsonRecords;
   try {
-    const parsed: unknown = JSON.parse(text);
-    records = Array.isArray(parsed) ? parsed : [parsed];
-    format = 'json';
+    parsed = parseJsonOrJsonl(text);
   } catch {
-    try {
-      records = text.split('\n').flatMap((line) => (line.trim() ? [JSON.parse(line)] : []));
-      format = 'jsonl';
-    } catch {
-      return { error: 'File is not valid JSON or JSONL' };
-    }
+    return { error: 'File is not valid JSON or JSONL' };
   }
+  const { records, format } = parsed;
 
-  if (records.length > 0 && !records.every(isRecord)) {
+  if (records.length > 0 && !records.every(isPlainObject)) {
     return { error: 'Every dataset record must be a JSON object.' };
   }
   return storedAs(records, format);

@@ -10,9 +10,9 @@ import {
   Warning,
   Pause,
 } from '@nemo/icons/icons';
-import { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
-import { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
-import { type ComponentType, type SVGProps } from 'react';
+import type { HelixJobStatus } from '@nemo/sdk/generated/platform/schema';
+import type { BadgeProps as KuiBadgeProps } from '@nvidia/foundations-react-core';
+import type { ComponentType, SVGProps } from 'react';
 
 export interface BadgeProps {
   label: string;

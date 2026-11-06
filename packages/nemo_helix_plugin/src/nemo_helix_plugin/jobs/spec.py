@@ -21,6 +21,7 @@ from nemo_helix_plugin.entity_naming import NAME_PATTERN, NAME_PATTERN_DESCRIPTI
 from nemo_helix_plugin.jobs._mapping_access import JobSpecModel
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.jobs.providers import Provider
+from nemo_helix_plugin.openshell.types import GatewayProviderBinding
 from pydantic import ConfigDict, Field, field_validator, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
@@ -143,6 +144,11 @@ class HelixJobStepSpec(JobSpecModel):
     )
     executor: Provider = Field(description="The executor for the step")
     config: dict = Field(default_factory=dict, description="Configuration for the step")
+    gateway_providers: dict[str, GatewayProviderBinding] = Field(default_factory=dict)
+    gateway_read_filesets: list[str] = Field(
+        default_factory=list,
+        description="Input filesets readable by a provider-bearing sandbox; authorized at job creation.",
+    )
     lifecycle: StepLifecycle = Field(
         default_factory=StepLifecycle, description="Lifecycle configuration settings for the step"
     )

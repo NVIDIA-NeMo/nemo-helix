@@ -67,6 +67,7 @@ from nemo_helix_ext.cli.commands.setup import (
     _resolve_setup_workspace,
     _run_auto_mode,
     _run_interactive_mode,
+    _run_skill_install,
     _save_data_dir,
     _select_model_pair,
     _select_usable_model_pair,
@@ -1607,48 +1608,22 @@ class TestFilterAgentsByScope:
 
 
 class TestLoadSkillsWithWarnings:
-    def test_captures_plugin_warnings(self):
-        # Stub load_skills so it emits a warning via the registry logger; the
-        # capture handler should pick it up and return it as a structured message.
-        def _stub() -> dict:
-            skills_registry.logger.warning("Skipping plugin 'fake': boom")
-            return {}
-
-        with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_stub):
-            skills, warnings = _load_skills_with_warnings()
-        assert skills == {}
-        assert any("Skipping plugin 'fake'" in msg for msg in warnings)
-
-    def test_handler_cleaned_up_on_exception(self):
-        handler_count_before = len(skills_registry.logger.handlers)
-
-        def _boom() -> dict:
-            raise RuntimeError("kaboom")
-
-        with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_boom):
-            with pytest.raises(RuntimeError):
-                _load_skills_with_warnings()
-        # Even on exception, the capture handler is removed.
-        assert len(skills_registry.logger.handlers) == handler_count_before
-
-    def test_warnings_captured_even_when_logger_level_above_warning(self):
-        """If an upstream caller raised the registry logger to ERROR, plugin
-        warnings should still reach the preview."""
-
-        def _stub() -> dict:
-            skills_registry.logger.warning("Skipping plugin 'quiet': nothing here")
+    def test_returns_discovery_warnings_regardless_of_logger_level(self):
+        def _discover(warnings: list[str]) -> dict:
+            warnings.append("Skipping plugin 'fake': boom")
             return {}
 
         original = skills_registry.logger.level
         skills_registry.logger.setLevel(logging.ERROR)
+        skills_registry.clear_cache()
         try:
-            with patch("nemo_helix_ext.cli.commands.setup.load_skills", side_effect=_stub):
-                _, warnings = _load_skills_with_warnings()
-            assert any("Skipping plugin 'quiet'" in m for m in warnings)
-            # Logger level is restored to ERROR after the call.
-            assert skills_registry.logger.level == logging.ERROR
+            with patch("nemo_helix_ext.cli.commands.skills.registry._discover_skill_providers", side_effect=_discover):
+                skills, warnings = _load_skills_with_warnings()
         finally:
             skills_registry.logger.setLevel(original)
+            skills_registry.clear_cache()
+        assert skills == {}
+        assert warnings == ["Skipping plugin 'fake': boom"]
 
 
 class TestMaybeInstallSkills:
@@ -1767,6 +1742,42 @@ class TestMaybeInstallSkills:
             )
 
         assert (custom_path / "nemo-alpha" / "SKILL.md").exists()
+
+    def test_run_skill_install_does_not_prune(self, tmp_path):
+        """`nemo setup` installs a user-chosen subset and must never prune.
+
+        Setup's chosen subset can happen to be every skill, but pruning is a
+        full-sync behavior owned by `nemo skills install` without `--skill`.
+        """
+        captured: list[dict] = []
+
+        class _CaptureInstaller:
+            name = "claude"
+            display_name = "Claude Code"
+            supported_scopes = [Scope.PROJECT, Scope.USER]
+
+            def install(self, scope, project_root, skills, **kwargs):
+                captured.append({"scope": scope, "skills": skills, "kwargs": kwargs})
+                return []
+
+            def get_install_path(self, scope, project_root, skill_name):
+                return project_root / ".claude" / "skills" / skill_name / "SKILL.md"
+
+        skills = {"alpha": self._skill("alpha")}
+        with patch(
+            "nemo_helix_ext.cli.commands.setup.get_installer",
+            side_effect=lambda name: _CaptureInstaller(),
+        ):
+            _run_skill_install(
+                agents=["claude"],
+                scope=Scope.PROJECT,
+                skill_names=["alpha"],
+                all_skills=skills,
+                project_root=tmp_path,
+            )
+
+        assert len(captured) == 1
+        assert captured[0]["kwargs"].get("prune", False) is False
 
     @pytest.mark.parametrize(
         "call_kwargs",

@@ -6,7 +6,7 @@ import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
 import { Badge, Banner, Card, Flex, Stack, Text } from '@nvidia/foundations-react-core';
 import type { OptimizationFormValues } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/formValues';
 import type { OptimizationTarget } from '@studio/routes/agents/AgentDetailRoute/optimizations/NewOptimizationForm/optimizationTargets';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 const DetailRow: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (

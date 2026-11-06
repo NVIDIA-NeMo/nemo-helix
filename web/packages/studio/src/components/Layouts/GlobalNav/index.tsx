@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Collapse, Expand } from '@nemo/icons/icons';
+import { ChevronDoubleLeft, ChevronDoubleRight } from '@nemo/icons/icons';
 import { AppBar, Button, Flex, Stack, Text, Tooltip } from '@nvidia/foundations-react-core';
 import { Breadcrumbs } from '@studio/components/Breadcrumbs';
 import { DocumentationLink } from '@studio/components/Layouts/GlobalNav/components/DocumentationLink';
@@ -57,7 +57,7 @@ const GlobalNavContent: FC<GlobalNavContentProps> = ({
         onClick={toggle}
         disabled={!sideNav}
       >
-        {expanded ? <Collapse /> : <Expand />}
+        {expanded ? <ChevronDoubleLeft /> : <ChevronDoubleRight />}
       </Button>
     </Tooltip>
   );

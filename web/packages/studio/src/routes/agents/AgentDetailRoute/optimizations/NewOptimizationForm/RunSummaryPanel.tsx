@@ -12,7 +12,7 @@ import {
   type PromptModeId,
   type SearchParameter,
 } from '@studio/routes/agents/AgentDetailRoute/optimizations/optimizationCatalog';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 const Stat: FC<{ value: string; label: string }> = ({ value, label }) => (
   <Stack gap="density-xxs">

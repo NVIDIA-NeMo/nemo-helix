@@ -19,6 +19,8 @@ These tests run a real ``EntityClient`` against a live entities app, so the quer
 string is genuinely built, sent, parsed and honoured.
 """
 
+from unittest.mock import patch
+
 import pytest
 from nhx.common.entities import EntityBase
 from nhx.common.entities.client import EntityClient, EntityConflictError, EntityNotFoundError
@@ -104,3 +106,38 @@ class TestDeleteVersionContract:
 
         with pytest.raises(EntityNotFoundError):
             await entity_client.get(VersionedWidget, "by-id-guard", workspace="default")
+
+    async def test_old_id_cannot_delete_same_name_replacement(self, entity_client: EntityClient):
+        original = await _make_widget(entity_client, "reused-name")
+        await entity_client.delete(VersionedWidget, original.name, workspace=original.workspace)
+        replacement = await _make_widget(entity_client, original.name)
+        assert original.db_version == replacement.db_version
+        with pytest.raises(EntityNotFoundError):
+            await entity_client.delete_by_id(VersionedWidget, original.id, expected_db_version=original.db_version)
+        survivor = await entity_client.get(VersionedWidget, replacement.name, workspace=replacement.workspace)
+        assert survivor.id == replacement.id
+        await entity_client.delete_by_id(VersionedWidget, replacement.id, expected_db_version=replacement.db_version)
+
+    async def test_stale_update_cannot_overwrite_same_name_replacement(self, entity_client: EntityClient):
+        original = await _make_widget(entity_client, "reused-update")
+        await entity_client.delete(VersionedWidget, original.name, workspace=original.workspace)
+        replacement = await _make_widget(entity_client, original.name)
+        assert original.db_version == replacement.db_version
+        original.colour = "blue"
+        with pytest.raises(EntityNotFoundError):
+            await entity_client.update(original)
+        survivor = await entity_client.get(VersionedWidget, replacement.name, workspace=replacement.workspace)
+        assert survivor.id == replacement.id
+        assert survivor.colour == "red"
+
+    async def test_delete_by_id_preserves_replacement_after_lookup(self, entity_client: EntityClient):
+        original = await _make_widget(entity_client, "reused-id-delete")
+        resolved = await entity_client._client.get_entity_by_id(entity_id=original.id)
+        await entity_client.delete(VersionedWidget, original.name, workspace=original.workspace)
+        replacement = await _make_widget(entity_client, original.name)
+        assert original.db_version == replacement.db_version
+        with patch.object(entity_client._client, "get_entity_by_id", return_value=resolved):
+            with pytest.raises(EntityNotFoundError):
+                await entity_client.delete_by_id(VersionedWidget, original.id)
+        survivor = await entity_client.get(VersionedWidget, replacement.name, workspace=replacement.workspace)
+        assert survivor.id == replacement.id

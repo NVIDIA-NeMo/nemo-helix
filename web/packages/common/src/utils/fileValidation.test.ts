@@ -1,8 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { InputFileSchemaType } from '../types';
-import { validateFileFormat, detectFileStructure, findMessageByRole } from './fileValidation';
+import { InputFileSchemaType } from '@nemo/common/src/types';
+import {
+  validateFileFormat,
+  detectFileStructure,
+  findMessageByRole,
+} from '@nemo/common/src/utils/fileValidation';
 
 // Mock File constructor for testing
 const createMockFile = (content: string, name: string = 'test.json'): File => {

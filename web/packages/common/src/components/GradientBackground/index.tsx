@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import cn from 'classnames';
-import { FC, ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 interface GradientBackgroundProps {
   children: ReactNode;

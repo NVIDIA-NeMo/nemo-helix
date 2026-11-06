@@ -1,16 +1,15 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { DEFAULT_LARGE_PAGE_SIZE, QUERY_PREFIX_PLATFORM } from '@nemo/common/src/constants/api';
 import { modelsListModels } from '@nemo/sdk/generated/platform/models';
-import {
+import type {
   ModelsListModelsParams,
   ModelEntitysPage,
   ModelEntity,
 } from '@nemo/sdk/generated/platform/schema';
-import { useInfiniteQuery, UseQueryOptions } from '@tanstack/react-query';
+import { useInfiniteQuery, type UseQueryOptions } from '@tanstack/react-query';
 import { useEffect } from 'react';
-
-import { DEFAULT_LARGE_PAGE_SIZE, QUERY_PREFIX_PLATFORM } from '../../constants/api';
 
 /**
  * A basic filter for a models dropdown that fetches models sorted alphabetically.

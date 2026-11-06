@@ -3,6 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { AccordionPanel } from '@nemo/common/src/components/AccordionPanel';
+import { DownloadMenu } from '@nemo/common/src/components/DownloadMenu';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
 import { KVPair } from '@nemo/common/src/components/KVPair';
 import { RelativeTime } from '@nemo/common/src/components/RelativeTime';
@@ -35,6 +36,7 @@ import {
   fetchAgentEvalJob,
   fetchAgentEvalResult,
   joinBundleByTask,
+  joinBundleByTrial,
   parseBundleRef,
 } from '@studio/api/evaluation/agent-evaluations';
 import { evalRunOutcomeOf } from '@studio/api/evaluation/runOutcome';
@@ -54,6 +56,7 @@ import {
 } from '@studio/routes/utils';
 import { useRequiredPathParams } from '@studio/util/hooks/useRequiredPathParams';
 import { formatCost } from '@studio/util/intakeTelemetry';
+import { agentEvalExport } from '@studio/util/resultExports';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FC, useEffect, useState } from 'react';
 import { Link } from 'react-router';
@@ -207,6 +210,22 @@ export const AgentEvaluationDetailRoute: FC = () => {
             </Flex>
           }
           slotDescription="Agent evaluation via nemo-evals. Scores aggregate per metric across the evaluated tasks."
+          slotActions={
+            <DownloadMenu
+              fileName={`${jobName}-results`}
+              // A referenced bundle that has not loaded yet (still polling, or 404 so far) would
+              // otherwise export the aggregate scores in place of the per-trial rows.
+              disabled={
+                !isJobTerminal ||
+                isLoadingResult ||
+                (!!result?.bundle_ref && !bundle) ||
+                (allScores.length === 0 && taskDetails.length === 0)
+              }
+              getData={() =>
+                agentEvalExport(job, result, allScores, joinBundleByTrial(bundle ?? null))
+              }
+            />
+          }
         />
 
         <Grid cols={{ base: 1, xl: 2 }} gap="density-2xl">

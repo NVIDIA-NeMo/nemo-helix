@@ -7,7 +7,10 @@ import { FilterPanelToggle } from '@nemo/common/src/components/DataView/FilterPa
 import * as DataView from '@nemo/common/src/components/DataView/internal';
 import '@nemo/common/src/components/DataView/StudioDataView.css';
 import { StudioAppliedFilters } from '@nemo/common/src/components/DataView/StudioAppliedFilters';
-import { RowClickHandler, useRowClick } from '@nemo/common/src/components/DataView/useRowClick';
+import {
+  type RowClickHandler,
+  useRowClick,
+} from '@nemo/common/src/components/DataView/useRowClick';
 import { TableEmptyState } from '@nemo/common/src/components/TableEmptyState';
 import { DEFAULT_PAGE_SIZE_OPTIONS } from '@nemo/common/src/constants/pagination';
 import {

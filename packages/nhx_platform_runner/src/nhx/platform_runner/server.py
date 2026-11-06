@@ -27,6 +27,7 @@ from nhx.common.observability import initialize_obs, setup_fastapi_instrumentati
 from nhx.common.observability.context import create_app_context_dependency
 from nhx.common.pyleak import detect_blocking
 from nhx.common.service import Service
+from nhx.common.version import OPENAPI_SPEC_VERSION
 from nhx.platform_runner.config import DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS, HelixAppConfig
 from nhx.platform_runner.controller_threads import (
     join_and_untrack_runner_threads,
@@ -260,7 +261,7 @@ def create_app(
     app = QueryParamSchemaFastAPI(
         title="NeMo Helix API",
         description="API for NeMo Helix services",
-        version="0.0.1",
+        version=OPENAPI_SPEC_VERSION,
         lifespan=lifespan,
     )
     app.add_middleware(ConflictRetryMiddleware)
@@ -520,6 +521,8 @@ def create_default_app() -> FastAPI:
     services = []
     for service_name in service_names:
         service_value = available_services.get(service_name)
+        if service_value is None and not service_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if service_value is None:
             available = ", ".join(sorted(available_services))
             raise ValueError(
@@ -535,6 +538,8 @@ def create_default_app() -> FastAPI:
     controller_run_funcs: dict[str, ControllerRunFunc] = {}
     for controller_name in controller_names:
         controller_value = available_controllers.get(controller_name)
+        if controller_value is None and not controller_names_env:
+            continue  # An installed plugin that failed to load (already logged); only named ones are errors.
         if controller_value is None:
             available = ", ".join(sorted(available_controllers))
             raise ValueError(

@@ -23,6 +23,7 @@ import shutil
 from pathlib import Path
 
 import yaml
+from nhx.rl.entities.values import FinetuningType
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,27 @@ def copy_lora_adapter(checkpoint_path: Path, adapter_root: Path, output_path: Pa
     output_path.mkdir(parents=True, exist_ok=True)
     shutil.copytree(adapter_root, output_path, dirs_exist_ok=True)
     _copy_tokenizer_if_missing(checkpoint_path, output_path)
+
+
+def select_publication(checkpoint_path: Path, finetuning_type: FinetuningType | None) -> tuple[str, Path | None]:
+    """Choose how a step directory is published.
+
+    Returns ``("peft"|"merge"|"hf"|"dcp"|"missing", root)``. ``merge`` is
+    ``lora_merged``: ``root`` is the adapter directory, or None when it is absent.
+    """
+    requested_lora = finetuning_type == FinetuningType.LORA
+    requested_merged = finetuning_type == FinetuningType.LORA_MERGED
+    adapter_root = find_lora_adapter_root(checkpoint_path) if requested_lora or requested_merged else None
+    if is_peft_publication(requested_lora=requested_lora, adapter_root=adapter_root):
+        return "peft", adapter_root
+    if requested_merged:
+        return "merge", adapter_root
+    hf_root = find_hf_full_weight_root(checkpoint_path)
+    if hf_root is not None:
+        return "hf", hf_root
+    if find_dcp_weights_root(checkpoint_path) is not None:
+        return "dcp", None
+    return "missing", None
 
 
 def _copy_tokenizer_if_missing(checkpoint_path: Path, output_path: Path) -> None:

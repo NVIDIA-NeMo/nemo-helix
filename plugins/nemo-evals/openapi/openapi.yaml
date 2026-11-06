@@ -4627,6 +4627,11 @@ components:
           description: Dockerfile path relative to `context_path`, for a `dockerfile`
             image.
           type: string
+        context_digest:
+          title: Context Digest
+          description: Digest of every file in the build context, for a `dockerfile`
+            image. Tasks whose contexts digest the same share one build.
+          type: string
         image:
           title: Image
           description: The image the task names, for a `prebuilt` image.
@@ -4797,7 +4802,7 @@ components:
             type: string
           type: object
           title: Secrets
-          description: ENV_VAR_NAME -> Secrets-service/plugin ref.
+          description: Secret alias -> Secrets-service/plugin ref.
         model_provider_override:
           allOf:
           - $ref: '#/components/schemas/ModelProviderOverride'
@@ -4845,6 +4850,7 @@ components:
           title: Mcp
           description: server-name -> fulfillment (url/env/secrets) for an Agent-declared
             MCP dependency.
+      additionalProperties: false
       type: object
       title: EnvironmentSpecInline
       description: 'Inline environment spec - the dependencies and configuration an
@@ -6071,12 +6077,13 @@ components:
         closed_book:
           type: boolean
           title: Closed Book
-          description: Run the trials closed-book. Each trial's gateway calls are
+          description: 'Run the trials closed-book. Each trial''s gateway calls are
             held to closed-book capable VirtualModels (ones whose request_middleware
             ends with nemo-evals-closed-book), and the closed-book middleware applies
-            to them. Every VirtualModel the agent can reach, a router's routes_to
-            included, must be closed-book capable. Taskset runs set it for tasks whose
-            agent runs with no network.
+            to them. Every VirtualModel the agent can reach, a router''s routes_to
+            included, must be closed-book capable. Off by default, also for no-network
+            tasks: their sandbox has no network, but the model provider may. Set it
+            to hold the run closed-book.'
           default: false
         agent_setup_timeout_multiplier:
           title: Agent Setup Timeout Multiplier
@@ -6710,6 +6717,13 @@ components:
           description: The image's `WORKDIR`, or None when it sets none.
           type: string
           maxLength: 4096
+        user:
+          title: User
+          description: The image's `USER`, as `name`, `uid` or either with `:group`;
+            an empty string when it sets none, so it runs as root. None when Builder
+            didn't record it, as for an image it built before it started to.
+          type: string
+          maxLength: 256
       type: object
       title: ImageRuntimeConfig
       description: 'How the image starts by default, from its image config, including

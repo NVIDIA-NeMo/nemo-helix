@@ -3,9 +3,9 @@
 
 import { ControlledTextInput } from '@nemo/common/src/components/form/ControlledTextInput';
 import { Accordion, Text } from '@nvidia/foundations-react-core';
-import { AdvancedFileSplitOptions } from '@studio/components/FilesTable/CreateFileSplitsModal/types';
+import type { AdvancedFileSplitOptions } from '@studio/components/FilesTable/CreateFileSplitsModal/types';
 import { tooltipClassName } from '@studio/styles/common';
-import { FC, useMemo } from 'react';
+import { type FC, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
 
 interface Props {

@@ -5,13 +5,14 @@ import type { NvidiaGuiIconProps } from '@nemo/icons';
 import {
   HelpCircle,
   IconClipboard,
-  Rename,
+  Pencil,
   IconDocument,
   World,
   ChartTree,
   MagnifyingGlass,
   WindowTerminal,
-  ListCheckmark,
+  CheckCircle,
+  IconKeyboard,
 } from '@nemo/icons/icons';
 import type { FC } from 'react';
 
@@ -19,28 +20,28 @@ export const TOOL_LABELS: Record<string, string> = {
   Bash: 'Run command',
   Edit: 'Edit file',
   Glob: 'Find files',
-  Grep: 'MagnifyingGlass text',
+  Grep: 'Search text',
   LS: 'List directory',
   MultiEdit: 'Edit file',
   Read: 'Read file',
   TodoWrite: 'Update todos',
   WebFetch: 'Fetch URL',
-  WebSearch: 'MagnifyingGlass web',
+  WebSearch: 'Search web',
   Write: 'Write file',
 };
 
 export const TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
   Bash: WindowTerminal,
-  Edit: Rename,
+  Edit: Pencil,
   Glob: MagnifyingGlass,
   Grep: MagnifyingGlass,
   LS: ChartTree,
-  MultiEdit: Rename,
+  MultiEdit: Pencil,
   Read: IconDocument,
-  TodoWrite: ListCheckmark,
+  TodoWrite: CheckCircle,
   WebFetch: World,
   WebSearch: MagnifyingGlass,
-  Write: Rename,
+  Write: Pencil,
 };
 
 export const CODE_BLOCK_SURFACE_CLASS = 'bg-gray-050 dark:bg-gray-900';
@@ -50,7 +51,7 @@ export const SUBTLE_MESSAGE_MAX_LENGTH = 160;
 
 export const SUBTLE_TOOL_ICONS: Record<string, FC<Omit<NvidiaGuiIconProps, 'iconName'>>> = {
   AskUserQuestion: HelpCircle,
-  Bash: WindowTerminal,
+  Bash: IconKeyboard,
   FindFiles: MagnifyingGlass,
   Grep: MagnifyingGlass,
   Read: IconDocument,

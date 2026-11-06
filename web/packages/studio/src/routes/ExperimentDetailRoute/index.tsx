@@ -3,7 +3,7 @@
 
 import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { ChartPerformance, ChartScatterplot, Pencil, Star, LayoutDetail } from '@nemo/icons/icons';
+import { Chart, ChartScatterplot, Pencil, Star, LayoutDetail } from '@nemo/icons/icons';
 import { useCompassGetInsight } from '@nemo/sdk/generated/compass/compass-insights';
 import { useGetExperiment } from '@nemo/sdk/generated/platform/experiments';
 import { Button, Card, Flex, PageHeader, Stack, Text } from '@nvidia/foundations-react-core';
@@ -160,7 +160,7 @@ export const ExperimentDetailRoute: FC = () => {
                       aria-pressed={trendVisible}
                       onClick={() => setTrendChoice({ visible: !trendVisible, flag: trendFlag })}
                     >
-                      <ChartPerformance width={12} height={12} className="text-brand" />
+                      <Chart width={12} height={12} className="text-brand" />
                       {trendVisible ? 'Hide over time' : 'Over time'}
                     </Button>
                     <Button

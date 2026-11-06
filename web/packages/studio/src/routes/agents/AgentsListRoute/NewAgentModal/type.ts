@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { FormModalProps } from '@nemo/common/src/components/FormModal';
-import type { uploadAgentFormSchema } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
+import type {
+  NEW_AGENT_TABS,
+  uploadAgentFormSchema,
+} from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
 import type { z } from 'zod';
 
 export type UploadAgentFormData = z.infer<typeof uploadAgentFormSchema>;
@@ -21,10 +24,11 @@ export interface UploadAgentEntry {
 
 /** Which route into a new agent the modal is showing: an agent already seen in ingested traces, a
  *  prompt to hand off, files to upload, or a repository to import. */
-export type NewAgentTab = 'imported-traces' | 'coding-agent-prompt' | 'upload' | 'github';
+export type NewAgentTab = (typeof NEW_AGENT_TABS)[number];
 
 export interface NewAgentModalProps extends Pick<FormModalProps, 'open' | 'onClose'> {
   workspace: string;
   /** Prefills the name, and keeps it when an uploaded config names a different agent. */
   initialName?: string;
+  initialTab?: NewAgentTab;
 }

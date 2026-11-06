@@ -23,7 +23,7 @@ import {
   WorkspaceMemberModal,
   type WorkspaceMemberModalMode,
 } from '@studio/routes/WorkspaceMembersRoute/WorkspaceMemberModal';
-import { FC, useCallback, useState } from 'react';
+import { type FC, useCallback, useState } from 'react';
 
 export const WorkspaceMembersRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

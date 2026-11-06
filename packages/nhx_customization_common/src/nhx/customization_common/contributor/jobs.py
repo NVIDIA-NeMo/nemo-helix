@@ -21,6 +21,7 @@ from nemo_helix_plugin.jobs.exceptions import HelixJobCompilationError
 from nemo_helix_plugin.jobs.spec import HelixJobSpec
 from nemo_helix_plugin.jobs.types import JobDryRunCheck
 from nhx.customization_common.dry_run import DatasetRows, check_dataset_rows
+from nhx.customization_common.schemas.checkpoint import CheckpointTraits
 from nhx.customization_common.service.platform_client import (
     AsyncCustomizationHelixClients,
     async_customization_platform_clients_from_platform,
@@ -140,10 +141,19 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
         return await cls._transform(job_input, workspace, platform)
 
     @classmethod
-    def _dry_run_datasets(cls, spec: JobOutputT, workspace: str) -> list[DatasetRows]:
-        """The datasets *spec* trains on, with training's own file picker and row validator. Per backend."""
-        del spec, workspace
+    def _dry_run_datasets(cls, spec: JobOutputT, workspace: str, traits: CheckpointTraits) -> list[DatasetRows]:
+        """The datasets *spec* trains on, with training's own file picker and row validator. Per backend.
+
+        *traits* are the model's, for a row validator that depends on them as training's does.
+        """
+        del spec, workspace, traits
         return []
+
+    @classmethod
+    async def _dry_run_traits(cls, spec: JobOutputT, workspace: str, async_client: AsyncNemoClient) -> CheckpointTraits:
+        """The traits of the model *spec* trains. Per backend whose row validator reads them."""
+        del spec, workspace, async_client
+        return CheckpointTraits()
 
     @classmethod
     async def dry_run_checks(
@@ -157,5 +167,7 @@ class BaseSubmitJob(NemoJob, Generic[JobInputT, JobOutputT]):
     ) -> list[JobDryRunCheck]:
         """Check the first rows of every file training would read, or with *full*, every row."""
         del platform_spec
-        datasets = cls._dry_run_datasets(cast(JobOutputT, spec), workspace)
+        job_spec = cast(JobOutputT, spec)
+        traits = await cls._dry_run_traits(job_spec, workspace, async_sdk)
+        datasets = cls._dry_run_datasets(job_spec, workspace, traits)
         return await check_dataset_rows(datasets, workspace, async_sdk, full=full)

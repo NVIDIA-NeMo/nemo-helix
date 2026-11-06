@@ -17,7 +17,7 @@ import {
   type TableRowDefinition,
 } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ComponentProps, FC, ReactNode, useMemo } from 'react';
+import { type ComponentProps, type FC, type ReactNode, useMemo } from 'react';
 
 export type PaginatedTableProps = {
   loading?: boolean;

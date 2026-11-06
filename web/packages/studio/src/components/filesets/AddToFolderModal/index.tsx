@@ -27,7 +27,7 @@ import {
   getParentFolder,
   getSiblingFolders,
 } from '@studio/components/filesets/AddToFolderModal/utils';
-import { FileSystemNode } from '@studio/components/FilesTable/utils';
+import type { FileSystemNode } from '@studio/components/FilesTable/utils';
 import { useDatasetNavigator } from '@studio/hooks/useDatasetNavigator';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { getFilesetDetailsRoute } from '@studio/routes/utils';
