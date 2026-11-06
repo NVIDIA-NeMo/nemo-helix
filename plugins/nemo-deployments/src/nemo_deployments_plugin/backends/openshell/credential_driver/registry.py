@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import json
 import os
 import secrets
 import stat
@@ -13,6 +15,7 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 from sqlalchemy import URL, Boolean, Text, create_engine, select
@@ -20,6 +23,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.pool import NullPool
 
 from .tickets import RegistrationClaims, RegistrationDenied, RegistrationTickets
+
+OWNED_HANDLE_PREFIX = "owned-v1-"
+OwnedState = Literal["pending", "active", "deleting", "deleted"]
 
 
 class ProviderOwner(BaseModel):
@@ -82,6 +88,35 @@ class RegistryIdentity(RegistryModel):
     gateway_id: Mapped[str] = mapped_column(Text)
 
 
+class OwnedCredential(BaseModel):
+    """An OpenShell-owned value stored in Secrets, with its durable cleanup state."""
+
+    model_config = ConfigDict(frozen=True)
+
+    handle: str
+    owner: ProviderOwner
+    workspace: str
+    name: str
+    value_digest: str
+    state: OwnedState
+    create_uncertain: bool
+
+
+class OwnedCredentialRecord(RegistryModel):
+    __tablename__ = "owned_credentials"
+
+    operation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    handle: Mapped[str] = mapped_column(Text, unique=True)
+    owner_json: Mapped[str] = mapped_column(Text)
+    object_id: Mapped[str] = mapped_column(Text)
+    existing_handle: Mapped[str] = mapped_column(Text)
+    workspace: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text, unique=True)
+    value_digest: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(Text)
+    create_uncertain: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 def require_private_directory(directory: Path) -> None:
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = directory.stat()
@@ -110,6 +145,7 @@ class BindingRegistry:
         self.path = path
         self.tickets = tickets
         self.clock = clock
+        self._owned_key: bytes | None = None
         self._engine = create_engine(
             URL.create("sqlite+pysqlite", database=str(path)),
             connect_args={"timeout": 10, "isolation_level": None},
@@ -216,3 +252,155 @@ class BindingRegistry:
         with self._session(write=True) as session:
             if session.get(RevokedJob, job_id) is None:
                 session.add(RevokedJob(job_id=job_id))
+
+    def owned_digest(self, value: str) -> str:
+        if self._owned_key is None:
+            # The database lock also serializes first-time key-file creation.
+            with self._session(write=True) as session:
+                path = self.path.with_suffix(self.path.suffix + ".owned-key")
+                if not path.exists() and session.scalar(select(OwnedCredentialRecord.handle).limit(1)) is not None:
+                    raise ValueError("Owned credential digest key is missing for the existing registry.")
+                try:
+                    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+                except FileExistsError:
+                    pass
+                else:
+                    with os.fdopen(descriptor, "wb") as stream:
+                        stream.write(secrets.token_bytes(32))
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(descriptor, "rb") as stream:
+                    info = os.fstat(stream.fileno())
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) & 0o077
+                    ):
+                        raise ValueError("Owned credential digest key must be a private regular file.")
+                    key = stream.read(33)
+                if len(key) != 32:
+                    raise ValueError("Invalid owned credential digest key.")
+                self._owned_key = key
+        return hmac.new(self._owned_key, value.encode(), hashlib.sha256).hexdigest()
+
+    @staticmethod
+    def _owned(row: OwnedCredentialRecord) -> OwnedCredential:
+        return OwnedCredential.model_validate(
+            {
+                "handle": row.handle,
+                "owner": ProviderOwner.model_validate_json(row.owner_json),
+                "workspace": row.workspace,
+                "name": row.name,
+                "value_digest": row.value_digest,
+                "state": row.state,
+                "create_uncertain": row.create_uncertain,
+            }
+        )
+
+    @staticmethod
+    def _owned_row(session: Session, owner: ProviderOwner, handle: str) -> OwnedCredentialRecord | None:
+        if not handle.startswith(OWNED_HANDLE_PREFIX):
+            raise RegistrationDenied("Expected an owned credential handle.")
+        row = session.scalar(select(OwnedCredentialRecord).where(OwnedCredentialRecord.handle == handle))
+        if row is not None and ProviderOwner.model_validate_json(row.owner_json) != owner:
+            raise RegistrationDenied("Owned credential belongs to another owner.")
+        return row
+
+    def reserve_owned(
+        self,
+        owner: ProviderOwner,
+        value: SecretStr,
+        *,
+        workspace: str,
+        object_id: str,
+        existing_handle: str,
+    ) -> OwnedCredential:
+        digest = self.owned_digest(value.get_secret_value())
+        operation_id = hashlib.sha256(
+            json.dumps(
+                [owner.model_dump(), object_id, existing_handle if not object_id else ""], sort_keys=True
+            ).encode()
+        ).hexdigest()
+        with self._session(write=True) as session:
+            row = session.get(OwnedCredentialRecord, operation_id)
+            if row is not None:
+                if (
+                    row.workspace != workspace
+                    or row.existing_handle != existing_handle
+                    or not hmac.compare_digest(row.value_digest, digest)
+                    or row.state not in {"pending", "active"}
+                ):
+                    raise RegistrationDenied("Owned credential operation has already been consumed.")
+                return self._owned(row)
+            if existing_handle:
+                previous = self._owned_row(session, owner, existing_handle)
+                if previous is None or previous.state != "active" or previous.workspace != workspace:
+                    raise RegistrationDenied("Existing owned credential is not active for this owner.")
+            row = OwnedCredentialRecord(
+                operation_id=operation_id,
+                handle=OWNED_HANDLE_PREFIX + secrets.token_urlsafe(32),
+                owner_json=owner.model_dump_json(),
+                object_id=object_id,
+                existing_handle=existing_handle,
+                workspace=workspace,
+                name="credential-" + secrets.token_hex(24),
+                value_digest=digest,
+                state="pending",
+                create_uncertain=False,
+            )
+            session.add(row)
+            return self._owned(row)
+
+    def get_owned(self, owner: ProviderOwner, handle: str, *, active: bool = False) -> OwnedCredential:
+        with self._session() as session:
+            row = self._owned_row(session, owner, handle)
+            if row is None or (active and row.state != "active"):
+                raise RegistrationDenied("Owned credential is not active for this owner.")
+            return self._owned(row)
+
+    def begin_owned_create(self, owner: ProviderOwner, handle: str) -> bool:
+        with self._session(write=True) as session:
+            row = self._owned_row(session, owner, handle)
+            if row is None or row.state != "pending":
+                raise RegistrationDenied("Owned credential cannot be created.")
+            was_uncertain = row.create_uncertain
+            row.create_uncertain = True
+            return was_uncertain
+
+    def activate_owned(self, owner: ProviderOwner, handle: str, *, retain_uncertainty: bool) -> None:
+        with self._session(write=True) as session:
+            row = self._owned_row(session, owner, handle)
+            if row is None or row.state not in {"pending", "active"}:
+                raise RegistrationDenied("Owned credential cannot be activated.")
+            row.state = "active"
+            if not retain_uncertainty:
+                row.create_uncertain = False
+
+    def revoke_owned(self, owner: ProviderOwner, handle: str) -> OwnedCredential | None:
+        with self._session(write=True) as session:
+            row = self._owned_row(session, owner, handle)
+            if row is None:
+                return None
+            if row.state != "deleted":
+                row.state = "deleting"
+            return self._owned(row)
+
+    def finish_owned_delete(self, owner: ProviderOwner, handle: str) -> None:
+        with self._session(write=True) as session:
+            row = self._owned_row(session, owner, handle)
+            if row is None or row.state not in {"deleting", "deleted"}:
+                raise RegistrationDenied("Owned credential is not pending deletion.")
+            # A timed-out POST can finish after DELETE reports 404. Only these
+            # uncertain creations retain cleanup intent for subsequent sweeps.
+            if not row.create_uncertain:
+                row.state = "deleted"
+
+    def pending_owned(self) -> list[OwnedCredential]:
+        with self._session() as session:
+            return [
+                self._owned(row)
+                for row in session.scalars(
+                    select(OwnedCredentialRecord).where(OwnedCredentialRecord.state.in_(("pending", "deleting")))
+                )
+            ]

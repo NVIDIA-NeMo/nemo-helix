@@ -8,12 +8,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
+import logging
 import os
 import signal
 import socket
 import stat
 from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -21,12 +22,16 @@ import grpc
 import httpx
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 
+from .owned import OwnedCredentials
 from .registry import BindingRegistry, require_private_directory
 from .service import CredentialDriver
 from .tickets import RegistrationTickets
+from .workspace import ensure_owned_workspace
+
+logger = logging.getLogger(__name__)
 
 # Defensive input bound, not an OpenShell/NeMo protocol limit. Allows ample room
-# for a service-account JWT while avoiding an unbounded read of a mounted file.
+# for a service workload JWT while avoiding an unbounded read of a mounted file.
 MAX_CREDENTIAL_FILE_BYTES = 64 * 1024
 
 
@@ -123,6 +128,27 @@ async def _running_server(driver: CredentialDriver, socket_path: Path) -> AsyncG
             socket_path.unlink()
 
 
+@asynccontextmanager
+async def owned_credential_recovery(owned: OwnedCredentials) -> AsyncGenerator[None, None]:
+    """Retry durable deletion intent without delaying server startup."""
+
+    async def repeat() -> None:
+        while True:
+            try:
+                await owned.reconcile()
+            except Exception:
+                logger.warning("Owned credential cleanup failed; retained deletion intent will be retried.")
+            await asyncio.sleep(30)
+
+    task = asyncio.create_task(repeat(), name="owned-credential-cleanup")
+    try:
+        yield
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 async def serve(args: argparse.Namespace) -> None:
     url = urlsplit(args.helix_url)
     if url.scheme != "https" and not (
@@ -136,15 +162,21 @@ async def serve(args: argparse.Namespace) -> None:
         auth = FileTokenProvider(args.helix_token_file)
         await auth.get_access_token_async()
     async with AsyncSecretsClient(base_url=args.helix_url, auth=auth) as secrets_client:
+        workspace = await ensure_owned_workspace(secrets_client, auth_enabled=not args.auth_disabled)
+        owned = OwnedCredentials(registry, secrets_client, workspace)
         driver = CredentialDriver(
-            registry, secrets_client, auth_enabled=not args.auth_disabled, cache_lifetime=args.cache_lifetime_seconds
+            registry,
+            secrets_client,
+            auth_enabled=not args.auth_disabled,
+            cache_lifetime=args.cache_lifetime_seconds,
+            owned=owned,
         )
         stopped = asyncio.Event()
         loop = asyncio.get_running_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, stopped.set)
         try:
-            async with running_server(driver, args.socket_path):
+            async with owned_credential_recovery(owned), running_server(driver, args.socket_path):
                 await stopped.wait()
         finally:
             for sig in (signal.SIGTERM, signal.SIGINT):
@@ -152,7 +184,7 @@ async def serve(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Experimental NeMo registration-ticket credential driver.")
+    parser = argparse.ArgumentParser(description="OpenShell credential driver backed by Helix Secrets.")
     parser.add_argument("--socket-path", type=Path, required=True)
     parser.add_argument("--state-path", type=Path, required=True)
     parser.add_argument("--gateway-id", required=True)
@@ -162,7 +194,7 @@ def main() -> None:
         "--cache-lifetime-seconds",
         type=int,
         default=300,
-        help="Resolved credential lifetime in OpenShell (1–3600 seconds; default: 300).",
+        help="Provider binding cache lifetime in OpenShell (1–3600 seconds; default: 300). Owned keys do not expire.",
     )
     auth = parser.add_mutually_exclusive_group(required=True)
     auth.add_argument("--helix-token-file", type=Path)
