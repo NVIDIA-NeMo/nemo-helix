@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -117,7 +119,12 @@ class TestPluginLoadErrorValidation:
     @pytest.mark.parametrize(
         "body",
         [
-            _report(code="NOT_A_CODE"),
+            _report(code="NOPE"),
+            _report(code="plugin_load_failed"),
+            _report(code="PLUGIN_"),
+            _report(code="PLUGIN_A B"),
+            _report(code="PLUGIN_" + "A" * 60),
+            _report(code="PLUGIN_X\n"),
             _report(plugin="MyPlugin"),
             _report(plugin="a/b"),
             _report(plugin="a" * 65),
@@ -132,7 +139,12 @@ class TestPluginLoadErrorValidation:
             {"plugin": "p", "issues": [{"code": "PLUGIN_LOAD_FAILED"}]},
         ],
         ids=[
-            "bad-code",
+            "bad-code-no-prefix",
+            "bad-code-lowercase",
+            "bad-code-bare-prefix",
+            "bad-code-space",
+            "bad-code-too-long",
+            "bad-code-trailing-newline",
             "uppercase-plugin",
             "slash-plugin",
             "long-plugin",
@@ -167,24 +179,52 @@ class TestPluginLoadErrorThrottling:
     """Global rate limit and duplicate suppression."""
 
     def test_rate_limit_21st_report_rejected(self, auth_off, caplog: pytest.LogCaptureFixture):
-        """20 distinct reports pass; the 21st gets 429 and is not logged."""
+        """20 distinct reports (one per plugin) pass; the 21st gets 429 and is not logged."""
         client = _client()
         for i in range(20):
-            assert client.post(URL, json=_report(subject=f"s{i}")).status_code == 204
+            assert client.post(URL, json=_report(f"plug-{i}")).status_code == 204
         assert len(_records(caplog)) == 20
 
-        assert client.post(URL, json=_report(subject="s20")).status_code == 429
+        assert client.post(URL, json=_report("plug-20")).status_code == 429
         assert len(_records(caplog)) == 20
+
+    def test_per_plugin_cap_is_five_per_minute(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """The 6th distinct report for one plugin is 429; another plugin is unaffected."""
+        client = _client()
+        for i in range(5):
+            assert client.post(URL, json=_report("noisy", message=f"m{i}")).status_code == 204
+        assert len(_records(caplog)) == 5
+
+        assert client.post(URL, json=_report("noisy", message="m5")).status_code == 429
+        assert len(_records(caplog)) == 5
+
+        assert client.post(URL, json=_report("quiet", message="m5")).status_code == 204
+        assert len(_records(caplog)) == 6
 
     def test_duplicate_report_logged_once(self, auth_off, caplog: pytest.LogCaptureFixture):
-        """An identical report is acknowledged twice but logged once; a new code set is logged."""
+        """An identical report is acknowledged twice but logged once; subject alone does not make it new."""
         client = _client()
         assert client.post(URL, json=_report()).status_code == 204
-        assert client.post(URL, json=_report(message="different text, same codes")).status_code == 204
+        assert client.post(URL, json=_report()).status_code == 204
         assert len(_records(caplog)) == 1
 
-        assert client.post(URL, json=_report(code="PLUGIN_MANIFEST_MISSING")).status_code == 204
+        assert client.post(URL, json=_report(subject="another subject")).status_code == 204
+        assert len(_records(caplog)) == 1
+
+    def test_dedupe_key_is_rendered_content(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """A different message, steps or code for the same plugin is a new report and is logged."""
+        client = _client()
+        assert client.post(URL, json=_report()).status_code == 204
+        assert len(_records(caplog)) == 1
+
+        assert client.post(URL, json=_report(message="different message, same code")).status_code == 204
         assert len(_records(caplog)) == 2
+
+        assert client.post(URL, json=_report(steps=["a different step"])).status_code == 204
+        assert len(_records(caplog)) == 3
+
+        assert client.post(URL, json=_report(code="PLUGIN_MANIFEST_MISSING")).status_code == 204
+        assert len(_records(caplog)) == 4
 
 
 class TestPluginLoadErrorGating:
@@ -237,3 +277,168 @@ class TestPluginLoadErrorGating:
         assert _client(True).post(URL, json=bad).status_code == 422
         assert _post_not_json(_client(True)).status_code == 422
         assert _records(caplog) == []
+
+    def test_disabled_route_answers_404_regardless_of_origin(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        """Gate precedes the Origin check: disabled => 404 even for an evil origin; enabled => 403."""
+        caplog.set_level(logging.WARNING, logger="nhx.studio")
+        evil = {"Origin": "https://evil.example"}
+
+        _set_auth(monkeypatch, False)
+        assert _client(False).post(URL, json=_report(), headers=evil).status_code == 404
+
+        _set_auth(monkeypatch, True)
+        assert _client(None).post(URL, json=_report(), headers=evil).status_code == 404
+        assert _records(caplog) == []
+
+        assert _client(True).post(URL, json=_report(), headers=evil).status_code == 403
+        assert _records(caplog) == []
+        assert _client(True).post(URL, json=_report()).status_code == 204
+        assert len(_records(caplog)) == 1
+
+
+class TestPluginLoadErrorOrigin:
+    """Only loopback browser origins (or no Origin at all) may report."""
+
+    @pytest.mark.parametrize(
+        "origin",
+        ["https://evil.example", "null", "http://localhost.evil.example"],
+        ids=["foreign", "null", "lookalike-host"],
+    )
+    def test_foreign_origin_rejected(self, auth_off, caplog: pytest.LogCaptureFixture, origin: str):
+        """A non-loopback Origin gets 403 and is not logged; the same report without Origin is accepted."""
+        client = _client()
+        assert client.post(URL, json=_report(), headers={"Origin": origin}).status_code == 403
+        assert _records(caplog) == []
+
+        assert client.post(URL, json=_report()).status_code == 204
+        assert len(_records(caplog)) == 1
+
+    def test_cross_site_simple_request_rejected(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """A text/plain body from a foreign origin (CORS simple request) is refused before logging."""
+        client = _client()
+        response = client.post(
+            URL,
+            content=json.dumps(_report()),
+            headers={"Origin": "https://evil.example", "content-type": "text/plain"},
+        )
+
+        assert response.status_code == 403
+        assert _records(caplog) == []
+        assert client.post(URL, json=_report()).status_code == 204
+        assert len(_records(caplog)) == 1
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "http://localhost:5173",
+            "https://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://[::1]:8080",
+            None,
+        ],
+        ids=["localhost-http", "localhost-https", "ipv4-loopback", "ipv6-loopback", "no-origin"],
+    )
+    def test_loopback_or_absent_origin_accepted(self, auth_off, caplog: pytest.LogCaptureFixture, origin: str | None):
+        """Loopback origins on any scheme/port, and requests without Origin, are accepted and logged."""
+        headers = {"Origin": origin} if origin is not None else {}
+
+        assert _client().post(URL, json=_report(), headers=headers).status_code == 204
+        assert len(_records(caplog)) == 1
+
+
+class TestPluginLoadErrorBodyCap:
+    """Request bodies are capped at 64 KiB, however the size is communicated."""
+
+    LIMIT = 64 * 1024
+
+    @classmethod
+    def _padded(cls, size: int) -> bytes:
+        """A valid report serialised and space-padded to exactly `size` bytes."""
+        raw = json.dumps(_report()).encode()
+        return raw + b" " * (size - len(raw))
+
+    @staticmethod
+    def _chunks(body: bytes, size: int = 4096) -> Iterator[bytes]:
+        for start in range(0, len(body), size):
+            yield body[start : start + size]
+
+    def test_oversized_body_with_content_length_rejected(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """A body one byte over the cap is 413 and unlogged; exactly at the cap is accepted."""
+        client = _client()
+        headers = {"content-type": "application/json"}
+
+        assert client.post(URL, content=self._padded(self.LIMIT + 1), headers=headers).status_code == 413
+        assert _records(caplog) == []
+
+        assert client.post(URL, content=self._padded(self.LIMIT), headers=headers).status_code == 204
+        assert len(_records(caplog)) == 1
+
+    def test_oversized_streamed_body_rejected(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """A chunked body with no Content-Length is also capped."""
+        client = _client()
+        headers = {"content-type": "application/json"}
+
+        response = client.post(URL, content=self._chunks(self._padded(self.LIMIT * 4)), headers=headers)
+        assert "content-length" not in response.request.headers
+        assert response.status_code == 413
+        assert _records(caplog) == []
+
+        streamed_ok = client.post(URL, content=self._chunks(self._padded(self.LIMIT)), headers=headers)
+        assert "content-length" not in streamed_ok.request.headers
+        assert streamed_ok.status_code == 204
+        assert len(_records(caplog)) == 1
+
+    def test_maximum_valid_report_fits_under_cap(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """The largest schema-valid report is well below the cap and is accepted."""
+        issue = _issue(subject="s" * 200, message="m" * 500, steps=["t" * 300] * 8)
+        body = json.dumps({"plugin": "a" * 64, "issues": [issue] * 10}).encode()
+
+        assert len(body) < self.LIMIT
+        response = _client().post(URL, content=body, headers={"content-type": "application/json"})
+        assert response.status_code == 204
+        assert len(_records(caplog)) == 1
+
+
+class TestPluginLoadErrorRejectionsAreFree:
+    """Requests refused for size or origin do not consume rate-limit budget."""
+
+    @pytest.mark.parametrize("kind", ["oversize", "oversize-streamed", "foreign-origin"])
+    def test_rejected_requests_leave_full_budget(self, auth_off, caplog: pytest.LogCaptureFixture, kind: str):
+        """25 refused requests (more than the global cap) do not stop 20 valid reports afterwards."""
+        client = _client()
+        padded = json.dumps(_report()).encode() + b" " * (64 * 1024)
+        for _ in range(25):
+            if kind == "oversize":
+                response = client.post(URL, content=padded, headers={"content-type": "application/json"})
+                expected = 413
+            elif kind == "oversize-streamed":
+                chunks = (padded[i : i + 4096] for i in range(0, len(padded), 4096))
+                response = client.post(URL, content=chunks, headers={"content-type": "application/json"})
+                expected = 413
+            else:
+                response = client.post(URL, json=_report(), headers={"Origin": "https://evil.example"})
+                expected = 403
+            assert response.status_code == expected
+        assert _records(caplog) == []
+
+        for i in range(20):
+            assert client.post(URL, json=_report(f"plug-{i}")).status_code == 204
+        assert len(_records(caplog)) == 20
+
+
+class TestPluginLoadErrorCodes:
+    """Issue codes follow a PLUGIN_* pattern rather than a closed enum."""
+
+    @pytest.mark.parametrize(
+        "code",
+        ["PLUGIN_LOAD_FAILED", "PLUGIN_FUTURE_THING", "PLUGIN_" + "A" * 57],
+        ids=["known", "future", "64-chars"],
+    )
+    def test_plugin_prefixed_code_accepted(self, auth_off, caplog: pytest.LogCaptureFixture, code: str):
+        """Any PLUGIN_[A-Z_]+ code up to 64 chars is accepted and logged."""
+        assert _client().post(URL, json=_report(code=code)).status_code == 204
+        records = _records(caplog)
+        assert len(records) == 1
+        assert code in records[0].getMessage()
