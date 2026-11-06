@@ -324,15 +324,21 @@ describe('fetchPlugins', () => {
     });
 
     it('caps issues at 10 and subject/message/step lengths, keeping prefixes', async () => {
-      // 12 unmapped specifiers, each 300 chars: 12 issues with subject 300,
-      // message > 500, and steps > 300 (they quote the specifier).
+      // 12 unmapped specifiers, each 400 chars: 12 issues whose subject, message and first
+      // step all exceed their limits (the message and steps quote the specifier).
       const specifiers = Array.from(
         { length: 12 },
-        (_, i) => `s${String(i).padStart(2, '0')}${'x'.repeat(297)}`
+        (_, i) => `s${String(i).padStart(2, '0')}${'x'.repeat(397)}`
       );
       const sidecar = goodSidecar({ specifiers });
       const expected = diffContract(sidecar, PLUGIN_CONTRACT, STUDIO_VERSIONS);
+      // Preconditions: every issue really is over each limit (otherwise the cuts prove nothing).
       expect(expected).toHaveLength(12);
+      for (const e of expected) {
+        expect(e.subject.length).toBeGreaterThan(200);
+        expect(e.message.length).toBeGreaterThan(500);
+        expect(e.steps[0].length).toBeGreaterThan(300);
+      }
       routeFetch([manifest()], { sidecar: () => Promise.resolve(json(sidecar)) });
 
       const issues = await postedIssues();
@@ -351,9 +357,6 @@ describe('fetchPlugins', () => {
           expect(expected[i].steps[s].startsWith(step)).toBe(true);
         });
       });
-      // Cuts actually happened (otherwise this test proves nothing).
-      expect(expected[0].message.length).toBeGreaterThan(500);
-      expect(expected[0].steps[0].length).toBeGreaterThan(300);
     });
   });
 });
