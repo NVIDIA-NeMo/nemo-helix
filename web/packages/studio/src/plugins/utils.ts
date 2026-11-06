@@ -1,7 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLUGIN_CONTRACT, diffContract, type PluginSidecar } from '@nemo/common/src/pluginContract';
+import {
+  PLUGIN_CONTRACT,
+  diffContract,
+  type ContractIssue,
+  type PluginSidecar,
+} from '@nemo/common/src/pluginContract';
 import { logger } from '@nemo/common/src/utils/logger';
 import { platformFetch } from '@nemo/sdk/src/utils/platformRequest';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
@@ -60,7 +65,9 @@ const isSidecar = (obj: unknown): obj is PluginSidecar => {
     isStrings(o.specifiers) &&
     isStrings(o.bundledPackages) &&
     typeof o.builtAgainst === 'object' &&
-    o.builtAgainst !== null
+    o.builtAgainst !== null &&
+    !Array.isArray(o.builtAgainst) &&
+    Object.values(o.builtAgainst).every((v) => typeof v === 'string')
   );
 };
 
@@ -97,7 +104,12 @@ export async function loadPlugin(
   } catch (err) {
     return fail(name, `Could not read ${sidecarUrl}: ${errorMessage(err)}`);
   }
-  const issues = diffContract(sidecar, PLUGIN_CONTRACT, STUDIO_SHARED_VERSIONS);
+  let issues: ContractIssue[];
+  try {
+    issues = diffContract(sidecar, PLUGIN_CONTRACT, STUDIO_SHARED_VERSIONS);
+  } catch (err) {
+    return fail(name, `Could not check ${sidecarUrl} against the contract: ${errorMessage(err)}`);
+  }
   if (issues.length > 0) {
     logger.warn(`[plugins] Plugin "${name}" violates the plugin contract:`, issues);
     return { failure: { name, issues } };
@@ -133,7 +145,7 @@ export async function fetchPlugins(): Promise<PluginQueryData> {
   const manifests = (data as unknown[]).filter(isValidPluginManifest);
   const loaded = await Promise.all(manifests.map((m) => loadPlugin(m, baseUrl)));
   const failed = loaded.flatMap((r) => (r && 'failure' in r ? [r.failure] : []));
-  if (failed.length > 0) void reportLoadFailures(baseUrl, failed);
+  if (failed.length > 0) reportLoadFailures(baseUrl, failed);
   return {
     installedNames: new Set(manifests.map((m) => m.name)),
     plugins: loaded.flatMap((r) => (r && 'plugin' in r ? [r.plugin] : [])),
