@@ -939,6 +939,13 @@ class _AgentEvalSpecCommon(BaseModel):
         default_factory=dict,
         description="Caller-supplied tags recorded on the run's metadata (e.g. benchmark, mode, backend).",
     )
+    result_ignore_patterns: list[Annotated[str, Field(min_length=1)]] = Field(
+        default_factory=list,
+        description="Files to leave out of the saved result bundle. `*.ext` and `name` match files at any "
+        "depth, `name/` matches directories with that name at any depth (folder globs allowed), "
+        "and `dir/sub/` matches that directory at "
+        "the bundle root, with each folder name a glob such as `sub*`. Omit to keep every file.",
+    )
     publication: PublicationSpec | None = Field(
         default=None,
         description="Where the completed run publishes its results, beyond its own result bundle. "

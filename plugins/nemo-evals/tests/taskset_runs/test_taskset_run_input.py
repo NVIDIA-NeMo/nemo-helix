@@ -288,9 +288,12 @@ def test_digest_sorts_nested_dictionary_keys(run_body):
         (("execution", "sandbox"), {"cpus": 2}, {"cpus": 4}),
         (("spec", "target", "agent_kwargs"), {"value": 1}, {"value": 1.0}),
         (("spec", "target", "closed_book"), False, True),
+        (("spec", "result_ignore_patterns"), ["*.tmp"], ["*.log"]),
+        (("spec", "result_ignore_patterns"), [], ["*.tmp"]),
     ],
 )
 def test_digest_preserves_meaningful_request_differences(run_body, path, left, right):
+    """Execution and retention changes distinguish requests reusing an idempotency key."""
     requests = []
     for value in (left, right):
         body = deepcopy(run_body)
@@ -320,7 +323,16 @@ def test_publication_is_part_of_the_request_identity(run_body):
     assert len({plain, *digests.values()}) == 3
 
 
-def test_digest_hashes_the_exact_compact_json_projection(run_body):
+@pytest.mark.parametrize(
+    "retention_settings",
+    [
+        {},
+        {"result_ignore_patterns": []},
+    ],
+)
+def test_digest_hashes_the_exact_compact_json_projection(run_body, retention_settings):
+    """Omitted and empty retention settings preserve the pre-upgrade request digest."""
+    run_body["spec"].update(retention_settings)
     request = TasksetRunInput.model_validate(run_body)
     expected_body = {
         "spec": {
