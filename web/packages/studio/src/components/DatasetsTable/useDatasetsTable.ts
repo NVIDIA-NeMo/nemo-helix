@@ -86,7 +86,7 @@ export function useDatasetsTable({
   const { mutateAsync: deleteDataset } = useFilesDeleteFilesetById({
     mutation: {
       onSuccess: (_data, variables) => {
-        invalidateDatasetCaches(variables.workspace, modalDataset?.name, ['list']);
+        invalidateDatasetCaches(variables.workspace, undefined, ['list']);
       },
     },
   });
