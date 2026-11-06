@@ -15,7 +15,12 @@ from nhx.common.entities.client import EntityConflictError, EntityValidationErro
 from nhx.core.models.api.dependencies import get_model_deployment_service
 from nhx.core.models.api.permissions import check_deployment_config_access
 from nhx.core.models.api.service.model_deployment_service import DeploymentStatusConflictError, ModelDeploymentService
-from nhx.core.models.api.v2.utils import ERR_DEPLOYMENTS_NOT_ENABLED, LIST_REQUEST_ERRORS, deployments_enabled
+from nhx.core.models.api.v2.utils import (
+    ERR_DEPLOYMENTS_NOT_ENABLED,
+    LIST_REQUEST_ERRORS,
+    NOT_FOUND_ERRORS,
+    deployments_enabled,
+)
 from nhx.core.models.schemas import (
     CreateModelDeploymentRequest,
     ModelDeployment,
@@ -135,6 +140,8 @@ async def create_deployment(
         )
     except PermissionDeniedError:
         raise
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error creating deployment")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create deployment")
@@ -169,6 +176,8 @@ async def get_latest_deployment(
     except HTTPException:
         raise
     except PermissionDeniedError:
+        raise
+    except NOT_FOUND_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error getting deployment")
@@ -210,6 +219,8 @@ async def get_deployment_models(
         raise
     except PermissionDeniedError:
         raise
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error getting deployment models")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to get deployment models")
@@ -236,6 +247,8 @@ async def list_deployment_versions(
         versions = await service.list_deployment_versions(workspace, deployment_name)
         return versions
     except PermissionDeniedError:
+        raise
+    except NOT_FOUND_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error listing deployment versions")
@@ -399,6 +412,8 @@ async def update_deployment_status(
         raise
     except PermissionDeniedError:
         raise
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error updating deployment status")
         raise HTTPException(
@@ -470,6 +485,8 @@ async def delete_all_deployment_versions(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
     except PermissionDeniedError:
+        raise
+    except NOT_FOUND_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error deleting deployment")

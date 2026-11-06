@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, validate_agent_config
+from nemo_agents_plugin.api.v2._errors import LIST_REQUEST_ERRORS
 from nemo_agents_plugin.api.v2._perms import AgentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
@@ -131,6 +132,8 @@ async def list_agents(
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
+    except LIST_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agents in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list agents.") from exc
@@ -189,6 +192,8 @@ async def delete_agent(
     # Check for live deployments that would be orphaned by this deletion.
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except LIST_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments before deleting agent '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to check deployments.") from exc

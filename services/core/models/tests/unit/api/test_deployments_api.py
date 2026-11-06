@@ -104,6 +104,24 @@ def sample_page(sample_deployment):
     )
 
 
+def test_missing_deployment_versions_remain_empty(client, mock_deployment_service):
+    mock_deployment_service.list_deployment_versions.return_value = []
+
+    response = client.get("/v2/workspaces/default/deployments/missing/versions")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_create_missing_config_remains_bad_request(client, mock_deployment_service):
+    mock_deployment_service.create_deployment.side_effect = ValueError("Deployment config does not exist")
+    with patch("nhx.core.models.api.v2.deployments.deployments_enabled", return_value=True):
+        response = client.post("/v2/workspaces/default/deployments", json={"name": "test", "config": "missing"})
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Deployment config does not exist"}
+
+
 def test_list_deployments_default_parameters(client, mock_deployment_service, sample_page):
     """Test listing deployments with default parameters."""
     mock_deployment_service.list_deployments.return_value = sample_page

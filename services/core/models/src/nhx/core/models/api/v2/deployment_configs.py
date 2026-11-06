@@ -231,6 +231,8 @@ async def list_deployment_config_versions(
         return versions
     except PermissionDeniedError:
         raise
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error listing deployment config versions")
         raise HTTPException(
@@ -383,6 +385,8 @@ async def delete_all_deployment_config_versions(
         ) from e
     except PermissionDeniedError:
         raise
+    except NOT_FOUND_ERRORS:
+        raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config")
         raise HTTPException(
@@ -448,6 +452,8 @@ async def delete_deployment_config_version(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
     except PermissionDeniedError:
+        raise
+    except NOT_FOUND_ERRORS:
         raise
     except Exception:
         logger.exception("Unexpected error deleting deployment config version")

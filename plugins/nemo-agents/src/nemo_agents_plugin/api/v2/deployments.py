@@ -24,6 +24,7 @@ from typing import Any, get_args
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
+from nemo_agents_plugin.api.v2._errors import LIST_REQUEST_ERRORS
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
@@ -335,6 +336,8 @@ async def list_deployments(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except LIST_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list deployments in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list deployments.") from exc

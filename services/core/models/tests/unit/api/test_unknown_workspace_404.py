@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from nemo_helix_plugin.api import response_policy
 from nemo_helix_plugin.client.errors import NotFoundError
-from nhx.common.auth import AuthClient, get_auth_client
+from nhx.common.auth import AuthClient, Principal, get_auth_client
 from nhx.common.entities.client import EntityNotFoundError
 from nhx.common.errors.sdk_exception_handlers import register_sdk_exception_handlers
 from nhx.core.models.api.dependencies import (
@@ -106,11 +106,70 @@ ENDPOINTS = [
 ]
 
 
+# These catches already have 403/unexpected-500 coverage in test_permission_denied.py.
+# Exercise each independently wired missing-workspace path without duplicating that matrix.
+REMAINING_WORKSPACE_ENDPOINTS = [
+    (deployments, get_model_deployment_service, "get_deployment", "GET", "deployments/test", None),
+    (deployments, get_model_deployment_service, "get_deployment", "GET", "deployments/test/models", None),
+    (deployments, get_model_deployment_service, "list_deployment_versions", "GET", "deployments/test/versions", None),
+    (
+        deployments,
+        get_model_deployment_service,
+        "create_deployment",
+        "POST",
+        "deployments",
+        {"name": "test", "config": "cfg"},
+    ),
+    (
+        deployments,
+        get_model_deployment_service,
+        "update_deployment_status",
+        "POST",
+        "deployments/test/status",
+        {"status": "READY"},
+    ),
+    (deployments, get_model_deployment_service, "delete_deployment", "DELETE", "deployments/test", None),
+    (
+        deployment_configs,
+        get_model_deployment_config_service,
+        "list_deployment_config_versions",
+        "GET",
+        "deployment-configs/test/versions",
+        None,
+    ),
+    (
+        deployment_configs,
+        get_model_deployment_config_service,
+        "delete_deployment_config",
+        "DELETE",
+        "deployment-configs/test",
+        None,
+    ),
+    (
+        deployment_configs,
+        get_model_deployment_config_service,
+        "delete_deployment_config",
+        "DELETE",
+        "deployment-configs/test/versions/0",
+        None,
+    ),
+]
+
+
+@pytest.mark.parametrize("module,dependency,method,verb,path,payload", REMAINING_WORKSPACE_ENDPOINTS)
+def test_remaining_workspace_error_response(module, dependency, method, verb, path, payload, monkeypatch):
+    _assert_workspace_error(module, dependency, method, verb, path, payload, None, "sdk-not-found", monkeypatch)
+
+
 @pytest.mark.parametrize("module,dependency,method,verb,path,payload,generic_detail", ENDPOINTS)
 @pytest.mark.parametrize("error_kind", ["sdk-not-found", "entity-not-found", "unexpected"])
 def test_workspace_error_response(
     module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch
 ):
+    _assert_workspace_error(module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch)
+
+
+def _assert_workspace_error(module, dependency, method, verb, path, payload, generic_detail, error_kind, monkeypatch):
     if error_kind == "sdk-not-found":
         request = httpx.Request("GET", f"http://entities/apis/entities/v2/workspaces/{WS}/entities")
         error = NotFoundError(httpx.Response(404, json={"detail": DETAIL}, request=request))
@@ -122,7 +181,10 @@ def test_workspace_error_response(
     service = Mock(spec=[method])
     service_method = AsyncMock(side_effect=error)
     setattr(service, method, service_method)
-    auth_client = Mock(spec=AuthClient, auth_enabled=False)
+    auth_client = Mock(spec=AuthClient, auth_enabled=False, principal=Principal(id="test-user"))
+    auth_client.has_permissions = AsyncMock(return_value=True)
+    monkeypatch.setattr(deployments, "deployments_enabled", lambda: True)
+    monkeypatch.setattr(deployment_configs, "deployments_enabled", lambda: True)
     monkeypatch.setattr(response_policy, "current_auth_client", lambda request: auth_client)
 
     # No default argument: FastAPI would treat it as a request parameter.
