@@ -818,16 +818,17 @@ before any trial runs unless every virtual model the agent can reach, including 
 virtual model lists in `routes_to`, ends its `request_middleware` with `nemo-evals-closed-book`.
 Without the label, the same virtual models serve the run open.
 
-A taskset run on Kubernetes labels the run closed-book itself for tasks whose agent runs with
+A taskset run on Kubernetes is closed-book only when labelled so. Tasks whose agent runs with
 `network_mode = "no-network"`, whether set under `[environment]`, `[agent]` or one of the task's
-steps. Their sandbox still reaches the agent's model route, so a closed-book run, labelled or not, is
-refused at submit, naming those tasks, unless every model the agent calls through the gateway, and
+steps, don't label it: their sandbox still reaches the agent's model route, so such a run is
+open-book by default, and submit warns once per run. A labelled taskset run is
+refused at submit unless every model the agent calls through the gateway, and
 each virtual model those list in `routes_to`, is a virtual model whose `request_middleware` ends with
 `nemo-evals-closed-book`, and you can read each one. For a built-in agent that's the virtual model its
 `model` names as a `ref`; for a registered agent it's each shared and harness model whose `base_url`
 is a gateway route. Agents that call no model, `oracle` and `nop`, are exempt. A built-in agent with a
-model by `name`, an imported agent, and a registered agent with no gateway model are refused for such
-tasks, since evals can't check where their model calls go.
+model by `name`, an imported agent, and a registered agent with no gateway model are refused for a
+labelled run, since evals can't check where their model calls go.
 
 ## How scoring works
 
