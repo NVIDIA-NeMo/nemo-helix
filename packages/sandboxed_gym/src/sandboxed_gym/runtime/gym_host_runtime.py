@@ -19,7 +19,6 @@ import concurrent.futures
 import json
 import os
 import re
-import select
 import shutil
 import socket
 import subprocess
@@ -31,7 +30,14 @@ import urllib.error
 import urllib.request
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from os import access
+from os import close as os_close
+from os import dup2 as os_dup2
+from os import read as os_read
 from pathlib import Path
+from select import select
+from subprocess import check_output
+from subprocess import run as run_process
 from types import SimpleNamespace
 from typing import Any
 
@@ -230,8 +236,8 @@ class _FdOutputTail:
         self._destination = os.fdopen(os.dup(fd), "wb", buffering=0)
         self._tail: _OutputTail | None = _OutputTail(None, _OUTPUT_TAIL, secrets)
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        os.dup2(write_fd, fd)
-        os.close(write_fd)
+        os_dup2(write_fd, fd)
+        os_close(write_fd)
         threading.Thread(target=self._run, daemon=True, name=f"gym-output-{fd}").start()
 
     def drain(self, *, max_chunks: int = 1) -> str:
@@ -239,7 +245,7 @@ class _FdOutputTail:
         with self._lock:
             for _ in range(max_chunks):
                 try:
-                    chunk = os.read(self._read_fd, 65536)
+                    chunk = os_read(self._read_fd, 65536)
                 except BlockingIOError:
                     break
                 if not chunk:
@@ -273,15 +279,15 @@ class _FdOutputTail:
         """Pump until process exit; a broken reader must not leave writers blocked."""
         try:
             while True:
-                select.select([self._read_fd], [], [])
+                select([self._read_fd], [], [])
                 self.drain()
         except Exception:
             # If the pipe itself fails, restore the host fd for subsequent writes. Closing the
             # reader also makes existing children fail fast rather than hang on a full pipe.
             try:
-                os.dup2(self._destination.fileno(), self._fd)
+                os_dup2(self._destination.fileno(), self._fd)
             finally:
-                os.close(self._read_fd)
+                os_close(self._read_fd)
 
 
 _OUTPUT_CAPTURES: tuple[_FdOutputTail, ...] = ()
@@ -530,7 +536,7 @@ def _uv_cache_dir() -> str | None:
     if configured:
         return configured
     try:
-        resolved = subprocess.check_output(["uv", "cache", "dir"], text=True).strip()
+        resolved = check_output(["uv", "cache", "dir"], text=True).strip()
     except (OSError, subprocess.SubprocessError):
         return None
     return resolved or None
@@ -640,6 +646,16 @@ def _load_runtime_environment_package(
     return package
 
 
+def _host_stderr() -> Any:
+    """The current ``sys.stderr``, looked up at call time because the host replaces it."""
+    return sys.stderr
+
+
+def _import_path() -> list[str]:
+    """This interpreter's module search path, which the wheels-v1 install extends."""
+    return sys.path
+
+
 def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_path: str) -> None:
     """Install a wheels-v1 environment's vendored dependencies, with no package-index access.
 
@@ -667,7 +683,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # source-distribution path opened by --find-links, including for transitive dependencies.
     # Keep uv's failure reason separately so it also reaches the exception message, even if
     # subsequent Gym output would push it out of the bounded host tail.
-    result = subprocess.run(
+    result = run_process(
         [
             "uv",
             "pip",
@@ -687,7 +703,7 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     )
     # Forwarded to the host fds so the output tail keeps it, with secrets masked.
     sys.stdout.write(result.stdout)
-    sys.stderr.write(result.stderr)
+    _host_stderr().write(result.stderr)
     if result.returncode != 0:
         lines = [line for line in result.stderr.splitlines() if line.strip()]
         reason = "\n".join(lines[-_UV_FAILURE_REASON_LINES:]) or "uv printed no error output"
@@ -722,8 +738,9 @@ def _install_wheels_v1_dependencies(package: EnvironmentPackage | None, work_pat
     # Updating PYTHONPATH does not change the current interpreter's `sys.path`. Prepend the wheel
     # target so the host can import wheel-only packages, with the staged environment taking
     # precedence over packages baked into the runtime image.
-    if wheels_install_dir not in sys.path:
-        sys.path.insert(0, wheels_install_dir)
+    import_path = _import_path()
+    if wheels_install_dir not in import_path:
+        import_path.insert(0, wheels_install_dir)
 
 
 _OPEN_SANDBOX_CONFIG = "nemo_gym/sandbox/providers/opensandbox/configs/opensandbox.yaml"
@@ -844,7 +861,7 @@ def _writable_component_venv_root(configured_root: str, work_path: str, global_c
     root = Path(configured_root)
     try:
         root.mkdir(parents=True, exist_ok=True)
-        writable = os.access(root, os.W_OK)
+        writable = access(root, os.W_OK)
     except OSError:
         writable = False
     if writable:

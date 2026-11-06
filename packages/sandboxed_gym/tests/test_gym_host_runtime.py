@@ -221,7 +221,7 @@ def test_apply_uv_dirs_sets_config_keys_in_container(monkeypatch):
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("NEMO_GYM_VENV_DIR", "/opt/gym_venvs")
     monkeypatch.delenv("UV_CACHE_DIR", raising=False)
-    monkeypatch.setattr(runtime.subprocess, "check_output", lambda *a, **k: "/opt/uv_cache\n")
+    monkeypatch.setattr(runtime, "check_output", lambda *a, **k: "/opt/uv_cache\n")
 
     config: dict = {}
     runtime._apply_uv_dirs(config)
@@ -244,7 +244,7 @@ def test_apply_uv_dirs_does_not_override_explicit_config(monkeypatch):
     monkeypatch.setenv("NRL_CONTAINER", "1")
     monkeypatch.setenv("NEMO_GYM_VENV_DIR", "/opt/gym_venvs")
     monkeypatch.delenv("UV_CACHE_DIR", raising=False)
-    monkeypatch.setattr(runtime.subprocess, "check_output", lambda *a, **k: "/opt/uv_cache\n")
+    monkeypatch.setattr(runtime, "check_output", lambda *a, **k: "/opt/uv_cache\n")
 
     config = {runtime.UV_CACHE_DIR_KEY: "/custom/cache"}
     runtime._apply_uv_dirs(config)
@@ -263,7 +263,7 @@ def test_uv_cache_dir_prefers_the_configured_env_var(monkeypatch):
     def _never(*a, **k):
         raise AssertionError("uv should not be invoked when UV_CACHE_DIR is set")
 
-    monkeypatch.setattr(runtime.subprocess, "check_output", _never)
+    monkeypatch.setattr(runtime, "check_output", _never)
 
     assert runtime._uv_cache_dir() == "/home/ubuntu/.cache/uv"
 
@@ -276,7 +276,7 @@ def test_uv_cache_dir_returns_none_when_uv_unavailable(monkeypatch):
     def _boom(*a, **k):
         raise FileNotFoundError("uv")
 
-    monkeypatch.setattr(runtime.subprocess, "check_output", _boom)
+    monkeypatch.setattr(runtime, "check_output", _boom)
 
     assert runtime._uv_cache_dir() is None
 
@@ -572,7 +572,7 @@ def test_native_v1_is_loaded_without_installing_wheels(tmp_path, monkeypatch):
     def fail_install(*args, **kwargs):
         pytest.fail("native-v1 must not install wheels")
 
-    monkeypatch.setattr(runtime.subprocess, "run", fail_install)
+    monkeypatch.setattr(runtime, "run_process", fail_install)
     runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
 
 
@@ -616,7 +616,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
         calls.append((a, k))
         return subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
 
-    monkeypatch.setattr(runtime.subprocess, "run", record)
+    monkeypatch.setattr(runtime, "run_process", record)
     monkeypatch.setenv("PYTHONPATH", "/image/packages")
 
     package = runtime._load_runtime_environment_package(str(tmp_path), required=True)
@@ -647,7 +647,7 @@ def test_wheels_v1_installs_every_wheel_with_no_index_access(tmp_path, monkeypat
     assert runtime.os.environ[runtime.UV_FIND_LINKS_ENV_KEY] == str(wheels_dir)
     # Child processes and the already-running host both prefer staged packages over image packages.
     assert runtime.os.environ["PYTHONPATH"] == f"{install_dir}{runtime.os.pathsep}/image/packages"
-    assert runtime.sys.path[0] == str(install_dir)
+    assert runtime._import_path()[0] == str(install_dir)
     # The wheelhouse is the closure. A reachable index would otherwise win with a newer build
     # and the server venvs would download packages this package already vendors.
     assert runtime.os.environ[runtime.UV_OFFLINE_ENV_KEY] == "1"
@@ -660,14 +660,14 @@ def _stage_wheelhouse(tmp_path, monkeypatch):
     wheels_dir.mkdir()
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
     monkeypatch.setattr(
-        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
     )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
 def _fail_uv(monkeypatch, stderr: str) -> None:
     monkeypatch.setattr(
-        runtime.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 1, stdout="", stderr=stderr)
     )
 
 
@@ -692,7 +692,8 @@ def test_a_failed_wheel_install_reaches_the_output_tail(tmp_path, monkeypatch, i
     package = _stage_wheelhouse(tmp_path, monkeypatch)
     _fail_uv(monkeypatch, "error: Failed to install: a_dep-1.0-py3-none-any.whl\n")
     monkeypatch.setattr(runtime, "_OUTPUT_TAIL", collections.deque(maxlen=runtime._OUTPUT_TAIL_LINES))
-    monkeypatch.setattr(runtime.sys, "stderr", runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL))
+    tail = runtime._OutputTail(io.StringIO(), runtime._OUTPUT_TAIL)
+    monkeypatch.setattr(runtime, "_host_stderr", lambda: tail)
 
     with pytest.raises(RuntimeError):
         runtime._install_wheels_v1_dependencies(package, str(tmp_path / "work"))
@@ -1767,8 +1768,11 @@ def test_an_empty_chunk_is_never_written():
 
 @pytest.fixture(autouse=True)
 def _isolated_hf_environment(monkeypatch):
+    # The runtime writes these straight into os.environ. setenv first so monkeypatch records the
+    # key even when it was unset, and teardown removes whatever value the runtime left behind.
     for key in ("HF_HOME", "HF_DATASETS_CACHE", "HF_HUB_CACHE", "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE"):
-        monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv(key, "")
+        monkeypatch.delenv(key)
 
 
 def _vendored_hf_cache(tmp_path):
@@ -2340,7 +2344,9 @@ def _wheels_package_with_servers(
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir(exist_ok=True)
     (wheels_dir / "a_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
@@ -2468,7 +2474,7 @@ def test_a_read_only_venv_root_is_mirrored_into_the_work_mount(tmp_path, monkeyp
     (baked / runtime.COMPONENT_VENV_DIRNAME / "bin").mkdir(parents=True)
     real_access = runtime.os.access
     monkeypatch.setattr(
-        runtime.os, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
+        runtime, "access", lambda path, mode: False if str(path) == str(image_root) else real_access(path, mode)
     )
     work = tmp_path / "work"
     config = {runtime.SKIP_VENV_IF_PRESENT_KEY: True, runtime.UV_VENV_DIR_KEY: str(image_root)}
@@ -2496,7 +2502,9 @@ def _extras_only_wheels_package(tmp_path, monkeypatch):
     wheels_dir = tmp_path / WHEELS_V1_SUBDIR
     wheels_dir.mkdir()
     (wheels_dir / "extra_dep-1.0-py3-none-any.whl").write_bytes(b"")
-    monkeypatch.setattr(runtime.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runtime, "run_process", lambda *a, **k: subprocess.CompletedProcess(a[0], 0, stdout="", stderr="")
+    )
     return runtime._load_runtime_environment_package(str(tmp_path), required=True)
 
 
