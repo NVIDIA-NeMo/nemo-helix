@@ -8,13 +8,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, NotRequired, TypedDict
 
+from nemo_helix_plugin.auth.types import MAX_PRINCIPAL_ID_LENGTH
 from pydantic import BaseModel, Field
 
 
 class RoleBindingInput(BaseModel):
     """Input schema for creating a role binding."""
 
-    principal: str = Field(description="The principal identifier (email, user ID, or group ID)")
+    principal: str = Field(
+        max_length=MAX_PRINCIPAL_ID_LENGTH, description="The principal identifier (email, user ID, or group ID)"
+    )
     workspace: str | None = Field(
         default=None, description="The workspace this binding applies to. None for platform-level roles."
     )

@@ -436,6 +436,21 @@ def test_grpo_lora_merged_rejects_adapter_output() -> None:
         )
 
 
+@pytest.mark.parametrize("stored", [True, False])
+def test_stored_v4_compatible_is_dropped(stored: bool) -> None:
+    """GRPO jobs persisted ``v4_compatible``. List and get revalidate that JSON."""
+    job = RlJobOutput.model_validate(
+        {
+            "model": "default/base",
+            "dataset": "default/gym-data",
+            "environment": "default/env",
+            "training": {"type": "grpo", "v4_compatible": stored},
+            "output": {"name": "out", "type": "model", "fileset": "out-fs"},
+        }
+    )
+    assert "v4_compatible" not in job.training.model_dump()
+
+
 def test_grpo_lora_requires_adapter_output() -> None:
     with pytest.raises(ValueError, match="adapter"):
         RlJobOutput(

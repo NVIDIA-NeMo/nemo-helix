@@ -9,7 +9,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-MAX_PRINCIPAL_ID_LENGTH = 256
+from nemo_helix_plugin.auth.types import MAX_PRINCIPAL_ID_LENGTH as MAX_PRINCIPAL_ID_LENGTH
+
 PRINCIPAL_ID_ALLOWED_CHARACTERS = "alphanumeric, @, ., -, _, :, +, /"
 SERVICE_PRINCIPAL_PREFIX = "service:"
 SERVICE_ACCOUNT_PRINCIPAL_PREFIX = "service-account:"

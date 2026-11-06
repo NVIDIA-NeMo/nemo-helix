@@ -2,16 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AssistantRuntimeProvider } from '@assistant-ui/react';
+import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
 import { modelSupportsImageAttachments } from '@nemo/common/src/components/AssistantChat/messageUtils';
+import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
+import { useAssistantChatRuntime } from '@nemo/common/src/components/AssistantChat/useAssistantChatRuntime';
 import cn from 'classnames';
 import { type FC, useMemo } from 'react';
 
-import { AssistantChatThread } from './AssistantChatThread';
-import type { AssistantChatProps } from './types';
-import { useAssistantChatRuntime } from './useAssistantChatRuntime';
-
-export type { AssistantChatProps } from './types';
-export { ComposerMode } from './types';
+export type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
+export { ComposerMode } from '@nemo/common/src/components/AssistantChat/types';
 
 export const AssistantChat: FC<AssistantChatProps> = ({
   model,

@@ -66,6 +66,7 @@ from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_uuid_
 from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -297,6 +298,8 @@ async def _resolve_and_proxy_deployment(
         raise HTTPException(
             status_code=404, detail=f"Deployment '{name}' not found in workspace '{workspace}'."
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -444,11 +447,15 @@ async def _resolve_agent_deployment(
         await entity_client.get(Agent, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found in workspace '{workspace}'.") from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -513,6 +520,8 @@ async def _resolve_session_deployment(
                 f"'{session.id}' was not found in workspace '{workspace}'."
             ),
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment ID '%s'", session.deployment_id)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

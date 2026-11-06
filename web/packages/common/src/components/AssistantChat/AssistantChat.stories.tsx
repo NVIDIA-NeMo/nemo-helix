@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
+import { AssistantChat } from '@nemo/common/src/components/AssistantChat/index';
 import { TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { http, HttpResponse } from 'msw';
 import type { ChatCompletionChunk } from 'openai/resources/index.mjs';
-
-import { AssistantChat } from './index';
 
 const STORY_INFERENCE_BASE_PATH = '/storybook-inference/v1';
 const STORY_COMPLETIONS_API = `${STORY_INFERENCE_BASE_PATH}/chat/completions`;

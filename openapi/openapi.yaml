@@ -22448,6 +22448,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
         workspace:
@@ -24930,6 +24931,7 @@ components:
       properties:
         principal:
           type: string
+          maxLength: 256
           title: Principal
           description: The principal identifier (email, user ID, or group ID)
           examples:

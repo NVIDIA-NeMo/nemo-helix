@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState/index';
 import { renderHook, act } from '@testing-library/react';
 import { MemoryRouter, useSearchParams } from 'react-router';
-
-import { useStudioDataViewState } from './index';
 
 // Track mock state for DataView
 const mockPaginationSet = vi.fn();
@@ -20,7 +19,7 @@ let mockInitialized = false;
 let lastDataViewOptions: Record<string, unknown> | undefined;
 
 // Mock DataView module
-vi.mock('../../components/DataView/internal', () => ({
+vi.mock('@nemo/common/src/components/DataView/internal', () => ({
   useDataViewState: vi.fn((options) => {
     lastDataViewOptions = options;
     // Only initialize from options on first call (simulates real useDataViewState behavior)

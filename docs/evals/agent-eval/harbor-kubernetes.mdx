@@ -244,30 +244,7 @@ To use a model the deployment already serves, skip these steps. Use that model's
 
 </Note>
 
-### 2. Create a closed-book virtual model
-
-The virtual model carries two middlewares:
-
-- **Closed-book** strips provider-side tools such as web search.
-  - A no-network task, such as every DeepSWE task, accepts a model-calling agent only through a closed-book model. Without one, submit returns a 422 that names the tasks.
-  - Networked tasks also accept it.
-  - It holds against an agent that tries to get around it only with platform auth on. With auth off, an agent can forge its trial credential or call a model that isn't closed-book.
-- **Trial recording** records each trial's model calls in Intake, with token usage, in the trial's trace.
-  - List it in both middleware lists. In `request_middleware`, closed-book comes last.
-  - Without it, the run still works: the job logs a warning and the calls aren't recorded.
-
-```bash
-nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
-  --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
-  --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
-                         {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
-  --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
-```
-
-- With platform auth off, this model refuses calls without the credential an evaluation issues (401). To chat with it yourself, call `$WS/nvidia-nemotron-3-5-super-vl-120b-a12b` instead.
-- See [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials) for details.
-
-### 3. Give the agent a gateway key
+### 2. Give the agent a gateway key
 
 Each trial calls the gateway with its own key, which evals creates for it and revokes when the trial ends. Submit still checks for a gateway key of your own:
 
@@ -283,7 +260,7 @@ Each trial calls the gateway with its own key, which evals creates for it and re
   - Each trial's own key is a Scoped Access Key owned by you, so `nemo auth access-keys list` shows it while the trial runs.
 - **Platform auth off:** skip this step and drop `env_secrets` from the request file. Evals sets a placeholder key.
 
-### 4. Write the request file
+### 3. Write the request file
 
 Save as `openhands-run.json`:
 
@@ -292,7 +269,7 @@ Save as `openhands-run.json`:
   "spec": {
     "target": {
       "kind": "harbor",
-      "source": {"name": "openhands", "model": {"ref": "default/nemotron-super-closed-book"}},
+      "source": {"name": "openhands", "model": {"ref": "default/nvidia-nemotron-3-5-super-vl-120b-a12b"}},
       "agent_kwargs": {"version": "1.6.0", "temperature": "1", "top_p": "0.95", "disable_vision": true},
       "env_secrets": {"LLM_API_KEY": "evals-inference-key"},
       "n_attempts": 1,
@@ -319,7 +296,7 @@ Harbor's built-in agents aren't guaranteed to work with every agent release, mod
 
 </Note>
 
-### 5. Submit
+### 4. Submit
 
 Three DeepSWE tasks. Expect 5–20 minutes: the tasks run in parallel, and openhands installs itself in each sandbox first.
 
@@ -335,11 +312,54 @@ Under `harbor-standard`:
 - Package and installer hosts (uv, PyPI, Debian, GitHub) open only while the agent installs itself, then close before it runs.
 - An agent that needs other hosts at run time needs another [profile](/documentation/kubernetes-deployment/setup/helm/harbor-sandbox-profiles). Ask your operator.
 
+DeepSWE tasks are no-network, and this run is open-book: submit prints a warning that the model provider may still use hosted tools such as web search. To prevent that, [run closed-book](#optional-run-closed-book).
+
 <Tip>
 
 The [DeepSWE notebook](https://github.com/NVIDIA-NeMo/nemo-helix/tree/main/plugins/nemo-evals/examples/deepswe_k8s_demo) runs 10 tasks the same way, with codex. It shows each task's progress while you wait, then charts which tasks the agent solved and why the others failed.
 
 </Tip>
+
+### Optional: run closed-book
+
+A no-network task cuts the sandbox off from the network, but not the model: the provider can still run hosted tools such as web search. Closed-book strips those tools.
+
+1. Create a virtual model in front of your model, with the closed-book middleware as the last `request_middleware` entry:
+
+   ```bash
+   nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
+     --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
+     --request-middleware '[{"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]'
+   ```
+
+   To record trials too, add the trial-recording entries as in [Optional: record trials](#optional-record-trials), closed-book still last.
+
+2. In the request file's `spec.target`, set `closed_book` and point the agent at the virtual model:
+
+   ```json
+   {"closed_book": true, "source": {"name": "openhands", "model": {"ref": "default/nemotron-super-closed-book"}}}
+   ```
+
+- Submit refuses a closed-book run with a 422 `closed_book_required` unless every virtual model the agent can reach ends its `request_middleware` with `nemo-evals-closed-book`.
+- It holds against an agent that tries to get around it only with platform auth on. With auth off, an agent can forge its trial credential or call a model that isn't closed-book.
+
+### Optional: record trials
+
+Trial recording records each trial's model calls in Intake, with token usage, in the trial's trace. Without it, the run still works: the job logs a warning and the calls aren't recorded.
+
+Create a virtual model with the trial-recording middleware in both middleware lists, and point `model.ref` at it. With closed-book, use one virtual model and put closed-book last in `request_middleware`:
+
+```bash
+nemo inference virtual-models create nemotron-super-closed-book --workspace "$WS" \
+  --default-model-entity "$WS/nvidia-nemotron-3-5-super-vl-120b-a12b" \
+  --request-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}},
+                         {"name": "nemo-evals-closed-book", "config_type": "closed_book", "config": {}}]' \
+  --response-middleware '[{"name": "nemo-evals-trial-recording", "config_type": "trial_recording", "config": {}}]'
+```
+
+- If you already created `nemotron-super-closed-book` in [Optional: run closed-book](#optional-run-closed-book), run the same command with `patch` in place of `create`.
+- With platform auth off, a trial-recording model refuses calls without the credential an evaluation issues (401). To chat with it yourself, call `$WS/nvidia-nemotron-3-5-super-vl-120b-a12b` instead.
+- See [Record Evaluation Trials](/documentation/models-and-inference/virtual-models#record-evaluation-trials) for details.
 
 ## Size sandboxes and limit concurrency
 
@@ -450,7 +470,7 @@ Use `--intake-dataset` so that runs on a stored taskset show the same dataset as
 | One trial's trace | `…/experiment/harbor-runs/<run-id>/sessions/<run-id>-task-<i>%3A<trial>` |
 
 - The trace shows the agent's model calls, tool calls and tokens.
-- With [trial recording](#2-create-a-closed-book-virtual-model), the trial's trace also holds one span per gateway call, with the token usage the provider reported. Usage is counted once.
+- With [trial recording](#optional-record-trials), the trial's trace also holds one span per gateway call, with the token usage the provider reported. Usage is counted once.
 - The cost column is empty when the agent reports no cost, as for a model without a known price.
 
 ## Track and cancel runs
@@ -553,8 +573,8 @@ nemo evals runs submit --workspace "$WS" --taskset "$TASKSET" --agent oracle \
 | 422 `unknown execution.sandbox.profile '…'` | The profile isn't defined on this deployment | Use a name the error lists, or omit it |
 | `Kubernetes taskset runs aren't configured in this deployment` | The operator hasn't enabled taskset runs | Ask your operator; see the Note in [Before you begin](#before-you-begin) |
 | 422 `tasks without images: <task>: <code>: …` | Each rejected task is listed with a code | Unbuilt image: `nemo evals tasksets build-images <taskset> --wait`, then resubmit. `resources_exceed_policy`: lower the task's `task.toml` resources or use a profile with higher ceilings. `gpu_unsupported`, `invalid_task_config`, `invalid_compose_file`: fix the task |
-| 422 naming no-network tasks | A model-calling agent without a closed-book `model.ref` | Use a closed-book model ([step 2](#2-create-a-closed-book-virtual-model)) |
-| `platform auth is on, so the agent needs a key to call the Inference Gateway` | No gateway key in `env_secrets` | [Step 3](#3-give-the-agent-a-gateway-key) |
+| 422 `closed_book_required` | A run with `closed_book: true` whose `model.ref` isn't a closed-book virtual model | [Run closed-book](#optional-run-closed-book) |
+| `platform auth is on, so the agent needs a key to call the Inference Gateway` | No gateway key in `env_secrets` | [Step 2](#2-give-the-agent-a-gateway-key) |
 | Task Job fails with `could not issue … trials their own Inference Gateway key` | Platform auth is on and Scoped Access Keys are off, you can't create them, or `auth.access_keys.max_expires_in_seconds` is under 86400 (trial keys last 24 h) | Ask your operator to enable [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys) with a maximum lifetime of at least 24 h |
 | 401 `… records evaluation trials, so calls to it must carry the credential the evaluation issued` | You called a trial-recording virtual model directly, with platform auth off | Call the model it serves, or a virtual model without trial recording |
 | 422 `Intake Experiment … doesn't exist` | `--experiment` names a missing Experiment | `nemo experiments create <name> --workspace "$WS"` |

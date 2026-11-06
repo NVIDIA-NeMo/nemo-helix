@@ -54,7 +54,6 @@ if AUTOMODEL_SRC.is_dir():
 else:
     sys.path.insert(0, "/app/services/automodel/src")
 
-from nhx.automodel.app.constants import V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES  # noqa: E402
 from nhx.automodel.tasks.training.backends.config import compile_automodel_config  # noqa: E402
 from nhx.automodel.tasks.training.schemas import TrainingStepConfig  # noqa: E402
 from nhx.customization_common.service.context import NHXJobContext  # noqa: E402
@@ -169,9 +168,6 @@ def _detect_model_flags(model_local_dir: Path) -> dict[str, bool]:
     arch_name = architectures[0] if architectures else None
 
     flags: dict[str, bool] = {}
-
-    if arch_name and arch_name in V4_MODEL_FOR_CAUSAL_LM_MAPPING_NAMES:
-        flags["v4_compatible"] = True
 
     if arch_name == "NemotronHForCausalLM" and "moe" not in hf_config:
         flags["override_custom_impl"] = True

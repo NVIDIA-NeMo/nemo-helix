@@ -1,7 +1,14 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  LOGS_MAX_FETCH_ITERATIONS,
+  LOGS_MAX_PAGES,
+  LOGS_PAGE_SIZE,
+} from '@nemo/common/src/constants';
+import { CJobTerminalStatuses } from '@nemo/common/src/constants/query';
 import { logStatusForJob, type LogLoadProgress, type LogStatus } from '@nemo/common/src/utils/logs';
+import { getJobRefetchInterval } from '@nemo/common/src/utils/query';
 import { getJobsPageJobLogsQueryKey, jobsPageJobLogs } from '@nemo/sdk/generated/platform/jobs';
 import type {
   HelixJobLog,
@@ -16,10 +23,6 @@ import {
   type RefetchOptions,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
-
-import { LOGS_MAX_FETCH_ITERATIONS, LOGS_MAX_PAGES, LOGS_PAGE_SIZE } from '../../constants';
-import { CJobTerminalStatuses } from '../../constants/query';
-import { getJobRefetchInterval } from '../../utils/query';
 
 // After a job goes terminal, refetchInterval stops polling — but OTLP log
 // shipping can still be in flight, so the final lines would be lost. Refetch a
