@@ -1954,4 +1954,3 @@ jobs:
 
           printf '%s\n' "${NEEDS_JSON}" \
             | jq -e 'to_entries | map(.value.result) | all(. as $result | ["success", "skipped"] | any($result == .))'
-
