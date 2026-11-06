@@ -2,9 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ToolCallMessagePartComponent } from '@assistant-ui/react';
-import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/RepeatedToolCallsStep';
-import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
-import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
 import {
   getSubtleToolGroupActions,
   summarizeRepeatedSubtleToolActions,
@@ -18,6 +15,9 @@ import {
   toAssistantToolArgs,
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
+import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/work/RepeatedToolCallsStep';
+import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/work/ThoughtStep';
+import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/work/ToolCallStep';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';

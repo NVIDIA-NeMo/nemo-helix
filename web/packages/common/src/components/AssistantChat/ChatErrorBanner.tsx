@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useAuiState } from '@assistant-ui/react';
-import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkCodeSnippet';
-import { WorkAccordion } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkStep';
 import { GENERIC_CHAT_ERROR } from '@nemo/common/src/components/AssistantChat/describeChatError';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
+import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/work/WorkCodeSnippet';
+import { WorkAccordion } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { Banner, Stack } from '@nvidia/foundations-react-core';
 
 // A failed reply's text parts hold the human-readable explanation (see `getFailedReply`), so they

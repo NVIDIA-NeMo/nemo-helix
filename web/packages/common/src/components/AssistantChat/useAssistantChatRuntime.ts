@@ -9,7 +9,6 @@ import {
   SimpleImageAttachmentAdapter,
   useExternalStoreRuntime,
 } from '@assistant-ui/react';
-import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
 import {
   computeCompletionMetrics,
   getReasoningDelta,
@@ -36,6 +35,7 @@ import {
   getUserMessageContent,
 } from '@nemo/common/src/components/AssistantChat/messageUtils';
 import type { AssistantChatProps } from '@nemo/common/src/components/AssistantChat/types';
+import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/work/workParts';
 import { useChatCompletion } from '@nemo/common/src/hooks/useChatCompletion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 

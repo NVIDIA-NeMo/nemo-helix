@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MessagePrimitive } from '@assistant-ui/react';
-import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
-import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
-import { WorkGroup } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkGroup';
-import {
-  WORK_GROUP_KEY,
-  groupWorkParts,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
 import { ChatErrorBanner } from '@nemo/common/src/components/AssistantChat/ChatErrorBanner';
 import type { MessageRenderProps } from '@nemo/common/src/components/AssistantChat/types';
 import { useMessageError } from '@nemo/common/src/components/AssistantChat/useMessageError';
+import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/work/ThoughtStep';
+import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/work/ToolCallStep';
+import { WorkGroup } from '@nemo/common/src/components/AssistantChat/work/WorkGroup';
+import {
+  WORK_GROUP_KEY,
+  groupWorkParts,
+} from '@nemo/common/src/components/AssistantChat/work/workParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
 import type { ReactNode } from 'react';
 

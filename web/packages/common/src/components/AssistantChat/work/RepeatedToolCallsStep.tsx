@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getSubtleToolIcon } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
 import {
   WORK_ACCORDION_CLASS,
   WORK_ICON_SIZE,
   WorkStep,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkStep';
-import { getSubtleToolIcon } from '@nemo/common/src/components/AssistantChat/toolCall/helpers';
+} from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import cn from 'classnames';
 import type { ReactNode } from 'react';
 

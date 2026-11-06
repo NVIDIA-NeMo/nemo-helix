@@ -3,11 +3,11 @@
 
 import type { ThreadMessageLike } from '@assistant-ui/react';
 import { AssistantChat } from '@nemo/common/src/components/AssistantChat';
-import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/RepeatedToolCallsStep';
-import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ThoughtStep';
-import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/chainOfThought/ToolCallStep';
-import { WorkGroupView } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkGroup';
-import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
+import { RepeatedToolCallsStep } from '@nemo/common/src/components/AssistantChat/work/RepeatedToolCallsStep';
+import { ThoughtStep } from '@nemo/common/src/components/AssistantChat/work/ThoughtStep';
+import { ToolCallStep } from '@nemo/common/src/components/AssistantChat/work/ToolCallStep';
+import { WorkGroupView } from '@nemo/common/src/components/AssistantChat/work/WorkGroup';
+import { WORK_DURATIONS_METADATA_KEY } from '@nemo/common/src/components/AssistantChat/work/workParts';
 import { Stack, Text, TooltipProvider } from '@nvidia/foundations-react-core';
 import type { Meta, StoryObj } from '@storybook/react';
 import { http, HttpResponse } from 'msw';

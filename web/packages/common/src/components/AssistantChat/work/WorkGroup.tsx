@@ -7,11 +7,11 @@ import {
   getWorkDurations,
   getWorkGroupLabel,
   getWorkGroupOrdinal,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
+} from '@nemo/common/src/components/AssistantChat/work/workParts';
 import {
   WORK_ICON_SIZE,
   WorkAccordion,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkStep';
+} from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { Lightbulb, WindowCode } from '@nemo/icons/icons';
 import { Stack } from '@nvidia/foundations-react-core';
 import { type ReactNode, useRef, useState } from 'react';

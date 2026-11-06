@@ -57,7 +57,7 @@ Use `baseURL` instead of `workspace` when the caller already has an OpenAI-compa
 
 ### Thinking and tool calls
 
-Streamed reasoning (`reasoning_content` or `reasoning`) and `tool_calls` become reasoning and tool-call parts on the reply. Each run of adjacent reasoning and tool-call parts renders as one collapsed work group (`chainOfThought/`), built on `MessagePrimitive.GroupedParts`:
+Streamed reasoning (`reasoning_content` or `reasoning`) and `tool_calls` become reasoning and tool-call parts on the reply. Each run of adjacent reasoning and tool-call parts renders as one collapsed work group (`work/`), built on `MessagePrimitive.GroupedParts`:
 
 - the group label reads "Thinking…" while the run is still streaming, then the tool-call count and how long the run took, for example "Ran 3 tool calls · 12s" or "Thought · 4s";
 - expanding it shows one row per step: a **Thought** with the reasoning text, or a tool call with the arguments and result (or error). The row's icon and message come from the same `toolCall/` helpers the NeMo Assistant's tool rows used, such as **Ran `pnpm test`**, **Read `README.md`**, or **Used get_weather**, with the call's detail styled apart from the action. `Write`, `Edit`, and `MultiEdit` show as a file change with its line counts (**Wrote `MEMORY.md` +12 −0**) and the written content or the edit's arguments;
@@ -115,7 +115,7 @@ Related documentation:
 - `UserEditComposer.tsx` — the inline composer shown when editing a user message.
 - `AssistantChatMessageContent.tsx` — shared message-parts renderer (text, image, the reasoning and tool-call work group, and the error banner) used by both message renderers.
 - `ChatErrorBanner.tsx` — the failed-reply banner with the explanation, plus the "Show details" row holding the raw error.
-- `chainOfThought/` — the collapsible work group, its Thought and tool-call steps, and the step that folds repeated calls of one tool. `toolCall/` holds the per-tool labels, icons, and message helpers they draw on.
+- `work/` — the collapsible work group, its Thought and tool-call steps, and the step that folds repeated calls of one tool. `toolCall/` holds the per-tool labels, icons, and message helpers they draw on.
 - `messageActions.tsx` — shared message-action styles, the action button, and the copy-message button.
 - `describeChatError.ts` — rules that explain agent chat failures (`describeChatError`), `humanizeChatError`, and the generic error line. `messageUtils.ts` `getFailedReply` builds the failed reply from them.
 - `useMessageError.ts` — hook returning the raw error of a failed message, shared by the message renderer, the error banner, and its "Show details" row.

@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
+  ASSISTANT_JOB_PROGRESS_TOOL_NAME,
+  ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
+  ASSISTANT_THINKING_TOOL_NAME,
+} from '@nemo/common/src/components/AssistantChat/toolParts';
+import {
   countToolCalls,
   formatToolPayload,
   formatWorkDuration,
@@ -9,13 +15,7 @@ import {
   getWorkGroupLabel,
   getWorkGroupOrdinal,
   groupWorkParts,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
-import {
-  ASSISTANT_COLLAPSED_STUDIO_DETAILS_TOOL_NAME,
-  ASSISTANT_JOB_PROGRESS_TOOL_NAME,
-  ASSISTANT_SUBTLE_TOOL_GROUP_NAME,
-  ASSISTANT_THINKING_TOOL_NAME,
-} from '@nemo/common/src/components/AssistantChat/toolParts';
+} from '@nemo/common/src/components/AssistantChat/work/workParts';
 
 describe('groupWorkParts', () => {
   it('groups reasoning and tool calls but leaves text and job progress ungrouped', () => {

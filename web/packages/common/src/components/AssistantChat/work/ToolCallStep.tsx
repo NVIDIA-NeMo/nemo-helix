@@ -1,16 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkCodeSnippet';
-import {
-  formatToolPayload,
-  getFileLanguage,
-  getFileName,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
-import {
-  WORK_ICON_SIZE,
-  WorkStep,
-} from '@nemo/common/src/components/AssistantChat/chainOfThought/WorkStep';
 import {
   TOOL_LABELS,
   TOOL_RUNNING_ACTIONS,
@@ -27,6 +17,13 @@ import {
   type AssistantToolArgs,
   toAssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
+import { WorkCodeSnippet } from '@nemo/common/src/components/AssistantChat/work/WorkCodeSnippet';
+import {
+  formatToolPayload,
+  getFileLanguage,
+  getFileName,
+} from '@nemo/common/src/components/AssistantChat/work/workParts';
+import { WORK_ICON_SIZE, WorkStep } from '@nemo/common/src/components/AssistantChat/work/WorkStep';
 import { DocumentNew, Pencil } from '@nemo/icons/icons';
 import { Stack } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
