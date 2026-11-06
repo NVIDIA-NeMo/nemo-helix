@@ -82,12 +82,62 @@ RUN --mount=from=golang:1.27.3,source=/usr/local/go,target=/usr/local/go,readonl
     --mount=type=bind,source=docker/scripts/collect-go-module-sources.py,target=/tmp/collect-go-module-sources.py,readonly \
     GOTOOLCHAIN=local GOROOT=/usr/local/go python3 /tmp/update-python-trust.py
 
-FROM ${NHX_PYTHON_IMAGE} AS runtime
+# Sources of the host venv, each prefetched component venv, CPython, and uv and its crates, collected
+# after the update above so they match what ships; the update collects the rebuilt wandb-cores' Go
+# modules into rebuilt-wandb. The uv cache's distributions are collected too: it also holds the build
+# backends uv fetched to build sdists, such as setuptools, at whatever version was current.
+# docker/sources/nhx-gym-host.json pins ray, which has no sdist, the packages ray bundles, and the
+# source of distlib's Windows launchers.
+COPY docker/sources/ /tmp/nhx-sources/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
+        /usr/local/bin/collect-python-sdists.py \
+        --python /opt/gym-host-venv/bin/python \
+        --output /source-distributions/nhx-gym-host \
+        --lock-file /app/docker/locks/nhx-gym-host/uv.lock \
+        --label gym-host-venv && \
+    find "${NEMO_GYM_VENV_DIR}" -mindepth 3 -maxdepth 3 -type d -name .venv | sort | while IFS= read -r venv; do \
+        label="$(dirname "${venv#"${NEMO_GYM_VENV_DIR}"/}" | tr / -)"; \
+        UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python "${venv}/bin/python" \
+            /usr/local/bin/collect-python-sdists.py \
+            --python "${venv}/bin/python" \
+            --output /source-distributions/nhx-gym-host \
+            --label "${label}" || exit 1; \
+    done && \
+    python3 /usr/local/bin/collect-python-sdists.py \
+        --uv-cache "${UV_CACHE_DIR}" \
+        --output /source-distributions/nhx-gym-host \
+        --label uv-cache && \
+    UV_CACHE_DIR=/root/.cache/uv uv run --no-project --python /opt/gym-host-venv/bin/python \
+        /usr/local/bin/collect-cpython-source.py \
+        --python /opt/gym-host-venv/bin/python \
+        --output /source-distributions/nhx-gym-host && \
+    python3 /usr/local/bin/collect-pinned-sources.py \
+        --manifest /tmp/nhx-sources/uv.json \
+        --manifest /tmp/nhx-sources/nhx-gym-host.json \
+        --installed-in /opt/gym-host-venv/bin/python \
+        $(find "${NEMO_GYM_VENV_DIR}" -mindepth 3 -maxdepth 3 -type d -name .venv -printf '--installed-in %p/bin/python ') \
+        --output /source-distributions/nhx-gym-host && \
+    python3 /usr/local/bin/collect-cargo-crate-sources.py \
+        --binary /bin/uv \
+        --cargo-lock /source-distributions/nhx-gym-host/pinned/uv-0.13.4.tar.gz \
+        --output /source-distributions/nhx-gym-host
+
+FROM ${NHX_PYTHON_IMAGE} AS runtime-base
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates \
     && rm -rf /var/lib/apt/lists/* && \
     dpkg --compare-versions "$(dpkg-query -W -f='${Version}' ca-certificates)" ge "20250419+deb13u1"
+
+# The runtime's own Debian packages, not the builder's build tools.
+FROM runtime-base AS apt-sources
+ARG NHX_COLLECT_SOURCES=0
+ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
+COPY docker/scripts/collect-apt-sources.sh /usr/local/bin/
+RUN bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-gym-host/apt --installed
+
+FROM runtime-base AS runtime
 
 # Copy uv because Gym uses it to launch component environments.
 COPY --from=builder /bin/uv /bin/uv
@@ -101,6 +151,8 @@ COPY --from=builder /opt/gym-host-venv /opt/gym-host-venv
 COPY --from=builder /opt/gym_venvs /opt/gym_venvs
 # Copy the matching uv cache used by those component environments.
 COPY --from=builder /home/ubuntu/.cache/uv /home/ubuntu/.cache/uv
+COPY --from=builder /source-distributions/nhx-gym-host/ /usr/share/nemo-helix/source-distributions/nhx-gym-host/
+COPY --from=apt-sources /source-distributions/nhx-gym-host/ /usr/share/nemo-helix/source-distributions/nhx-gym-host/
 
 ENV PATH="/opt/gym-host-venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/gym-host-venv \

@@ -86,8 +86,13 @@ jobs:
       fail-fast: false
       matrix:
         image:
+          - nhx-api
           - nhx-builder-tasks
+          - nhx-garak-tasks
+          - nhx-gym-host
+          - nhx-gym-tasks
           - nhx-kaniko
+          - nhx-tasks
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3

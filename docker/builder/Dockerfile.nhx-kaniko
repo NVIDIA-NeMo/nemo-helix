@@ -43,18 +43,20 @@ COPY --from=go-builder /src/out/ /kaniko/
 
 # The image has no Python, so its sources are collected here. docker/sources/nhx-kaniko.json pins the
 # components its Go binaries don't record: kaniko itself; BusyBox with the patches and build script
-# Docker builds it with, and Alpine 3.23's musl package it links statically; tini's release binaries
-# and the Ubuntu xenial glibc they link statically (glibc 2.23-0ubuntu10 on amd64, and on arm64 the
-# 2.23-0ubuntu3 that cross-toolchain-base 10ubuntu1 built); and Debian trixie's ca-certificates, from
-# which the CA bundle is generated. Re-check it whenever the digest above moves.
+# Docker builds it with; tini's release binaries and the Ubuntu xenial glibc they link statically
+# (glibc 2.23-0ubuntu10 on amd64, and on arm64 the 2.23-0ubuntu3 that cross-toolchain-base 10ubuntu1
+# built); and Debian trixie's ca-certificates, from which the CA bundle is generated.
+# alpine-3.23-musl.json pins the Alpine musl package BusyBox links statically. Re-check both whenever
+# the digest above moves.
 FROM ${NHX_PYTHON_BASE} AS sources
 ARG NHX_COLLECT_SOURCES=0
 ENV NHX_COLLECT_SOURCES=${NHX_COLLECT_SOURCES}
-COPY docker/sources/nhx-kaniko.json /tmp/nhx-kaniko.json
+COPY docker/sources/nhx-kaniko.json docker/sources/alpine-3.23-musl.json /tmp/
 COPY --from=patched-kaniko /kaniko/executor /kaniko/warmer /kaniko/docker-credential-gcr \
     /kaniko/docker-credential-ecr-login /kaniko/docker-credential-acr-env /tmp/kaniko/
 RUN python3 /usr/local/bin/collect-pinned-sources.py \
         --manifest /tmp/nhx-kaniko.json \
+        --manifest /tmp/alpine-3.23-musl.json \
         --output /source-distributions/nhx-kaniko && \
     bash /usr/local/bin/collect-apt-sources.sh /source-distributions/nhx-kaniko/apt ca-certificates && \
     python3 /usr/local/bin/collect-go-module-sources.py \

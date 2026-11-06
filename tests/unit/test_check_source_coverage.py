@@ -63,6 +63,7 @@ def policy(tmp_path: Path) -> Path:
             {
                 "first_party": {"python": [{"name": "nemo-fabric*"}], "npm": [{"name": "nemo-oo-agents-viewer"}]},
                 "vendored": [{"path": "/setuptools/_vendor/", "covered_by": "setuptools"}],
+                "embedded": [{"type": "go-module", "name": "github.com/wandb/wandb/core", "covered_by": "setuptools"}],
             }
         )
     )
@@ -79,6 +80,7 @@ COVERED = [
     artifact("deb", "libc6", "2.41-12", "/var/lib/dpkg/status", source="glibc"),
     artifact("go-module", "golang.org/x/sys", "v0.47.0", "/bin/crane"),
     artifact("go-module", "stdlib", "go1.26.8", "/bin/crane"),
+    artifact("go-module", "github.com/wandb/wandb/core", "(devel)", f"{SITE}/wandb/bin/wandb-core"),
     artifact("rust-crate", "anyhow", "1.0.102", "/usr/bin/uv"),
     artifact("rust-crate", "uv-cache", "0.0.1", "/usr/bin/uv"),
     artifact("binary", "busybox", "1.37.0", "/usr/bin/sh"),
@@ -117,6 +119,7 @@ def test_every_collected_first_party_vendored_or_pinned_component_is_covered(
         artifact("deb", "libssl3", "3.5.4", "/var/lib/dpkg/status", source="openssl"),
         artifact("go-module", "golang.org/x/net", "v0.50.0", "/bin/crane"),
         artifact("go-module", "stdlib", "go1.26.7", "/tools/jobs-launcher"),
+        artifact("go-module", "github.com/ray-project/ray/core", "(devel)", f"{SITE}/ray/core/raylet"),
         artifact("rust-crate", "serde", "1.0.228", "/usr/bin/uv"),
         artifact("binary", "busybox", "1.38.0", "/busybox/sh"),
         artifact("binary", "python", "3.12.11", "/usr/local/bin/python3.12"),

@@ -15,6 +15,7 @@ import http.client
 import json
 import os
 import re
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -37,6 +38,8 @@ class PinnedSource:
     url: str
     sha256: str
     covers: tuple[str, ...]
+    #: Where the covered copy ships when it isn't the installed package, e.g. vendored inside another.
+    bundled_in: str | None = None
 
     @property
     def filename(self) -> str:
@@ -57,6 +60,7 @@ def load_manifest(path: Path) -> list[PinnedSource]:
             url=entry["url"],
             sha256=entry["sha256"].lower(),
             covers=tuple(entry.get("covers", ())),
+            bundled_in=entry.get("bundled_in"),
         )
         if not SHA256_PATTERN.fullmatch(source.sha256):
             raise ValueError(f"{path}: {source.name} has an invalid sha256: {entry['sha256']!r}")
@@ -64,6 +68,43 @@ def load_manifest(path: Path) -> list[PinnedSource]:
             raise ValueError(f"{path}: {source.name} must be downloaded over https: {source.url}")
         sources.append(source)
     return sources
+
+
+def normalize(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+INSTALLED_DISTRIBUTIONS = (
+    "import importlib.metadata as m, json; "
+    "print(json.dumps([[d.metadata['Name'], d.version] for d in m.distributions()]))"
+)
+
+
+def installed_versions(python: str) -> dict[str, set[str]]:
+    """The version of each distribution installed in ``python``'s environment, by normalized name."""
+    output = subprocess.run([python, "-c", INSTALLED_DISTRIBUTIONS], check=True, capture_output=True, text=True).stdout
+    versions: dict[str, set[str]] = {}
+    for name, version in json.loads(output):
+        versions.setdefault(normalize(name), set()).add(version)
+    return versions
+
+
+def stale_python_pins(sources: list[PinnedSource], installed: dict[str, set[str]]) -> list[str]:
+    """Python packages a manifest pins at a version other than the one installed, as when a lock moved on.
+
+    A pin for a copy bundled elsewhere, such as inside another package, is independent of what's installed.
+    """
+    stale = []
+    for source in sources:
+        if source.bundled_in:
+            continue
+        for cover in source.covers:
+            kind, _, rest = cover.partition(":")
+            name, _, version = rest.rpartition("@")
+            found = installed.get(normalize(name), set())
+            if kind == "python" and found and version not in found:
+                stale.append(f"{source.name} pins {name} {version}, but {', '.join(sorted(found))} is installed")
+    return stale
 
 
 def source_collection_enabled() -> bool:
@@ -108,12 +149,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", action="append", required=True, help="JSON manifest of pinned sources")
     parser.add_argument("--output", required=True, help="Source distribution output directory")
+    parser.add_argument(
+        "--installed-in",
+        action="append",
+        default=[],
+        metavar="PYTHON",
+        help="Python whose environment must have each pinned Python package at the pinned version, if at all",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output)
     manifests = output_dir / "manifests"
     manifests.mkdir(parents=True, exist_ok=True)
     sources = [source for manifest in args.manifest for source in load_manifest(Path(manifest))]
+    stale = [line for python in args.installed_in for line in stale_python_pins(sources, installed_versions(python))]
+    if stale:
+        raise RuntimeError("update the pinned sources: " + "; ".join(stale))
     if not source_collection_enabled():
         record_source_collection_disabled(output_dir)
         return 0

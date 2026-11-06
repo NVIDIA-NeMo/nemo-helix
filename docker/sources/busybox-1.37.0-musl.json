@@ -1,0 +1,42 @@
+{
+  "sources": [
+    {
+      "name": "busybox",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://busybox.net/downloads/busybox-1.37.0.tar.bz2",
+      "sha256": "3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4",
+      "covers": [
+        "binary:busybox@1.37.0"
+      ]
+    },
+    {
+      "name": "busybox-no-cbq-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/no-cbq.patch",
+      "sha256": "8451446ee0c7128f3eaca0322f113dadc11d1c05f616f6543a77908648f50785"
+    },
+    {
+      "name": "busybox-x86-hash-hackfix-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/hackfix-to-disable-HW-acceleration-for-MD5-SHA1-on-x86-1.37.patch",
+      "sha256": "02a518720e0a3dc451fc005187a32cd4b06513f5d6e0cccc432fd9ad7728bc07"
+    },
+    {
+      "name": "busybox-sha1-shani-musl-patch",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/.patches/sha1_process_block64_shaNI-musl.patch",
+      "sha256": "9fc31a72297d1e8950ada8e88033daef684f5744a3b589a38597dbdcc1a7fd39"
+    },
+    {
+      "name": "busybox-docker-builder",
+      "version": "1.37.0",
+      "license": "GPL-2.0-only",
+      "url": "https://raw.githubusercontent.com/docker-library/busybox/54028ab642a011c458878f7393b1483f23ee1057/latest-1/musl/Dockerfile.builder",
+      "sha256": "674f88ea449f591a05a79976088caeae621dd5ff9d35ac032fde3aa752608861"
+    }
+  ]
+}

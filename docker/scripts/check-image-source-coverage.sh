@@ -5,15 +5,15 @@
 # Check that a locally loaded image, built with NHX_COLLECT_SOURCES=1, carries the source of every
 # third-party component syft finds in it.
 #
-# Usage: check-image-source-coverage.sh <image-ref> <image-name>
-#   image-name names /usr/share/nemo-helix/source-distributions/<image-name> inside the image, or
-#   /kaniko/source-distributions/<image-name> in the kaniko image, whose builds replace everything
-#   outside /kaniko.
+# Usage: check-image-source-coverage.sh <image-ref>
+#
+# Reads every directory under /usr/share/nemo-helix/source-distributions, so an image built FROM
+# another counts the sources it inherits; or under /kaniko/source-distributions in the kaniko image,
+# whose builds replace everything outside /kaniko.
 
 set -euo pipefail
 
 image_ref="$1"
-image_name="$2"
 syft_image="${SYFT_IMAGE:-anchore/syft:v1.18.1@sha256:b8c170b8e51bfc4779ec3ef4399942c57290f5ce76a9c3af564c9d00d4946a6b}"
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 work_dir="$(mktemp -d)"
@@ -29,12 +29,12 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "${syft_image}" \
 
 container="$(docker create "${image_ref}" true)"
 for source_root in /usr/share/nemo-helix/source-distributions /kaniko/source-distributions; do
-    if docker cp -q "${container}:${source_root}/${image_name}" "${work_dir}/sources" 2>/dev/null; then
+    if docker cp -q "${container}:${source_root}" "${work_dir}/sources" 2>/dev/null; then
         break
     fi
 done
 if [[ ! -d "${work_dir}/sources" ]]; then
-    echo "${image_ref} has no source-distributions/${image_name} directory" >&2
+    echo "${image_ref} has no source-distributions directory" >&2
     exit 1
 fi
 

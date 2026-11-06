@@ -18,3 +18,6 @@ This container image provides platform components needed for a deployed NeMo Hel
 ### License
 
 This container is licensed under the [Apache License 2.0](https://github.com/NVIDIA-NeMo/nemo-helix/blob/main/LICENSE).
+It includes open source components under their own licenses, among them
+[BusyBox](https://busybox.net), under the GNU General Public License v2. The source code of these
+components is in the image under `/usr/share/nemo-helix/source-distributions`.

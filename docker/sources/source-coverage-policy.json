@@ -8,15 +8,25 @@
       {"name": "ngcsdk", "reason": "NVIDIA NGC SDK"},
       {"name": "openshell", "reason": "NVIDIA OpenShell"},
       {"name": "data-designer-nemo", "reason": "NeMo Helix workspace package"},
-      {"name": "sandboxed-gym", "reason": "NeMo Helix workspace package"}
+      {"name": "sandboxed-gym", "reason": "NeMo Helix workspace package"},
+      {"name": "garak-api", "reason": "NeMo Helix workspace package"},
+      {"name": "nvidia-*", "reason": "NVIDIA packages, including the CUDA libraries and Riva client"},
+      {"name": "cuda-*", "reason": "NVIDIA CUDA Python packages"}
     ],
     "npm": [
-      {"name": "nemo-oo-agents-viewer", "reason": "NVIDIA nooa viewer, shipped inside the nemo-oo-agents wheel"}
+      {"name": "nemo-oo-agents-viewer", "reason": "NVIDIA nooa viewer, shipped inside the nemo-oo-agents wheel"},
+      {"name": "nemo-*-plugin-web", "reason": "NeMo Helix plugin web UIs"}
+    ],
+    "go-module": [
+      {"name": "github.com/nvidia-nemo/*", "reason": "NeMo Helix Go modules, such as jobs-launcher"}
     ]
   },
   "vendored": [
-    {"path": "/site-packages/pip/_vendor/", "covered_by": "pip"},
-    {"path": "/site-packages/setuptools/_vendor/", "covered_by": "setuptools"},
-    {"path": "/site-packages/pkg_resources/_vendor/", "covered_by": "setuptools"}
+    {"path": "/pip/_vendor/", "covered_by": "pip"},
+    {"path": "/setuptools/_vendor/", "covered_by": "setuptools"},
+    {"path": "/pkg_resources/_vendor/", "covered_by": "setuptools"}
+  ],
+  "embedded": [
+    {"type": "go-module", "name": "github.com/wandb/wandb/core", "covered_by": "wandb", "reason": "wandb's sdist includes core/, the source of its bundled wandb-core binary"}
   ]
 }

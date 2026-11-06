@@ -1,0 +1,24 @@
+{
+  "sources": [
+    {
+      "name": "codex",
+      "version": "0.144.4",
+      "license": "Apache-2.0",
+      "url": "https://github.com/openai/codex/archive/refs/tags/rust-v0.144.4.tar.gz",
+      "sha256": "14c173d78f0c22da73e4ca1a205836b525e1dd9fe7db9b4ddea62214b2cc5009",
+      "covers": [
+        "python:openai-codex-cli-bin@0.144.4"
+      ]
+    },
+    {
+      "name": "sqlite-vec",
+      "version": "0.1.9",
+      "license": "MIT OR Apache-2.0",
+      "url": "https://github.com/asg017/sqlite-vec/archive/refs/tags/v0.1.9.tar.gz",
+      "sha256": "9823e737d9934dcbe85dff75d3fca81018a9beee803d70fa77b16faab5d61dc9",
+      "covers": [
+        "python:sqlite-vec@0.1.9"
+      ]
+    }
+  ]
+}
