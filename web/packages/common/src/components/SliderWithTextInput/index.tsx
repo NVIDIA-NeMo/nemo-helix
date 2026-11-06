@@ -64,9 +64,10 @@ export const SliderWithTextInput = ({
   displayName,
 }: SliderWithTextInputProps) => {
   const [draftValue, setDraftValue] = useState<string | null>(null);
-  // Name the controls after a visible text label when there is one; the label is not tied to them.
+  // Name the controls after the visible label (it is not tied to them), or displayName when it is not text.
   const accessibleLabel =
-    typeof formFieldProps?.slotLabel === 'string' ? formFieldProps.slotLabel : undefined;
+    (typeof formFieldProps?.slotLabel === 'string' ? formFieldProps.slotLabel : undefined) ||
+    displayName;
 
   const handleSliderChange = (newValue: number) => {
     const clampedValue = clamp(newValue, min, max);
@@ -164,7 +165,7 @@ export const SliderWithTextInput = ({
           disabled={disabled}
           stepPosition={showStepMarkers ? (attributes?.Slider?.stepPosition ?? 'end') : undefined}
           customSteps={attributes?.Slider?.customSteps ?? [min, max]}
-          aria-label={accessibleLabel ?? 'Controlled slider'}
+          aria-label={accessibleLabel || 'Controlled slider'}
           stepFormatFn={attributes?.Slider?.stepFormatFn ?? toScientificNotation}
           {...attributes?.Slider}
           onValueChange={handleSliderChange}
@@ -200,7 +201,7 @@ export const SliderWithTextInput = ({
         <Button
           kind="tertiary"
           size="small"
-          aria-label={`Reset ${displayName || field.name} to default value`}
+          aria-label={`Reset ${accessibleLabel || field.name} to default value`}
           disabled={disabled}
           onClick={handleReset}
           className="shrink-0"
