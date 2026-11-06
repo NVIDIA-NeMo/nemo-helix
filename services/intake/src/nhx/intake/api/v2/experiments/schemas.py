@@ -9,6 +9,7 @@ Response models are standalone: they translate from the stored entity via
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Self
 
@@ -430,22 +431,7 @@ class EvaluationCompareResponse(BaseModel):
         candidate: str,
         comparison: PairedComparison,
     ) -> EvaluationCompareResponse:
-        return cls(
-            workspace=workspace,
-            baseline=baseline,
-            candidate=candidate,
-            metric=comparison.metric,
-            higher_is_better=comparison.higher_is_better,
-            n_pairs=comparison.n_pairs,
-            better=comparison.better,
-            same=comparison.same,
-            worse=comparison.worse,
-            mean_paired_difference=comparison.mean_paired_difference,
-            interval_low=comparison.interval_low,
-            interval_high=comparison.interval_high,
-            p_candidate_better=comparison.p_candidate_better,
-            interval_caveat=comparison.interval_caveat,
-        )
+        return cls(workspace=workspace, baseline=baseline, candidate=candidate, **asdict(comparison))
 
 
 class MetricStatFilters(BaseModel):

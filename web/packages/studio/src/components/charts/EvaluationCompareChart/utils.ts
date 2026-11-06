@@ -136,7 +136,8 @@ export function describeComparison(compare: EvaluationCompareResponse): string {
     );
   }
   if (compare.p_candidate_better != null) {
-    parts.push(`P(better) ${Math.round(compare.p_candidate_better * 100)}%`);
+    // 2,000 resamples resolve to 0.05%, so whole percents would print 100% for a probability short of it.
+    parts.push(`P(better) ${Number((compare.p_candidate_better * 100).toFixed(2))}%`);
   }
   parts.push(`${compare.n_pairs} paired test case${compare.n_pairs === 1 ? '' : 's'}`);
   return parts.join(' · ');

@@ -31,8 +31,8 @@ from dataclasses import dataclass
 # Two paired values closer than this count as the same; Studio's describeComparison uses the same tolerance.
 SAME_TOLERANCE = 1e-9
 
-# Bootstrap configuration. The seed is fixed so an (input, metric) pair always
-# produces the same interval; callers cannot steer it.
+# Bootstrap configuration, deliberately not request-tunable: the API, CLI, and Studio must
+# report the same interval for the same input, so the seed, resample count, and level are fixed.
 BOOTSTRAP_RESAMPLES = 2000
 BOOTSTRAP_INTERVAL_LEVEL = 0.95
 BOOTSTRAP_SEED = 0
@@ -211,7 +211,7 @@ def compare_test_case_means(
     if n_pairs <= WEAK_INTERVAL_MAX_PAIRS:
         pairs_word = "test case" if n_pairs == 1 else "test cases"
         caveat = (
-            f"Only {n_pairs} paired {pairs_word}: this 95% bootstrap interval is a weak estimate "
+            f"Only {n_pairs} paired {pairs_word}: this {BOOTSTRAP_INTERVAL_LEVEL:.0%} bootstrap interval is a weak estimate "
             "and can move sharply with one more run."
         )
 

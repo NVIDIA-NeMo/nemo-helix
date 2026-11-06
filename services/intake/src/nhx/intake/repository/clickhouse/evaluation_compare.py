@@ -86,6 +86,8 @@ class ClickHouseEvaluationCompareRepository(EvaluationCompareRepository):
 
 
 def _evaluation_name_parameters(evaluation_names: list[str]) -> tuple[str, dict[str, str]]:
+    # Only the generated ``%(evaluation_name_N)s`` placeholders are interpolated into the SQL; the
+    # names themselves travel as bound parameters.
     parameters = {f"evaluation_name_{index}": evaluation_name for index, evaluation_name in enumerate(evaluation_names)}
     return ", ".join(f"%({name})s" for name in parameters), parameters
 

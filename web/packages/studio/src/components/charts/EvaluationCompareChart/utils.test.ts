@@ -124,6 +124,15 @@ describe('describeComparison', () => {
     ).toBe('mean -0.5 (worse) · 95% CI -1.25 to 0 · P(better) 20% · 1 paired test case');
   });
 
+  it('shows the probability to the bootstrap resolution rather than rounding it to a whole percent', () => {
+    expect(describeComparison(comparison({ p_candidate_better: 0.9995 }))).toContain(
+      'P(better) 99.95%'
+    );
+    expect(describeComparison(comparison({ p_candidate_better: 0.0005 }))).toContain(
+      'P(better) 0.05%'
+    );
+  });
+
   it('names a negative difference better for lower-is-better metrics', () => {
     expect(
       describeComparison(
