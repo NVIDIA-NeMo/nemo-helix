@@ -39,14 +39,6 @@ export const getFileNameFromPath = (path: string) => {
 };
 
 /**
- * Returns the given fileName prepended with the given folder, if provided.
- */
-export const getFullFilePath = (filepath: string, folder?: string) => {
-  const fileName = getFileNameFromPath(filepath);
-  return folder ? `${folder}/${fileName}` : fileName;
-};
-
-/**
  * Resolves the storage path for a file within a dataset for API calls (download, delete, etc.).
  * Tree nodes and API responses use full paths (e.g. `training/data/file.txt`). When the path
  * already contains `/`, it is returned as-is. Only single-segment paths (filename or root-level
