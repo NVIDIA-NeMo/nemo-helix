@@ -89,8 +89,8 @@ outputs:
     description: "'true' if anything a customization job step touches on an auth-enabled cluster changed"
     value: ${{ steps.filter.outputs.customization-auth == 'true' || steps.filter.outputs.deps == 'true' || steps.filter.outputs.docker == 'true' || steps.filter.outputs.helm == 'true' }}
   builder-e2e:
-    description: "'true' if the builder, its images, the chart, or what a build step calls changed"
-    value: ${{ steps.filter.outputs.builder-e2e == 'true' }}
+    description: "'true' if the builder, its images, the chart, what a build step calls, or the root dependencies changed"
+    value: ${{ steps.filter.outputs.builder-e2e == 'true' || steps.filter.outputs.deps == 'true' }}
 
 runs:
   using: "composite"
