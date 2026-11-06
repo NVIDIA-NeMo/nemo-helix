@@ -691,8 +691,24 @@ class _AgentEvalJobBase(NemoJob):
                 result.metadata.target.config["url"] = endpoint.url
 
         files = self._write_result_files(result, ctx.storage.persistent)
-        artifact = ctx.results.save(DEFAULT_RESULT_NAME, files.bundle_dir)
-        ctx.results.save(SUMMARY_RESULT_NAME, files.summary)
+        artifact = None
+        finalization_errors: list[Exception] = []
+        for name, path in {
+            DEFAULT_RESULT_NAME: files.bundle_dir,
+            SUMMARY_RESULT_NAME: files.summary,
+        }.items():
+            try:
+                saved = ctx.results.save(name, path)
+                if name == DEFAULT_RESULT_NAME:
+                    artifact = saved
+            except Exception as error:
+                error.add_note(f"Failed to save result {name!r}")
+                finalization_errors.append(error)
+                logger.exception("Failed to save result %r; attempting remaining results", name)
+
+        # Publication requires a durable bundle, but its failure must not prevent other saves.
+        if artifact is None:
+            raise ExceptionGroup("Evaluation bundle retention failed", finalization_errors)
 
         outcome = agent_eval_outcome(result)
         report_run_outcome(outcome, ctx=ctx, async_client=async_client)
@@ -721,27 +737,34 @@ class _AgentEvalJobBase(NemoJob):
         if outcome.failed:
             output["reason"] = outcome.message
 
-        # Publication runs last, after the bundle and the queryable record are both durable, so a
-        # failed publish costs a re-publish rather than a re-run. Nothing depends on its result.
+        # A supplementary save failure must not block publication of the durable bundle.
         publication = spec.publication.intake if spec.publication is not None else None
         if publication is not None:
-            intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
-            publication_outcome = publish_agent_eval_result(
-                result,
-                spec=publication,
-                target=spec.target,
-                workspace=ctx.workspace,
-                intake=intake,
-                record_durations=self.record_publication_durations,
-                usage_superseded_by_gateway=trial_issuer is not None and trial_issuer.records_calls,
-            )
-            output["publication"] = publication_outcome.model_dump(exclude_none=True)
-            # The job output isn't persisted; status details are, so `runs status` can say what was published.
-            report_status_details(
-                {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
-                ctx=ctx,
-                async_client=async_client,
-            )
+            try:
+                intake = AsyncIntakeClient.from_client(async_client) if async_client is not None else None
+                publication_outcome = publish_agent_eval_result(
+                    result,
+                    spec=publication,
+                    target=spec.target,
+                    workspace=ctx.workspace,
+                    intake=intake,
+                    record_durations=self.record_publication_durations,
+                    usage_superseded_by_gateway=trial_issuer is not None and trial_issuer.records_calls,
+                )
+                output["publication"] = publication_outcome.model_dump(exclude_none=True)
+                # The job output isn't persisted; status details are, so `runs status` can say what was published.
+                report_status_details(
+                    {PUBLICATION_STATUS_KEY: publication_outcome.model_dump(mode="json", exclude_none=True)},
+                    ctx=ctx,
+                    async_client=async_client,
+                )
+            except Exception as error:
+                finalization_errors.append(error)
+
+        if len(finalization_errors) == 1:
+            raise finalization_errors[0]
+        if finalization_errors:
+            raise ExceptionGroup("Evaluation finalization failed", finalization_errors)
 
         # The run is complete and its bundle durable; the files snapshot taken at submit has served its
         # purpose (the staged copy stays on job storage). A failed run keeps it for the retry.
