@@ -5905,6 +5905,9 @@ interface CreateSecretModalProps extends Pick<FormModalProps, 'open' | 'onClose'
   errorText?: string;
   /** Where result messages go. Defaults to the surrounding ToastProvider; plugins pass `host.notifications.notify`. */
   onNotify?: NotifyFn;
+  instruction?: FormModalProps['instruction'];
+  initialValues?: Partial<CreateSecretFormData>;
+  valueHelp?: ReactNode;
 }
 export declare const CreateSecretModal: FC<CreateSecretModalProps>;
 //#endregion
@@ -6059,11 +6062,20 @@ interface ActionMenuItem {
   danger?: boolean;
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
 }
+type DeleteActionLabel = 'Delete' | 'Remove' | `Delete ${string}` | `Remove ${string}`;
+interface DeleteAction {
+  onSelect: () => void;
+  label?: DeleteActionLabel;
+  disabled?: boolean;
+}
 //#endregion
 //#region src/components/QuickActionsMenu/QuickActionsMenuRoot/index.d.ts
 type QuickActionItem = ActionMenuItem;
 interface QuickActionsMenuProps {
   actions: QuickActionItem[];
+  deleteAction?: DeleteAction;
+  ariaLabel?: string;
+  disabled?: boolean;
 }
 export declare const QuickActionsMenuRoot: FC<QuickActionsMenuProps>;
 //#endregion
@@ -11140,4 +11152,4 @@ export declare const CJobLaunchableStatuses: HelixJobStatus[];
 export declare const CJobTerminalStatuses: HelixJobStatus[];
 export declare const HelixJobTerminalStatuses: HelixJobStatus[];
 //#endregion
-export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };
+export { type AccordionSectionProps, type ApiFilter, type AssistantChatMessageContentProps, type AssistantChatProps, type BadgeStatus, type CreateSecretFormData, type CreateSecretModalProps, type CsvOptions, type CsvRow, index_d_exports as DataView, type DeleteAction, type DeleteActionLabel, type DownloadFormat, type FetchAllPagesOptions, type FileTagProps, type FileTagStatus, type FileUploadProps, type FilterOperators, type FormModalProps, type LogStatus, type NotifyFn, type NotifyType, type PaginatedResponse, type QuickActionItem, type RadioCardProps, type RenderFileTagFn, type StatusConfigEntry, type StudioDataViewState, type StudioDataViewToolbarProps, type UseStudioDataViewStateOptions, type WithFilterOperators };

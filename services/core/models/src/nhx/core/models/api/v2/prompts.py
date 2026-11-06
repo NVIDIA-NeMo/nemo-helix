@@ -4,14 +4,13 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nhx.common.api.common import ErrorResponse, Page
 from nhx.common.api.parsed_filter import ParsedFilter, make_filter_dep
 from nhx.common.api.utils import generate_openapi_extra_params
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.core.models.api.dependencies import get_prompt_service
 from nhx.core.models.api.service.prompt_service import PromptService
-from nhx.core.models.api.v2.utils import NOT_FOUND_ERRORS
 from nhx.core.models.schemas import (
     CreatePromptRequest,
     DeletePromptRequest,
@@ -67,9 +66,7 @@ async def list_prompts(
             sort=sort,
             filter_operation=parsed_filter.operation,
         )
-    except NOT_FOUND_ERRORS:
-        raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to list prompts for workspace {_sanitize_for_log(workspace)}")
@@ -105,7 +102,7 @@ async def create_prompt(
             )
         logger.warning(f"Prompt creation validation error: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid prompt data")
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to create prompt")
@@ -137,7 +134,7 @@ async def get_prompt(
         return prompt
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to get prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")
@@ -171,7 +168,7 @@ async def update_prompt(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(e))
     except HTTPException:
         raise
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception("Failed to update prompt")
@@ -206,7 +203,7 @@ async def delete_prompt(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Concurrent modification - please retry."
         ) from e
-    except PermissionDeniedError:
+    except CLIENT_ERRORS:
         raise
     except Exception:
         logger.exception(f"Failed to delete prompt {_sanitize_for_log(workspace)}/{_sanitize_for_log(name)}")

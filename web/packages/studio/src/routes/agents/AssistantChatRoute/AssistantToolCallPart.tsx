@@ -19,6 +19,7 @@ import {
   type AssistantToolArgs,
 } from '@nemo/common/src/components/AssistantChat/toolParts';
 import { MessageContent } from '@nemo/common/src/components/Chat/MessageContent';
+import { isPlainObject } from '@nemo/common/src/utils/isPlainObject';
 import { AssistantStudioLink } from '@studio/routes/agents/AssistantChatRoute/AssistantStudioLink';
 import { JobProgressToolCall } from '@studio/routes/agents/AssistantChatRoute/JobProgressToolCall';
 
@@ -41,12 +42,9 @@ type SerializedPart =
       readonly toolName: string;
     };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
 // Collapsed details and subtle groups store their parts and calls serialized in their args.
 const getSerializedParts = (value: unknown): readonly SerializedPart[] =>
-  (Array.isArray(value) ? value : []).filter(isRecord).flatMap((part): SerializedPart[] => {
+  (Array.isArray(value) ? value : []).filter(isPlainObject).flatMap((part): SerializedPart[] => {
     if ((part.type === 'text' || part.type === 'reasoning') && typeof part.text === 'string') {
       return part.text.trim() ? [{ type: part.type, text: part.text }] : [];
     }
@@ -54,7 +52,7 @@ const getSerializedParts = (value: unknown): readonly SerializedPart[] =>
     return [
       {
         type: 'tool-call',
-        args: isRecord(part.args) ? toAssistantToolArgs(part.args) : {},
+        args: isPlainObject(part.args) ? toAssistantToolArgs(part.args) : {},
         argsText: typeof part.argsText === 'string' ? part.argsText : undefined,
         toolCallId: typeof part.toolCallId === 'string' ? part.toolCallId : part.toolName,
         toolName: part.toolName,

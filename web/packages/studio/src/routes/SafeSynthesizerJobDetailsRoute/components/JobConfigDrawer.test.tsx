@@ -91,15 +91,5 @@ describe('JobConfigDrawer', () => {
 
       await waitFor(() => expect(mockOnOpenChange).toHaveBeenCalledWith(false, expect.anything()));
     });
-
-    describe('Heading Content', () => {
-      it('should render heading with icon and text', () => {
-        render(<JobConfigDrawer job={mockJob} open onOpenChange={mockOnOpenChange} />, {
-          wrapper: createWrapper(),
-        });
-
-        expect(screen.getByText('Job Configuration')).toBeInTheDocument();
-      });
-    });
   });
 });

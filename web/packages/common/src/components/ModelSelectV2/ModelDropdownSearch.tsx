@@ -8,28 +8,30 @@ import type { ChangeEvent, FC } from 'react';
 interface ModelDropdownSearchProps {
   value: string;
   onChange: (value: string) => void;
+  name?: string;
+  testId?: string;
 }
 
-export const ModelDropdownSearch: FC<ModelDropdownSearchProps> = ({ value, onChange }) => {
-  const handleChange = (e: ChangeEvent<HTMLInputElement>) => {
-    onChange(e.target.value);
-  };
-
-  return (
-    <Block className="p-2 w-full sticky top-0 bg-surface z-10">
-      <TextInput
-        name="model-filter"
-        className="overflow-hidden"
-        slotStart={<Filter />}
-        placeholder="Filter"
-        value={value}
-        onChange={handleChange}
-        attributes={{
-          Input: {
-            ['data-testid' as never]: 'model-select-v2-filter',
-          },
-        }}
-      />
-    </Block>
-  );
-};
+/** Sticky filter box at the top of a searchable dropdown. */
+export const ModelDropdownSearch: FC<ModelDropdownSearchProps> = ({
+  value,
+  onChange,
+  name = 'model-filter',
+  testId = 'model-select-v2-filter',
+}) => (
+  <Block className="p-2 w-full sticky top-0 bg-surface z-10">
+    <TextInput
+      name={name}
+      className="overflow-hidden"
+      slotStart={<Filter />}
+      placeholder="Filter"
+      value={value}
+      onChange={(e: ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      attributes={{
+        Input: {
+          ['data-testid' as never]: testId,
+        },
+      }}
+    />
+  </Block>
+);

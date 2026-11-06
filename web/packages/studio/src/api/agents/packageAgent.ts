@@ -1,9 +1,6 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Only Platform-managed agents can be packaged; NAT workflows build from a checkout. */
-export const FABRIC_CONFIG_FORMAT = 'nemo-agents-spec-v1';
-
 /** Matches `PACKAGE_RESULT_NAME` in the nemo-agents plugin. */
 export const PACKAGE_RESULT_NAME = 'package_result';
 

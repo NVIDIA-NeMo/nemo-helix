@@ -62,10 +62,11 @@ from nemo_agents_plugin.entities import (
 )
 from nemo_agents_plugin.fabric.session_manager import DEFAULT_IDLE_SESSION_TIMEOUT_SECONDS
 from nemo_agents_plugin.session_lifecycle import session_expiration_is_due
-from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER
+from nemo_agents_plugin.session_protocol import SESSION_ID_HEADER, session_uuid_to_id
 from nemo_deployments_plugin.endpoint_transport import DIRECT, EndpointTransport
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.dependencies import get_effective_principal_id
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -297,6 +298,8 @@ async def _resolve_and_proxy_deployment(
         raise HTTPException(
             status_code=404, detail=f"Deployment '{name}' not found in workspace '{workspace}'."
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -357,7 +360,7 @@ async def _proxy_deployment(
 
     tracks_session_activity = session is not None and request.method.upper() in _PROXY_WRITE_METHODS
 
-    return await _proxy(
+    response = await _proxy(
         request,
         endpoint,
         trailing_uri,
@@ -368,6 +371,10 @@ async def _proxy_deployment(
         on_complete=persist_finish_activity if tracks_session_activity else None,
         strip_request_model=_is_nat_deployment(deployment),
     )
+
+    if session is not None:
+        response.headers[SESSION_ID_HEADER] = session.session_uuid
+    return response
 
 
 @router.api_route(
@@ -440,11 +447,15 @@ async def _resolve_agent_deployment(
         await entity_client.get(Agent, name=name, workspace=workspace)
     except NemoEntityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"Agent '{name}' not found in workspace '{workspace}'.") from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         result = await entity_client.list(AgentDeployment, workspace=workspace)
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -470,6 +481,11 @@ async def _resolve_request_session(
         return None
     if not session_id:
         raise HTTPException(status_code=400, detail=f"Header '{SESSION_ID_HEADER}' must not be empty.")
+
+    try:
+        session_id = session_uuid_to_id(session_id)
+    except ValueError:
+        pass  # Preserve entity-ID headers and existing not-found behavior.
 
     session = await get_owned_session_by_id(
         entity_client,
@@ -504,6 +520,8 @@ async def _resolve_session_deployment(
                 f"'{session.id}' was not found in workspace '{workspace}'."
             ),
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment ID '%s'", session.deployment_id)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

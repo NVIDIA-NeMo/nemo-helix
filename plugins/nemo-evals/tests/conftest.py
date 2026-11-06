@@ -20,6 +20,7 @@ from unittest.mock import AsyncMock, Mock
 import httpx
 import pytest
 from nemo_agents_plugin.jobs import gateway_proxy
+from nemo_builder_plugin.entities import ImageRuntimeConfig
 from nemo_evals.api.schemas import (
     EvaluatorTaskDefinition,
     HarborTaskDefinition,
@@ -309,9 +310,10 @@ SANDBOX_DOMAIN = "opensandbox.opensandbox-system.svc.cluster.local"
 
 
 def harbor_task_jobs_config(**overrides: object) -> HarborTaskJobsConfig:
-    """An operator ``evals.runs.harbor`` block with the MVP's two profiles."""
+    """An operator ``evals.runs.harbor`` block with the MVP's two profiles; agent layers off unless overridden."""
     data: dict[str, object] = {
         "dispatcher_image": DISPATCHER_IMAGE,
+        "agent_layers": False,
         "dispatcher_profiles": ["local-k8s", "k8s-cpu"],
         "sandbox_profiles": {
             "harbor-standard": {"egress_allow": ["igw.svc.cluster.local"]},
@@ -441,6 +443,8 @@ def _prepared(task_id: str, image_type: ImageType) -> PreparedImage:
     return PreparedImage(
         image_ref=f"registry.invalid/fake/{task_id}-{image_type}@sha256:{_key(task_id, image_type)}",
         preparation_key=_key(task_id, image_type),
+        # As Builder records an image that sets no USER: it runs as root.
+        runtime_config=ImageRuntimeConfig(user=""),
     )
 
 

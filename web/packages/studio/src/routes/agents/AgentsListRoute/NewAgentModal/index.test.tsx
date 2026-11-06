@@ -3,6 +3,7 @@
 
 import { getBuildThenDeployRequest } from '@studio/api/agents/buildThenDeploy';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
+import { LINK_GITHUB_NEW_FINE_GRAINED_TOKEN } from '@studio/constants/links';
 import { ROUTES } from '@studio/constants/routes';
 import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
@@ -24,6 +25,7 @@ const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
 const DEPLOYMENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployments`;
+const SECRETS_URL = `${PLATFORM_BASE_URL}/apis/secrets/v2/workspaces/:workspace/secrets`;
 const DEPLOYMENT_MODES_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/deployment-modes`;
 
 const FABRIC_YAML = `config_format: nemo-agents-spec-v1
@@ -156,7 +158,7 @@ const openPromptTab = (dialog: HTMLElement) => {
 
 const openGitHubTab = async (dialog: HTMLElement) => {
   fireEvent.click(within(dialog).getByRole('tab', { name: 'Register from GitHub' }));
-  await within(dialog).findByRole('textbox', { name: 'Repository' });
+  await within(dialog).findByRole('textbox', { name: 'Repository URL' });
 };
 
 const pickDirectory = (dialog: HTMLElement, files: File[] = DEFAULT_FILES) => {
@@ -452,7 +454,7 @@ describe('NewAgentModal GitHub import', () => {
     user: ReturnType<typeof userEvent.setup>,
     spec = 'github.com/owner/repo'
   ) => {
-    await user.type(within(dialog).getByRole('textbox', { name: 'Repository' }), spec);
+    await user.type(within(dialog).getByRole('textbox', { name: 'Repository URL' }), spec);
     await user.tab();
   };
 
@@ -533,7 +535,7 @@ describe('NewAgentModal GitHub import', () => {
     const dialog = await screen.findByRole('dialog');
     await openGitHubTab(dialog);
     await user.type(
-      within(dialog).getByRole('textbox', { name: 'Repository' }),
+      within(dialog).getByRole('textbox', { name: 'Repository URL' }),
       'https://gitlab.com/owner/repo'
     );
 
@@ -560,9 +562,183 @@ describe('NewAgentModal GitHub import', () => {
 
     await submit(dialog, user);
 
-    expect(await within(dialog).findByText(/Could not read agent\.yaml/)).toBeInTheDocument();
+    expect(
+      await within(dialog).findByText(/Check that the branch and directory hold agent\.yaml/)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
     expect(created).toHaveLength(0);
     await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+  });
+
+  it('reads a private repository with the chosen access token secret', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    server.use(http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)));
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    await waitFor(() => expect(filesets).toHaveLength(1));
+    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'huggingface-token' });
+  });
+
+  it('stores a new GitHub token from the modal and reads the repository with it', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    const secrets: { name?: string; value?: string }[] = [];
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.text(FABRIC_YAML)),
+      http.post(SECRETS_URL, async ({ request }) => {
+        const body = (await request.json()) as { name?: string; value?: string };
+        secrets.push(body);
+        return HttpResponse.json({ name: body.name, workspace });
+      })
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog', { name: /Register an agent/ });
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'New Secret' }));
+
+    const secretDialog = await screen.findByRole('dialog', { name: 'Create Secret' });
+    expect(within(secretDialog).getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'github-owner-repo'
+    );
+    expect(
+      within(secretDialog).getByRole('link', { name: 'Create a token on GitHub' })
+    ).toHaveAttribute('href', LINK_GITHUB_NEW_FINE_GRAINED_TOKEN);
+    await user.type(
+      within(secretDialog).getByLabelText('Value', { selector: 'input' }),
+      'github_pat_abc'
+    );
+    await user.click(within(secretDialog).getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'Create Secret' })).not.toBeInTheDocument()
+    );
+    expect(secrets).toEqual([
+      expect.objectContaining({ name: 'github-owner-repo', value: 'github_pat_abc' }),
+    ]);
+    await submit(dialog, user);
+
+    await waitFor(() => expect(filesets).toHaveLength(1));
+    expect(filesets[0]?.storage).toMatchObject({ token_secret: 'github-owner-repo' });
+  });
+
+  it('does not blame access when the repository read fails for another reason', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () => HttpResponse.json({ detail: 'unavailable' }, { status: 503 }))
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/Could not read agent\.yaml from owner\/repo\. unavailable/)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
+  });
+
+  it('suggests a token when GitHub turns the repository away at setup', async () => {
+    const user = userEvent.setup();
+    const { filesets } = mockHelix();
+    server.use(
+      http.post(FILESETS_URL, () =>
+        HttpResponse.json(
+          { detail: 'GitHub has no repository owner/repo, or the token does not have access' },
+          { status: 400 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(
+        /the token does not have access\. If the repository is private, choose an access token secret\./
+      )
+    ).toBeInTheDocument();
+    expect(filesets).toHaveLength(0);
+  });
+
+  it('says which secret could not read the repository', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.post(FILESETS_URL, () =>
+        HttpResponse.json(
+          { detail: 'GitHub denied access to repository owner/repo' },
+          { status: 400 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/token in "huggingface-token" can read this repository/)
+    ).toBeInTheDocument();
+  });
+
+  it('shows the files service reason when GitHub fails after setup, without blaming the token', async () => {
+    const user = userEvent.setup();
+    mockHelix();
+    server.use(
+      http.get(UPLOAD_URL, () =>
+        HttpResponse.json(
+          { detail: 'Failed to connect to upstream storage backend' },
+          { status: 502 }
+        )
+      )
+    );
+
+    renderModal();
+    const dialog = await screen.findByRole('dialog');
+    await openGitHubTab(dialog);
+    await typeRepo(dialog, user);
+    await user.click(within(dialog).getByRole('combobox', { name: 'Access token secret' }));
+    await user.click(await screen.findByRole('option', { name: 'huggingface-token' }));
+    await submit(dialog, user);
+
+    expect(
+      await within(dialog).findByText(/Failed to connect to upstream storage backend/)
+    ).toBeInTheDocument();
+    expect(within(dialog).queryByText(/token in "huggingface-token"/)).not.toBeInTheDocument();
+  });
+});
+
+describe('NewAgentModal initial tab', () => {
+  it('opens on the requested tab', async () => {
+    renderRoute(<NewAgentModal open onClose={vi.fn()} workspace={workspace} initialTab="github" />);
+
+    const dialog = await screen.findByRole('dialog', { name: /Register an agent/ });
+
+    expect(
+      within(dialog).getByRole('tab', { name: 'Register from GitHub', selected: true })
+    ).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Repository URL' })).toBeInTheDocument();
   });
 });
 
