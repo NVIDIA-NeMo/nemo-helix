@@ -278,4 +278,75 @@ describe('studioPlugin', () => {
     expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
     expect(message).not.toContain('production');
   });
+
+  describe('packages identified by package.json name, not by path', () => {
+    const app = () => path.join(root, 'app');
+    const buildApp = (entry: string) => {
+      write('app/package.json', JSON.stringify({ name: 'my-plugin' }));
+      write('app/src/index.js', entry);
+      return runBuild(studioPlugin({ root: app() }), app());
+    };
+    const appBuildError = async (entry: string): Promise<string> => {
+      try {
+        await buildApp(entry);
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+      return 'BUILD SUCCEEDED';
+    };
+    const appManifest = () => path.join(app(), 'dist/plugin.manifest.json');
+    const importIndex = (rel: string) => `import x from '${rel}';\nconsole.log(x);\n`;
+
+    it('rejects a singleton linked from a checkout outside node_modules', async () => {
+      write('lib/react-router/package.json', JSON.stringify({ name: 'react-router' }));
+      write('lib/react-router/index.js', `export default 'react-router';\n`);
+      fs.mkdirSync(path.join(app(), 'node_modules'), { recursive: true });
+      fs.symlinkSync('../../lib/react-router', path.join(app(), 'node_modules/react-router'));
+      const message = await appBuildError(importIndex('../node_modules/react-router/index.js'));
+
+      expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+      expect(message).toContain('react-router');
+      expect(fs.existsSync(appManifest()), 'no manifest after failed build').toBe(false);
+    });
+
+    it('rejects a plain directory whose package.json names a scoped singleton', async () => {
+      write('lib/query/package.json', JSON.stringify({ name: '@tanstack/react-query' }));
+      write('lib/query/index.js', `export default 'query';\n`);
+      const message = await appBuildError(importIndex('../../lib/query/index.js'));
+
+      expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+      expect(message).toContain('@tanstack/react-query');
+      expect(fs.existsSync(appManifest()), 'no manifest after failed build').toBe(false);
+    });
+
+    it.each(['react-router-dom', 'react-dom-foo'])(
+      'bundles a directory outside node_modules named like %s',
+      async (name) => {
+        write(`lib/${name}/package.json`, JSON.stringify({ name }));
+        write(`lib/${name}/index.js`, `export default '${name}';\n`);
+        await buildApp(importIndex(`../../lib/${name}/index.js`));
+
+        expect(fs.existsSync(appManifest()), 'manifest emitted').toBe(true);
+      }
+    );
+
+    it("bundles the plugin's own source", async () => {
+      write('app/src/local.js', `export default 'local';\n`);
+      await buildApp(importIndex('./local.js'));
+
+      expect(fs.existsSync(appManifest()), 'manifest emitted').toBe(true);
+    });
+
+    it('bundles a module that has no package.json above it', async () => {
+      const orphan = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-plugin-orphan-'));
+      try {
+        fs.writeFileSync(path.join(orphan, 'index.js'), `export default 'orphan';\n`);
+        await buildApp(importIndex(path.join(orphan, 'index.js')));
+
+        expect(fs.existsSync(appManifest()), 'manifest emitted').toBe(true);
+      } finally {
+        fs.rmSync(orphan, { recursive: true, force: true });
+      }
+    });
+  });
 });
