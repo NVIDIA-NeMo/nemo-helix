@@ -16,8 +16,8 @@ from pathlib import Path, PurePosixPath
 
 from kubernetes import client as k8s
 from kubernetes import config as k8s_config
-from kubernetes import watch as k8s_watch
 from kubernetes.client.exceptions import ApiException
+from kubernetes.watch import Watch
 from nemo_builder_plugin.run.utils import job_identity, read_step_config
 from nemo_builder_plugin.steps import SandboxGroup, SandboxSpec, SuperviseStepConfig, WorkLayout
 from nemo_helix_plugin.jobs.constants import job_storage_subpath
@@ -188,7 +188,7 @@ def _pod_manifest(
 
 
 def _await_pod(api: k8s.CoreV1Api, *, name: str, namespace: str) -> str:
-    watcher = k8s_watch.Watch()
+    watcher = Watch()
     deadline = time.monotonic() + _POD_TIMEOUT_SECONDS
     try:
         for event in watcher.stream(

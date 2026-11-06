@@ -32,6 +32,9 @@ from harbor.environments.base import BaseEnvironment, ExecResult
 from harbor.models.trial.config import AgentConfig
 from nhx_evals_sdk.agent_eval.runtimes.harbor.agent_layer import FABRIC_CONFIG_BUNDLE_KWARG
 
+# Bound here so tests replace this module's name rather than Harbor's shared class attribute.
+create_agent_from_config = AgentFactory.create_agent_from_config
+
 
 class LocalExecEnvironment:
     """What a Harbor agent's ``setup()`` uses of its environment, over processes in this filesystem."""
@@ -97,7 +100,7 @@ async def install(agent: Mapping[str, Any]) -> None:
         name=agent.get("name"), import_path=agent.get("import_path"), kwargs=kwargs, env=agent.get("env") or {}
     )
     with tempfile.TemporaryDirectory(prefix="nemo-agent-layer-") as logs:
-        harbor_agent = AgentFactory.create_agent_from_config(config, logs_dir=Path(logs))
+        harbor_agent = create_agent_from_config(config, logs_dir=Path(logs))
         # Agents' setup() uses only exec, upload_file/upload_dir and default_user: no trial, task directory or
         # lifecycle exists in a build to make a real BaseEnvironment from.
         environment = cast(BaseEnvironment, LocalExecEnvironment(default_user=agent.get("user")))
