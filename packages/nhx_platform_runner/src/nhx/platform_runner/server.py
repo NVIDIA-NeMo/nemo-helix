@@ -115,22 +115,6 @@ class PyleakMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-def preflight_embedded_auth_policy(auth_config) -> None:
-    """Ensure embedded auth can compile its Rego source before serving traffic."""
-    if not auth_config.enabled or auth_config.policy_decision_point_provider != "embedded":
-        return
-
-    try:
-        from nhx.core.auth.app.embedded_pdp import get_policy
-    except ImportError as exc:
-        raise RuntimeError(
-            "Auth is enabled with the embedded PDP, but the nhx-auth package is not installed. "
-            "Install nhx-auth or set auth.policy_decision_point_provider='opa'."
-        ) from exc
-
-    get_policy()
-
-
 def create_platform_openapi_app() -> FastAPI:
     """Create the platform app used for aggregate OpenAPI generation."""
     services = []
@@ -389,7 +373,6 @@ def run_server(
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
     """Run the platform API server."""
-    preflight_embedded_auth_policy(get_auth_config())
     app = create_app(services or [])
     setup_fastapi_instrumentations(app)
     docker_host = docker_listener_host(host)
@@ -450,7 +433,6 @@ def run_server_with_reload(
     keep_alive_timeout_seconds: int = DEFAULT_UVICORN_KEEP_ALIVE_TIMEOUT_SECONDS,
 ) -> None:
     """Run the platform API server with uvicorn reload enabled."""
-    preflight_embedded_auth_policy(get_auth_config())
     reload_dirs = [
         "packages/nhx_platform/src",
         "services/core",
