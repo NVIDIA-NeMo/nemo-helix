@@ -930,8 +930,6 @@ def test_git_invalid_range_downloads_nothing(git_registry, tmp_path, tokens):
 
 @pytest.fixture
 def hub_registry(monkeypatch):
-    from harbor.registry.client import package
-
     downloads = []
 
     async def metadata(dataset):
@@ -948,7 +946,7 @@ def hub_registry(monkeypatch):
         return SimpleNamespace(paths=[output_dir / name.rpartition("/")[2] for name in names])
 
     client = SimpleNamespace(get_dataset_metadata=metadata, _task_client=SimpleNamespace(download_tasks=download_tasks))
-    monkeypatch.setattr(package, "PackageDatasetClient", lambda: client)
+    monkeypatch.setattr(runs_cli, "PackageDatasetClient", lambda: client)
     return downloads
 
 

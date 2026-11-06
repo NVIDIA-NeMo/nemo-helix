@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 import typer
+from harbor.registry.client.package import PackageDatasetClient
 from nemo_evals.api.fields import TaskRef, TasksetRef
 from nemo_evals.api.schemas import AgentEvalResult, TaskInput, TasksetInput
 from nemo_evals.api.taskset_run_schemas import TasksetRunInput, TasksetRunStatus, TasksetRunTask
@@ -133,8 +134,6 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
     Returns the dataset's name, its resolved version (``sha256:…``, also without ``@ref``) and the task
     directories, in the dataset's order.
     """
-    from harbor.registry.client.package import PackageDatasetClient
-
     client = PackageDatasetClient()
     metadata = asyncio.run(client.get_dataset_metadata(dataset))
     ids = sorted(metadata.task_ids, key=lambda task_id: task_id.get_name())
@@ -145,8 +144,6 @@ def download_hub_tasks(dataset: str, names: str | None, output_dir: Path) -> tup
 
 
 def list_hub_tasks(dataset: str) -> list[str]:
-    from harbor.registry.client.package import PackageDatasetClient
-
     metadata = asyncio.run(PackageDatasetClient().get_dataset_metadata(dataset))
     return sorted(task_id.get_name() for task_id in metadata.task_ids)
 
