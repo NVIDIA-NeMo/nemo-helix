@@ -3,17 +3,8 @@
 
 """Helper functions for API v2."""
 
-from nemo_helix_plugin.client.errors import BadRequestError, NotFoundError, UnprocessableEntityError
 from nemo_helix_plugin.config import Runtime
-from nhx.common.entities.client import EntityNotFoundError
 from nhx.core.models.config import get_platform_config
-
-# Let the registered SDK handlers preserve not-found status and detail.
-NOT_FOUND_ERRORS = (NotFoundError, EntityNotFoundError)
-
-# Only known upstream list request failures bypass list handlers' 500 fallback.
-# Do not classify arbitrary ValueError/ValidationError as client input failures.
-LIST_REQUEST_ERRORS = (*NOT_FOUND_ERRORS, BadRequestError, UnprocessableEntityError)
 
 
 def deployments_enabled() -> bool:

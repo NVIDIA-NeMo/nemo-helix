@@ -24,7 +24,6 @@ from typing import Any, get_args
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from nemo_agents_plugin.agent_config import AgentConfig
 from nemo_agents_plugin.agent_config_formats import AgentConfigFormatError, resolve_agent_config_for_deployment
-from nemo_agents_plugin.api.v2._errors import LIST_REQUEST_ERRORS
 from nemo_agents_plugin.api.v2._perms import DeploymentPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client, get_files_client
 from nemo_agents_plugin.authz import scope
@@ -67,6 +66,7 @@ from nemo_helix_plugin.auth import current_auth_context
 from nemo_helix_plugin.auth.access import AuthContextResponsePolicy
 from nemo_helix_plugin.authz import CallerKind, path_rule
 from nemo_helix_plugin.client.errors import NotFoundError, PermissionDeniedError
+from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entity_client import (
     NemoEntitiesClient,
     NemoEntityConflictError,
@@ -115,6 +115,8 @@ async def create_deployment(
             status_code=404,
             detail=f"Agent '{body.agent}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to look up agent.") from exc
@@ -229,6 +231,8 @@ async def create_deployment(
         ) from exc
     except NemoEntityValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to create deployment for agent '%s'", body.agent)
         raise HTTPException(status_code=500, detail="Failed to create deployment.") from exc
@@ -336,7 +340,7 @@ async def list_deployments(
             sort=sort,
             filter_obj=filter_dict or None,
         )
-    except LIST_REQUEST_ERRORS:
+    except CLIENT_ERRORS:
         raise
     except Exception as exc:
         logger.exception("Failed to list deployments in workspace '%s'", workspace)
@@ -374,6 +378,8 @@ async def get_deployment(
             status_code=404,
             detail=f"Deployment '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to get deployment '%s'", name)
         raise HTTPException(status_code=500, detail="Failed to get deployment.") from exc
@@ -414,6 +420,8 @@ async def delete_deployment(
                     detail=f"Deployment '{name}' is being modified concurrently.",
                 ) from exc
             logger.info("Retrying delete for deployment '%s' after concurrent update", name)
+        except CLIENT_ERRORS:
+            raise
         except Exception as exc:
             logger.exception("Failed to mark deployment '%s' as deleting", name)
             raise HTTPException(status_code=500, detail="Failed to update deployment.") from exc
@@ -436,6 +444,8 @@ async def _mark_deployment_deleting_once(
             status_code=404,
             detail=f"Deployment '{name}' not found in workspace '{workspace}'.",
         ) from exc
+    except CLIENT_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment '%s' before delete", name)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc
