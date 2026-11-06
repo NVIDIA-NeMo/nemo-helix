@@ -13,6 +13,7 @@
 import logging
 import os
 import signal
+import time
 from pathlib import Path
 from typing import Any, Optional, cast
 
@@ -59,6 +60,13 @@ _DRIVER_DIR = Path(__file__).parent
 # Upper bound on one sandbox sweep. A cancelled step pod gets a 30s termination grace period, and
 # the driver wait that follows can use all of it, so the sweep has to leave room.
 SANDBOX_REAP_TIMEOUT_S = 10.0
+
+# One budget for everything a signal triggers: both sandbox sweeps and the driver termination. It
+# stays under the default 30s grace so the process exits before the runtime sends SIGKILL.
+SHUTDOWN_GRACE_S = 25.0
+
+# ``terminate_driver`` can wait this long after it kills a driver that ignored the signal.
+_DRIVER_KILL_WAIT_S = 5.0
 
 
 class NemoRLBackend(TrainingBackend):
@@ -183,13 +191,23 @@ class NemoRLBackend(TrainingBackend):
         # Set up signal handler for cleanup — terminate the driver subprocess
         # explicitly so it doesn't become orphaned, then let SystemExit propagate
         # to trigger Ray cluster cleanup in the bootstrap's finally block.
+        shutdown_deadline: float | None = None
+
         def cleanup(signum, frame):
+            """Reap sandboxes, stop the driver, then exit; later signals take the default action."""
+            nonlocal shutdown_deadline
             logger.warning(f"Signal {signum} received, terminating driver and cleaning up")
+            # Put the default actions back before any blocking work, so a second signal ends the
+            # process instead of re-entering this handler in the middle of the first teardown.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            shutdown_deadline = time.monotonic() + SHUTDOWN_GRACE_S
             # Reap before waiting on the driver, which can take the whole termination grace
             # period. The sandbox belongs to a Ray actor that is killed without running its
             # own teardown, and this process is the one the container runtime signals.
-            self._reap_job_sandboxes(customizer_config)
-            bootstrap.terminate_driver(signum)
+            self._reap_job_sandboxes(customizer_config, deadline=shutdown_deadline)
+            driver_wait = max(1, int(shutdown_deadline - time.monotonic() - _DRIVER_KILL_WAIT_S))
+            bootstrap.terminate_driver(signum, timeout=driver_wait)
             raise SystemExit(signum)
 
         # Snapshot env vars and signal handlers so we can restore them after the
@@ -207,7 +225,7 @@ class NemoRLBackend(TrainingBackend):
         finally:
             # Whatever ended the driver (a cancel, a crash, an ordinary exit), no sandbox this
             # job created outlives it. A no-op when the Gym actor already tore its own down.
-            self._reap_job_sandboxes(customizer_config)
+            self._reap_job_sandboxes(customizer_config, deadline=shutdown_deadline)
             signal.signal(signal.SIGINT, previous_sigint)
             signal.signal(signal.SIGTERM, previous_sigterm)
             for key, original in saved_env.items():
@@ -227,8 +245,11 @@ class NemoRLBackend(TrainingBackend):
         # Return empty metrics (actual metrics are logged during training)
         return TrainingMetrics(total_steps=0, total_epochs=0)
 
-    def _reap_job_sandboxes(self, config: TrainingStepConfig) -> None:
+    def _reap_job_sandboxes(self, config: TrainingStepConfig, deadline: float | None = None) -> None:
         """Destroy every OpenSandbox resource labelled with this job's id. Never raises.
+
+        ``deadline`` is a ``time.monotonic()`` instant. When set, the sweep gets only the time left
+        before it, and is skipped once that has run out.
 
         Only GRPO jobs that run the Gym in a sandbox have anything to reap. Failures are logged
         rather than raised: this runs from a signal handler and a ``finally``, and an error here
@@ -237,6 +258,13 @@ class NemoRLBackend(TrainingBackend):
         gym = getattr(config, "gym", None)
         if gym is None or not getattr(gym, "sandboxed", False):
             return
+        timeout_s = SANDBOX_REAP_TIMEOUT_S
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(f"Shutdown budget spent; not reaping sandboxes for job {self._job_ctx.job_id}")
+                return
+            timeout_s = min(timeout_s, remaining)
         try:
             from sandboxed_gym.job_reaper import reap_job_sandboxes
 
@@ -244,7 +272,7 @@ class NemoRLBackend(TrainingBackend):
                 self._job_ctx.job_id,
                 host_provider="opensandbox",
                 host_provider_options=sandbox_host_provider_options(gym),
-                timeout_s=SANDBOX_REAP_TIMEOUT_S,
+                timeout_s=timeout_s,
             )
         except Exception:
             logger.exception(f"Could not reap sandboxes for job {self._job_ctx.job_id}")
