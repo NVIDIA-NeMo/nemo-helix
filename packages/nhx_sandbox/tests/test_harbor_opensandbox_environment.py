@@ -190,6 +190,62 @@ async def test_records_the_verified_policy_for_the_supervisor(tmp_path: Path, se
     assert record["policy_sha256"] == hashlib.sha256(canonical.encode()).hexdigest()
 
 
+async def test_a_slow_dns_lookup_does_not_block_the_event_loop(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Building the policy resolves hostnames; a slow lookup must not pause other trials on the same loop."""
+    lookup_sec = 0.5
+    lookups: list[str] = []
+
+    def slow_getaddrinfo(host: str, *args: Any, **kwargs: Any) -> list[Any]:
+        lookups.append(host)
+        time.sleep(lookup_sec)
+        raise OSError("name does not resolve")
+
+    monkeypatch.setattr(egress.socket, "getaddrinfo", slow_getaddrinfo)
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    environment._trusted_allowed_hosts = ("slow.example.com",)
+
+    ticks = 0
+
+    async def other_trial() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.01)
+            ticks += 1
+
+    ticker = asyncio.create_task(other_trial())
+    try:
+        await environment._create_sandbox()
+    finally:
+        ticker.cancel()
+
+    assert lookups == ["slow.example.com"]
+    # A blocked loop would have run the ticker about once; a free one runs it for most of the lookup.
+    assert ticks >= lookup_sec / 0.01 / 4
+
+
+async def test_the_policy_sent_verified_and_recorded_is_one_policy(
+    tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Building off the event loop still yields the single policy the create, the verification and the record share."""
+    environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
+    built: list[Any] = []
+    build = environment.egress_policy
+
+    def spy() -> Any:
+        built.append(build())
+        return built[-1]
+
+    monkeypatch.setattr(environment, "egress_policy", spy)
+
+    sandbox = await environment._create_sandbox()
+
+    record = json.loads((tmp_path / TRIAL / applied_egress_filename(sandbox.id)).read_text())
+    assert len(built) == 1
+    assert record["policy"] == _policy_sent(server)
+
+
 @pytest.mark.parametrize("agent_session", [TRIAL, f"{TRIAL}__env"], ids=["harbor-0.13", "harbor-0.20"])
 async def test_agent_and_separate_verifier_each_keep_their_record(
     tmp_path: Path, server: Server, agent_session: str
