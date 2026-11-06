@@ -222,7 +222,11 @@ Directory paths such as `evidence/home/.tmp/plugins*/` start at the bundle root 
 allow a glob in each folder name. This example excludes `plugins/` and
 `plugins-clone-123/` there while keeping `plugins.sha`. Local saves and hosted uploads
 use the same matching rules. Filename patterns do not remove directories; directory
-patterns do not remove regular files. The separate `summary` result is unaffected.
+patterns do not remove regular files. A leading slash anchors a directory pattern at
+the bundle root: `/evidence/` excludes only the root evidence directory. The separate
+`summary` result is unaffected. Kubernetes taskset runs reject patterns matching
+`metadata.json`, `trials.jsonl`, or `scores.jsonl` before scheduling, because aggregation
+requires these files in every task bundle.
 
 ### Download job results
 

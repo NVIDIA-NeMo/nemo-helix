@@ -6,6 +6,7 @@
 import hashlib
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, Self
 
 from nemo_evals.api.fields import TasksetRef
@@ -20,6 +21,8 @@ from nemo_evals.taskset_runs.entities import (
     TasksetRunPhase,
 )
 from nemo_evals.taskset_runs.progress import TasksetRunProgress
+from nemo_evals.taskset_runs.specs import TASK_BUNDLE_FILES
+from nemo_helix_plugin.jobs.ignore_patterns import matches_ignore_patterns
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -203,6 +206,20 @@ class TasksetRunInput(BaseModel):
         """
         if not isinstance(self.spec.target, HarborRunnerTarget):
             raise ValueError('execution requires a Harbor runner target (spec.target.kind = "harbor")')
+        return self
+
+    @model_validator(mode="after")
+    def _require_aggregation_inputs(self) -> Self:
+        """Reject exclusions that prevent aggregation before scheduling task Jobs."""
+        excluded = [
+            name
+            for name in TASK_BUNDLE_FILES
+            if matches_ignore_patterns(Path(name), self.spec.result_ignore_patterns or [])
+        ]
+        if excluded:
+            raise ValueError(
+                "spec.result_ignore_patterns excludes required Kubernetes aggregation inputs: " + ", ".join(excluded)
+            )
         return self
 
     @model_validator(mode="after")

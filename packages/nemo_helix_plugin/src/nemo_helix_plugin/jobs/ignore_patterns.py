@@ -16,8 +16,8 @@ def matches_ignore_patterns(path: Path, patterns: list[str], *, is_directory: bo
     directories = path.parts if is_directory else path.parts[:-1]
     for pattern in patterns:
         if pattern.endswith("/"):
-            parts = Path(pattern.rstrip("/")).parts
-            if len(parts) == 1:
+            parts = Path(pattern.strip("/")).parts
+            if len(parts) == 1 and not pattern.startswith("/"):
                 if any(fnmatchcase(directory, parts[0]) for directory in directories):
                     return True
             elif parts and len(directories) >= len(parts) and all(map(fnmatchcase, directories, parts)):

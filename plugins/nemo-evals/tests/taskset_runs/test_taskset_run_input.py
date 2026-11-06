@@ -510,3 +510,20 @@ def test_to_task_preserves_stored_fields_without_internal_metadata(phase, with_d
         if with_details
         else None,
     }
+
+
+@pytest.mark.parametrize("pattern", ["metadata.json", "trials.jsonl", "scores.jsonl", "*.json", "*.jsonl", "*"])
+@pytest.mark.parametrize("as_json", [False, True])
+def test_run_rejects_excluded_aggregation_inputs(run_body, pattern, as_json):
+    run_body["spec"]["result_ignore_patterns"] = [pattern]
+    with pytest.raises(ValidationError, match="required Kubernetes aggregation inputs"):
+        if as_json:
+            TasksetRunInput.model_validate_json(json.dumps(run_body))
+        else:
+            TasksetRunInput.model_validate(run_body)
+
+
+@pytest.mark.parametrize("patterns", [[], ["/evidence/"], ["*.tmp", "evidence/"], ["nested/metadata.json"]])
+def test_run_accepts_exclusions_that_keep_aggregation_inputs(run_body, patterns):
+    run_body["spec"]["result_ignore_patterns"] = patterns
+    assert TasksetRunInput.model_validate(run_body).spec.result_ignore_patterns == patterns

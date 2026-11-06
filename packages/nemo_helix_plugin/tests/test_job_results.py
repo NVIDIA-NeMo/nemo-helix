@@ -215,6 +215,9 @@ class TestSaveDirectory:
                 },
             ),
             (["home/.tmp/plugins*/"], {"home/.tmp/plugins/catalog.json"}),
+            (["/home/.tmp/plugins*/"], {"home/.tmp/plugins/catalog.json"}),
+            (["/plugins/"], {"plugins/catalog.json"}),
+            (["/evidence/"], {"evidence/trace.json"}),
             (["nested/*.tmp"], {"nested/cache.tmp"}),
             (
                 ["catalog.json"],
@@ -239,6 +242,8 @@ class TestSaveDirectory:
             "plugins/catalog.json",
             "nested/plugins-clone/catalog.json",
             "plugins.sha",
+            "evidence/trace.json",
+            "nested/evidence/trace.json",
             "home/.tmp/plugins/catalog.json",
             "deep/home/.tmp/plugins/catalog.json",
             ".hidden",
