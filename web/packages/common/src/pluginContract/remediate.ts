@@ -25,11 +25,28 @@ export const specifierUnmapped = (specifier: string): Fix =>
     `If it must be shared with Studio, request that "${specifier}" be added to the plugin contract.`
   );
 
-export const singletonBundled = (pkg: string, specifier: string = pkg): Fix =>
+// Rollup/Vite emit this deep import in development mode; Studio provides only the production runtime.
+const DEV_RUNTIME = 'react/jsx-dev-runtime';
+
+/** `specifier` is what the plugin imported, when it differs from the package (a deep import). */
+export const singletonBundled = (pkg: string, specifier = pkg): Fix =>
   fix(
     `The singleton "${pkg}" is bundled into the plugin; a second copy breaks shared context.`,
     `Import "${pkg}" only by a contract specifier (e.g. react-router), never a deep path (e.g. react-router/dom) and never from node_modules directly. The build helper externalizes contract specifiers for you.`,
+    ...(specifier === DEV_RUNTIME
+      ? [
+          `A development-mode build emits the dev JSX runtime ("${DEV_RUNTIME}"), which Studio does not provide. Build in production mode (e.g. vite build without --mode development).`,
+        ]
+      : []),
     'Rebuild the plugin.'
+  );
+
+/** A deep import of a provided package (e.g. `@nemo/common/components/Foo`). */
+export const providedDeepImport = (specifier: string, pkg: string): Fix =>
+  fix(
+    `Studio does not provide "${specifier}" (it is not in the plugin contract); "${pkg}" is provided only through its bare specifier.`,
+    `Import from the bare "${pkg}" specifier instead of "${specifier}", then rebuild.`,
+    `If the name you need is not exported from "${pkg}", add it to web/packages/common/src/plugin.ts.`
   );
 
 export const contractUnsupported = (built: string, current: string): Fix =>
