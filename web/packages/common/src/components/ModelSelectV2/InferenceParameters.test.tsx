@@ -51,7 +51,10 @@ describe('InferenceParameters', () => {
   });
 
   it('sends the default when a box with no value is cleared', () => {
-    const { onChange } = renderComponent({ value: {}, fieldMetadata: { temperature: { default: 0.3 } } });
+    const { onChange } = renderComponent({
+      value: {},
+      fieldMetadata: { temperature: { default: 0.3 } },
+    });
     fireEvent.change(screen.getAllByRole('spinbutton')[0], { target: { value: '' } });
     expect(onChange).toHaveBeenLastCalledWith({ temperature: 0.3 });
   });

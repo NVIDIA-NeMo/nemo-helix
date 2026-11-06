@@ -161,6 +161,7 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
           fullWidth
           disabled={panel.locked}
           showParams
+          paramsIconOnly
           // A locked panel pins the model, not its sampling settings.
           paramsDisabled={false}
           paramsFields={CHAT_INFERENCE_PARAM_FIELDS}

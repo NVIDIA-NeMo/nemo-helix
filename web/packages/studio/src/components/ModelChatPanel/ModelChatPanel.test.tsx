@@ -186,6 +186,7 @@ describe('ModelChatPanel — inference params', () => {
     expect(lastSelectProps()).toEqual(
       expect.objectContaining({
         showParams: true,
+        paramsIconOnly: true,
         paramsFields: CHAT_INFERENCE_PARAM_FIELDS,
         paramsFieldMetadata: CHAT_INFERENCE_PARAM_METADATA,
         inferenceParams: { temperature: 0.7, max_tokens: 512 },

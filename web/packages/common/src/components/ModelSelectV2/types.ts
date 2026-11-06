@@ -18,7 +18,28 @@ export interface ModelSelection {
   entity?: ModelEntity;
 }
 
-export interface ModelSelectProps {
+/** The params control shown beside the model button. */
+export interface ModelSelectParamsProps {
+  /** Show the params button alongside the model button */
+  showParams?: boolean;
+  /** Current inference parameter values */
+  inferenceParams?: Partial<InferenceParams>;
+  /** Called when the user changes any inference parameter */
+  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
+  /**
+   * Disable the params control on its own. Defaults to `disabled`; pass `false` to keep
+   * params editable while the model is fixed (e.g. a locked chat panel).
+   */
+  paramsDisabled?: boolean;
+  /** Per-field bounds and defaults for the params control, for callers whose backend differs. */
+  paramsFieldMetadata?: InferenceParametersProps['fieldMetadata'];
+  /** The params to show, for callers whose request only carries some of them. Defaults to all. */
+  paramsFields?: InferenceParametersProps['fields'];
+  /** Show only the icon on the params button, for tight layouts. */
+  paramsIconOnly?: boolean;
+}
+
+export interface ModelSelectProps extends ModelSelectParamsProps {
   /** Currently selected model (and optional adapter) */
   value: ModelSelection | null;
   /** Called when user selects a model or adapter */
@@ -62,8 +83,6 @@ export interface ModelSelectProps {
    * the caller owns the filter and the dropdown stops applying it to {@link groups}.
    */
   onModelTypeChange?: (modelType: ModelType) => void;
-  /** Show the params button alongside the model button */
-  showParams?: boolean;
   /**
    * Hide each model's adapter sub-list. When true, models render as flat,
    * directly-selectable items even if they have adapters.
@@ -77,19 +96,6 @@ export interface ModelSelectProps {
   fullWidth?: boolean;
   /** Preferred side for the dropdown content */
   dropdownSide?: 'top' | 'bottom';
-  /** Current inference parameter values */
-  inferenceParams?: Partial<InferenceParams>;
-  /** Called when the user changes any inference parameter */
-  onInferenceParamsChange?: (params: Partial<InferenceParams>) => void;
-  /**
-   * Disable the params control on its own. Defaults to {@link disabled}; pass `false` to keep
-   * params editable while the model is fixed (e.g. a locked chat panel).
-   */
-  paramsDisabled?: boolean;
-  /** Per-field bounds and defaults for the params control, for callers whose backend differs. */
-  paramsFieldMetadata?: InferenceParametersProps['fieldMetadata'];
-  /** The params to show, for callers whose request only carries some of them. Defaults to all. */
-  paramsFields?: InferenceParametersProps['fields'];
   /** Called when the model dropdown opens or closes */
   onOpenChange?: (open: boolean) => void;
   /** aria-label for the button group */
