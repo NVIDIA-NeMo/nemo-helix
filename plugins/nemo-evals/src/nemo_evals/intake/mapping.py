@@ -29,6 +29,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 from collections.abc import Sequence
@@ -202,7 +203,7 @@ async def otlp_ingest_for_trial(
     model calls the Inference Gateway recorded in the session (``USAGE_SUPERSEDED_ATTRIBUTE``).
 
     Nested agents retain their own attribution. Explicit root payloads win over the recorded task instruction and retained
-    final answer. Without those, only agreeing recorded descendant agent payloads are used.
+    final answer. Descendant outputs are never promoted to a trial answer.
 
     Evaluation identity is written onto spans rather than resource attributes because Intake merges the
     layers as ``{**resource, **span}``. An agent that records its own ``gen_ai.conversation.id``
@@ -429,17 +430,75 @@ def _caller_identity(*, agent_name: str | None, agent_version: str, model_name: 
     return identity
 
 
+def _boundary_kind(attributes: dict[str, AnyValue]) -> str:
+    """Recognize payload-bearing kinds with the same standard-before-native precedence as Intake."""
+    kind = attributes.get("openinference.span.kind", AnyValue()).string_value.upper()
+    known = {"LLM", "AGENT", "TOOL", "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL", "EVALUATOR"}
+    if kind in known:
+        return kind
+    operation = attributes.get("gen_ai.operation.name", AnyValue()).string_value
+    operations = {"chat": "LLM", "generate_content": "LLM", "text_completion": "LLM", "invoke_agent": "AGENT"}
+    if operation in operations:
+        return operations[operation]
+    if not kind and "gen_ai.operation.name" not in attributes:
+        scope = attributes.get("nemo_relay.scope_type", AnyValue()).string_value
+        return {"llm": "LLM", "agent": "AGENT"}.get(scope, "UNKNOWN")
+    return "UNKNOWN"
+
+
+def _has_agent_ancestor(span: Span, *, root: Span, by_id: dict[bytes, tuple[Span, dict[str, AnyValue]]]) -> bool:
+    """Exclude internal agent layers below the invocation's topmost agent layer."""
+    parent = bytes(span.parent_span_id)
+    visited = {bytes(root.span_id)}
+    while parent and parent not in visited and parent in by_id:
+        visited.add(parent)
+        ancestor, resource_attrs = by_id[parent]
+        attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in ancestor.attributes}}
+        if _boundary_kind(attrs) == "AGENT":
+            return True
+        parent = bytes(ancestor.parent_span_id)
+    return False
+
+
+def _native_agent_input(attributes: dict[str, AnyValue]) -> AnyValue | None:
+    """Retain an exact native scalar or reconstruct its recorded top-level projection."""
+    prefix = "nemo_relay.start.input"
+    if prefix in attributes:
+        return attributes[prefix] if attributes[prefix].WhichOneof("value") is not None else None
+    payload: dict[str, object] = {}
+    for key, attribute in attributes.items():
+        if not key.startswith(prefix + "."):
+            continue
+        field = attribute.WhichOneof("value")
+        if field not in {"string_value", "bool_value", "int_value", "double_value"}:
+            return None
+        value = getattr(attribute, field)
+        if isinstance(value, str) and value.lstrip().startswith(("{", "[")):
+            try:
+                value = json.loads(value)
+            except (ValueError, RecursionError):
+                pass
+        payload[key.removeprefix(prefix + ".")] = value
+    if not payload:
+        return None
+    try:
+        return AnyValue(string_value=json.dumps(payload, separators=(",", ":"), allow_nan=False))
+    except (ValueError, RecursionError):
+        return None
+
+
 def _enrich_trial_boundary(
     resource_spans: list[ResourceSpans],
     *,
     trial: AgentEvalTrial,
     task: AgentEvalTask | None,
 ) -> None:
-    """Fill only missing boundary fields, never select a model/tool's intermediate answer.
+    """Preserve recorded roots, recover task input/final answer, otherwise diagnose unknown.
 
-    Resource attributes count as explicit root attributes too. Descendant fallback is limited
-    to connected agent spans and requires agreement across every recorded candidate. Missing
-    or conflicting boundaries remain absent with a persisted diagnostic, not fabricated text.
+    Descendant output is never a final-answer fallback. Input recovery from descendants
+    requires an explicitly recorded invoke_agent wrapper and agreeing topmost agent inputs;
+    internal nested agents are not task boundaries. Empty task/retained strings are missing,
+    but explicitly recorded root payloads (including empty strings) are preserved.
     """
     spans = [
         (span, {attribute.key: attribute.value for attribute in resource.resource.attributes})
@@ -464,6 +523,8 @@ def _enrich_trial_boundary(
             break
         connected.update(children)
 
+    by_id = {bytes(span.span_id): (span, attrs) for span, attrs in spans if span.trace_id == root.trace_id}
+    root_kind = _boundary_kind(root_attributes)
     instruction = task.inputs.get("instruction") if task is not None else None
     output = trial.output.output_text if trial.output is not None else None
     for direction, authoritative, aliases in (
@@ -480,41 +541,59 @@ def _enrich_trial_boundary(
     ):
         native_prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
         if (
-            any(key in root_attributes for key in aliases)
-            or any(key.startswith(f"llm.{direction}_messages.") for key in root_attributes)
-            or any(key == native_prefix or key.startswith(f"{native_prefix}.") for key in root_attributes)
+            any(key in root_attributes and root_attributes[key].WhichOneof("value") is not None for key in aliases)
+            or (
+                root_kind == "LLM"
+                and any(
+                    key.startswith(f"llm.{direction}_messages.")
+                    and key.removeprefix(f"llm.{direction}_messages.").partition(".message.")[0].isdigit()
+                    and ".message." in key
+                    for key in root_attributes
+                )
+            )
+            or (
+                "nemo_relay.scope_type" in root_attributes
+                and (
+                    root_attributes[native_prefix].WhichOneof("value") is not None
+                    if native_prefix in root_attributes
+                    else any(key.startswith(f"{native_prefix}.") for key in root_attributes)
+                )
+            )
         ):
             continue
-        value = AnyValue(string_value=authoritative) if isinstance(authoritative, str) else None
+        value = AnyValue(string_value=authoritative) if isinstance(authoritative, str) and authoritative else None
         source = "task.instruction" if direction == "input" else "trial.output"
-        if value is None:
+        if (
+            value is None
+            and direction == "input"
+            and root_attributes.get("gen_ai.operation.name", AnyValue()).string_value == "invoke_agent"
+        ):
             candidates: dict[bytes, AnyValue] = {}
+            missing_candidate = False
             for span, resource_attrs in spans:
                 if span is root or span.trace_id != root.trace_id or bytes(span.span_id) not in connected:
                     continue
                 attrs = {**resource_attrs, **{attribute.key: attribute.value for attribute in span.attributes}}
-                kind = attrs.get("openinference.span.kind", AnyValue()).string_value.upper()
-                operation = attrs.get("gen_ai.operation.name", AnyValue()).string_value
-                relay_scope = attrs.get("nemo_relay.scope_type", AnyValue()).string_value
-                is_agent = kind == "AGENT" or (not kind and operation == "invoke_agent")
-                if not kind and not operation:
-                    is_agent = relay_scope == "agent"
-                if not is_agent:
+                if _boundary_kind(attrs) != "AGENT" or _has_agent_ancestor(span, root=root, by_id=by_id):
                     continue
-                candidate = next((attrs[key] for key in aliases if key in attrs), None)
-                # A direct native payload can be forwarded losslessly. Flattened Relay
-                # arguments need framework-specific reconstruction; leave those unknown.
-                if candidate is None and relay_scope == "agent":
-                    native_key = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
-                    candidate = attrs.get(native_key)
+                candidate = next(
+                    (attrs[key] for key in aliases if key in attrs and attrs[key].WhichOneof("value") is not None), None
+                )
+                if candidate is None and attrs.get("nemo_relay.scope_type", AnyValue()).string_value == "agent":
+                    candidate = _native_agent_input(attrs)
                 if candidate is not None:
                     candidates[candidate.SerializeToString(deterministic=True)] = candidate
-            if len(candidates) == 1:
+                else:
+                    missing_candidate = True
+            if len(candidates) == 1 and not missing_candidate:
                 value = next(iter(candidates.values()))
                 source = "unambiguous_descendant"
             else:
                 source = "unknown:ambiguous_descendants" if candidates else "unknown:not_recorded"
-                logger.warning("Trial %s %s boundary %s", trial.id, direction, source)
+        if value is None:
+            if not source.startswith("unknown:"):
+                source = "unknown:not_recorded"
+            logger.warning("Trial %s %s boundary %s", trial.id, direction, source)
         if value is not None:
             attribute = root.attributes.add(key=f"{direction}.value")
             attribute.value.CopyFrom(value)

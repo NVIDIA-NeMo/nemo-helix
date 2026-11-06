@@ -85,7 +85,6 @@ ATTRIBUTE_SPECS = (
             "gen_ai.request.model",
             "gen_ai.response.model",
             "llm.model_name",
-            "nemo_relay.model_name",
         ),
         distinct_source_keys=("gen_ai.response.model",),
     ),
@@ -178,7 +177,7 @@ ATTRIBUTE_SPECS = (
         field=SpanAttributeField.ERROR_TYPE,
         bag=AttributeBag.STRING,
         bag_key="exception.type",
-        source_keys=("exception.type", "error.type", "nemo_relay.end.metadata.exception.type"),
+        source_keys=("exception.type", "nemo_relay.end.metadata.exception.type"),
     ),
     AttributeSpec(
         field=SpanAttributeField.ERROR_MESSAGE,

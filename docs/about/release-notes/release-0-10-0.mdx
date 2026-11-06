@@ -67,6 +67,7 @@ NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-
 
 ## Upgrade from v0.9.x
 
+- Intake recalculates usage for all stored non-gateway OTLP traces at query time, not only new Relay captures. Per metric, it now estimates the maximum of summed model-call counters and the largest recorded aggregate instead of preferring the model-call tier. A larger parent, tool, or chain measurement can therefore increase a displayed total; sibling aggregate measurements of 100 and 200 with no model calls produce 200, not 300. Gateway coverage and superseded-trace handling are unchanged. These estimates are not verified reconciliation; inspect original span measurements for conflicts and incomplete coverage. See [Usage Estimates](/documentation/agents/traces-and-insights/collect-agent-traces#usage-estimates).
 - Rename the execute-job field `extension` to `post_run_action`. Plugins that register execute extensions must move to the `nemo.agents.post_run_actions` entry-point group and the `PostRunAction` contract. No aliases are kept.
 - An agent registered without `post_run_actions`, including one registered before this release, allows only `agents.noop`. To use another post-run action, add it under `helix_registration.post_run_actions` and register the agent again. For a deployed agent, `nemo agents redeploy` re-registers and redeploys it.
 - Check harness `kind` values. Custom adapters must install their descriptor under `share/nemo-fabric` in the platform's Python environment, or be installed in the agent image, rather than relying on an `nvidia.fabric.` prefix.
@@ -78,6 +79,7 @@ NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-
 
 ## Current constraints
 
+- Publishing the same logical model call through both Relay and another OpenInference/GenAI exporter with different span IDs can double reported call usage. Intake does not heuristically reconcile distinct exporter spans; use one usage representation per call. See [Usage Estimates](/documentation/agents/traces-and-insights/collect-agent-traces#usage-estimates).
 - A taskset run on Kubernetes that includes no-network tasks is refused at submission unless every model the agent calls through the gateway is a closed-book virtual model that you can read. Built-in agents that name a model by `name`, imported agents, and registered agents with no gateway model are refused for such tasks.
 - Harbor agent install reuse applies only to Harbor's default local Docker environment, not to tasks that bring their own `docker-compose.yaml`.
 - The Studio model detail page is behind the `studio.feature_flags.model_details_enabled` flag, which is off by default.

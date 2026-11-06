@@ -73,21 +73,28 @@ service.
 Intake interprets native `nemo_relay.*` fields from Relay full OTLP exports, verified against
 `nemo-relay==0.9.3`. This includes recorded scope kinds, input/output, LangChain response messages,
 model identity, usage, tools, and errors. Explicit OpenInference and GenAI semantic attributes take
-precedence. Raw native attributes, span IDs, timestamps, and parent relationships remain available.
-Missing providers, usage, or reasoning are not inferred.
+precedence. Usage is selected as a group: any standard usage measurement, including zero,
+suppresses all native usage fallback. Model/provider identity is also selected as a group, so a
+standard model or provider does not get paired with the other field from Relay. Missing fields
+remain unknown rather than mixing source tuples. Raw native attributes, span IDs, timestamps, and
+parent relationships remain available. Missing providers, usage, or reasoning are not inferred.
 
 Evaluator OTLP publication fills missing root input/output from the recorded task instruction and
-retained trial final answer. Without those, it uses only unambiguous recorded agent descendants;
-otherwise `nemo.evaluation.boundary.input` or `.output` records an unknown-boundary diagnostic.
-Explicit root payloads and nested agent identities are preserved. Republishing retained captures does
-not require rerunning agents or judges.
+retained trial final answer. Descendant outputs are never promoted into final answers. Without a
+recorded task instruction, input fallback requires an explicit `gen_ai.operation.name=invoke_agent`
+wrapper and agreeing recorded inputs at its topmost agent layer; nested internal agents do not supply
+the task boundary. Otherwise `nemo.evaluation.boundary.input` or `.output` records an unknown-boundary
+diagnostic. Empty task instructions and retained answers are missing; explicitly recorded root values,
+including empty strings, still win. Root span payloads win over resource-level aliases, which are
+used only when that root recorded no payload. Nested identities are preserved. Republishing retained
+captures does not require rerunning agents or judges.
 
 ### Usage Estimates
 
 For usage not covered by the Inference Gateway ledger, OTLP rollups are **interim estimates, not
 verified reconciliation**. For each trace and each metric independently, Intake takes the maximum of
-summed model-call counters and the largest recorded parent/agent aggregate, then sums the trace
-estimates. It never adds parent and child representations of the same usage or sums nested aggregate
+summed model-call counters and the largest recorded non-model aggregate (including parent, agent,
+tool, or chain measurements), then sums the trace estimates. It never adds parent and child representations of the same usage or sums nested aggregate
 representations. Gateway call coverage and superseded-trace handling still take precedence so the
 same gateway-served calls are not counted again from agent captures. ATIF retains its ingest-reconciled ledger.
 
@@ -95,7 +102,17 @@ Explicit zero is a measurement; a metric with no reported measurements remains u
 captures can undercount usage, and conflicting sources can produce inconsistent input/output/total
 metrics because each metric is estimated independently. Separate sibling aggregates without model-call
 counters are not reconciled into an additive ledger. Inspect the original span measurements to assess
-coverage and conflicts; these rollups do not certify completeness or billing accuracy.
+coverage and conflicts; these rollups do not certify completeness or billing accuracy. This query-time
+policy applies to existing stored non-gateway OTLP traces too: larger parent/tool measurements can
+replace smaller call totals, and sibling aggregates of 100 and 200 without call counters yield 200,
+not their former sum of 300.
+
+**Avoid duplicate model-call instrumentation.** Relay and a second OpenInference/GenAI exporter can
+record the same logical call under distinct span IDs. Those spans are counted as distinct model calls;
+Intake does not guess cross-exporter call equivalence from matching names, times, or counters. Dual
+exporters can therefore double call usage even when a parent aggregate is present. Publish one usage
+representation per call, or reconcile duplicate instrumentation upstream; the parent/child estimate
+policy does not deduplicate separate exporter call spans.
 
 ### When to Use It
 

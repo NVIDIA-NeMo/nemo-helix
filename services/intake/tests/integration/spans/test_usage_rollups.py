@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -329,6 +330,91 @@ def test_partial_and_conflicting_usage_estimate(
     for usage in (_trace(client, session_id), _session(client, session_id)):
         assert usage.get("input_tokens") == expected
         assert usage.get("output_tokens") is None
+
+
+def test_distinct_exporter_call_spans_are_not_heuristically_deduplicated(client: TestClient, make_otlp_request) -> None:
+    session_id = "dual-exporters"
+    relay_call = _span(name="relay-call", span_id=3, parent_span_id=1, session_id=session_id)
+    relay_call["attributes"].update(
+        {
+            "nemo_relay.scope_type": "llm",
+            "nemo_relay.end.output.__nemo_relay_integrations_langchain_model_response": json.dumps(
+                {
+                    "messages": [
+                        {
+                            "type": "ai",
+                            "data": {
+                                "content": "answer",
+                                "usage_metadata": {"input_tokens": 9, "output_tokens": 5, "total_tokens": 14},
+                            },
+                        }
+                    ],
+                }
+            ),
+        }
+    )
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(26),
+        spans=[
+            _span(name="root", span_id=1, session_id=session_id, input_tokens=9, output_tokens=5),
+            _span(
+                name="openinference-call",
+                span_id=2,
+                parent_span_id=1,
+                session_id=session_id,
+                kind="LLM",
+                input_tokens=9,
+                output_tokens=5,
+            ),
+            relay_call,
+        ],
+    )
+    # Distinct span IDs alone cannot prove these are duplicate representations.
+    for usage in (_trace(client, session_id), _session(client, session_id)):
+        assert usage["input_tokens"] == 18
+        assert usage["output_tokens"] == 10
+
+
+def test_sibling_agent_aggregates_without_model_calls_use_the_largest_estimate(
+    client: TestClient, make_otlp_request
+) -> None:
+    session_id = "sibling-aggregates"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(24),
+        spans=[
+            _span(name="root", span_id=1, session_id=session_id),
+            _span(name="agent-a", span_id=2, parent_span_id=1, session_id=session_id, kind="AGENT", input_tokens=100),
+            _span(name="agent-b", span_id=3, parent_span_id=1, session_id=session_id, kind="AGENT", input_tokens=200),
+        ],
+    )
+    for usage in (_trace(client, session_id), _session(client, session_id)):
+        assert usage["input_tokens"] == 200  # Conservative estimate, not the former sibling sum of 300.
+
+
+@pytest.mark.parametrize("kind", ["TOOL", "CHAIN"])
+def test_larger_non_root_tool_or_chain_cost_beats_summed_model_cost(
+    client: TestClient, make_otlp_request, kind: str
+) -> None:
+    session_id = "non-model-cost"
+    _ingest(
+        client,
+        make_otlp_request,
+        session_id=session_id,
+        trace_id=_trace_id(25),
+        spans=[
+            _span(name="root", span_id=1, session_id=session_id),
+            _span(name="chat", span_id=2, parent_span_id=1, session_id=session_id, kind="LLM", cost_usd=0.02),
+            _span(name="non-model", span_id=3, parent_span_id=1, session_id=session_id, kind=kind, cost_usd=0.05),
+        ],
+    )
+    for usage in (_trace(client, session_id), _session(client, session_id)):
+        assert usage["cost_usd"] == pytest.approx(0.05)
 
 
 @pytest.mark.parametrize("on_call", [False, True])

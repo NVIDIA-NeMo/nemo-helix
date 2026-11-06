@@ -10,6 +10,7 @@ import math
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from nemo_evals.intake.publish import PublishError, _token_final_metrics, publish_to_intake
@@ -446,10 +447,21 @@ _OTLP_TRACE_ID = "0123456789abcdef0123456789abcdef"
 _OTLP_SPAN_ID = "0102030405060708"
 
 
-def _otlp_trial(trial_id: str = "t-1", *, span_id: str = _OTLP_SPAN_ID, extra_spans: list[dict] | None = None):
+def _otlp_trial(
+    trial_id: str = "t-1",
+    *,
+    span_id: str = _OTLP_SPAN_ID,
+    extra_spans: list[dict] | None = None,
+    operation: str | None = None,
+):
     from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 
-    spans = [{"traceId": _OTLP_TRACE_ID, "spanId": span_id, "name": "agent run"}, *(extra_spans or [])]
+    spans: list[dict[str, Any]] = [
+        {"traceId": _OTLP_TRACE_ID, "spanId": span_id, "name": "agent run"},
+        *(extra_spans or []),
+    ]
+    if operation is not None:
+        spans[0]["attributes"] = [{"key": "gen_ai.operation.name", "value": {"stringValue": operation}}]
     trace = EvidenceDescriptor(
         kind="trace", format="otlp", data={"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}
     )
@@ -1065,7 +1077,7 @@ def _attributes(span):
 
 
 async def test_otlp_publication_forwards_identity_and_preserves_nested_agents() -> None:
-    trial = _otlp_trial(extra_spans=[_recorded_agent("aabbccddeeff0011")])
+    trial = _otlp_trial(extra_spans=[_recorded_agent("aabbccddeeff0011")], operation="invoke_agent")
     intake = InMemoryIntakeService()
     await publish_to_intake(
         _result([trial], []), client=intake.client(), experiment_id="exp-1", agent_name="declared", agent_version="v2"
@@ -1101,14 +1113,16 @@ async def test_conflicting_descendant_boundaries_stay_unknown_with_diagnostic() 
         extra_spans=[
             _recorded_agent("aabbccddeeff0011", input_text="request A", output_text="answer A"),
             _recorded_agent("aabbccddeeff0022", input_text="request B", output_text="answer B"),
-        ]
+        ],
+        operation="invoke_agent",
     ).model_copy(update={"output": AgentOutput(output_text=None)})
     intake = InMemoryIntakeService()
     await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
     root = _attributes(_published_spans(intake)[0])
     for direction in ("input", "output"):
         assert f"{direction}.value" not in root
-        assert root[f"nemo.evaluation.boundary.{direction}"].string_value == "unknown:ambiguous_descendants"
+        expected = "unknown:ambiguous_descendants" if direction == "input" else "unknown:not_recorded"
+        assert root[f"nemo.evaluation.boundary.{direction}"].string_value == expected
 
 
 @pytest.mark.parametrize("kind", ["LLM", "TOOL", "UNKNOWN"])
@@ -1124,18 +1138,100 @@ async def test_model_tool_and_unknown_spans_are_not_task_boundary_fallbacks(kind
     assert root["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
 
 
-async def test_single_descendant_output_is_fallback_only_without_retained_answer() -> None:
+async def test_empty_task_and_retained_answer_are_missing_but_explicit_empty_roots_win() -> None:
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+
+    trial = _otlp_trial().model_copy(update={"output": AgentOutput(output_text="")})
+    result = _result([trial], [])
+    result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": ""})]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert "input.value" not in attrs and "output.value" not in attrs
+    assert attrs["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
+    assert attrs["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
+
+    trial = _otlp_trial()
+    trial.evidence.descriptors["trace"].data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["attributes"] = [
+        {"key": key, "value": {"stringValue": ""}} for key in ("input.value", "output.value")
+    ]
+    result = _result([trial], [])
+    result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "nonempty task"})]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert attrs["input.value"].string_value == attrs["output.value"].string_value == ""
+
+
+async def test_arbitrary_chain_research_subagent_and_final_model_are_not_task_boundaries() -> None:
+    research = _recorded_agent("aabbccddeeff0011", input_text="internal research", output_text="research notes")
+    model = _recorded_agent("aabbccddeeff0022", output_text="FINAL")
+    model["parentSpanId"] = research["spanId"]
+    model["attributes"][0]["value"]["stringValue"] = "LLM"
+    trial = _otlp_trial(extra_spans=[research, model]).model_copy(update={"output": AgentOutput(output_text=None)})
+    source_root = trial.evidence.descriptors["trace"].data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    source_root["name"] = "graph"
+    source_root["attributes"] = [{"key": "openinference.span.kind", "value": {"stringValue": "CHAIN"}}]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert "input.value" not in attrs and "output.value" not in attrs
+    assert attrs["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
+    assert attrs["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
+
+
+async def test_designated_invocation_uses_topmost_agent_input_not_internal_agents() -> None:
+    outer = _recorded_agent("aabbccddeeff0011", input_text="outer task", output_text="outer final")
+    inner = _recorded_agent("aabbccddeeff0022", input_text="internal input", output_text="internal partial")
+    inner["parentSpanId"] = outer["spanId"]
+    trial = _otlp_trial(extra_spans=[outer, inner], operation="invoke_agent").model_copy(
+        update={"output": AgentOutput(output_text=None)}
+    )
+    intake = InMemoryIntakeService()
+    await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert attrs["input.value"].string_value == "outer task"
+    assert "output.value" not in attrs
+    assert attrs["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
+
+
+@pytest.mark.parametrize(
+    "ignored",
+    [
+        {"llm.input_messages.0.message.content": "not an LLM", "llm.output_messages.0.message.content": "not an LLM"},
+        {"nemo_relay.start.input.instruction": "no scope", "nemo_relay.end.output": "no scope"},
+    ],
+)
+async def test_ignored_root_metadata_does_not_hide_a_missing_boundary(ignored: dict[str, str]) -> None:
+    from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
+
+    trial = _otlp_trial()
+    root = trial.evidence.descriptors["trace"].data["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    root["attributes"] = [
+        {"key": key, "value": {"stringValue": value}}
+        for key, value in {"openinference.span.kind": "CHAIN", **ignored}.items()
+    ]
+    result = _result([trial], [])
+    result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "task request"})]
+    intake = InMemoryIntakeService()
+    await publish_to_intake(result, client=intake.client(), experiment_id="exp-1")
+    attrs = _attributes(_published_spans(intake)[0])
+    assert attrs["input.value"].string_value == "task request"
+    assert attrs["output.value"].string_value == "answer"
+
+
+async def test_single_descendant_intermediate_output_is_never_promoted_to_final_answer() -> None:
     trial = _otlp_trial(extra_spans=[_recorded_agent("aabbccddeeff0011")]).model_copy(
         update={"output": AgentOutput(output_text=None)}
     )
     intake = InMemoryIntakeService()
     await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
     root = _attributes(_published_spans(intake)[0])
-    assert root["output.value"].string_value == "intermediate"
-    assert root["nemo.evaluation.boundary.output"].string_value == "unambiguous_descendant"
+    assert "output.value" not in root
+    assert root["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
 
 
-async def test_native_agent_descendant_direct_payloads_are_lossless_fallbacks() -> None:
+async def test_designated_invocation_recovers_native_agent_input_but_never_descendant_output() -> None:
     child = _recorded_agent("aabbccddeeff0011")
     native = {
         "nemo_relay.scope_type": "agent",
@@ -1143,12 +1239,15 @@ async def test_native_agent_descendant_direct_payloads_are_lossless_fallbacks() 
         "nemo_relay.end.output": "recorded native answer",
     }
     child["attributes"] = [{"key": key, "value": {"stringValue": value}} for key, value in native.items()]
-    trial = _otlp_trial(extra_spans=[child]).model_copy(update={"output": AgentOutput(output_text=None)})
+    trial = _otlp_trial(extra_spans=[child], operation="invoke_agent").model_copy(
+        update={"output": AgentOutput(output_text=None)}
+    )
     intake = InMemoryIntakeService()
     await publish_to_intake(_result([trial], []), client=intake.client(), experiment_id="exp-1")
     root, recorded = map(_attributes, _published_spans(intake))
     assert root["input.value"].string_value == "recorded native request"
-    assert root["output.value"].string_value == "recorded native answer"
+    assert "output.value" not in root
+    assert root["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
     assert {key: value.string_value for key, value in recorded.items() if key.startswith("nemo_relay.")} == native
     assert "gen_ai.agent.name" not in recorded
 
@@ -1163,7 +1262,7 @@ async def test_boundary_enrichment_uses_canonical_run_root_beside_an_earlier_eve
     run_resource["resource"] = {"attributes": [{"key": "input.value", "value": {"stringValue": "resource request"}}]}
     mark = {"traceId": "f" * 32, "spanId": "f" * 16, "name": "standalone mark"}
     data["resourceSpans"].insert(0, {"scopeSpans": [{"spans": [mark]}]})
-    trial.output = AgentOutput(output_text=None)
+    trial.output = AgentOutput(output_text="retained answer")
     result = _result([trial], [])
     result.tasks = [AgentEvalTask(id="task-1", intent="grader", inputs={"instruction": "task instruction"})]
     intake = InMemoryIntakeService()
@@ -1172,8 +1271,8 @@ async def test_boundary_enrichment_uses_canonical_run_root_beside_an_earlier_eve
     run_attrs = _attributes(run_span)
     assert report.published_trials[0].span_id == run_span.span_id.hex() == _OTLP_SPAN_ID
     assert "input.value" not in run_attrs  # The selected root's explicit resource value wins.
-    assert run_attrs["output.value"].string_value == "agent answer"
-    assert run_attrs["nemo.evaluation.boundary.output"].string_value == "unambiguous_descendant"
+    assert run_attrs["output.value"].string_value == "retained answer"
+    assert run_attrs["nemo.evaluation.boundary.output"].string_value == "trial.output"
     assert "output.value" not in _attributes(mark_span)
 
 
@@ -1297,8 +1396,10 @@ async def test_publication_is_repeatable_without_mutating_source_capture(tmp_pat
 
 
 @pytest.mark.parametrize("outer_invocation", [False, True])
+@pytest.mark.parametrize("retained_boundary", [False, True])
 async def test_captured_native_trace_publication_round_trip_preserves_replay_boundary(
     outer_invocation: bool,
+    retained_boundary: bool,
 ) -> None:
     """Replay the captured export through publication and Intake normalization, without running agents."""
     from base64 import b64decode
@@ -1315,10 +1416,19 @@ async def test_captured_native_trace_publication_round_trip_preserves_replay_bou
         # Reproduce a transport/invocation wrapper whose boundary was never captured.
         wrapper_id = "0102030405060708"
         captured_root["parentSpanId"] = wrapper_id
-        spans.append({"traceId": captured_root["traceId"], "spanId": wrapper_id, "name": "invoke"})
+        spans.append(
+            {
+                "traceId": captured_root["traceId"],
+                "spanId": wrapper_id,
+                "name": "invoke",
+                "attributes": [
+                    {"key": "gen_ai.operation.name", "value": {"stringValue": "invoke_agent"}},
+                ],
+            }
+        )
     trial = _trial("t-1").model_copy(
         update={
-            "output": AgentOutput(output_text="hello back"),
+            "output": AgentOutput(output_text="hello back" if retained_boundary else None),
             "measurements": TrialMeasurements(prompt_tokens=11, completion_tokens=3),
             "evidence": CandidateEvidence(
                 descriptors={"trace": EvidenceDescriptor(kind="trace", format="otlp", data=document)}
@@ -1326,7 +1436,9 @@ async def test_captured_native_trace_publication_round_trip_preserves_replay_bou
         }
     )
     result = _result([trial], [])
-    result.tasks = [AgentEvalTask(id="task-1", intent="not a request", inputs={"instruction": "hello"})]
+    result.tasks = [
+        AgentEvalTask(id="task-1", intent="not a request", inputs={"instruction": "hello"} if retained_boundary else {})
+    ]
     intake = InMemoryIntakeService()
     for _ in range(2):
         await publish_to_intake(
@@ -1337,8 +1449,11 @@ async def test_captured_native_trace_publication_round_trip_preserves_replay_bou
     normalized = _span_to_domain(
         workspace="default", span=root, resource_attributes={}, scope_data={}, ingested_at=STARTED_AT
     )
-    assert normalized.input == ("hello" if outer_invocation else '{"instruction":"hello"}')
-    assert normalized.output == "hello back"
+    assert normalized.input == ("hello" if outer_invocation and retained_boundary else '{"instruction":"hello"}')
+    assert normalized.output == ("" if outer_invocation and not retained_boundary else "hello back")
+    if outer_invocation and not retained_boundary:
+        assert normalized.attributes_string["nemo.evaluation.boundary.input"] == "unambiguous_descendant"
+        assert normalized.attributes_string["nemo.evaluation.boundary.output"] == "unknown:not_recorded"
     assert normalized.attributes_string["gen_ai.agent.name"] == "registered"
     assert normalized.attributes_string["agent.version"] == "v1"
     nested = next(span for span in published if span.name == "nested-agent")

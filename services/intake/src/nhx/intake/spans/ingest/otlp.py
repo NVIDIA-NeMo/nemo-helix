@@ -56,6 +56,34 @@ _SPAN_KIND_BY_RELAY_SCOPE = {
     "evaluator": SpanKind.EVALUATOR,
 }
 _RELAY_RESPONSE_KEY = "__nemo_relay_integrations_langchain_model_response"
+_RELAY_USAGE_FIELDS = frozenset(
+    {
+        SpanAttributeField.INPUT_TOKENS,
+        SpanAttributeField.OUTPUT_TOKENS,
+        SpanAttributeField.CACHED_TOKENS,
+        SpanAttributeField.TOTAL_TOKENS,
+        SpanAttributeField.PROMPT_CACHE_WRITE_TOKENS,
+        SpanAttributeField.PROMPT_AUDIO_TOKENS,
+        SpanAttributeField.COMPLETION_REASONING_TOKENS,
+        SpanAttributeField.COMPLETION_AUDIO_TOKENS,
+        SpanAttributeField.COST_TOTAL_USD,
+        SpanAttributeField.COST_INPUT_USD,
+        SpanAttributeField.COST_OUTPUT_USD,
+    }
+)
+_RELAY_IDENTITY_FIELDS = frozenset({SpanAttributeField.MODEL, SpanAttributeField.PROVIDER})
+_STANDARD_USAGE_KEYS = {
+    key
+    for field in _RELAY_USAGE_FIELDS
+    for key in spec_for_field(field).source_keys
+    if not key.startswith("nemo_relay.")
+}
+_STANDARD_IDENTITY_KEYS = {
+    key
+    for field in _RELAY_IDENTITY_FIELDS
+    for key in spec_for_field(field).source_keys
+    if not key.startswith("nemo_relay.")
+}
 
 # Ordered by precedence. Keep direct input.value/output.value first so existing
 # OpenInference/LangChain payloads continue to win over framework-specific fallbacks.
@@ -256,8 +284,14 @@ def _span_to_domain(
         if operation is not None:
             kind = _SPAN_KIND_BY_GEN_AI_OPERATION.get(operation, SpanKind.UNKNOWN)
     if original_kind is None and "gen_ai.operation.name" not in source_attributes:
-        kind = _SPAN_KIND_BY_RELAY_SCOPE.get(source_attributes.get("nemo_relay.scope_type"), kind)
+        kind = _SPAN_KIND_BY_RELAY_SCOPE.get(_as_str(source_attributes.get("nemo_relay.scope_type")), kind)
+    standard_usage = not _STANDARD_USAGE_KEYS.isdisjoint(source_attributes)
+    standard_identity = not _STANDARD_IDENTITY_KEYS.isdisjoint(source_attributes)
     for field, value in _relay_semantic_fields(attributes, kind=kind, name=span.name).items():
+        # Do not synthesize a model/provider or usage tuple from different sources.
+        # A reported standard zero is authoritative for the entire usage group.
+        if (standard_usage and field in _RELAY_USAGE_FIELDS) or (standard_identity and field in _RELAY_IDENTITY_FIELDS):
+            continue
         if attribute_bags.get_field(field) is None:
             attribute_bags.put_field(field, value)
     status_message = _as_str(getattr(span.status, "message", None))
@@ -268,10 +302,16 @@ def _span_to_domain(
     if any(value is not None for value in scope_data.values()):
         attribute_bags.put_json("otel.scope", scope_data)
 
-    # Resource-level payloads describe the task boundary, not every child call.
-    # At that boundary use the same span-over-resource layering as semantic fields;
-    # a child's missing payload must not become a copy of the root request/answer.
-    payload_attributes = source_attributes if not parent_span_id else attributes
+    # Resolve the entire span payload before considering resource aliases. Resource
+    # payloads are a root-only fallback, never a source of inherited child data.
+    # None means missing; an explicitly recorded empty string still wins.
+    input_payload = _input_payload(attributes, events, kind=kind.value)
+    output_payload = _output_payload(attributes, events, kind=kind.value)
+    if not parent_span_id:
+        if input_payload is None:
+            input_payload = _input_payload(resource_attributes, events, kind=kind.value)
+        if output_payload is None:
+            output_payload = _output_payload(resource_attributes, events, kind=kind.value)
 
     # TODO: After the POC lands, switch non-openinference/non-gen_ai spans from UNKNOWN rows to hard drops.
     span_domain = IntakeSpan(
@@ -289,8 +329,8 @@ def _span_to_domain(
         attributes_string=attribute_bags.string,
         attributes_number=attribute_bags.number,
         attributes_bool=attribute_bags.boolean,
-        input=_input_payload(payload_attributes, events, kind=kind.value) or "",
-        output=_output_payload(payload_attributes, events, kind=kind.value) or "",
+        input=input_payload if input_payload is not None else "",
+        output=output_payload if output_payload is not None else "",
         event_ts=ingested_at,
     )
     return span_domain
@@ -378,6 +418,11 @@ def _relay_payload(attributes: dict[str, Any], *, direction: str, kind: str) -> 
             messages = _relay_messages(content.get("messages"))
             if messages is not None:
                 return json_dumps_preserve({**content, "messages": messages})
+    # Exact scalar text is recorded text, not a JSON projection to rewrite.
+    # Only the LLM message normalization above may replace its representation.
+    original = attributes.get(prefix)
+    if isinstance(original, str):
+        return original
     return value if isinstance(value, str) else json_dumps_preserve(value)
 
 
@@ -391,6 +436,9 @@ def _relay_semantic_fields(attributes: dict[str, Any], *, kind: SpanKind, name: 
         fields[SpanAttributeField.TOOL_NAME] = name
     if scope != "llm" or kind is not SpanKind.LLM:
         return fields
+    native_model = attributes.get("nemo_relay.model_name")
+    if isinstance(native_model, str) and native_model:
+        fields[SpanAttributeField.MODEL] = native_model
     output = _relay_value(attributes, "nemo_relay.end.output")
     if not isinstance(output, dict):
         return fields
@@ -404,13 +452,16 @@ def _relay_semantic_fields(attributes: dict[str, Any], *, kind: SpanKind, name: 
     message = next((item for item in reversed(messages) if item.get("role") == "assistant"), messages[-1])
     metadata = message.get("response_metadata")
     if isinstance(metadata, dict):
-        fields[SpanAttributeField.MODEL] = next(
-            (
-                metadata[key]
-                for key in ("model_name", "model", "model_id")
-                if isinstance(metadata.get(key), str) and metadata[key]
+        fields.setdefault(
+            SpanAttributeField.MODEL,
+            next(
+                (
+                    metadata[key]
+                    for key in ("model_name", "model", "model_id")
+                    if isinstance(metadata.get(key), str) and metadata[key]
+                ),
+                None,
             ),
-            None,
         )
         provider = metadata.get("model_provider")
         if isinstance(provider, str) and provider:

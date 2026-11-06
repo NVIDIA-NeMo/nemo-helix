@@ -1,17 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Native full capture mapping, not a semantic-export reconfiguration.
-
-fixtures/relay_full_0_9_3.json is an actual OTLP/HTTP capture from the installed
-nemo-relay==0.9.3 wheel at fixture capture time, using OpenTelemetryConfig('full')
-and a local HTTP collector. No model/provider API was called. It records nested
-scope.push agents, llm.execute with model_response_to_json(ModelResponse(...)),
-and typed.tool_execute success/failure. IDs, timestamps and raw attributes are
-unaltered. Export layout verified against NVIDIA/NeMo-Relay tag 0.9.3:
-crates/core/src/observability/{otel.rs,mod.rs} and
-python/nemo_relay/integrations/langchain/_serialization.py.
-"""
+"""Native full-capture mapping; see fixtures/README.md for provenance and reproduction."""
 
 import json
 from datetime import datetime, timezone
@@ -166,7 +156,7 @@ def test_existing_native_full_capture():
             "output": "",
             "identity_and_error": {
                 "gen_ai.tool.name": "broken",
-                "exception.type": "internal_error",
+                "exception.type": "ValueError",
                 "exception.message": "internal error: ValueError: recorded failure",
             },
             "usage": {},
@@ -286,6 +276,47 @@ def test_malformed_native_response_stays_raw_without_guessing(payload):
     assert domain.output
 
 
+@pytest.mark.parametrize("standard", [{"gen_ai.usage.input_tokens": 0}, {"llm.cost.total": 0}])
+def test_any_standard_usage_suppresses_the_entire_native_usage_group(standard):
+    native = _response(
+        {
+            "usage_metadata": {
+                "input_tokens": 9,
+                "output_tokens": 5,
+                "total_tokens": 14,
+                "input_token_details": {"cache_read": 2},
+                "output_token_details": {"reasoning": 1},
+            }
+        }
+    )
+    domain = _domain(_span({"nemo_relay.scope_type": "llm", **native, **standard}))
+    expected = {"llm.token_count.prompt": 0} if "gen_ai.usage.input_tokens" in standard else {"cost.total": 0}
+    assert domain.attributes_number == expected
+    assert RESPONSE_KEY in domain.attributes_string
+
+
+@pytest.mark.parametrize(
+    "standard", [{"gen_ai.request.model": "standard-model"}, {"gen_ai.provider.name": "standard-provider"}]
+)
+def test_standard_model_or_provider_suppresses_native_identity_as_a_group(standard):
+    domain = _domain(
+        _span(
+            {
+                "nemo_relay.scope_type": "llm",
+                "nemo_relay.model_name": "native-model",
+                **standard,
+                **_response(
+                    {"response_metadata": {"model_name": "response-model", "model_provider": "native-provider"}}
+                ),
+            }
+        )
+    )
+    assert domain.attributes_string.get("gen_ai.request.model") == standard.get("gen_ai.request.model")
+    assert domain.attributes_string.get("gen_ai.system") == standard.get("gen_ai.provider.name")
+    assert domain.attributes_string["nemo_relay.model_name"] == "native-model"
+    assert RESPONSE_KEY in domain.attributes_string
+
+
 def test_top_level_payload_projection_does_not_split_dotted_user_keys():
     domain = _domain(
         _span(
@@ -302,7 +333,7 @@ def test_top_level_payload_projection_does_not_split_dotted_user_keys():
     assert domain.output == "false"
 
 
-def test_resource_root_payloads_win_over_native_fallback_but_not_explicit_span_payloads():
+def test_root_span_payload_layer_wins_over_resource_aliases():
     attrs = {
         "nemo_relay.scope_type": "agent",
         "nemo_relay.start.input": "native request",
@@ -310,11 +341,22 @@ def test_resource_root_payloads_win_over_native_fallback_but_not_explicit_span_p
     }
     resource = {"input.value": "resource request", "output.value": "resource answer"}
     domain = _domain(_span(attrs), resource)
-    assert domain.input == "resource request"
-    assert domain.output == "resource answer"
+    assert domain.input == "native request"
+    assert domain.output == "native answer"
     domain = _domain(_span({**attrs, "input.value": "span request", "output.value": ""}), resource)
     assert domain.input == "span request"
     assert domain.output == ""
+
+
+def test_non_relay_root_uses_its_own_gen_ai_payload_before_resource_input_value():
+    resource = {"input.value": "resource request", "output.value": "resource answer"}
+    attrs = {"gen_ai.input.messages": "recorded request", "gen_ai.output.messages": "recorded answer"}
+    domain = _domain(_span(attrs), resource)
+    assert (domain.input, domain.output) == ("recorded request", "recorded answer")
+    empty = _domain(_span({"input.value": "", "output.value": ""}), resource)
+    assert (empty.input, empty.output) == ("", "")
+    missing = _domain(_span({}), resource)
+    assert (missing.input, missing.output) == ("resource request", "resource answer")
 
 
 def test_root_resource_payloads_do_not_leak_into_nested_calls():
@@ -377,6 +419,36 @@ def test_native_usage_invalid_or_missing_is_not_zero(value):
     )
     assert not domain.attributes_number
     assert "gen_ai.system" not in domain.attributes_string
+
+
+@pytest.mark.parametrize("exception", [None, "ExplicitError"])
+def test_non_relay_error_type_remains_raw_and_distinct(exception):
+    attrs = {"error.type": "producer classification"}
+    if exception is not None:
+        attrs["exception.type"] = exception
+    domain = _domain(_span(attrs))
+    assert domain.attributes_string["error.type"] == "producer classification"
+    assert domain.attributes_string.get("exception.type") == exception
+
+
+@pytest.mark.parametrize("shape", ["array", "kvlist"])
+def test_malformed_native_scope_type_does_not_reject_the_span(shape):
+    span = _span({})
+    attr = span.attributes.add(key="nemo_relay.scope_type")
+    if shape == "array":
+        attr.value.array_value.values.add(string_value="llm")
+    else:
+        attr.value.kvlist_value.values.add(key="scope").value.string_value = "llm"
+    assert _domain(span).kind is SpanKind.UNKNOWN
+
+
+@pytest.mark.parametrize("scope", ["agent", "tool", "llm"])
+@pytest.mark.parametrize("direction", ["input", "output"])
+@pytest.mark.parametrize("text", ["[1, 2]", '{ "a": 1, "a": 2 }', '{ "overflow": 1e400 }'])
+def test_exact_native_scalar_text_is_not_rewritten_as_json(scope, direction, text):
+    prefix = "nemo_relay.start.input" if direction == "input" else "nemo_relay.end.output"
+    domain = _domain(_span({"nemo_relay.scope_type": scope, prefix: text}))
+    assert getattr(domain, direction) == text
 
 
 def test_native_error_aliases_and_standard_error_precedence():

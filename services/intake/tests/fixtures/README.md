@@ -30,7 +30,10 @@ uv run --no-project services/intake/tests/fixtures/generate_relay_full_capture.p
 The companion script is the retained capture scenario adapted into a standalone,
 version-pinned script (Python 3.13, Relay 0.9.3 and the original LangChain/protobuf
 versions). It uses a separate uv script environment so the release workspace's
-newer Relay does not silently change this compatibility fixture. It requires
+newer Relay does not silently change this compatibility fixture. At review time the
+workspace lock pins Relay 0.11.0, whereas this generator deliberately pins 0.9.3.
+Testing regeneration with 0.11.0 or a future main dependency should produce a new
+versioned capture; it does not establish that the two exporter contracts match. It requires
 permission to bind a loopback socket. It is a manual fixture-maintenance tool,
 not a provider-dependent test-suite prerequisite.
 
