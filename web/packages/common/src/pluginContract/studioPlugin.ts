@@ -61,8 +61,13 @@ const readVersion = (root: string, pkg: string): string | undefined => {
  * specifiers, fails the build when a singleton would be bundled, and emits
  * `plugin.manifest.json` next to the bundle.
  */
-export const studioPlugin = ({ root = process.cwd() }: StudioPluginOptions = {}): Plugin => ({
+export const studioPlugin = ({ root = process.cwd() }: StudioPluginOptions = {}): Plugin & {
+  enforce: 'pre';
+} => ({
   name: 'nemo-studio-plugin',
+  // Vite-only (rolldown ignores it): must run before Vite's core resolver, which would otherwise
+  // resolve a contract specifier to a file in node_modules and bundle it.
+  enforce: 'pre',
 
   // Singletons are checked twice: here, deep imports are caught with an actionable importer;
   // in generateBundle, source reached by paths that bypass resolution (relative node_modules).

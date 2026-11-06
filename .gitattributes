@@ -32,6 +32,8 @@ services/core/infrastructure/models/src/models/nim_operator_types/*.py linguist-
 plugins/*/src/*/web/dist/** linguist-generated
 # Rolled-up Studio plugin surface types (pnpm --filter @nemo/common types:plugin)
 web/packages/common/plugin-types/** linguist-generated
+# Rolled-up Studio plugin build helper (pnpm --filter @nemo/common build:plugin-helper)
+web/packages/common/plugin-build/** linguist-generated
 # Generated Studio stylesheet
 web/packages/studio/src/generated/** linguist-generated
 # Generated license files

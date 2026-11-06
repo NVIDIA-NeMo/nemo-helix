@@ -1544,6 +1544,12 @@ jobs:
           pnpm --filter @nemo/common types:plugin
           # Out-of-tree plugins vendor this artifact; it must stay current.
           git diff --exit-code -- packages/common/plugin-types
+      - name: Regenerate and check plugin build helper
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          pnpm --filter @nemo/common build:plugin-helper
+          # Out-of-tree plugins vendor this artifact; it must stay current.
+          git diff --exit-code -- packages/common/plugin-build
 
   agents-mini-swe-agent-tests:
     name: Mini-SWE-Agent adapter integration tests
