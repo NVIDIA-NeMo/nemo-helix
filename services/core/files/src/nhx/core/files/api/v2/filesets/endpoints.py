@@ -42,6 +42,7 @@ from nhx.common.service.dependencies import (
     get_service_config_factory,
 )
 from nhx.core.files.api.endpoint_helpers import (
+    UPSTREAM_STORAGE_ACCESS_DETAIL,
     CacheContext,
     get_cache_status_for_files,
     get_download_file_info,
@@ -960,7 +961,8 @@ async def upload_file(
             logger.error(msg)
             raise HTTPException(status_code=HTTP_408_REQUEST_TIMEOUT, detail=msg)
         except StorageAccessError as e:
-            raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=str(e)) from e
+            logger.exception("Storage access error during upload")
+            raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail=UPSTREAM_STORAGE_ACCESS_DETAIL) from e
         except OSError as e:
             logger.exception(f"Storage error for upload at {path}")
             raise HTTPException(

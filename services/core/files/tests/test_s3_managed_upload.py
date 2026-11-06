@@ -1,6 +1,8 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+"""Exercise managed S3 transfers against a loopback endpoint using the real SDK."""
+
 import asyncio
 from types import SimpleNamespace
 
@@ -14,6 +16,7 @@ from nhx.core.files.app.backends.s3 import S3AccessError, S3ConfigError, S3Stora
 
 @pytest.fixture
 async def managed_upload(monkeypatch):
+    """Provide a local S3 endpoint with controllable retries, errors, and cancellation."""
     monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
     monkeypatch.setenv("AWS_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("AWS_RETRY_MODE", "standard")
@@ -32,6 +35,7 @@ async def managed_upload(monkeypatch):
     )
 
     async def handler(request):
+        """Record PUT/multipart requests and simulate the selected storage failures."""
         assert request.path == "/test/prefix/file"
         if state.rejection:
             status, code = state.rejection
@@ -91,6 +95,7 @@ async def managed_upload(monkeypatch):
 
 
 async def chunks(data):
+    """Yield request-sized fragments interleaved with empty chunks."""
     for start in range(0, len(data), 3 * 1024**2):
         yield b""
         yield data[start : start + 3 * 1024**2]
@@ -98,6 +103,7 @@ async def chunks(data):
 
 @pytest.mark.parametrize("size", [0, 7, 17 * 1024**2])
 async def test_managed_transfer_retains_bytes(managed_upload, size):
+    """Empty, small, and multipart uploads preserve bytes and explicit credentials."""
     impl, state = managed_upload
     data = (b"test-data" * (size // 9 + 1))[:size]
     result = await impl.upload("file", chunks(data), size)
@@ -107,6 +113,7 @@ async def test_managed_transfer_retains_bytes(managed_upload, size):
 
 @pytest.mark.parametrize("failures", [1, 2])
 async def test_managed_retries_and_failed_part_abort(managed_upload, monkeypatch, failures):
+    """Retry transient part failures and abort after retry exhaustion using SDK credentials."""
     impl, state = managed_upload
     impl.config.use_sdk_auth = True
     monkeypatch.setenv("AWS_ACCESS_KEY_ID", "ambient")
@@ -129,6 +136,7 @@ async def test_managed_retries_and_failed_part_abort(managed_upload, monkeypatch
     [(404, "NoSuchBucket", S3ConfigError), (403, "AccessDenied", S3AccessError), (400, "ExpiredToken", S3AccessError)],
 )
 async def test_storage_rejection_preserves_error_kind(managed_upload, status, code, error):
+    """Retain storage error classifications when the backend rejects an upload."""
     impl, state = managed_upload
     state.rejection = status, code
     with pytest.raises(error):
@@ -138,6 +146,7 @@ async def test_storage_rejection_preserves_error_kind(managed_upload, status, co
 
 @pytest.mark.parametrize("declared", [2, 5])
 async def test_mismatched_length_fails_before_object_is_saved(managed_upload, declared):
+    """Reject both truncated and oversized bodies without publishing an object."""
     impl, state = managed_upload
     with pytest.raises(ValueError, match="Content-Length"):
         await impl.upload("file", chunks(b"abc"), declared)
@@ -145,9 +154,11 @@ async def test_mismatched_length_fails_before_object_is_saved(managed_upload, de
 
 
 async def test_source_error_aborts_partial_upload(managed_upload):
+    """A failing request stream aborts an already-started multipart transfer."""
     impl, state = managed_upload
 
     async def failed_source():
+        """Fail after supplying enough data to initiate a multipart upload."""
         yield b"x" * (8 * 1024**2)
         raise OSError("source failed")
 
@@ -158,10 +169,12 @@ async def test_source_error_aborts_partial_upload(managed_upload):
 
 @pytest.mark.parametrize("raw_cancel", [False, True])
 async def test_cancelled_source_aborts(managed_upload, raw_cancel):
+    """Both task and task-group cancellation abort a transfer waiting on its source."""
     impl, state = managed_upload
     waiting, release = anyio.Event(), anyio.Event()
 
     async def source():
+        """Pause the request stream after multipart transfer initiation."""
         yield b"x" * (8 * 1024**2)
         waiting.set()
         await release.wait()
@@ -190,6 +203,7 @@ async def test_cancelled_source_aborts(managed_upload, raw_cancel):
 
 
 async def test_network_cancellation_waits_for_request_then_aborts(managed_upload):
+    """Cancellation during a part request aborts once synchronous network I/O returns."""
     impl, state = managed_upload
     state.block_part = True
     data = b"x" * (17 * 1024**2)
