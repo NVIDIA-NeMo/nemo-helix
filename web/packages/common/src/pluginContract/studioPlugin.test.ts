@@ -153,4 +153,51 @@ describe('studioPlugin', () => {
       )
     ).toEqual(['PLUGIN_CONTRACT_UNSUPPORTED']);
   });
+
+  it('detects a singleton bundled through a pnpm symlink layout', async () => {
+    writeFixture(`import x from '../node_modules/react-router/index.js';\nconsole.log(x);\n`);
+    const store = 'node_modules/.pnpm/react-router@8.3.0/node_modules/react-router';
+    write(`${store}/index.js`, `export default 'react-router';\n`);
+    fs.rmSync(path.join(root, 'node_modules/react-router'), { recursive: true });
+    fs.symlinkSync(
+      path.relative(path.join(root, 'node_modules'), path.join(root, store)),
+      path.join(root, 'node_modules/react-router')
+    );
+    const message = await buildError();
+
+    expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+    expect(message).toContain('react-router');
+    expect(fs.existsSync(manifestPath()), 'no manifest after failed build').toBe(false);
+  });
+
+  it('detects a scoped singleton bundled by relative import', async () => {
+    writeFixture(
+      `import x from '../node_modules/@tanstack/react-query/index.js';\nconsole.log(x);\n`
+    );
+    const message = await buildError();
+
+    expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+    expect(message).toContain('@tanstack/react-query');
+  });
+
+  it('does not flag packages whose names merely start with a singleton name', async () => {
+    writeFixture(
+      `import a from '../node_modules/react-dom-foo/index.js';\nimport b from '../node_modules/react-router-dom/index.js';\nconsole.log(a, b);\n`
+    );
+    installPackage('react-dom-foo', '1.0.0');
+    installPackage('react-router-dom', '1.0.0');
+    await runBuild();
+
+    const { specifiers } = JSON.parse(fs.readFileSync(manifestPath(), 'utf8'));
+    expect(specifiers).not.toContain('react-dom-foo');
+    expect(specifiers).not.toContain('react-router-dom');
+  });
+
+  it('does not identity-check provided packages bundled by relative import', async () => {
+    writeFixture(`import x from '../node_modules/@nemo/common/index.js';\nconsole.log(x);\n`);
+    installPackage('@nemo/common', '1.0.0');
+    await runBuild();
+
+    expect(fs.existsSync(manifestPath()), 'manifest emitted').toBe(true);
+  });
 });
