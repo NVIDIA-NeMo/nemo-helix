@@ -17,6 +17,7 @@ from collections.abc import Awaitable
 from typing import cast
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from nemo_agents_plugin.api.v2._errors import LIST_REQUEST_ERRORS, LOOKUP_REQUEST_ERRORS
 from nemo_agents_plugin.api.v2._perms import SessionPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.api.v2.session_access import get_owned_session, session_not_found
@@ -124,6 +125,8 @@ async def list_sessions(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except LIST_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list sessions in workspace '%s'", workspace)
         raise HTTPException(status_code=500, detail="Failed to list sessions.") from exc
@@ -279,6 +282,8 @@ async def _get_deployment_for_session(
         )
     except NemoEntityNotFoundError as exc:
         raise _deployment_not_found(workspace, deployment_id) from exc
+    except LOOKUP_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to look up deployment ID '%s'", deployment_id)
         raise HTTPException(status_code=500, detail="Failed to look up deployment.") from exc

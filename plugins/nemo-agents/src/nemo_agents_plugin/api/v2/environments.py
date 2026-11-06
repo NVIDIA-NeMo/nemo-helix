@@ -19,6 +19,7 @@ import logging
 from typing import TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_agents_plugin.api.v2._errors import LIST_REQUEST_ERRORS
 from nemo_agents_plugin.api.v2._perms import ComputeSpecPerms, EnvironmentPerms, EnvironmentSpecPerms
 from nemo_agents_plugin.api.v2.dependencies import get_entity_client
 from nemo_agents_plugin.authz import scope
@@ -320,6 +321,8 @@ async def _list_entities(
             sort=sort,
             filter_obj=filter_dict or None,
         )
+    except LIST_REQUEST_ERRORS:
+        raise
     except Exception as exc:
         logger.exception("Failed to list agent %s in workspace '%s'", kind, workspace)
         raise HTTPException(status_code=500, detail=f"Failed to list agent {kind}.") from exc
