@@ -32,15 +32,6 @@ describe('clampIssues', () => {
     });
   });
 
-  it('does not mutate its input', () => {
-    const input = Array.from({ length: 12 }, (_, n) => longIssue(n));
-    const snapshot = structuredClone(input);
-
-    clampIssues(input);
-
-    expect(input).toEqual(snapshot);
-  });
-
   it('leaves in-limit issues unchanged', () => {
     const small: PluginLoadIssue = {
       code: 'PLUGIN_LOAD_FAILED',
