@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 import {
   CHAT_INFERENCE_PARAM_METADATA,
   chatParamMetadataWithMaxTokens,
@@ -18,6 +19,14 @@ describe('mergeChatParams', () => {
   it('keeps the previous value for a param the edit leaves unset', () => {
     expect(
       mergeChatParams({ temperature: 0.7, max_tokens: 512 }, { temperature: undefined })
+    ).toEqual({ temperature: 0.7, max_tokens: 512 });
+  });
+
+  it('keeps the previous value over a null', () => {
+    expect(
+      mergeChatParams({ temperature: 0.7, max_tokens: 512 }, {
+        temperature: null,
+      } as unknown as Partial<InferenceParams>)
     ).toEqual({ temperature: 0.7, max_tokens: 512 });
   });
 });
