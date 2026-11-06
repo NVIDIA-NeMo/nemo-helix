@@ -813,8 +813,9 @@ class JobDispatcher:
                 if current_record.failed_creation:
                     current_record.targets = targets
                     current_record.failed_creation = False
-                current_record.fileset_name = fileset_name
-                if record.fileset_id is not None:
+                # A persisted allocation receipt outlives mutable Job output fields.
+                if current_record.fileset_id is None:
+                    current_record.fileset_name = fileset_name or current_record.fileset_name
                     current_record.fileset_id = record.fileset_id
                 try:
                     await self.system_store.update(current_record)
@@ -1160,7 +1161,8 @@ class JobDispatcher:
             )
         # Older schedulers must also be unable to see an unpublished first
         # step. Apply this before pagination so counts and page boundaries agree.
-        released_filter = {"$not": {"data.status_details." + JOB_CREATION_PENDING_KEY: True}}
+        pending_field = "data.status_details." + JOB_CREATION_PENDING_KEY
+        released_filter = {"$or": [{pending_field: False}, {pending_field: None}]}
         filter_str = json.dumps({"$and": [json.loads(filter_str), released_filter]} if filter_str else released_filter)
         sort_str = sort.value
 

@@ -452,7 +452,7 @@ class JobReconciler(HeartbeatMixin, Controller):
     def _reclaim_fileset(self, reclaim: HelixJobStorageReclaim) -> HelixJobStorageReclaim | None:
         """Remove owned artifacts only after the Job is gone; retain failures."""
         fileset_name = reclaim.fileset_name
-        if fileset_name is None:
+        if fileset_name is None and reclaim.fileset_id is None:
             return reclaim
         try:
             self._system_entities.get_by_id(HelixJob, reclaim.job_id)
@@ -461,11 +461,14 @@ class JobReconciler(HeartbeatMixin, Controller):
         else:
             return None
         try:
-            fileset = (
-                self._files.get_fileset_by_id(fileset_id=reclaim.fileset_id, workspace=reclaim.job_workspace)
-                if reclaim.fileset_id is not None
-                else self._files.get_fileset(name=fileset_name, workspace=reclaim.job_workspace)
-            ).data()
+            if reclaim.fileset_id is not None:
+                fileset = self._files.get_fileset_by_id(
+                    fileset_id=reclaim.fileset_id, workspace=reclaim.job_workspace
+                ).data()
+            elif fileset_name is not None:
+                fileset = self._files.get_fileset(name=fileset_name, workspace=reclaim.job_workspace).data()
+            else:
+                return reclaim
         except ClientNotFoundError:
             return reclaim
         if reclaim.fileset_id is None:

@@ -4,10 +4,12 @@
 """Jobs creation cleanup through actual Entities, Files and SQLite boundaries."""
 
 import asyncio
+import os
 import threading
 from collections.abc import Iterator
 from typing import TypeVar
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -20,6 +22,7 @@ from nemo_helix_plugin.files.types import CreateFilesetRequest, UpdateFilesetReq
 from nemo_helix_plugin.jobs.constants import PERSISTENT_JOB_STORAGE_PATH_ENVVAR
 from nemo_helix_plugin.secrets.client import AsyncSecretsClient
 from nhx.common.auth.models import Principal
+from nhx.common.config.base import DatabaseConfig
 from nhx.common.entities import (
     DEFAULT_WORKSPACE,
     SYSTEM_WORKSPACE,
@@ -29,6 +32,8 @@ from nhx.common.entities import (
 )
 from nhx.common.entities.client import EntityBase
 from nhx.common.observability import MARK_INTERNAL_REQUEST_HEADERS
+from nhx.core.entities.config import EntitiesConfig
+from nhx.core.entities.service import EntitiesService
 from nhx.core.files.app.backends.local import LocalStorageImpl
 from nhx.core.files.service import FilesService
 from nhx.core.jobs.api.v2.jobs.schemas import CreateHelixJobRequest, HelixJobSortField, HelixJobStepsListFilter
@@ -39,6 +44,8 @@ from nhx.core.jobs.controllers.backends.registry import BackendRegistry
 from nhx.core.jobs.controllers.reconciler import JobReconciler
 from nhx.core.jobs.entities import HelixJob, HelixJobAttempt, HelixJobStep, HelixJobStorageReclaim
 from nhx.testing.client import ClientContext, create_test_client
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 
 pytestmark = pytest.mark.integration
 EntityT = TypeVar("EntityT", bound=EntityBase)
@@ -781,3 +788,134 @@ async def test_cleanup_receipt_survives_editable_owner_metadata(
     with pytest.raises(ClientNotFoundError):
         await dispatcher.files.get_fileset_by_id(fileset_id=owner.fileset_id, workspace=DEFAULT_WORKSPACE)
     assert not (await dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)).data
+
+
+@pytest.fixture(params=["sqlite", "postgresql"])
+def polling_platform(request: pytest.FixtureRequest) -> Iterator[ClientContext]:
+    """Use a fresh database per SQL dialect without adding infrastructure to unit tests."""
+    if request.param == "sqlite":
+        with create_test_client(FilesService, client_type=ClientContext, projects=["default/test-project"]) as context:
+            yield context
+        return
+    database_url = os.environ.get("P123_TEST_POSTGRES_URL")
+    if not database_url:
+        pytest.skip("Set P123_TEST_POSTGRES_URL for the isolated PostgreSQL polling regression")
+    admin_url = make_url(database_url).set(drivername="postgresql")
+    database = f"step_polling_{uuid4().hex}"
+    engine = create_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql(f'CREATE DATABASE "{database}"')
+        isolated_url = admin_url.set(database=database).render_as_string(hide_password=False)
+        config = EntitiesConfig(database_config=DatabaseConfig(url=isolated_url))
+        with create_test_client(
+            FilesService,
+            client_type=ClientContext,
+            projects=["default/test-project"],
+            service_configs={EntitiesService: config},
+        ) as context:
+            yield context
+    finally:
+        with engine.connect() as connection:
+            connection.exec_driver_sql(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)')
+        engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("details", "expected_count"),
+    [
+        ({}, 1),
+        ({JOB_CREATION_PENDING_KEY: None}, 1),
+        ({JOB_CREATION_PENDING_KEY: False}, 1),
+        ({JOB_CREATION_PENDING_KEY: True}, 0),
+    ],
+)
+async def test_step_polling_includes_released_and_legacy_markers(
+    polling_platform: ClientContext,
+    sample_platform_job_request: CreateHelixJobRequest,
+    details: dict[str, bool | None],
+    expected_count: int,
+) -> None:
+    """Poll released, pending and legacy markers through actual database filters."""
+    dispatcher = dispatcher_for(polling_platform)
+    created = await dispatcher.create_job(sample_platform_job_request, DEFAULT_WORKSPACE)
+    steps = (
+        await dispatcher.store.list(
+            HelixJobStep, workspace=DEFAULT_WORKSPACE, filter_obj={"attempt_id": created.attempt_id}
+        )
+    ).data
+    assert len(steps) == 1
+    step = steps[0]
+    step.status_details = details
+    await dispatcher.store.update(step)
+    visible, total = await dispatcher.list_steps(
+        filter=HelixJobStepsListFilter(),
+        sort=HelixJobSortField.CREATED_AT_ASC,
+        limit=1,
+        offset=0,
+        workspace=DEFAULT_WORKSPACE,
+    )
+    assert len(visible) == total == expected_count
+    if visible:
+        assert visible[0].id == step.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_receipt_name", [False, True])
+async def test_delete_retry_keeps_queued_identity_after_job_output_changes(
+    cleanup_platform: ClientContext,
+    sample_platform_job_request: CreateHelixJobRequest,
+    missing_receipt_name: bool,
+) -> None:
+    """Retain queued allocation authority through edited outputs and Files retries."""
+    context = cleanup_platform
+    dispatcher = dispatcher_for(context)
+    original = sample_platform_job_request.platform_spec
+    step = original.steps[0].model_copy(
+        update={"environment": [HelixJobEnvironmentVariable(name=PERSISTENT_JOB_STORAGE_PATH_ENVVAR, value="/storage")]}
+    )
+    request = sample_platform_job_request.model_copy(
+        update={"platform_spec": original.model_copy(update={"steps": [step]})}
+    )
+    created = await dispatcher.create_job(request, DEFAULT_WORKSPACE)
+    await dispatcher.cancel_job(created.id, DEFAULT_WORKSPACE)
+    owner = await dispatcher.store.get_by_id(HelixJob, created.id)
+    owned_fileset_id = owner.fileset_id
+    assert owned_fileset_id is not None
+    with patch.object(dispatcher.store, "delete_by_id", side_effect=RuntimeError("record deletion interrupted")):
+        with pytest.raises(RuntimeError, match="record deletion interrupted"):
+            await dispatcher.delete_job(created.id, DEFAULT_WORKSPACE)
+    caller_fileset = (
+        await dispatcher.files.create_fileset(
+            workspace=DEFAULT_WORKSPACE, body=CreateFilesetRequest(name="caller-output")
+        )
+    ).data()
+    owner.fileset = caller_fileset.name
+    owner.fileset_id = None
+    owner.output_location = caller_fileset.name
+    await dispatcher.store.update(owner)
+    await dispatcher.delete_job(created.id, DEFAULT_WORKSPACE)
+    queue = (await dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)).data
+    assert len(queue) == 1
+    receipt = queue[0]
+    assert receipt.fileset_id == owned_fileset_id
+    assert receipt.fileset_name == created.fileset
+    if missing_receipt_name:
+        receipt.fileset_name = None
+        await dispatcher.system_store.update(receipt)
+    worker = reconciler_for(context)
+    with patch.object(
+        worker._files, "delete_fileset_by_id", side_effect=NemoTransportError(httpx.ReadTimeout("retry Files"))
+    ):
+        await asyncio.to_thread(worker._reclaim_queued_storage)
+    retained = (await dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)).data
+    assert len(retained) == 1
+    assert retained[0].fileset_id == owned_fileset_id
+    await asyncio.to_thread(reconciler_for(context)._reclaim_queued_storage)
+    assert not (await dispatcher.system_store.list(HelixJobStorageReclaim, workspace=SYSTEM_WORKSPACE)).data
+    with pytest.raises(ClientNotFoundError):
+        await dispatcher.files.get_fileset_by_id(fileset_id=owned_fileset_id, workspace=DEFAULT_WORKSPACE)
+    assert (
+        await dispatcher.files.get_fileset_by_id(fileset_id=caller_fileset.id, workspace=DEFAULT_WORKSPACE)
+    ).data().id == caller_fileset.id
