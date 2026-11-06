@@ -62,15 +62,27 @@ const VENDOR_IMPORT_MAP: Record<string, string> = {
 
 // Installed version of each contract package, resolved like Node would (hoisted
 // installs live in a parent node_modules). Studio compares plugin sidecars to it.
+// A singleton without a readable version would silently disable the major-version
+// check, so that fails the build; provided packages (@nemo/common) are not installed here.
+const readInstalledVersion = (pkg: string): string | undefined => {
+  for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
+    const file = path.join(dir, 'node_modules', pkg, 'package.json');
+    if (fs.existsSync(file))
+      return (JSON.parse(fs.readFileSync(file, 'utf8')) as PackageJson).version;
+    if (path.dirname(dir) === dir) return undefined;
+  }
+};
+
 const STUDIO_SHARED_VERSIONS = Object.fromEntries(
-  [...new Set(PLUGIN_CONTRACT.entries.map((entry) => entry.package))].flatMap((pkg) => {
-    for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
-      const file = path.join(dir, 'node_modules', pkg, 'package.json');
-      if (fs.existsSync(file)) {
-        return [[pkg, (JSON.parse(fs.readFileSync(file, 'utf8')) as PackageJson).version]];
-      }
-      if (path.dirname(dir) === dir) return [];
+  PLUGIN_CONTRACT.entries.flatMap((entry) => {
+    const version = readInstalledVersion(entry.package);
+    if (version !== undefined) return [[entry.package, version]];
+    if (entry.kind === 'singleton') {
+      throw new Error(
+        `Cannot read the installed version of "${entry.package}" (plugin contract singleton)`
+      );
     }
+    return [];
   })
 );
 
