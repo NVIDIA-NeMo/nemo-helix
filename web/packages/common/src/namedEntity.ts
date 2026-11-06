@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { DEFAULT_WORKSPACE } from './models/constants';
-import { resourceRefSchema, type ResourceRef } from './types';
+import { DEFAULT_WORKSPACE } from '@nemo/common/src/models/constants';
+import { resourceRefSchema, type ResourceRef } from '@nemo/common/src/types';
 
 export interface NamedEntity {
   workspace?: string;

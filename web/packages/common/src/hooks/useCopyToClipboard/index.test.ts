@@ -1,10 +1,9 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { useCopyToClipboard } from '@nemo/common/src/hooks/useCopyToClipboard/index';
 import { suppressConsoleError } from '@nemo/testing/utils/suppress-console';
 import { renderHook, act } from '@testing-library/react';
-
-import { useCopyToClipboard } from './index';
 
 // Mock navigator.clipboard
 const mockWriteText = vi.fn();

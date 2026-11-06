@@ -9,6 +9,7 @@ import {
 } from '@assistant-ui/react';
 import { AssistantChatThread } from '@nemo/common/src/components/AssistantChat/AssistantChatThread';
 import { describeChatError } from '@nemo/common/src/components/AssistantChat/describeChatError';
+import { AssistantChat } from '@nemo/common/src/components/AssistantChat/index';
 import {
   ThemeProvider as KaizenThemeProvider,
   TooltipProvider,
@@ -19,13 +20,11 @@ import type { ChatCompletion, ChatCompletionChunk } from 'openai/resources/index
 import type { Stream } from 'openai/streaming.mjs';
 import { type ReactElement, useState } from 'react';
 
-import { AssistantChat } from './index';
-
 const mocks = vi.hoisted(() => ({
   createChatCompletion: vi.fn(),
 }));
 
-vi.mock('../../hooks/useChatCompletion', () => ({
+vi.mock('@nemo/common/src/hooks/useChatCompletion', () => ({
   useChatCompletion: () => ({
     mutateAsync: mocks.createChatCompletion,
   }),
