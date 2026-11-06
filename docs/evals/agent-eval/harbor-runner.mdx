@@ -752,6 +752,7 @@ from nemo_evals.jobs.agent_spec import HarborBuiltinAgentSource, HarborGatewayMo
 from nhx_evals_sdk.values import ModelRef
 
 target = HarborRunnerTarget(
+    closed_book=True,
     source=HarborBuiltinAgentSource(
         name="codex", model=HarborGatewayModel(ref=ModelRef("my-workspace/closed-book-model"))
     ),
