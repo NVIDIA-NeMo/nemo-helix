@@ -184,7 +184,7 @@ async def test_public_endpoints_fall_back_to_provider_discovery() -> None:
         "userinfo_endpoint": "https://discovered.example/userinfo",
     }
 
-    with patch("httpx.AsyncClient") as mock_client_class:
+    with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
         mock_client = AsyncMock()
         mock_response = MagicMock(is_success=True)
         mock_response.json.return_value = discovery_doc
@@ -262,7 +262,7 @@ class TestIdpDiscoveryCache:
     @pytest.mark.asyncio
     async def test_cache_hit_avoids_http_call(self) -> None:
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
-        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock(is_success=True)
             mock_response.json.return_value = discovery_doc
@@ -280,7 +280,7 @@ class TestIdpDiscoveryCache:
         import nhx.core.auth.api.v2.discovery.endpoints as endpoints
 
         discovery_doc = {"token_endpoint": "https://sso.example.com/token"}
-        with patch("nhx.core.auth.api.v2.discovery.endpoints.httpx.AsyncClient") as mock_client_class:
+        with patch("nhx.core.auth.api.v2.discovery.endpoints.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock(is_success=True)
             mock_response.json.return_value = discovery_doc

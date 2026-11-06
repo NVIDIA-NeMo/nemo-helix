@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from alembic import command
+from alembic.command import upgrade as alembic_upgrade
 from alembic.config import Config
 from nhx.common.entities.constants import DEFAULT_WORKSPACE, SYSTEM_WORKSPACE
 from nhx.core.entities.app.repository import get_async_engine, get_async_session_maker
@@ -91,7 +91,7 @@ def _run_alembic_upgrade(alembic_ini_path: Path, database_url: str) -> None:
     cfg = Config(str(alembic_ini_path))
     # Alembic's ConfigParser treats "%" as interpolation; escape URL-encoded characters.
     cfg.set_main_option("sqlalchemy.url", sync_url.replace("%", "%%"))
-    command.upgrade(cfg, "head")
+    alembic_upgrade(cfg, "head")
 
 
 def _engine_url_for_alembic(engine) -> str:

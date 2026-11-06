@@ -199,7 +199,7 @@ def json_overflows(monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(*args: object, **kwargs: object) -> object:
         raise RecursionError("maximum recursion depth exceeded while decoding a JSON object")
 
-    monkeypatch.setattr(otlp_module.json, "loads", _raise)
+    monkeypatch.setattr(otlp_module, "loads", _raise)
 
 
 @pytest.mark.usefixtures("json_overflows")

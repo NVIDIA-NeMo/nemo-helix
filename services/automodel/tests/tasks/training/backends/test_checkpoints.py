@@ -63,7 +63,7 @@ def patched_checkpoint_io(mocker: MockerFixture) -> dict:
         "export_onnx": mocker.patch(f"{CHECKPOINTS}.export_onnx", side_effect=_record("export")),
         "sanitize": mocker.patch(f"{CHECKPOINTS}.sanitize_encoder_hf", side_effect=_record("sanitize")),
         "restructure": mocker.patch(f"{CHECKPOINTS}._restructure_encoder_output", side_effect=_record("restructure")),
-        "copytree": mocker.patch(f"{CHECKPOINTS}.shutil.copytree"),
+        "copytree": mocker.patch(f"{CHECKPOINTS}.copytree"),
     }
 
 

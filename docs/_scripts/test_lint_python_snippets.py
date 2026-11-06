@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -286,8 +287,8 @@ def test_run_type_check_matches_temp_paths_exactly(monkeypatch: pytest.MonkeyPat
     def fake_run(
         command: list[str],
         **kwargs: object,
-    ) -> lint_python_snippets.subprocess.CompletedProcess[str]:
-        return lint_python_snippets.subprocess.CompletedProcess(
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
             command,
             returncode=1,
             stdout=f"{prefixed_temp_path}:1:5: exact match only\n",
@@ -295,7 +296,7 @@ def test_run_type_check_matches_temp_paths_exactly(monkeypatch: pytest.MonkeyPat
         )
 
     monkeypatch.setattr(lint_python_snippets, "prepare_type_check_file", fake_prepare_type_check_file)
-    monkeypatch.setattr(lint_python_snippets.subprocess, "run", fake_run)
+    monkeypatch.setattr(lint_python_snippets, "run", fake_run)
 
     results = run_type_check(
         {

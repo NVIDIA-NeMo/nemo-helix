@@ -145,7 +145,7 @@ class TestDeviceFlow:
             "interval": 5,
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -191,7 +191,7 @@ class TestDeviceFlow:
             "expires_in": 1800,
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -232,7 +232,7 @@ class TestDeviceFlow:
             certificate_authority="/tmp/context-ca.pem",
         )
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -261,7 +261,7 @@ class TestDeviceFlow:
         }
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -286,7 +286,7 @@ class TestDeviceFlow:
             # No interval provided
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
@@ -309,7 +309,7 @@ class TestDeviceFlow:
             json={"error": "invalid_client", "error_description": "Device flow is disabled"},
         )
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.return_value = response
             mock_client.__aenter__.return_value = mock_client
@@ -330,7 +330,7 @@ class TestDeviceFlow:
             "scope": "openid email",
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -361,7 +361,7 @@ class TestDeviceFlow:
             include_scope_in_token_request=False,
         )
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -382,7 +382,7 @@ class TestDeviceFlow:
 
     @pytest.mark.asyncio
     async def test_poll_for_token_handles_bodyless_unauthorized_response(self, device_flow):
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_response = MagicMock()
             mock_response.status_code = 401
@@ -413,7 +413,7 @@ class TestDeviceFlow:
             "expires_in": 3600,
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.side_effect = [pending_response, success_response]
             mock_client.__aenter__.return_value = mock_client
@@ -437,7 +437,7 @@ class TestDeviceFlow:
         error_response.status_code = 400
         error_response.json.return_value = {"error": "expired_token"}
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.return_value = error_response
             mock_client.__aenter__.return_value = mock_client
@@ -459,7 +459,7 @@ class TestDeviceFlow:
         error_response.status_code = 400
         error_response.json.return_value = {"error": "access_denied"}
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.return_value = error_response
             mock_client.__aenter__.return_value = mock_client
@@ -489,7 +489,7 @@ class TestDeviceFlow:
             "expires_in": 3600,
         }
 
-        with patch("httpx.AsyncClient") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.AsyncClient") as mock_client_class:
             mock_client = AsyncMock()
             mock_client.post.side_effect = [slow_down_response, success_response]
             mock_client.__aenter__.return_value = mock_client
@@ -587,7 +587,7 @@ class TestRefreshAccessToken:
 
 class TestPasswordGrant:
     def test_authenticate_with_password_grant_success(self):
-        with patch("httpx.Client") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -631,7 +631,7 @@ class TestPasswordGrant:
     def test_authenticate_with_password_grant_uses_nemo_scoped_ca_bundle(self, monkeypatch):
         monkeypatch.setenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, "/tmp/nemo-ca.pem")
 
-        with patch("httpx.Client") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -657,7 +657,7 @@ class TestPasswordGrant:
     def test_authenticate_with_password_grant_uses_context_certificate_authority(self, monkeypatch):
         monkeypatch.delenv(NHX_CLIENT_SSL_CERT_FILE_ENVVAR, raising=False)
 
-        with patch("httpx.Client") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.status_code = 200
@@ -682,7 +682,7 @@ class TestPasswordGrant:
             mock_client_class.assert_called_once_with(verify="/tmp/context-ca.pem")
 
     def test_authenticate_with_password_grant_failure(self):
-        with patch("httpx.Client") as mock_client_class:
+        with patch("nemo_helix_ext.auth.device_flow.Client") as mock_client_class:
             mock_client = MagicMock()
             mock_response = MagicMock()
             mock_response.status_code = 400

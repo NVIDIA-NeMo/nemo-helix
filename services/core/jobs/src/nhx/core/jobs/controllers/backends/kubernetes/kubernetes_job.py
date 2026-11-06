@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Generic, Literal, TypeVar
 
 from kubernetes import client
+from kubernetes.client import BatchV1Api, CoreV1Api, NetworkingV1Api
 from kubernetes.client.models import V1Job, V1JobStatus
 from kubernetes.client.rest import ApiException
 from nemo_helix_plugin.jobs.types import HelixJobStepWithContext
@@ -117,9 +118,9 @@ class KubernetesJobBackend(JobBackend[ProviderT, KubernetesJobExecutionProfileCo
     def init(self) -> None:
         """Initialize Kubernetes client and determine namespace."""
         load_kubernetes_config()
-        self._batch_v1 = client.BatchV1Api()
-        self._core_v1 = client.CoreV1Api()
-        self._networking_v1 = client.NetworkingV1Api()
+        self._batch_v1 = BatchV1Api()
+        self._core_v1 = CoreV1Api()
+        self._networking_v1 = NetworkingV1Api()
         self.namespace = self._execution_profile_config.namespace or get_namespace_from_environment()
         self._configmap_sweeper = StepConfigMapSweeper(
             self._core_v1,

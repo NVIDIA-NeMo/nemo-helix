@@ -11,12 +11,21 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-# Mock nemo_automodel before importing the config module
-# (nemo_automodel is only available in the training container)
-sys.modules["nemo_automodel"] = MagicMock()
-sys.modules["nemo_automodel._transformers"] = MagicMock()
-sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
+from nhx.automodel.tasks.training.backends.config import (
+    _build_base_model,
+    _build_peft,
+    _configure_chat_dataset,
+    _configure_moe_backend,
+    _configure_retrieval_dataset,
+    _configure_sft_dataset,
+    _resolve_optimizer_target,
+    compile_automodel_config,
+    estimate_steps_per_epoch,
+    resolve_compiled_recipe,
+    resolve_warmup_steps,
+)
+from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset
+from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig
 
 
 def _hf_config(**overrides: object) -> SimpleNamespace:
@@ -77,22 +86,6 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
     except ImportError:
         monkeypatch.setitem(sys.modules, "transformers", _TransformersStandIn("transformers"))
 
-
-from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
-    _build_base_model,
-    _build_peft,
-    _configure_chat_dataset,
-    _configure_moe_backend,
-    _configure_retrieval_dataset,
-    _configure_sft_dataset,
-    _resolve_optimizer_target,
-    compile_automodel_config,
-    estimate_steps_per_epoch,
-    resolve_compiled_recipe,
-    resolve_warmup_steps,
-)
-from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset  # noqa: E402
-from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
 CONFIG_MODULE = "nhx.automodel.tasks.training.backends.config"
 MODEL_REGISTRY_PATCH = f"{CONFIG_MODULE}.ModelRegistry"

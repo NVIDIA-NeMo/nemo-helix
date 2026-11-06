@@ -35,7 +35,7 @@ def test_check_runs_pytest_with_the_context(monkeypatch: pytest.MonkeyPatch) -> 
         return subprocess.CompletedProcess(args, 0)
 
     monkeypatch.setattr("check.get_context", fake_get_context)
-    monkeypatch.setattr("check.subprocess.run", fake_run)
+    monkeypatch.setattr("check.run", fake_run)
     code = run_check(parse_args(["--context", "prod", "--models", "--model", "default/m", "--keep", "--timeout", "30"]))
     assert code == 0
     assert seen["overrides"] == {"current_context": "prod"}
@@ -61,7 +61,7 @@ def test_check_propagates_the_pytest_exit_code(monkeypatch: pytest.MonkeyPatch) 
         return subprocess.CompletedProcess(args, 3)
 
     monkeypatch.setattr("check.get_context", lambda overrides=None: _context())
-    monkeypatch.setattr("check.subprocess.run", fake_run)
+    monkeypatch.setattr("check.run", fake_run)
     assert run_check(parse_args([])) == 3
 
 
@@ -72,7 +72,7 @@ def test_check_requires_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
         called.ran = True
         return subprocess.CompletedProcess([], 0)
 
-    monkeypatch.setattr("check.subprocess.run", fake_run)
-    monkeypatch.setattr("check.importlib.util.find_spec", lambda name: None)
+    monkeypatch.setattr("check.run", fake_run)
+    monkeypatch.setattr("check.find_spec", lambda name: None)
     assert run_check(parse_args([])) == 1
     assert called.ran is False

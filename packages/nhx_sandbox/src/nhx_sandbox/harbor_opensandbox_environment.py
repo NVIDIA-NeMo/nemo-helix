@@ -63,6 +63,7 @@ from harbor.environments.capabilities import EnvironmentCapabilities, Environmen
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.config import ResourceMode
 from harbor.models.trial.paths import EnvironmentPaths, TrialPaths
+from httpx import AsyncClient
 from nhx_sandbox.backends.opensandbox.termination import OpenSandboxTerminationDiagnostics
 from nhx_sandbox.compose_env import expand_env
 from nhx_sandbox.core.termination import check_termination, write_termination
@@ -666,7 +667,7 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
         """Replace *path* with *record* in one rename, so a failed write leaves the previous record whole."""
         temporary = path.with_name(f"{path.name}.tmp")
         try:
-            temporary.write_text(json.dumps(record, indent=2))
+            _write_text(temporary, json.dumps(record, indent=2))
             temporary.replace(path)
         except OSError:
             temporary.unlink(missing_ok=True)
@@ -1152,6 +1153,11 @@ class NemoOpenSandboxEnvironment(BaseEnvironment):
                 )
 
 
+def _write_text(path: Path, text: str) -> None:
+    """Write *text* to *path*; a seam so a test can fail the write without patching ``Path``."""
+    path.write_text(text)
+
+
 def _error_text(response: httpx.Response) -> str:
     """A short error message from a server response: ``code: message`` when it has the server's error shape."""
     try:
@@ -1206,7 +1212,7 @@ class _ServerClient:
             response: httpx.Response | None = None
 
             try:
-                async with httpx.AsyncClient(timeout=attempt_timeout) as client:
+                async with AsyncClient(timeout=attempt_timeout) as client:
                     response = await client.request(method, f"{self.base_url}{path}", json=body, headers=self.headers)
             except retry_errors as exc:
                 error = exc

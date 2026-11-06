@@ -30,6 +30,7 @@ from datetime import UTC, datetime
 from typing import ClassVar, cast
 
 import httpx
+from httpx import AsyncClient
 from nemo_agents_plugin.config import ControllerConfig
 from nemo_agents_plugin.entities import (
     NEMO_AGENTS_SPEC_CONFIG_FORMAT,
@@ -487,7 +488,7 @@ class AgentDeploymentController(NemoController):
     def _runtime_health_client(self, transport: EndpointTransport) -> httpx.AsyncClient:
         client = self._runtime_health_clients.get(transport)
         if client is None:
-            client = httpx.AsyncClient(
+            client = AsyncClient(
                 timeout=_RUNTIME_HEALTH_TIMEOUT_SECONDS,
                 follow_redirects=False,
                 **transport.client_kwargs(),

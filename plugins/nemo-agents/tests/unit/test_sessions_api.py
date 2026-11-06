@@ -126,7 +126,7 @@ class TestCreateSession:
     def test_create_generates_name_from_deployment(self, client: TestClient, mock_entity_client: AsyncMock) -> None:
         mock_entity_client.find_one.return_value = _make_deployment(name="fabric-dep")
         mock_entity_client.create.side_effect = _persist_session
-        with patch.object(sessions_router_module.secrets, "token_hex", return_value="a1b2c3d4"):
+        with patch.object(sessions_router_module, "token_hex", return_value="a1b2c3d4"):
             response = client.post(BASE, json={"deployment_id": "deployment-id"})
 
         assert response.status_code == 201
@@ -458,7 +458,7 @@ class TestFabricRuntimeCleanup:
             return httpx.Response(204)
 
         cleanup_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        with patch.object(session_lifecycle_module.httpx, "AsyncClient", return_value=cleanup_client):
+        with patch.object(session_lifecycle_module, "AsyncClient", return_value=cleanup_client):
             await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert len(requests) == 1
@@ -479,7 +479,7 @@ class TestFabricRuntimeCleanup:
             return httpx.Response(404)
 
         cleanup_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        with patch.object(session_lifecycle_module.httpx, "AsyncClient", return_value=cleanup_client):
+        with patch.object(session_lifecycle_module, "AsyncClient", return_value=cleanup_client):
             await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert "Fabric runtime cleanup failed" not in caplog.text
@@ -501,7 +501,7 @@ class TestFabricRuntimeCleanup:
             raise httpx.ConnectError("refused", request=request)
 
         cleanup_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        with patch.object(session_lifecycle_module.httpx, "AsyncClient", return_value=cleanup_client):
+        with patch.object(session_lifecycle_module, "AsyncClient", return_value=cleanup_client):
             await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert attempts == 1
@@ -524,7 +524,7 @@ class TestFabricRuntimeCleanup:
             return httpx.Response(503)
 
         cleanup_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        with patch.object(session_lifecycle_module.httpx, "AsyncClient", return_value=cleanup_client):
+        with patch.object(session_lifecycle_module, "AsyncClient", return_value=cleanup_client):
             await sessions_router_module._cleanup_fabric_runtime(mock_entity_client, session)
 
         assert (

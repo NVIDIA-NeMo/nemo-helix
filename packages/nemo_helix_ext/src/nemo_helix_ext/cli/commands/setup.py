@@ -10,15 +10,15 @@ Supports both interactive and non-interactive (``--auto``) modes.
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 import os
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
 from enum import Enum, StrEnum
+from importlib.util import find_spec
 from pathlib import Path
+from sys import version_info
 from time import monotonic, sleep
 from time import time as wall_time
 from typing import Annotated, Any, Literal
@@ -26,6 +26,8 @@ from urllib.parse import urlparse
 
 import httpx
 import typer
+from httpx import get as http_get
+from httpx import request as http_request
 from nemo_helix_plugin.agents.client import AgentsClient
 from nemo_helix_plugin.agents.types import CreateSampleAgentRequest, SampleAgentResponse, SampleAgentStreamEvent
 from nemo_helix_plugin.capabilities import probe_docker
@@ -88,6 +90,7 @@ from nemo_helix_ext.ui.prompts import (
 
 logger = logging.getLogger(__name__)
 console = Console(stderr=True)
+_cwd = Path.cwd
 
 # Supported Python versions (inclusive).
 _SUPPORTED_PYTHON_MIN = (3, 12)
@@ -412,7 +415,7 @@ def _check_platform_reachable(
     root = base_url.rstrip("/")
     for path in _PLATFORM_REACHABILITY_PATHS:
         try:
-            resp = httpx.get(f"{root}{path}", timeout=timeout, **tls_config)
+            resp = http_get(f"{root}{path}", timeout=timeout, **tls_config)
             if resp.status_code == 200:
                 return True
         except Exception:
@@ -553,7 +556,7 @@ def _platform_request_headers(cli_context: CLIContext) -> dict[str, str] | None:
 def _hosted_platform_without_status(base_url: str, *, timeout: float, tls_config: HttpxTLSConfig) -> bool:
     """Return True when ``/cluster-info`` confirms a hosted platform that omits ``/status``."""
     try:
-        resp = httpx.get(f"{base_url.rstrip('/')}/cluster-info", timeout=timeout, **tls_config)
+        resp = http_get(f"{base_url.rstrip('/')}/cluster-info", timeout=timeout, **tls_config)
     except Exception:
         return False
     return resp.status_code == 200
@@ -581,7 +584,7 @@ def _check_controller_health(
     root = base_url.rstrip("/")
     for attempt in range(2):
         try:
-            resp = httpx.get(f"{root}/status", timeout=timeout, **tls_config)
+            resp = http_get(f"{root}/status", timeout=timeout, **tls_config)
             if resp.status_code == 404:
                 if _hosted_platform_without_status(root, timeout=timeout, tls_config=tls_config):
                     return True, "Hosted deployment does not publish /status."
@@ -1413,7 +1416,7 @@ def _maybe_start_services(
     else:
         data_dir = _prompt_data_dir()
 
-    if importlib.util.find_spec("pyleak") is None:
+    if find_spec("pyleak") is None:
         console.print(f"{CROSS} Local services require extra dependencies that aren't installed.")
         console.print("  Install them with:")
         console.print(f"    [cyan]{escape(services_extra_install_command())}[/cyan]")
@@ -1487,7 +1490,7 @@ def _detect_coding_agents() -> list[tuple[str, str]]:
 
 def _find_project_root() -> Path:
     """Find the project root by looking for a .git directory, falling back to cwd."""
-    cwd = Path.cwd()
+    cwd = _cwd()
     current = cwd
     while current != current.parent:
         if (current / ".git").exists():
@@ -2157,7 +2160,7 @@ def _nvidia_build_chat_probe(
             "max_tokens": 1,
         }
         try:
-            chat_resp = httpx.request("POST", chat_url, headers=headers, json=body, timeout=timeout)
+            chat_resp = http_request("POST", chat_url, headers=headers, json=body, timeout=timeout)
         except httpx.TimeoutException:
             logger.debug("NVIDIA Build chat probe timed out for '%s'", model_id)
             last_warning = _inconclusive_message("provider probe timed out.")
@@ -2229,7 +2232,7 @@ def _validate_api_key(
     url = f"{probe_host.rstrip('/')}/{probe.path}"
 
     try:
-        resp = httpx.request(
+        resp = http_request(
             probe.method,
             url,
             headers=headers,
@@ -2314,7 +2317,7 @@ def _save_model_pair(cli_context: CLIContext, model_pair: ModelPair) -> None:
 def _check_ollama_running(host_url: str) -> bool:
     """Probe Ollama endpoint to check if it's running."""
     try:
-        resp = httpx.get(f"{host_url.rstrip('/')}/models", timeout=3.0)
+        resp = http_get(f"{host_url.rstrip('/')}/models", timeout=3.0)
         return resp.status_code == 200
     except Exception:
         return False
@@ -2406,12 +2409,12 @@ def _auto_setup(clients: SetupClients, workspace: str, inference_base_url: str |
 
 def _require_supported_python() -> None:
     """Exit if this interpreter is outside the supported Python versions."""
-    v = sys.version_info[:2]
+    v = version_info[:2]
     v_min, v_max = _SUPPORTED_PYTHON_MIN, _SUPPORTED_PYTHON_MAX
     if v_min <= v <= v_max:
         return
 
-    running = ".".join(str(part) for part in sys.version_info[:3])
+    running = ".".join(str(part) for part in version_info[:3])
     console.print(f"\n{CROSS} Unsupported Python {running}.")
     console.print(f"  NeMo Helix requires Python {v_min[0]}.{v_min[1]}-{v_max[0]}.{v_max[1]}.")
     console.print("  Reinstall the CLI against a supported interpreter:")

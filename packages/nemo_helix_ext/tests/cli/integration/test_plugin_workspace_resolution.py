@@ -247,6 +247,7 @@ def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Pat
     """
     del config_file
     import httpx
+    import nemo_helix_ext.client.bootstrap as client_bootstrap
     from nemo_helix_ext.cli.app import app
 
     captured: list[httpx.Request] = []
@@ -263,7 +264,7 @@ def test_hand_written_plugin_command_uses_config_file_workspace(config_file: Pat
         kwargs["transport"] = transport
         return real_client(*args, **kwargs)
 
-    with patch.object(httpx, "Client", _factory):
+    with patch.object(client_bootstrap, "Client", _factory):
         result = runner.invoke(
             app,
             ["garak", "configs", "list"],

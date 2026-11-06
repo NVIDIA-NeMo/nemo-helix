@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import asyncio
-import atexit
 import http.client
 import json
 import logging
@@ -16,6 +15,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from atexit import register as register_atexit
 from collections.abc import Callable, Coroutine, Mapping
 from types import FrameType
 from typing import Any, Protocol, TypeVar
@@ -683,7 +683,7 @@ def install_termination_cleanup(shutdown: Callable[[], object]) -> None:
     on ``atexit``.
     """
     _TERMINATION_SHUTDOWNS.append(shutdown)
-    atexit.register(shutdown)
+    register_atexit(shutdown)
 
     def _terminate(signum: int, _frame: FrameType | None) -> None:
         # Restored before the cleanup runs, not after: a second signal arriving mid-shutdown then

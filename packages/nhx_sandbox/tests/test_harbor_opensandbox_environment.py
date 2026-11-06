@@ -31,6 +31,7 @@ from harbor.environments.base import BaseEnvironment
 from harbor.models.task.config import EnvironmentConfig, NetworkMode, NetworkPolicy
 from harbor.models.trial.paths import TrialPaths
 from nhx_sandbox import egress
+from nhx_sandbox import harbor_opensandbox_driver as driver_module
 from nhx_sandbox import harbor_opensandbox_environment as environment_module
 from nhx_sandbox.core.errors import ExecInterrupted
 from nhx_sandbox.core.termination import TERMINATION_GLOB
@@ -68,7 +69,7 @@ def server(monkeypatch: pytest.MonkeyPatch) -> Server:
         )
         return real_client(transport=transport, **kwargs)
 
-    monkeypatch.setattr(environment_module.httpx, "AsyncClient", client)
+    monkeypatch.setattr(environment_module, "AsyncClient", client)
     monkeypatch.setattr(environment_module, "SERVER_RETRY_BASE_SEC", 0)
     return server
 
@@ -357,7 +358,7 @@ async def test_a_sandbox_created_later_still_ends_at_the_expiry(
     from the same settings ends when the first one does, not ``sandbox_timeout_sec`` after its own create."""
     settings: dict[str, Any] = {"sandbox_timeout_sec": 3600, "sandbox_expires_at": "2026-10-23T13:00:00+00:00"}
     now = [datetime(2026, 10, 23, 12, 30, tzinfo=UTC).timestamp()]
-    monkeypatch.setattr(time, "time", lambda: now[0])
+    monkeypatch.setattr(driver_module, "time", lambda: now[0])
 
     await _environment(tmp_path, server, NetworkMode.NO_NETWORK, **settings)._create_sandbox()
     now[0] += 20 * 60
@@ -847,12 +848,12 @@ async def test_a_failed_rewrite_leaves_the_previous_record_whole(
     sandbox_id = _sandbox(environment).id
     before = _record(tmp_path, sandbox_id)
 
-    def dies_mid_write(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
-        with open(self, "w") as file:
-            file.write(data[:10])
+    def dies_mid_write(path: Path, text: str) -> None:
+        with open(path, "w") as file:
+            file.write(text[:10])
         raise OSError("No space left on device")
 
-    monkeypatch.setattr(Path, "write_text", dies_mid_write)
+    monkeypatch.setattr(environment_module, "_write_text", dies_mid_write)
     await environment.stop(delete=True)
     monkeypatch.undo()
 
