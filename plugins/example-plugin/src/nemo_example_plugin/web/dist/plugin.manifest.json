@@ -1,0 +1,18 @@
+{
+  "contractVersion": "1.0.0",
+  "specifiers": [
+    "@nemo/common",
+    "@nvidia/foundations-react-core",
+    "react",
+    "react-router",
+    "react/jsx-runtime"
+  ],
+  "bundledPackages": [],
+  "builtAgainst": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-router": "8.3.0",
+    "@nvidia/foundations-react-core": "1.16.0",
+    "@tanstack/react-query": "5.101.4"
+  }
+}
