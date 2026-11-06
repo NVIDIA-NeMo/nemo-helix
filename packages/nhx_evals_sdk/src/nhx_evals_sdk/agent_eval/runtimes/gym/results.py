@@ -18,19 +18,20 @@ from pathlib import Path
 from typing import Any
 
 from google.protobuf.json_format import MessageToDict
-from nhx_evals_sdk.agent_eval.runtimes.fabric._common import (
-    ATIF_ARTIFACT_KIND,
-    OTLP_ARTIFACT_KIND,
-    ResultView,
-)
-from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import register_trace_evidence
 from nhx_evals_sdk.agent_eval.runtimes.gym.config import DEFAULT_REWARD_KEY, model_call_capture_dir
 from nhx_evals_sdk.agent_eval.runtimes.gym.records import (
     ENV_LOG_NAME,
+    FABRIC_RESULT_KEY,
     NG_ATTEMPT_INDEX,
     NG_ROLLOUT_INDEX,
     NG_TASK_INDEX,
     read_jsonl,
+)
+from nhx_evals_sdk.agent_eval.runtimes.trace_evidence import (
+    ATIF_ARTIFACT_KIND,
+    OTLP_ARTIFACT_KIND,
+    declared_artifacts,
+    register_trace_evidence,
 )
 from nhx_evals_sdk.agent_eval.tasks import AgentEvalTask
 from nhx_evals_sdk.agent_eval.trials import (
@@ -303,22 +304,22 @@ def _within_run_dir(candidate: str, run_dir: Path) -> bool:
     return resolved == root or root in resolved.parents
 
 
-def _declared_fabric_trace(record: Mapping[str, Any], *, run_dir: Path) -> tuple[Path | None, Path | None]:
+def _declared_fabric_trace(
+    fabric_result: object, *, run_dir: Path, trial: Mapping[str, object]
+) -> tuple[Path | None, Path | None]:
     """``(otlp, atif)`` when the rollout declared exactly one non-empty trace inside ``run_dir``.
 
     A declared OTLP that is not that one file is rejected with a warning, so the caller keeps
     the model-call projection instead of dropping the trace silently. No declaration is not a
-    rejection.
+    rejection. ``trial`` identifies the rollout in those warnings.
     """
-    fabric_result = record.get("fabric_result")
     if not isinstance(fabric_result, Mapping):
         return None, None
-    artifacts = ResultView.from_mapping(fabric_result).artifacts
+    artifacts = declared_artifacts(fabric_result)
     declared = [artifact for artifact in artifacts if artifact.kind == OTLP_ARTIFACT_KIND]
     if not declared:
         return None, None
     contained = [artifact for artifact in declared if _within_run_dir(artifact.path, run_dir)]
-    trial = {"task_index": record.get(NG_TASK_INDEX), "rollout_index": record.get(NG_ROLLOUT_INDEX)}
     if len(contained) != 1:
         logger.warning(
             "Declared otlp trace is not a single file inside the run directory; keeping the model-call projection.",
@@ -374,7 +375,11 @@ def _rollout_evidence(
             trial_id,
             capture_dir,
         )
-    otlp, atif = _declared_fabric_trace(record, run_dir=rollouts_path.parent)
+    otlp, atif = _declared_fabric_trace(
+        record.get(FABRIC_RESULT_KEY),
+        run_dir=rollouts_path.parent,
+        trial={"task_index": record.get(NG_TASK_INDEX), "rollout_index": record.get(NG_ROLLOUT_INDEX)},
+    )
     if otlp is not None:
         register_trace_evidence(descriptors, atif=atif, otlp=otlp)
         return CandidateEvidence(descriptors=descriptors)

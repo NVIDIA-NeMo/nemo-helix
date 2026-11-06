@@ -25,14 +25,11 @@ from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_receiver import (
     OTLPReceiver,
 )
 from nhx_evals_sdk.agent_eval.runtimes.fabric.otlp_writer import (
-    OTLP_FILENAME,
     fold_exports,
     otlp_endpoint_fields,
     otlp_trace_path,
-    register_trace_evidence,
     traces_dir,
 )
-from nhx_evals_sdk.values.evidence import EVIDENCE_FORMAT_ATIF, EVIDENCE_FORMAT_OTLP, EVIDENCE_TRACE
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 
 from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import export, post, span_names
@@ -182,34 +179,6 @@ def test_signal_ready_announces_a_bound_socket(tmp_path: Path) -> None:
 
         assert (traces_dir(tmp_path) / READY_FILENAME).is_file()
         assert post(running.endpoint, export("agent run")) == 200
-
-
-def test_the_primary_trace_is_otlp_when_there_is_one_and_atif_otherwise(tmp_path: Path) -> None:
-    # ATIF needs no file on disk: Fabric declares it in the artifact manifest and the handle
-    # validates it on read.
-    atif, otlp = tmp_path / "t.atif.json", tmp_path / OTLP_FILENAME
-
-    atif_only: dict = {}
-    register_trace_evidence(atif_only, atif=atif, otlp=otlp)
-    assert atif_only[EVIDENCE_TRACE].format == EVIDENCE_FORMAT_ATIF
-
-    otlp.write_text("{}\n", encoding="utf-8")
-    both: dict = {}
-    register_trace_evidence(both, atif=atif, otlp=otlp)
-    assert both[EVIDENCE_TRACE].format == EVIDENCE_FORMAT_OTLP
-    # The format decides which view is primary, never which is reachable.
-    assert both[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"].format == EVIDENCE_FORMAT_ATIF
-    assert both[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"].format == EVIDENCE_FORMAT_OTLP
-
-
-def test_an_empty_trace_file_is_not_registered(tmp_path: Path) -> None:
-    otlp = tmp_path / OTLP_FILENAME
-    otlp.touch()
-
-    descriptors: dict = {}
-    register_trace_evidence(descriptors, atif=None, otlp=otlp)
-
-    assert descriptors == {}
 
 
 def test_the_endpoint_fields_are_the_ones_relay_needs() -> None:

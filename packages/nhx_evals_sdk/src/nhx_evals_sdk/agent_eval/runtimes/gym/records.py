@@ -24,6 +24,10 @@ NG_ROLLOUT_INDEX = "_ng_rollout_index"
 NG_ATTEMPT_INDEX = "_ng_attempt_index"
 #: Set on a record Gym routes to the failures sidecar instead of the rollouts file.
 NG_FAILURE_CLASS = "_ng_failure_class"
+#: The Fabric ``RunResult`` mapping the registered agent attaches to its rollout record (the
+#: ``fabric_result`` field of ``NeMoRegisteredAgentVerifyResponse``). It crosses a process
+#: boundary as JSON, so this name is the whole contract; a record without it ran no Fabric agent.
+FABRIC_RESULT_KEY = "fabric_result"
 #: Fields excluded from a row's content hash (runtime-injected, not task-defining).
 RUNTIME_KEYS = frozenset({NG_TASK_INDEX, NG_ROLLOUT_INDEX})
 
