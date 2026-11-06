@@ -9,7 +9,6 @@
     "react-router",
     "react/jsx-runtime"
   ],
-  "bundledPackages": [],
   "builtAgainst": {
     "react": "19.2.8",
     "react-dom": "19.2.8",

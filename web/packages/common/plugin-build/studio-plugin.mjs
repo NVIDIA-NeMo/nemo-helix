@@ -50,7 +50,7 @@ const PLUGIN_CONTRACT = {
 };
 //#endregion
 //#region src/pluginContract/remediate.ts
-const CONTRACT_DOCS = "plugins/example-plugin/web/AGENTS.md";
+const CONTRACT_DOCS = "plugins/example-plugin/web/AGENTS.md (in the nemo-helix repo)";
 const fix = (message, ...steps) => ({
 	message,
 	steps: [...steps, `Contract and shared-dependency rules: ${CONTRACT_DOCS}`]
@@ -66,6 +66,10 @@ const formatIssue = (issue, importer) => [
 	...importer ? [`Imported from: ${importer}`] : [],
 	...issue.steps.map((step, i) => `${i + 1}. ${step}`)
 ].join("\n");
+//#endregion
+//#region src/pluginContract/semver.ts
+const NUM = "(0|[1-9]\\d*)";
+new RegExp(`^[\\^~]?${NUM}\\.${NUM}\\.${NUM}(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$`);
 //#endregion
 //#region src/pluginContract/diffContract.ts
 const issue = (code, subject, fix) => ({
@@ -153,7 +157,6 @@ const studioPlugin = (options = {}) => {
 			const manifest = {
 				contractVersion: PLUGIN_CONTRACT.version,
 				specifiers: [...bare].sort(),
-				bundledPackages: [],
 				builtAgainst
 			};
 			this.emitFile({
