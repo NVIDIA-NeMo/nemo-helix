@@ -1,22 +1,51 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Inference parameter type + defaults — shared between the ParamsPopover
- * component and the route state that owns the panel params.
- *
- * Lives in its own module (not co-located with the ParamsPopover component)
- * so the component file can stay a pure component export and not trip
- * `react-refresh/only-export-components`.
- */
+import type {
+  FieldMetadata,
+  InferenceParameterField,
+} from '@nemo/common/src/components/ModelSelectV2/InferenceParameters';
+import type { InferenceParams } from '@nemo/sdk/generated/platform/schema';
 
-export interface InferenceParams {
-  temperature: number;
-  max_tokens: number;
-  [key: string]: unknown;
-}
+/** The chat runtime only puts temperature and max_tokens on the wire, so only those are offered. */
+export const CHAT_INFERENCE_PARAM_FIELDS = [
+  'temperature',
+  'max_tokens',
+] as const satisfies readonly InferenceParameterField[];
 
-export const DEFAULT_INFERENCE_PARAMS: InferenceParams = {
-  temperature: 0.7,
-  max_tokens: 512,
+type ChatParamMetadata = Record<
+  (typeof CHAT_INFERENCE_PARAM_FIELDS)[number],
+  Partial<FieldMetadata> & Pick<FieldMetadata, 'default'>
+>;
+
+/** Chat's bounds differ from the shared ones: greedy decoding (0) is allowed, tokens move by 32. */
+export const CHAT_INFERENCE_PARAM_METADATA: ChatParamMetadata = {
+  temperature: { min: 0, max: 2, step: 0.05, default: 0.7 },
+  max_tokens: { min: 32, max: 4096, step: 32, default: 512 },
 };
+
+/** The params a chat surface starts from, and resets to, given its metadata. */
+export const chatParamDefaults = (metadata: ChatParamMetadata): InferenceParams => ({
+  temperature: metadata.temperature.default,
+  max_tokens: metadata.max_tokens.default,
+});
+
+export const DEFAULT_CHAT_INFERENCE_PARAMS = chatParamDefaults(CHAT_INFERENCE_PARAM_METADATA);
+
+/** Chat's bounds for a surface that starts at its own max_tokens, so reset returns there too. */
+export const chatParamMetadataWithMaxTokens = (maxTokens: number): ChatParamMetadata => ({
+  ...CHAT_INFERENCE_PARAM_METADATA,
+  max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: maxTokens },
+});
+
+/**
+ * Apply params over the current ones, skipping any left unset (a null in a saved prompt): chat keeps
+ * sending the last value rather than dropping the param or sending null.
+ */
+export const mergeChatParams = (
+  previous: InferenceParams,
+  next: Partial<InferenceParams>
+): InferenceParams => ({
+  ...previous,
+  ...Object.fromEntries(Object.entries(next).filter(([, value]) => value != null)),
+});

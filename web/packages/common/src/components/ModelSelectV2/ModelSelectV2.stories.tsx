@@ -175,6 +175,54 @@ export const WithParams: Story = {
   render: WithParamsRender,
 };
 
+/** A caller whose request only carries some params, with its own bounds (as Studio's chat does). */
+const WithParamSubsetRender = (args: ModelSelectV2Props) => {
+  const [value, setValue] = useState<ModelSelection | null>(null);
+  const [inferenceParams, setInferenceParams] = useState<Partial<InferenceParams>>({});
+  return (
+    <ModelSelectV2
+      {...args}
+      value={value}
+      onValueChange={setValue}
+      groups={mockGroups}
+      showParams
+      paramsFields={['temperature', 'max_tokens']}
+      paramsFieldMetadata={{
+        temperature: { min: 0, max: 2, step: 0.05, default: 0.7 },
+        max_tokens: { min: 32, max: 4096, step: 32, default: 512 },
+      }}
+      inferenceParams={inferenceParams}
+      onInferenceParamsChange={setInferenceParams}
+    />
+  );
+};
+
+export const WithParamSubset: Story = {
+  render: WithParamSubsetRender,
+};
+
+/** The model is pinned (e.g. a locked chat panel) but its params stay editable. */
+const LockedModelEditableParamsRender = (args: ModelSelectV2Props) => {
+  const [inferenceParams, setInferenceParams] = useState<Partial<InferenceParams>>({});
+  return (
+    <ModelSelectV2
+      {...args}
+      value={{ model: 'nvidia/llama-3.1-8b-instruct' }}
+      onValueChange={() => {}}
+      groups={mockGroups}
+      disabled
+      showParams
+      paramsDisabled={false}
+      inferenceParams={inferenceParams}
+      onInferenceParamsChange={setInferenceParams}
+    />
+  );
+};
+
+export const LockedModelEditableParams: Story = {
+  render: LockedModelEditableParamsRender,
+};
+
 const WithAllFeaturesRender = (args: ModelSelectV2Props) => {
   const [value, setValue] = useState<ModelSelection | null>(null);
   const [inferenceParams, setInferenceParams] = useState<Partial<InferenceParams>>({});
