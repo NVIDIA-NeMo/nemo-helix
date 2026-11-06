@@ -111,21 +111,16 @@ export const getWorkGroupLabel = ({
     : summary;
 };
 
-export const FILE_PATH_KEYS = ['file_path', 'filePath', 'path', 'filename', 'file_name', 'file'];
-const FILE_CONTENT_KEYS = ['content', 'contents', 'new_content', 'text'];
-const REPLACED_TEXT_KEYS = ['old_string', 'oldString', 'old_str', 'old_text'];
-const REPLACEMENT_TEXT_KEYS = ['new_string', 'newString', 'new_str', 'new_text'];
+/** A whole-file write (`content`), or an edit with `old_string`/`new_string` or a list of `edits`. */
+export type FileChangeKind = 'write' | 'edit';
 
 export interface FileEdit {
   readonly path: string;
   /** Lines added and removed, so the step can show "+12 −3". */
   readonly additions: number;
   readonly deletions: number;
-  /** The whole file, when a tool writes it. */
+  /** The whole file, for a write. */
   readonly content?: string;
-  /** The replaced and replacement text, when a tool edits part of a file. */
-  readonly before?: string;
-  readonly after?: string;
 }
 
 const getFirstString = (args: Record<string, unknown>, keys: readonly string[]) =>
@@ -134,31 +129,25 @@ const getFirstString = (args: Record<string, unknown>, keys: readonly string[]) 
 export const countLines = (text: string | undefined): number =>
   text ? text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n').length : 0;
 
-/**
- * Any tool whose arguments carry a file path and either the file's content, a replacement
- * (`old_string`/`new_string`), or a list of such `edits` counts as a file edit.
- */
-export const getFileEdit = (args: unknown): FileEdit | undefined => {
+/** The file change a `Write`, `Edit`, or `MultiEdit` call describes, with its line counts. */
+export const getFileEdit = (kind: FileChangeKind, args: unknown): FileEdit | undefined => {
   if (!isRecord(args)) return undefined;
-  const path = getFirstString(args, FILE_PATH_KEYS)?.trim();
+  const path = getFirstString(args, ['file_path', 'path'])?.trim();
   if (!path) return undefined;
 
-  const after = getFirstString(args, REPLACEMENT_TEXT_KEYS);
-  if (after !== undefined) {
-    const before = getFirstString(args, REPLACED_TEXT_KEYS);
-    return { path, before, after, additions: countLines(after), deletions: countLines(before) };
+  if (kind === 'write') {
+    const content = getFirstString(args, ['content']);
+    return content === undefined
+      ? undefined
+      : { path, content, additions: countLines(content), deletions: 0 };
   }
 
-  const content = getFirstString(args, FILE_CONTENT_KEYS);
-  if (content !== undefined) return { path, content, additions: countLines(content), deletions: 0 };
-
-  const edits = Array.isArray(args.edits) ? args.edits.filter(isRecord) : [];
-  if (!edits.length) return undefined;
+  const edits = Array.isArray(args.edits) ? args.edits.filter(isRecord) : [args];
   return edits.reduce<FileEdit>(
     (total, edit) => ({
       ...total,
-      additions: total.additions + countLines(getFirstString(edit, REPLACEMENT_TEXT_KEYS)),
-      deletions: total.deletions + countLines(getFirstString(edit, REPLACED_TEXT_KEYS)),
+      additions: total.additions + countLines(getFirstString(edit, ['new_string'])),
+      deletions: total.deletions + countLines(getFirstString(edit, ['old_string'])),
     }),
     { path, additions: 0, deletions: 0 }
   );

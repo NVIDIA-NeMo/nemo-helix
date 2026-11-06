@@ -92,7 +92,7 @@ describe('AssistantToolCallPart', () => {
     expect(within(step).getByText('src/notes/MEMORY.md')).toBeInTheDocument();
   });
 
-  it('shows line counts and the replaced and replacement text of an edit', () => {
+  it('shows line counts and the arguments of an edit', () => {
     renderPart({
       args: { file_path: 'src/app.ts', old_string: 'a\nb', new_string: 'c' },
       toolName: 'Edit',
@@ -101,8 +101,7 @@ describe('AssistantToolCallPart', () => {
     const step = screen.getByTestId('assistant-work-file-edit');
     expect(step).toHaveTextContent('Edited file app.ts');
     expect(within(step).getByTestId('assistant-work-edit-stats')).toHaveTextContent('+1 −2');
-    expect(within(step).getByText('src/app.ts · before')).toBeInTheDocument();
-    expect(within(step).getByText('src/app.ts · after')).toBeInTheDocument();
+    expect(within(step).getByText('Arguments')).toBeInTheDocument();
   });
 
   it('shows a Bash command as a shell snippet rather than JSON', () => {
@@ -113,13 +112,14 @@ describe('AssistantToolCallPart', () => {
     expect(within(step).queryByText('Arguments')).not.toBeInTheDocument();
   });
 
-  it('renders an unknown tool with file-edit arguments as an Edited step', () => {
+  it('renders an unknown tool with file-like arguments as a plain Called step', () => {
     renderPart({
       args: { file_path: 'src/notes/MEMORY.md', content: 'Pick up milk' },
       toolName: 'save_note',
     });
 
-    expect(screen.getByTestId('assistant-work-file-edit')).toHaveTextContent('Edited MEMORY.md');
+    expect(screen.queryByTestId('assistant-work-file-edit')).not.toBeInTheDocument();
+    expect(screen.getByTestId('assistant-work-tool-call')).toHaveTextContent('Called save_note');
   });
 
   it('keeps a failed file write as a tool call so its error shows', () => {

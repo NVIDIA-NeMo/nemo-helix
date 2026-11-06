@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  FILE_PATH_KEYS,
+  type FileChangeKind,
   getFileName,
   isRecord,
 } from '@nemo/common/src/components/AssistantChat/chainOfThought/workParts';
@@ -30,7 +30,7 @@ type ToolArgs = Record<string, unknown>;
 
 /** How a tool call reads in the work group: its icon and the action it describes. */
 export interface ToolStepDefinition {
-  /** Tool names this covers. Matching ignores case, `_`, `-`, and an `mcp__<server>__` prefix. */
+  /** The exact tool names this covers, e.g. `Edit` and `MultiEdit`. */
   readonly names: readonly string[];
   readonly icon: ToolStepIcon;
   /** Action text while the call runs, e.g. "Running command". */
@@ -45,6 +45,8 @@ export interface ToolStepDefinition {
   readonly repeated?: string;
   /** Shows the arguments as something other than JSON, e.g. a Bash command as a shell snippet. */
   readonly formatArgs?: (args: ToolArgs) => ToolStepArgsView | undefined;
+  /** Renders as a file change with line counts: a whole-file write, or an edit with replacements. */
+  readonly fileChange?: FileChangeKind;
 }
 
 export interface ToolStepArgsView {
@@ -61,7 +63,7 @@ const firstString =
       .find((value): value is string => typeof value === 'string' && value.trim() !== '');
 
 const fileName = (args: ToolArgs) => {
-  const path = firstString(...FILE_PATH_KEYS)(args);
+  const path = firstString('file_path', 'path')(args);
   return path && getFileName(path.trim());
 };
 
@@ -92,7 +94,7 @@ const commandSnippet = (args: ToolArgs): ToolStepArgsView | undefined => {
 
 export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
   {
-    names: ['Bash', 'Shell', 'RunCommand', 'ExecuteCommand'],
+    names: ['Bash'],
     icon: WindowTerminal,
     running: 'Running command',
     done: 'Ran command',
@@ -102,7 +104,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     formatArgs: commandSnippet,
   },
   {
-    names: ['Read', 'ReadFile'],
+    names: ['Read'],
     icon: IconDocument,
     running: 'Reading file',
     done: 'Read file',
@@ -111,22 +113,24 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subjectIsCode: true,
   },
   {
-    names: ['Write', 'WriteFile', 'CreateFile'],
+    names: ['Write'],
     icon: Pencil,
     running: 'Writing file',
     done: 'Wrote file',
     repeated: 'Wrote {count} files',
     subject: fileName,
     subjectIsCode: true,
+    fileChange: 'write',
   },
   {
-    names: ['Edit', 'MultiEdit', 'EditFile'],
+    names: ['Edit', 'MultiEdit'],
     icon: Pencil,
     running: 'Editing file',
     done: 'Edited file',
     repeated: 'Edited {count} files',
     subject: fileName,
     subjectIsCode: true,
+    fileChange: 'edit',
   },
   {
     names: ['Glob', 'FindFiles'],
@@ -138,7 +142,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subjectIsCode: true,
   },
   {
-    names: ['Grep', 'SearchText'],
+    names: ['Grep'],
     icon: MagnifyingGlass,
     running: 'Searching text',
     done: 'Searched text',
@@ -147,7 +151,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subjectIsCode: true,
   },
   {
-    names: ['LS', 'ListDirectory', 'ListDir', 'ListFiles'],
+    names: ['LS'],
     icon: FolderOpen,
     running: 'Listing directory',
     done: 'Listed directory',
@@ -156,7 +160,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subjectIsCode: true,
   },
   {
-    names: ['WebSearch', 'SearchWeb'],
+    names: ['WebSearch'],
     icon: World,
     running: 'Searching web',
     done: 'Searched web',
@@ -164,7 +168,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subject: firstString('query', 'q'),
   },
   {
-    names: ['WebFetch', 'FetchUrl'],
+    names: ['WebFetch'],
     icon: Link,
     running: 'Fetching URL',
     done: 'Fetched URL',
@@ -197,7 +201,7 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
     subject: firstString('description', 'task', 'subject'),
   },
   {
-    names: ['AskUserQuestion', 'AskUser'],
+    names: ['AskUserQuestion'],
     icon: HelpCircle,
     running: 'Asking user',
     done: 'Asked user',
@@ -223,41 +227,22 @@ export const TOOL_STEP_DEFINITIONS: readonly ToolStepDefinition[] = [
   },
 ];
 
-/** Steps for tools with file-edit arguments but no definition, e.g. a custom `save_note` tool. */
-export const FILE_EDIT_STEP: ToolStepDefinition = {
-  names: [],
-  icon: Pencil,
-  running: 'Editing',
-  done: 'Edited',
-  repeated: 'Edited {count} files',
-  subject: fileName,
-  subjectIsCode: true,
-};
-
-/** Unknown tools show their name, plus whichever common argument they have as the detail. */
 export const getFallbackToolStep = (toolName: string): ToolStepDefinition => ({
   names: [toolName],
   icon: WindowCode,
   running: `Calling ${toolName}`,
   done: `Called ${toolName}`,
   repeated: `Called ${toolName} {count} times`,
-  subject: firstString('command', 'file_path', 'path', 'pattern', 'query', 'url'),
 });
-
-const normalizeToolName = (name: string) =>
-  name
-    .replace(/^mcp__.+?__/, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
 
 const DEFINITIONS_BY_NAME = new Map(
   TOOL_STEP_DEFINITIONS.flatMap((definition) =>
-    definition.names.map((name) => [normalizeToolName(name), definition] as const)
+    definition.names.map((name) => [name, definition] as const)
   )
 );
 
 export const findToolStepDefinition = (toolName: string): ToolStepDefinition | undefined =>
-  DEFINITIONS_BY_NAME.get(normalizeToolName(toolName));
+  DEFINITIONS_BY_NAME.get(toolName);
 
 interface ToolStepTitleOptions {
   readonly args: ToolArgs;

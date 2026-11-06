@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  FILE_EDIT_STEP,
   findToolStepDefinition,
   getFallbackToolStep,
   getToolStepTitleParts,
@@ -59,35 +58,19 @@ const EditStats = ({ additions, deletions }: Pick<FileEdit, 'additions' | 'delet
   </span>
 );
 
-/** The written file, the replaced and replacement text, or (for a list of edits) the arguments. */
-const FileEditContent = ({ args, edit }: { readonly args: unknown; readonly edit: FileEdit }) => {
-  const language = getFileLanguage(edit.path);
-  if (edit.content !== undefined) {
-    return <WorkCodeSnippet label={edit.path} language={language} value={edit.content} />;
-  }
-  if (edit.after !== undefined) {
-    return (
-      <Stack gap="density-md">
-        {edit.before !== undefined ? (
-          <WorkCodeSnippet
-            label={`${edit.path} · before`}
-            language={language}
-            value={edit.before}
-          />
-        ) : null}
-        <WorkCodeSnippet label={`${edit.path} · after`} language={language} value={edit.after} />
-      </Stack>
-    );
-  }
-  return <PayloadSection label="Arguments" value={args} />;
-};
+/** The written file for a write; the arguments for an edit. */
+const FileEditContent = ({ args, edit }: { readonly args: unknown; readonly edit: FileEdit }) =>
+  edit.content !== undefined ? (
+    <WorkCodeSnippet label={edit.path} language={getFileLanguage(edit.path)} value={edit.content} />
+  ) : (
+    <PayloadSection label="Arguments" value={args} />
+  );
 
 /**
  * A tool call, with the icon and action text from its `TOOL_STEP_DEFINITIONS` entry, or
  * "Called {toolName}" for tools without one. Expanding it shows the arguments and the result.
- * Successful calls whose arguments carry a file path and content show the file change instead,
- * with its line counts in the title; a failed one keeps the arguments and error so the failure
- * is visible.
+ * Successful file tools (`Write`, `Edit`, `MultiEdit`) show the file change instead, with its line
+ * counts in the title; a failed one keeps the arguments and error so the failure is visible.
  */
 export const ToolCallStep = ({
   args,
@@ -99,9 +82,8 @@ export const ToolCallStep = ({
   toolName,
 }: ToolCallStepProps) => {
   const toolArgs = isRecord(args) ? args : {};
-  const fileEdit = isError ? undefined : getFileEdit(args);
-  const step =
-    findToolStepDefinition(toolName) ?? (fileEdit ? FILE_EDIT_STEP : getFallbackToolStep(toolName));
+  const step = findToolStepDefinition(toolName) ?? getFallbackToolStep(toolName);
+  const fileEdit = !isError && step.fileChange ? getFileEdit(step.fileChange, toolArgs) : undefined;
   const { icon: Icon } = step;
   const { action, subject } = getToolStepTitleParts(step, { args: toolArgs, running });
   const hasArgs = isRecord(args) ? Object.keys(args).length > 0 : args !== undefined;

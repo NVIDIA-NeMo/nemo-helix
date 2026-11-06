@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
-  FILE_EDIT_STEP,
   findToolStepDefinition,
   getFallbackToolStep,
   getRepeatedToolStepTitle,
@@ -12,21 +11,15 @@ import {
 } from '@nemo/common/src/components/AssistantChat/chainOfThought/toolSteps';
 
 describe('findToolStepDefinition', () => {
-  it.each(['WebSearch', 'web_search', 'web-search', 'SEARCH_WEB', 'mcp__browser__web_search'])(
-    'matches %s regardless of case, separators, and MCP prefix',
-    (toolName) => {
-      expect(findToolStepDefinition(toolName)?.done).toBe('Searched web');
-    }
-  );
-
-  it('returns undefined for tools without a definition', () => {
+  it('matches exact tool names', () => {
+    expect(findToolStepDefinition('WebSearch')?.done).toBe('Searched web');
+    expect(findToolStepDefinition('MultiEdit')?.done).toBe('Edited file');
+    expect(findToolStepDefinition('web_search')).toBeUndefined();
     expect(findToolStepDefinition('get_weather')).toBeUndefined();
   });
 
   it('maps every tool name to a single definition', () => {
-    const names = TOOL_STEP_DEFINITIONS.flatMap((definition) =>
-      definition.names.map((name) => name.toLowerCase())
-    );
+    const names = TOOL_STEP_DEFINITIONS.flatMap((definition) => definition.names);
     expect(new Set(names).size).toBe(names.length);
   });
 });
@@ -57,16 +50,15 @@ describe('getToolStepTitle', () => {
     expect(
       getToolStepTitle(findToolStepDefinition('Read')!, { args: { file_path: 'a/b/README.md' } })
     ).toBe('Read file README.md');
-    expect(getToolStepTitle(FILE_EDIT_STEP, { args: { path: 'notes/MEMORY.md' } })).toBe(
-      'Edited MEMORY.md'
-    );
+    expect(
+      getToolStepTitle(findToolStepDefinition('Write')!, { args: { path: 'notes/MEMORY.md' } })
+    ).toBe('Wrote file MEMORY.md');
   });
 
-  it('falls back to the tool name for unknown tools, with a common argument as detail', () => {
+  it('falls back to the tool name for unknown tools', () => {
     const step = getFallbackToolStep('get_weather');
-    expect(getToolStepTitle(step, { args: { city: 'Paris' } })).toBe('Called get_weather');
+    expect(getToolStepTitle(step, { args: { query: 'rain' } })).toBe('Called get_weather');
     expect(getToolStepTitle(step, { args: {}, running: true })).toBe('Calling get_weather');
-    expect(getToolStepTitle(step, { args: { query: 'rain' } })).toBe('Called get_weather rain');
   });
 
   it('joins a search pattern with its path', () => {

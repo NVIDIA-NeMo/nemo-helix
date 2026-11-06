@@ -96,7 +96,7 @@ const staticMessages: readonly ThreadMessageLike[] = [
       {
         type: 'tool-call',
         toolCallId: 'call_memory',
-        toolName: 'write_file',
+        toolName: 'Write',
         args: MEMORY_EDIT,
         argsText: JSON.stringify(MEMORY_EDIT),
         result: 'ok',
@@ -230,23 +230,23 @@ export const LiveStream: Story = {
   },
 };
 
-// One call per entry in TOOL_STEP_DEFINITIONS, with names in the styles different agents use.
+// One call per entry in TOOL_STEP_DEFINITIONS.
 const KNOWN_TOOL_EXAMPLES: readonly { readonly toolName: string; readonly args: object }[] = [
   { toolName: 'Bash', args: { command: 'pnpm --filter @nemo/common test' } },
-  { toolName: 'read_file', args: { file_path: 'web/packages/common/README.md' } },
+  { toolName: 'Read', args: { file_path: 'web/packages/common/README.md' } },
   { toolName: 'Write', args: { file_path: 'notes/MEMORY.md', content: '- Pack an umbrella' } },
   { toolName: 'Edit', args: { file_path: 'src/app.ts', old_string: 'foo', new_string: 'bar' } },
   { toolName: 'Glob', args: { pattern: '**/*.stories.tsx' } },
   { toolName: 'Grep', args: { pattern: 'ToolCallStep' } },
-  { toolName: 'list_directory', args: { path: 'web/packages' } },
-  { toolName: 'web_search', args: { query: 'Paris weather tomorrow' } },
+  { toolName: 'LS', args: { path: 'web/packages' } },
+  { toolName: 'WebSearch', args: { query: 'Paris weather tomorrow' } },
   { toolName: 'WebFetch', args: { url: 'https://example.com/forecast' } },
   { toolName: 'TodoWrite', args: { todos: [{}, {}, {}] } },
   { toolName: 'TaskCreate', args: { description: 'Summarize the eval results' } },
   { toolName: 'TaskUpdate', args: { task: 'Summarize the eval results', status: 'done' } },
   { toolName: 'AskUserQuestion', args: { question: 'Which dataset should I use?' } },
   { toolName: 'ToolSearch', args: { query: 'calendar' } },
-  { toolName: 'mcp__studio__Skill', args: { skill: 'nemo-status' } },
+  { toolName: 'Skill', args: { skill: 'nemo-status' } },
 ];
 
 const GalleryLabel = ({ children }: { readonly children: string }) => (
@@ -276,8 +276,8 @@ export const ComponentGallery: Story = {
         <WorkGroupView defaultOpen hasToolCalls label="Ran 3 tool calls · 12s">
           <ThoughtStep defaultOpen text={REASONING} />
           <ToolCallStep toolName="get_weather" args={WEATHER_ARGS} result={WEATHER_RESULT} />
-          <ToolCallStep toolName="search_web" args={{ query: 'Paris weather' }} running />
-          <ToolCallStep defaultOpen toolName="write_file" args={MEMORY_EDIT} result="ok" />
+          <ToolCallStep toolName="WebSearch" args={{ query: 'Paris weather' }} running />
+          <ToolCallStep defaultOpen toolName="Write" args={MEMORY_EDIT} result="ok" />
         </WorkGroupView>
       </Stack>
       <Stack gap="density-sm">
@@ -300,7 +300,7 @@ export const ComponentGallery: Story = {
         />
       </Stack>
       <Stack gap="density-sm">
-        <GalleryLabel>File edit with the replaced text</GalleryLabel>
+        <GalleryLabel>File edit with line counts</GalleryLabel>
         <ToolCallStep
           defaultOpen
           toolName="Edit"
@@ -322,7 +322,7 @@ export const ComponentGallery: Story = {
       </Stack>
       <Stack gap="density-sm">
         <GalleryLabel>Tool call still running</GalleryLabel>
-        <ToolCallStep defaultOpen toolName="search_web" args={{ query: 'Paris weather' }} running />
+        <ToolCallStep defaultOpen toolName="WebSearch" args={{ query: 'Paris weather' }} running />
       </Stack>
       <Stack gap="density-sm">
         <GalleryLabel>Known tools</GalleryLabel>
