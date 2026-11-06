@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PLUGIN_CONTRACT, diffContract, type PluginSidecar } from '@nemo/common/src/pluginContract';
+import { diffContract as actualDiffContract } from '@nemo/common/src/pluginContract/diffContract';
 import type { PluginManifest } from '@studio/plugins/types';
 import { fetchPlugins, loadPlugin } from '@studio/plugins/utils';
+
+// Real diffContract by default; one test overrides it to throw.
+vi.mock('@nemo/common/src/pluginContract', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@nemo/common/src/pluginContract')>();
+  return { ...original, diffContract: vi.fn(original.diffContract) };
+});
 
 vi.mock('@studio/plugins/studioVersions', () => ({
   STUDIO_SHARED_VERSIONS: { react: '19.2.7', 'react-router': '8.3.0' },
@@ -40,10 +47,21 @@ const urlOf = (input: unknown) => String(input);
 const callsTo = (suffix: string) =>
   vi.mocked(global.fetch).mock.calls.filter(([url]) => urlOf(url).endsWith(suffix));
 
+/** Passes the loader's shape check (right containers) but holds non-string values. */
+const MALFORMED_SIDECARS: [string, unknown][] = [
+  ['a numeric builtAgainst value', { builtAgainst: { react: 19 } }],
+  ['an array builtAgainst value', { builtAgainst: { react: ['19.2.7'] } }],
+  ['an object builtAgainst value', { builtAgainst: { react: { version: '19.2.7' } } }],
+  ['a null builtAgainst value', { builtAgainst: { react: null } }],
+  ['a numeric specifier', { specifiers: [1] }],
+  ['a null bundled package', { bundledPackages: [null] }],
+];
+
 const goodModule = { Root: () => null, navItems: () => [] };
 
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(diffContract).mockImplementation(actualDiffContract);
   global.fetch = vi.fn();
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
@@ -166,6 +184,49 @@ describe('loadPlugin', () => {
     });
   });
 
+  describe('sidecar has the right shape but malformed values', () => {
+    it.each(MALFORMED_SIDECARS)(
+      'resolves to PLUGIN_LOAD_FAILED for %s and does not import',
+      async (_label, over) => {
+        vi.mocked(global.fetch).mockResolvedValue(json({ ...goodSidecar(), ...(over as object) }));
+        const importModule = vi.fn();
+
+        const result = await loadPlugin(manifest(), BASE, importModule);
+
+        expect(result).toMatchObject({
+          failure: {
+            name: 'pr-review',
+            issues: [
+              {
+                code: 'PLUGIN_LOAD_FAILED',
+                message: expect.stringMatching(/not (a )?valid|invalid/i),
+              },
+            ],
+          },
+        });
+        expect(importModule).not.toHaveBeenCalled();
+      }
+    );
+  });
+
+  it('resolves to PLUGIN_LOAD_FAILED with the cause when diffContract itself throws', async () => {
+    vi.mocked(global.fetch).mockResolvedValue(json(goodSidecar()));
+    vi.mocked(diffContract).mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const importModule = vi.fn();
+
+    const result = await loadPlugin(manifest(), BASE, importModule);
+
+    expect(result).toMatchObject({
+      failure: {
+        name: 'pr-review',
+        issues: [{ code: 'PLUGIN_LOAD_FAILED', message: expect.stringContaining('boom') }],
+      },
+    });
+    expect(importModule).not.toHaveBeenCalled();
+  });
+
   describe('bundle import', () => {
     beforeEach(() => {
       vi.mocked(global.fetch).mockResolvedValue(json(goodSidecar()));
@@ -209,14 +270,14 @@ describe('fetchPlugins', () => {
   const routeFetch = (
     manifests: PluginManifest[],
     opts: {
-      sidecar?: () => Promise<Response>;
+      sidecar?: (url: string) => Promise<Response>;
       report?: () => Promise<Response>;
     } = {}
   ) => {
     vi.mocked(global.fetch).mockImplementation(async (input) => {
       const url = urlOf(input);
       if (url.endsWith('/apis/plugins')) return json(manifests);
-      if (url.endsWith('plugin.manifest.json')) return opts.sidecar?.() ?? json({}, 404);
+      if (url.endsWith('plugin.manifest.json')) return opts.sidecar?.(url) ?? json({}, 404);
       if (url.endsWith(REPORT_PATH)) return opts.report?.() ?? json({}, 202);
       throw new Error(`unexpected fetch ${url}`);
     });
@@ -293,6 +354,42 @@ describe('fetchPlugins', () => {
     const result = await fetchPlugins();
 
     expect(result.failed).toHaveLength(1);
+  });
+
+  describe('a plugin with a malformed sidecar', () => {
+    const malformed = json({ ...goodSidecar(), builtAgainst: { react: 19 } });
+
+    it('does not stop a headless plugin from being accounted for', async () => {
+      routeFetch([manifest('bad'), { name: 'headless', bundleUrl: null }], {
+        sidecar: () => Promise.resolve(malformed),
+      });
+
+      const result = await fetchPlugins();
+
+      expect(result.failed.map((f) => [f.name, f.issues.map((i) => i.code)])).toEqual([
+        ['bad', ['PLUGIN_LOAD_FAILED']],
+      ]);
+      expect([...result.installedNames].sort()).toEqual(['bad', 'headless']);
+      expect(result.plugins).toEqual([]);
+    });
+
+    it('does not stop a plugin with a missing sidecar from being reported', async () => {
+      routeFetch([manifest('bad'), manifest('nomanifest')], {
+        sidecar: (url) => Promise.resolve(url.includes('/bad/') ? malformed : json({}, 404)),
+      });
+
+      const result = await fetchPlugins();
+      await flush();
+
+      const codesByName = Object.fromEntries(
+        result.failed.map((f) => [f.name, f.issues.map((i) => i.code)])
+      );
+      expect(codesByName).toEqual({
+        bad: ['PLUGIN_LOAD_FAILED'],
+        nomanifest: ['PLUGIN_MANIFEST_MISSING'],
+      });
+      expect(callsTo(REPORT_PATH)).toHaveLength(2);
+    });
   });
 
   describe('report clamping', () => {
