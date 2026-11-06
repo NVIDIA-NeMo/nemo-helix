@@ -20,7 +20,10 @@ export interface VirtualDropdownListProps<R extends { key: string }> {
   /** First-guess row height in px; rows measure themselves once mounted. */
   estimateSize: (row: R) => number;
   loading?: boolean;
-  /** Called as the user scrolls near the end; no-op when {@link hasMore} is false. */
+  /**
+   * Called as the user scrolls near the end, and again after each page that resolves while the end
+   * is still in view. Each call should load a page; skipped when {@link hasMore} is false.
+   */
   onLoadMore?: () => void | Promise<void>;
   hasMore?: boolean;
   isLoadingMore?: boolean;
@@ -88,6 +91,8 @@ export function VirtualDropdownList<R extends { key: string }>({
   // Refs keep `loadMore` stable so a failed page doesn't re-fire the effect as loading state flips.
   const latest = useRef({ onLoadMore, hasMore, isLoadingMore });
   const inFlight = useRef(false);
+  // Bumped per successful page so a page the caller filtered to nothing still re-checks the end.
+  const [loadedPages, setLoadedPages] = useState(0);
   useLayoutEffect(() => {
     latest.current = { onLoadMore, hasMore, isLoadingMore };
   }, [onLoadMore, hasMore, isLoadingMore]);
@@ -99,6 +104,7 @@ export function VirtualDropdownList<R extends { key: string }>({
     setIsLoadingMoreLocal(true);
     try {
       await load();
+      setLoadedPages((n) => n + 1);
     } finally {
       inFlight.current = false;
       setIsLoadingMoreLocal(false);
@@ -110,7 +116,7 @@ export function VirtualDropdownList<R extends { key: string }>({
     if (lastVisibleIndex >= rows.length - LOAD_MORE_THRESHOLD) {
       loadMore().catch(() => undefined);
     }
-  }, [hasMore, lastVisibleIndex, loadMore, rows.length]);
+  }, [hasMore, lastVisibleIndex, loadMore, loadedPages, rows.length]);
 
   const loadingMore = isLoadingMore || isLoadingMoreLocal;
   const showDoneMessage = Boolean(doneLoadingMessage) && !hasMore && !loading && !loadingMore;
