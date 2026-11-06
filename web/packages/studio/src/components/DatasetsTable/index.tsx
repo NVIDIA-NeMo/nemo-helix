@@ -2,54 +2,39 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataView';
-import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
 import { EntityEmptyState } from '@nemo/common/src/components/EntityEmptyState';
 import { ErrorMessage } from '@nemo/common/src/components/ErrorMessage';
-import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { Trash } from '@nemo/icons/icons';
-import { FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
+import { type FilesetOutput as Dataset, FilesetPurpose } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { DatasetCreateModal } from '@studio/components/DatasetCreateModal';
-import { DatasetCreateModalMode } from '@studio/components/DatasetCreateModal/constants';
 import { makeDatasetsTableColumns } from '@studio/components/DatasetsTable/columns';
-import type { DatasetsTableProps } from '@studio/components/DatasetsTable/types';
-import { useDatasetsTable } from '@studio/components/DatasetsTable/useDatasetsTable';
 import { FilesetCreateModal } from '@studio/components/FilesetCreateModal';
+import { useFilesetsTable } from '@studio/components/FilesetsTable/useFilesetsTable';
 import { Loading } from '@studio/components/Layouts/Loading';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { DatasetBulkDeleteModal } from '@studio/routes/FilesetListRoute/DatasetBulkDeleteModal';
-import { getNewFilesetRoute } from '@studio/routes/utils';
 import { useBoolean } from '@studio/util/hooks/useBoolean';
-import type { FC } from 'react';
-import { useNavigate } from 'react-router';
+import type { FC, ReactNode } from 'react';
 
-export type { DatasetsTableProps } from '@studio/components/DatasetsTable/types';
+export interface DatasetsTableProps {
+  /** Renders the dataset name as a link to the returned route */
+  getDatasetRoute?: (dataset: Dataset) => string;
+  /** Renders the row's action menu; `onDatasetDeleted` clears the row from the selection */
+  renderRowActions?: (
+    dataset: Dataset,
+    callbacks: { onDatasetDeleted: (dataset: Dataset) => void }
+  ) => ReactNode;
+}
 
 /**
- * A table that displays a list of datasets with optional filtering, search, and bulk operations.
+ * Lists the workspace's dataset filesets with search, sorting, and bulk delete.
  */
-export const DatasetsTable: FC<DatasetsTableProps> = ({
-  variant = 'filesets',
-  onDatasetsSelected,
-  onRowClick,
-  enableActions = true,
-  enableBulkDelete,
-  enableFilters,
-  enableSelection,
-  selectionType,
-  getDatasetRoute,
-  renderRowActions,
-  purposeFilter,
-  attributes,
-}) => {
+export const DatasetsTable: FC<DatasetsTableProps> = ({ getDatasetRoute, renderRowActions }) => {
   const {
     workspace,
     hasSearchOrFilters,
     dataViewState,
-    modalDataset,
-    setModalDataset,
-    modalOpen,
-    setModalOpen,
     datasetsResponse,
     datasets,
     refetch,
@@ -59,55 +44,30 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     resetFilters,
     handleRowClick,
     handleDatasetDeleted,
-    handleDeleteDataset,
     handleBulkDeleteSuccess,
     handleBulkDeleteSettled,
-    handleModalClose,
-  } = useDatasetsTable({
-    onDatasetsSelected,
-    onRowClick,
-    enableFilters,
-    enableSelection,
-    selectionType,
+  } = useFilesetsTable({
+    enableFilters: true,
+    enableSelection: true,
     getDatasetRoute,
-    purposeFilter: variant === 'datasets' ? FilesetPurpose.dataset : purposeFilter,
+    purposeFilter: FilesetPurpose.dataset,
   });
-  const entity = variant === 'datasets' ? 'datasets' : 'filesets';
-
-  const navigate = useNavigate();
   const [createModalOpen, openCreateModal, closeCreateModal] = useBoolean(false);
-  const handleCreateFileset = () => {
-    if (FILESET_DETAILS_ENABLED) {
-      openCreateModal();
-    } else {
-      navigate(getNewFilesetRoute(workspace));
-    }
-  };
 
-  // Column definitions
   const makeColumns = makeDatasetsTableColumns({
-    variant,
-    enableSelection,
-    selectionType,
-    enableFilters,
-    enableActions,
-    getDatasetRoute,
-    renderRowActions,
-    setModalDataset,
-    setModalOpen,
-    handleDatasetDeleted,
+    renderRowActions:
+      renderRowActions &&
+      ((dataset) => renderRowActions(dataset, { onDatasetDeleted: handleDatasetDeleted })),
   });
 
-  // Loading state
   if (isPending) {
-    return <Loading description={`Loading ${entity}...`} />;
+    return <Loading description="Loading datasets..." />;
   }
 
-  // Error state
   if (error) {
     return (
       <ErrorMessage
-        message={`Failed to fetch ${entity}`}
+        message="Failed to fetch datasets"
         slotFooter={
           <Button type="button" kind="tertiary" onClick={() => refetch()}>
             Retry
@@ -117,35 +77,29 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
     );
   }
 
-  // Table content
-  const tableContent = (
+  return (
     <>
       <StudioDataView
         dataViewState={dataViewState}
-        searchField={enableFilters ? 'name' : undefined}
+        searchField="name"
         makeColumns={makeColumns}
         onRowClick={handleRowClick}
-        renderBulkActions={
-          enableBulkDelete
-            ? ({ selectedRows }) => (
-                <DatasetBulkDeleteModal
-                  selectedDatasets={selectedRows}
-                  onConfirmSuccess={handleBulkDeleteSuccess}
-                  onSettled={handleBulkDeleteSettled}
-                  slotTrigger={
-                    <Button kind="tertiary" aria-label="Delete selected datasets">
-                      <Trash />
-                      Delete
-                    </Button>
-                  }
-                />
-              )
-            : undefined
-        }
+        renderBulkActions={({ selectedRows }) => (
+          <DatasetBulkDeleteModal
+            selectedDatasets={selectedRows}
+            onConfirmSuccess={handleBulkDeleteSuccess}
+            onSettled={handleBulkDeleteSettled}
+            slotTrigger={
+              <Button kind="tertiary" aria-label="Delete selected datasets">
+                <Trash />
+                Delete
+              </Button>
+            }
+          />
+        )}
         attributes={{
-          ...attributes,
           DataViewSearchBar: {
-            placeholder: `Search ${entity}...`,
+            placeholder: 'Search datasets...',
           },
           DataViewRoot: {
             data: datasets,
@@ -153,55 +107,40 @@ export const DatasetsTable: FC<DatasetsTableProps> = ({
             requestStatus: isFetching ? 'loading' : undefined,
           },
           DataViewTableContent: {
-            // The hook's flag ignores the seeded default purposes, so an empty table is still "first use".
             renderEmptyState: () =>
               hasSearchOrFilters ? (
                 <EntityEmptyState
-                  entity={entity}
+                  entity="datasets"
                   variant="no-results"
                   onClearFilters={resetFilters}
                 />
               ) : (
                 <EntityEmptyState
-                  entity={entity}
+                  entity="datasets"
                   variant="first-use"
-                  onCreate={handleCreateFileset}
+                  onCreate={openCreateModal}
                 />
               ),
           },
         }}
       />
 
-      {modalOpen === 'delete' && modalDataset && (
-        <DeleteConfirmationModal
-          open
-          simpleConfirm
-          onDelete={handleDeleteDataset}
-          title={`Delete Dataset: ${modalDataset.name}`}
-          confirmationText={modalDataset.name ?? getEntityReference(modalDataset)}
-          onClose={handleModalClose}
-        />
-      )}
-
-      {modalOpen === 'edit' && modalDataset && (
-        <DatasetCreateModal
-          dataset={modalDataset}
-          mode={DatasetCreateModalMode.Edit}
-          onClose={handleModalClose}
-          open={modalOpen === 'edit'}
-        />
-      )}
-
-      {createModalOpen && (
-        <FilesetCreateModal
-          open={createModalOpen}
-          onClose={closeCreateModal}
-          workspace={workspace}
-          purpose={FilesetPurpose.dataset}
-        />
-      )}
+      {/* Same create flow as NewDatasetButton in the page header. */}
+      {createModalOpen &&
+        (FILESET_DETAILS_ENABLED ? (
+          <FilesetCreateModal
+            open={createModalOpen}
+            onClose={closeCreateModal}
+            workspace={workspace}
+            purpose={FilesetPurpose.dataset}
+          />
+        ) : (
+          <DatasetCreateModal
+            open={createModalOpen}
+            onClose={closeCreateModal}
+            onDatasetCreated={closeCreateModal}
+          />
+        ))}
     </>
   );
-
-  return tableContent;
 };

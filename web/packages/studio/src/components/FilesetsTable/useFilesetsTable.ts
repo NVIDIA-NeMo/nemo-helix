@@ -16,21 +16,21 @@ import {
   DEFAULT_PURPOSE_FILTER,
   isDefaultPurposeFilter,
   VISIBLE_PURPOSES,
-} from '@studio/components/DatasetsTable/constants';
+} from '@studio/components/FilesetsTable/constants';
 import type {
   DatasetWithId,
-  DatasetsTableProps,
+  FilesetsTableProps,
   ModalOpenState,
-} from '@studio/components/DatasetsTable/types';
-import { useOwnedFirstFilesets } from '@studio/components/DatasetsTable/useOwnedFirstFilesets';
+} from '@studio/components/FilesetsTable/types';
+import { useOwnedFirstFilesets } from '@studio/components/FilesetsTable/useOwnedFirstFilesets';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useAuthProfile } from '@studio/providers/auth/useAuthProfile';
 import { keepPreviousData } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-type UseDatasetsTableArgs = Pick<
-  DatasetsTableProps,
+type UseFilesetsTableArgs = Pick<
+  FilesetsTableProps,
   | 'onDatasetsSelected'
   | 'onRowClick'
   | 'enableFilters'
@@ -40,7 +40,7 @@ type UseDatasetsTableArgs = Pick<
   | 'purposeFilter'
 >;
 
-export function useDatasetsTable({
+export function useFilesetsTable({
   onDatasetsSelected,
   onRowClick,
   enableFilters,
@@ -48,7 +48,7 @@ export function useDatasetsTable({
   selectionType,
   getDatasetRoute,
   purposeFilter,
-}: UseDatasetsTableArgs) {
+}: UseFilesetsTableArgs) {
   const workspace = useWorkspaceFromPath();
   const navigate = useNavigate();
 

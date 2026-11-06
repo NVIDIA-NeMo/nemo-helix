@@ -52,10 +52,6 @@ export const DatasetListRoute: FC = () => {
           slotActions={<NewDatasetButton color="brand" />}
         />
         <DatasetsTable
-          variant="datasets"
-          enableFilters
-          enableBulkDelete
-          enableSelection
           getDatasetRoute={getDatasetRoute}
           renderRowActions={(dataset, { onDatasetDeleted }) => (
             <ActionMenu

@@ -26,15 +26,7 @@ export type StorageConfig =
 
 export type DatasetWithId = Dataset & { id: string };
 
-/**
- * `filesets` lists every purpose with a Purpose filter. `datasets` is fixed to
- * `purpose: dataset` and shows a narrower set of columns.
- */
-export type DatasetsTableVariant = 'filesets' | 'datasets';
-
-export interface DatasetsTableProps {
-  /** Which listing this table renders (default: 'filesets') */
-  variant?: DatasetsTableVariant;
+export interface FilesetsTableProps {
   /** Callback when datasets are selected */
   onDatasetsSelected?: (datasets: Dataset[]) => void;
   /** Callback when a row is clicked */

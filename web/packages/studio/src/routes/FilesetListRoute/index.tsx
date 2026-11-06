@@ -5,7 +5,7 @@ import { AccessibleTitle } from '@nemo/common/src/components/AccessibleTitle';
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button, PageHeader, Stack } from '@nvidia/foundations-react-core';
-import { DatasetsTable } from '@studio/components/DatasetsTable';
+import { FilesetsTable } from '@studio/components/FilesetsTable';
 import { NewModelFilesetButton } from '@studio/components/NewModelFilesetButton';
 import { FILESET_DETAILS_ENABLED } from '@studio/constants/environment';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
@@ -66,7 +66,7 @@ export const FilesetListRoute: FC = () => {
             )
           }
         />
-        <DatasetsTable
+        <FilesetsTable
           enableFilters
           enableBulkDelete
           enableSelection

@@ -9,7 +9,7 @@ import type {
   NGCStorageConfig,
   S3StorageConfig,
 } from '@nemo/sdk/generated/platform/schema';
-import type { StorageConfig } from '@studio/components/DatasetsTable/types';
+import type { StorageConfig } from '@studio/components/FilesetsTable/types';
 import type { StorageBackend } from '@studio/util/storageBackend';
 
 export function getStorageBackend(storage: StorageConfig | undefined): StorageBackend | null {
