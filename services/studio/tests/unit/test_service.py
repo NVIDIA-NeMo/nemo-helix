@@ -706,6 +706,45 @@ class TestConfigureAppPluginRouter:
         assert client.get("/plugin-ui/ex/index.js").status_code == 200
         assert client.get("/plugin-ui/ex/leak.js").status_code == 404
 
+    def test_sidecar_manifest_is_served(self, tmp_path: Path):
+        """plugin.manifest.json is served as JSON next to the bundle."""
+        (tmp_path / "index.js").write_text("export function mount(){}")
+        (tmp_path / "plugin.manifest.json").write_text('{"name": "ex"}')
+        manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
+
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
+            app = FastAPI()
+            StudioService().configure_app(app)
+
+        client = TestClient(app)
+        response = client.get("/plugin-ui/ex/plugin.manifest.json")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("application/json")
+        assert response.text == '{"name": "ex"}'
+        assert client.get("/plugin-ui/ex/index.js").status_code == 200
+
+    def test_sidecar_allowlist_blocks_other_json(self, tmp_path: Path):
+        """Only the exact sidecar name is served; other .json, traversal and nesting are 404."""
+        (tmp_path / "plugin.manifest.json").write_text("{}")
+        (tmp_path / "secrets.json").write_text("{}")
+        (tmp_path / "package.json").write_text("{}")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "plugin.manifest.json").write_text("{}")
+        manifests = [PluginManifestResponse(name="ex", bundle_url="/plugin-ui/ex/index.js", bundle_dir=tmp_path)]
+
+        with patch("nhx.studio.service.discover_plugins", return_value=manifests):
+            app = FastAPI()
+            StudioService().configure_app(app)
+
+        client = TestClient(app)
+        assert client.get("/plugin-ui/ex/plugin.manifest.json").status_code == 200
+        assert client.get("/plugin-ui/ex/secrets.json").status_code == 404
+        assert client.get("/plugin-ui/ex/package.json").status_code == 404
+        assert client.get("/plugin-ui/ex/..%2Fplugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/ex/%2e%2e/ex/plugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/ex/sub/plugin.manifest.json").status_code == 404
+        assert client.get("/plugin-ui/unknown/plugin.manifest.json").status_code == 404
+
 
 class TestBuildCSPHeader:
     """_build_csp_header wires configured STUDIO_UI_* endpoints into CSP directives."""
