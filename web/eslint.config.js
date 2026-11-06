@@ -112,7 +112,7 @@ const baseRules = {
 
 // Path aliases only (`@studio/*`, `@nemo/common/src/*`); relative imports, including siblings, are banned
 const relativeImportPattern = {
-  group: ['./*', '../*'],
+  regex: '^\\.{1,2}(?:/|$)',
   message: 'Use the @studio/* or @nemo/common/src/* alias instead of a relative import.',
 };
 
