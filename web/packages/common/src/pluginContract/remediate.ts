@@ -15,31 +15,39 @@ const fix = (message: string, ...steps: string[]): Fix => ({
 export const manifestMissing = (): Fix =>
   fix(
     'plugin.manifest.json was not found next to index.js.',
-    'Rebuild the plugin with the Studio plugin build helper so it emits plugin.manifest.json next to index.js.'
+    "Add studioPlugin() from the Studio plugin build helper (studio-plugin.mjs) to the plugin's Vite config, then rebuild."
   );
 
 export const specifierUnmapped = (specifier: string): Fix =>
   fix(
-    `The plugin imports "${specifier}" at runtime, but it is not in the plugin contract.`,
-    `To bundle it, remove "${specifier}" from build.rolldownOptions.external in the plugin build config, then run pnpm build.`,
-    `If it must be shared with Studio, request that "${specifier}" be added to the plugin contract (see ${CONTRACT_DOCS}).`
+    `Studio does not provide "${specifier}" (it is not in the plugin contract). This can also mean the plugin was built with a modified or older build helper.`,
+    `Import "${specifier}" as a normal dependency so the plugin bundles its own copy, then rebuild.`,
+    `If it must be shared with Studio, request that "${specifier}" be added to the plugin contract.`
   );
 
 export const singletonBundled = (pkg: string, specifier: string = pkg): Fix =>
   fix(
     `The singleton "${pkg}" is bundled into the plugin; a second copy breaks shared context.`,
-    `Ensure "${specifier}" is listed in build.rolldownOptions.external in the plugin build config.`,
-    `Import "${pkg}" only by its contract specifier, not by a deep path, then run pnpm build.`
+    `Import "${pkg}" only by a contract specifier (e.g. react-router), never a deep path (e.g. react-router/dom) and never from node_modules directly. The build helper externalizes contract specifiers for you.`,
+    'Rebuild the plugin.'
   );
 
 export const contractUnsupported = (built: string, current: string): Fix =>
   fix(
     `The plugin was built against contract "${built}", which Studio's contract ${current} does not support.`,
-    `Rebuild the plugin against the current contract (${current}) with pnpm build.`
+    `Update the plugin's copy of the build helper (studio-plugin.mjs) to the current one (contract ${current}), then rebuild.`
   );
 
 export const versionIncompatible = (pkg: string, built: string, studio: string): Fix =>
   fix(
     `"${pkg}" was built against ${built}, but Studio ships ${studio} (different major version).`,
-    `Set "${pkg}" to "${studio}" in the plugin's web/package.json, then rebuild with pnpm build.`
+    `Set "${pkg}" to "${studio}" in the plugin's web/package.json, then rebuild.`
   );
+
+/** Render an issue as build-error text: code, message, optional importer, numbered steps. */
+export const formatIssue = (issue: ContractIssue, importer?: string): string =>
+  [
+    `${issue.code}: ${issue.message}`,
+    ...(importer ? [`Imported from: ${importer}`] : []),
+    ...issue.steps.map((step, i) => `${i + 1}. ${step}`),
+  ].join('\n');
