@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import {
+  CONTRACT_DOCS,
   diffContract,
   PLUGIN_CONTRACT,
   type IssueCode,
   type PluginContract,
   type PluginSidecar,
 } from '@nemo/common/src/pluginContract';
+import { singletonBundled } from '@nemo/common/src/pluginContract/remediate';
 
 const CONTRACT: PluginContract = {
   version: '1.2.0',
@@ -24,13 +26,24 @@ const STUDIO = { react: '19.1.0', 'react-router': '8.3.0', '@nemo/common': '1.0.
 const sidecar = (overrides: Partial<PluginSidecar> = {}): PluginSidecar => ({
   contractVersion: '1.2.0',
   specifiers: ['react', 'react/jsx-runtime', 'react-router', '@nemo/common'],
-  bundledPackages: [],
   builtAgainst: { ...STUDIO },
   ...overrides,
 });
 
 const diff = (s: PluginSidecar | null) => diffContract(s, CONTRACT, STUDIO);
 const codes = (s: PluginSidecar | null) => diff(s).map((i) => i.code);
+
+const DIFF_SCENARIOS: Record<
+  Exclude<IssueCode, 'PLUGIN_SINGLETON_BUNDLED'>,
+  PluginSidecar | null
+> = {
+  PLUGIN_MANIFEST_MISSING: null,
+  PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
+  PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
+  PLUGIN_VERSION_INCOMPATIBLE: sidecar({
+    builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
+  }),
+};
 
 describe('diffContract', () => {
   it('accepts a clean sidecar and rejects a missing sidecar', () => {
@@ -41,29 +54,17 @@ describe('diffContract', () => {
     expect(missing[0].code).toBe('PLUGIN_MANIFEST_MISSING');
   });
 
-  it('reports unmapped specifiers and bundled singletons, but not bundled provided/unlisted packages', () => {
+  it('reports unmapped specifiers', () => {
     const unmapped = diff(sidecar({ specifiers: ['react', 'lodash'] }));
     expect(unmapped, 'one unmapped issue for lodash').toHaveLength(1);
     expect(unmapped[0].code).toBe('PLUGIN_SPECIFIER_UNMAPPED');
     expect(unmapped[0].subject).toBe('lodash');
     expect(unmapped[0].message).toContain('lodash');
+  });
 
-    // Bundled lodash is not a bare import, so it is fine.
-    expect(
-      diff(sidecar({ bundledPackages: ['lodash'] })),
-      'bundling a non-contract package is allowed'
-    ).toEqual([]);
-
-    const singleton = diff(sidecar({ bundledPackages: ['react-router'] }));
-    expect(singleton, 'bundled singleton yields one issue').toHaveLength(1);
-    expect(singleton[0].code).toBe('PLUGIN_SINGLETON_BUNDLED');
-    expect(singleton[0].subject).toBe('react-router');
-    expect(singleton[0].message).toContain('react-router');
-
-    expect(
-      diff(sidecar({ bundledPackages: ['@nemo/common'] })),
-      'bundling a provided package is allowed'
-    ).toEqual([]);
+  it('ignores a legacy bundledPackages field', () => {
+    const legacy = { ...sidecar(), bundledPackages: ['react-router'] } as PluginSidecar;
+    expect(diff(legacy), 'the field is ignored, not reported').toEqual([]);
   });
 
   it('applies the contract version policy', () => {
@@ -122,14 +123,12 @@ describe('diffContract', () => {
     const messy = sidecar({
       contractVersion: '1.9.0',
       specifiers: ['react', 'lodash'],
-      bundledPackages: ['react-router'],
       builtAgainst: { react: '18.3.1', 'react-router': '7.0.0', '@nemo/common': '1.5.0' },
     });
     const first = diff(messy);
     expect(first.map((i) => i.code).sort()).toEqual(
       [
         'PLUGIN_CONTRACT_UNSUPPORTED',
-        'PLUGIN_SINGLETON_BUNDLED',
         'PLUGIN_SPECIFIER_UNMAPPED',
         'PLUGIN_VERSION_INCOMPATIBLE',
         'PLUGIN_VERSION_INCOMPATIBLE',
@@ -142,17 +141,8 @@ describe('diffContract', () => {
     expect(diff(messy), 'same input, same order').toEqual(first);
   });
 
-  it('gives every code a message naming its subject and actionable steps', () => {
-    const scenarios: Record<IssueCode, PluginSidecar | null> = {
-      PLUGIN_MANIFEST_MISSING: null,
-      PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
-      PLUGIN_SINGLETON_BUNDLED: sidecar({ bundledPackages: ['react-router'] }),
-      PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
-      PLUGIN_VERSION_INCOMPATIBLE: sidecar({
-        builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
-      }),
-    };
-    for (const [code, input] of Object.entries(scenarios) as [IssueCode, PluginSidecar | null][]) {
+  it('gives every diffContract code a message naming its subject and actionable steps', () => {
+    for (const [code, input] of Object.entries(DIFF_SCENARIOS)) {
       const issue = diff(input).find((i) => i.code === code);
       expect(issue, `${code} should be emitted`).toBeDefined();
       if (code !== 'PLUGIN_MANIFEST_MISSING') {
@@ -164,6 +154,15 @@ describe('diffContract', () => {
         `${code} steps are non-empty`
       ).toBe(true);
     }
+  });
+
+  it('gives the build-time singleton-bundled fix a message, steps and the docs step', () => {
+    const fix = singletonBundled('react-router');
+    expect(fix.message, 'names the package').toContain('react-router');
+    expect(fix.steps.length, 'has steps').toBeGreaterThanOrEqual(1);
+    expect(fix.steps.at(-1), 'last step is the docs step').toBe(
+      `Contract and shared-dependency rules: ${CONTRACT_DOCS}`
+    );
   });
 
   it('tells the developer which version to use for a major mismatch', () => {
@@ -196,24 +195,18 @@ describe('diffContract hardening', () => {
     expect(issues.length, 'must be rejected').toBeGreaterThan(0);
   });
 
-  it('links every issue code to the contract docs', () => {
-    const scenarios: Record<IssueCode, PluginSidecar | null> = {
-      PLUGIN_MANIFEST_MISSING: null,
-      PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
-      PLUGIN_SINGLETON_BUNDLED: sidecar({ bundledPackages: ['react-router'] }),
-      PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
-      PLUGIN_VERSION_INCOMPATIBLE: sidecar({
-        builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
-      }),
-    };
-    for (const [code, input] of Object.entries(scenarios) as [IssueCode, PluginSidecar | null][]) {
+  it('ends every diffContract issue with the contract docs step', () => {
+    for (const [code, input] of Object.entries(DIFF_SCENARIOS)) {
       const issue = diff(input).find((i) => i.code === code);
       expect(issue, `${code} should be emitted`).toBeDefined();
-      expect(
-        issue!.steps.some((s) => s.includes('plugins/example-plugin/web/AGENTS.md')),
-        `${code} steps link the docs`
-      ).toBe(true);
+      expect(issue!.steps.at(-1), `${code} last step is the docs step`).toBe(
+        `Contract and shared-dependency rules: ${CONTRACT_DOCS}`
+      );
     }
+  });
+
+  it('exports the docs location, naming the helix repo', () => {
+    expect(CONTRACT_DOCS).toBe('plugins/example-plugin/web/AGENTS.md (in the nemo-helix repo)');
   });
 
   it('skips malformed builtAgainst versions and still parses pre-releases', () => {
@@ -232,6 +225,34 @@ describe('diffContract hardening', () => {
     expect(
       codes(sidecar({ builtAgainst: { react: '18.0.0-rc.1' } })),
       'pre-release of another major is still a major mismatch'
+    ).toEqual(['PLUGIN_VERSION_INCOMPATIBLE']);
+  });
+
+  it.each([
+    ['leading zero', '01.0.0'],
+    ['empty prerelease', '1.0.0-'],
+    ['empty build', '1.0.0+'],
+    ['beyond MAX_SAFE_INTEGER', `1${'0'.repeat(400)}.0.0`],
+  ])('fails closed on a non-strict contractVersion (%s)', (_label, v) => {
+    expect(codes(sidecar({ contractVersion: v }))).toEqual(['PLUGIN_CONTRACT_UNSUPPORTED']);
+  });
+
+  it('parses built-against versions strictly', () => {
+    expect(
+      codes(sidecar({ builtAgainst: { react: '01.2.3' } })),
+      'leading-zero version is unparseable and skipped'
+    ).toEqual([]);
+    expect(
+      codes(sidecar({ builtAgainst: { react: '19.1.0-rc.1' } })),
+      'pre-release equals 19.1.0'
+    ).toEqual([]);
+    expect(
+      codes(sidecar({ builtAgainst: { react: '^19.1.0+build.5' } })),
+      'caret + build metadata equals 19.1.0'
+    ).toEqual([]);
+    expect(
+      codes(sidecar({ builtAgainst: { react: '18.0.0+build.5' } })),
+      'build metadata of another major is still a major mismatch'
     ).toEqual(['PLUGIN_VERSION_INCOMPATIBLE']);
   });
 });
