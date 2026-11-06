@@ -10,7 +10,11 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from nhx.common.api.filter import FilterOperation
 from nhx.common.entities import ALL_WORKSPACES
 from nhx.core.entities.app.repository.entity import EntityRepositoryInterface
-from nhx.core.entities.app.repository.exceptions import EntityNotFoundError, EntityVersionConflictError
+from nhx.core.entities.app.repository.exceptions import (
+    EntityNotFoundError,
+    EntityVersionConflictError,
+    InvalidEntityDataError,
+)
 from nhx.core.entities.app.repository.policy import NO_OP_ENTITY_FIELD_POLICY, EntityFieldPolicy
 from nhx.core.entities.app.repository.sqlalchemy.filter import SQLAlchemyFilterRepository
 from nhx.core.entities.app.repository.sqlalchemy.models import DBEntity
@@ -35,7 +39,9 @@ def _validate_json_data(data: Any) -> None:
         value = pending.pop()
         if isinstance(value, str):
             if "\x00" in value:
-                raise ValueError("Entity data must not contain the NUL character (U+0000) in JSON strings or keys")
+                raise InvalidEntityDataError(
+                    "Entity data must not contain the NUL character (U+0000) in JSON strings or keys"
+                )
         elif isinstance(value, dict):
             pending.extend(value.keys())
             pending.extend(value.values())
