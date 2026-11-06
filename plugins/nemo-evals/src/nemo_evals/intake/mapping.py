@@ -435,18 +435,35 @@ def _boundary_kind(attributes: dict[str, AnyValue]) -> str:
     recorded_kind = attributes.get("openinference.span.kind", AnyValue())
     kind = recorded_kind.string_value.upper()
     kind_missing = recorded_kind.WhichOneof("value") is None or (
-        recorded_kind.WhichOneof("value") == "string_value" and not kind
+        (recorded_kind.WhichOneof("value") == "string_value" and not kind)
+        or (recorded_kind.WhichOneof("value") == "bytes_value" and not recorded_kind.bytes_value)
     )
     known = {"LLM", "AGENT", "TOOL", "CHAIN", "RETRIEVER", "EMBEDDING", "RERANKER", "GUARDRAIL", "EVALUATOR"}
     if kind in known:
         return kind
     operation = attributes.get("gen_ai.operation.name", AnyValue()).string_value
-    operations = {"chat": "LLM", "generate_content": "LLM", "text_completion": "LLM", "invoke_agent": "AGENT"}
+    operations = {
+        "chat": "LLM",
+        "generate_content": "LLM",
+        "text_completion": "LLM",
+        "embeddings": "EMBEDDING",
+        "invoke_agent": "AGENT",
+    }
     if operation in operations:
         return operations[operation]
     if kind_missing and "gen_ai.operation.name" not in attributes:
         scope = attributes.get("nemo_relay.scope_type", AnyValue()).string_value
-        return {"llm": "LLM", "agent": "AGENT"}.get(scope, "UNKNOWN")
+        return {
+            "agent": "AGENT",
+            "function": "CHAIN",
+            "tool": "TOOL",
+            "llm": "LLM",
+            "retriever": "RETRIEVER",
+            "embedder": "EMBEDDING",
+            "reranker": "RERANKER",
+            "guardrail": "GUARDRAIL",
+            "evaluator": "EVALUATOR",
+        }.get(scope, "UNKNOWN")
     return "UNKNOWN"
 
 

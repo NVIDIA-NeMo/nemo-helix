@@ -30,7 +30,7 @@ from nhx_evals_sdk.metrics.protocol import MetricOutput
 from nhx_evals_sdk.values.evidence import CandidateEvidence, EvidenceDescriptor
 from nhx_evals_sdk.values.results import AggregatedMetricResult, EvaluationResult, RowScore
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
-from opentelemetry.proto.common.v1.common_pb2 import AnyValue
+from opentelemetry.proto.common.v1.common_pb2 import AnyValue, ArrayValue, KeyValueList
 from pydantic import ValidationError
 
 # --- fakes ------------------------------------------------------------------
@@ -1178,6 +1178,63 @@ async def test_arbitrary_chain_research_subagent_and_final_model_are_not_task_bo
     assert "input.value" not in attrs and "output.value" not in attrs
     assert attrs["nemo.evaluation.boundary.input"].string_value == "unknown:not_recorded"
     assert attrs["nemo.evaluation.boundary.output"].string_value == "unknown:not_recorded"
+
+
+@pytest.mark.parametrize(
+    "recorded_kind",
+    [
+        AnyValue(),
+        AnyValue(string_value=""),
+        AnyValue(bytes_value=b""),
+        AnyValue(bytes_value=b"LLM"),
+        AnyValue(bool_value=False),
+        AnyValue(int_value=7),
+        AnyValue(double_value=0),
+        AnyValue(array_value=ArrayValue()),
+        AnyValue(kvlist_value=KeyValueList()),
+        AnyValue(string_value="LLM"),
+        AnyValue(string_value="AGENT"),
+        AnyValue(string_value="UNKNOWN"),
+        AnyValue(string_value="invalid"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("scope", "operation"),
+    [
+        *[
+            (scope, None)
+            for scope in (
+                "agent",
+                "llm",
+                "function",
+                "tool",
+                "retriever",
+                "embedder",
+                "reranker",
+                "guardrail",
+                "evaluator",
+            )
+        ],
+        *[
+            ("agent", operation)
+            for operation in ("chat", "generate_content", "text_completion", "embeddings", "invoke_agent", "unknown")
+        ],
+    ],
+)
+def test_boundary_kind_matches_intake_for_all_wire_value_shapes(recorded_kind, scope, operation) -> None:
+    from nemo_evals.intake.mapping import _boundary_kind
+    from nhx.intake.spans.ingest.otlp import _span_to_domain
+    from opentelemetry.proto.trace.v1.trace_pb2 import Span
+
+    span = Span(trace_id=b"t" * 16, span_id=b"s" * 8, name="recorded")
+    span.attributes.add(key="openinference.span.kind").value.CopyFrom(recorded_kind)
+    span.attributes.add(key="nemo_relay.scope_type").value.string_value = scope
+    if operation is not None:
+        span.attributes.add(key="gen_ai.operation.name").value.string_value = operation
+    normalized = _span_to_domain(
+        workspace="default", span=span, resource_attributes={}, scope_data={}, ingested_at=STARTED_AT
+    )
+    assert _boundary_kind(_attributes(span)) == normalized.kind.value
 
 
 @pytest.mark.parametrize(
