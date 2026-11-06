@@ -182,36 +182,34 @@ async def ingest_atif(
         context=body.evaluation_context,
         entity_client=entity_client,
     )
+    if intake.atif_ingest_pending >= config.atif_ingest_max_pending:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="ATIF ingest is at capacity; retry the request",
+            headers={"Retry-After": "1"},
+        )
     ingested_at = utc_now()
     trajectory = body.to_trajectory()
     # Read the pool only now: the validation await above can outlast a rebuild or shutdown.
     executor = get_atif_ingest_executor(intake)
-    # Mapping and row building are pure CPU over picklable data, so they run in
-    # the service-owned ingest process pool instead of blocking the event loop.
-    # A worker exception or a dead worker propagates here and inserts nothing.
+    intake.atif_ingest_pending += 1
     try:
         future = _submit_atif_batch(executor, workspace, trajectory, ingested_at, config.atif_max_subagent_depth)
         prepared = await asyncio.wrap_future(future)
     except AtifTrajectoryDepthError as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
     except BrokenProcessPool as error:
-        # A worker died, which permanently breaks a ProcessPoolExecutor. Fail this
-        # request (nothing was inserted) and replace the pool so retries heal.
-        logger.error(
-            "ATIF ingest worker died mapping session %s in workspace %s",
-            trajectory.session_id,
-            workspace,
-            exc_info=error,
-        )
+        # Nothing is stored yet, so the producer's retry of this 503 lands on the rebuilt pool.
+        logger.error("ATIF ingest worker died; rebuilding the pool", exc_info=error)
         intake.rebuild_atif_ingest_executor(broken=executor)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="ATIF ingest worker failed; retry the request",
         ) from error
-    # The awaited inserts are the commit point for the 201: it is returned only
-    # after they succeed, and mark_dirty runs only then. The inserts are
-    # sequential (spans first), so a failure between them can leave spans stored
-    # without their evaluator results; stable ids make a producer retry converge.
+    finally:
+        intake.atif_ingest_pending -= 1
+    # The 201 and mark_dirty wait for both inserts. A failure between them leaves spans without
+    # evaluator results; stable ids make the producer's retry converge.
     await service.ingest_prepared_batch(
         span_rows=prepared.span_rows,
         evaluator_result_rows=prepared.evaluator_result_rows,

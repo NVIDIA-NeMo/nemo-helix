@@ -37,13 +37,9 @@ logger = logging.getLogger(__name__)
 # Interruptible pause between failed local ClickHouse reconciles. Tests set this to 0.
 LOCAL_CLICKHOUSE_RECONCILE_RETRY_SECONDS = 5.0
 
-# Worker processes that run the CPU-heavy part of ATIF ingest (mapping and row
-# building). Two workers overlap back-to-back trajectories without competing for
-# many cores. The spawn start method keeps workers from inheriting a forked copy
-# of this multithreaded server process. Warm-up tasks hold a worker just long
-# enough that the pool spawns its full complement during startup.
-ATIF_INGEST_POOL_WORKERS = 2
+# Spawn, not fork: workers must not inherit a copy of this multithreaded server process.
 ATIF_INGEST_POOL_START_METHOD = "spawn"
+# Long enough that each warm-up task lands on a fresh worker, so startup spawns the full pool.
 ATIF_INGEST_WARMUP_HOLD_SECONDS = 0.05
 
 
@@ -140,9 +136,10 @@ class IntakeService(Service[IntakeConfig]):
         super().__init__(name="intake", module_name="nhx.intake")
         # The client is owned by the service lifecycle; it is absent before startup and after shutdown.
         self.clickhouse_client: ClickHouseSpanClient | None = None
-        # Process pool that runs ATIF mapping and row building off the event loop;
-        # absent before startup and after shutdown.
+        # Runs ATIF mapping off the event loop; absent before startup and after shutdown.
         self.atif_ingest_executor: ProcessPoolExecutor | None = None
+        # ATIF requests holding a pool slot (mapping or queued); capped by atif_ingest_max_pending.
+        self.atif_ingest_pending = 0
         # Background worker that denormalizes agent/model name fields onto Evaluation entities.
         self.denormalizer: EvaluationDenormalizer | None = None
         self._local_clickhouse_data_dir: Path | None = None
@@ -250,24 +247,21 @@ class IntakeService(Service[IntakeConfig]):
         self._ready = True
 
     def _create_atif_ingest_executor(self) -> ProcessPoolExecutor:
-        executor = ProcessPoolExecutor(
-            max_workers=ATIF_INGEST_POOL_WORKERS,
-            mp_context=get_context(ATIF_INGEST_POOL_START_METHOD),
-        )
+        workers = (self.service_config or IntakeConfig()).atif_ingest_workers
+        executor = ProcessPoolExecutor(max_workers=workers, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
         try:
-            self._warm_atif_ingest_executor(executor)
+            self._warm_atif_ingest_executor(executor, workers)
         except BaseException:
             # Warm-up spawns synchronously; a failed second spawn must not leak the first worker.
             executor.shutdown(wait=False, cancel_futures=True)
             raise
         return executor
 
-    def _warm_atif_ingest_executor(self, executor: ProcessPoolExecutor) -> None:
-        """Pre-spawn both ingest workers so the first overlapping ingests skip startup latency."""
-        for task in (
-            executor.submit(atif_ingest_worker_hold, ATIF_INGEST_WARMUP_HOLD_SECONDS),
-            executor.submit(atif_ingest_worker_ready),
-        ):
+    def _warm_atif_ingest_executor(self, executor: ProcessPoolExecutor, workers: int) -> None:
+        """Pre-spawn every ingest worker so the first overlapping ingests skip startup latency."""
+        tasks = [executor.submit(atif_ingest_worker_hold, ATIF_INGEST_WARMUP_HOLD_SECONDS) for _ in range(workers - 1)]
+        tasks.append(executor.submit(atif_ingest_worker_ready))
+        for task in tasks:
             task.add_done_callback(self._log_atif_ingest_warmup_failure)
 
     async def _stop_atif_ingest_executor(self, executor: ProcessPoolExecutor) -> None:
@@ -286,11 +280,9 @@ class IntakeService(Service[IntakeConfig]):
             )
 
     def rebuild_atif_ingest_executor(self, *, broken: ProcessPoolExecutor) -> None:
-        """Replace a pool whose worker died so later ingests heal instead of failing until restart.
+        """Replace a pool whose worker died; ``ProcessPoolExecutor`` never recovers on its own.
 
-        ``ProcessPoolExecutor`` never recovers from a dead worker. Safe under
-        overlapping failures: when the current pool is no longer ``broken``,
-        another caller already rebuilt it and this call is a no-op.
+        A no-op when ``broken`` was already replaced by an overlapping failure.
         """
         if self.atif_ingest_executor is not broken:
             return
@@ -300,7 +292,7 @@ class IntakeService(Service[IntakeConfig]):
         )
         try:
             replacement = self._create_atif_ingest_executor()
-        except OSError:
+        except (OSError, RuntimeError):
             logger.exception(
                 "Could not replace the broken ATIF ingest worker pool; the next ingest retries",
                 extra={"service": self.name},

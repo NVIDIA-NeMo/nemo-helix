@@ -1,23 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Process-pool offload for the CPU-heavy part of the ATIF ingest path.
+"""ATIF mapping and row building, run in the Intake service's ingest process pool.
 
-``prepare_atif_batch`` runs in a ``ProcessPoolExecutor`` worker owned by the
-Intake service. It maps one ATIF trajectory into spans and evaluator results and
-builds the ClickHouse insert rows, so none of that CPU runs on the event loop.
-The awaited insert stays on the loop in the request handler and remains the
-commit point for the ``201``.
-
-Constraints, enforced by tests:
-
-- The function is pickled by reference, so it stays module-level and importable
-  without the FastAPI request stack.
-- It takes and returns only plain picklable data: the trajectory, the ingest
-  timestamp, and prebuilt insert rows — never the request, the ClickHouse client,
-  or a live session.
-- An exception (including ``AtifTrajectoryDepthError``) propagates to the
-  awaiting request handler, which fails the request and inserts nothing.
+Everything here is pickled by reference into worker processes, so it stays module-level and
+takes and returns only plain picklable data, never request or storage clients.
 """
 
 from __future__ import annotations
@@ -49,11 +36,7 @@ def atif_ingest_worker_ready() -> None:
 
 
 def atif_ingest_worker_hold(seconds: float) -> None:
-    """Hold one worker briefly so a second warm-up task forces a second spawn.
-
-    ``ProcessPoolExecutor`` only spawns a new process when no worker is idle, so
-    the short hold makes the warm-up cover the pool's full worker complement.
-    """
+    """Keep a worker busy so the next warm-up task forces another spawn."""
     time.sleep(seconds)
 
 
@@ -63,11 +46,7 @@ def prepare_atif_batch(
     ingested_at: datetime,
     max_subagent_depth: int,
 ) -> PreparedAtifBatch:
-    """Map one ATIF trajectory and build its insert rows off the event loop.
-
-    Runs in an ingest worker process, so the arguments and the result must stay
-    picklable and the function must not touch request or storage clients.
-    """
+    """Map one ATIF trajectory and build its insert rows."""
     spans = trajectory_to_spans(
         workspace=workspace,
         trajectory=trajectory,

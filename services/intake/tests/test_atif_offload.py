@@ -26,11 +26,7 @@ from nhx.intake.config import IntakeConfig
 from nhx.intake.dependencies import get_atif_ingest_executor
 from nhx.intake.repository.clickhouse.evaluator_results import evaluator_result_rows_for_insert
 from nhx.intake.repository.clickhouse.span import span_rows_for_insert
-from nhx.intake.service import (
-    ATIF_INGEST_POOL_START_METHOD,
-    ATIF_INGEST_POOL_WORKERS,
-    IntakeService,
-)
+from nhx.intake.service import ATIF_INGEST_POOL_START_METHOD, IntakeService
 from nhx.intake.spans.ingest import atif
 from nhx.intake.spans.ingest.atif import AtifIngestRequest, ingest_atif
 from nhx.intake.spans.ingest.atif_mapping import (
@@ -40,10 +36,6 @@ from nhx.intake.spans.ingest.atif_mapping import (
 )
 from nhx.intake.spans.ingest.atif_offload import PreparedAtifBatch, atif_ingest_worker_ready, prepare_atif_batch
 from nhx.intake.spans.storage import utc_now
-
-# The route-level tests mirror the production wiring by building the same pool
-# the Intake service owns: two spawn-method workers.
-
 
 # ---------------------------------------------------------------------------
 # Module-level worker functions. They are pickled by reference, so they must
@@ -142,6 +134,7 @@ class _RecordingIntakeService:
     def __init__(self) -> None:
         self.rebuilt: list[ProcessPoolExecutor] = []
         self.atif_ingest_executor: ProcessPoolExecutor | None = None
+        self.atif_ingest_pending = 0
 
     def rebuild_atif_ingest_executor(self, *, broken: ProcessPoolExecutor) -> None:
         self.rebuilt.append(broken)
@@ -150,7 +143,7 @@ class _RecordingIntakeService:
 @pytest.fixture(scope="module")
 def atif_pool():
     executor = ProcessPoolExecutor(
-        max_workers=ATIF_INGEST_POOL_WORKERS, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD)
+        max_workers=IntakeConfig().atif_ingest_workers, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD)
     )
     yield executor
     executor.shutdown(wait=True)
@@ -269,13 +262,37 @@ async def test_pool_shut_down_after_the_request_read_it_returns_503() -> None:
     assert service.batches == []
 
 
-def test_rebuild_keeps_the_broken_pool_when_the_replacement_cannot_spawn(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_ingest_at_capacity_returns_503_without_touching_the_pool() -> None:
+    executor = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
+    executor.shutdown(wait=True)
+    intake = _RecordingIntakeService()
+    intake.atif_ingest_pending = IntakeConfig().atif_ingest_max_pending
+    service = _RecordingSpansService()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _ingest(executor, _ingest_body(), service=service, intake=intake)
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.headers == {"Retry-After": "1"}
+    assert intake.atif_ingest_pending == IntakeConfig().atif_ingest_max_pending
+    assert service.batches == []
+
+
+@pytest.mark.parametrize(
+    "spawn_error",
+    [OSError("too many open files"), RuntimeError("can't start new thread")],
+    ids=["os-error", "runtime-error"],
+)
+def test_rebuild_keeps_the_broken_pool_when_the_replacement_cannot_spawn(
+    monkeypatch: pytest.MonkeyPatch, spawn_error: Exception
+) -> None:
     service = IntakeService()
     broken = ProcessPoolExecutor(max_workers=1, mp_context=get_context(ATIF_INGEST_POOL_START_METHOD))
     service.atif_ingest_executor = broken
 
     def _spawn_fails() -> ProcessPoolExecutor:
-        raise OSError("too many open files")
+        raise spawn_error
 
     monkeypatch.setattr(service, "_create_atif_ingest_executor", _spawn_fails)
     try:
@@ -321,10 +338,12 @@ async def test_worker_depth_error_fails_request_without_insert(
     """An AtifTrajectoryDepthError in the worker still maps to a 422 and inserts nothing."""
     monkeypatch.setattr(atif, "prepare_atif_batch", _depth_error_prepare)
     service = _RecordingSpansService()
+    intake = _RecordingIntakeService()
 
     with pytest.raises(HTTPException) as exc_info:
-        await _ingest(atif_pool, _ingest_body(), service=service)
+        await _ingest(atif_pool, _ingest_body(), service=service, intake=intake)
 
+    assert intake.atif_ingest_pending == 0
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail == "ATIF trajectory depth 3 exceeds configured maximum 2"
     assert service.batches == []
@@ -430,15 +449,18 @@ async def test_successful_ingest_marks_denormalizer_dirty_after_insert(
     monkeypatch.setattr(atif, "validate_evaluation_context", _skip_evaluation_context_validation)
     service = _RecordingSpansService()
     denormalizer = _RecordingDenormalizer()
+    intake = _RecordingIntakeService()
 
     response = await _ingest(
         atif_pool,
         _ingest_body({"evaluation_name": "eval-x"}),
         service=service,
         denormalizer=denormalizer,
+        intake=intake,
     )
 
     assert response.status_code == 201
+    assert intake.atif_ingest_pending == 0
     assert denormalizer.dirty == [("default", "eval-x")]
     assert len(service.batches) == 1
     span_rows, evaluator_result_rows = service.batches[0]

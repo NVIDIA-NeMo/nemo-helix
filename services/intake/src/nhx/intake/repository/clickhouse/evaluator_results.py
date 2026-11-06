@@ -40,12 +40,7 @@ EVALUATOR_RESULT_SORT_COLUMNS = {
 
 
 def evaluator_result_rows_for_insert(results: list[EvaluatorResult]) -> list[list[Any]]:
-    """Build ClickHouse insert rows for evaluator results, in EVALUATOR_RESULT_COLUMNS order.
-
-    Pure function over picklable data, so the ATIF ingest worker can call it in
-    its process pool; ``ClickHouseEvaluatorResultsRepository.insert_evaluator_result_rows``
-    consumes the result on the event loop.
-    """
+    """Build ClickHouse insert rows for evaluator results, in EVALUATOR_RESULT_COLUMNS order."""
     return [dict_to_row(_evaluator_result_to_row(result), EVALUATOR_RESULT_COLUMNS) for result in results]
 
 
