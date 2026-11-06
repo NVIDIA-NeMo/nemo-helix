@@ -48,7 +48,7 @@ def _clean(text: str) -> str:
 def format_report(report: PluginLoadErrorReport) -> str:
     """Render a report as one single-line log message (` | ` delimited); every field is control-char free."""
     count = len(report.issues)
-    parts = [f"Studio plugin '{_clean(report.plugin)}' failed to load ({count} issue{'s' if count != 1 else ''})"]
+    parts = [f"Studio plugin '{report.plugin}' failed to load ({count} issue{'s' if count != 1 else ''})"]
     for issue in report.issues:
         parts.append(f"[{issue.code.value}] {_clean(issue.message)}")
         parts.extend(f"{i}. {_clean(step)}" for i, step in enumerate(issue.steps, 1))
