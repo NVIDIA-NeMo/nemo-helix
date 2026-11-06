@@ -46,8 +46,9 @@ export const InferenceParameters: FC<InferenceParametersProps> = ({
           id={`${key}-slider`}
           field={{
             name: key,
-            value: (value[key] as number | undefined) ?? param.default,
-            onChange: (v: number) => onChange({ ...value, [key]: v }),
+            value: value[key] ?? param.default,
+            onChange: (v: number | undefined) =>
+              onChange({ ...value, [key]: v ?? value[key] ?? param.default }),
           }}
           defaultValue={param.default}
           displayName={param.name}
