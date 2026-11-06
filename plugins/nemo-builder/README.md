@@ -778,9 +778,13 @@ builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
   closes early, the sandbox's unfinished images fail. A retried `build` step fails while the
   previous attempt's sandbox still exists, and a sandbox whose `build` was killed is never deleted:
   it stays until someone deletes it.
-- **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
-  sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
-  profiles set it, so a failed build's contexts and layouts stay until someone deletes them.
+- **A failed build holds its space for hours.** Jobs deletes a build's directory on the work
+  volume once its last step succeeds, when the push step's profile sets
+  `cleanup_completed_jobs_immediately`, as the chart's do. A failed build's contexts and layouts
+  stay for `jobs.storage.failed_storage_ttl_seconds` after its failed step stopped, 4 hours by
+  default, and a cancelled build's until Jobs' next retention pass, every 5 minutes by default.
+  Size the work volume for a burst of failures as well as for the burst itself (see
+  [Jobs execution profiles](#jobs-execution-profiles)).
 - **`fetch` reads each file of a fileset whole into memory.** A build context with very large files
   can exhaust the step's memory. An archive is streamed to the work volume instead.
 - **An archive unpacks to at most 4 GiB and 100,000 entries.** A larger one fails the whole set,
