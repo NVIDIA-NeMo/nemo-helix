@@ -416,6 +416,7 @@ class TestCreateFullEntity:
 
 class TestCreateAdapter:
     def test_creates_adapter_for_lora(self) -> None:
+        """A LoRA run registers the adapter in the output workspace, naming the base model by reference."""
         from nhx.customization_common.schemas.file_io import FileSetRef
         from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nhx.unsloth.entities.values import FinetuningType
@@ -451,6 +452,7 @@ class TestCreateAdapter:
         assert deploy_target is base_me
 
     def test_adapter_conflict_falls_back_to_update(self) -> None:
+        """An existing adapter is updated in place when create conflicts."""
         from nhx.customization_common.schemas.file_io import FileSetRef
         from nhx.customization_common.schemas.model_entity import ModelEntityTaskConfig, PEFTConfig
         from nhx.unsloth.entities.values import FinetuningType
