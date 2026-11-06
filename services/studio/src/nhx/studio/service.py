@@ -19,9 +19,10 @@ from nhx.common.http_clients import shared_async_http_client
 from nhx.common.service import RouterConfig, Service
 from nhx.common.service.dependencies import service_instance_dependency
 from nhx.studio.config import StudioConfig
-from nhx.studio.plugin_reports import build_report_handler
+from nhx.studio.plugin_reports import PluginLoadErrorReport, ReportThrottle, format_report
 from nhx.studio.plugins import build_plugins_router, discover_plugins
 from nhx.studio.static_files import SPAStaticFiles, build_csp
+from pydantic import ValidationError
 from starlette.responses import Response
 
 logger = logging.getLogger(__name__)
@@ -99,7 +100,6 @@ class StudioService(Service[StudioConfig]):
     def __init__(self):
         """Initialize the studio service."""
         super().__init__(name="studio", module_name="nhx.studio")
-        self._plugin_report_handler = build_report_handler(self._plugin_error_reports_enabled)
 
     @property
     def title(self) -> str:
@@ -168,15 +168,31 @@ class StudioService(Service[StudioConfig]):
 
     def _mount_plugin_error_reports(self, app: FastAPI) -> None:
         """Mount the browser plugin load-error report endpoint (before the /studio static mount)."""
+        throttle = ReportThrottle()
+
+        async def report_plugin_load_errors(request: Request) -> Response:
+            if not self._plugin_error_reports_enabled():
+                return Response(status_code=status.HTTP_404_NOT_FOUND)
+            try:
+                report = PluginLoadErrorReport.model_validate_json(await request.body())
+            except ValidationError:
+                return Response(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT)
+            verdict = throttle.check(report)
+            if verdict == "limited":
+                return Response(status_code=status.HTTP_429_TOO_MANY_REQUESTS)
+            if verdict == "log":
+                logger.warning("%s", format_report(report))
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
 
         app.add_api_route(
             "/studio/api/plugin-load-errors",
-            self._plugin_report_handler,
+            report_plugin_load_errors,
             methods=["POST"],
             include_in_schema=False,
         )
 
     def _plugin_error_reports_enabled(self) -> bool:
+        """Return whether plugin load-error reports are accepted (explicit flag, else only when auth is off)."""
         flag = self._get_config().plugin_error_reports_enabled
         return flag if flag is not None else not get_auth_config().enabled
 

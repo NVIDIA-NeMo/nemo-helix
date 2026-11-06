@@ -80,7 +80,9 @@ class StudioConfig(create_service_config_class("studio")):  # type: ignore[misc]
         default=None,
         description=(
             "Accept plugin load-failure reports from Studio and write them to the platform log. "
-            "When unset, reports are accepted only while platform auth is disabled (local use)."
+            "When unset, reports are accepted only while platform auth is disabled (local use). "
+            "Setting it to true while platform auth is enabled exposes an unauthenticated log-writing endpoint "
+            "(everything under /studio bypasses the auth middleware)."
         ),
     )
     otel: StudioOtelConfig = Field(
