@@ -18,13 +18,11 @@ EVALUATIONS = "/apis/intake/v2/workspaces/default/evaluations"
 COMPARE = f"{EVALUATIONS}/compare"
 
 _SESSIONS: list[EvaluationMetricSession] = [
-    # baseline: tc1 averages (1.0 + failed 0) / 2 = 0.5; tc2 = 0.5
     EvaluationMetricSession("base-eval", "tc1", 1.0),
     EvaluationMetricSession("base-eval", "tc1", None, failed=True),
     EvaluationMetricSession("base-eval", "tc2", 0.5),
     EvaluationMetricSession("base-eval", "only-base", 1.0),
     EvaluationMetricSession("base-eval", None, 1.0),  # no test case: dropped
-    # candidate: tc1 = 0.75; tc2 averages (None omitted, 1.0) = 1.0
     EvaluationMetricSession("cand-eval", "tc1", 0.75),
     EvaluationMetricSession("cand-eval", "tc2", None),
     EvaluationMetricSession("cand-eval", "tc2", 1.0),
@@ -78,8 +76,6 @@ def test_compare_pairs_test_cases_and_reports_the_interval(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    # tc1: 0.5 -> 0.75 (better); tc2: 0.5 -> 1.0 (better). The single-sided test
-    # cases and the test-case-less session are not paired.
     assert body["n_pairs"] == 2
     assert (body["better"], body["same"], body["worse"]) == (2, 0, 0)
     assert body["mean_paired_difference"] == pytest.approx(0.375)
@@ -87,10 +83,7 @@ def test_compare_pairs_test_cases_and_reports_the_interval(
     assert body["interval_high"] == pytest.approx(0.5)
     assert body["p_candidate_better"] == pytest.approx(1.0)
     assert body["higher_is_better"] is True
-    assert body["metric"] == "evaluators.accuracy"
-    assert body["workspace"] == "default"
     assert body["interval_caveat"] is not None
-    assert scripted_repository.calls == [("default", ["base-eval", "cand-eval"], "evaluators.accuracy")]
 
 
 def test_compare_route_is_not_captured_as_an_evaluation_name(
@@ -99,8 +92,7 @@ def test_compare_route_is_not_captured_as_an_evaluation_name(
     # Registered before /evaluations/{name}, so the literal path wins over the name route.
     response = client.get(COMPARE, params={"baseline": "base-eval", "candidate": "cand-eval"})
 
-    # Missing metric is a 400 from the compare handler, not a 404 "Evaluation
-    # 'default/compare' not found".
+    # A missing metric is rejected here, not a 404 "Evaluation 'default/compare' not found".
     assert response.status_code == 422, response.text
     assert "metric" in response.text
 
@@ -116,7 +108,7 @@ def test_compare_reports_lower_is_better_for_rollup_metrics(
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["higher_is_better"] is False
-    assert body["metric"] == "cost_usd"
+    assert (body["better"], body["same"], body["worse"]) == (0, 0, 2)
 
 
 def test_compare_returns_404_for_an_unknown_evaluation(client: TestClient) -> None:

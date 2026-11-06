@@ -79,8 +79,6 @@ export const EvaluationCompareChart: FC<EvaluationCompareChartProps> = ({
   const headToHeadMetric =
     evaluatorMetrics.find(({ id }) => id === headToHeadMetricId) ?? evaluatorMetrics[0];
 
-  // The pairing runs server-side: one compare request per candidate against the selected
-  // baseline and evaluator, so this chart, the CLI, and the API agree by construction.
   const candidateNames = useMemo(() => candidates.map(({ row }) => row.name), [candidates]);
   const comparisons = useComparedEvaluations(
     workspace,

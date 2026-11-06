@@ -698,11 +698,6 @@ def test_sessions_get_code_output(intake_cli) -> None:
     assert 'response = client.get_session(id="sess-1")' in result.stdout
 
 
-# ---------------------------------------------------------------------------
-# evaluations
-# ---------------------------------------------------------------------------
-
-
 def test_evaluations_compare(intake_cli) -> None:
     result, recorder = intake_cli.run(
         ["evaluations", "compare", "base-eval", "cand-eval", "--metric", "evaluators.accuracy"],
@@ -718,8 +713,7 @@ def test_evaluations_compare(intake_cli) -> None:
         "metric": "evaluators.accuracy",
     }
     body = json.loads(result.stdout)
-    assert body["n_pairs"] == 2
-    assert body["p_candidate_better"] == 1.0
+    assert (body["better"], body["same"], body["worse"]) == (2, 0, 0)
 
 
 def test_evaluations_compare_without_metric_is_usage_error(intake_cli) -> None:

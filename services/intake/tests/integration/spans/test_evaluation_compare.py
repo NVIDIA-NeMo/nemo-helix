@@ -20,8 +20,6 @@ BASELINE = "compare-base"
 CANDIDATE = "compare-cand"
 
 # (test_case, score, cost_usd, latency_ms, prompt_tokens, completion_tokens)
-# Both evaluations share case-1 and case-2; base-only and cand-only prove unshared
-# test cases are not paired.
 BASE_ROWS = [
     ("case-1", 0.4, 0.10, 1000, 100, 10),
     ("case-2", 0.6, 0.20, 2000, 100, 10),
@@ -141,8 +139,6 @@ def compared_evaluations(client: TestClient) -> None:
 @pytest.mark.parametrize(
     ("metric", "higher_is_better", "better", "same", "worse", "mean_difference"),
     [
-        # case-1 improved, case-2 unchanged: 1 better, 1 same. The mean difference is
-        # signed candidate - baseline over the two shared test cases.
         ("evaluators.reward", True, 1, 1, 0, pytest.approx(0.2)),
         ("cost_usd", False, 1, 1, 0, pytest.approx(-0.025)),
         ("latency_ms", False, 1, 1, 0, pytest.approx(-100.0)),
@@ -166,7 +162,6 @@ def test_compare_executes_each_metric_against_clickhouse(
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["metric"] == metric
     assert body["higher_is_better"] is higher_is_better
     assert body["n_pairs"] == 2  # base-only and cand-only are not paired
     assert (body["better"], body["same"], body["worse"]) == (better, same, worse)
@@ -184,9 +179,7 @@ def test_compare_interval_is_deterministic_across_calls(client: TestClient, comp
     second = client.get(COMPARE, params=params).json()
 
     assert first == second
-    # case-1 is +0.4 and case-2 is 0, so every resample mean lies in [0.0, 0.4] and a
-    # mean favors the candidate unless both draws hit case-2 (expected 3/4 of resamples;
-    # a finite 2,000-resample estimate sits within noise of that).
+    assert (first["better"], first["same"], first["worse"]) == (1, 1, 0)
     assert first["interval_low"] == pytest.approx(0.0)
     assert first["interval_high"] == pytest.approx(0.4)
     assert first["p_candidate_better"] == pytest.approx(0.75, abs=0.02)

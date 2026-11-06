@@ -762,11 +762,6 @@ def list_span_evaluator_results(
     )
 
 
-# ---------------------------------------------------------------------------
-# evaluations
-# ---------------------------------------------------------------------------
-
-
 @evaluations_app.command("compare")
 @collect_warnings
 @handle_errors
