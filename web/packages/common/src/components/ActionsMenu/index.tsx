@@ -13,6 +13,7 @@ import {
   Flex,
   Stack,
   Text,
+  Tooltip,
 } from '@nvidia/foundations-react-core';
 import React, { type FC, type ReactElement, type ReactNode } from 'react';
 
@@ -23,6 +24,7 @@ export interface ActionMenuItem {
   onSelect: () => void;
   icon?: ReactElement<{ size?: number; fill?: string; className?: string }>;
   disabled?: boolean;
+  disabledReason?: string;
   danger?: boolean;
   divider?: Omit<DropdownDividerItemEntry, 'kind'>;
 }
@@ -33,6 +35,7 @@ export interface DeleteAction {
   onSelect: () => void;
   label?: DeleteActionLabel;
   disabled?: boolean;
+  disabledReason?: string;
 }
 
 interface ActionsMenuProps {
@@ -69,6 +72,7 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
     label: deleteAction.label ?? 'Delete',
     onSelect: deleteAction.onSelect,
     disabled: deleteAction.disabled,
+    disabledReason: deleteAction.disabledReason,
     danger: true,
   };
   const items = deleteItem ? [...actions, deleteItem] : actions;
@@ -93,11 +97,12 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
         data-testid={`${testId}-content`}
         className={hasDescriptions ? 'w-[260px] min-w-[260px]' : 'w-[180px] min-w-[180px]'}
       >
-        {items.map((action, key) => (
-          <React.Fragment key={`action-${key}`}>
-            {action === deleteItem && showDeleteDivider && <Divider />}
+        {items.map((action, key) => {
+          const disabledReason = action.disabled ? action.disabledReason : undefined;
+          const item = (
             <DropdownItem
               data-testid={`${testId}-item`}
+              className={disabledReason ? 'pointer-events-none w-full' : undefined}
               disabled={action.disabled}
               onClick={(e) => {
                 e.stopPropagation();
@@ -119,9 +124,30 @@ export const ActionsMenu: FC<ActionsMenuProps> = ({
                 )}
               </Flex>
             </DropdownItem>
-            {action.divider && <Divider width={action.divider.width} />}
-          </React.Fragment>
-        ))}
+          );
+
+          return (
+            <React.Fragment key={`action-${key}`}>
+              {action === deleteItem && showDeleteDivider && <Divider />}
+              {disabledReason ? (
+                <Tooltip
+                  slotContent={disabledReason}
+                  attributes={{
+                    TooltipTrigger: {
+                      className: 'flex w-full cursor-not-allowed',
+                      onClick: (e) => e.stopPropagation(),
+                    },
+                  }}
+                >
+                  {item}
+                </Tooltip>
+              ) : (
+                item
+              )}
+              {action.divider && <Divider width={action.divider.width} />}
+            </React.Fragment>
+          );
+        })}
       </DropdownContent>
     </DropdownRoot>
   );
