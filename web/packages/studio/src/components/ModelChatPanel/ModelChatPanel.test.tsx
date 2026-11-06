@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WorkspaceModelSelectProps } from '@nemo/common/src/components/ModelSelectV2';
-import type { PromptData } from '@nemo/sdk/generated/platform/schema';
+import type { InferenceParams, PromptData } from '@nemo/sdk/generated/platform/schema';
 import {
   CHAT_INFERENCE_PARAM_FIELDS,
   CHAT_INFERENCE_PARAM_METADATA,
@@ -126,6 +126,23 @@ describe('ModelChatPanel — URN routing', () => {
     expect(modelChatSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         promptData: { inference_params: { temperature: 0.1, max_tokens: 512 } },
+      })
+    );
+  });
+
+  it('uses the defaults for params a saved prompt leaves null', () => {
+    renderPanel('nvidia/llama-70b', null, {
+      // Saved prompts are untyped JSON, so a null can arrive despite the SDK type.
+      inference_params: {
+        temperature: null,
+        max_completion_tokens: null,
+        max_tokens: 64,
+      } as unknown as InferenceParams,
+    });
+
+    expect(modelChatSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0.7, max_tokens: 64 } },
       })
     );
   });

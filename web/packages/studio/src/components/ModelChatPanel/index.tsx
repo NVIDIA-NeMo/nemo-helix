@@ -60,12 +60,10 @@ export const ModelChatPanel: FC<ModelChatPanelProps> = ({
   const [inferenceParams, setInferenceParams] = useState<InferenceParams>(() => {
     // The chat runtime only reads max_tokens, so fold a saved completion-token limit into it.
     const { max_completion_tokens, ...saved } = panel.promptData?.inference_params ?? {};
-    return {
-      ...DEFAULT_CHAT_INFERENCE_PARAMS,
+    return mergeChatParams(DEFAULT_CHAT_INFERENCE_PARAMS, {
       ...saved,
-      max_tokens:
-        max_completion_tokens ?? saved.max_tokens ?? DEFAULT_CHAT_INFERENCE_PARAMS.max_tokens,
-    };
+      max_tokens: max_completion_tokens ?? saved.max_tokens,
+    });
   });
 
   const handleModelChange = useCallback(

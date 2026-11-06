@@ -25,20 +25,24 @@ export const DEFAULT_CHAT_INFERENCE_PARAMS: InferenceParams = {
 };
 
 /** Chat's bounds for a surface that starts at its own max_tokens, so reset returns there too. */
-export const chatParamMetadataWithMaxTokens = (maxTokens: number) =>
-  ({
-    ...CHAT_INFERENCE_PARAM_METADATA,
-    max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: maxTokens },
-  }) satisfies NonNullable<InferenceParametersProps['fieldMetadata']>;
+type ChatParamMetadata = Record<
+  (typeof CHAT_INFERENCE_PARAM_FIELDS)[number],
+  { min: number; max: number; step: number; default: number }
+>;
+
+export const chatParamMetadataWithMaxTokens = (maxTokens: number): ChatParamMetadata => ({
+  ...CHAT_INFERENCE_PARAM_METADATA,
+  max_tokens: { ...CHAT_INFERENCE_PARAM_METADATA.max_tokens, default: maxTokens },
+});
 
 /**
- * Apply a params edit, ignoring a cleared number box: chat keeps sending the last value rather than
- * silently dropping the param and falling back to the server's default.
+ * Apply params over the current ones, skipping any left unset (a cleared number box, or a null in a
+ * saved prompt): chat keeps sending the last value rather than dropping the param or sending null.
  */
 export const mergeChatParams = (
   previous: InferenceParams,
   next: Partial<InferenceParams>
 ): InferenceParams => ({
   ...previous,
-  ...Object.fromEntries(Object.entries(next).filter(([, value]) => value !== undefined)),
+  ...Object.fromEntries(Object.entries(next).filter(([, value]) => value != null)),
 });
