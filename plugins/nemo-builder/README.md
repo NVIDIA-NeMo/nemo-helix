@@ -280,8 +280,8 @@ it too. Use a credential you can rotate.
 
 **If the push fails with `401`** on crane's first `HEAD`, rather than at login, check the username
 and password: Harbor answers bad credentials with an anonymous token, so the failure shows up only
-once crane uses it. Fix the secret, then submit with the next `revision`: the failed image's row stays
-`pending` (see [Reliability](#reliability)).
+once crane uses it. Fix the secret, then submit with the next `revision`: the failed image's row fails
+once its job has ended (see [Reliability](#reliability)).
 
 `helm uninstall` deletes `$NS-builds` and its work volume. The images stay in the registry.
 
@@ -380,22 +380,21 @@ credential for every workload.
 A successful submit returns `201` with the job's name and the `pending` rows. Poll the rows, not the
 job: images in a set finish independently.
 
-With `max_concurrent_builds` set (see [Configuration](#configuration)), the rows come back `queued` and
-the job isn't created yet. The `builder-queue` controller creates it on behalf of the user who submitted
-the build, once fewer than `max_concurrent_builds` builds run across the deployment, oldest submit first,
-and moves the rows to `pending`. If Jobs then
-refuses the job, the rows are failed with the reason in `status_detail` rather than the submit
-returning `403` or `409`.
+Jobs starts each of the job's steps once that step's [execution profile](#jobs-execution-profiles)
+has room: the chart's `builder.maxConcurrentBuilds` sets each build profile's `max_active_jobs`, so at
+most that many steps run on each profile at once, and Jobs queues the rest, one user's at a time. That
+caps the sandboxes, not the builds in flight (see the profiles section). While a step waits, the job's
+status is `queued` and the rows stay `pending`.
 
 | Status | When |
 |---|---|
 | `201` | Rows created and job submitted, or the same request was submitted before and these are its rows and job. |
 | `400` | Two specs would publish the same `repository:tag`, or the workspace name can't be a repository path component. Or an image to copy doesn't resolve to a public image for its platform. |
 | `401` | Platform auth is on and the request names no one. |
-| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and stay `pending`. Or you're a service that isn't acting for a person. |
+| `403` | You may not submit builds in the workspace, or read Jobs' execution profiles, which every user can by default. Or you may, but may not create jobs there: the rows were already written, and fail five minutes on. Or you're a service that isn't acting for a person. |
 | `409` | An image to copy is on a registry the deployment doesn't allow. Or the deployment can't build: `registry` is unset, or the build's [Jobs execution profiles](#jobs-execution-profiles) are missing, aren't on Kubernetes, or disagree. Or the push step's secrets don't exist in the workspace, or you can't read them. Or this `name` and `revision` were already submitted with a different request, or the job's name is held by a job this request didn't create; the request's rows are then failed. |
 | `422` | The body failed validation: for example a path outside the context or fileset, a set or spec name that doesn't fit, more than 100 specs, duplicate spec names, a `revision` below 1, a repository or tag that isn't valid or is reserved, or an unknown field such as `output.registry`. |
-| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and stay `pending`. Or the registry of an image to copy couldn't be reached. |
+| `502` | Another platform service refused the build. If Jobs refused the job, the rows were already written, and fail five minutes on. Or the registry of an image to copy couldn't be reached. |
 | `500` | Anything else. |
 
 ### Read the results: `GET /container-images` and `GET /container-images/{name}`
@@ -411,7 +410,7 @@ service on its own permissions, so the service checks its user may read images h
 
 | Field | Meaning |
 |---|---|
-| `status` | `queued`, `pending`, `ready` or `failed`. `queued` means the build waits for a slot under `max_concurrent_builds`. `ready` is written once the push step has pushed and signed the image; `failed` only when the submit that wrote the row was refused. The builder's routes never change either (but see [Security](#security)). |
+| `status` | `pending`, `ready` or `failed` (or `queued`, deprecated: see [Upgrading from 0.10](#upgrading-from-010)). `ready` is written once the push step has pushed and signed the image. `failed` is written when the submit that wrote the row was refused, or once the image is found abandoned: its job ended without completing it, or it is five minutes old and has no job (see [Reliability](#reliability)). The builder's routes never change either (but see [Security](#security)). |
 | `status_detail` | Why a row failed. |
 | `registry`, `repository` | Where the image lives. |
 | `digest` | The digest the push step pushed and signed, set when the row becomes `ready`. |
@@ -554,7 +553,7 @@ sequenceDiagram
    in one write.
 
 One failed Dockerfile, or one sandbox that can't run, doesn't stop the rest of the set: the other
-images still build, push and complete. The failed image's row stays `pending` (see
+images still build, push and complete. The failed image's row fails once the job has ended (see
 [Reliability](#reliability)). If every image in a set fails, `push` never runs.
 
 | | Runs as | Holds | Work volume | Runs your code |
@@ -668,9 +667,6 @@ builder:
   import_registries: [docker.io, ghcr.io, nvcr.io, quay.io]
   # The platform for a spec that names none. Set it to the nodes' architecture; this is the default.
   default_platform: linux/amd64
-  # Most builds running at once, across workspaces; later submits queue. Null, the default, never queues.
-  # The chart sets it from builder.maxConcurrentBuilds (3).
-  max_concurrent_builds: 3
 ```
 
 `registry` has no default; while it is unset, submits fail with a `409` rather than as builds that
@@ -737,6 +733,36 @@ volume and `node_selector`, so the profiles must agree with each other:
   steps name their image, so `default_task_image` doesn't apply
 - with a `ReadWriteOnce` work volume, every `node_selector` names the one node all build pods run on
 
+Each profile's `max_active_jobs` caps the builds at that step: Jobs starts a step there only while fewer
+than that many run, and queues the rest. The chart sets all three from `builder.maxConcurrentBuilds`.
+A build runs one step at a time and holds its sandboxes only during `build`, so size the build
+namespace's ResourceQuota for that many sandboxes and that many step pods per profile. Jobs' per-user
+and per-workspace limits apply too.
+
+The limits count steps, not builds: a build between two steps holds no slot, so nothing caps how many
+builds are started and not yet finished. In a burst, `fetch` runs ahead of `build`, and most of the
+burst's contexts land on the work volume while `build` works through them that many at a time. Size
+the work volume for the largest burst, not for `builder.maxConcurrentBuilds` builds. A cap on whole
+builds needs a Jobs limit per group of jobs, which Jobs doesn't offer yet.
+
+### Upgrading from 0.10
+
+0.10's builder capped builds with its own queue; 0.11 leaves that to the build profiles'
+`max_active_jobs`. What 0.10 left behind still works, but is deprecated and goes in a later release:
+
+- **The `builder-queue` controller** is now a name for `builder-settle`, which it runs, and it logs a
+  warning as it starts. Select `builder-settle` instead. Under a controller group, such as `all`, both
+  run, and each pass settles twice; that's safe, since every write is conditional.
+- **`builder.max_concurrent_builds`** is accepted and ignored, with a warning. The chart's
+  `builder.maxConcurrentBuilds` keeps its name, and sets the build profiles' `max_active_jobs`
+  instead.
+- **The `queued` status** is still read, and still filters a listing, but nothing writes it.
+  `builder-settle` settles the images 0.10 left `queued` as it does `pending` ones: one whose job 0.10's
+  queue created completes or fails with it, and one whose job it never created fails, five minutes
+  after it was submitted, with a `status_detail` saying to submit the next revision.
+- **The queued builds 0.10 stored** are deleted by `builder-settle`, since each holds its submitter's
+  principal.
+
 ## Limitations
 
 ### Deployment
@@ -754,10 +780,17 @@ volume and `node_selector`, so the profiles must agree with each other:
 
 ### Reliability
 
-- **Nothing fails a row whose build fails.** Its row stays `pending`. So do the rows of a submit
-  that died, or that Jobs refused, between writing them and creating its job, and the rows of a job
-  whose push step never started, because a secret was deleted after the submit checked it. Poll
-  with a deadline. Submitting the same request again reuses its rows.
+- **A row whose build fails is failed by `builder-settle`, or when it's read.** Once a `pending`
+  image's job has ended, or once the image is five minutes old and has no job (a submit that died, or
+  that Jobs refused, between writing its rows and creating its job; or a job deleted before it
+  ended), it is written `failed`, with the reason in `status_detail`. The five minutes count from
+  the row's creation, not from when its job went missing: a job deleted when its image is four
+  minutes old fails the image within about a minute. The `builder-settle` controller does that
+  for every `pending` image every 30 seconds, and reading one image does it for that image at once.
+  Listing doesn't, so a listing's `status` lags by up to a pass, and without `builder-settle` such
+  rows stay `pending` in listings for good: the chart refuses a controller selection that leaves it
+  out. Within the five minutes, submitting the same request again creates its job; after them,
+  submit the next `revision`: the same one again would build images already failed.
 - **One unreadable fileset fails the whole set.** `fetch` copies every context in one step, so one
   that can't be read stops every image in the set.
 - **A sandbox has an hour.** The images from one context build one after another in one sandbox.
@@ -767,9 +800,13 @@ volume and `node_selector`, so the profiles must agree with each other:
   closes early, the sandbox's unfinished images fail. A retried `build` step fails while the
   previous attempt's sandbox still exists, and a sandbox whose `build` was killed is never deleted:
   it stays until someone deletes it.
-- **The work volume fills up.** Jobs deletes a job's directory only when the push step's profile
-  sets `cleanup_completed_jobs_immediately`, and only after the job's last step succeeds. The chart's
-  profiles set it, so a failed build's contexts and layouts stay until someone deletes them.
+- **A failed build holds its space for hours.** Jobs deletes a build's directory on the work
+  volume once its last step succeeds, when the push step's profile sets
+  `cleanup_completed_jobs_immediately`, as the chart's do. A failed build's contexts and layouts
+  stay for `jobs.storage.failed_storage_ttl_seconds` after its failed step stopped, 4 hours by
+  default, and a cancelled build's until Jobs' next retention pass, every 5 minutes by default.
+  Size the work volume for a burst of failures as well as for the burst itself (see
+  [Jobs execution profiles](#jobs-execution-profiles)).
 - **`fetch` reads each file of a fileset whole into memory.** A build context with very large files
   can exhaust the step's memory. An archive is streamed to the work volume instead.
 - **An archive unpacks to at most 4 GiB and 100,000 entries.** A larger one fails the whole set,

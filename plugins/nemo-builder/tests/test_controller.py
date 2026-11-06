@@ -1,171 +1,218 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The build queue controller, against fakes."""
+"""``builder-settle``: each pass fails the abandoned ``pending`` images of every workspace."""
 
 from __future__ import annotations
 
-from contextlib import nullcontext
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from typing import Any
+from typing import Literal
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from nemo_builder_plugin.controller import BuildQueueController
+from nemo_builder_plugin.controller import BuildQueueController, SettleController
 from nemo_builder_plugin.entities import ContainerImage, Provenance, QueuedBuild
-from nemo_helix_plugin.client.errors import ConflictError, NotFoundError, PermissionDeniedError
+from nemo_builder_plugin.settle import QUEUE_GONE, job_status_from
+from nemo_helix_plugin.client.errors import NotFoundError
 from nemo_helix_plugin.entities import EntityNotFoundError
-from nemo_helix_plugin.jobs.providers import ContainerSpec, CPUExecutionProvider
 from nemo_helix_plugin.jobs.schemas import HelixJobStatus
-from nemo_helix_plugin.jobs.spec import HelixJobSpec, HelixJobStepSpec
-from nemo_helix_plugin.jobs.types import CreateHelixJobRequest
-
-DIGEST = "sha256:" + "a" * 64
-OTHER = "sha256:" + "b" * 64
 
 
-def _response(code: int) -> httpx.Response:
-    return httpx.Response(code, json={"detail": "nope"}, request=httpx.Request("POST", "http://jobs"))
+def _row(
+    name: str, job: str, *, status: Literal["queued", "pending"] = "pending", age: timedelta = timedelta(minutes=1)
+) -> ContainerImage:
+    row = ContainerImage(
+        name=name,
+        workspace="ws-a",
+        status=status,
+        registry="reg.example.com",
+        repository="ws-a/app",
+        provenance=Provenance(build_set="demo", revision=1, job=f"ws-a/{job}", request_digest="sha256:" + "a" * 64),
+    )
+    row._created_at = datetime.now(UTC) - age
+    return row
 
 
 class FakeEntities:
-    def __init__(self) -> None:
-        self.entities: dict[str, Any] = {}
-        self.fail_update: set[str] = set()
+    """Rows and queued builds over pages of ``page_size``; records each list, update and delete in order."""
 
-    async def list(self, entity_type, *, workspace, sort, page):
-        found = [e for e in self.entities.values() if isinstance(e, entity_type)]
-        return SimpleNamespace(data=found, pagination=SimpleNamespace(total_pages=1))
+    def __init__(
+        self, rows: Sequence[ContainerImage], page_size: int = 2, queued_builds: Sequence[QueuedBuild] = ()
+    ) -> None:
+        self.rows = [*rows]
+        self.queued_builds = [*queued_builds]
+        self.page_size = page_size
+        self.events: list[str] = []
+        self.filters: list[tuple[str, object]] = []
+        #: Names whose delete fails, as an entity store outage would.
+        self.undeletable: set[str] = set()
 
-    async def get(self, entity_type, *, name, workspace):
-        if name not in self.entities:
-            raise EntityNotFoundError(name)
-        return self.entities[name].model_copy(deep=True)
+    async def list(self, entity_type: type, *, workspace: str, filter_obj: dict | None, sort: str, page: int):
+        self.filters.append((workspace, filter_obj))
+        if entity_type is QueuedBuild:
+            self.events.append(f"list-queued-builds:{page}")
+            matching: list = self.queued_builds
+        else:
+            status = (filter_obj or {})["status"]
+            self.events.append(f"list-{status}:{page}")
+            matching = [row for row in self.rows if row.status == status]
+        pages = max(1, -(-len(matching) // self.page_size))
+        data = matching[(page - 1) * self.page_size : page * self.page_size]
+        return SimpleNamespace(data=data, pagination=SimpleNamespace(total_pages=pages))
 
-    async def update(self, entity):
-        if entity.name in self.fail_update:
-            self.fail_update.discard(entity.name)
+    async def delete(self, entity_type: type, name: str, *, workspace: str) -> None:
+        assert entity_type is QueuedBuild
+        self.events.append(f"delete:{name}")
+        if name in self.undeletable:
             raise RuntimeError("entity store down")
-        self.entities[entity.name] = entity
+        if name not in [build.name for build in self.queued_builds]:
+            raise EntityNotFoundError(name)
+        self.queued_builds = [build for build in self.queued_builds if build.name != name]
+
+    async def get(self, entity_type: type, *, name: str, workspace: str) -> ContainerImage:
+        return next(row for row in self.rows if row.name == name)
+
+    async def update(self, entity: ContainerImage) -> ContainerImage:
+        self.events.append(f"update:{entity.name}:{entity.status}")
+        self.rows = [entity if row.name == entity.name else row for row in self.rows]
         return entity
 
-    async def delete(self, entity_type, name, *, workspace):
-        del self.entities[name]
+
+def _controller(
+    entities: FakeEntities, job_status: AsyncMock, controller_type: type[SettleController] = SettleController
+) -> SettleController:
+    controller = controller_type()
+    controller._entities = entities  # ty: ignore[invalid-assignment]
+    controller._job_status = job_status
+    return controller
 
 
-class FakeJobs:
-    def __init__(self) -> None:
-        self.jobs: dict[str, SimpleNamespace] = {}
-        self.refuse: set[str] = set()
-        self.conflict: set[str] = set()
+class TestAPass:
+    @pytest.mark.asyncio
+    async def test_it_reads_every_page_before_failing_the_abandoned_ones(self) -> None:
+        """A write before the last page is read would move a row out of the pages still to come."""
+        entities = FakeEntities([_row("a", "ended"), _row("b", "ended"), _row("c", "running")])
+        statuses = {"ended": HelixJobStatus.ERROR, "running": HelixJobStatus.ACTIVE}
+        job_status = AsyncMock(side_effect=lambda workspace, name: statuses[name])
 
-    async def create_job(self, *, workspace: str, body: CreateHelixJobRequest):
-        assert body.name is not None
-        if body.name in self.refuse:
-            raise PermissionDeniedError(_response(403))
-        if body.name in self.jobs or body.name in self.conflict:
-            raise ConflictError(_response(409))
-        self.jobs[body.name] = SimpleNamespace(status=HelixJobStatus.CREATED, custom_fields=body.custom_fields)
+        await _controller(entities, job_status).reconcile()
 
-    async def get_job(self, *, workspace: str, name: str):
-        if name not in self.jobs:
-            raise NotFoundError(_response(404))
-        return SimpleNamespace(data=lambda: self.jobs[name])
+        assert entities.events == [
+            "list-pending:1",
+            "list-pending:2",
+            "list-queued:1",
+            "update:a:failed",
+            "update:b:failed",
+            "list-queued-builds:1",
+        ]
+        assert entities.filters[:3] == [("-", {"status": "pending"})] * 2 + [("-", {"status": "queued"})]
+        # Once per job, however many of its images are pending.
+        assert [call.args for call in job_status.await_args_list] == [("ws-a", "ended"), ("ws-a", "running")]
 
-
-def _queue(entities: FakeEntities, job: str, digest: str = DIGEST) -> None:
-    image = f"{job}.img"
-    entities.entities[image] = ContainerImage(
-        name=image,
-        workspace="default",
-        status="queued",
-        registry="reg.example.com",
-        repository=f"team/{job}",
-        provenance=Provenance(build_set=job, revision=1, spec="img", job=f"default/{job}", request_digest=digest),
-    )
-    request = CreateHelixJobRequest(
-        name=job,
-        source="builder.build",
-        spec={},
-        platform_spec=HelixJobSpec(
-            steps=[HelixJobStepSpec(name="push", executor=CPUExecutionProvider(container=ContainerSpec(image="i")))]
-        ),
-        custom_fields={"images": [image], "request_digest": digest},
-    )
-    entities.entities[job] = QueuedBuild(
-        name=job, workspace="default", request=request.model_dump(mode="json"), images=[image]
-    )
+    @pytest.mark.asyncio
+    async def test_nothing_pending_asks_jobs_nothing(self) -> None:
+        entities = FakeEntities([])
+        job_status = AsyncMock()
+        await _controller(entities, job_status).reconcile()
+        assert entities.events == ["list-pending:1", "list-queued:1", "list-queued-builds:1"]
+        job_status.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_queue_starts_builds_in_order_within_the_cap() -> None:
-    entities, jobs = FakeEntities(), FakeJobs()
-    controller = BuildQueueController(cap=lambda: 1)
-    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
-    for job in ("build-a", "build-b", "build-c"):
-        _queue(entities, job)
-
-    def status(job: str) -> str:
-        return entities.entities[f"{job}.img"].status
-
-    await controller.reconcile()
-    assert set(jobs.jobs) == {"build-a"}
-    assert (status("build-a"), status("build-b"), entities.entities["build-a"].state) == (
-        "pending",
-        "queued",
-        "started",
-    )
-
-    # Still running: the cap holds.
-    await controller.reconcile()
-    assert set(jobs.jobs) == {"build-a"}
-
-    # a publishes and ends: its entry goes and b takes the slot. c's job is refused, so c fails rather than waiting.
-    entities.entities["build-a.img"].status = "ready"
-    jobs.jobs["build-a"].status = HelixJobStatus.COMPLETED
-    jobs.refuse.add("build-c")
-    await controller.reconcile()
-    assert "build-a" not in entities.entities and set(jobs.jobs) == {"build-a", "build-b"}
-    assert status("build-a") == "ready"
-    # b's job errors before publishing: its image fails instead of staying pending.
-    jobs.jobs["build-b"].status = HelixJobStatus.ERROR
-    await controller.reconcile()
-    assert status("build-b") == "failed" and "build-b" not in entities.entities
-    assert status("build-c") == "failed" and "build-c" not in entities.entities
-
-    # A job already created for the same request (a pass that died before marking it started) is adopted.
-    _queue(entities, "build-d")
-    jobs.jobs["build-d"] = SimpleNamespace(status=HelixJobStatus.ACTIVE, custom_fields={"request_digest": DIGEST})
-    await controller.reconcile()
-    assert (status("build-d"), entities.entities["build-d"].state) == ("pending", "started")
-
-    # One held by a different request fails the build.
-    _queue(entities, "build-e", digest=OTHER)
-    jobs.jobs["build-d"].status = HelixJobStatus.COMPLETED
-    jobs.jobs["build-e"] = SimpleNamespace(status=HelixJobStatus.ACTIVE, custom_fields={"request_digest": DIGEST})
-    await controller.reconcile()
-    assert status("build-e") == "failed" and "build-e" not in entities.entities
+def _queued_build(name: str) -> QueuedBuild:
+    return QueuedBuild(name=name, workspace="ws-a")
 
 
-@pytest.mark.asyncio
-async def test_refused_builds_do_not_block_the_queue() -> None:
-    entities, jobs = FakeEntities(), FakeJobs()
-    controller = BuildQueueController(cap=lambda: 1)
-    vars(controller).update(_entities=entities, _jobs=jobs, _jobs_as=lambda principal: nullcontext(jobs))
-    for job in ("bad-request", "missing-secret", "good"):
-        _queue(entities, job)
-    entities.entities["bad-request"].request = {"name": "bad-request"}
-    # Jobs answers 409 with no job behind it, as it does for a secret the job names going missing.
-    jobs.conflict.add("missing-secret")
-    # The first attempt to fail its image doesn't stick, so its entry must outlive this pass.
-    entities.fail_update.add("missing-secret.img")
+class TestWhat010Left:
+    """Deprecated: 0.10's builder queued builds itself, and wrote their images ``queued``."""
 
-    await controller.reconcile()
-    assert entities.entities["bad-request.img"].status == "failed" and "bad-request" not in entities.entities
-    assert entities.entities["missing-secret.img"].status == "queued" and "missing-secret" in entities.entities
-    assert set(jobs.jobs) == {"good"} and entities.entities["good.img"].status == "pending"
+    @pytest.mark.asyncio
+    async def test_a_queued_image_whose_job_was_never_created_fails(self) -> None:
+        entities = FakeEntities([_row("a", "never", status="queued", age=timedelta(hours=1))])
+        await _controller(entities, AsyncMock(return_value=None)).reconcile()
+        [row] = entities.rows
+        assert (row.status, row.status_detail) == ("failed", QUEUE_GONE)
 
-    # Retried once a slot is free.
-    jobs.jobs["good"].status = HelixJobStatus.COMPLETED
-    await controller.reconcile()
-    assert entities.entities["missing-secret.img"].status == "failed" and "missing-secret" not in entities.entities
+    @pytest.mark.asyncio
+    async def test_a_queued_image_whose_job_runs_is_left_to_it(self) -> None:
+        """0.10's queue created its job, then died before moving the image to ``pending``: the job completes it."""
+        entities = FakeEntities([_row("a", "running", status="queued", age=timedelta(hours=1))])
+        await _controller(entities, AsyncMock(return_value=HelixJobStatus.ACTIVE)).reconcile()
+        assert [row.status for row in entities.rows] == ["queued"]
+
+    @pytest.mark.asyncio
+    async def test_its_queued_builds_are_deleted_after_every_page_is_read(self) -> None:
+        """Each holds its submitter's principal, and nothing reads it any more."""
+        entities = FakeEntities([], queued_builds=[_queued_build(name) for name in "abc"])
+        await _controller(entities, AsyncMock()).reconcile()
+        assert entities.events[2:] == [
+            "list-queued-builds:1",
+            "list-queued-builds:2",
+            "delete:a",
+            "delete:b",
+            "delete:c",
+        ]
+        assert entities.queued_builds == []
+
+    @pytest.mark.asyncio
+    async def test_a_queued_build_that_cant_be_deleted_is_left_for_the_next_pass(self) -> None:
+        entities = FakeEntities([], queued_builds=[_queued_build("a"), _queued_build("b")])
+        entities.undeletable = {"a"}
+        await _controller(entities, AsyncMock()).reconcile()
+        assert [build.name for build in entities.queued_builds] == ["a"]
+
+    @pytest.mark.asyncio
+    async def test_one_already_deleted_is_not_an_error(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Another pass, under the deprecated name, deleted it first."""
+        entities = FakeEntities([])
+        controller = _controller(entities, AsyncMock())
+        # Listed before the other pass deleted it.
+        controller._every = AsyncMock(return_value=[_queued_build("a")])
+        await controller._forget_queued_builds()
+        assert entities.events == ["delete:a"]
+        assert "could not delete" not in caplog.text
+
+
+class TestTheDeprecatedName:
+    def test_builder_queue_runs_builder_settle(self) -> None:
+        """So a 0.10 selection that names builder-queue keeps settling."""
+        assert BuildQueueController.name == "builder-queue"
+        assert issubclass(BuildQueueController, SettleController)
+
+    @pytest.mark.asyncio
+    async def test_it_warns_as_it_starts(self, caplog: pytest.LogCaptureFixture) -> None:
+        client = MagicMock()
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=client)
+        controller = BuildQueueController(client_factory=lambda: context)
+        await controller.on_startup()
+        assert "builder-queue controller is deprecated" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_it_settles_as_builder_settle_does(self) -> None:
+        entities = FakeEntities([_row("a", "ended")])
+        await _controller(entities, AsyncMock(return_value=HelixJobStatus.ERROR), BuildQueueController).reconcile()
+        assert [row.status for row in entities.rows] == ["failed"]
+
+
+class TestReadingAJobAsTheBuilder:
+    @pytest.mark.asyncio
+    async def test_a_job_that_doesnt_exist_is_none(self) -> None:
+        jobs = MagicMock()
+        jobs.get_job_status = AsyncMock(
+            side_effect=NotFoundError(
+                httpx.Response(404, json={"detail": "no"}, request=httpx.Request("GET", "http://j"))
+            )
+        )
+        assert await job_status_from(jobs)("ws-a", "builder-demo-1") is None
+
+    @pytest.mark.asyncio
+    async def test_a_job_that_exists_is_its_status(self) -> None:
+        response = MagicMock()
+        response.data.return_value.status = HelixJobStatus.QUEUED
+        jobs = MagicMock()
+        jobs.get_job_status = AsyncMock(return_value=response)
+        assert await job_status_from(jobs)("ws-a", "builder-demo-1") == HelixJobStatus.QUEUED
+        jobs.get_job_status.assert_awaited_once_with(workspace="ws-a", name="builder-demo-1")
