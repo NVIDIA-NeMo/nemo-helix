@@ -210,6 +210,53 @@ issue only for the types. They are still kept catalog-aligned — every dep in
 this `package.json` currently matches the catalog exactly, which makes an audit
 a diff rather than a judgement call.
 
+## Shared-dependency contract
+
+Studio runs your bundle in its own page, so some packages must be Studio's copy.
+
+- **Singleton** (identity matters: the plugin must use Studio's instance): `react`,
+  `react-dom`, `react-router`, KUI (`@nvidia/foundations-react-core`),
+  `@tanstack/react-query`.
+- **Provided** (`@nemo/common`): Studio serves a separate vendor build of Common's
+  source, so module state is **not** shared with Studio's own copy. State crosses
+  via the `host` prop.
+- Everything else is bundled into the plugin and is out of the contract.
+
+**Version rule.** Only a different **major** between the version you built against
+and the version Studio ships is an error. The contract has its own semver: it is
+supported iff the major is the same and the plugin's minor is <= Studio's minor.
+
+**Enforcement.**
+
+1. Build gate: `studioPlugin()` fails the build on deep imports and on bundled singletons.
+2. Sidecar: the build emits `plugin.manifest.json` next to `index.js` (commit it next
+   to a committed bundle).
+3. Load time: Studio fetches the sidecar and checks it before the bundle runs.
+
+**Error codes.**
+
+| Code                          | Cause                                                      | Fix                                                                                         |
+| ----------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `PLUGIN_MANIFEST_MISSING`     | `plugin.manifest.json` not found next to `index.js`        | Add `studioPlugin()` from `studio-plugin.mjs` to the plugin's Vite config, rebuild          |
+| `PLUGIN_SPECIFIER_UNMAPPED`   | The bundle imports a name Studio does not provide          | Import it as a normal dependency so it is bundled, or request it be added to the contract   |
+| `PLUGIN_SINGLETON_BUNDLED`    | A singleton's source was bundled into the plugin           | Import only contract specifiers (no deep paths, no `node_modules`), rebuild                 |
+| `PLUGIN_CONTRACT_UNSUPPORTED` | Built against a contract version Studio does not support   | Update the vendored `studio-plugin.mjs` to the current one, rebuild                         |
+| `PLUGIN_VERSION_INCOMPATIBLE` | A shared package has a different major than Studio ships   | Set that package to Studio's version in the plugin's `web/package.json`, rebuild            |
+| `PLUGIN_LOAD_FAILED`          | Untrusted URL, unreadable sidecar, or the bundle threw/lacks `Root`/`navItems` | Check the browser console for the underlying error, rebuild, refresh Studio |
+
+**Where a failure shows up.** The plugin's route panel, a `FAILED PLUGINS` sidebar
+group, and one line in the platform terminal (reported through
+`POST /studio/api/plugin-load-errors`; on only when
+`studio.plugin_error_reports_enabled` is true, or unset with auth disabled).
+
+**Development loop.** Run `vite build --watch` in the plugin's `web/`, then refresh
+Studio (the plugin UI is a prebuilt bundle, no HMR). `NODE_ENV=development` builds
+fail (the dev JSX runtime is not provided); build in the default production mode.
+
+**Out-of-tree plugins** vendor `web/packages/common/plugin-build/studio-plugin.mjs`
+and refresh it when the contract changes (`pnpm --filter @nemo/common build:plugin-helper`
+regenerates it).
+
 ## Build & verify
 
 This dir is its own pnpm root (`pnpm-workspace.yaml`), separate from `web/`.

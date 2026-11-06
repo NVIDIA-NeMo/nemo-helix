@@ -88,6 +88,7 @@ those catalog entries, update the matching `dependencies` in every
 typechecking against the old version while Studio serves the new one, and
 nothing fails until it breaks at runtime. See
 [plugins/example-plugin/web/AGENTS.md](../plugins/example-plugin/web/AGENTS.md).
+The load-time contract check, its error codes, and the dev loop are in that file's "Shared-dependency contract" section.
 
 ## Running Tests Locally
 
