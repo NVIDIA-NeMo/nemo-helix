@@ -54,9 +54,12 @@ export class AgentsAPI {
   }
 
   async deleteFileset(workspace: string, name: string) {
-    const response = await this.request.delete(
-      `${NHX_BASE_URL}/apis/files/v2/workspaces/${encodeURIComponent(workspace)}/filesets/${encodeURIComponent(name)}`
-    );
+    const base = `${NHX_BASE_URL}/apis/files/v2/workspaces/${encodeURIComponent(workspace)}/filesets`;
+    const selected = await this.request.get(`${base}/${encodeURIComponent(name)}`);
+    if (selected.status() === 404) return;
+    assertDone(selected, `select fileset ${name}`);
+    const fileset: { id: string } = await selected.json();
+    const response = await this.request.delete(`${base}/by-id/${encodeURIComponent(fileset.id)}`);
     assertDone(response, `delete fileset ${name}`);
   }
 

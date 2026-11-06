@@ -6,7 +6,7 @@ import { toError } from '@nemo/common/src/utils/logger';
 import {
   getFilesListFilesetsQueryKey,
   useFilesCreateFileset,
-  useFilesDeleteFileset,
+  useFilesDeleteFilesetById,
   useFilesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
 import {
@@ -94,7 +94,7 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
 
   const { mutateAsync: createFileset } = useFilesCreateFileset();
   const { mutateAsync: uploadFile } = useFilesUploadFile();
-  const { mutateAsync: deleteFileset } = useFilesDeleteFileset();
+  const { mutateAsync: deleteFileset } = useFilesDeleteFilesetById();
   const { mutateAsync: createModel } = useModelsCreateModel();
   const downloadFileHead = useDownloadFileHead();
 
@@ -162,7 +162,7 @@ export const useTemplateSetup = (workspace: string): UseTemplateSetupResult => {
       const removeReplaced = async () => {
         if (!replacing) return;
         setLabel('Removing the old fileset…');
-        await deleteFileset({ workspace, name: replacing.name });
+        await deleteFileset({ workspace, filesetId: replacing.filesetId });
       };
 
       setLabel('Checking the workspace…');

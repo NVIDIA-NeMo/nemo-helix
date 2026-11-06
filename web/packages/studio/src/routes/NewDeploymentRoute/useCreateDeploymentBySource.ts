@@ -43,6 +43,7 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
+  HUGGING_FACE_FILESET_ID_FIELD,
   HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,
   huggingFaceSourceFilesetName,
 } from '@studio/routes/DeploymentsListRoute/huggingFaceDeploymentArtifacts';
@@ -189,7 +190,7 @@ async function createHuggingFaceDeployment(
   };
 
   reportStage('Creating Hugging Face fileset…');
-  await filesCreateFileset(workspace, {
+  const allocated = await filesCreateFileset(workspace, {
     name: filesetName,
     storage,
   });
@@ -200,6 +201,7 @@ async function createHuggingFaceDeployment(
     fileset: `${workspace}/${filesetName}`,
     custom_fields: {
       [HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD]: HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,
+      [HUGGING_FACE_FILESET_ID_FIELD]: allocated.id,
     },
   });
 

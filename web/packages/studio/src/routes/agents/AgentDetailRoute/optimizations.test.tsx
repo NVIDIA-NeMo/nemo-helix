@@ -28,7 +28,7 @@ const workspace = workspace1.workspace;
 const OPTIMIZE_JOBS_URL = `${PLATFORM_BASE_URL}/apis/agent-optimization/v2/workspaces/:workspace/jobs/run-strategy`;
 const OPTIMIZE_JOB_URL = `${OPTIMIZE_JOBS_URL}/:name`;
 
-const FILESET_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`;
+const FILESET_BY_ID_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`;
 
 const listOnly = (studyName: string, overrides: Partial<RunStrategyJob> = {}) => {
   const data = mockOptimizeJobs
@@ -136,8 +136,8 @@ describe('AgentDetailRoute optimizations tab', () => {
         deleted.studies.push(String(params.name));
         return new HttpResponse(null, { status: 204 });
       }),
-      http.delete(FILESET_URL, ({ params }) => {
-        deleted.filesets.push(String(params.name));
+      http.delete(FILESET_BY_ID_URL, ({ params }) => {
+        deleted.filesets.push(String(params.filesetId));
         return new HttpResponse(null, { status: 204 });
       })
     );
@@ -151,6 +151,7 @@ describe('AgentDetailRoute optimizations tab', () => {
   };
 
   const BUNDLE = 'react-agent-optimize-abc123';
+  const BUNDLE_ID = 'fileset-original-bundle-id';
 
   /** A study as Studio launches it: its marker names the bundle the study actually runs from. */
   const launchedByStudio = (bundle = BUNDLE) => ({
@@ -160,15 +161,16 @@ describe('AgentDetailRoute optimizations tab', () => {
       agent: agentName,
       optimize_config_fileset: `${workspace}/${bundle}`,
     },
-    custom_fields: { studio_bundle_fileset: bundle },
+    custom_fields: { studio_bundle_fileset: bundle, studio_bundle_fileset_id: BUNDLE_ID },
   });
 
   /** The files service's view of that bundle, carrying the stamp Studio wrote when it staged it. */
   const serveStampedBundle = () =>
     server.use(
-      http.get(FILESET_URL, ({ params }) =>
+      http.get(FILESET_BY_ID_URL, ({ params }) =>
         HttpResponse.json({
-          name: String(params.name),
+          id: String(params.filesetId),
+          name: BUNDLE,
           custom_fields: { studio_optimize_bundle: agentName },
         })
       )
@@ -197,7 +199,7 @@ describe('AgentDetailRoute optimizations tab', () => {
 
     // The bundle goes first, so waiting on it alone would settle before the study delete lands.
     await waitFor(() => {
-      expect(deleted.filesets).toEqual([BUNDLE]);
+      expect(deleted.filesets).toEqual([BUNDLE_ID]);
       expect(deleted.studies).toEqual(['brevity-sweep-3']);
     });
   });
@@ -209,7 +211,10 @@ describe('AgentDetailRoute optimizations tab', () => {
     // A marker aimed at someone else's fileset: the study's own spec points somewhere else.
     listOnly('brevity-sweep-3', {
       ...launchedByStudio(),
-      custom_fields: { studio_bundle_fileset: 'shared-eval-data' },
+      custom_fields: {
+        studio_bundle_fileset: 'shared-eval-data',
+        studio_bundle_fileset_id: BUNDLE_ID,
+      },
     });
     renderDetail();
 
@@ -224,7 +229,7 @@ describe('AgentDetailRoute optimizations tab', () => {
     const deleted = captureDeletes();
     serveStampedBundle();
     // Registered after captureDeletes, so this failing handler wins.
-    server.use(http.delete(FILESET_URL, () => new HttpResponse(null, { status: 500 })));
+    server.use(http.delete(FILESET_BY_ID_URL, () => new HttpResponse(null, { status: 500 })));
     listOnly('brevity-sweep-3', launchedByStudio());
     renderDetail();
 

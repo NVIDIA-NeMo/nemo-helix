@@ -4,7 +4,7 @@
 import { agentsRegisterAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   filesCreateFileset,
-  filesDeleteFileset,
+  filesDeleteFilesetById,
   filesRetrieveFileset,
 } from '@nemo/sdk/generated/platform/files';
 import { AgentSpecFilesetOrphanError } from '@studio/api/agents/agentSpecFileset';
@@ -21,7 +21,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
   filesRetrieveFileset: vi.fn(),
   filesCreateFileset: vi.fn(),
-  filesDeleteFileset: vi.fn(),
+  filesDeleteFilesetById: vi.fn(),
 }));
 
 vi.mock('@studio/api/files/uploadFilesetEntries', () => ({ copyFilesetFiles: vi.fn() }));
@@ -61,8 +61,8 @@ const params = (replaceOrphanedFileset = false) => ({
 beforeEach(() => {
   vi.mocked(agentsGetAgent).mockRejectedValue(httpError(404));
   vi.mocked(agentsRegisterAgent).mockResolvedValue({ name: 'hermes-trial-4' } as never);
-  vi.mocked(filesCreateFileset).mockResolvedValue({} as never);
-  vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
+  vi.mocked(filesCreateFileset).mockResolvedValue({ id: 'allocated-id' } as never);
+  vi.mocked(filesDeleteFilesetById).mockResolvedValue(undefined as never);
   vi.mocked(copyFilesetFiles).mockResolvedValue();
 });
 
@@ -127,7 +127,9 @@ describe('createAgentFromTrial', () => {
   });
 
   it('refuses an orphaned fileset under the new name unless told to replace it', async () => {
-    mockFilesets({ 'ws/hermes-trial-4-ethos': { storage: { type: 'local', path: '/old' } } });
+    mockFilesets({
+      'ws/hermes-trial-4-ethos': { id: 'allocated-id', storage: { type: 'local', path: '/old' } },
+    });
 
     await expect(createAgentFromTrial(params())).rejects.toBeInstanceOf(
       AgentSpecFilesetOrphanError
@@ -135,7 +137,7 @@ describe('createAgentFromTrial', () => {
     expect(agentsRegisterAgent).not.toHaveBeenCalled();
 
     await createAgentFromTrial(params(true));
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'hermes-trial-4-ethos');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
     expect(agentsRegisterAgent).toHaveBeenCalled();
   });
 
@@ -144,6 +146,6 @@ describe('createAgentFromTrial', () => {
     vi.mocked(agentsRegisterAgent).mockRejectedValue(new Error('invalid config'));
 
     await expect(createAgentFromTrial(params())).rejects.toThrow('invalid config');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'hermes-trial-4-ethos');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
   });
 });

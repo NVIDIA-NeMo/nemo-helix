@@ -44,8 +44,9 @@ export const createAgentFromGitHub = async ({
 
   await claimFileset(workspace, name, filesetName, replaceOrphanedFileset);
 
+  let allocated;
   try {
-    await filesCreateFileset(workspace, {
+    allocated = await filesCreateFileset(workspace, {
       name: filesetName,
       description: `Agent spec for ${name}, from ${formatGitHubSource(source)}`,
       storage: githubStorageConfig(source, secretName),
@@ -69,7 +70,7 @@ export const createAgentFromGitHub = async ({
       config_format: FABRIC_CONFIG_FORMAT,
     });
   } catch (error) {
-    await rollbackFileset(workspace, filesetName);
+    await rollbackFileset(workspace, allocated.id);
     throw error;
   }
 };

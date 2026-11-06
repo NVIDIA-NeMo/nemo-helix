@@ -82,7 +82,7 @@ describe('useCreateDeploymentBySource — workspace source', () => {
       dismissToast: vi.fn(),
     } as unknown as ReturnType<typeof useToast>);
 
-    mockFilesCreateFileset.mockResolvedValue(undefined as never);
+    mockFilesCreateFileset.mockResolvedValue({ id: 'allocated-id' } as never);
     mockModelsCreateModel.mockResolvedValue(undefined as never);
     mockModelsCreateDeploymentConfig.mockResolvedValue(undefined as never);
     mockModelsCreateDeployment.mockResolvedValue(undefined as never);
@@ -275,7 +275,7 @@ describe('useCreateDeploymentBySource — huggingface name collisions', () => {
       dismissToast: vi.fn(),
     } as unknown as ReturnType<typeof useToast>);
 
-    mockFilesCreateFileset.mockResolvedValue(undefined as never);
+    mockFilesCreateFileset.mockResolvedValue({ id: 'allocated-id' } as never);
     mockModelsCreateModel.mockResolvedValue(undefined as never);
     mockModelsCreateDeploymentConfig.mockResolvedValue(undefined as never);
     mockModelsCreateDeployment.mockResolvedValue(undefined as never);

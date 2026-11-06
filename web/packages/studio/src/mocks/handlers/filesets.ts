@@ -185,7 +185,7 @@ export const filesetsHandlers = [
     }
   ),
   http.delete(
-    `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+    `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
     () => new HttpResponse(null, { status: 200 })
   ),
   http.options(

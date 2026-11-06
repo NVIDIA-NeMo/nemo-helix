@@ -14,7 +14,7 @@ import { getPartsFromReference } from '@nemo/common/src/namedEntity';
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
 import { logger } from '@nemo/common/src/utils/logger';
 import {
-  filesDeleteFileset,
+  filesDeleteFilesetById,
   getFilesListFilesetsQueryKey,
 } from '@nemo/sdk/generated/platform/files';
 import {
@@ -41,8 +41,8 @@ import {
 } from '@nemo/sdk/generated/platform/schema';
 import {
   HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD,
+  HUGGING_FACE_FILESET_ID_FIELD,
   HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,
-  huggingFaceSourceFilesetName,
 } from '@studio/routes/DeploymentsListRoute/huggingFaceDeploymentArtifacts';
 import { type QueryClient, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
@@ -107,7 +107,7 @@ async function waitForDeploymentReleasedFromConfig(
   throw new Error('Timed out waiting for deployment to finish deleting.');
 }
 
-type HuggingFaceCleanup = { modelName: string; filesetName: string };
+type HuggingFaceCleanup = { modelName: string; filesetId: string | null };
 type ModelRef = { workspace: string; name: string };
 
 function getDeploymentConfigModelRef(config: ModelDeploymentConfig): ModelRef | null {
@@ -138,8 +138,7 @@ function isStudioHuggingFaceSourceModel(model: ModelEntity): boolean {
 
 async function readHuggingFaceCleanupPlan(
   workspace: string,
-  configName: string,
-  deploymentName: string
+  configName: string
 ): Promise<HuggingFaceCleanup | null> {
   try {
     const cfg = await modelsGetLatestDeploymentConfig(workspace, configName);
@@ -151,7 +150,10 @@ async function readHuggingFaceCleanupPlan(
 
     return {
       modelName: modelRef.name,
-      filesetName: huggingFaceSourceFilesetName(deploymentName),
+      filesetId:
+        typeof model.custom_fields?.[HUGGING_FACE_FILESET_ID_FIELD] === 'string'
+          ? model.custom_fields[HUGGING_FACE_FILESET_ID_FIELD]
+          : null,
     };
   } catch {
     return null;
@@ -161,7 +163,7 @@ async function readHuggingFaceCleanupPlan(
 /** Best-effort: deployment + config are already removed; avoid failing the whole flow. */
 async function deleteHuggingFaceModelAndFileset(
   workspace: string,
-  { modelName, filesetName }: HuggingFaceCleanup
+  { modelName, filesetId }: HuggingFaceCleanup
 ): Promise<void> {
   try {
     await modelsDeleteModel(workspace, modelName);
@@ -169,7 +171,7 @@ async function deleteHuggingFaceModelAndFileset(
     /* model may already be gone */
   }
   try {
-    await filesDeleteFileset(workspace, filesetName);
+    if (filesetId) await filesDeleteFilesetById(workspace, filesetId);
   } catch {
     /* fileset may already be gone */
   }
@@ -185,7 +187,7 @@ async function deleteRelatedResourcesAfterDeploymentReleased(
   await waitForDeploymentReleasedFromConfig(workspace, deployment.name);
 
   if (configName) {
-    hfCleanup = await readHuggingFaceCleanupPlan(workspace, configName, deployment.name);
+    hfCleanup = await readHuggingFaceCleanupPlan(workspace, configName);
     await modelsDeleteAllDeploymentConfigVersions(workspace, configName);
   }
 

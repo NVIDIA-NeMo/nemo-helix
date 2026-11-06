@@ -3,7 +3,7 @@
 
 import { isNotFoundError } from '@nemo/common/src/api/common/utils';
 import { agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
-import { filesDeleteFileset, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
+import { filesDeleteFilesetById, filesRetrieveFileset } from '@nemo/sdk/generated/platform/files';
 
 /** An agent of this name already exists; its spec fileset is not ours to take. */
 export class AgentSpecFilesetConflictError extends Error {
@@ -29,8 +29,9 @@ export const claimFileset = async (
   filesetName: string,
   replaceOrphanedFileset: boolean
 ): Promise<void> => {
+  let selected;
   try {
-    await filesRetrieveFileset(workspace, filesetName);
+    selected = await filesRetrieveFileset(workspace, filesetName);
   } catch (error) {
     // Only a 404 means the name is free; anything else leaves ownership unknown.
     if (!isNotFoundError(error)) throw error;
@@ -44,7 +45,7 @@ export const claimFileset = async (
     throw new AgentSpecFilesetOrphanError(filesetName);
   }
 
-  await filesDeleteFileset(workspace, filesetName);
+  await filesDeleteFilesetById(workspace, selected.id);
 };
 
 const agentExists = async (workspace: string, agentName: string): Promise<boolean> => {
@@ -57,6 +58,6 @@ const agentExists = async (workspace: string, agentName: string): Promise<boolea
   }
 };
 
-export const rollbackFileset = async (workspace: string, filesetName: string): Promise<void> => {
-  await filesDeleteFileset(workspace, filesetName).catch(() => undefined);
+export const rollbackFileset = async (workspace: string, filesetId: string): Promise<void> => {
+  await filesDeleteFilesetById(workspace, filesetId).catch(() => undefined);
 };

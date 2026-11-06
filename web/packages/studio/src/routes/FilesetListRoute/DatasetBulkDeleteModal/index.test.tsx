@@ -128,16 +128,16 @@ describe('DatasetBulkDeleteModal', () => {
   describe('Delete Operations', () => {
     it('calls delete for each selected dataset when delete button is clicked', async () => {
       const user = userEvent.setup();
-      const deleteRequests: Array<{ workspace: string; name: string }> = [];
+      const deleteRequests: Array<{ workspace: string; filesetId: string }> = [];
 
       // Track delete requests
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) => {
             deleteRequests.push({
               workspace: params.workspace as string,
-              name: params.name as string,
+              filesetId: params.filesetId as string,
             });
             return new HttpResponse(null, { status: 200 });
           }
@@ -172,15 +172,15 @@ describe('DatasetBulkDeleteModal', () => {
       // Verify correct delete requests were made
       expect(deleteRequests).toContainEqual({
         workspace: 'test-namespace',
-        name: 'dataset-1',
+        filesetId: 'uuid-1',
       });
       expect(deleteRequests).toContainEqual({
         workspace: 'test-namespace',
-        name: 'dataset-2',
+        filesetId: 'uuid-2',
       });
       expect(deleteRequests).toContainEqual({
         workspace: 'test-namespace',
-        name: 'dataset-3',
+        filesetId: 'uuid-3',
       });
     });
 
@@ -225,7 +225,7 @@ describe('DatasetBulkDeleteModal', () => {
       // Override with error response
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           () => new HttpResponse(null, { status: 500 })
         )
       );
@@ -265,8 +265,9 @@ describe('DatasetBulkDeleteModal', () => {
         "Cannot delete fileset 'test-namespace/dataset-1' because 1 model entity reference(s) and 0 adapter entity reference(s) still use it. Relink or delete the dependent entities first.";
 
       server.use(
-        http.delete(`${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`, () =>
-          HttpResponse.json({ detail }, { status: 409 })
+        http.delete(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
+          () => HttpResponse.json({ detail }, { status: 409 })
         )
       );
 
@@ -297,9 +298,9 @@ describe('DatasetBulkDeleteModal', () => {
       // throws, so the list still needs a refresh to drop it.
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) =>
-            params.name === 'dataset-1'
+            params.filesetId === 'uuid-1'
               ? new HttpResponse(null, { status: 200 })
               : new HttpResponse(null, { status: 500 })
         )
@@ -337,7 +338,7 @@ describe('DatasetBulkDeleteModal', () => {
 
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           async () => {
             await deleteGate;
             return new HttpResponse(null, { status: 200 });
@@ -384,16 +385,16 @@ describe('DatasetBulkDeleteModal', () => {
   describe('Edge Cases', () => {
     it('handles datasets with missing namespace gracefully', async () => {
       const user = userEvent.setup();
-      const deleteRequests: Array<{ workspace: string; name: string }> = [];
+      const deleteRequests: Array<{ workspace: string; filesetId: string }> = [];
 
       // Track delete requests
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) => {
             deleteRequests.push({
               workspace: params.workspace as string,
-              name: params.name as string,
+              filesetId: params.filesetId as string,
             });
             return new HttpResponse(null, { status: 200 });
           }
@@ -428,16 +429,16 @@ describe('DatasetBulkDeleteModal', () => {
 
     it('handles datasets with missing name gracefully', async () => {
       const user = userEvent.setup();
-      const deleteRequests: Array<{ workspace: string; name: string }> = [];
+      const deleteRequests: Array<{ workspace: string; filesetId: string }> = [];
 
       // Track delete requests
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) => {
             deleteRequests.push({
               workspace: params.workspace as string,
-              name: params.name as string,
+              filesetId: params.filesetId as string,
             });
             return new HttpResponse(null, { status: 200 });
           }
@@ -472,16 +473,16 @@ describe('DatasetBulkDeleteModal', () => {
 
     it('works correctly with single dataset', async () => {
       const user = userEvent.setup();
-      const deleteRequests: Array<{ workspace: string; name: string }> = [];
+      const deleteRequests: Array<{ workspace: string; filesetId: string }> = [];
 
       // Track delete requests
       server.use(
         http.delete(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) => {
             deleteRequests.push({
               workspace: params.workspace as string,
-              name: params.name as string,
+              filesetId: params.filesetId as string,
             });
             return new HttpResponse(null, { status: 200 });
           }

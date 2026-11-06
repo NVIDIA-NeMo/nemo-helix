@@ -50,7 +50,7 @@ export const createAgentFromTrial = async ({
   if (!sourceFileset) return createAgent();
 
   const sharesStorage = isRepositoryBackend(sourceFileset.storage.type);
-  await filesCreateFileset(workspace, {
+  const allocated = await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Agent spec for ${name}, copied from ${source.workspace}/${source.name}`,
     storage: sharesStorage ? sourceFileset.storage : undefined,
@@ -65,7 +65,7 @@ export const createAgentFromTrial = async ({
     }
     return await createAgent();
   } catch (error) {
-    await rollbackFileset(workspace, filesetName);
+    await rollbackFileset(workspace, allocated.id);
     throw error;
   }
 };

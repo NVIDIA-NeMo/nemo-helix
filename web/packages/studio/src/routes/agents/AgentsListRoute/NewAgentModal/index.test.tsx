@@ -9,7 +9,6 @@ import { workspace1 } from '@studio/mocks/entity-store/projects';
 import { server } from '@studio/mocks/node';
 import { NewAgentModal } from '@studio/routes/agents/AgentsListRoute/NewAgentModal';
 import { MAX_PICKED_FILES } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/const';
-import { agentSpecFilesetName } from '@studio/routes/agents/AgentsListRoute/NewAgentModal/utils';
 import { getAgentsListRoute } from '@studio/routes/utils';
 import { mockExecutionProfiles } from '@studio/tests/util/mockAgentDeploymentCapabilities';
 import { renderRoute, screen, waitFor } from '@studio/tests/util/render';
@@ -21,6 +20,8 @@ import { useLocation } from 'react-router';
 const workspace = workspace1.workspace;
 const FILESETS_URL = `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets`;
 const FILESET_URL = `${FILESETS_URL}/:name`;
+const FILESET_BY_ID_URL = `${FILESETS_URL}/by-id/:filesetId`;
+const CREATED_FILESET_ID = 'fileset-created-id';
 const UPLOAD_URL = `${FILESET_URL}/-/*`;
 const AGENTS_URL = `${PLATFORM_BASE_URL}/apis/agents/v2/workspaces/:workspace/agents`;
 const AGENT_URL = `${AGENTS_URL}/:name`;
@@ -89,7 +90,7 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
   server.use(
     http.get(FILESET_URL, ({ params }) =>
       filesetExists
-        ? HttpResponse.json({ name: params['name'], workspace })
+        ? HttpResponse.json({ id: 'fileset-existing-id', name: params['name'], workspace })
         : HttpResponse.json({ detail: 'not found' }, { status: 404 })
     ),
     http.get(AGENT_URL, ({ params }) =>
@@ -97,14 +98,14 @@ const mockHelix = ({ filesetExists = false, agentExists = false }: Scenario = {}
         ? HttpResponse.json({ name: params['name'], workspace })
         : HttpResponse.json({ detail: 'not found' }, { status: 404 })
     ),
-    http.delete(FILESET_URL, ({ params }) => {
-      deleted.push(String(params['name']));
+    http.delete(FILESET_BY_ID_URL, ({ params }) => {
+      deleted.push(String(params.filesetId));
       return HttpResponse.json({ name: 'deleted' });
     }),
     http.post(FILESETS_URL, async ({ request }) => {
       const body = (await request.json()) as { storage?: unknown };
       filesets.push(body);
-      return HttpResponse.json(body);
+      return HttpResponse.json({ ...body, id: CREATED_FILESET_ID, workspace });
     }),
     http.put(UPLOAD_URL, ({ request }) => {
       uploaded.push(decodeURIComponent(new URL(request.url).pathname.split('/-/')[1] ?? ''));
@@ -567,7 +568,7 @@ describe('NewAgentModal GitHub import', () => {
     ).toBeInTheDocument();
     expect(within(dialog).queryByText(/If the repository is private/)).not.toBeInTheDocument();
     expect(created).toHaveLength(0);
-    await waitFor(() => expect(deleted).toContain(agentSpecFilesetName('repo')));
+    await waitFor(() => expect(deleted).toEqual([CREATED_FILESET_ID]));
   });
 
   it('reads a private repository with the chosen access token secret', async () => {

@@ -4,7 +4,10 @@
 import { withOperators } from '@nemo/common/src/api/filterOperators';
 import { useStudioDataViewState } from '@nemo/common/src/hooks/useStudioDataViewState';
 import { getSortParam } from '@nemo/common/src/utils/query';
-import { useFilesDeleteFileset, useFilesListFilesets } from '@nemo/sdk/generated/platform/files';
+import {
+  useFilesDeleteFilesetById,
+  useFilesListFilesets,
+} from '@nemo/sdk/generated/platform/files';
 import type {
   FilesetFilter,
   FilesetOutput as Dataset,
@@ -80,10 +83,10 @@ export function useDatasetsTable({
 
   const [modalDataset, setModalDataset] = useState<Dataset>();
   const [modalOpen, setModalOpen] = useState<ModalOpenState>();
-  const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
+  const { mutateAsync: deleteDataset } = useFilesDeleteFilesetById({
     mutation: {
       onSuccess: (_data, variables) => {
-        invalidateDatasetCaches(variables.workspace, variables.name, ['list']);
+        invalidateDatasetCaches(variables.workspace, undefined, ['list']);
       },
     },
   });
@@ -222,7 +225,7 @@ export function useDatasetsTable({
       if (!modalDataset?.workspace || !modalDataset?.name) return false;
       await deleteDataset({
         workspace: modalDataset.workspace,
-        name: modalDataset.name,
+        filesetId: modalDataset.id,
       });
       handleDatasetDeleted(modalDataset);
       return true;

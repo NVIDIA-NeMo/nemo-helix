@@ -19,7 +19,7 @@ import {
 } from '@nemo/sdk/generated/platform/experiments';
 import {
   filesCreateFileset,
-  filesDeleteFileset,
+  filesDeleteFilesetById,
   filesDownloadFile,
   filesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
@@ -298,7 +298,7 @@ interface AgentEvaluationWizardProps {
 }
 
 interface SeededEntities {
-  filesetName?: string;
+  fileset?: { id: string; name: string };
   experimentName?: string;
   evaluationName?: string;
 }
@@ -325,9 +325,10 @@ const discardSeeded = async (
       leftovers.push(`evaluation "${seeded.evaluationName}"`)
     );
   }
-  if (seeded.filesetName) {
-    await filesDeleteFileset(workspace, seeded.filesetName, signal).catch(() =>
-      leftovers.push(`fileset "${seeded.filesetName}"`)
+  const fileset = seeded.fileset;
+  if (fileset) {
+    await filesDeleteFilesetById(workspace, fileset.id, signal).catch(() =>
+      leftovers.push(`fileset "${fileset.name}"`)
     );
   }
   if (leftovers.length === 0) return cause;
@@ -360,7 +361,7 @@ const loadPersistedSpec = async (
   formData: SubmitEvaluationFormData,
   configFileset: string | null,
   uploads: UploadedEvalInputs | null
-): Promise<EvalSpec> => {
+): Promise<{ spec: EvalSpec; fileset?: { id: string; name: string } }> => {
   if (formData.mode === MODE_DEFAULT) {
     if (!uploads) throw new Error('Upload a dataset and an eval config before submitting');
     const signal = new AbortController().signal;
@@ -374,8 +375,13 @@ const loadPersistedSpec = async (
         : uploads.spec.metrics,
     };
 
+    let allocated;
     try {
-      await filesCreateFileset(workspace, { name, description: 'Agent Evaluation Config' }, signal);
+      allocated = await filesCreateFileset(
+        workspace,
+        { name, description: 'Agent Evaluation Config' },
+        signal
+      );
     } catch (err) {
       if (isConflictError(err)) {
         throw new Error(
@@ -400,9 +406,9 @@ const loadPersistedSpec = async (
         signal
       );
     } catch (uploadErr) {
-      throw await discardSeeded(workspace, { filesetName: name }, uploadErr);
+      throw await discardSeeded(workspace, { fileset: allocated }, uploadErr);
     }
-    return spec;
+    return { spec, fileset: allocated };
   }
   if (!configFileset) throw new Error('The selected evaluation has no eval config fileset');
   const signal = new AbortController().signal;
@@ -412,7 +418,7 @@ const loadPersistedSpec = async (
   if (!configFile) throw new Error("Failed to read the selected evaluation's eval config");
   const blob = await filesDownloadFile(workspace, configFileset, configFile, signal);
   if (!blob) throw new Error("Failed to read the selected evaluation's eval config");
-  return parseEvalConfig(await blob.text());
+  return { spec: parseEvalConfig(await blob.text()) };
 };
 
 export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
@@ -743,14 +749,19 @@ export const AgentEvaluationWizard: FC<AgentEvaluationWizardProps> = ({
     isPending,
   } = useMutation({
     mutationFn: async (formData: SubmitEvaluationFormData) => {
-      const spec = await loadPersistedSpec(workspace, formData, evaluationFileset, uploads);
+      const { spec, fileset } = await loadPersistedSpec(
+        workspace,
+        formData,
+        evaluationFileset,
+        uploads
+      );
 
       const isNew = formData.mode === MODE_DEFAULT;
       const filesetName = isNew
         ? filesetNameForExperiment(formData.newName)
         : (evaluationFileset ?? '');
 
-      const seeded: SeededEntities = isNew ? { filesetName } : {};
+      const seeded: SeededEntities = { fileset };
 
       try {
         // The "new experiment" path creates the ExperimentGroup this run lands in, carrying every

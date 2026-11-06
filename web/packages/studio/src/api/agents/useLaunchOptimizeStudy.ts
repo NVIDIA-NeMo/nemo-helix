@@ -7,8 +7,8 @@ import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
   filesCreateFileset,
-  filesDeleteFileset,
-  filesRetrieveFileset,
+  filesDeleteFilesetById,
+  filesGetFilesetById,
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { rollbackFileset } from '@studio/api/agents/agentSpecFileset';
@@ -44,6 +44,7 @@ export const STUDIO_OPTIMIZE_STRATEGY = 'config-tuning';
 
 // Marks a bundle fileset that Studio created for exactly one study, so deleting the study may delete it.
 const STUDIO_BUNDLE_FIELD = 'studio_bundle_fileset';
+const STUDIO_BUNDLE_ID_FIELD = 'studio_bundle_fileset_id';
 
 /**
  * Stamped on the bundle fileset itself at creation, carrying the agent it was staged for.
@@ -90,11 +91,13 @@ export const deleteStudioBundleFileset = async (
   job: RunStrategyJob
 ): Promise<void> => {
   const filesetName = studioBundleFileset(job);
+  const filesetId = job.custom_fields?.[STUDIO_BUNDLE_ID_FIELD];
+  if (typeof filesetId !== 'string' || !filesetId) return;
   if (!filesetName || !runsFromFileset(job, workspace, filesetName)) return;
 
   try {
-    if (!isStagedBundle(await filesRetrieveFileset(workspace, filesetName))) return;
-    await filesDeleteFileset(workspace, filesetName);
+    if (!isStagedBundle(await filesGetFilesetById(workspace, filesetId))) return;
+    await filesDeleteFilesetById(workspace, filesetId);
   } catch (error) {
     if (isNotFoundError(error)) return;
     throw new Error(
@@ -138,7 +141,7 @@ export const launchOptimizeStudy = async (
 
   const filesetName = optimizeBundleFilesetName(agentName);
 
-  await filesCreateFileset(workspace, {
+  const allocated = await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Optimize bundle for ${agentName}`,
     custom_fields: { [STUDIO_BUNDLE_STAMP]: agentName },
@@ -146,9 +149,12 @@ export const launchOptimizeStudy = async (
 
   try {
     await uploadFilesetEntries(workspace, filesetName, params.entries);
-    return await createStudy(params, filesetName, { [STUDIO_BUNDLE_FIELD]: filesetName });
+    return await createStudy(params, filesetName, {
+      [STUDIO_BUNDLE_FIELD]: filesetName,
+      [STUDIO_BUNDLE_ID_FIELD]: allocated.id,
+    });
   } catch (error) {
-    await rollbackFileset(workspace, filesetName);
+    await rollbackFileset(workspace, allocated.id);
     throw error;
   }
 };

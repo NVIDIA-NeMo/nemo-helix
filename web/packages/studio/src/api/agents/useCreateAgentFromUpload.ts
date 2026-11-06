@@ -39,7 +39,7 @@ export const createAgentFromUpload = async ({
 
   await claimFileset(workspace, name, filesetName, replaceOrphanedFileset);
 
-  await filesCreateFileset(workspace, {
+  const allocated = await filesCreateFileset(workspace, {
     name: filesetName,
     description: `Agent spec for ${name}`,
   });
@@ -54,7 +54,7 @@ export const createAgentFromUpload = async ({
       config_format: FABRIC_CONFIG_FORMAT,
     });
   } catch (error) {
-    await rollbackFileset(workspace, filesetName);
+    await rollbackFileset(workspace, allocated.id);
     throw error;
   }
 };

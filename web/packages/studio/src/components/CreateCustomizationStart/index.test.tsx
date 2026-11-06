@@ -95,7 +95,7 @@ const useFilesetStore = (seed: Record<string, Partial<FakeFileset>> = {}) => {
   );
 
   const asOutput = (name: string, fileset: FakeFileset) => ({
-    id: `${DEFAULT_WORKSPACE}/${name}`,
+    id: `allocation-${name}`,
     name,
     workspace: DEFAULT_WORKSPACE,
     description: '',
@@ -130,8 +130,8 @@ const useFilesetStore = (seed: Record<string, Partial<FakeFileset>> = {}) => {
       if (!fileset) return new HttpResponse(null, { status: 404 });
       return HttpResponse.json(asOutput(name, fileset));
     }),
-    http.delete(`${FILESETS_URL}/:name`, ({ params }) => {
-      const name = String(params.name);
+    http.delete(`${FILESETS_URL}/by-id/:filesetId`, ({ params }) => {
+      const name = String(params.filesetId).replace(/^allocation-/, '');
       const fileset = filesets.get(name);
       if (!fileset) return new HttpResponse(null, { status: 404 });
       filesets.delete(name);

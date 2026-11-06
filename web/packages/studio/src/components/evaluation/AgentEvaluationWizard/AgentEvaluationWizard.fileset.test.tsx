@@ -40,7 +40,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   filesCreateFileset: vi.fn(),
   filesDownloadFile: vi.fn(),
   filesUploadFile: vi.fn(),
-  filesDeleteFileset: vi.fn(),
+  filesDeleteFilesetById: vi.fn(),
 }));
 
 vi.mock('@studio/components/filesets/hooks/useDownloadFileAsArrayBuffer', () => ({
