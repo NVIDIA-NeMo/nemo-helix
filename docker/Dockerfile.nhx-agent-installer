@@ -10,7 +10,7 @@
 # /opt/nhx-agent-installer. The agent-layer Job copies /nhx-agent-installer.tar.gz from this image into each build's
 # context. The build mounts it at the same path, so the venv's interpreter path holds.
 #
-# HARBOR_VERSION and NEMO_FABRIC_VERSION match uv.lock (a test checks); nemo-fabric[harbor] 0.5 caps harbor below
+# HARBOR_VERSION and NEMO_FABRIC_VERSION match uv.lock (a test checks); nemo-fabric[harbor] 0.6 caps harbor below
 # 0.24, overridden as the workspace's own override-dependencies do.
 #
 # Sources: the venv's packages and CPython are collected from the interpreter, and docker/sources pins the rest.
@@ -28,7 +28,7 @@ FROM ${NHX_PYTHON_BASE} AS builder
 ARG PYTHON_VERSION=3.12.15
 ARG PYTHON_BUILD_STANDALONE_RELEASE=20261013
 ARG HARBOR_VERSION=0.24.0
-ARG NEMO_FABRIC_VERSION=0.5.0
+ARG NEMO_FABRIC_VERSION=0.6.0
 # The SDK goes in without its dependencies: these are the ones its Fabric agent imports that Harbor and Fabric don't bring.
 ARG OPENTELEMETRY_PROTO_VERSION=1.43.0
 ARG PROTOBUF_VERSION=6.33.6
