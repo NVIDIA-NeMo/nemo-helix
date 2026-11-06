@@ -35,6 +35,7 @@ from nemo_agents_plugin.entities import (
     supports_image_entrypoint,
 )
 from nemo_agents_plugin.fabric.gateway_credentials import platform_gateway_credential_env
+from nemo_agents_plugin.fabric.gateway_models import is_gateway_url, model_configs
 from nemo_agents_plugin.runner.backend import DeploymentInfo, ExternalLog, LogLocation, RunnerBackend
 from nemo_agents_plugin.runner.fabric_artifact_staging import (
     FabricArtifactStagingError,
@@ -252,33 +253,16 @@ def rewrite_fabric_config_base_urls(agent_config: dict[str, Any], gateway_url: s
     reachable = urlsplit(gateway_url.rstrip("/"))
     reachable_origin = f"{reachable.scheme}://{reachable.netloc}"
     config = copy.deepcopy(agent_config)
-    model_configs: list[Any] = []
-
-    models = config.get("models")
-    if isinstance(models, dict):
-        model_configs.extend(models.values())
-
-    harnesses = config.get("harnesses")
-    if isinstance(harnesses, dict):
-        for harness in harnesses.values():
-            if isinstance(harness, dict) and "model" in harness:
-                model_configs.append(harness["model"])
-
-    for model_config in model_configs:
+    for model_config in model_configs(config):
         if not isinstance(model_config, dict):
             continue
         current = model_config.get("base_url")
-        if isinstance(current, str) and "/apis/inference-gateway/" in current:
-            parts = urlsplit(current)
-            model_config["base_url"] = f"{reachable_origin}{parts.path}"
+        if is_gateway_url(current):
+            model_config["base_url"] = f"{reachable_origin}{urlsplit(current).path}"
         settings = model_config.get("settings")
-        if not isinstance(settings, dict):
-            continue
-        current = settings.get("base_url")
-        if not isinstance(current, str) or "/apis/inference-gateway/" not in current:
-            continue
-        parts = urlsplit(current)
-        settings["base_url"] = f"{reachable_origin}{parts.path}"
+        current = settings.get("base_url") if isinstance(settings, dict) else None
+        if isinstance(settings, dict) and is_gateway_url(current):
+            settings["base_url"] = f"{reachable_origin}{urlsplit(current).path}"
 
     for exporter, key in telemetry_url_fields(config):
         endpoint = exporter.get(key)

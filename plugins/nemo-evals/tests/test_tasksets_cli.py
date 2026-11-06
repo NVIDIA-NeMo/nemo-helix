@@ -12,6 +12,7 @@ from typing import cast
 import httpx
 import pytest
 import typer
+from nemo_evals.api.fields import TaskRef
 from nemo_evals.image_builds.models import BuildImage, ImageBuild
 from nemo_evals.runs_cli import (
     BUILD_READ_FAILURES,
@@ -105,7 +106,9 @@ class FakeBuilds:
 
 def evaluator(builds: FakeBuilds, names=("a", "b")) -> Evaluator:
     members = [f"default/{name}#{DIGEST}" for name in names]
-    tasksets = SimpleNamespace(retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=members))
+    tasksets = SimpleNamespace(
+        retrieve=lambda name, revision, workspace: SimpleNamespace(tasks=[TaskRef(m) for m in members])
+    )
     return cast(Evaluator, SimpleNamespace(tasks=builds, tasksets=tasksets))
 
 
@@ -312,11 +315,13 @@ def test_create_prints_the_dataset_flag_and_the_ref_last(cli, monkeypatch):
     result = cli(FakeBuilds(), "create", "--harbor-hub", "datacurve/deep-swe@latest", "--workspace", "ac9")
     assert result.exit_code == 0, result.output
     assert result.output.splitlines() == [
-        f"Dataset for Intake: --dataset datacurve/deep-swe@sha256:{'a' * 64}",
+        f"Intake label: --intake-dataset datacurve/deep-swe@sha256:{'a' * 64}",
         created.ref,
     ]
     as_json = json.loads(cli(FakeBuilds(), "create", "--harbor-hub", "x/y@1", "--json").output)
-    assert as_json["taskset_ref"] == created.ref and as_json["dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    assert (
+        as_json["taskset_ref"] == created.ref and as_json["intake_dataset"] == f"datacurve/deep-swe@sha256:{'a' * 64}"
+    )
 
 
 def test_create_needs_exactly_one_source(cli, tmp_path: Path):

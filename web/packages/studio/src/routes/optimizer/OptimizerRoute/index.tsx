@@ -18,7 +18,7 @@ import { useBreadcrumbs } from '@studio/providers/breadcrumbs/useBreadcrumbs';
 import { insightStatusColor } from '@studio/routes/optimizer/insightStatus';
 import { getOptimizerInsightRoute, getOptimizerRoute } from '@studio/routes/utils';
 import { keepPreviousData } from '@tanstack/react-query';
-import { type ComponentProps, type FC } from 'react';
+import type { ComponentProps, FC } from 'react';
 
 export const OptimizerRoute: FC = () => {
   const workspace = useWorkspaceFromPath();

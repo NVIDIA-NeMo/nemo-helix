@@ -1,0 +1,101 @@
+---
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+title: "v0.10.0 - 2026-11-18"
+description: ""
+---
+<Note>
+These notes describe a proposed v0.10.0 cut. The release date is a planned date, and the content can change before the release ships.
+</Note>
+
+NeMo Helix v0.10.0 brings Harbor taskset evaluations to Kubernetes, adds closed-book evaluation controls in the Inference Gateway, and lets agents declare how their execute jobs run. Customizer adds pre-submission dry runs and dataset preparation, and Studio adds model detail pages and result downloads.
+
+## Highlights
+
+- **Harbor taskset runs on Kubernetes.** Create a Harbor taskset, build its task images, and submit it as a run on Kubernetes, including tasks that ship their own Docker Compose files. Helm installs that have both sandboxing and Builder turned on now include a Harbor sandbox profile.
+- **Closed-book evaluations.** Inference Gateway middleware removes provider-hosted tools such as web search from model calls. Each trial gets its own gateway credential, and a taskset run with no-network tasks is refused unless its model route is closed-book.
+- **Declared agent runs.** Agents can declare a context schema, a default input, and the post-run actions their execute jobs may use. Jobs can pass per-run `context`, so mistakes are rejected when the job is created rather than when the agent runs.
+
+## What's included
+
+### Agents and Fabric
+
+- Execute jobs accept a per-run `context`, which reaches the agent alongside platform-supplied job details. Agents can declare `context_schema`, `default_input`, and `post_run_actions` under `helix_registration`. Execute extensions are now called post-run actions: the job field `extension` becomes `post_run_action`, with no alias for the old name. Each execute job records `spec.agent_ref`, so you can list an agent's runs. See [Execute Agents as Jobs](/documentation/agents/execute-agents-as-jobs).
+- Agent registration can record a source fileset and a container image under `helix_registration.reference`, and attach labels that you can filter on. Packaging and deployment use the referenced fileset and image. Image selection order is `--image`, then the agent's reference, then the deployment default. See [Register with References](/documentation/agents/register-agents#register-with-references) and [Deploy Agents](/documentation/agents/deploy-agents).
+- A harness `kind` must name a built-in harness or the `adapter_id` of an adapter descriptor installed in the platform's Python environment. Before, NeMo Helix accepted any ID starting with `nvidia.fabric.`. See [Register Agents](/documentation/agents/register-agents).
+- On the Kubernetes platform runtime, including Helm installs, subprocess agent deployments are off unless `agents.subprocess_enabled: true` is set. Without `--mode`, `nemo agents deploy` picks a mode the platform allows. See [Deploy Agents](/documentation/agents/deploy-agents).
+- Agent chat completions stream the agent's reasoning, and Studio explains agent chat failures instead of showing a bare 502 (documentation not yet available).
+- The third-party Tavily plugin is included in NeMo Helix images, and the Helm chart serves its proxy by default. It gives agents web search and page extraction through the workspace's Tavily API key, and sends nothing to Tavily until a workspace stores a key. See [Web Search with Tavily](/documentation/agents/web-search-tavily).
+- Fabric agents' NeMo Relay traces link to their Inference Gateway calls, and Intake counts each model call only once when the gateway also recorded it. Use `nemo intake traces show` to print one trace as a transcript. To compare versions of one agent, give each candidate its own Evaluation. See [Evaluate Agent Candidates](/documentation/agents/traces-and-insights/evaluate-agent-candidates) and [Harbor Fabric Agent](/documentation/evaluate-models/agent-eval/harbor-fabric-agent).
+- Filesets can read an agent's source from any Git repository over SSH, using a private key stored as a workspace secret (documentation not yet available).
+- OpenShell adds scoped credential registration, provider renewal and revocation, and binding of agent environment secrets for Jobs (documentation not yet available).
+
+### Agent Evaluation
+
+- Harbor tasksets run on Kubernetes. Use `nemo evals tasksets create`, `nemo evals tasksets build-images`, and `nemo evals runs submit` to separate taskset creation, image builds, and run submission. Taskset runs can run compose-based tasks with their volumes, resources, networks, container security settings, and tmpfs mounts, and can start each sandbox with its image's own `ENTRYPOINT`. They report run progress, task job status, and cancel intent. Image builds are keyed by build-context contents, so tasks that share an environment build it only once. Task images can target a chosen platform. See [Harbor Runner](/documentation/evaluate-models/agent-eval/harbor-runner) and [Manage Tasks & Tasksets](/documentation/evaluate-models/manage-tasks-tasksets).
+- Closed-book evaluations send model calls through a virtual model that runs the `nemo-evals-closed-book` middleware. Built-in Harbor agents can name a gateway model with `model: {"ref": ...}`. Each trial calls the gateway with its own credential, which is held to the trial's models, and a `nemo-evals-trial-recording` virtual model records the trial's model calls in Intake. Sandboxed trials can reach an HTTPS gateway signed by a private CA. See [Closed-book evaluations](/documentation/evaluate-models/agent-eval/targets-and-runners#closed-book-evaluations) and [Keep Evaluations Closed-Book](/documentation/models-and-inference/virtual-models#keep-evaluations-closed-book).
+- Local Docker Harbor trials install each agent once per task environment and reuse that install in later trials. Concurrent agent setups across the machine are capped by `NHX_HARBOR_MAX_CONCURRENT_SETUPS` (default `4`). Before setup, trials check that setup hosts resolve, and a failed agent setup is retried once inside the egress window. See [Agent install reuse](/documentation/evaluate-models/agent-eval/harbor-runner#agent-install-reuse).
+- Sandbox egress allowlists are verified in both directions, and strict verification is the default. Allowlist Harbor tasks also open the profile's agent channel to the platform. Sandboxes record why they stopped before their trial finished. The `SandboxedCodex` Harbor agent is removed; built-in Harbor agents install themselves through the agent-setup egress window (documentation not yet available).
+- Evaluation jobs split oversized OTLP trace publication into bounded requests, sized by `publication.intake.max_otlp_request_bytes`. See [Experiments](/documentation/evaluate-models/experiments).
+- Default LLM-as-a-judge inputs are framed as untrusted data. Platform agent targets are called through the job's auth proxy (documentation not yet available).
+
+### Customizer
+
+- Dry runs check a customization job before it is submitted. A dry run validates and compiles the job, checks its execution profile, and reads the first 10 rows of each dataset file, or every row with `--dry-run-full`. From the CLI, add `--dry-run` to the submit command; from the SDK, pass `dry_run=True`. See [Check a Job Before Submitting](/documentation/customizer-reference/manage-customization-jobs/create-a-customization-job#check-a-job-before-submitting).
+- `nemo customization dataset prepare` turns a Parquet, CSV, or JSONL table, such as Data Designer output, into a training dataset in the `chat`, `preference`, `prompt-completion`, `embedding`, or `text` format. See [Prepare Data Designer Output or a Table](/documentation/customizer-reference/models/dataset-format#prepare-data-designer-output-or-a-table).
+- Every backend reads one dataset fileset that holds the training file and, optionally, a validation file, told apart by file name. Without a validation file, `schedule.validation_split` (default `0.1`) of the training rows is held out. Learning-rate defaults now depend on the method and `finetuning_type`, and retrieval recipes have their own batch and optimizer defaults. See [Training Configuration](/documentation/customizer-reference/manage-customization-jobs/training-configuration).
+- A LoRA job reuses a base-model deployment that already has `lora_enabled: true`. If the base model is served only without LoRA, the job creates a LoRA-enabled deployment alongside it. See [GRPO and Reward Environments](/documentation/customizer-reference/grpo-and-reward-environments).
+- Training images are updated for vision-language model (VLM) training, and the Customizer agent skill adds helpers for importing multimodal datasets (documentation not yet available).
+
+### Studio
+
+- A model detail page, available when `studio.feature_flags.model_details_enabled` is set, adds Evaluations, Deployment, and Files tabs. Its Chat tab opens the Playground's compare view with the model as the baseline (documentation not yet available).
+- Evaluation and training results can be downloaded as JSON, JSONL, or CSV, and agent evaluation results show cost (documentation not yet available).
+- Agent detail pages move the agent config into a side panel and the deployment picker into the header. Hyperparameter optimization jobs can include prompt optimization and show its results. (documentation not yet available).
+- Fileset and dataset pickers list the signed-in user's items first, generic filesets are hidden by default and color-coded by purpose, and fileset tables add a Created By column. Log viewers show a status badge, and Studio asks for confirmation before it cancels a data processing job (documentation not yet available).
+
+### Platform, CLI, and Deployment
+
+- Jobs gain a `queued` status for jobs the controller has seen but not yet admitted. Concurrency limits are configured per execution profile with `max_active_jobs` and per user and workspace with `max_active_jobs_per_user` and `max_active_jobs_per_workspace`. Builder can cap concurrent image builds with `max_concurrent_builds` and queues the rest. See [Config Reference](/documentation/kubernetes-deployment/config-reference).
+- The Inference Gateway accepts an access key sent as `x-api-key` on model routes, lets middleware refuse a call before it is served, and counts upstream requests by status as an OpenTelemetry metric. Envoy deployments must add `x-api-key` to the `ext_authz` `allowed_headers`. See [Gateway Integration](/documentation/access-control/deployment/gateway-integration).
+- Platform services can sign attributes into the access keys they create on a user's behalf. Every scoped access key token is limited to 7 KiB. See [Scoped Access Keys](/documentation/access-control/deployment#scoped-access-keys).
+- `nemo workspaces delete` asks for confirmation before it deletes a workspace and everything in it. Pass `--yes` to skip the prompt; non-interactive shells must pass it. See [Workspaces](/documentation/get-started/core-concepts/workspaces).
+- Filters on key/value fields, such as an agent's `labels` or a job's `spec`, treat bracket, nested JSON, and dotted forms the same way. Filter shapes that the entity store cannot evaluate return `400 Bad Request`. See [Filtering](/documentation/get-started/core-concepts/filtering).
+- The Helm chart and RC artifacts use release-candidate naming in place of nightly naming. RC charts in GHCR use versions such as `X.Y.Z-rc-YYYYMMDDHHMMSS`. See [Install](/documentation/kubernetes-deployment/setup/helm/install).
+- Authorization fixes: HF-compatible file endpoints require a verified credential, entity-permission denials name the action and workspace, sandbox pods no longer mount a service account token, and client Docker network selection for deployments is restricted (documentation not yet available).
+
+## Upgrade from v0.9.x
+
+- Rename the execute-job field `extension` to `post_run_action`. Plugins that register execute extensions must move to the `nemo.agents.post_run_actions` entry-point group and the `PostRunAction` contract. No aliases are kept.
+- An agent registered without `post_run_actions`, including one registered before this release, allows only `agents.noop`. To use another post-run action, add it under `helix_registration.post_run_actions` and register the agent again. For a deployed agent, `nemo agents redeploy` re-registers and redeploys it.
+- Check harness `kind` values. Custom adapters must install their descriptor under `share/nemo-fabric` in the platform's Python environment, or be installed in the agent image, rather than relying on an `nvidia.fabric.` prefix.
+- On Helm and other Kubernetes runtimes, deploy agents with `--mode k8s`, or set `agents.subprocess_enabled: true` to keep subprocess deployments. The Python SDK still defaults to `subprocess`, so pass `deployment_mode` there. Existing subprocess deployments keep running.
+- Replace the separate Customizer validation-fileset fields, such as `dataset.validation` and `dataset.validation_path`, with a single dataset fileset that holds both the training and validation files.
+- For built-in Harbor agents, replace `model_name` with `model: {"name": ...}`. The old field is still accepted in 0.10 with a deprecation warning, and stops being accepted in the release after 0.10.
+- Pass `--yes` to `nemo workspaces delete` in scripts and other non-interactive shells.
+- If you used the `SandboxedCodex` Harbor agent, switch to the built-in `codex` agent.
+- `nemo-mcp` no longer registers the `delete_workspace` tool unless started with `--enable-destructive-tools`. `nemo-mcp --transport streamable-http` now refuses to start without `NHX_MCP_AUTH_TOKEN`; clients send it as `Authorization: Bearer <token>`. For local debugging on a loopback host, pass `--allow-unauthenticated` instead.
+
+## Current constraints
+
+- A taskset run on Kubernetes that includes no-network tasks is refused at submission unless every model the agent calls through the gateway is a closed-book virtual model that you can read. Built-in agents that name a model by `name`, imported agents, and registered agents with no gateway model are refused for such tasks.
+- Harbor agent install reuse applies only to Harbor's default local Docker environment, not to tasks that bring their own `docker-compose.yaml`.
+- The Studio model detail page is behind the `studio.feature_flags.model_details_enabled` flag, which is off by default.
+
+## Maintenance
+
+- Dependency updates: Harbor 0.24, Data Designer 0.9.7, the OpenSandbox SDK 1.2.0, NeMo Compass 0.2.0 (which restores ethos analysis), yara-python 4.5.4 for Python 3.13 wheels, and uv 0.13.4. Remaining Gym virtualenv vulnerabilities are patched, and `langchain-community` is capped so that RAGAS metrics import.
+- Builder no longer passes Kaniko's `--reproducible` flag, which was causing large image builds to run out of memory. Builder also reports how a build sandbox's containers ended and retries sandboxes that a namespace quota rejects.
+- Reliability fixes cover job storage cleanup and orphaned step ConfigMaps, length-safe output fileset names, streamed local-file upload retries, invalid request bodies (which return 422), and `--spec` overlays on `--spec-file` in generated CLI commands.
+- Scaled evaluations store their evaluations and benchmark runs as platform entities instead of in a separate PostgreSQL database.
+- Release automation runs smoke tests on published release artifacts.
+
+## Install
+
+See [Setup](/documentation/get-started/setup) for local installations and [Install](/documentation/kubernetes-deployment/setup/helm/install) for self-managed Kubernetes deployments.
+
+## Links
+
+- [Repository](https://github.com/NVIDIA-NeMo/nemo-helix)
+- [Issues](https://github.com/NVIDIA-NeMo/nemo-helix/issues)

@@ -46,6 +46,17 @@ const baseRules = {
     { blankLine: 'any', prev: 'import', next: 'import' },
   ],
   '@typescript-eslint/no-unused-vars': 'off',
+  // Inline `type` keeps mixed type/value imports on one line, which no-duplicate-imports requires
+  '@typescript-eslint/consistent-type-imports': [
+    'error',
+    {
+      prefer: 'type-imports',
+      fixStyle: 'inline-type-imports',
+      // Allow `typeof import('...')`, used by vi.mock/importOriginal in tests
+      disallowTypeAnnotations: false,
+    },
+  ],
+  '@typescript-eslint/no-import-type-side-effects': 'error',
   'import/extensions': [
     'error',
     'never',

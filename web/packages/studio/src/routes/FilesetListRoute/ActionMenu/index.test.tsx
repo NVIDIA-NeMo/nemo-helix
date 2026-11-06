@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfirmationModal';
-import { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
+import type { FilesetOutput as Dataset } from '@nemo/sdk/generated/platform/schema';
 import { PLATFORM_BASE_URL } from '@studio/constants/environment';
 import { server } from '@studio/mocks/node';
 import { ActionMenu } from '@studio/routes/FilesetListRoute/ActionMenu';
@@ -129,6 +129,34 @@ describe('ActionMenu', () => {
       expect(viewItem).toBeInTheDocument();
       expect(editItem).toBeInTheDocument();
       expect(deleteItem).toBeInTheDocument();
+    });
+  });
+
+  describe('Copy to New Fileset', () => {
+    it('opens the copy modal for local filesets', async () => {
+      const user = userEvent.setup();
+      render(<ActionMenu {...defaultProps} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
+
+      expect(screen.getByText(/creates a new local fileset/i)).toBeInTheDocument();
+    });
+
+    it('opens the copy modal for external filesets', async () => {
+      const user = userEvent.setup();
+      const external = {
+        ...mockDataset,
+        storage: { type: 's3', bucket: 'b' },
+      } as Dataset;
+      render(<ActionMenu {...defaultProps} dataset={external} />);
+
+      await user.click(screen.getByRole('button', { name: /open dataset actions menu/i }));
+      await user.click(screen.getByText('Copy to New Fileset'));
+
+      expect(screen.getByText(`Copy Fileset: ${mockDataset.name}`)).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: /name/i })).toHaveValue('test-dataset-copy');
+      expect(screen.getByText(/so you can edit, upload, and delete files/i)).toBeInTheDocument();
     });
   });
 

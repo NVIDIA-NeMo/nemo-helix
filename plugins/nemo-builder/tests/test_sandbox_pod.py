@@ -25,7 +25,14 @@ from nemo_builder_plugin.run.supervise import (
     _results_from_log,
     sandbox_pod_name,
 )
-from nemo_builder_plugin.steps import ContextSource, SandboxGroup, SandboxImage, SandboxSpec, WorkLayout
+from nemo_builder_plugin.steps import (
+    ContextSource,
+    SandboxGroup,
+    SandboxImage,
+    SandboxMount,
+    SandboxSpec,
+    WorkLayout,
+)
 
 
 def _sandbox(**overrides: object) -> SandboxSpec:
@@ -146,6 +153,24 @@ class TestMounts:
         assert mounts["/nhx-work/context/ws/fs-a"].sub_path == "jobs/default/abc/context/ws/fs-a"
         assert mounts["/nhx-work/out/demo-1-0"].sub_path == "jobs/default/abc/out/demo-1-0"
 
+    def test_a_groups_mounts_are_read_only_at_their_targets(self) -> None:
+        group = _group(1).model_copy(
+            update={
+                "mounts": [SandboxMount(source=ContextSource(fileset="ws/tools", context_path="bin"), target="/opt/t")]
+            }
+        )
+        pod = _pod_manifest(
+            name="nhx-sbx-abc-g0",
+            namespace="nhx-builds",
+            group=group,
+            sandbox=_sandbox(),
+            pvc="nhx-build-work",
+            job_sub_path="jobs/default/abc",
+        )
+        mounts = {m.mount_path: m for m in pod.spec.containers[0].volume_mounts}
+        assert mounts["/opt/t"].read_only is True
+        assert mounts["/opt/t"].sub_path == "jobs/default/abc/context/ws/tools/bin"
+
     def test_only_this_groups_outputs_are_mounted(self) -> None:
         mounts = {m.mount_path for m in _pod().spec.containers[0].volume_mounts}
         assert "/nhx-work/out" not in mounts
@@ -174,6 +199,14 @@ class TestMounts:
         assert f"--context=dir://{WorkLayout(SANDBOX_ROOT).context(ContextSource(fileset='ws/fs-a'))}" in script
         assert "--oci-layout-path=/nhx-work/out/demo-1-0" in script
         assert {"/nhx-work/context/ws/fs-a", "/nhx-work/out/demo-1-0", "/nhx-work/out/demo-1-1"} == mounts
+
+    def test_a_dockerfile_in_a_mount_is_passed_by_its_absolute_path(self) -> None:
+        group = SandboxGroup(
+            source=ContextSource(fileset="ws/fs-a"),
+            mounts=[SandboxMount(source=ContextSource(fileset="ws/tools"), target="/opt/t")],
+            images=[SandboxImage(image="demo-1-0", platform="linux/amd64", dockerfile="/opt/t/Dockerfile")],
+        )
+        assert "--dockerfile=/opt/t/Dockerfile" in _build_script(group, _sandbox())
 
 
 class TestPodNames:
@@ -295,6 +328,26 @@ class _Api:
         """Only named: the faked Watch streams the pods."""
 
 
+class _Clock:
+    """Stands in for supervise's ``time`` module.
+
+    Patching ``supervise.time.sleep`` would patch the shared ``time`` module, so every other thread in the
+    worker would record its sleeps here and spin, and a failing assert would then format a list too long to
+    print before the test timed out.
+    """
+
+    def __init__(self) -> None:
+        self.now = 0.0
+        self.sleeps: list[float] = []
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
 class TestEachSandboxFailsAlone:
     NAME = "nhx-sbx-abc-g0"
     BUILT = f"{RESULT_MARKER} demo-1-0 0\n{RESULT_MARKER} demo-1-1 0\n"
@@ -314,23 +367,17 @@ class TestEachSandboxFailsAlone:
         )
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        sleeps: list[float] = []
-        monkeypatch.setattr(supervise.time, "sleep", sleeps.append)
+        clock = _Clock()
+        monkeypatch.setattr(supervise, "time", clock)
         api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
-        assert sleeps == []
+        assert clock.sleeps == []
 
     def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        now = [0.0]
-        sleeps: list[float] = []
-
-        def sleep(seconds: float) -> None:
-            sleeps.append(seconds)
-            now[0] += seconds
-
-        monkeypatch.setattr(supervise.time, "monotonic", lambda: now[0])
-        monkeypatch.setattr(supervise.time, "sleep", sleep)
+        clock = _Clock()
+        sleeps = clock.sleeps
+        monkeypatch.setattr(supervise, "time", clock)
         quota = ApiException(status=403, reason="Forbidden")
         quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
         api = _Api(create=quota, create_failures=3)

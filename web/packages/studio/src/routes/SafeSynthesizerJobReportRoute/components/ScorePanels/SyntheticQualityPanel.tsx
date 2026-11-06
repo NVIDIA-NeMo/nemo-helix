@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
+import type { SafeSynthesizerSummary } from '@nemo/sdk/generated/safe-synthesizer/schema';
 import { Grid, Panel, Stack, Text } from '@nvidia/foundations-react-core';
 import { ScoreItem } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreItem';
 import { ScoreTable } from '@studio/routes/SafeSynthesizerJobReportRoute/components/ScorePanels/ScoreTable';
@@ -11,7 +11,7 @@ import {
   GRADE_VALUES,
   isPassingGrade,
 } from '@studio/routes/SafeSynthesizerJobReportRoute/util';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface SyntheticQualityPanelProps {
   reportSummary?: SafeSynthesizerSummary;

@@ -197,7 +197,7 @@ def run_platform(
 
 def _load_service_instances(
     service_names: list[str],
-    available_services: dict[str, str | Service],
+    available_services: Mapping[str, str | Service],
 ) -> list[Service]:
     service_instances: list[Service] = []
     if not service_names:

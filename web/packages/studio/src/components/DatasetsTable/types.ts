@@ -1,18 +1,18 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import * as DataView from '@nemo/common/src/components/DataView/internal';
-import {
-  type FilesetOutput as Dataset,
-  type FilesetPurpose,
-  type GitStorageConfig,
-  type GithubStorageConfig,
-  type HuggingfaceStorageConfig,
-  type LocalStorageConfig,
-  type NGCStorageConfig,
-  type S3StorageConfig,
+import type * as DataView from '@nemo/common/src/components/DataView/internal';
+import type {
+  FilesetOutput as Dataset,
+  FilesetPurpose,
+  GitStorageConfig,
+  GithubStorageConfig,
+  HuggingfaceStorageConfig,
+  LocalStorageConfig,
+  NGCStorageConfig,
+  S3StorageConfig,
 } from '@nemo/sdk/generated/platform/schema';
-import { type ComponentProps, type ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 
 export type ModalOpenState = 'delete' | 'edit' | 'none';
 

@@ -32,6 +32,8 @@ export interface InferenceSliderParams {
   top_p: number;
 }
 
+// TODO (LLM-4626): Ideally, the default and min/max values are returned by the backend for each NIM,
+// instead of hardcoded in the UI.
 export const INFERENCE_HYPERPARAMETER_FIELD_METADATA: HyperparameterFieldMetadata<InferenceSliderParams> =
   {
     temperature: {
@@ -72,10 +74,6 @@ export const INFERENCE_HYPERPARAMETER_FIELD_METADATA: HyperparameterFieldMetadat
     },
   };
 
-// TODO (LLM-4626): Ideally, the default and min/max values are returned by the backend for each NIM,
-// instead of hardcoded in the UI.
-export const MODEL_HYPERPARAMETER_FIELD_METADATA = INFERENCE_HYPERPARAMETER_FIELD_METADATA;
-
 export const modelInferenceParametersSchema = z.object({
   max_tokens: z
     .number()
@@ -97,5 +95,3 @@ export const modelInferenceParametersSchema = z.object({
     .optional(),
   top_p: z.number().min(TOP_P_MIN).max(TOP_P_MAX).step(TOP_P_STEP).optional(),
 });
-
-export type ModelInferenceParameters = z.infer<typeof modelInferenceParametersSchema>;

@@ -12333,6 +12333,7 @@ components:
       enum:
       - OPENAI_CHAT
       - ANTHROPIC_MESSAGES
+      - SYSTEMONE
       title: BackendFormat
       description: Inference backend API wire formats understood by IGW and middleware
         plugins.
@@ -20685,6 +20686,14 @@ components:
           type: string
           title: Family
           description: Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')
+        architectures:
+          title: Architectures
+          description: Architectures declared in the checkpoint's top-level config.json.
+            For a multimodal checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'),
+            while the other fields describe its language model.
+          items:
+            type: string
+          type: array
         num_layers:
           type: integer
           title: Num Layers
@@ -20738,6 +20747,26 @@ components:
           allOf:
           - $ref: '#/components/schemas/SlidingWindowConfig'
           description: Sliding window attention config if applicable
+        has_vision_tower:
+          type: boolean
+          title: Has Vision Tower
+          description: True when the checkpoint config contains a vision tower.
+          default: false
+        has_audio_tower:
+          type: boolean
+          title: Has Audio Tower
+          description: True when the checkpoint config contains an audio tower.
+          default: false
+        num_experts:
+          title: Num Experts
+          description: Routed expert count when the checkpoint declares more than
+            one. None for a dense model.
+          type: integer
+        num_nextn_predict_layers:
+          title: Num Nextn Predict Layers
+          description: Multi-token prediction depth declared by the checkpoint. None
+            when the config has no such field.
+          type: integer
         linear_layers:
           title: Linear Layers
           description: List of all linear/Conv1D layers with their dimensions. Used

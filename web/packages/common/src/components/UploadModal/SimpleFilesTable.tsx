@@ -6,7 +6,7 @@ import { StudioDataView } from '@nemo/common/src/components/DataView/StudioDataV
 import { LeftOverflow } from '@nemo/common/src/components/LeftOverflow';
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { useInlinePickerSlot } from '@nemo/common/src/components/UploadModal/InlinePickerSlot';
-import { UploadFile } from '@nemo/common/src/components/UploadModal/types';
+import type { UploadFile } from '@nemo/common/src/components/UploadModal/types';
 import { formatFileSize, isFileTypeAllowed } from '@nemo/common/src/components/UploadModal/utils';
 import { IconError } from '@nemo/icons/icons';
 import {

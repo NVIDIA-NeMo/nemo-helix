@@ -6,7 +6,7 @@ import { Grid, Panel, Skeleton, Stack } from '@nvidia/foundations-react-core';
 import type { TraceStatisticsSummary } from '@studio/components/AgentTraceStatistics/types';
 import { formatLatencyMs, formatTokens } from '@studio/components/AgentTraceStatistics/utils';
 import { formatCost } from '@studio/util/intakeTelemetry';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   /** `null` while the first rollup is still in flight — the skeletons stand in for it. */

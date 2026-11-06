@@ -13,8 +13,8 @@ import {
 } from '@studio/routes/AnonymizerBuilderRoute/schema';
 import { useDefaultRoleModels } from '@studio/routes/AnonymizerBuilderRoute/useDefaultRoleModels';
 import { renderHook } from '@testing-library/react';
-import { type FC, type ReactNode } from 'react';
-import { FormProvider, useForm, useFormContext } from 'react-hook-form';
+import type { FC, ReactNode } from 'react';
+import { FormProvider, useForm, type useFormContext } from 'react-hook-form';
 
 const mockModels = vi.hoisted(() => ({ value: [] as { id: string; name: string }[] }));
 

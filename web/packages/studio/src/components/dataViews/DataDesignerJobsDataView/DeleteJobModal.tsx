@@ -9,7 +9,7 @@ import type { CreateJob as DataDesignerJob } from '@nemo/sdk/generated/data-desi
 import { BulkDeleteModal } from '@studio/components/BulkDeleteModal';
 import { useWorkspaceFromPath } from '@studio/hooks/useWorkspaceFromPath';
 import { useQueryClient } from '@tanstack/react-query';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface DeleteJobModalProps {
   jobs: DataDesignerJob[];

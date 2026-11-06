@@ -1,6 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
@@ -20,7 +21,12 @@ from nhx.platform_runner.config import (
 
 
 @pytest.fixture(autouse=True)
-def clear_registry_caches() -> None:
+def clear_registry_caches() -> Iterator[None]:
+    # Clear after as well: a registry cached while a test patches discovery would otherwise leak
+    # fake plugins into later tests on the same worker.
+    registry.get_available_services.cache_clear()
+    registry.get_available_controllers.cache_clear()
+    yield
     registry.get_available_services.cache_clear()
     registry.get_available_controllers.cache_clear()
 
@@ -214,6 +220,97 @@ def test_invalid_service_raises_clear_error():
 def test_extra_services_are_available_for_resolution():
     with pytest.raises(ValueError, match="Unknown services: custom-service"):
         resolve(services=["custom-service"])
+
+
+class _PluginEntryPoint:
+    """A ``nemo.services`` entry point for *service_cls*, counting loads; ``error`` makes it unloadable."""
+
+    def __init__(self, service_cls: type | None = None, *, error: Exception | None = None) -> None:
+        self.value = "fake.module:Service"
+        self._service_cls = service_cls
+        self._error = error
+        self.loads = 0
+
+    def load(self) -> type | None:
+        self.loads += 1
+        if self._error is not None:
+            raise self._error
+        return self._service_cls
+
+
+def _plugin_service_class(service_name: str) -> type:
+    from fastapi import APIRouter
+    from nemo_helix_plugin.service import NemoService, RouterSpec
+
+    class _Plugin(NemoService):
+        name = service_name
+
+        def get_routers(self) -> list[RouterSpec]:
+            return [RouterSpec(router=APIRouter())]
+
+    return _Plugin
+
+
+def _install_plugins(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: dict[str, _PluginEntryPoint],
+    controllers: dict[str, _PluginEntryPoint] | None = None,
+) -> None:
+    groups = {"nemo.services": entries, "nemo.controllers": controllers or {}}
+    monkeypatch.setattr(registry, "discover_entry_points", lambda group: groups.get(group, {}))
+
+
+def test_resolving_selected_services_loads_only_selected_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+    entries = {
+        "agents": _PluginEntryPoint(_plugin_service_class("agents")),
+        "evals": _PluginEntryPoint(error=AssertionError("unselected plugins must not be imported")),
+    }
+    _install_plugins(monkeypatch, entries)
+
+    resolved = resolve(services=["entities", "agents"], controllers=[])
+
+    assert resolved.services == {"entities", "agents"}
+    assert entries["agents"].loads == 1
+    assert entries["evals"].loads == 0
+
+
+def test_an_unloadable_plugin_named_explicitly_is_an_unknown_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_plugins(monkeypatch, {"agents": _PluginEntryPoint(error=ImportError("boom"))})
+
+    with pytest.raises(ValueError, match="Unknown services: agents"):
+        resolve(services=["agents"], controllers=[])
+
+
+def test_resolving_without_controllers_imports_no_plugin_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    controller = _PluginEntryPoint(error=AssertionError("unselected controllers must not be imported"))
+    _install_plugins(monkeypatch, {}, controllers={"agents-deployment": controller})
+
+    resolved = resolve(services=["entities"], controllers=[])
+
+    assert resolved.controllers == set()
+    assert controller.loads == 0
+
+
+def test_an_unloadable_controller_named_explicitly_is_an_unknown_controller(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_plugins(monkeypatch, {}, controllers={"agents-deployment": _PluginEntryPoint(error=ImportError("boom"))})
+
+    with pytest.raises(ValueError, match="Unknown controllers: agents-deployment"):
+        resolve(services=["entities"], controllers=["agents-deployment"])
+
+
+def test_an_unloadable_plugin_drops_out_of_a_service_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_plugins(
+        monkeypatch,
+        {
+            "agents": _PluginEntryPoint(error=ImportError("boom")),
+            "evals": _PluginEntryPoint(_plugin_service_class("evals")),
+        },
+    )
+
+    resolved = resolve(service_group="all", controllers=[])
+
+    assert "agents" not in resolved.services
+    assert "evals" in resolved.services
 
 
 def test_resolve_rejects_relative_socket_path():

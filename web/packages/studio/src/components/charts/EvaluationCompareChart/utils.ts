@@ -14,9 +14,6 @@ const EVALUATOR_METRIC_PREFIX = 'evaluators.';
 export const isEvaluatorMetric = (metric: TrendMetric): boolean =>
   metric.id.startsWith(EVALUATOR_METRIC_PREFIX);
 
-/** Scores go up when things get better; cost, latency, tokens and duration go down. */
-export const higherIsBetter = isEvaluatorMetric;
-
 export interface ComparedEvaluation {
   readonly row: EvaluationRow;
   readonly color: string;
@@ -64,7 +61,8 @@ export function improvementPercent(
 ): number | undefined {
   if (baseline === undefined || candidate === undefined || baseline === 0) return undefined;
   const change = ((candidate - baseline) / Math.abs(baseline)) * 100;
-  return higherIsBetter(metric) ? change : -change;
+  // Scores go up when things get better; cost, latency, tokens and duration go down.
+  return isEvaluatorMetric(metric) ? change : -change;
 }
 
 export interface ImprovementRow {

@@ -3,7 +3,7 @@
 
 import { Card, Grid, Stack, Text } from '@nvidia/foundations-react-core';
 import type { MonitorSummary } from '@studio/routes/agents/AgentMonitorRoute/utils';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 interface Props {
   summary: MonitorSummary;

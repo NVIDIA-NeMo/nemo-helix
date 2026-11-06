@@ -319,6 +319,12 @@ class ModelSpec(BaseModel):
     # Basic model information
     checkpoint_model_name: str = Field(description="Checkpoint Model identifier or model path")
     family: str = Field(description="Model architecture family (e.g., 'llama', 'mixtral', 'gpt2')")
+    architectures: list[str] | None = Field(
+        default=None,
+        description="Architectures declared in the checkpoint's top-level config.json. For a multimodal "
+        "checkpoint this names the whole model (e.g., 'NemotronH_Omni_Reasoning_V3'), while the other fields "
+        "describe its language model.",
+    )
 
     # Architecture dimensions
     num_layers: int = Field(description="Number of transformer layers")
@@ -339,6 +345,22 @@ class ModelSpec(BaseModel):
     mamba_config: MambaConfig | None = Field(default=None, description="Mamba/SSM configuration if applicable")
     sliding_window_config: SlidingWindowConfig | None = Field(
         default=None, description="Sliding window attention config if applicable"
+    )
+    has_vision_tower: bool = Field(
+        default=False,
+        description="True when the checkpoint config contains a vision tower.",
+    )
+    has_audio_tower: bool = Field(
+        default=False,
+        description="True when the checkpoint config contains an audio tower.",
+    )
+    num_experts: int | None = Field(
+        default=None,
+        description="Routed expert count when the checkpoint declares more than one. None for a dense model.",
+    )
+    num_nextn_predict_layers: int | None = Field(
+        default=None,
+        description="Multi-token prediction depth declared by the checkpoint. None when the config has no such field.",
     )
 
     # LoRA-specific metadata (pre-computed to avoid model instantiation)

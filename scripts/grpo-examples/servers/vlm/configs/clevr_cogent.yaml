@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+clevr_cogent:
+  resources_servers:
+    vlm:
+      entrypoint: app.py
+      domain: knowledge
+      verified: false
+      description: CLEVR-CoGenT scorer ported from NeMo-RL VLMEnvironment
+      value: Score a short answer inside answer tags, with a format bonus
+      reward_functions:
+        - name: format
+          weight: 0.2
+        - name: exact_alnum
+          weight: 0.8
+clevr_cogent_simple_agent:
+  responses_api_agents:
+    simple_agent:
+      entrypoint: app.py
+      max_steps: 1
+      resources_server:
+        type: resources_servers
+        name: clevr_cogent
+      model_server:
+        type: responses_api_models
+        name: policy_model

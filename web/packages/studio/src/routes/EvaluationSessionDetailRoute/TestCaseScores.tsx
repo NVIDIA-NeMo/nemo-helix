@@ -4,7 +4,7 @@
 import { formatEvaluatorScore, snakeCaseToTitleCase } from '@nemo/common/src/utils/formatters';
 import type { EvaluationSessionResponse } from '@nemo/sdk/generated/platform/schema';
 import { Badge, Flex, Stack, Text } from '@nvidia/foundations-react-core';
-import { type FC, type ReactNode } from 'react';
+import type { FC, ReactNode } from 'react';
 
 const SummaryItem: FC<{ label: string; children: ReactNode }> = ({ label, children }) => (
   <Stack gap="density-xs" className="min-w-0">

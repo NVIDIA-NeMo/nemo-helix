@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 from nemo_builder_plugin.plan import BuildPlan, Destination, PlannedImage
-from nemo_builder_plugin.schema import BuildOutput, BuildSet, BuildSpec, FileSetSource
-from nemo_builder_plugin.steps import ContextSource
+from nemo_builder_plugin.schema import BuildMount, BuildOutput, BuildSet, BuildSpec, FileSetSource
+from nemo_builder_plugin.steps import ContextSource, SandboxMount
 
 
 def _spec(name: str | None, *, repository: str | None = None, tag: str = "v1", fileset: str = "fs-a") -> BuildSpec:
@@ -80,17 +80,28 @@ class TestWithDestinations:
 
 
 class TestGroups:
+    def test_mounts_split_a_shared_context_and_are_qualified(self) -> None:
+        tool = BuildMount(source=FileSetSource(fileset="tools"), target="/opt/tool")
+        plain = _spec("plain")
+        mounted = BuildSpec(name="mounted", source=FileSetSource(fileset="fs-a"), mounts=[tool])
+        plan = BuildPlan.resolve(_set(plain, mounted), workspace="ws")
+        assert [(mounts, [i.spec.name for i in images]) for _, mounts, images in plan.groups()] == [
+            ((), ["plain"]),
+            ((SandboxMount(source=ContextSource(fileset="ws/tools"), target="/opt/tool"),), ["mounted"]),
+        ]
+        assert plan.sources == [ContextSource(fileset="ws/fs-a"), ContextSource(fileset="ws/tools")]
+
     def test_one_group_per_source_in_first_appearance_order(self) -> None:
         plan = BuildPlan.resolve(
             _set(_spec("a", fileset="fs-b"), _spec("b", fileset="fs-a"), _spec("c", fileset="fs-b")),
             workspace="ws",
         )
         groups = plan.groups()
-        assert [source for source, _ in groups] == [
+        assert [source for source, _, _ in groups] == [
             ContextSource(fileset="ws/fs-b"),
             ContextSource(fileset="ws/fs-a"),
         ]
-        assert [[image.spec.name for image in images] for _, images in groups] == [["a", "c"], ["b"]]
+        assert [[image.spec.name for image in images] for _, _, images in groups] == [["a", "c"], ["b"]]
 
     def test_context_path_splits_a_shared_fileset(self) -> None:
         env = BuildSpec(name="env", source=FileSetSource(fileset="fs-a", context_path="environment"))
@@ -99,7 +110,7 @@ class TestGroups:
 
     def test_one_fileset_spelled_two_ways_is_one_group(self) -> None:
         plan = BuildPlan.resolve(_set(_spec("a"), _spec("b", fileset="ws/fs-a")), workspace="ws")
-        assert [source for source, _ in plan.groups()] == [ContextSource(fileset="ws/fs-a")]
+        assert [source for source, _, _ in plan.groups()] == [ContextSource(fileset="ws/fs-a")]
 
     def test_an_archive_and_each_directory_in_it_is_its_own_group(self) -> None:
         def task(name: str, context_path: str | None) -> BuildSpec:
@@ -110,7 +121,7 @@ class TestGroups:
             _set(task("env", "environment"), task("env-again", "environment"), task("whole", None), _spec("plain")),
             workspace="ws",
         )
-        assert [source for source, _ in plan.groups()] == [
+        assert [source for source, _, _ in plan.groups()] == [
             ContextSource(fileset="ws/fs-a", archive="task.tar.gz", context_path="environment"),
             ContextSource(fileset="ws/fs-a", archive="task.tar.gz"),
             ContextSource(fileset="ws/fs-a"),

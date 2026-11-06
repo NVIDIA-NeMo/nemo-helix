@@ -12,7 +12,7 @@
 import { isDefined } from '@nemo/common/src/utils/isDefined';
 import { Card, Flex, RadioGroupInput, RadioGroupItem, Text } from '@nvidia/foundations-react-core';
 import cn from 'classnames';
-import { ComponentProps, FC, ReactNode } from 'react';
+import type { ComponentProps, FC, ReactNode } from 'react';
 
 export interface RadioCardProps extends Omit<ComponentProps<typeof RadioGroupItem>, 'children'> {
   /** The radio value (forwarded to RadioGroupInput) */

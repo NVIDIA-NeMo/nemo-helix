@@ -6,7 +6,8 @@
 import json
 import sys
 from pathlib import Path
-from typing import Any, cast
+from types import ModuleType, SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,44 @@ import pytest
 sys.modules["nemo_automodel"] = MagicMock()
 sys.modules["nemo_automodel._transformers"] = MagicMock()
 sys.modules["nemo_automodel._transformers.registry"] = MagicMock()
+
+
+def _hf_config(**overrides: object) -> SimpleNamespace:
+    """A checkpoint config whose nested language configs are None.
+
+    The expert walk reads these names. A MagicMock invents a new child for each
+    one and never repeats an id, so the walk allocates until the worker is killed.
+    """
+    config = SimpleNamespace(
+        architectures=None,
+        num_local_experts=None,
+        num_experts=None,
+        n_routed_experts=None,
+        text_config=None,
+        thinker_config=None,
+        language_config=None,
+        llm_config=None,
+    )
+    for name, value in overrides.items():
+        setattr(config, name, value)
+    return config
+
+
+class _AutoConfig:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return _hf_config()
+
+
+class _AutoTokenizer:
+    @staticmethod
+    def from_pretrained(path: str, trust_remote_code: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(vocab_size=None)
+
+
+class _TransformersStandIn(ModuleType):
+    AutoConfig = _AutoConfig
+    AutoTokenizer = _AutoTokenizer
 
 
 @pytest.fixture(autouse=True)
@@ -36,7 +75,7 @@ def _transformers_module(monkeypatch: pytest.MonkeyPatch) -> None:
     try:
         import transformers  # noqa: F401
     except ImportError:
-        monkeypatch.setitem(sys.modules, "transformers", MagicMock())
+        monkeypatch.setitem(sys.modules, "transformers", _TransformersStandIn("transformers"))
 
 
 from nhx.automodel.tasks.training.backends.config import (  # noqa: E402
@@ -56,7 +95,6 @@ from nhx.automodel.tasks.training.datasets.preparation import PreparedDataset  #
 from nhx.automodel.tasks.training.schemas import RetrievalConfig, TrainingRecipe, TrainingStepConfig  # noqa: E402
 
 CONFIG_MODULE = "nhx.automodel.tasks.training.backends.config"
-AUTOCONFIG_PATCH = "transformers.AutoConfig"
 MODEL_REGISTRY_PATCH = f"{CONFIG_MODULE}.ModelRegistry"
 
 
@@ -273,47 +311,29 @@ class TestConfigureMoeBackend:
         num_gpus_per_node: int = 1,
         tensor_parallel_size: int = 1,
         expert_parallel_size: int | None = None,
+        architecture: str | None = "NemotronHForCausalLM",
+        num_experts: int | None = 8,
     ) -> MagicMock:
         config = MagicMock()
         config.model.path = model_path
+        config.model.checkpoint_model_name = architecture
+        config.model.num_experts = num_experts
         config.parallelism.num_nodes = num_nodes
         config.parallelism.num_gpus_per_node = num_gpus_per_node
         config.parallelism.tensor_parallel_size = tensor_parallel_size
         config.parallelism.expert_parallel_size = expert_parallel_size
         return config
 
-    def _make_hf_config(
-        self,
-        architectures: list[str],
-        num_local_experts: int | None = None,
-        num_experts: int | None = None,
-    ) -> MagicMock:
-        hf_config = MagicMock()
-        hf_config.architectures = architectures
-
-        original_getattr = type(hf_config).__getattr__
-
-        def _controlled_getattr(self: Any, name: str) -> Any:
-            if name == "num_local_experts":
-                return num_local_experts
-            if name == "num_experts":
-                return num_experts
-            return original_getattr(self, name)
-
-        type(hf_config).__getattr__ = cast(Any, _controlled_getattr)
-        return hf_config
-
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_model_gets_backend_and_parallelizer(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_model_gets_backend_and_parallelizer(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        with patch(
+            "transformers.AutoConfig.from_pretrained", side_effect=AssertionError("traits already recorded")
+        ) as load:
+            _configure_moe_backend(cfg, self._make_config(num_gpus_per_node=8, expert_parallel_size=8))
+        load.assert_not_called()
 
         assert cfg["model"]["backend"] == {
             "_target_": "nemo_automodel.components.models.common.utils.BackendConfig",
@@ -321,13 +341,8 @@ class TestConfigureMoeBackend:
         }
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_requested_backend_settings_survive_the_moe_default(self, mock_autoconfig_cls, mock_registry) -> None:
+    def test_requested_backend_settings_survive_the_moe_default(self, mock_registry) -> None:
         """The torch-dispatcher default sits under whatever the job spec asked for."""
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
         cfg: dict[str, Any] = {
             "model": {
@@ -348,12 +363,7 @@ class TestConfigureMoeBackend:
         }
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_tp_gt1_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_tp_gt1_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -364,12 +374,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_ep_not_set_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_ep_not_set_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -380,12 +385,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_multi_gpu_ep_eq1_raises(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_multi_gpu_ep_eq1_raises(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -396,12 +396,7 @@ class TestConfigureMoeBackend:
             )
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_single_gpu_skips_multi_gpu_validation(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
-        )
+    def test_moe_single_gpu_skips_multi_gpu_validation(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {"model": {}}
@@ -410,51 +405,123 @@ class TestConfigureMoeBackend:
         assert cfg["model"]["backend"]["_target_"] == "nemo_automodel.components.models.common.utils.BackendConfig"
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_dense_custom_model_no_moe_config(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["LlamaForCausalLM"],
-        )
+    def test_dense_custom_model_no_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
 
         cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
+        _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
 
         assert "backend" not in cfg["model"]
         assert "parallelizer" not in cfg
 
     @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_standard_hf_model_no_custom_config(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["LlamaForCausalLM"],
-        )
+    def test_standard_hf_model_no_custom_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_registry.model_arch_name_to_cls = {}
-
-        cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
-
-        assert "backend" not in cfg["model"]
-        assert "parallelizer" not in cfg
-
-    @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_autoconfig_exception_handled_gracefully(self, mock_autoconfig_cls, _mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.side_effect = OSError("Model not found")
-
-        cfg: dict[str, Any] = {"model": {}}
-        _configure_moe_backend(cfg, self._make_config())
-
-        assert "backend" not in cfg["model"]
-        assert "parallelizer" not in cfg
-
-    @patch(MODEL_REGISTRY_PATCH)
-    @patch(AUTOCONFIG_PATCH)
-    def test_moe_validation_error_propagates(self, mock_autoconfig_cls, mock_registry) -> None:
-        mock_autoconfig_cls.from_pretrained.return_value = self._make_hf_config(
-            architectures=["NemotronHForCausalLM"],
-            num_local_experts=8,
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
         )
+
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture="LlamaForCausalLM", num_experts=None))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_a_checkpoint_id_uses_the_loaded_architecture(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"MixtralForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["MixtralForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(
+                    architecture="mistralai/Mixtral-8x7B-v0.1",
+                    num_experts=8,
+                    num_gpus_per_node=8,
+                    expert_parallel_size=None,
+                ),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_a_nested_language_config_supplies_the_expert_count(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronH_Omni": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronH_Omni"],
+                text_config={"n_routed_experts": 128},
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"num_experts=128"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_loads_a_moe_config(self, mock_registry, monkeypatch: pytest.MonkeyPatch) -> None:
+        mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(
+                architectures=["NemotronHForCausalLM"],
+                num_local_experts=8,
+            ),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        with pytest.raises(ValueError, match=r"expert_parallel_size.*not set.*requires expert_parallel_size > 1"):
+            _configure_moe_backend(
+                cfg,
+                self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8, expert_parallel_size=None),
+            )
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_missing_architecture_with_a_dense_config_skips_moe(
+        self, mock_registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mock_registry.model_arch_name_to_cls = {"LlamaForCausalLM": MagicMock()}
+        monkeypatch.setattr(
+            "transformers.AutoConfig.from_pretrained",
+            lambda path, trust_remote_code=False: SimpleNamespace(architectures=["LlamaForCausalLM"]),
+        )
+
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None, num_gpus_per_node=8))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    def test_missing_architecture_skips_moe_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _unloadable(path: str, trust_remote_code: bool = False) -> None:
+            raise OSError(f"cannot load {path}")
+
+        monkeypatch.setattr("transformers.AutoConfig.from_pretrained", _unloadable)
+        cfg: dict[str, Any] = {"model": {}}
+        _configure_moe_backend(cfg, self._make_config(architecture=None, num_experts=None))
+
+        assert "backend" not in cfg["model"]
+        assert "parallelizer" not in cfg
+
+    @patch(MODEL_REGISTRY_PATCH)
+    def test_moe_validation_error_propagates(self, mock_registry) -> None:
         mock_registry.model_arch_name_to_cls = {"NemotronHForCausalLM": MagicMock()}
 
         cfg: dict[str, Any] = {}
@@ -958,3 +1025,187 @@ class TestBackendSettings:
         explicit = self._explicit(BackendConfig(rope_fusion=False))
 
         assert explicit == {"rope_fusion": False}
+
+
+def _vision_training_config(
+    tmp_path: Path,
+    rows: list[dict[str, Any]],
+    has_vision_tower: bool = True,
+    has_audio_tower: bool = False,
+    num_experts: int | None = None,
+    num_nextn_predict_layers: int | None = None,
+    checkpoint_model_name: str | None = None,
+    gpus_per_node: int = 1,
+) -> TrainingStepConfig:
+    dataset = tmp_path / "data"
+    dataset.mkdir()
+    payload = "".join(json.dumps(row) + "\n" for row in rows)
+    (dataset / "training.jsonl").write_text(payload, encoding="utf-8")
+    (dataset / "validation.jsonl").write_text(payload, encoding="utf-8")
+    fixture = Path(__file__).parents[3] / "contract" / "input_configs" / "llama-3.2-1b" / "llama_3_2_1b_lora.json"
+    raw = json.loads(fixture.read_text())
+    raw.pop("backend")
+    raw["model"]["path"] = str(tmp_path / "model")
+    raw["dataset"]["path"] = str(dataset)
+    raw["parallelism"]["num_gpus_per_node"] = gpus_per_node
+    config = TrainingStepConfig.model_validate(raw)
+    config.model.has_vision_tower = has_vision_tower
+    config.model.has_audio_tower = has_audio_tower
+    config.model.num_experts = num_experts
+    config.model.num_nextn_predict_layers = num_nextn_predict_layers
+    config.model.checkpoint_model_name = checkpoint_model_name
+    return config
+
+
+def test_the_missing_transformers_stand_in_is_a_finite_config() -> None:
+    config = _AutoConfig.from_pretrained("meta-llama/Llama-3.2-1B")
+
+    assert config.text_config is None
+    assert config.thinker_config is None
+    assert config.language_config is None
+    assert config.llm_config is None
+
+
+def _compile_vision(config: TrainingStepConfig, tmp_path: Path) -> dict[str, Any]:
+    with (
+        patch(f"{CONFIG_MODULE}.build_wandb_config", return_value=None),
+        patch(f"{CONFIG_MODULE}.build_mlflow_config", return_value=None),
+        patch("transformers.AutoConfig.from_pretrained", return_value=_hf_config()),
+    ):
+        return compile_automodel_config(config, tmp_path / "work", MagicMock())
+
+
+def test_a_vision_checkpoint_compiles_the_vlm_recipe(tmp_path: Path) -> None:
+    """Text and image rows share FinetuneRecipeForVLM. The causal-LM class cannot load this checkpoint."""
+    from nhx.automodel.tasks.training.backends.vlm import make_conversation_dataset
+
+    image = {"type": "image_url", "image_url": {"url": "receipt.png"}}
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [image, {"type": "text", "text": "read this"}]},
+                {"role": "assistant", "content": "total 12"},
+            ]
+        },
+        {
+            "messages": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi"},
+            ]
+        },
+    ]
+    config = _vision_training_config(tmp_path, rows)
+    (tmp_path / "data" / "receipt.png").write_bytes(b"png")
+    config.model.chat_template = "vision-template"
+    compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["_recipe"] == "vlm_sft"
+    assert compiled["model"]["_target_"] == "nemo_automodel.NeMoAutoModelForImageTextToText.from_pretrained"
+    assert compiled["processor"]["_target_"] == "transformers.AutoProcessor.from_pretrained"
+    assert compiled["dataset"]["chat_template"] == "vision-template"
+    assert compiled["validation_dataset"]["chat_template"] == "vision-template"
+    assert compiled["_resolved_chat_template"] == "vision-template"
+    assert compiled["freeze_config"]["freeze_vision_tower"] is True
+    assert compiled["distributed"]["ep_size"] == 1
+    assert "num_nextn_predict_layers" not in compiled["model"]
+    assert compiled["peft"]["exclude_modules"] == [
+        "*vision_tower*",
+        "*vision_model*",
+        "*vision_projector*",
+        "*visual*",
+        "*image_encoder*",
+        "*multi_modal_projector*",
+        "*audio*",
+        "*sound*",
+        "*mlp1*",
+        "*lm_head*",
+    ]
+    assert "target_modules" not in compiled["peft"]
+    assert "collate_fn" not in compiled["dataloader"]
+
+    train_rows = [
+        json.loads(line)
+        for line in Path(compiled["dataset"]["path_or_dataset"]).read_text(encoding="utf-8").splitlines()
+    ]
+    image_part = train_rows[0]["conversation"][0]["content"][0]
+    assert image_part == {"type": "image", "image": str(tmp_path / "data" / "receipt.png")}
+    assert train_rows[0]["conversation"][0]["content"][1] == {"type": "text", "text": "read this"}
+    assert train_rows[1]["conversation"][0]["content"] == [{"type": "text", "text": "hello"}]
+
+    loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
+    assert "_injected_fake" not in loaded[0]
+    assert loaded[1]["_injected_fake"] is True
+    assert loaded[1]["conversation"][0]["content"][0]["type"] == "image"
+
+
+def test_prompt_completion_on_a_vision_checkpoint_is_still_the_vlm_recipe(tmp_path: Path) -> None:
+    from nhx.automodel.tasks.training.backends.vlm import make_conversation_dataset
+
+    rows = [{"prompt": "say hi", "completion": "hi"}]
+    compiled = _compile_vision(_vision_training_config(tmp_path, rows), tmp_path)
+
+    assert compiled["_recipe"] == "vlm_sft"
+    loaded = make_conversation_dataset(compiled["dataset"]["path_or_dataset"])
+    assert loaded[0]["_injected_fake"] is True
+    assert loaded[0]["conversation"][1]["content"] == [{"type": "text", "text": "hi"}]
+
+
+def test_a_data_url_is_decoded_next_to_the_workspace(tmp_path: Path) -> None:
+    import base64
+
+    raw = b"\x89PNG\r\n"
+    url = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]},
+                {"role": "assistant", "content": "a"},
+            ]
+        }
+    ]
+    compiled = _compile_vision(_vision_training_config(tmp_path, rows), tmp_path)
+    image = json.loads(Path(compiled["dataset"]["path_or_dataset"]).read_text(encoding="utf-8").splitlines()[0])
+    path = Path(image["conversation"][0]["content"][0]["image"])
+
+    assert path.is_file()
+    assert path.read_bytes() == raw
+    assert path.parent == (tmp_path / "work" / "dataset" / "images").resolve()
+
+
+def test_a_text_checkpoint_rejects_an_image_row(tmp_path: Path) -> None:
+    from nhx.automodel.tasks.training.datasets.preparation import DatasetFormatError
+
+    rows = [
+        {
+            "messages": [
+                {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "a.png"}}]},
+                {"role": "assistant", "content": "a"},
+            ]
+        }
+    ]
+    config = _vision_training_config(tmp_path, rows, has_vision_tower=False)
+
+    with pytest.raises(DatasetFormatError, match="image row"):
+        _compile_vision(config, tmp_path)
+
+
+def test_omni_experts_are_read_from_the_nested_config(tmp_path: Path) -> None:
+    rows = [{"prompt": "q", "completion": "a"}]
+    config = _vision_training_config(
+        tmp_path,
+        rows,
+        has_audio_tower=True,
+        num_experts=16,
+        num_nextn_predict_layers=1,
+        checkpoint_model_name="NemotronH_Omni",
+        gpus_per_node=4,
+    )
+
+    with patch(MODEL_REGISTRY_PATCH) as registry:
+        registry.model_arch_name_to_cls = {"NemotronH_Omni": object()}
+        compiled = _compile_vision(config, tmp_path)
+
+    assert compiled["distributed"]["ep_size"] == 4
+    assert compiled["model"]["num_nextn_predict_layers"] == 0
+    assert compiled["freeze_config"]["freeze_audio_tower"] is True
+    assert compiled["model"]["backend"]["dispatcher"] == "torch"

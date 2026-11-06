@@ -18,7 +18,7 @@ import { Banner, Button, Divider, Flex, Panel, Stack, Text } from '@nvidia/found
 import { SafeSynthesizerFilesetPreview } from '@studio/components/SafeSynthesizerFilesetPreview';
 import { EMPTY_FIELD_VALUE } from '@studio/constants/constants';
 import { JobConfigDrawer } from '@studio/routes/SafeSynthesizerJobDetailsRoute/components/JobConfigDrawer';
-import { FC, useState } from 'react';
+import { type FC, useState } from 'react';
 
 interface JobDetailsPanelProps {
   job: GenerateJob;

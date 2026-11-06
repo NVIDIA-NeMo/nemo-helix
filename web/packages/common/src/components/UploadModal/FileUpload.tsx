@@ -4,7 +4,7 @@
 import { useUploadModalContext } from '@nemo/common/src/components/UploadModal/Context/useUploadModalContext';
 import { formatFileSize } from '@nemo/common/src/components/UploadModal/utils';
 import { Upload, Text, Stack } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 export interface FileUploadProps {
   /** Callback when a file is selected */

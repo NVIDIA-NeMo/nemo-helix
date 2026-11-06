@@ -621,8 +621,11 @@ class TasksetRunStore:
                 return members
             page += 1
 
-    async def create_member(self, run: TasksetRunEntity, task_index: int) -> TasksetRunMemberEntity | None:
-        """Create task ``task_index``'s member under ``run``, queued (``image_ready``): its images are in the plan.
+    async def create_member(
+        self, run: TasksetRunEntity, task_index: int, *, phase: MemberPhase = MemberPhase.IMAGE_READY
+    ) -> TasksetRunMemberEntity | None:
+        """Create task ``task_index``'s member under ``run``: queued (``image_ready``), its images in the plan, or
+        ``image_preparing`` while it waits for its agent layer.
 
         A named create, so a repeat is harmless.
 
@@ -630,7 +633,7 @@ class TasksetRunStore:
             The new member, or None when it already exists.
         """
         member = TasksetRunMemberEntity(
-            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=MemberPhase.IMAGE_READY
+            name=member_name(task_index), workspace=run.workspace, task_index=task_index, phase=phase
         )
         member._parent = run.id
         member_client = cast(EntityClientProtocol[TasksetRunMemberEntity], self.entity_client)

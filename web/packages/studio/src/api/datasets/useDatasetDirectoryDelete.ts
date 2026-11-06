@@ -4,7 +4,7 @@
 import { filesDeleteFile, filesListFilesetFiles } from '@nemo/sdk/generated/platform/files';
 import type { FilesetFileOutput } from '@nemo/sdk/generated/platform/schema';
 import { invalidateDatasetCaches } from '@studio/api/datasets/invalidateDatasetCaches';
-import { useMutation, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 
 export interface DeleteDatasetDirectoryParams {
   workspace: string;

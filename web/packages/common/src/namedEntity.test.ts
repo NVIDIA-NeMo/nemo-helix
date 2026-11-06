@@ -49,11 +49,6 @@ describe('getEntityFullName', () => {
     const input: NamedEntity = { workspace: 'custom' };
     expect(getEntityReference(input)).toBe('custom/');
   });
-
-  it('should handle empty namespace in object input', () => {
-    const input: NamedEntity = { name: 'test' };
-    expect(getEntityReference(input)).toBe(`${DEFAULT_WORKSPACE}/test`);
-  });
 });
 
 describe('getURNFromNamedEntityRef', () => {

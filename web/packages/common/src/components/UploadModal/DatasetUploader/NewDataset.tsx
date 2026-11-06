@@ -14,7 +14,7 @@ import { FileUpload } from '@nemo/common/src/components/UploadModal/FileUpload';
 import { SimpleFilesTable } from '@nemo/common/src/components/UploadModal/SimpleFilesTable';
 import { IconError } from '@nemo/icons/icons';
 import { Flex, FormField, Stack, Text, TextInput } from '@nvidia/foundations-react-core';
-import { FC } from 'react';
+import type { FC } from 'react';
 
 /**
  * Component for creating a new dataset and uploading files to it.

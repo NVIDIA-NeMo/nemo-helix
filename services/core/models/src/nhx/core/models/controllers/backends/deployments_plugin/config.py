@@ -60,7 +60,14 @@ class DeploymentsPluginConfig(BaseModel):
         default="docker.io/vllm/vllm-openai",
         description="Default vLLM image repository. Fully qualified so it resolves on runtimes that block docker.io short names.",
     )
-    default_vllm_image_tag: str = "v0.22.1"
+    default_vllm_image_tag: str = "v0.32.0"
+    default_vllm_max_lora_rank: int = Field(
+        default=32,
+        description=(
+            "--max-lora-rank for vLLM deployments with LoRA enabled, unless additional_args sets it. "
+            "vLLM refuses adapters above this rank; set it to the highest rank you train."
+        ),
+    )
     default_user_id: int | None = 1000
     default_group_id: int | None = 2000
     default_vllm_user_id: int | None = 2000

@@ -3,7 +3,7 @@
 
 import { MarkdownContent } from '@nemo/common/src/components/MarkdownContent';
 import { Flex, Spinner, Text } from '@nvidia/foundations-react-core';
-import { type FC } from 'react';
+import type { FC } from 'react';
 
 export interface ReadmeBodyProps {
   isFilesError: boolean;
