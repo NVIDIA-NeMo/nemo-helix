@@ -3,7 +3,6 @@
 
 import {
   diffContract,
-  hasBlockingIssues,
   PLUGIN_CONTRACT,
   type IssueCode,
   type PluginContract,
@@ -34,22 +33,18 @@ const diff = (s: PluginSidecar | null) => diffContract(s, CONTRACT, STUDIO);
 const codes = (s: PluginSidecar | null) => diff(s).map((i) => i.code);
 
 describe('diffContract', () => {
-  it('accepts a clean sidecar and a missing sidecar blocks', () => {
+  it('accepts a clean sidecar and rejects a missing sidecar', () => {
     expect(diff(sidecar()), 'clean sidecar should have no issues').toEqual([]);
-    expect(hasBlockingIssues([]), 'no issues must not block').toBe(false);
 
     const missing = diff(null);
     expect(missing, 'null sidecar yields exactly one issue').toHaveLength(1);
     expect(missing[0].code).toBe('PLUGIN_MANIFEST_MISSING');
-    expect(missing[0].severity).toBe('error');
-    expect(hasBlockingIssues(missing), 'missing manifest must block').toBe(true);
   });
 
   it('reports unmapped specifiers and bundled singletons, but not bundled provided/unlisted packages', () => {
     const unmapped = diff(sidecar({ specifiers: ['react', 'lodash'] }));
     expect(unmapped, 'one unmapped issue for lodash').toHaveLength(1);
     expect(unmapped[0].code).toBe('PLUGIN_SPECIFIER_UNMAPPED');
-    expect(unmapped[0].severity).toBe('error');
     expect(unmapped[0].subject).toBe('lodash');
     expect(unmapped[0].message).toContain('lodash');
 
@@ -62,7 +57,6 @@ describe('diffContract', () => {
     const singleton = diff(sidecar({ bundledPackages: ['react-router'] }));
     expect(singleton, 'bundled singleton yields one issue').toHaveLength(1);
     expect(singleton[0].code).toBe('PLUGIN_SINGLETON_BUNDLED');
-    expect(singleton[0].severity).toBe('error');
     expect(singleton[0].subject).toBe('react-router');
     expect(singleton[0].message).toContain('react-router');
 
@@ -78,21 +72,20 @@ describe('diffContract', () => {
       expect(codes(sidecar({ contractVersion })), `${contractVersion} vs 1.2.0`).toEqual([
         'PLUGIN_CONTRACT_UNSUPPORTED',
       ]);
-      expect(diff(sidecar({ contractVersion }))[0].severity).toBe('error');
     }
     for (const contractVersion of ['1.2.0', '1.2.9', '1.1.0', '1.0.0']) {
       expect(codes(sidecar({ contractVersion })), `${contractVersion} vs 1.2.0`).toEqual([]);
     }
   });
 
-  it('classifies version drift as warning and major mismatch as error', () => {
+  it('flags only a different major as incompatible; minor and patch differences are fine', () => {
     const cases: [string, string, IssueCode | null][] = [
       ['8.3.0', '8.3.0', null],
       ['^8.3.0', '8.3.0', null],
       ['~8.3.0', '^8.3.0', null],
-      ['8.2.0', '8.3.0', 'PLUGIN_VERSION_DRIFT'],
-      ['8.3.1', '8.3.0', 'PLUGIN_VERSION_DRIFT'],
-      ['^8.1.5', '8.3.0', 'PLUGIN_VERSION_DRIFT'],
+      ['8.2.0', '8.3.0', null],
+      ['8.3.1', '8.3.0', null],
+      ['^8.1.5', '8.3.0', null],
       ['7.9.0', '8.3.0', 'PLUGIN_VERSION_INCOMPATIBLE'],
       ['^9.0.0', '8.3.0', 'PLUGIN_VERSION_INCOMPATIBLE'],
     ];
@@ -106,15 +99,18 @@ describe('diffContract', () => {
         actual.map((i) => i.code),
         label
       ).toEqual(expected ? [expected] : []);
-      if (expected === 'PLUGIN_VERSION_DRIFT') {
-        expect(actual[0].severity, label).toBe('warning');
-        expect(hasBlockingIssues(actual), `${label}: drift must not block`).toBe(false);
-      }
-      if (expected === 'PLUGIN_VERSION_INCOMPATIBLE') {
-        expect(actual[0].severity, label).toBe('error');
-        expect(hasBlockingIssues(actual), `${label}: major mismatch must block`).toBe(true);
-      }
     }
+
+    for (const built of ['19.2.3', '19.1.9', '^19.0.0']) {
+      expect(
+        codes(sidecar({ builtAgainst: { react: built } })),
+        `react built ${built} vs studio 19.1.0 is same-major and must not be reported`
+      ).toEqual([]);
+    }
+    expect(
+      codes(sidecar({ builtAgainst: { react: '18.3.1' } })),
+      'react built 18.3.1 vs studio 19.1.0'
+    ).toEqual(['PLUGIN_VERSION_INCOMPATIBLE']);
 
     expect(
       codes(sidecar({ builtAgainst: {} })),
@@ -122,12 +118,12 @@ describe('diffContract', () => {
     ).toEqual([]);
   });
 
-  it('reports every problem once, errors before warnings, in a stable order', () => {
+  it('reports every problem once, in a stable order', () => {
     const messy = sidecar({
       contractVersion: '1.9.0',
       specifiers: ['react', 'lodash'],
       bundledPackages: ['react-router'],
-      builtAgainst: { react: '19.0.0', 'react-router': '7.0.0' },
+      builtAgainst: { react: '18.3.1', 'react-router': '7.0.0', '@nemo/common': '1.5.0' },
     });
     const first = diff(messy);
     expect(first.map((i) => i.code).sort()).toEqual(
@@ -135,16 +131,15 @@ describe('diffContract', () => {
         'PLUGIN_CONTRACT_UNSUPPORTED',
         'PLUGIN_SINGLETON_BUNDLED',
         'PLUGIN_SPECIFIER_UNMAPPED',
-        'PLUGIN_VERSION_DRIFT',
+        'PLUGIN_VERSION_INCOMPATIBLE',
         'PLUGIN_VERSION_INCOMPATIBLE',
       ].sort()
     );
-    const severities = first.map((i) => i.severity);
-    expect(severities, 'errors must precede warnings').toEqual(
-      [...severities].sort((a, b) => (a === b ? 0 : a === 'error' ? -1 : 1))
-    );
+    expect(
+      first.filter((i) => i.code === 'PLUGIN_VERSION_INCOMPATIBLE').map((i) => i.subject),
+      'one incompatible issue per mismatched package, not for same-major differences'
+    ).toEqual(expect.arrayContaining(['react', 'react-router']));
     expect(diff(messy), 'same input, same order').toEqual(first);
-    expect(hasBlockingIssues(first)).toBe(true);
   });
 
   it('gives every code a message naming its subject and actionable steps', () => {
@@ -153,7 +148,6 @@ describe('diffContract', () => {
       PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
       PLUGIN_SINGLETON_BUNDLED: sidecar({ bundledPackages: ['react-router'] }),
       PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
-      PLUGIN_VERSION_DRIFT: sidecar({ builtAgainst: { ...STUDIO, 'react-router': '8.2.0' } }),
       PLUGIN_VERSION_INCOMPATIBLE: sidecar({
         builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
       }),
@@ -172,15 +166,20 @@ describe('diffContract', () => {
     }
   });
 
-  it('tells the developer which version to use for drift and incompatibility', () => {
-    for (const built of ['8.2.0', '7.0.0']) {
-      const issues = diffContract(sidecar({ builtAgainst: { 'react-router': built } }), CONTRACT, {
-        ...STUDIO,
-      });
-      expect(issues, `built ${built}`).toHaveLength(1);
+  it('tells the developer which version to use for a major mismatch', () => {
+    const cases = [
+      { pkg: 'react-router', built: '7.0.0', shipped: '8.3.0' },
+      { pkg: 'react', built: '18.3.1', shipped: '19.1.0' },
+    ];
+    for (const { pkg, built, shipped } of cases) {
+      const issues = diff(sidecar({ builtAgainst: { [pkg]: built } }));
+      expect(
+        issues.map((i) => i.code),
+        `${pkg} built ${built}`
+      ).toEqual(['PLUGIN_VERSION_INCOMPATIBLE']);
       const steps = issues[0].steps.join('\n');
-      expect(steps, 'names the Studio version').toContain('8.3.0');
-      expect(steps, 'names the package').toContain('react-router');
+      expect(steps, 'names the Studio version').toContain(shipped);
+      expect(steps, 'names the package').toContain(pkg);
       expect(steps, 'points at web/package.json').toContain('web/package.json');
       expect(steps.toLowerCase(), 'tells the developer to rebuild').toContain('rebuild');
     }
@@ -194,7 +193,7 @@ describe('diffContract hardening', () => {
       issues.map((i) => i.code),
       `contractVersion ${JSON.stringify(v)}`
     ).toEqual(['PLUGIN_CONTRACT_UNSUPPORTED']);
-    expect(hasBlockingIssues(issues)).toBe(true);
+    expect(issues.length, 'must be rejected').toBeGreaterThan(0);
   });
 
   it('links every issue code to the contract docs', () => {
@@ -203,7 +202,6 @@ describe('diffContract hardening', () => {
       PLUGIN_SPECIFIER_UNMAPPED: sidecar({ specifiers: ['lodash'] }),
       PLUGIN_SINGLETON_BUNDLED: sidecar({ bundledPackages: ['react-router'] }),
       PLUGIN_CONTRACT_UNSUPPORTED: sidecar({ contractVersion: '3.0.0' }),
-      PLUGIN_VERSION_DRIFT: sidecar({ builtAgainst: { ...STUDIO, 'react-router': '8.2.0' } }),
       PLUGIN_VERSION_INCOMPATIBLE: sidecar({
         builtAgainst: { ...STUDIO, 'react-router': '7.0.0' },
       }),
@@ -219,7 +217,9 @@ describe('diffContract hardening', () => {
   });
 
   it('skips malformed builtAgainst versions and still parses pre-releases', () => {
-    for (const built of ['19.2.3garbage', '19.2.3.4', '>=8', '8', '']) {
+    // Values that would be a different major if a lenient parser read a prefix of them.
+    const malformed = ['19.2.3garbage', '19.2.3.4', '18.3.1garbage', '18.3.1.4', '>=18', '18', ''];
+    for (const built of malformed) {
       expect(
         codes(sidecar({ builtAgainst: { react: built } })),
         `built ${JSON.stringify(built)} is malformed and skipped`
@@ -229,6 +229,10 @@ describe('diffContract hardening', () => {
       codes(sidecar({ builtAgainst: { react: '19.1.0-rc.1' } })),
       'pre-release parses as 19.1.0'
     ).toEqual([]);
+    expect(
+      codes(sidecar({ builtAgainst: { react: '18.0.0-rc.1' } })),
+      'pre-release of another major is still a major mismatch'
+    ).toEqual(['PLUGIN_VERSION_INCOMPATIBLE']);
   });
 });
 
