@@ -29,7 +29,7 @@ async def test_debug_startup_hydrates_model_entity_metadata(mocker):
         "nhx.core.inference_gateway.api.model_cache.refresh_model_cache",
         refresh_model_cache,
     )
-    mocker.patch("nhx.core.inference_gateway.service.aiohttp.ClientSession", return_value=http_client)
+    mocker.patch("nhx.core.inference_gateway.service.ClientSession", return_value=http_client)
     mocker.patch.object(
         config,
         "debug_model_providers",

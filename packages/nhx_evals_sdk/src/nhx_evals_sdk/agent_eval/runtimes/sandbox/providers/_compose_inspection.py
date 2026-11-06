@@ -6,10 +6,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
+from json import JSONDecodeError, loads
+from socket import AF_INET, AF_INET6, SO_REUSEADDR, SOCK_DGRAM, SOCK_STREAM, SOL_SOCKET, socket
 from typing import Any
 
 from ._compose_contracts import ComposeServiceTopology
@@ -54,11 +54,11 @@ def _parse_json_rows(text: str) -> list[dict[str, Any]]:
     if not stripped:
         return []
     try:
-        payload = json.loads(stripped)
-    except json.JSONDecodeError:
+        payload = loads(stripped)
+    except JSONDecodeError:
         rows: list[dict[str, Any]] = []
         for line in stripped.splitlines():
-            value = json.loads(line)
+            value = loads(line)
             if isinstance(value, dict):
                 rows.append(value)
         return rows
@@ -80,7 +80,7 @@ def _parse_compose_config(text: str) -> dict[str, Any]:
         json.JSONDecodeError: If ``text`` is not valid JSON.
         TypeError: If the root or ``services`` value is not an object.
     """
-    payload = json.loads(text)
+    payload = loads(text)
     if not isinstance(payload, dict):
         raise TypeError("Compose config JSON must be an object")
     services = payload.get("services", {})
@@ -160,11 +160,11 @@ def _published_port_available(published_port: _PublishedPort) -> bool:
     Returns:
         ``True`` when a temporary matching socket can bind the host endpoint.
     """
-    family = socket.AF_INET6 if ":" in published_port.host_ip else socket.AF_INET
-    socket_type = socket.SOCK_DGRAM if published_port.protocol == "udp" else socket.SOCK_STREAM
-    with socket.socket(family, socket_type) as probe:
-        if socket_type == socket.SOCK_STREAM:
-            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    family = AF_INET6 if ":" in published_port.host_ip else AF_INET
+    socket_type = SOCK_DGRAM if published_port.protocol == "udp" else SOCK_STREAM
+    with socket(family, socket_type) as probe:
+        if socket_type == SOCK_STREAM:
+            probe.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
         try:
             probe.bind((published_port.host_ip, published_port.published))
         except OSError:

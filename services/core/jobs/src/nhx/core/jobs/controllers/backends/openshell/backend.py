@@ -93,6 +93,9 @@ from nhx.core.jobs.controllers.backends.openshell.policy import (
 _OPENSHELL_IMPORT_ERROR: ImportError | None = None
 try:
     import grpc
+    from grpc import ssl_channel_credentials
+    from grpc.aio import insecure_channel as aio_insecure_channel
+    from grpc.aio import secure_channel as aio_secure_channel
     from nemo_helix_plugin.openshell.isolation import restricted_platform_policy, validate_provider_environment
     from nhx.core.jobs.controllers.backends.openshell.sandbox_client import JobsSandboxClient
     from openshell import SandboxError, TlsConfig
@@ -697,15 +700,15 @@ class OpenShellJobBackend(JobBackend[Any, PluginOpenShellJobExecutionProfileConf
             raise ValueError("Gateway credentials are not configured.")
         target = self._executor_config.grpc_target()
         if self._executor_config.use_insecure():
-            channel = grpc.aio.insecure_channel(target)
+            channel = aio_insecure_channel(target)
         else:
             tls = self._executor_config.tls
-            credentials = grpc.ssl_channel_credentials(
+            credentials = ssl_channel_credentials(
                 root_certificates=Path(tls.ca_cert_path).read_bytes() if tls and tls.ca_cert_path else None,
                 private_key=Path(tls.client_key_path).read_bytes() if tls and tls.client_key_path else None,
                 certificate_chain=Path(tls.client_cert_path).read_bytes() if tls and tls.client_cert_path else None,
             )
-            channel = grpc.aio.secure_channel(target, credentials)
+            channel = aio_secure_channel(target, credentials)
         # Jobs invokes provider operations with asyncio.run; never retain a
         # channel across those event loops or create it on the controller thread.
         async with channel:

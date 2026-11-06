@@ -6,6 +6,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.inference_middleware_models import VirtualModel, guardrail_config_membership_filter
 from nhx.common.api import ParsedFilter, make_filter_dep
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
@@ -34,8 +35,7 @@ logger = logging.getLogger(__name__)
 async def list_guardrail_configs(
     workspace: str,
     entities_client: EntityClient = Depends(get_entity_client),
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=10, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     sort: GenericSortField = Query(
         default="created_at",
         description="""The field to sort by. To sort in decreasing order, use `-` in front of the field name.""",
@@ -48,8 +48,8 @@ async def list_guardrail_configs(
     """
     res = await entities_client.list(
         GuardrailConfig,
-        page=page,
-        page_size=page_size,
+        page=page_params.page,
+        page_size=page_params.page_size,
         sort=sort.value,
         workspace=workspace,
         filter_operation=parsed.operation,

@@ -1303,7 +1303,10 @@ jobs:
             # install to the workspace .venv.
             uv pip install --python "$venv/bin/python" -r "$requirements" . pytest pytest-asyncio
             echo "::group::Harbor $version"
-            "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+            # The repository's shared-patch guard, with nhx_sandbox counted as first-party although
+            # this venv installs it as a wheel.
+            PYTHONPATH="$GITHUB_WORKSPACE" "$venv/bin/python" -m pytest -p no:cacheprovider -v \
+              -p tests.shared_patch_guard --shared-patch-guard=strict -o shared_patch_first_party=nhx_sandbox \
               tests/test_harbor_opensandbox_environment.py tests/test_harbor_opensandbox_driver.py \
               tests/test_harbor_opensandbox_compose_services.py
             echo "::endgroup::"

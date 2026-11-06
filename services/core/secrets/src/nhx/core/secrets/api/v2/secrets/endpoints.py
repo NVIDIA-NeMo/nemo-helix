@@ -5,8 +5,9 @@ import logging
 import math
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nhx.common.api.common import ErrorResponse, Page, PaginationData
 from nhx.common.auth import AuthClient, get_auth_client
 from nhx.common.config import HelixConfig
@@ -135,8 +136,7 @@ async def create_secret(
 )
 async def list_secrets(
     workspace: str,
-    page: int = Query(default=1, description="Page number.", gt=0),
-    page_size: int = Query(default=10, description="Page size.", gt=0),
+    page_params: PageParams = Depends(make_page_dep(default_size=10)),
     entity_store: EntityClient = Depends(get_entity_client),
     platform_config: HelixConfig = Depends(get_platform_config),
 ) -> Page[schemas.HelixSecretResponse]:
@@ -145,8 +145,8 @@ async def list_secrets(
         result = await entity_store.list(
             entity_type=HelixSecret,
             workspace=workspace,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
         )
         total_results = result.pagination.total_results
         total_pages = result.pagination.total_pages
@@ -156,8 +156,8 @@ async def list_secrets(
         ) and is_default_ngc_api_key_configured(platform_config)
         if include_default_ngc_api_key:
             total_results = result.pagination.total_results + 1
-            total_pages = math.ceil(total_results / page_size) if page_size else 1
-            if page == total_pages:
+            total_pages = math.ceil(total_results / page_params.page_size) if page_params.page_size else 1
+            if page_params.page == total_pages:
                 result.data.append(get_default_ngc_api_key(platform_config))
 
         return Page(

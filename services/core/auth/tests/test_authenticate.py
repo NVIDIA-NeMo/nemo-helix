@@ -140,6 +140,7 @@ def _auth_config_with_workload_exchange(
         ),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer=oidc_issuer,
             additional_issuers=additional_issuers or [],
             jwks_uri=oidc_jwks_uri,
@@ -342,6 +343,7 @@ def _web_session_config(tmp_path) -> AuthConfig:
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             confidential_client=OIDCConfidentialClientConfig(
                 client_id="studio",
@@ -532,6 +534,7 @@ def test_authenticate_oidc_access_token_with_actor_returns_direct_principal_json
         token_signing=TokenSigningConfig(private_key_file=str(tmp_path / "private.pem")),
         oidc=OIDCConfig(
             enabled=True,
+            audience="test-audience",
             issuer="https://sso.example.com",
             public_client=OIDCPublicClientConfig(client_id="nemo-helix-cli"),
         ),

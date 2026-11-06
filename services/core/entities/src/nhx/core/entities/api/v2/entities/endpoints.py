@@ -24,7 +24,8 @@ import logging
 import textwrap
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.entities.types import WORKSPACE_NOT_FOUND_CODE, EntityWriteValidationErrorResponse
 from nhx.common.api.common import DeleteResponse, Page, PaginationData
 from nhx.common.auth import ALL_WORKSPACES
@@ -354,8 +355,7 @@ async def list_entities(
     workspace_repository: WorkspaceRepository,
     filter: FilterDep,
     auth_client: AuthClientDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: str = Query(
         "-created_at",
         description=(
@@ -399,8 +399,8 @@ async def list_entities(
         entities, total = await repository.list_entities(
             workspace=query_workspace,
             entity_type=entity_type,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_op=effective_filter,
             relationship_child_workspaces=accessible_workspaces,
@@ -423,11 +423,11 @@ async def list_entities(
     return EntitiesPage(
         data=entities,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             current_page_size=len(entities),
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
         ),
         sort=sort,
         filter=filter.to_dict() if filter else None,

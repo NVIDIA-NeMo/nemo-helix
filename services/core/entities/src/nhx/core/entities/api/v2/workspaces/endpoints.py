@@ -24,7 +24,8 @@ import logging
 import textwrap
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.workspaces.constants import SAMPLE_WORKSPACE_PREFIX
 from nemo_helix_plugin.workspaces.types import WorkspaceDeletionStatus
 from nhx.common.api.common import DeleteResponse, GenericSortField, Page, PaginationData
@@ -331,8 +332,7 @@ async def list_workspaces(
     repository: WorkspaceRepository,
     entity_repository: EntityRepository,
     filter: FilterDep,
-    page: int = Query(1, ge=1, description="Page number"),
-    page_size: int = Query(100, ge=1, le=1000, description="Items per page"),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: GenericSortField = Query(GenericSortField.CREATED_AT_DESC, description="Sort field"),
 ) -> Page[Workspace]:
     """List workspaces accessible to the current principal."""
@@ -343,8 +343,8 @@ async def list_workspaces(
 
     try:
         workspaces, total = await repository.list_workspaces(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             filter_op=combined_filter,
         )
@@ -354,10 +354,10 @@ async def list_workspaces(
     return Page(
         data=workspaces,
         pagination=PaginationData(
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             total_results=total,
-            total_pages=(total + page_size - 1) // page_size,
+            total_pages=(total + page_params.page_size - 1) // page_params.page_size,
             current_page_size=len(workspaces),
         ),
         sort=sort,

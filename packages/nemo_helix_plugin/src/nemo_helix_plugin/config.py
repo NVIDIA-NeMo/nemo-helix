@@ -68,13 +68,14 @@ from __future__ import annotations
 
 import logging
 import os
-import platform
 import re
 from abc import ABC, abstractmethod
 from enum import Enum
 from functools import cache
 from os import environ
 from pathlib import Path
+from platform import system as platform_system
+from socket import gethostname
 from typing import Any, ClassVar, Literal, Self, Type, TypeVar
 from urllib.parse import urlsplit
 
@@ -384,12 +385,15 @@ def platform_service_name_from_url_env_var(env_name: str) -> str | None:
 LOOPBACK_ADDRESSES = ("localhost", "0.0.0.0", "::1", "127.0.0.1")
 
 
+_CGROUP_FILE = "/proc/self/cgroup"
+
+
 def _is_running_in_docker() -> bool:
     """Detect if the current process is running inside a Docker container."""
     if Path("/.dockerenv").exists():
         return True
     try:
-        with open("/proc/self/cgroup", "r") as f:
+        with open(_CGROUP_FILE, "r") as f:
             return any("docker" in line or "containerd" in line for line in f)
     except (FileNotFoundError, PermissionError):
         return False
@@ -397,7 +401,7 @@ def _is_running_in_docker() -> bool:
 
 def determine_loopback_override() -> str | None:
     """Automatically determine the appropriate loopback address override for jobs."""
-    system = platform.system()
+    system = platform_system()
     running_in_docker = _is_running_in_docker()
 
     if system == "Darwin":
@@ -405,9 +409,7 @@ def determine_loopback_override() -> str | None:
         return "host.docker.internal"
 
     if running_in_docker:
-        import socket
-
-        container_hostname = socket.gethostname()
+        container_hostname = gethostname()
         logger.debug(f"Detected Docker container: using container hostname {container_hostname}")
         return container_hostname
 

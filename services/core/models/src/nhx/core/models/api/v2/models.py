@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from nemo_helix_plugin.api.pagination import PageParams, make_page_dep
 from nemo_helix_plugin.client.errors import NemoClientError
 from nemo_helix_plugin.entities import CLIENT_ERRORS
 from nemo_helix_plugin.entities.types import EntityWriteValidationErrorResponse
@@ -188,8 +189,7 @@ async def create_model(
 )
 async def list_models(
     workspace: str,
-    page: int = Query(default=1, description="Page number."),
-    page_size: int = Query(default=100, description="Page size."),
+    page_params: PageParams = Depends(make_page_dep()),
     sort: ModelEntitySortField = Query(
         default="created_at",
         description="The field to sort by. To sort in decreasing order, use `-` in front of the field name.",
@@ -214,8 +214,8 @@ async def list_models(
         result = await service.list_model_entities(
             workspace=filter_workspace,
             parsed_filter=parsed_filter,
-            page=page,
-            page_size=page_size,
+            page=page_params.page,
+            page_size=page_params.page_size,
             sort=sort,
             verbose=verbose,
         )

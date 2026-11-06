@@ -364,7 +364,7 @@ class _Api:
 
 
 class _Clock:
-    """Stands in for supervise's ``time`` module.
+    """Stands in for supervise's locally bound clock functions.
 
     Patching ``supervise.time.sleep`` would patch the shared ``time`` module, so every other thread in the
     worker would record its sleeps here and spin, and a failing assert would then format a list too long to
@@ -403,7 +403,7 @@ class TestEachSandboxFailsAlone:
 
     def test_a_sandbox_that_cannot_be_created_fails_only_its_own_images(self, monkeypatch: pytest.MonkeyPatch) -> None:
         clock = _Clock()
-        monkeypatch.setattr(supervise, "time", clock)
+        monkeypatch.setattr(supervise, "sleep", clock.sleep)
         api = _Api(create=ApiException(status=403, reason="Forbidden"))
         assert self._build(monkeypatch, api) == 2
         assert api.deleted == []
@@ -412,7 +412,8 @@ class TestEachSandboxFailsAlone:
     def test_a_sandbox_the_quota_rejects_waits_for_room(self, monkeypatch: pytest.MonkeyPatch) -> None:
         clock = _Clock()
         sleeps = clock.sleeps
-        monkeypatch.setattr(supervise, "time", clock)
+        monkeypatch.setattr(supervise, "monotonic", clock.monotonic)
+        monkeypatch.setattr(supervise, "sleep", clock.sleep)
         quota = ApiException(status=403, reason="Forbidden")
         quota.body = 'pods "nhx-sbx-abc-g0" is forbidden: exceeded quota: compute, requested: cpu=2'
         api = _Api(create=quota, create_failures=3)
@@ -474,7 +475,7 @@ def test_a_dead_sandbox_reports_why_it_died(monkeypatch: pytest.MonkeyPatch, cap
         def stop(self) -> None:
             pass
 
-    monkeypatch.setattr(supervise.k8s_watch, "Watch", Watch)
+    monkeypatch.setattr(supervise, "Watch", Watch)
     monkeypatch.setattr(supervise, "_read_pod_log", lambda api, *, name, namespace: "")
     with caplog.at_level(logging.ERROR, logger=supervise.__name__):
         failures = _build_group(

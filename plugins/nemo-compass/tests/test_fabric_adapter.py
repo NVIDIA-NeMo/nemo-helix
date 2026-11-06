@@ -409,7 +409,7 @@ async def test_relay_activates_fabrics_config_and_scopes_the_agent(
         yield _clean_activation()
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fake_run_compass_change_set)
-    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "activate_relay_plugin", fake_activate)
     monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
 
     runtime = fabric_adapter.CompassRuntime()
@@ -447,7 +447,7 @@ async def test_relay_refuses_an_ambient_user_plugin_file(
         raise AssertionError("compass ran")
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
-    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "activate_relay_plugin", fake_activate)
     monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
 
     runtime = fabric_adapter.CompassRuntime()
@@ -487,7 +487,7 @@ async def test_relay_refuses_plugin_config_inherited_during_activation(
         raise AssertionError("compass ran")
 
     monkeypatch.setattr(fabric_adapter, "run_compass_change_set", fail_if_called)
-    monkeypatch.setattr(fabric_adapter.relay_plugin, "activate", fake_activate)
+    monkeypatch.setattr(fabric_adapter, "activate_relay_plugin", fake_activate)
     monkeypatch.setattr(fabric_adapter, "get_async_task_nemo_client", _stub_client_factory([]))
 
     runtime = fabric_adapter.CompassRuntime()

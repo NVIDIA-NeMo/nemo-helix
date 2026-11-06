@@ -18,10 +18,10 @@ import re
 import sys
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from time import sleep
+from urllib.request import urlopen
 
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 ARCHIVE_SUFFIXES = (".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tgz", ".zip", ".crate")
@@ -93,7 +93,7 @@ def download(source: PinnedSource, destination: Path) -> None:
     last_error: Exception | None = None
     for attempt in range(DOWNLOAD_ATTEMPTS):
         try:
-            with urllib.request.urlopen(source.url, timeout=120) as response:
+            with urlopen(source.url, timeout=120) as response:
                 data = response.read()
             verify_sha256(data, source.sha256)
             destination.write_bytes(data)

@@ -21,6 +21,11 @@ _CHECKPOINT_PREFIX = "checkpoint-"
 _TRAINER_STATE_FILE = "trainer_state.json"
 
 
+def _read_trainer_state(checkpoint: Path) -> str:
+    """Read a checkpoint's trainer state; a seam so a test can fail the read without patching ``Path``."""
+    return (checkpoint / _TRAINER_STATE_FILE).read_text()
+
+
 def _saved_step(checkpoint: Path) -> int | None:
     """The step a checkpoint holds, or None when its trainer state is missing or not valid JSON.
 
@@ -28,7 +33,7 @@ def _saved_step(checkpoint: Path) -> int | None:
     be complete, so it must not be removed.
     """
     try:
-        state = json.loads((checkpoint / _TRAINER_STATE_FILE).read_text())
+        state = json.loads(_read_trainer_state(checkpoint))
     except (FileNotFoundError, ValueError):
         return None
     step = state.get("global_step") if isinstance(state, dict) else None
