@@ -583,7 +583,9 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
     )
 
 
-@pytest.mark.parametrize("config_path", ["absolute", "agent.yaml", "./agent.yaml", "../fabric-agent-spec/agent.yaml"])
+@pytest.mark.parametrize(
+    "config_path", ["absolute", "agent.yaml", "./agent.yaml", "../fabric-agent-spec/agent.yaml", "../agent.yaml"]
+)
 def test_register_fabric_uploads_ethos_fileset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_path: str
 ) -> None:
@@ -606,7 +608,12 @@ def test_register_fabric_uploads_ethos_fileset(
     (package / AGENT_SPEC_FILENAME).write_text("# Contract\n")
     (package / "skills").mkdir()
     (package / "skills" / "SKILL.md").write_text("# Bundle skill\n")
-    monkeypatch.chdir(package)
+    if config_path == "../agent.yaml":
+        workdir = package / "work"
+        workdir.mkdir()
+    else:
+        workdir = tmp_path if config_path == "absolute" else package
+    monkeypatch.chdir(workdir)
     config_argument = str(config) if config_path == "absolute" else config_path
     normalized_config = {
         "config_format": "nemo-agents-spec-v1",
@@ -651,6 +658,9 @@ def test_register_fabric_uploads_ethos_fileset(
         )
 
     assert result.exit_code == 0, result.stderr
+    if config_path == "absolute":
+        warning = _spec_package_warning("fabric-agent", config)
+        assert result.stderr.splitlines()[-len(warning) :] == list(warning)
     assert uploaded["files"] == {"agent.yaml": config.read_text(), "skills/SKILL.md": "# Bundle skill\n"}
     assert files.deleted == [AGENT_SPEC_FILENAME]
     assert uploaded["fileset"] == "fabric-agent-ethos"
