@@ -583,7 +583,10 @@ def test_register_validates_platform_agent_config_before_post(tmp_path, with_reg
     )
 
 
-def test_register_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("config_path", ["absolute", "agent.yaml", "./agent.yaml", "../fabric-agent-spec/agent.yaml"])
+def test_register_fabric_uploads_ethos_fileset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_path: str
+) -> None:
     package = tmp_path / "agents" / "fabric-agent-spec"
     package.mkdir(parents=True)
     config = package / "agent.yaml"
@@ -601,7 +604,10 @@ def test_register_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pyte
         )
     )
     (package / AGENT_SPEC_FILENAME).write_text("# Contract\n")
-    monkeypatch.chdir(tmp_path)
+    (package / "skills").mkdir()
+    (package / "skills" / "SKILL.md").write_text("# Bundle skill\n")
+    monkeypatch.chdir(package)
+    config_argument = str(config) if config_path == "absolute" else config_path
     normalized_config = {
         "config_format": "nemo-agents-spec-v1",
         "name": "fabric-agent",
@@ -611,17 +617,20 @@ def test_register_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pyte
     }
 
     async def _validate_platform_agent_config(config_dict: dict[str, Any], *, base_dir: Path):
-        del config_dict, base_dir
+        assert (base_dir / "skills" / "SKILL.md").read_text() == "# Bundle skill\n"
         return type("ValidationResult", (), {"agent_config": _ValidatedAgentConfig(normalized_config)})()
 
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "POST"
+        assert json.loads(req.content)["config"] == normalized_config
         return httpx.Response(200, json={"name": "fabric-agent"})
 
     uploaded: dict[str, Any] = {}
 
     def fake_upload(local_dir: Path, *, fileset: str, workspace: str, sdk: Any) -> None:
-        uploaded["files"] = {path.relative_to(local_dir).as_posix() for path in local_dir.rglob("*") if path.is_file()}
+        uploaded["files"] = {
+            path.relative_to(local_dir).as_posix(): path.read_text() for path in local_dir.rglob("*") if path.is_file()
+        }
         uploaded["fileset"] = fileset
         uploaded["workspace"] = workspace
         uploaded["sdk_base_url"] = sdk.base_url
@@ -637,14 +646,12 @@ def test_register_fabric_uploads_ethos_fileset(tmp_path: Path, monkeypatch: pyte
     ):
         result = CliRunner().invoke(
             app,
-            ["register", "--name", "fabric-agent", "--agent-config", str(config)],
+            ["register", "--name", "fabric-agent", "--agent-config", config_argument],
             obj=_CLIState(base_url="http://test"),
         )
 
     assert result.exit_code == 0, result.stderr
-    warning = _spec_package_warning("fabric-agent", config)
-    assert result.stderr.splitlines()[-len(warning) :] == list(warning)
-    assert uploaded["files"] == {"agent.yaml"}
+    assert uploaded["files"] == {"agent.yaml": config.read_text(), "skills/SKILL.md": "# Bundle skill\n"}
     assert files.deleted == [AGENT_SPEC_FILENAME]
     assert uploaded["fileset"] == "fabric-agent-ethos"
     assert uploaded["workspace"] == "default"

@@ -97,7 +97,7 @@ unattended. Conditional permission used to live only in the section's prose
 ``Notes`` line, where no consumer could act on it.
 """
 
-_LEVER_RE = re.compile(r"^-\s*([^:]+?)\s*:\s*(.+?)\s*$", re.MULTILINE)
+_LEVER_RE = re.compile(r"^-[ \t]*([^:\r\n]+?)[ \t]*:[ \t]*(.+?)[ \t]*$", re.MULTILINE)
 
 
 def _require_supported_schema_version(version: int) -> None:

@@ -3352,7 +3352,9 @@ def _upload_ethos_fileset(
     fileset = ethos_fileset_name(agent_name)
     sdk = shared_cli_client(NemoClient)
     with tempfile.TemporaryDirectory(prefix=f".{agent_name}-ethos-upload-") as directory:
-        staged = Path(directory) / agent_root.name
+        # Path('.') has no name; keep the same staging layout for relative
+        # config paths without resolving symlinks or changing bundle context.
+        staged = Path(directory) / agent_root.absolute().name
         staged.mkdir()
         for relative_path, content in artifacts:
             destination = staged / relative_path
