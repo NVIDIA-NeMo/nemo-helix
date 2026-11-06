@@ -42,6 +42,7 @@ def reap_job_sandboxes(
     options = dict(host_provider_options or {})
 
     async def _destroy() -> tuple[str, ...]:
+        """Destroy the job's sandboxes through the host provider."""
         provider = get_host_provider(host_provider, options)
         return await asyncio.wait_for(provider.destroy_job_sandboxes(job_id), timeout=timeout_s)
 
