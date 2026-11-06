@@ -2541,6 +2541,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+  /apis/files/v2/workspaces/{workspace}/filesets/by-id/{fileset_id}:
+    get:
+      tags:
+      - Files
+      summary: Get Fileset by ID
+      operationId: get_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__get
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+    delete:
+      tags:
+      - Files
+      summary: Delete Fileset by ID
+      operationId: delete_fileset_by_id_apis_files_v2_workspaces__workspace__filesets_by_id__fileset_id__delete
+      parameters:
+      - name: workspace
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Workspace
+      - name: fileset_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Fileset Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilesetOutput'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /apis/files/v2/workspaces/{workspace}/filesets/{name}:
     get:
       tags:

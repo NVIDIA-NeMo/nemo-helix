@@ -137,7 +137,7 @@ async def test_harbor_direct_list_snapshots_selected_revision(entity_store):
     task.spec.source.fileset_ref = "default/files#v2/task/files"
     await entity_store.update(task)
     await publish_revision(entity_store, entity_store, task, TaskRevisionEntity)
-    await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+    await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     restored = AgentEvalSpec.model_validate_json(snapshot)
     assert all(task.spec.kind == "harbor" for task in restored.tasks)
     members = restored.tasks
@@ -270,7 +270,7 @@ async def test_submission_rejects_incompatible_suite_member_and_deleted_task(ent
             for item in loaded
         ]
         validate_execution_support(snapshots, target=HarborRunnerTarget(), adapters=KIND_ADAPTERS)
-    await entity_store.delete(TaskEntity, task.name, workspace=task.workspace)
+    await entity_store.delete_by_id(TaskEntity, task.id, expected_db_version=task.db_version)
     with pytest.raises(ValueError, match="not found"):
         loaded = await load_tasks(
             TasksetRef("suite"),

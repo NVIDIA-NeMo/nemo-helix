@@ -241,22 +241,20 @@ def test_update_item_404() -> None:
 def test_delete_item_204() -> None:
     mock = AsyncMock()
     mock.get.return_value = _make_item("widget")
-    mock.delete.return_value = None
+    mock.delete_by_id.return_value = None
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/widget")
 
     assert resp.status_code == 204
-    mock.delete.assert_awaited_once_with(
-        ExampleItem,
-        name="widget",
-        workspace="default",
+    mock.delete_by_id.assert_awaited_once_with(
+        ExampleItem, mock.get.return_value.id, expected_db_version=mock.get.return_value.db_version
     )
 
 
 def test_delete_item_404() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityNotFoundError("not found")
+    mock.delete_by_id.side_effect = NemoEntityNotFoundError("not found")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/missing")
@@ -266,7 +264,7 @@ def test_delete_item_404() -> None:
 
 def test_delete_item_409_when_changed() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityConflictError("changed")
+    mock.delete_by_id.side_effect = NemoEntityConflictError("changed")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/items/widget")
@@ -276,22 +274,20 @@ def test_delete_item_409_when_changed() -> None:
 
 def test_delete_middleware_config_204() -> None:
     mock = AsyncMock()
-    mock.delete.return_value = None
+    mock.delete_by_id.return_value = None
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/middleware-configs/cfg-1")
 
     assert resp.status_code == 204
-    mock.delete.assert_awaited_once_with(
-        ExampleMiddlewareConfig,
-        name="cfg-1",
-        workspace="default",
+    mock.delete_by_id.assert_awaited_once_with(
+        ExampleMiddlewareConfig, mock.get.return_value.id, expected_db_version=mock.get.return_value.db_version
     )
 
 
 def test_delete_middleware_config_409_when_changed() -> None:
     mock = AsyncMock()
-    mock.delete.side_effect = NemoEntityConflictError("changed")
+    mock.delete_by_id.side_effect = NemoEntityConflictError("changed")
 
     client = TestClient(_make_app(mock))
     resp = client.delete("/v2/workspaces/default/middleware-configs/cfg-1")

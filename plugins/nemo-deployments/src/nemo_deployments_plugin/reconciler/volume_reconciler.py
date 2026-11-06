@@ -79,12 +79,7 @@ class VolumeReconciler:
             return
 
         try:
-            await self._entities.delete(
-                Volume,
-                name=volume.name,
-                workspace=volume.workspace,
-                expected_db_version=volume.db_version,
-            )
+            await self._entities.delete_by_id(Volume, volume.id, expected_db_version=volume.db_version)
             logger.info("Deleted volume entity %s", volume_id)
         except NemoEntityNotFoundError:
             logger.debug("Volume entity %s already deleted", volume_id)

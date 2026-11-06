@@ -101,7 +101,12 @@ class BenchmarkImportStore:
 
     def delete(self, import_id: str) -> None:
         try:
-            self._client.delete(ScaledEvalsBenchmarkImport, import_id, workspace=entity_store.private_workspace())
+            _delete_target = self._client.get(
+                ScaledEvalsBenchmarkImport, name=import_id, workspace=entity_store.private_workspace()
+            )
+            self._client.delete_by_id(
+                ScaledEvalsBenchmarkImport, _delete_target.id, expected_db_version=_delete_target.db_version
+            )
         except EntityNotFoundError:
             pass
 

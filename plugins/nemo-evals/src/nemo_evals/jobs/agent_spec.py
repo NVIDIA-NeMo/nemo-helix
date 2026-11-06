@@ -22,6 +22,7 @@ from typing import Annotated, Any, Literal, Self, TypeAlias
 import nemo_evals.shared.metric_bundles.cloudpickle  # noqa: F401
 import nemo_evals.shared.metric_bundles.inline  # noqa: F401
 from filesets import FilesetPathError, parse_fileset_ref
+from nemo_evals._fileset_receipt import FilesetReceipt
 from nemo_evals.api.schemas import AgentRef, TaskInputs, TaskMetadataList, TaskRef, TasksetRef
 from nemo_evals.api.task_definitions.evaluator import ResolvedEvaluatorTaskDefinition
 from nemo_evals.api.task_definitions.harbor import ResolvedHarborTaskDefinition
@@ -129,6 +130,7 @@ class RegisteredAgentSource(BaseModel):
         "taken when the agent was resolved so a re-registration while the job is queued cannot change the "
         "files it runs with. Present only when the resolved config refers to files by relative path.",
     )
+    fileset_id: str | None = Field(default=None, description="ID of the snapshot allocation; absent on legacy jobs.")
 
 
 #: What a Fabric run is made from. The two shapes share no field, so a document is one or the other.
@@ -766,6 +768,16 @@ def registered_agent_files(target: FabricRunnerTarget | HarborRunnerTarget | Gym
     return source.files if source is not None else None
 
 
+def registered_agent_files_receipt(
+    target: Target | None,
+) -> FilesetReceipt | None:
+    """Return the captured snapshot allocation for cleanup; legacy names cannot identify it safely."""
+    source = registered_agent_source(target)
+    if source is None or source.files is None or source.fileset_id is None:
+        return None
+    return FilesetReceipt(ref=source.files.root, fileset_id=source.fileset_id)
+
+
 def target_agent_identity(target: Target | Model | AgentBase | ModelRef | None) -> tuple[str | None, str | None]:
     """``(agent_name, model_name)`` derivable from a target, for publishing to Intake.
 
@@ -1001,7 +1013,7 @@ class AgentEvalInputSpec(_AgentEvalSpecCommon):
         if isinstance(target, (FabricRunnerTarget, GymRunnerTarget)) and target.resolved_config is not None:
             raise ValueError("`resolved_config` is set by registered-agent resolution, not the submitter")
         source = registered_agent_source(target)
-        if source is not None and source.files is not None:
+        if source is not None and (source.files is not None or source.fileset_id is not None):
             raise ValueError("`source.files` is set by registered-agent resolution, not the submitter")
         if isinstance(target, HarborRunnerTarget) and source is not None and "fabric_config" in target.agent_kwargs:
             raise ValueError(
