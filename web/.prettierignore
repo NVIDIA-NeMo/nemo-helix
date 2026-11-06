@@ -20,3 +20,6 @@ packages/studio/src/generated/*
 
 # Rolled-up plugin surface types; formatting it breaks the CI drift check
 packages/common/plugin-types/
+
+# Rolled-up plugin build helper; formatting it breaks the CI drift check
+packages/common/plugin-build/
