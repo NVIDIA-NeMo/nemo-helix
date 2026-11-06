@@ -284,7 +284,7 @@ class _AgentEvalJobBase(NemoJob):
         target = await resolve_registered_agent(submit_spec.target, workspace=workspace, async_sdk=async_sdk)
         try:
             await check_gateway_model(target, async_sdk=async_sdk, authorize=authorize)
-            await require_closed_book_route(target, (), async_sdk=async_sdk, authorize=authorize)
+            await require_closed_book_route(target, async_sdk=async_sdk, authorize=authorize)
             validate_execution_support(resolved_tasks, target=target, adapters=ctx.adapters)
             if isinstance(target, GymRunnerTarget):
                 target = await prepare_gym_submission(resolved_tasks, target, ctx)
@@ -776,7 +776,7 @@ def _trial_credential_issuer(
 ) -> TrialCredentialIssuer | None:
     """The issuer of each trial's trial token, for a Harbor agent that calls a gateway model."""
     gateway = _trial_gateway(spec.target)
-    closed = closed_book_run(spec.target, ())
+    closed = closed_book_run(spec.target)
     if async_client is None or gateway is None:
         if closed:
             raise ValueError(

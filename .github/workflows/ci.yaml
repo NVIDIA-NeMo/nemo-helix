@@ -1434,6 +1434,30 @@ jobs:
           -m integration -n 4 --dist loadgroup -v
         env:
           _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      # test_taskset_run_controller.py tests platforms it does not start, so it skips in the step above.
+      # The script hosts one per auth mode at the URLs below and runs only that file against them; every
+      # test has to run here, and a skip fails the step.
+      - name: Run taskset-run controller integration
+        id: controller-integration
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: bash .github/scripts/run-taskset-run-controller-integration.sh
+        env:
+          NHX_AGENT_BASE_URL: http://localhost:18090
+          NHX_AGENT_AUTH_BASE_URL: http://localhost:18092
+          UV_FROZEN: "1"
+          _TYPER_FORCE_DISABLE_TERMINAL: "1"
+      - name: Upload taskset-run controller diagnostics
+        if: ${{ !cancelled() && steps.controller-integration.outcome == 'failure' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: taskset-run-controller-results
+          retention-days: 14
+          if-no-files-found: warn
+          # Logs and results only: the platforms' data directories sit beside them.
+          path: |
+            ${{ runner.temp }}/controller-platforms/*.log
+            ${{ runner.temp }}/controller-platforms/junit.xml
       # Run separately from xdist: the shared platform fixture binds one port.
       # Keep opt-in and plugin isolation scoped to this step, not the general suite.
       - name: Run Harbor taskset integration

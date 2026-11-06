@@ -146,10 +146,6 @@ class ModelConfig(BaseModel):
         description="Some of the custom implementations in nemo automodel cause loading failures when used with other models in the same family, this forces the use_hf=True flag to use non custom implementations.",
     )
 
-    v4_compatible: bool = Field(
-        default=False,
-        description="Enable transformers-v4-compatible checkpoint output that preserves the original transformers-v4-style config.json output.",
-    )
     has_vision_tower: bool = Field(
         default=False,
         description="Copied from the model spec. Selects the vision-language recipe.",

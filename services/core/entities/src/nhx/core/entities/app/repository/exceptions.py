@@ -4,6 +4,10 @@
 """Custom exceptions for entity repository operations."""
 
 
+class InvalidEntityDataError(ValueError):
+    """Raised when entity JSON data cannot safely be stored and queried."""
+
+
 class InvalidFilterError(ValueError):
     """Raised when a requested filter field or value is invalid."""
 

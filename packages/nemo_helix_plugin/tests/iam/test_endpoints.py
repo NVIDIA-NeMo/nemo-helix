@@ -77,3 +77,17 @@ def test_authz_error_models_fastapi_detail_envelope() -> None:
     assert error.detail.valid_entrypoints == ["allow"]
     with pytest.raises(ValidationError):
         AuthzErrorResponse.model_validate({"detail": "policy failed"})
+
+
+@pytest.mark.parametrize("length", [257, 70005])
+def test_role_binding_input_rejects_long_principal(length: int) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        RoleBindingInput(principal="a" * length, role="Viewer")
+    error = exc_info.value.errors()[0]
+    assert error["loc"] == ("principal",)
+    assert error["type"] == "string_too_long"
+
+
+def test_role_binding_input_accepts_max_length_principal() -> None:
+    principal = "a" * 256
+    assert RoleBindingInput(principal=principal, role="Viewer").principal == principal

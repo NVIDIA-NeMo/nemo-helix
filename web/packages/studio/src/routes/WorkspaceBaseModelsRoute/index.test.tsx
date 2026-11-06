@@ -214,7 +214,7 @@ describe('WorkspaceBaseModelsRoute deep linking', () => {
   // in the monorepo parallel test environment.
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {
@@ -347,7 +347,7 @@ describe('WorkspaceBaseModelsRoute deep linking', () => {
 describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {
@@ -382,7 +382,7 @@ describe('WorkspaceBaseModelsRoute customizable filter gating', () => {
 describe('WorkspaceBaseModelsRoute card prop wiring', () => {
   let WorkspaceBaseModelsRoute: React.FC;
   beforeAll(async () => {
-    ({ WorkspaceBaseModelsRoute } = await import('./index'));
+    ({ WorkspaceBaseModelsRoute } = await import('@studio/routes/WorkspaceBaseModelsRoute/index'));
   }, 30000);
 
   beforeEach(() => {

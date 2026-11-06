@@ -1,14 +1,13 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { FileFormatType } from '@nemo/common/src/types';
 import {
   jsonlLines,
   parquetRowCount,
   readParquetObjects,
 } from '@nemo/common/src/utils/parseRecords';
 import Papa from 'papaparse';
-
-import type { FileFormatType } from '../types';
 
 /**
  * Searches through an object's keys (one layer deep) to find an array that contains

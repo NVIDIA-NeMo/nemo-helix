@@ -126,15 +126,14 @@ Lives under `training`, a **sibling of `parallelism`** and not a field on it. Th
 
 `megatron` is not selectable. The image builds `MegatronPolicyWorker`, but the compiler still emits an inert `megatron_cfg`.
 
-`v4_compatible` (`GRPOTraining.v4_compatible`, default `true`) is the compatibility control for the Automodel full-weight export. Automodel otherwise writes a transformers-v5 `config.json` that the platform's vLLM cannot load, so the compiler keeps the base checkpoint's v4 `config.json` on the published model and writes the in-memory v5 config beside it as `config.v5.json`. Set it `false` to export the v5 file as `config.json` instead. If the base checkpoint already uses transformers v5, the job logs warn you to opt out. The field is written on every GRPO `automodel_cfg` and has no effect on LoRA adapters.
+The full-weight export writes the transformers 5 `config.json`, which the platform vLLM loads directly. A stored or submitted `v4_compatible` is ignored.
 
 ```json
 {
   "training": {
     "type": "grpo",
     "finetuning_type": "all_weights",
-    "policy_backend": "automodel",
-    "v4_compatible": false
+    "policy_backend": "automodel"
   }
 }
 ```

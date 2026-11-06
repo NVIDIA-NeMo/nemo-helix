@@ -96,31 +96,35 @@ class NemoHTTPError(NemoClientError):
 # ---------------------------------------------------------------------------
 
 
-class BadRequestError(NemoHTTPError):
+class HTTPClientError(NemoHTTPError):
+    """HTTP 4xx"""
+
+
+class BadRequestError(HTTPClientError):
     """HTTP 400"""
 
 
-class AuthenticationError(NemoHTTPError):
+class AuthenticationError(HTTPClientError):
     """HTTP 401"""
 
 
-class PermissionDeniedError(NemoHTTPError):
+class PermissionDeniedError(HTTPClientError):
     """HTTP 403"""
 
 
-class NotFoundError(NemoHTTPError):
+class NotFoundError(HTTPClientError):
     """HTTP 404"""
 
 
-class ConflictError(NemoHTTPError):
+class ConflictError(HTTPClientError):
     """HTTP 409"""
 
 
-class UnprocessableEntityError(NemoHTTPError):
+class UnprocessableEntityError(HTTPClientError):
     """HTTP 422"""
 
 
-class RateLimitError(NemoHTTPError):
+class RateLimitError(HTTPClientError):
     """HTTP 429"""
 
 
@@ -145,6 +149,8 @@ def raise_for_status(http_response: httpx.Response) -> None:
     if 200 <= http_response.status_code < 300:
         return
     error_cls = _STATUS_CODE_TO_ERROR.get(http_response.status_code, NemoHTTPError)
-    if error_cls is NemoHTTPError and http_response.status_code >= 500:
+    if error_cls is NemoHTTPError and 400 <= http_response.status_code < 500:
+        error_cls = HTTPClientError
+    elif error_cls is NemoHTTPError and http_response.status_code >= 500:
         error_cls = InternalServerError
     raise error_cls(http_response)

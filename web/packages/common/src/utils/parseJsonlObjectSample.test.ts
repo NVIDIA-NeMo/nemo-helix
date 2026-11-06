@@ -7,7 +7,7 @@ import {
   JSONL_SAMPLE_RAW_LINE_KEY,
   JSONL_SAMPLE_SCALAR_KEY,
   labelForJsonlSampleColumnKey,
-} from './parseJsonlObjectSample';
+} from '@nemo/common/src/utils/parseJsonlObjectSample';
 
 describe('buildRowsAndKeysFromJsonlSample', () => {
   it('parses JSONL objects and unions keys in first-seen order', () => {

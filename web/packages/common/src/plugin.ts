@@ -11,6 +11,18 @@ export type {
   AssistantChatProps,
 } from '@nemo/common/src/components/AssistantChat/types';
 export { AccordionSection } from '@nemo/common/src/components/AccordionSection';
+// Presentational only: pass `agents` (and `onSearchChange`/`onLoadMore` to page) from `host.sdk`.
+// WorkspaceAgentSelect is deliberately NOT exported — it fetches.
+export { AgentSelect } from '@nemo/common/src/components/AgentSelect/AgentSelect';
+export type {
+  AgentSelectProps,
+  MultiAgentSelectProps,
+  SingleAgentSelectProps,
+} from '@nemo/common/src/components/AgentSelect/types';
+export {
+  groupAgentsByFormat,
+  matchesAgentSearch,
+} from '@nemo/common/src/components/AgentSelect/utils';
 // CancelJobButton is deliberately NOT exported
 export { ConfirmationModal } from '@nemo/common/src/components/ConfirmationModal';
 export { CreateSecretModal } from '@nemo/common/src/components/CreateSecretModal';
