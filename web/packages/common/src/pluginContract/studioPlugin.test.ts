@@ -6,7 +6,7 @@ import { studioPlugin } from '@nemo/common/src/pluginContract/studioPlugin';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { build } from 'rolldown';
+import { build, type Plugin } from 'rolldown';
 
 const INSTALLED: Record<string, string> = {
   react: '19.2.7',
@@ -50,15 +50,28 @@ const writeFixture = (entry: string) => {
 
 const outDir = () => path.join(root, 'dist');
 
-const runBuild = () =>
+const runBuild = (plugin: Plugin = studioPlugin({ root }), dir = root) =>
   build({
-    input: path.join(root, 'src/index.js'),
-    cwd: root,
+    input: path.join(dir, 'src/index.js'),
+    cwd: dir,
     platform: 'browser',
     logLevel: 'silent',
-    plugins: [studioPlugin({ root })],
-    output: { dir: outDir(), format: 'esm' },
+    plugins: [plugin],
+    output: { dir: path.join(dir, 'dist'), format: 'esm' },
   });
+
+/** Writes `<dir>/node_modules/<pkg>/package.json` (relative to the temp root) for each version. */
+const installVersions = (dir: string, versions: Record<string, string>) => {
+  for (const [name, version] of Object.entries(versions)) {
+    write(`${dir}/node_modules/${name}/package.json`, JSON.stringify({ name, version }));
+  }
+};
+
+const EXTERNAL_ENTRY = `import a from 'react';\nimport b from 'react-router';\nconsole.log(a, b);\n`;
+
+const builtAgainstAt = (dir: string) =>
+  JSON.parse(fs.readFileSync(path.join(root, dir, 'dist/plugin.manifest.json'), 'utf8'))
+    .builtAgainst;
 
 const buildError = async (): Promise<string> => {
   try {
@@ -199,5 +212,70 @@ describe('studioPlugin', () => {
     await runBuild();
 
     expect(fs.existsSync(manifestPath()), 'manifest emitted').toBe(true);
+  });
+
+  it('finds hoisted dependencies in ancestor node_modules; the nearest one wins', async () => {
+    write('pkg/web/src/index.js', EXTERNAL_ENTRY);
+    installVersions('pkg', { react: '19.2.7', 'react-router': '8.3.0' });
+    const web = path.join(root, 'pkg/web');
+    await runBuild(studioPlugin({ root: web }), web);
+    expect(builtAgainstAt('pkg/web'), 'ancestor versions reported').toEqual({
+      react: '19.2.7',
+      'react-router': '8.3.0',
+    });
+
+    installVersions('pkg/web', { react: '18.3.1' });
+    await runBuild(studioPlugin({ root: web }), web);
+    expect(builtAgainstAt('pkg/web'), 'nested react beats ancestor react').toEqual({
+      react: '18.3.1',
+      'react-router': '8.3.0',
+    });
+  });
+
+  it('defaults the root to the Vite config root, but an explicit root wins', async () => {
+    for (const dir of ['a', 'b']) {
+      write(`${dir}/src/index.js`, EXTERNAL_ENTRY);
+    }
+    installVersions('a', { react: '19.2.7' });
+    installVersions('b', { react: '18.3.1' });
+    const [a, b] = [path.join(root, 'a'), path.join(root, 'b')];
+    type ViteHooks = { configResolved?: (config: { root: string }) => void };
+
+    const viteRooted = studioPlugin();
+    (viteRooted as ViteHooks).configResolved?.({ root: a });
+    await runBuild(viteRooted, a);
+    expect(builtAgainstAt('a'), 'versions come from config.root').toEqual({ react: '19.2.7' });
+
+    const explicit = studioPlugin({ root: b });
+    (explicit as ViteHooks).configResolved?.({ root: a });
+    await runBuild(explicit, a);
+    expect(builtAgainstAt('a'), 'explicit root beats config.root').toEqual({ react: '18.3.1' });
+  });
+
+  it('gives provided-package deep imports the right advice', async () => {
+    writeFixture(`import x from '@nemo/common/components/Foo';\nconsole.log(x);\n`);
+    const message = await buildError();
+
+    expect(message).toContain('PLUGIN_SPECIFIER_UNMAPPED');
+    expect(message, 'advises the bare @nemo/common specifier').toMatch(/[`"']@nemo\/common[`"']/);
+    expect(message).toContain('web/packages/common/src/plugin.ts');
+    expect(message).not.toContain('bundles its own copy');
+  });
+
+  it('tells authors to build in production mode when the dev JSX runtime is imported', async () => {
+    writeFixture(`import x from 'react/jsx-dev-runtime';\nconsole.log(x);\n`);
+    const message = await buildError();
+
+    expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+    expect(message).toContain('production');
+    expect(fs.existsSync(manifestPath()), 'no manifest after failed build').toBe(false);
+  });
+
+  it('does not mention production mode for other deep imports', async () => {
+    writeFixture(`import x from 'react-router/dom';\nconsole.log(x);\n`);
+    const message = await buildError();
+
+    expect(message).toContain('PLUGIN_SINGLETON_BUNDLED');
+    expect(message).not.toContain('production');
   });
 });
