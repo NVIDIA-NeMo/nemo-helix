@@ -19,9 +19,11 @@ from nemo_helix_plugin.jobs.client import AsyncJobsClient
 from nemo_helix_plugin.jobs.file_manager import TmpDirPath
 from nemo_helix_plugin.jobs.schemas import FileStorageType, HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.types import HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest
+from nhx.common.auth.models import Principal
 from nhx.common.entities import ALL_WORKSPACES, DEFAULT_WORKSPACE
 from nhx.common.entities.client import EntityConflictError, EntityValidationError
 from nhx.common.jobs.schemas import HelixJobStatus
+from nhx.core.jobs.api.v2.jobs import endpoints
 from nhx.core.jobs.api.v2.jobs.endpoints import (
     _format_create_job_conflict,
     _format_entity_validation_error,
@@ -625,9 +627,6 @@ def test_create_job_secret_validation_error_returns_safe_guidance():
 @pytest.mark.asyncio
 async def test_create_job_conflict_sanitizes_log_fields(monkeypatch, caplog):
     """Keep defense-in-depth logging safe even when a direct caller bypasses HTTP validation."""
-    from nhx.common.auth.models import Principal
-    from nhx.core.jobs.api.v2.jobs import endpoints
-
     dispatcher = AsyncMock()
     dispatcher.create_job.side_effect = ValueError("conflict")
     auth_client = MagicMock()

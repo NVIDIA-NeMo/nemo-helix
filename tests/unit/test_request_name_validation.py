@@ -13,7 +13,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from nemo_helix_plugin.client.errors import PermissionDeniedError
+from nemo_helix_plugin.client.errors import PermissionDeniedError, UnprocessableEntityError
 from nemo_helix_plugin.entities.base import EntityBase, EntityNotFoundError, EntityValidationError
 from nemo_helix_plugin.iam.types import RoleBindingInput
 from nhx.common.auth.models import Principal
@@ -57,6 +57,17 @@ ROUTES = [
 ]
 CREATE_ROUTES = ROUTES[:6]
 MODEL_ROUTES = ROUTES[6:]
+PROVIDER_WORKSPACE_ROUTES = [
+    ("list_providers", "GET", None, "list_model_providers"),
+    (
+        "create_provider",
+        "POST",
+        {"name": "provider-one", "host_url": "http://localhost:9000/v1"},
+        "create_model_provider",
+    ),
+    ("upsert_provider", "PUT", {"host_url": "http://localhost:9000/v1"}, "upsert_model_provider"),
+    ("update_provider_status", "PUT", {"status": "READY"}, "update_model_provider_status"),
+]
 
 
 def override(value):
@@ -78,7 +89,9 @@ def route_client(module_name, endpoint_name):
     app.include_router(module.router, prefix="/v2/workspaces/{workspace}" if module_name == AGENTS else "")
     dependencies = {}
     for dependency in route.dependant.dependencies:
-        # Only replace infrastructure, never the route or its request validators.
+        # Keep the actual query parser for collection routes as well as request validators.
+        if dependency.name == "parsed_filter":
+            continue
         mock = AsyncMock()
         mock.auth_enabled = False
         dependencies[dependency.call] = mock
@@ -327,3 +340,47 @@ def test_lookup_request_names_remain_nonempty(module_name, request_name):
     with pytest.raises(ValidationError) as error:
         model(workspace="default", name="")
     assert error.value.errors()[0]["loc"] == ("name",)
+
+
+@pytest.mark.parametrize(("endpoint", "method", "body", "operation_name"), PROVIDER_WORKSPACE_ROUTES)
+@pytest.mark.parametrize("workspace", ["bad\x1a", "a" * 256])
+def test_remaining_provider_routes_validate_workspace(endpoint, method, body, operation_name, workspace):
+    """Every provider route rejects malformed/overlong workspaces before its service runs."""
+    module = import_module(MODELS + "providers")
+    client, path, dependencies = route_client(MODELS + "providers", endpoint)
+    operation = getattr(dependencies[module.get_model_provider_service], operation_name)
+    response = client.request(method, path.format(workspace=quote(workspace, safe=""), name="provider-one"), json=body)
+    assert response.status_code == 422, response.text
+    assert [error["loc"] for error in response.json()["detail"]] == [["path", "workspace"]]
+    operation.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("endpoint", "method", "body", "operation_name"), PROVIDER_WORKSPACE_ROUTES)
+@pytest.mark.parametrize(
+    ("workspace", "status"), [("missing-workspace", 422), ("Upper_case.caf\u00e9" + "a" * 240, 403)]
+)
+def test_remaining_provider_routes_preserve_service_errors(endpoint, method, body, operation_name, workspace, status):
+    """Accepted workspace syntax and the 255-character boundary retain business/permission errors."""
+    module = import_module(MODELS + "providers")
+    client, path, dependencies = route_client(MODELS + "providers", endpoint)
+    operation = getattr(dependencies[module.get_model_provider_service], operation_name)
+    if endpoint in {"create_provider", "upsert_provider"}:
+        dependencies[module.get_auth_client].principal = Principal(id="user:example")
+    detail = "Workspace does not exist" if status == 422 else "Access denied"
+    if status == 403:
+        error = PermissionDeniedError(httpx.Response(status, json={"detail": detail}))
+    elif endpoint == "list_providers":
+        error = UnprocessableEntityError(httpx.Response(status, json={"detail": detail}))
+    else:
+        error = EntityValidationError(detail, code="workspace_not_found")
+    operation.side_effect = error
+    response = client.request(method, path.format(workspace=quote(workspace, safe=""), name="provider-one"), json=body)
+    assert response.status_code == status, response.text
+    assert response.json() == {"detail": detail}
+    operation.assert_awaited_once()
+    if endpoint == "list_providers":
+        assert operation.await_args.kwargs["workspace"] == workspace
+    elif endpoint == "create_provider":
+        assert operation.await_args.args[1] == workspace
+    else:
+        assert operation.await_args.args[0] == workspace

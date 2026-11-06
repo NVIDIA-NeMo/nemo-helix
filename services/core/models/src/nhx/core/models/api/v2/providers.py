@@ -53,7 +53,7 @@ provider_routes = PolicyRoutes(router, provider_policy, auth_dependency=get_auth
     ),
 )
 async def list_providers(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     page_params: PageParams = Depends(make_page_dep()),
     sort: ModelProviderSort = Query(
         default=ModelProviderSort.CREATED_AT_ASC,
@@ -90,7 +90,7 @@ async def list_providers(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_provider(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     request: Annotated[
         CreateModelProviderRequest,
         Body(
@@ -160,7 +160,7 @@ async def create_provider(
     status_code=status.HTTP_200_OK,
 )
 async def upsert_provider(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     name: str,
     request: Annotated[
         UpsertModelProviderRequest,
@@ -232,7 +232,7 @@ async def upsert_provider(
     status_code=status.HTTP_200_OK,
 )
 async def update_provider_status(
-    workspace: str,
+    workspace: Annotated[str, Path(pattern=REGEX_WORD_CHARACTER_DOT_DASH, max_length=MAX_LENGTH_255)],
     name: str,
     request: UpdateModelProviderStatusRequest,
     service: ModelProviderService = Depends(get_model_provider_service),
