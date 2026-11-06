@@ -25,7 +25,7 @@ export const specifierUnmapped = (specifier: string): Fix =>
     `If it must be shared with Studio, request that "${specifier}" be added to the plugin contract.`
   );
 
-// Rollup/Vite emit this deep import in development mode; Studio provides only the production runtime.
+// The React plugin imports this when the build runs with NODE_ENV=development.
 const DEV_RUNTIME = 'react/jsx-dev-runtime';
 
 /** `specifier` is what the plugin imported, when it differs from the package (a deep import). */
@@ -35,7 +35,7 @@ export const singletonBundled = (pkg: string, specifier = pkg): Fix =>
     `Import "${pkg}" only by a contract specifier (e.g. react-router), never a deep path (e.g. react-router/dom) and never from node_modules directly. The build helper externalizes contract specifiers for you.`,
     ...(specifier === DEV_RUNTIME
       ? [
-          `A development-mode build emits the dev JSX runtime ("${DEV_RUNTIME}"), which Studio does not provide. Build in production mode (e.g. vite build without --mode development).`,
+          `The build ran with NODE_ENV=development, which makes the React plugin import the development JSX runtime ("${DEV_RUNTIME}"); Studio does not provide it. Run the build with NODE_ENV unset or set to production (the default for vite build).`,
         ]
       : []),
     'Rebuild the plugin.'
