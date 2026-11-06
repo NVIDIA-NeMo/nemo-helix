@@ -16,6 +16,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -194,35 +195,36 @@ async def test_a_slow_dns_lookup_does_not_block_the_event_loop(
     tmp_path: Path, server: Server, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Building the policy resolves hostnames; a slow lookup must not pause other trials on the same loop."""
-    lookup_sec = 0.5
     lookups: list[str] = []
+    lookup_started = threading.Event()
+    loop_progressed = threading.Event()
+    loop_ran_during_lookup: list[bool] = []
 
     def slow_getaddrinfo(host: str, *args: Any, **kwargs: Any) -> list[Any]:
         lookups.append(host)
-        time.sleep(lookup_sec)
+        lookup_started.set()
+        # Only another coroutine on the loop can set this. If the lookup ran on the loop, nothing
+        # would, and the wait would run out.
+        loop_ran_during_lookup.append(loop_progressed.wait(timeout=5))
         raise OSError("name does not resolve")
 
     monkeypatch.setattr(egress.socket, "getaddrinfo", slow_getaddrinfo)
     environment = _environment(tmp_path, server, NetworkMode.PUBLIC)
     environment._trusted_allowed_hosts = ("slow.example.com",)
 
-    ticks = 0
-
     async def other_trial() -> None:
-        nonlocal ticks
-        while True:
-            await asyncio.sleep(0.01)
-            ticks += 1
+        while not lookup_started.is_set():
+            await asyncio.sleep(0.001)
+        loop_progressed.set()
 
-    ticker = asyncio.create_task(other_trial())
+    other = asyncio.create_task(other_trial())
     try:
         await environment._create_sandbox()
     finally:
-        ticker.cancel()
+        other.cancel()
 
     assert lookups == ["slow.example.com"]
-    # A blocked loop would have run the ticker about once; a free one runs it for most of the lookup.
-    assert ticks >= lookup_sec / 0.01 / 4
+    assert loop_ran_during_lookup == [True]
 
 
 async def test_the_policy_sent_verified_and_recorded_is_one_policy(
