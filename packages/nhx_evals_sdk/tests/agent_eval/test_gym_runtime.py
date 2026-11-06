@@ -54,7 +54,6 @@ from nhx_evals_sdk.agent_eval.runtimes.gym.results import (
     _TOKEN_USAGE_KEYS,
     AGENT_NEVER_RAN_ERROR_TYPE,
     GYM_FAILURE_RECORD,
-    NG_TRAJECTORY_EVIDENCE,
     _agent_never_ran,
     _aggregate_metrics_path_for,
     _usage_measurements,
@@ -78,6 +77,9 @@ from nhx_evals_sdk.values.otlp import final_output_text
 from pydantic import ValidationError
 
 from packages.nhx_evals_sdk.tests.agent_eval._otlp_testkit import write_answer_trace
+
+_GYM_RESULTS_LOG = "nhx_evals_sdk.agent_eval.runtimes.gym.results"
+_PROJECTED_ANSWER = "The projected answer."
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXAMPLE = FIXTURES / "gym_mcqa_example.jsonl"
@@ -644,12 +646,7 @@ def _fabric_result(*artifacts: dict[str, Any]) -> dict[str, Any]:
 
 
 def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[str, Any]]) -> AgentEvalTrial:
-    """One COMPLETED rollout whose ``fabric_result`` declares ``artifacts``, read back as a trial.
-
-    The rollouts file sits in ``tmp_path``, so ``rollouts_path.parent`` — the run directory the
-    declared paths are contained against — is ``tmp_path``. A model-call capture is written too, so
-    the trial carries the ``ng_trajectory`` descriptor alongside whichever trace wins.
-    """
+    """One completed rollout whose ``fabric_result`` declares ``artifacts``."""
     tasks = discover_gym_tasks(EXAMPLE)
     _ordered, index_map = _index_map(tasks, tmp_path)
     bundle = tmp_path / "rollouts.jsonl"
@@ -659,7 +656,10 @@ def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[s
                 NG_TASK_INDEX: 0,
                 NG_ROLLOUT_INDEX: 0,
                 "reward": 1.0,
-                "response": {"usage": {"input_tokens": 4, "output_tokens": 1}},
+                "response": {
+                    "usage": {"input_tokens": 4, "output_tokens": 1},
+                    "output": [{"type": "message", "content": [{"type": "output_text", "text": _PROJECTED_ANSWER}]}],
+                },
                 "fabric_result": _fabric_result(*artifacts),
             }
         )
@@ -673,40 +673,33 @@ def _trial_declaring_fabric_artifacts(tmp_path: Path, artifacts: Sequence[dict[s
     return trial
 
 
-def _assert_shared_descriptors(trial: AgentEvalTrial, rollouts: Path) -> None:
-    """The rollouts file and the model-call capture stay reachable in every evidence shape."""
+async def _trace_answer(trial: AgentEvalTrial) -> str | None:
     assert trial.evidence is not None
-    assert trial.evidence.descriptors["rollouts"].ref == str(rollouts)
-    assert trial.evidence.descriptors[NG_TRAJECTORY_EVIDENCE].ref == str(
-        model_call_capture_dir(rollouts.parent) / "0-0.capture.jsonl"
-    )
+    handle = await trial.evidence.trace(EVIDENCE_TRACE, format=EVIDENCE_FORMAT_OTLP)
+    return final_output_text(await handle.resource_spans())
+
+
+def _declared_warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == _GYM_RESULTS_LOG and record.message.startswith("Declared otlp")
+    ]
 
 
 @pytest.mark.asyncio
 async def test_declared_otlp_artifact_supersedes_the_model_call_projection(tmp_path: Path) -> None:
-    # Fabric 0.6 declares the Relay OpenTelemetry file as a RunResult artifact of kind `otlp`. When
-    # exactly one such artifact sits inside the run directory and holds spans, that file — not a
-    # projection built from the rollout record — is the trial's trace. Read back through the
-    # evidence handle the way Intake and metrics do, so the test proves the file is usable, not
-    # merely that its path was registered.
     trace = write_answer_trace(tmp_path, "The declared answer.")
 
     trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
 
-    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert await _trace_answer(trial) == "The declared answer."
     assert trial.evidence is not None
-    otlp = trial.evidence.descriptors[EVIDENCE_TRACE]
-    assert otlp == trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"]
-    assert otlp.ref == str(trace)
-    assert otlp.data is None  # the declared file, not an inline projection
-    assert EVIDENCE_FORMAT_ATIF not in {d.format for d in trial.evidence.descriptors.values()}
-    handle = await trial.evidence.trace(EVIDENCE_TRACE, format=EVIDENCE_FORMAT_OTLP)
-    assert final_output_text(await handle.resource_spans()) == "The declared answer."
+    assert EVIDENCE_FORMAT_ATIF not in {descriptor.format for descriptor in trial.evidence.descriptors.values()}
 
 
-def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: Path) -> None:
-    # A declared ATIF stays reachable under its format-qualified key, with the OTLP file primary —
-    # the same publication shape the Fabric runtime's trials carry.
+@pytest.mark.asyncio
+async def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: Path) -> None:
     trace = write_answer_trace(tmp_path, "The declared answer.")
     atif = tmp_path / "relay" / "trajectory-session.atif.json"
     atif.parent.mkdir()
@@ -720,16 +713,13 @@ def test_declared_otlp_artifact_registers_one_declared_atif_alongside(tmp_path: 
         ],
     )
 
-    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
+    assert await _trace_answer(trial) == "The declared answer."
     assert trial.evidence is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref == str(trace)
-    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"].ref == str(trace)
-    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}"].ref == str(atif)
+    assert f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}" in trial.evidence.descriptors
 
 
-def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
-    # The dual of the two-OTLP ambiguity: with two ATIF artifacts declared there is no single
-    # unambiguous one to pass along, so none is — while the one declared OTLP still wins.
+@pytest.mark.asyncio
+async def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
     trace = write_answer_trace(tmp_path, "The declared answer.")
     atif_a = tmp_path / "relay" / "trajectory-a.atif.json"
     atif_b = tmp_path / "relay" / "trajectory-b.atif.json"
@@ -746,9 +736,8 @@ def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
         ],
     )
 
+    assert await _trace_answer(trial) == "The declared answer."
     assert trial.evidence is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref == str(trace)
-    assert trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"].ref == str(trace)
     assert f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_ATIF}" not in trial.evidence.descriptors
 
 
@@ -767,30 +756,33 @@ def test_two_declared_atif_artifacts_register_no_atif(tmp_path: Path) -> None:
         pytest.param([{"name": "trace", "kind": "otlp", "path": "traces/missing.jsonl"}], id="otlp-path-missing"),
     ],
 )
-def test_trials_without_a_single_declared_trace_keep_the_projection(
-    tmp_path: Path, artifacts: list[dict[str, Any]]
+@pytest.mark.asyncio
+async def test_trials_without_a_single_declared_trace_keep_the_projection(
+    tmp_path: Path, artifacts: list[dict[str, Any]], caplog: pytest.LogCaptureFixture
 ) -> None:
-    # No declared OTLP file, one that is ambiguous, or none at all: the projection always works, so
-    # it — not a guess about which declaration to trust — remains the trial's trace.
     (tmp_path / "traces").mkdir()
     for name in ("relay-a.jsonl", "relay-b.jsonl"):
         (tmp_path / "traces" / name).write_text('{"resourceSpans": []}\n', encoding="utf-8")
     (tmp_path / "relay").mkdir()
     declared = [{**artifact, "path": str(tmp_path / artifact["path"])} for artifact in artifacts]
+    otlp_count = sum(artifact["kind"] == "otlp" for artifact in artifacts)
 
-    trial = _trial_declaring_fabric_artifacts(tmp_path, declared)
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        trial = _trial_declaring_fabric_artifacts(tmp_path, declared)
 
-    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
-    assert trial.evidence is not None
-    projection = trial.evidence.descriptors[EVIDENCE_TRACE]
-    assert projection == trial.evidence.descriptors[f"{EVIDENCE_TRACE}:{EVIDENCE_FORMAT_OTLP}"]
-    assert projection.data is not None  # the inline projection, ref-less
-    assert projection.ref is None
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    warnings = _declared_warnings(caplog)
+    if otlp_count == 0:
+        assert warnings == []
+    elif otlp_count == 2:
+        assert getattr(warnings[-1], "declared_count") == 2
+        assert getattr(warnings[-1], "contained_count") == 2
+    else:
+        assert str(getattr(warnings[-1], "path")).endswith("missing.jsonl")
 
 
-def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path) -> None:
-    # ``fabric_result`` is whatever the registered agent put on the record; only a mapping is a
-    # Fabric result, so anything else means there is no declaration to read and the projection stays.
+@pytest.mark.asyncio
+async def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     tasks = discover_gym_tasks(EXAMPLE)
     _ordered, index_map = _index_map(tasks, tmp_path)
     bundle = tmp_path / "rollouts.jsonl"
@@ -798,27 +790,29 @@ def test_non_mapping_fabric_result_keeps_the_projection(tmp_path: Path) -> None:
         NG_TASK_INDEX: 0,
         NG_ROLLOUT_INDEX: 0,
         "reward": 1.0,
-        "response": {"usage": {"input_tokens": 4, "output_tokens": 1}},
+        "response": {
+            "usage": {"input_tokens": 4, "output_tokens": 1},
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": _PROJECTED_ANSWER}]}],
+        },
         "fabric_result": "not-a-mapping",
     }
     bundle.write_text(json.dumps(record) + "\n", encoding="utf-8")
     captures = model_call_capture_dir(tmp_path)
     captures.mkdir(parents=True)
     (captures / "0-0.capture.jsonl").write_text(json.dumps({"model_call_id": "c0"}) + "\n", encoding="utf-8")
-    (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        (trial,) = trials_from_rollouts(bundle, tasks, index_map, capture_dir=captures)
 
-    _assert_shared_descriptors(trial, bundle)
-    assert trial.evidence is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    assert _declared_warnings(caplog) == []
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("escape", ["absolute", "symlink"])
-def test_declared_trace_outside_the_run_directory_keeps_the_projection(tmp_path: Path, escape: str) -> None:
-    # A declared path is agent-supplied data: one resolving outside the run directory must not
-    # become an evidence ref, exactly as the sandbox download rules. Both escapes present a
-    # readable, non-empty file so only the containment check can reject them: an absolute path
-    # outside the run directory, and a symlink inside it that resolves outside.
+async def test_declared_trace_outside_the_run_directory_keeps_the_projection(
+    tmp_path: Path, escape: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Both escapes are readable, non-empty files, so only the containment check can reject them.
     outside = tmp_path.parent / "outside-relay.jsonl"
     outside.write_text('{"resourceSpans": []}\n', encoding="utf-8")
     try:
@@ -829,29 +823,29 @@ def test_declared_trace_outside_the_run_directory_keeps_the_projection(tmp_path:
             escape_link.symlink_to(outside)
             declared = str(escape_link)
 
-        trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": declared}])
+        with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+            trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": declared}])
     finally:
         outside.unlink(missing_ok=True)
 
-    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
-    assert trial.evidence is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    warning = _declared_warnings(caplog)[-1]
+    assert getattr(warning, "declared_count") == 1
+    assert getattr(warning, "contained_count") == 0
 
 
-def test_empty_declared_trace_keeps_the_projection(tmp_path: Path) -> None:
-    # An empty file means Relay never flushed, the same admission rule `register_trace_evidence`
-    # applies to a trace folded on this side: it is not a trace, so the projection stays.
+@pytest.mark.asyncio
+async def test_empty_declared_trace_keeps_the_projection(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    # An empty file means Relay never flushed.
     trace = tmp_path / "traces" / "relay.jsonl"
     trace.parent.mkdir()
     trace.write_text("", encoding="utf-8")
 
-    trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
+    with caplog.at_level(logging.WARNING, logger=_GYM_RESULTS_LOG):
+        trial = _trial_declaring_fabric_artifacts(tmp_path, [{"name": "trace", "kind": "otlp", "path": str(trace)}])
 
-    _assert_shared_descriptors(trial, tmp_path / "rollouts.jsonl")
-    assert trial.evidence is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].data is not None
-    assert trial.evidence.descriptors[EVIDENCE_TRACE].ref is None
+    assert await _trace_answer(trial) == _PROJECTED_ANSWER
+    assert getattr(_declared_warnings(caplog)[-1], "path") == str(trace)
 
 
 def test_success_records_without_rollout_index_get_distinct_ids(tmp_path: Path) -> None:

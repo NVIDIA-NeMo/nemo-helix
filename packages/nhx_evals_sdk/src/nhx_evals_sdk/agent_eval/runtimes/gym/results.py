@@ -288,14 +288,10 @@ def require_full_coverage(tasks: Sequence[AgentEvalTask], *, covered_task_ids: s
 
 
 def _within_run_dir(candidate: str, run_dir: Path) -> bool:
-    """True when ``candidate`` resolves to ``run_dir`` itself or a descendant of it.
+    """Whether ``candidate`` resolves inside ``run_dir``.
 
-    A declared artifact path is agent-supplied data, so a symlink or ``..`` traversal resolving
-    outside the run directory must not become an evidence ref. Same containment rule as the
-    sandbox download (``_downloaded_path``): resolve, then require the resolved path to be the
-    root or under it. Relative paths are rejected rather than resolved against the process
-    working directory — Fabric declares absolute host paths, and a relative one would name a
-    different file depending on where the evaluator was launched.
+    Relative paths are rejected: Fabric declares absolute host paths, and a relative one would
+    name a different file depending on where the evaluator was launched.
     """
     if not Path(candidate).is_absolute():
         return False
@@ -308,22 +304,11 @@ def _within_run_dir(candidate: str, run_dir: Path) -> bool:
 
 
 def _declared_fabric_trace(record: Mapping[str, Any], *, run_dir: Path) -> tuple[Path | None, Path | None]:
-    """The Relay trace a Fabric result declared inside ``run_dir``, as ``(otlp, atif)`` paths.
+    """``(otlp, atif)`` when the rollout declared exactly one non-empty trace inside ``run_dir``.
 
-    Fabric 0.6+ declares the Relay OpenTelemetry file sink as a ``RunResult`` artifact of kind
-    ``otlp`` — one per rollout, which is the invariant this admission rule assumes: a file shared
-    by the whole run would otherwise become every trial's trace. It is admitted only when
-    exactly one such artifact resolves inside the run directory and the file is non-empty — the
-    same admission rule ``register_trace_evidence`` applies to a trace folded on this side,
-    because an empty file means Relay never flushed. Any other shape (no Fabric result, no OTLP,
-    two of them, a path outside, an empty file) returns ``(None, None)`` so the caller keeps the
-    model-call projection, which always works. A declared ATIF is passed along only when
-    exactly one contained artifact carries that kind, so an ambiguous ATIF is omitted rather
-    than guessed at.
-
-    A declared-but-rejected OTLP is warned about rather than silently dropped: keeping the
-    projection is the right fallback, but a Fabric or Relay change that quietly stops declaring
-    a usable trace is exactly the silent thinning this exists to surface.
+    A declared OTLP that is not that one file is rejected with a warning, so the caller keeps
+    the model-call projection instead of dropping the trace silently. No declaration is not a
+    rejection.
     """
     fabric_result = record.get("fabric_result")
     if not isinstance(fabric_result, Mapping):
@@ -332,15 +317,12 @@ def _declared_fabric_trace(record: Mapping[str, Any], *, run_dir: Path) -> tuple
     declared = [artifact for artifact in artifacts if artifact.kind == OTLP_ARTIFACT_KIND]
     if not declared:
         return None, None
-    trial_label = f"task={record.get(NG_TASK_INDEX)!r} rollout={record.get(NG_ROLLOUT_INDEX)!r}"
     contained = [artifact for artifact in declared if _within_run_dir(artifact.path, run_dir)]
+    trial = {"task_index": record.get(NG_TASK_INDEX), "rollout_index": record.get(NG_ROLLOUT_INDEX)}
     if len(contained) != 1:
         logger.warning(
-            "Gym %s: fabric_result declared %d otlp artifact(s), %d inside the run directory; "
-            "keeping the model-call projection.",
-            trial_label,
-            len(declared),
-            len(contained),
+            "Declared otlp trace is not a single file inside the run directory; keeping the model-call projection.",
+            extra={**trial, "declared_count": len(declared), "contained_count": len(contained)},
         )
         return None, None
     trace = Path(contained[0].path)
@@ -350,9 +332,8 @@ def _declared_fabric_trace(record: Mapping[str, Any], *, run_dir: Path) -> tuple
         readable = False
     if not readable:
         logger.warning(
-            "Gym %s: the declared otlp trace %s is missing or empty; keeping the model-call projection.",
-            trial_label,
-            trace,
+            "Declared otlp trace is missing or empty; keeping the model-call projection.",
+            extra={**trial, "path": str(trace)},
         )
         return None, None
     atif = [
@@ -373,26 +354,21 @@ def _rollout_evidence(
 ) -> CandidateEvidence:
     """The rollouts file every trial shares, plus this rollout's own trace.
 
-    A Fabric-backed rollout carries the Relay trace Fabric declared as a run artifact; that file —
-    the captured trace itself — wins over the projection below, which is built from the record and
-    the model-call capture and is what every rollout without a usable declared trace gets instead.
-    A trace is registered under the format-qualified key as well as the plain one, so a metric asking
-    for ``format="otlp"`` and one asking for whatever is primary reach the same handle.
+    A declared trace file wins over the projection built from the rollout record. The trace is
+    registered under the format-qualified key as well as the plain one, so a metric asking for
+    ``format="otlp"`` and one asking for whatever is primary reach the same handle.
     """
     descriptors: dict[str, EvidenceDescriptor] = {
         "rollouts": EvidenceDescriptor(kind="filesystem", format="file", ref=str(rollouts_path))
     }
     capture_path = _capture_path(record, capture_dir)
     if capture_path is not None:
-        # Kept as its own evidence, by reference: the OTLP view below is a projection of it, and a
-        # projection is not a reason to lose what it was projected from. A declared trace does not
-        # consume it, but the capture stays reachable for a metric that wants the per-call source.
+        # The capture stays even when a declared trace wins: a metric can still want the per-call source.
         descriptors[NG_TRAJECTORY_EVIDENCE] = EvidenceDescriptor(
             kind="filesystem", format="file", ref=str(capture_path)
         )
     if capture_dir is not None and capture_path is None:
-        # Capture is switched on by the runner, so an absent one is Gym not doing what it was asked
-        # — a misconfiguration of the run, whichever trace wins below, so it is reported in both.
+        # Capture is requested by the runner, so a missing file is a misconfigured run whichever trace wins.
         logger.warning(
             "No model-call capture for trial %s under %s; its trace will carry no per-call timing.",
             trial_id,
@@ -400,7 +376,6 @@ def _rollout_evidence(
         )
     otlp, atif = _declared_fabric_trace(record, run_dir=rollouts_path.parent)
     if otlp is not None:
-        # Fabric declared the trace Relay captured, so publish that file rather than project one.
         register_trace_evidence(descriptors, atif=atif, otlp=otlp)
         return CandidateEvidence(descriptors=descriptors)
     model_calls = _read_model_calls(capture_path, trial_id=trial_id)

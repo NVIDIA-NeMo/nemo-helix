@@ -46,7 +46,7 @@ ATOF_FILENAME = "events.atof.jsonl"
 FABRIC_AGENT_VERSION = "fabric"
 #: ``kind`` Fabric stamps on the promoted Relay ATIF artifact.
 ATIF_ARTIFACT_KIND = "atif"
-#: ``kind`` Fabric stamps on the Relay OpenTelemetry file it declares as a run artifact (0.6+).
+#: ``kind`` Fabric stamps on the Relay OpenTelemetry file it declares as a run artifact.
 OTLP_ARTIFACT_KIND = "otlp"
 
 
