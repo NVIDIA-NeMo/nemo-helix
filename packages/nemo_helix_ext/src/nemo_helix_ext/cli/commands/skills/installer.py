@@ -108,6 +108,10 @@ class BaseAgentInstaller:
     def get_install_path(self, scope: Scope, project_root: Path, skill_name: str) -> Path:
         raise NotImplementedError
 
+    def _skills_root(self, scope: Scope, project_root: Path) -> Path:
+        """The directory that holds installed skill directories, even when this install writes none."""
+        return self.get_install_path(scope, project_root, "skill").parent.parent
+
     def format_content(self, skill: Skill) -> str:
         """Format skill content for this agent. Default: return raw content."""
         return skill.raw
@@ -141,6 +145,11 @@ class BaseAgentInstaller:
         for path in paths:
             skills_root = path.parent.parent
             wrote.setdefault(skills_root, set()).add(path.parent.name)
+        # A full install that ships nothing still has a root to prune, which the writes above never visit.
+        if prune and not wrote:
+            skills_root = self._skills_root(scope, project_root)
+            if (skills_root / INSTALLED_SKILLS_MANIFEST_NAME).exists():
+                wrote[skills_root] = set()
 
         for skills_root, installed_dirs in wrote.items():
             owned = _read_owned_directories(skills_root)

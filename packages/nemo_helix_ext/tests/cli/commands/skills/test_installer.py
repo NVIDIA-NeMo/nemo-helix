@@ -209,6 +209,22 @@ class TestInstallManifest:
         assert (skills_root / "nemo-user-skill" / "SKILL.md").exists()
         assert _read_manifest(tmp_path)["owned"] == ["nemo-alpha"]
 
+    def test_prune_removes_recorded_skills_when_this_install_writes_nothing(self, tmp_path: Path):
+        installer = DirectoryLayoutInstaller()
+        skills_root = _skills_root(tmp_path)
+        installer.install(
+            Scope.PROJECT, tmp_path, {"alpha": _make_skill("alpha"), "beta": _make_skill("beta")}, prune=True
+        )
+        _write_skill_dir(skills_root, "nemo-user-skill")
+
+        installer.install(Scope.PROJECT, tmp_path, {}, prune=True)
+
+        assert not (skills_root / "nemo-alpha").exists()
+        assert not (skills_root / "nemo-beta").exists()
+        assert (skills_root / "nemo-user-skill" / "SKILL.md").exists()
+        assert _read_manifest(tmp_path)["owned"] == []
+        assert {path.name for path in installer.pruned_directories} == {"nemo-alpha", "nemo-beta"}
+
     def test_subset_install_records_directory_and_does_not_prune(self, tmp_path: Path):
         """A `--skill` subset records what it wrote and removes nothing."""
         installer = DirectoryLayoutInstaller()
