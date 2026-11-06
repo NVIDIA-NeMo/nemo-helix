@@ -22,16 +22,25 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
-@pytest_asyncio.fixture(params=["sqlite", "postgresql"])
+@pytest_asyncio.fixture(
+    params=[
+        "sqlite",
+        pytest.param(
+            "postgresql",
+            marks=pytest.mark.skipif(
+                not os.environ.get("NHX_TEST_POSTGRES_URL"),
+                reason="Set NHX_TEST_POSTGRES_URL to run real PostgreSQL JSON safety tests",
+            ),
+        ),
+    ]
+)
 async def json_repository(request, session_maker):
     """Use existing SQLite fixtures or an isolated schema on an opted-in PG server."""
     engine = None
     schema = None
     try:
         if request.param == "postgresql":
-            url = os.environ.get("NHX_TEST_POSTGRES_URL")
-            if not url:
-                pytest.skip("Set NHX_TEST_POSTGRES_URL to run real PostgreSQL JSON safety tests")
+            url = os.environ["NHX_TEST_POSTGRES_URL"]
             schema = "json_safety_" + uuid4().hex
             engine = create_async_engine(url, connect_args={"server_settings": {"search_path": schema}})
             async with engine.begin() as connection:

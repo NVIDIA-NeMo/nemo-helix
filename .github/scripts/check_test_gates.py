@@ -38,6 +38,7 @@ ALLOWED_UNSET = {
     "NHX_INSIGHTS_E2E": "needs a live Insights deployment",
     "TRACE_FIXTURE_LIVE_CODEX": "regenerates fixtures against a live Codex CLI",
     "SCALED_EVALS_TEST_DATABASE_URL": "needs a live Postgres for the scaled-evals migration tests",
+    "NHX_TEST_POSTGRES_URL": "needs a disposable live PostgreSQL server; Entities JSON safety tests use isolated schemas",
     "NHX_E2E_SANDBOXED_GYM": "needs a sandbox-capable deployment with OpenSandbox; the Gym e2e Kind cluster has none",
 }
 
