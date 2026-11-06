@@ -16,14 +16,6 @@ from nhx.studio.config import StudioConfig
 from nhx.studio.service import StudioService
 
 URL = "/studio/api/plugin-load-errors"
-CODES = [
-    "PLUGIN_MANIFEST_MISSING",
-    "PLUGIN_SPECIFIER_UNMAPPED",
-    "PLUGIN_SINGLETON_BUNDLED",
-    "PLUGIN_CONTRACT_UNSUPPORTED",
-    "PLUGIN_VERSION_INCOMPATIBLE",
-    "PLUGIN_LOAD_FAILED",
-]
 
 
 def _issue(**overrides: Any) -> dict[str, Any]:
@@ -70,7 +62,7 @@ class TestPluginLoadErrorLogging:
     """Accepted reports produce exactly one well-formed log record."""
 
     def test_valid_report_logs_one_record(self, auth_off, caplog: pytest.LogCaptureFixture):
-        """A valid report is acknowledged and logged as a single multi-line record."""
+        """A valid report is acknowledged and logged as a single record."""
         body = {
             "plugin": "my-plugin",
             "issues": [
@@ -89,7 +81,7 @@ class TestPluginLoadErrorLogging:
         assert text.index("1.") < text.index("alpha") < text.index("2.") < text.index("beta")
 
     def test_control_characters_cannot_forge_log_lines(self, auth_off, caplog: pytest.LogCaptureFixture):
-        """Newlines and control characters in fields are neutralised."""
+        """Line breaks and control characters in fields are neutralised."""
         response = _client().post(
             URL, json=_report(message="x\nFAKE LOG LINE", steps=["go\r\x1b[31mred", "ok"], subject="s\nFAKE2")
         )
@@ -98,11 +90,25 @@ class TestPluginLoadErrorLogging:
         records = _records(caplog)
         assert len(records) == 1
         text = records[0].getMessage()
-        assert "FAKE LOG LINE" in text.replace("\n", " ")  # content kept, just defanged
-        for line in text.splitlines():
-            assert not line.lstrip().startswith("FAKE")
-        assert not [c for c in text if ord(c) < 32 and c != "\n"]
-        assert "\x7f" not in text
+        assert "FAKE LOG LINE" in text  # injected words survive only as plain text
+        for forbidden in ("\n", "\r", "\u2028", "\u2029", "\x7f"):
+            assert forbidden not in text
+        assert not [c for c in text if ord(c) < 32 or 0x80 <= ord(c) <= 0x9F]
+
+    def test_unicode_separators_and_invisibles_stripped(self, auth_off, caplog: pytest.LogCaptureFixture):
+        """Line/paragraph separators, bidi and zero-width characters never reach the log."""
+        bad = "\u2028\u2029\u202e\u200b\u2066\ufeff"
+        response = _client().post(
+            URL,
+            json=_report(message=f"vis{bad}ible", subject=f"sub{bad}ject", steps=[f"step\u2028one{bad}", "ok"]),
+        )
+
+        assert response.status_code == 204
+        records = _records(caplog)
+        assert len(records) == 1
+        text = records[0].getMessage()
+        assert "vis" in text and "ible" in text and "step" in text
+        assert not [c for c in bad if c in text]
 
 
 class TestPluginLoadErrorValidation:
@@ -208,3 +214,26 @@ class TestPluginLoadErrorGating:
         client = _client()
         assert client.post(URL, json=_report()).status_code == 204
         assert "plugin-load-errors" not in client.get("/openapi.json").text
+
+    def test_disabled_route_does_not_reveal_itself_via_validation(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ):
+        """Invalid bodies get 404 when gated off, 422 when gated on."""
+        caplog.set_level(logging.WARNING, logger="nhx.studio")
+        bad = _report(code="NOT_A_CODE")
+
+        def _post_not_json(client: TestClient):
+            return client.post(URL, content=b"not json", headers={"content-type": "application/json"})
+
+        _set_auth(monkeypatch, False)
+        assert _client(False).post(URL, json=bad).status_code == 404
+        assert _post_not_json(_client(False)).status_code == 404
+
+        _set_auth(monkeypatch, True)
+        assert _client(None).post(URL, json=bad).status_code == 404
+        assert _post_not_json(_client(None)).status_code == 404
+        assert _records(caplog) == []
+
+        assert _client(True).post(URL, json=bad).status_code == 422
+        assert _post_not_json(_client(True)).status_code == 422
+        assert _records(caplog) == []
