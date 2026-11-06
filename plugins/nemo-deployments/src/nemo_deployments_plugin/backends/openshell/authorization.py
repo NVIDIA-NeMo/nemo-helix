@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Authorize deployment provider bindings before signing registration tickets."""
+"""Authorize deployment provider bindings for registration and renewal."""
 
 from nemo_helix_plugin.auth import platform_auth_enabled
 from nemo_helix_plugin.iam.client import AsyncIAMClient
