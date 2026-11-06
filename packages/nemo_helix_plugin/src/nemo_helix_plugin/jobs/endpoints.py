@@ -30,6 +30,7 @@ from nemo_helix_plugin.jobs.schemas import (
 )
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    CreateJobGroupRequest,
     HelixJobAttemptResponse,
     HelixJobListResultResponse,
     HelixJobListTaskResponse,
@@ -40,14 +41,17 @@ from nemo_helix_plugin.jobs.types import (
     HelixJobTaskResponse,
     HelixJobTaskUpdate,
     JobControl,
+    JobGroupResponse,
     JobLogsQueryParams,
     JobStatusDetailsQueryParams,
     JobStatusDetailsUpdate,
     ListAttemptsQueryParams,
+    ListJobGroupsQueryParams,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
     UpdateHelixJobRequest,
+    UpdateJobGroupRequest,
 )
 
 # The execution-profiles endpoint returns a union over all configured backend
@@ -126,6 +130,48 @@ def rerun_job(*, workspace: str | None = None, job: str) -> HelixJobResponse: ..
 @patch("/apis/jobs/v2/workspaces/{workspace}/jobs/{name}/control")
 @abstractmethod
 def update_job_control(*, workspace: str | None = None, name: str, body: JobControl) -> HelixJobResponse: ...
+
+
+# ---------------------------------------------------------------------------
+# Job groups (bulk create + CRUD + lifecycle)
+# ---------------------------------------------------------------------------
+
+
+@post("/apis/jobs/v2/workspaces/{workspace}/job-groups")
+@abstractmethod
+def create_job_group(*, workspace: str | None = None, body: CreateJobGroupRequest) -> JobGroupResponse: ...
+
+
+@get("/apis/jobs/v2/workspaces/{workspace}/job-groups")
+@abstractmethod
+def list_job_groups(
+    *, workspace: str | None = None, query_params: ListJobGroupsQueryParams | None = None
+) -> Paginated[JobGroupResponse]: ...
+
+
+@get("/apis/jobs/v2/workspaces/{workspace}/job-groups/{name}")
+@abstractmethod
+def get_job_group(*, workspace: str | None = None, name: str) -> JobGroupResponse: ...
+
+
+@patch("/apis/jobs/v2/workspaces/{workspace}/job-groups/{name}")
+@abstractmethod
+def update_job_group(*, workspace: str | None = None, name: str, body: UpdateJobGroupRequest) -> JobGroupResponse: ...
+
+
+@delete("/apis/jobs/v2/workspaces/{workspace}/job-groups/{name}")
+@abstractmethod
+def delete_job_group(*, workspace: str | None = None, name: str) -> None: ...
+
+
+@post("/apis/jobs/v2/workspaces/{workspace}/job-groups/{name}/cancel")
+@abstractmethod
+def cancel_job_group(*, workspace: str | None = None, name: str) -> JobGroupResponse: ...
+
+
+@post("/apis/jobs/v2/workspaces/{workspace}/job-groups/{name}/retry")
+@abstractmethod
+def retry_job_group(*, workspace: str | None = None, name: str) -> JobGroupResponse: ...
 
 
 # ---------------------------------------------------------------------------

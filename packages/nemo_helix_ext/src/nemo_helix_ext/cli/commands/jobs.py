@@ -15,15 +15,18 @@ from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest
 from nemo_helix_plugin.jobs.telemetry import merge_job_telemetry_custom_fields
 from nemo_helix_plugin.jobs.types import (
     CreateHelixJobRequest,
+    CreateJobGroupRequest,
     HelixJobStatusUpdateRequest,
     HelixJobTaskUpdate,
     JobControl,
     JobLogsQueryParams,
     ListAttemptsQueryParams,
+    ListJobGroupsQueryParams,
     ListJobResultsQueryParams,
     ListJobsQueryParams,
     ListStepsQueryParams,
     UpdateHelixJobRequest,
+    UpdateJobGroupRequest,
 )
 
 from nemo_helix_ext.cli.core.api import build_kwargs, merge_filter_dict
@@ -74,11 +77,13 @@ attempts_app = create_typer_app(name="attempts", help="Inspect job attempts")
 results_app = create_typer_app(name="results", help="Manage results")
 steps_app = create_typer_app(name="steps", help="Manage steps")
 tasks_app = create_typer_app(name="tasks", help="Manage tasks")
+groups_app = create_typer_app(name="groups", help="Submit and manage job groups")
 
 app.add_typer(attempts_app, name="attempts")
 app.add_typer(results_app, name="results")
 app.add_typer(steps_app, name="steps")
 app.add_typer(tasks_app, name="tasks")
+app.add_typer(groups_app, name="groups")
 
 
 def _jobs_client_from_state(state: CLIContext) -> tuple[NemoClient, JobsClient]:
@@ -121,6 +126,22 @@ def _list_steps_query_params(
     query_params: ListStepsQueryParams = {}
     if filter_value is not None:
         query_params["filter"] = filter_value
+    if page is not None:
+        query_params["page"] = page
+    if page_size is not None:
+        query_params["page_size"] = page_size
+    if sort is not None:
+        query_params["sort"] = sort
+    return query_params or None
+
+
+def _list_job_groups_query_params(
+    *,
+    page: int | None,
+    page_size: int | None,
+    sort: str | None,
+) -> ListJobGroupsQueryParams | None:
+    query_params: ListJobGroupsQueryParams = {}
     if page is not None:
         query_params["page"] = page
     if page_size is not None:
@@ -207,7 +228,8 @@ def _generate_jobs_python_code(
         "from nemo_helix_plugin.jobs.schemas import HelixJobResultCreateRequest",
         (
             "from nemo_helix_plugin.jobs.types import CreateHelixJobRequest, "
-            "HelixJobStatusUpdateRequest, HelixJobTaskUpdate, UpdateHelixJobRequest"
+            "CreateJobGroupRequest, HelixJobStatusUpdateRequest, HelixJobTaskUpdate, "
+            "UpdateHelixJobRequest, UpdateJobGroupRequest"
         ),
     ]
     if lifecycle_mode == "wait":
@@ -479,6 +501,51 @@ def _render_source_jobs_call(resource_path: list[str], method: str, args: dict[s
             "    step=args['step'],",
             "    name=args['name'],",
             ")",
+            "print(response.data())",
+        ]
+    if operation == (("jobs", "groups"), "create"):
+        return [
+            "request = dict(args)",
+            'workspace = request.pop("workspace", None)',
+            "response = jobs_client.create_job_group(",
+            "    workspace=workspace,",
+            "    body=CreateJobGroupRequest.model_validate(request),",
+            ")",
+            "print(response.data())",
+        ]
+    if operation == (("jobs", "groups"), "list"):
+        return [
+            "query_params = dict(args)",
+            'workspace = query_params.pop("workspace", None)',
+            "response = jobs_client.list_job_groups(workspace=workspace, query_params=query_params or None)",
+            "for item in response.page().items:",
+            "    print(item)",
+        ]
+    if operation == (("jobs", "groups"), "retrieve"):
+        return [
+            "response = jobs_client.get_job_group(name=args['name'], workspace=args.get('workspace'))",
+            "print(response.data())",
+        ]
+    if operation == (("jobs", "groups"), "update"):
+        return [
+            "request = {key: value for key, value in args.items() if key not in {'workspace', 'name'}}",
+            "response = jobs_client.update_job_group(",
+            "    name=args['name'],",
+            "    workspace=args.get('workspace'),",
+            "    body=UpdateJobGroupRequest.model_validate(request),",
+            ")",
+            "print(response.data())",
+        ]
+    if operation == (("jobs", "groups"), "delete"):
+        return ["jobs_client.delete_job_group(name=args['name'], workspace=args.get('workspace'))"]
+    if operation == (("jobs", "groups"), "cancel"):
+        return [
+            "response = jobs_client.cancel_job_group(name=args['name'], workspace=args.get('workspace'))",
+            "print(response.data())",
+        ]
+    if operation == (("jobs", "groups"), "retry"):
+        return [
+            "response = jobs_client.retry_job_group(name=args['name'], workspace=args.get('workspace'))",
             "print(response.data())",
         ]
     raise ValueError(f"Unsupported source-owned jobs code generation for {resource_path!r}.{method}")
@@ -1295,6 +1362,371 @@ def tail_platform_job(
 
     response = jobs_client.list_job_logs(workspace=workspace, name=name, query_params=query_params)
     render_job_logs(response.page().items)
+
+
+# ---------------------------------------------------------------------------
+# Job groups (bulk create + CRUD + lifecycle)
+# ---------------------------------------------------------------------------
+
+
+@groups_app.command("create")
+@collect_warnings
+@handle_errors
+def create_job_group(
+    ctx: typer.Context,
+    name: Annotated[str | None, typer.Argument(help="Group name. Auto-generated when omitted.")] = None,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    input_file: Annotated[
+        str | None,
+        typer.Option("--input-file", help="Path to JSON file (use '-' for stdin)", rich_help_panel="Input Options"),
+    ] = None,
+    input_data: Annotated[
+        str | None,
+        typer.Option("--input-data", help="Input data for the request (JSON or YAML)", rich_help_panel="Input Options"),
+    ] = None,
+    source: Annotated[str | None, typer.Option("--source", help="(required)")] = None,
+    template: Annotated[
+        str | None,
+        typer.Option("--template", help="Shared job platform_spec expanded into every member. (JSON string)"),
+    ] = None,
+    spec: Annotated[str | None, typer.Option("--spec", help="Shared plugin-defined spec. (JSON string)")] = None,
+    members: Annotated[
+        str | None,
+        typer.Option("--members", help="Per-member entries [{name, config_patch, timeout_seconds}]. (JSON string)"),
+    ] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    project: Annotated[str | None, typer.Option("--project")] = None,
+    max_concurrent_jobs: Annotated[
+        int | None, typer.Option("--max-concurrent-jobs", min=1, help="Recorded ceiling; not yet enforced.")
+    ] = None,
+    fail_fast: Annotated[
+        bool | None,
+        typer.Option("--fail-fast/--no-fail-fast", help="Cancel remaining members when one member fails."),
+    ] = None,
+    default_timeout_seconds: Annotated[
+        int | None,
+        typer.Option("--default-timeout-seconds", min=0, help="Group-default per-step staleness timeout."),
+    ] = None,
+    custom_fields: Annotated[str | None, typer.Option("--custom-fields", help="JSON string")] = None,
+    ownership: Annotated[str | None, typer.Option("--ownership", help="JSON string")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Create a job group and expand its members into parented jobs.
+
+    [bold red]Required fields:[/] source, template, members
+
+    [green]Examples:[/]
+    nemo jobs groups create my-sweep --input-file group.json
+    echo '{"json": "data"}' | nemo jobs groups create my-sweep --input-file -
+    """
+    if input_file or input_data:
+        input_payload = read_data_input_with_flags(input_file=input_file, input_data=input_data)
+    else:
+        input_payload = {}
+
+    if workspace is not None:
+        input_payload["workspace"] = workspace
+    if source is not None:
+        input_payload["source"] = source
+    if template is not None:
+        input_payload["template"] = read_payload("template", template)
+    if spec is not None:
+        input_payload["spec"] = read_payload("spec", spec)
+    if members is not None:
+        input_payload["members"] = read_payload("members", members)
+    if name is not None:
+        input_payload["name"] = name
+    if description is not None:
+        input_payload["description"] = description
+    if project is not None:
+        input_payload["project"] = project
+    if max_concurrent_jobs is not None:
+        input_payload["max_concurrent_jobs"] = max_concurrent_jobs
+    if fail_fast is not None:
+        input_payload["fail_fast"] = fail_fast
+    if default_timeout_seconds is not None:
+        input_payload["default_timeout_seconds"] = default_timeout_seconds
+    if custom_fields is not None:
+        input_payload["custom_fields"] = read_payload("custom_fields", custom_fields)
+    if ownership is not None:
+        input_payload["ownership"] = read_payload("ownership", ownership)
+
+    validate_required_fields(
+        input_payload,
+        ["source", "template", "members"],
+        "jobs groups create",
+        {
+            "source": "(required)",
+            "template": "Shared job platform_spec expanded into every member. (JSON string) (required)",
+            "members": "Per-member entries. (JSON string) (required)",
+        },
+    )
+
+    all_kwargs = dict(input_payload)
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    if handle_code_generation(["jobs", "groups"], "create", all_kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    request_payload = dict(all_kwargs)
+    request_workspace = cast(str | None, request_payload.pop("workspace", None))
+    result = jobs_client.create_job_group(
+        workspace=request_workspace,
+        body=CreateJobGroupRequest.model_validate(request_payload),
+    ).data()
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@groups_app.command("list")
+@collect_warnings
+@handle_errors
+def list_job_groups(
+    ctx: typer.Context,
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    page: Annotated[int | None, typer.Option("--page", help="Page number.")] = None,
+    page_size: Annotated[int | None, typer.Option("--page-size", help="Page size.")] = None,
+    sort: Annotated[
+        Literal["created_at", "-created_at", "updated_at", "-updated_at", "source", "-source"] | None,
+        typer.Option(
+            "--sort", help="The field to sort by. To sort in decreasing order, use `-` in front of the field name."
+        ),
+    ] = None,
+    output_format: ListOutputFormatOption = None,
+    no_truncate: NoTruncateOption = None,
+    columns: OutputColumnsOption = None,
+    stream: StreamOutputOption = False,
+    all_pages: Annotated[bool, typer.Option("--all-pages", help="Fetch all pages")] = False,
+) -> None:
+    """List job groups with their aggregate derived status."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    validate_stream_output_format(resolved_output_format, stream)
+
+    check_output_columns_with_format(columns, resolved_output_format)
+
+    default_columns = [
+        Column("name", None),
+        Column("status", None),
+        Column("member_count", None),
+        Column("created_at", None),
+    ]
+    output_columns: str | list[Column] | None = columns
+    if columns is None or str(columns).strip() == "default":
+        output_columns = default_columns
+
+    query_params = _list_job_groups_query_params(page=page, page_size=page_size, sort=sort)
+    kwargs = build_kwargs(workspace=workspace, **(query_params or {}))
+
+    if handle_code_generation(["jobs", "groups"], "list", dict(kwargs), resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    response = jobs_client.list_job_groups(workspace=workspace, query_params=query_params)
+    items = collect_offset_pages(response, all_pages=all_pages)
+
+    format_output(
+        items,
+        is_list=True,
+        output_format=resolved_output_format,
+        output_columns=output_columns,
+        no_truncate=state.get_no_truncate(no_truncate),
+        timestamp_format=state.get_timestamp_format(),
+        stream=stream,
+    )
+    if not all_pages:
+        warn_if_more_pages(items, PaginationType.PAGE_NUMBER)
+
+
+@groups_app.command("get")
+@collect_warnings
+@handle_errors
+def retrieve_job_group(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job group name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Get a job group by name or ID, including its aggregate status."""
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs", "groups"], "retrieve", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.get_job_group(name=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@groups_app.command("update")
+@collect_warnings
+@handle_errors
+def update_job_group(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job group name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    description: Annotated[str | None, typer.Option("--description")] = None,
+    max_concurrent_jobs: Annotated[
+        int | None, typer.Option("--max-concurrent-jobs", min=1, help="Recorded ceiling; not yet enforced.")
+    ] = None,
+    fail_fast: Annotated[
+        bool | None,
+        typer.Option("--fail-fast/--no-fail-fast", help="Cancel remaining members when one member fails."),
+    ] = None,
+    default_timeout_seconds: Annotated[
+        int | None,
+        typer.Option("--default-timeout-seconds", min=0, help="Group-default per-step staleness timeout."),
+    ] = None,
+    custom_fields: Annotated[str | None, typer.Option("--custom-fields", help="JSON string")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Update a job group's mutable metadata.
+
+    Members are not added or removed through this command, and the derived
+    status is never writable.
+    """
+    update_payload: dict[str, Any] = {}
+    if description is not None:
+        update_payload["description"] = description
+    if max_concurrent_jobs is not None:
+        update_payload["max_concurrent_jobs"] = max_concurrent_jobs
+    if fail_fast is not None:
+        update_payload["fail_fast"] = fail_fast
+    if default_timeout_seconds is not None:
+        update_payload["default_timeout_seconds"] = default_timeout_seconds
+    if custom_fields is not None:
+        update_payload["custom_fields"] = read_payload("custom_fields", custom_fields)
+
+    if not update_payload:
+        raise typer.BadParameter("At least one mutable job group field is required.")
+
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+    kwargs = {"name": name, **build_kwargs(workspace=workspace), **update_payload}
+    if handle_code_generation(["jobs", "groups"], "update", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.update_job_group(
+        name=name,
+        workspace=workspace,
+        body=UpdateJobGroupRequest.model_validate(update_payload),
+    ).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@groups_app.command("delete")
+@collect_warnings
+@handle_errors
+def delete_job_group(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job group name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Delete a job group and all of its member jobs.
+
+    Every member must be in a terminal state first; otherwise the request is rejected.
+    """
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs", "groups"], "delete", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    jobs_client.delete_job_group(name=name, workspace=workspace).data()
+
+
+@groups_app.command("cancel")
+@collect_warnings
+@handle_errors
+def cancel_job_group(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job group name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Request cancellation of a job group.
+
+    Records the group's cancelling intent in one call and returns immediately; every
+    non-terminal member is then cancelled in the background. Re-request to drive it
+    again if a teardown is lost.
+    """
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs", "groups"], "cancel", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    result = jobs_client.cancel_job_group(name=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
+
+
+@groups_app.command("retry")
+@collect_warnings
+@handle_errors
+def retry_job_group(
+    ctx: typer.Context,
+    name: Annotated[str, typer.Argument(help="Job group name or ID (both are accepted).")],
+    workspace: Annotated[str | None, typer.Option("--workspace")] = None,
+    output_format: EntityOutputFormatOption = None,
+) -> None:
+    """Retry the non-succeeded members of a job group.
+
+    Reruns each failed or cancelled member as a fresh attempt in the background;
+    succeeded members are left untouched. A group that is cancelling cannot be retried.
+    """
+    state: CLIContext = ctx.obj
+    resolved_output_format = state.get_output_format(output_format)
+
+    kwargs = {"name": name, **build_kwargs(workspace=workspace)}
+    if handle_code_generation(["jobs", "groups"], "retry", kwargs, resolved_output_format, state):
+        return
+
+    _, jobs_client = _jobs_client_from_state(state)
+    # Sent once: a retry after a lost response could double-fan the rerun.
+    result = jobs_client.with_retry(RetryPolicy(max_retries=0)).retry_job_group(name=name, workspace=workspace).data()
+
+    format_output(
+        result,
+        is_list=False,
+        output_format=resolved_output_format,
+        no_truncate=state.get_no_truncate(),
+        timestamp_format=state.get_timestamp_format(),
+    )
 
 
 @attempts_app.command("list")

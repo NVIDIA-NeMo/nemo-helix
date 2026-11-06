@@ -491,6 +491,9 @@ navigation:
               - page: Jobs
                 slug: jobs
                 path: ../../set-up/manage-jobs.mdx
+              - page: Job Groups
+                slug: job-groups
+                path: ../../set-up/job-groups.mdx
               - page: Milvus
                 path: ../../set-up/milvus.mdx
               - page: Observability

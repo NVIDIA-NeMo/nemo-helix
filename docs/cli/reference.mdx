@@ -4137,6 +4137,7 @@ nemo jobs [OPTIONS] COMMAND [ARGS]...
 * `results`: Manage results
 * `steps`: Manage steps
 * `tasks`: Manage tasks
+* `groups`: Submit and manage job groups
 
 #### nemo jobs cancel
 
@@ -5082,6 +5083,257 @@ nemo jobs tasks get [OPTIONS] NAME
 * `--job`: (required)
 * `--attempt-id`: Attempt ID or 'current'
 * `--step`: (required)
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+#### nemo jobs groups
+
+Submit and manage job groups
+
+**Usage:**
+
+```shell
+nemo jobs groups [OPTIONS] COMMAND [ARGS]...
+```
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Commands:**
+
+* `create`: Create a job group and expand its members into parented...
+* `list`: List job groups with their aggregate derived status.
+* `get`: Get a job group by name or ID, including its aggregate...
+* `update`: Update a job group's mutable metadata.
+* `delete`: Delete a job group and all of its member jobs.
+* `cancel`: Request cancellation of a job group.
+* `retry`: Retry the non-succeeded members of a job group.
+
+##### nemo jobs groups create
+
+Create a job group and expand its members into parented jobs.
+
+**Required fields:** source, template, members
+
+**Examples:**
+
+```shell
+nemo jobs groups create my-sweep --input-file group.json
+echo '{"json": "data"}' | nemo jobs groups create my-sweep --input-file -
+```
+
+**Usage:**
+
+```shell
+nemo jobs groups create [OPTIONS] [NAME]
+```
+
+**Arguments:**
+
+* `<NAME>`: Group name. Auto-generated when omitted.
+
+**Options:**
+
+* `--workspace`
+* `--source`: (required)
+* `--template`: Shared job platform_spec expanded into every member. (JSON string)
+* `--spec`: Shared plugin-defined spec. (JSON string)
+* `--members`: Per-member entries [\{name, config_patch, timeout_seconds}]. (JSON string)
+* `--description`
+* `--project`
+* `--max-concurrent-jobs <INTEGER RANGE>`: Recorded ceiling; not yet enforced.
+* `--fail-fast, --no-fail-fast`: Cancel remaining members when one member fails.
+* `--default-timeout-seconds <INTEGER RANGE>`: Group-default per-step staleness timeout.
+* `--custom-fields`: JSON string
+* `--ownership`: JSON string
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Input Options:**
+
+* `--input-file`: Path to JSON file (use '-' for stdin)
+* `--input-data`: Input data for the request (JSON or YAML)
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs groups list
+
+List job groups with their aggregate derived status.
+
+**Usage:**
+
+```shell
+nemo jobs groups list [OPTIONS]
+```
+
+**Options:**
+
+* `--workspace`
+* `--page <INTEGER>`: Page number.
+* `--page-size <INTEGER>`: Page size.
+* `--sort <CHOICE>`: The field to sort by. To sort in decreasing order, use `-` in front of the field name. [possible values: created_at, -created_at, updated_at, -updated_at, source, -source]
+* `--all-pages`: Fetch all pages
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for the list of results. [possible values: table, json, yaml, markdown, csv, raw, code]
+* `--no-truncate`: Don't truncate long values in table/markdown/csv output.
+* `--output-columns, -c`: Columns to display: 'default', 'all', or comma-separated names. Only affects table/csv/markdown formats.
+* `--stream`: Emit newline-delimited JSON, one record per line. Requires JSON or raw output.
+
+##### nemo jobs groups get
+
+Get a job group by name or ID, including its aggregate status.
+
+**Usage:**
+
+```shell
+nemo jobs groups get [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job group name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs groups update
+
+Update a job group's mutable metadata.
+
+Members are not added or removed through this command, and the derived
+status is never writable.
+
+**Usage:**
+
+```shell
+nemo jobs groups update [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job group name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+* `--description`
+* `--max-concurrent-jobs <INTEGER RANGE>`: Recorded ceiling; not yet enforced.
+* `--fail-fast, --no-fail-fast`: Cancel remaining members when one member fails.
+* `--default-timeout-seconds <INTEGER RANGE>`: Group-default per-step staleness timeout.
+* `--custom-fields`: JSON string
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs groups delete
+
+Delete a job group and all of its member jobs.
+
+Every member must be in a terminal state first; otherwise the request is rejected.
+
+**Usage:**
+
+```shell
+nemo jobs groups delete [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job group name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs groups cancel
+
+Request cancellation of a job group.
+
+Records the group's cancelling intent in one call and returns immediately; every
+non-terminal member is then cancelled in the background. Re-request to drive it
+again if a teardown is lost.
+
+**Usage:**
+
+```shell
+nemo jobs groups cancel [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job group name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
+
+**Help:**
+
+* `--help, -h`: Show this message and exit.
+
+**Output Options:**
+
+* `--output-format, --output, -f <CHOICE>`: Output format for an entity. [possible values: json, yaml, raw, code]
+
+##### nemo jobs groups retry
+
+Retry the non-succeeded members of a job group.
+
+Reruns each failed or cancelled member as a fresh attempt in the background;
+succeeded members are left untouched. A group that is cancelling cannot be retried.
+
+**Usage:**
+
+```shell
+nemo jobs groups retry [OPTIONS] NAME
+```
+
+**Arguments:**
+
+* `<NAME>`: Job group name or ID (both are accepted).
+
+**Options:**
+
+* `--workspace`
 
 **Help:**
 
