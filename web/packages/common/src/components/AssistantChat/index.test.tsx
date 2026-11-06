@@ -373,6 +373,19 @@ describe('AssistantChat', () => {
     interactionTimeoutMs
   );
 
+  it(
+    'notifies the parent when the thread is reset',
+    async () => {
+      const onReset = vi.fn();
+      renderAssistantChat(<AssistantChat model="test-model" onReset={onReset} />);
+
+      await userEvent.click(screen.getByRole('button', { name: /Reset/i }));
+
+      expect(onReset).toHaveBeenCalledTimes(1);
+    },
+    interactionTimeoutMs
+  );
+
   it('shows copy and regenerate message actions by default', () => {
     renderAssistantChat(
       <AssistantChat
