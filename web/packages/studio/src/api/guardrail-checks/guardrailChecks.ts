@@ -4,7 +4,7 @@
 import { isVersionConflictError } from '@nemo/common/src/api/common/utils';
 import {
   entitiesCreateEntity,
-  entitiesDeleteEntityByName,
+  entitiesDeleteEntityById,
   entitiesGetEntityById,
   entitiesGetEntityByName,
   entitiesListEntities,
@@ -157,15 +157,12 @@ export async function updateGuardrailCheck(
 }
 
 /**
- * Delete a guardrail check by name. Requires `parent` (the owning config's entity id)
- * so the correct child entity is addressed when names collide across configs.
+ * Delete the loaded guardrail check by its ID and observed version.
  */
-export async function deleteGuardrailCheck(
-  workspace: string,
-  name: string,
-  parent: string
-): Promise<void> {
-  await entitiesDeleteEntityByName(workspace, GUARDRAIL_CHECKS_ENTITY_TYPE, name, { parent });
+export async function deleteGuardrailCheck(entity: GuardrailCheckEntity): Promise<void> {
+  await entitiesDeleteEntityById(entity.workspace, GUARDRAIL_CHECKS_ENTITY_TYPE, entity.id, {
+    expected_db_version: entity.db_version,
+  });
 }
 
 // ---------------------------------------------------------------------------

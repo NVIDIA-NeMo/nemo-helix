@@ -3,7 +3,7 @@
 
 import { getErrorMessage } from '@nemo/common/src/api/common/utils';
 import { Trash } from '@nemo/icons/icons';
-import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
+import { useFilesDeleteFilesetById } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import { Button } from '@nvidia/foundations-react-core';
 import { useMutateMany } from '@studio/api/common/useMutateMany';
@@ -37,10 +37,17 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
 
-  const { mutateAsync: deleteDataset } = useFilesDeleteFileset();
-  const deleteDatasetWithMessage = async (variables: { workspace: string; name: string }) => {
+  const { mutateAsync: deleteDataset } = useFilesDeleteFilesetById();
+  const deleteDatasetWithMessage = async (variables: {
+    workspace: string;
+    name: string;
+    filesetId: string;
+  }) => {
     try {
-      return await deleteDataset(variables);
+      return await deleteDataset({
+        workspace: variables.workspace,
+        filesetId: variables.filesetId,
+      });
     } catch (error) {
       throw new Error(
         getErrorMessage(
@@ -64,7 +71,11 @@ export const DatasetBulkDeleteModal: FC<DatasetBulkDeleteModalProps> = ({
     }
     try {
       await deleteDatasets(
-        datasetsToDelete.map((dataset) => ({ workspace: dataset.workspace, name: dataset.name }))
+        datasetsToDelete.map((dataset) => ({
+          workspace: dataset.workspace,
+          name: dataset.name,
+          filesetId: dataset.id,
+        }))
       );
       onConfirmSuccess();
     } finally {

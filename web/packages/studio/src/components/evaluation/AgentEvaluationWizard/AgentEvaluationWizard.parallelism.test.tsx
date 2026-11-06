@@ -39,7 +39,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   filesCreateFileset: vi.fn(),
   filesUploadFile: vi.fn(),
   filesDownloadFile: vi.fn(),
-  filesDeleteFileset: vi.fn(),
+  filesDeleteFilesetById: vi.fn(),
 }));
 
 vi.mock('@studio/components/evaluation/experimentEvalConfig', async (importOriginal) => ({

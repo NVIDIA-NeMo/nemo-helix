@@ -34,6 +34,7 @@ export type TemplateConflictReason =
 export type TemplateFilesetTarget = 'source' | 'converted';
 
 export interface TemplateFilesetConflict {
+  filesetId: string;
   workspace: string;
   name: string;
   /** `workspace/name`, as the rest of Studio refers to filesets. */
@@ -57,10 +58,18 @@ export type FilesetPreflight =
   | { kind: 'conflict'; conflict: TemplateFilesetConflict };
 
 const makeConflict =
-  (workspace: string, name: string, target: TemplateFilesetTarget) =>
+  (workspace: string, name: string, target: TemplateFilesetTarget, filesetId: string) =>
   (reason: TemplateConflictReason, message: string): FilesetPreflight => ({
     kind: 'conflict',
-    conflict: { workspace, name, filesetRef: `${workspace}/${name}`, target, reason, message },
+    conflict: {
+      filesetId,
+      workspace,
+      name,
+      filesetRef: `${workspace}/${name}`,
+      target,
+      reason,
+      message,
+    },
   });
 
 /** Retrieves a fileset, or null when nothing holds the name. */
@@ -105,7 +114,7 @@ export const preflightSourceFileset = async (
   const existing = await retrieveIfPresent(workspace, name);
   if (!existing) return { kind: 'absent' };
 
-  const conflict = makeConflict(workspace, name, 'source');
+  const conflict = makeConflict(workspace, name, 'source', existing.id);
   const { storage } = existing;
   if (storage.type && storage.type !== 'huggingface') {
     return conflict('source-repo', `already exists on ${storage.type} storage, not "${hfRepoId}".`);
@@ -143,7 +152,7 @@ export const preflightConvertedFileset = async ({
   const existing = await retrieveIfPresent(workspace, name);
   if (!existing) return { kind: 'absent' };
 
-  const conflict = makeConflict(workspace, name, 'converted');
+  const conflict = makeConflict(workspace, name, 'converted', existing.id);
 
   // The discriminator is optional in the generated schema. When it is absent there is
   // nothing to rule the fileset out on, so the content checks below decide instead.

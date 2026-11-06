@@ -6,7 +6,7 @@ import { DeleteConfirmationModal } from '@nemo/common/src/components/DeleteConfi
 import { getEntityReference } from '@nemo/common/src/namedEntity';
 import { logger } from '@nemo/common/src/utils/logger';
 import { MoreVert } from '@nemo/icons/icons';
-import { useFilesDeleteFileset } from '@nemo/sdk/generated/platform/files';
+import { useFilesDeleteFilesetById } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
 import {
   Button,
@@ -35,10 +35,10 @@ export const ActionMenu: FC<ActionMenuProps> = ({
   onDatasetDeleted,
 }) => {
   const [modalOpen, setModalOpen] = useState<'edit' | 'copy' | 'delete' | undefined>(undefined);
-  const { mutateAsync: deleteDataset } = useFilesDeleteFileset({
+  const { mutateAsync: deleteDataset } = useFilesDeleteFilesetById({
     mutation: {
       onSuccess: (_data, variables) => {
-        invalidateDatasetCaches(variables.workspace, variables.name, ['list']);
+        invalidateDatasetCaches(variables.workspace, dataset.name, ['list']);
       },
     },
   });
@@ -48,7 +48,7 @@ export const ActionMenu: FC<ActionMenuProps> = ({
       if (!dataset?.workspace || !dataset?.name) {
         throw new Error('Dataset workspace or name is undefined');
       }
-      await deleteDataset({ workspace: dataset.workspace, name: dataset.name });
+      await deleteDataset({ workspace: dataset.workspace, filesetId: dataset.id });
       onDatasetDeleted?.(dataset);
       return true;
     } catch (error) {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useToast } from '@nemo/common/src/providers/toast/useToast';
-import { filesDeleteFileset } from '@nemo/sdk/generated/platform/files';
+import { filesDeleteFilesetById } from '@nemo/sdk/generated/platform/files';
 import {
   modelsDeleteAllDeploymentConfigVersions,
   modelsGetLatestDeploymentConfig,
@@ -24,7 +24,7 @@ import { act, renderHook } from '@testing-library/react';
 vi.mock('@nemo/common/src/providers/toast/useToast');
 vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>();
-  return { ...actual, filesDeleteFileset: vi.fn() };
+  return { ...actual, filesDeleteFilesetById: vi.fn() };
 });
 
 vi.mock('@nemo/sdk/generated/platform/model-deployment-configs', async (importOriginal) => {
@@ -53,7 +53,7 @@ vi.mock('@nemo/sdk/generated/platform/models', async (importOriginal) => {
 });
 
 const mockUseToast = vi.mocked(useToast);
-const mockFilesDeleteFileset = vi.mocked(filesDeleteFileset);
+const mockFilesDeleteFileset = vi.mocked(filesDeleteFilesetById);
 const mockModelsDeleteAllDeploymentConfigVersions = vi.mocked(
   modelsDeleteAllDeploymentConfigVersions
 );
@@ -162,6 +162,7 @@ describe('useDeleteDeploymentAndConfig', () => {
     mockModelsGetModel.mockResolvedValueOnce({
       custom_fields: {
         [HUGGING_FACE_DEPLOYMENT_SOURCE_FIELD]: HUGGING_FACE_DEPLOYMENT_SOURCE_VALUE,
+        studio_deployment_fileset_id: 'allocated-id',
       },
     } as never);
 
@@ -176,7 +177,7 @@ describe('useDeleteDeploymentAndConfig', () => {
     });
 
     expect(mockModelsDeleteModel).toHaveBeenCalledWith(workspace, 'deployment-model');
-    expect(mockFilesDeleteFileset).toHaveBeenCalledWith(workspace, 'deployment-hf-src');
+    expect(mockFilesDeleteFileset).toHaveBeenCalledWith(workspace, 'allocated-id');
   });
 
   it('does not plan Hugging Face cleanup when config only has model name', async () => {

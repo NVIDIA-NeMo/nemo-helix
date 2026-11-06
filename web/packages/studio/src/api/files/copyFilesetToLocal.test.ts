@@ -49,9 +49,9 @@ const setup = ({ failUpload = false, failDelete = false } = {}) => {
       uploaded.push(String(params[0]));
       return HttpResponse.json({});
     }),
-    http.delete(`${BASE}/:name`, ({ params }) => {
+    http.delete(`${BASE}/by-id/:filesetId`, ({ params }) => {
       if (failDelete) return HttpResponse.json({ detail: 'nope' }, { status: 500 });
-      deleted.push(String(params.name));
+      deleted.push(String(params.filesetId));
       return new HttpResponse(null, { status: 200 });
     })
   );
@@ -79,7 +79,7 @@ describe('copyFilesetToLocal', () => {
     const { deleted } = setup({ failUpload: true });
 
     await expect(copyFilesetToLocal({ source, name: 'hf-data-copy' })).rejects.toBeDefined();
-    expect(deleted).toEqual(['hf-data-copy']);
+    expect(deleted).toEqual(['1']);
   });
 
   it('names the leftover fileset when the rollback also fails', async () => {

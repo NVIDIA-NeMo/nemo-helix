@@ -6,8 +6,8 @@ import { agentOptimizationCreateRunStrategyJob } from '@nemo/sdk/generated/agent
 import type { RunStrategyJob } from '@nemo/sdk/generated/agent-optimization/schema/RunStrategyJob';
 import {
   filesCreateFileset,
-  filesDeleteFileset,
-  filesRetrieveFileset,
+  filesDeleteFilesetById,
+  filesGetFilesetById,
   filesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
 import type { FilesetOutput } from '@nemo/sdk/generated/platform/schema';
@@ -28,8 +28,8 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@nemo/sdk/generated/platform/files')>()),
   filesCreateFileset: vi.fn(),
   filesUploadFile: vi.fn(),
-  filesDeleteFileset: vi.fn(),
-  filesRetrieveFileset: vi.fn(),
+  filesDeleteFilesetById: vi.fn(),
+  filesGetFilesetById: vi.fn(),
 }));
 
 const entryFor = (path: string) => ({ path, file: new File(['x'], path) });
@@ -48,10 +48,10 @@ const stagedBundle = (
 
 beforeEach(() => {
   vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
-  vi.mocked(filesCreateFileset).mockResolvedValue({} as never);
+  vi.mocked(filesCreateFileset).mockResolvedValue({ id: 'allocated-id' } as never);
   vi.mocked(filesUploadFile).mockResolvedValue({} as never);
-  vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
-  vi.mocked(filesRetrieveFileset).mockResolvedValue(stagedBundle() as never);
+  vi.mocked(filesDeleteFilesetById).mockResolvedValue(undefined as never);
+  vi.mocked(filesGetFilesetById).mockResolvedValue(stagedBundle() as never);
   vi.mocked(agentOptimizationCreateRunStrategyJob).mockResolvedValue({ name: 'study-1' } as never);
 });
 
@@ -87,9 +87,12 @@ describe('launchOptimizeStudy', () => {
         optimize_config_fileset: `ws/${filesetName}`,
         agent: 'hermes',
       },
-      custom_fields: { studio_bundle_fileset: filesetName },
+      custom_fields: {
+        studio_bundle_fileset: filesetName,
+        studio_bundle_fileset_id: 'allocated-id',
+      },
     });
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('runs from an existing fileset in place without claiming it', async () => {
@@ -127,10 +130,7 @@ describe('launchOptimizeStudy', () => {
 
     await expect(launchOptimizeStudy(params())).rejects.toThrow('boom');
 
-    expect(filesDeleteFileset).toHaveBeenCalledWith(
-      'ws',
-      optimizeBundleFilesetName('hermes', 1_700_000_000_000)
-    );
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
   });
 
   it('leaves nothing to roll back when the fileset cannot be created', async () => {
@@ -139,7 +139,7 @@ describe('launchOptimizeStudy', () => {
     await expect(launchOptimizeStudy(params())).rejects.toThrow('conflict');
 
     expect(filesUploadFile).not.toHaveBeenCalled();
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 });
 
@@ -152,56 +152,69 @@ describe('deleteStudioBundleFileset', () => {
     }) as unknown as RunStrategyJob;
 
   /** A study pointing at the bundle Studio staged for it. */
-  const ownBundle = () => study({ studio_bundle_fileset: 'hermes-optimize-abc' });
+  const ownBundle = () =>
+    study({
+      studio_bundle_fileset: 'hermes-optimize-abc',
+      studio_bundle_fileset_id: 'allocated-id',
+    });
 
   const notFound = () => Object.assign(new Error('gone'), { status: 404 });
 
   it('deletes the bundle the study staged', async () => {
     await expect(deleteStudioBundleFileset('ws', ownBundle())).resolves.toBeUndefined();
 
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'hermes-optimize-abc');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
+  });
+
+  it('retains a legacy bundle with no recorded allocation ID', async () => {
+    await deleteStudioBundleFileset('ws', study({ studio_bundle_fileset: 'hermes-optimize-abc' }));
+    expect(filesGetFilesetById).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('ignores a study that claims no bundle', async () => {
     await expect(deleteStudioBundleFileset('ws', study())).resolves.toBeUndefined();
 
-    expect(filesRetrieveFileset).not.toHaveBeenCalled();
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesGetFilesetById).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('ignores a marker naming a fileset the study does not run from', async () => {
-    const aimedElsewhere = study({ studio_bundle_fileset: 'shared-eval-data' });
+    const aimedElsewhere = study({
+      studio_bundle_fileset: 'shared-eval-data',
+      studio_bundle_fileset_id: 'allocated-id',
+    });
 
     await expect(deleteStudioBundleFileset('ws', aimedElsewhere)).resolves.toBeUndefined();
 
-    expect(filesRetrieveFileset).not.toHaveBeenCalled();
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesGetFilesetById).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('leaves a fileset Studio did not stage alone', async () => {
-    vi.mocked(filesRetrieveFileset).mockResolvedValue(stagedBundle({}) as never);
+    vi.mocked(filesGetFilesetById).mockResolvedValue(stagedBundle({}) as never);
 
     await expect(deleteStudioBundleFileset('ws', ownBundle())).resolves.toBeUndefined();
 
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('counts an already-deleted bundle as cleaned up, so a half-finished delete can be retried', async () => {
-    vi.mocked(filesDeleteFileset).mockRejectedValue(notFound());
+    vi.mocked(filesDeleteFilesetById).mockRejectedValue(notFound());
 
     await expect(deleteStudioBundleFileset('ws', ownBundle())).resolves.toBeUndefined();
   });
 
   it('counts a bundle that no longer exists as cleaned up', async () => {
-    vi.mocked(filesRetrieveFileset).mockRejectedValue(notFound());
+    vi.mocked(filesGetFilesetById).mockRejectedValue(notFound());
 
     await expect(deleteStudioBundleFileset('ws', ownBundle())).resolves.toBeUndefined();
 
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('names the bundle it could not delete, so the caller can report it', async () => {
-    vi.mocked(filesDeleteFileset).mockRejectedValue(new Error('boom'));
+    vi.mocked(filesDeleteFilesetById).mockRejectedValue(new Error('boom'));
 
     await expect(deleteStudioBundleFileset('ws', ownBundle())).rejects.toThrow(
       /hermes-optimize-abc/

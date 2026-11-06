@@ -135,18 +135,18 @@ export const useUpdateGuardrailCheck = (options?: UseUpdateGuardrailCheckOptions
   });
 
 export type UseDeleteGuardrailCheckOptions = Omit<
-  UseMutationOptions<void, Error, { workspace: string; name: string; parent: string }>,
+  UseMutationOptions<void, Error, GuardrailCheckEntity>,
   'mutationFn'
 >;
 
 /**
  * Mutation hook to delete a guardrail check; refreshes check caches on success.
- * `parent` (the owning config's entity id) is required to address the child by name.
+ * The loaded entity retains its immutable ID and observed version.
  */
 export const useDeleteGuardrailCheck = (options?: UseDeleteGuardrailCheckOptions) =>
   useMutation({
     ...options,
-    mutationFn: ({ workspace, name, parent }) => deleteGuardrailCheck(workspace, name, parent),
+    mutationFn: deleteGuardrailCheck,
     onSuccess: (...args) => {
       const [, variables] = args;
       invalidateGuardrailChecksCaches(variables.workspace, variables.name);

@@ -4,7 +4,7 @@
 import { agentsRegisterAgent, agentsGetAgent } from '@nemo/sdk/generated/agents/agents';
 import {
   filesCreateFileset,
-  filesDeleteFileset,
+  filesDeleteFilesetById,
   filesRetrieveFileset,
   filesUploadFile,
 } from '@nemo/sdk/generated/platform/files';
@@ -26,7 +26,7 @@ vi.mock('@nemo/sdk/generated/platform/files', async (importOriginal) => ({
   filesRetrieveFileset: vi.fn(),
   filesCreateFileset: vi.fn(),
   filesUploadFile: vi.fn(),
-  filesDeleteFileset: vi.fn(),
+  filesDeleteFilesetById: vi.fn(),
 }));
 
 const FABRIC_YAML = 'config_format: nemo-agents-spec-v1\nname: calc\ndescription: Adds numbers\n';
@@ -48,16 +48,21 @@ const httpError = (status: number): Error =>
 
 const filesetMissing = () => vi.mocked(filesRetrieveFileset).mockRejectedValue(httpError(404));
 const filesetExists = () =>
-  vi.mocked(filesRetrieveFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
+  vi
+    .mocked(filesRetrieveFileset)
+    .mockResolvedValue({ id: 'allocated-id', name: 'calc-ethos' } as never);
 const agentMissing = () => vi.mocked(agentsGetAgent).mockRejectedValue(httpError(404));
 const agentExists = () => vi.mocked(agentsGetAgent).mockResolvedValue({ name: 'calc' } as never);
 
 beforeEach(() => {
   filesetMissing();
   agentMissing();
-  vi.mocked(filesCreateFileset).mockResolvedValue({ name: 'calc-ethos' } as never);
+  vi.mocked(filesCreateFileset).mockResolvedValue({
+    id: 'allocated-id',
+    name: 'calc-ethos',
+  } as never);
   vi.mocked(filesUploadFile).mockResolvedValue({ path: 'agent.yaml' } as never);
-  vi.mocked(filesDeleteFileset).mockResolvedValue(undefined as never);
+  vi.mocked(filesDeleteFilesetById).mockResolvedValue(undefined as never);
   vi.mocked(agentsRegisterAgent).mockResolvedValue({ name: 'calc' } as never);
 });
 
@@ -96,14 +101,14 @@ describe('createAgentFromUpload', () => {
 
     await expect(createAgentFromUpload(params())).rejects.toThrow(AgentSpecFilesetConflictError);
     expect(filesCreateFileset).not.toHaveBeenCalled();
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('asks before replacing a fileset that no agent owns', async () => {
     filesetExists();
 
     await expect(createAgentFromUpload(params())).rejects.toThrow(AgentSpecFilesetOrphanError);
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
     expect(agentsRegisterAgent).not.toHaveBeenCalled();
   });
 
@@ -112,12 +117,28 @@ describe('createAgentFromUpload', () => {
 
     await createAgentFromUpload({ ...params(), replaceOrphanedFileset: true });
 
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
     expect(filesCreateFileset).toHaveBeenCalledWith(
       'ws',
       expect.objectContaining({ name: 'calc-ethos' })
     );
     expect(agentsRegisterAgent).toHaveBeenCalled();
+  });
+
+  it('keeps the originally selected allocation through the agent check', async () => {
+    filesetExists();
+    vi.mocked(agentsGetAgent).mockImplementation(async () => {
+      vi.mocked(filesRetrieveFileset).mockResolvedValue({
+        id: 'replacement-id',
+        name: 'calc-ethos',
+      } as never);
+      throw httpError(404);
+    });
+
+    await createAgentFromUpload({ ...params(), replaceOrphanedFileset: true });
+
+    expect(filesRetrieveFileset).toHaveBeenCalledTimes(1);
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
   });
 
   it('does not replace an owned fileset even when confirmed', async () => {
@@ -127,7 +148,7 @@ describe('createAgentFromUpload', () => {
     await expect(
       createAgentFromUpload({ ...params(), replaceOrphanedFileset: true })
     ).rejects.toThrow(AgentSpecFilesetConflictError);
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('deletes the fileset when an upload fails', async () => {
@@ -136,21 +157,21 @@ describe('createAgentFromUpload', () => {
       .mockRejectedValueOnce(new Error('network down'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('network down');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
   });
 
   it('deletes the fileset when creating the agent fails', async () => {
     vi.mocked(agentsRegisterAgent).mockRejectedValue(new Error('409 conflict'));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('409 conflict');
-    expect(filesDeleteFileset).toHaveBeenCalledWith('ws', 'calc-ethos');
+    expect(filesDeleteFilesetById).toHaveBeenCalledWith('ws', 'allocated-id');
   });
 
   it('does not delete a fileset it failed to create', async () => {
     vi.mocked(filesCreateFileset).mockRejectedValue(httpError(409));
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('HTTP 409');
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('does not claim the name when the fileset lookup fails for any reason but absence', async () => {
@@ -158,7 +179,7 @@ describe('createAgentFromUpload', () => {
 
     await expect(createAgentFromUpload(params())).rejects.toThrow('HTTP 503');
     expect(filesCreateFileset).not.toHaveBeenCalled();
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
   });
 
   it('does not replace a fileset when the agent lookup fails for any reason but absence', async () => {
@@ -168,7 +189,7 @@ describe('createAgentFromUpload', () => {
     await expect(
       createAgentFromUpload({ ...params(), replaceOrphanedFileset: true })
     ).rejects.toThrow('HTTP 503');
-    expect(filesDeleteFileset).not.toHaveBeenCalled();
+    expect(filesDeleteFilesetById).not.toHaveBeenCalled();
     expect(agentsRegisterAgent).not.toHaveBeenCalled();
   });
 

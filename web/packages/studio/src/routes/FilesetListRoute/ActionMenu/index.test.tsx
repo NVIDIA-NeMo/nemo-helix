@@ -209,8 +209,9 @@ describe('ActionMenu', () => {
         "Cannot delete fileset 'test-workspace/test-dataset' because 2 model entity reference(s) and 1 adapter entity reference(s) still use it. Relink or delete the dependent entities first.";
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       server.use(
-        http.delete(`${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`, () =>
-          HttpResponse.json({ detail }, { status: 409 })
+        http.delete(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
+          () => HttpResponse.json({ detail }, { status: 409 })
         )
       );
       const user = userEvent.setup();
@@ -308,13 +309,13 @@ describe('ActionMenu', () => {
 
     it('performs delete operation and calls callbacks when delete is confirmed', async () => {
       const user = userEvent.setup();
-      let capturedParams: { workspace: string; name: string } | undefined;
+      let capturedParams: { workspace: string; filesetId: string } | undefined;
 
       server.use(
-        http.delete<{ workspace: string; name: string }>(
-          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`,
+        http.delete<{ workspace: string; filesetId: string }>(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
           ({ params }) => {
-            capturedParams = { workspace: params.workspace, name: params.name };
+            capturedParams = { workspace: params.workspace, filesetId: params.filesetId };
             return new HttpResponse(null, { status: 200 });
           }
         )
@@ -333,7 +334,7 @@ describe('ActionMenu', () => {
       await waitFor(() => {
         expect(capturedParams).toEqual({
           workspace: mockDataset.workspace,
-          name: mockDataset.name,
+          filesetId: mockDataset.id,
         });
       });
 
@@ -351,8 +352,9 @@ describe('ActionMenu', () => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       server.use(
-        http.delete(`${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/:name`, () =>
-          HttpResponse.json({ detail: 'Delete failed' }, { status: 500 })
+        http.delete(
+          `${PLATFORM_BASE_URL}/apis/files/v2/workspaces/:workspace/filesets/by-id/:filesetId`,
+          () => HttpResponse.json({ detail: 'Delete failed' }, { status: 500 })
         )
       );
 
