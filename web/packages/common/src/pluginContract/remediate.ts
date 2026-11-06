@@ -3,7 +3,7 @@
 
 import type { ContractIssue } from '@nemo/common/src/pluginContract/types';
 
-const CONTRACT_DOCS = 'plugins/example-plugin/web/AGENTS.md';
+export const CONTRACT_DOCS = 'plugins/example-plugin/web/AGENTS.md (in the nemo-helix repo)';
 
 type Fix = Pick<ContractIssue, 'message' | 'steps'>;
 
@@ -25,10 +25,10 @@ export const specifierUnmapped = (specifier: string): Fix =>
     `If it must be shared with Studio, request that "${specifier}" be added to the plugin contract (see ${CONTRACT_DOCS}).`
   );
 
-export const singletonBundled = (pkg: string): Fix =>
+export const singletonBundled = (pkg: string, specifier: string = pkg): Fix =>
   fix(
     `The singleton "${pkg}" is bundled into the plugin; a second copy breaks shared context.`,
-    `Ensure "${pkg}" is listed in build.rolldownOptions.external in the plugin build config.`,
+    `Ensure "${specifier}" is listed in build.rolldownOptions.external in the plugin build config.`,
     `Import "${pkg}" only by its contract specifier, not by a deep path, then run pnpm build.`
   );
 

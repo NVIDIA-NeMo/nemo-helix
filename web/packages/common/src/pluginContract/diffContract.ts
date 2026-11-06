@@ -4,7 +4,6 @@
 import {
   contractUnsupported,
   manifestMissing,
-  singletonBundled,
   specifierUnmapped,
   versionIncompatible,
 } from '@nemo/common/src/pluginContract/remediate';
@@ -28,7 +27,8 @@ const bySubject = (a: ContractIssue, b: ContractIssue) =>
 /**
  * Compare a plugin's sidecar against the contract. `studioVersions` maps each
  * shared package to the version Studio ships. A `null` sidecar means the plugin
- * was built without the Studio plugin build helper.
+ * was built without the Studio plugin build helper. Bundled singletons are not
+ * reported here; the plugin build gate rejects them.
  */
 export const diffContract = (
   sidecar: PluginSidecar | null,
@@ -57,16 +57,6 @@ export const diffContract = (
     ...sidecar.specifiers
       .filter((s) => !known.has(s))
       .map((s) => issue('PLUGIN_SPECIFIER_UNMAPPED', s, specifierUnmapped(s)))
-      .sort(bySubject)
-  );
-
-  const singletons = new Set(
-    contract.entries.filter((e) => e.kind === 'singleton').map((e) => e.package)
-  );
-  issues.push(
-    ...sidecar.bundledPackages
-      .filter((p) => singletons.has(p))
-      .map((p) => issue('PLUGIN_SINGLETON_BUNDLED', p, singletonBundled(p)))
       .sort(bySubject)
   );
 
