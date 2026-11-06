@@ -1,6 +1,10 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_SIZE_OPTIONS,
+  type ModelFilterValues,
+} from '@nemo/common/src/api/models/modelFilters';
 import type { ModelWorkspaceGroup } from '@nemo/common/src/api/models/useModels';
 import { ModelSelectV2 } from '@nemo/common/src/components/ModelSelectV2/ModelSelectV2';
 import type {
@@ -153,6 +157,46 @@ const WithModelTypeToggleRender = (args: ModelSelectV2Props) => {
 
 export const WithModelTypeToggle: Story = {
   render: WithModelTypeToggleRender,
+};
+
+const MOCK_FAMILIES = ['llama', 'mistral', 'nemotron'];
+
+const WithFiltersRender = (args: ModelSelectV2Props) => {
+  const [value, setValue] = useState<ModelSelection | null>(null);
+  const [filters, setFilters] = useState<ModelFilterValues>({});
+  const groups = mockGroups
+    .filter((group) => !filters.provider || group.workspace === filters.provider)
+    .map((group) => ({
+      ...group,
+      models: group.models.filter(
+        (model) => !filters.family || model.name.startsWith(filters.family)
+      ),
+    }))
+    .filter((group) => group.models.length > 0);
+
+  return (
+    <ModelSelectV2
+      {...args}
+      value={value}
+      onValueChange={setValue}
+      groups={groups}
+      modelFilters={{
+        values: filters,
+        onChange: setFilters,
+        providerOptions: mockGroups.map(({ workspace }) => ({
+          value: workspace,
+          label: workspace,
+        })),
+        familyOptions: MOCK_FAMILIES.map((family) => ({ value: family, label: family })),
+        sizeOptions: MODEL_SIZE_OPTIONS,
+        providersLoading: false,
+      }}
+    />
+  );
+};
+
+export const WithFilters: Story = {
+  render: WithFiltersRender,
 };
 
 const WithParamsRender = (args: ModelSelectV2Props) => {
