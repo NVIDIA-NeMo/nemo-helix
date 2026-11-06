@@ -63,15 +63,34 @@ describe('VirtualModelChatTab', () => {
     );
   });
 
-  it('resets max tokens to the chat default', async () => {
+  it('resets max tokens to the limit this tab starts with', async () => {
     render(<VirtualModelChatTab />);
     await openParams();
 
-    fireEvent.click(screen.getAllByRole('button', { name: /reset/i })[1]);
+    const maxTokens = screen.getByRole('spinbutton', { name: 'Max Tokens value' });
+    fireEvent.change(maxTokens, { target: { value: '256' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset Max Tokens to default value' }));
 
     expect(modelChatSpy).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        promptData: { inference_params: { temperature: 0.7, max_tokens: 512 } },
+        promptData: { inference_params: { temperature: 0.7, max_tokens: 4096 } },
+      })
+    );
+  });
+
+  it('keeps sending the last temperature when its box is cleared', async () => {
+    render(<VirtualModelChatTab />);
+    await openParams();
+
+    const temperature = screen.getByRole('spinbutton', { name: 'Temperature value' });
+    fireEvent.change(temperature, { target: { value: '0.4' } });
+    fireEvent.change(temperature, { target: { value: '' } });
+    fireEvent.blur(temperature);
+
+    expect(temperature).toHaveValue(0.4);
+    expect(modelChatSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        promptData: { inference_params: { temperature: 0.4, max_tokens: 4096 } },
       })
     );
   });

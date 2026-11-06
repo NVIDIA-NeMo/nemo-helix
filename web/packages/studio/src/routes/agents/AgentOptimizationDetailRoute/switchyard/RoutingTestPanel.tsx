@@ -21,8 +21,9 @@ import {
 } from '@nvidia/foundations-react-core';
 import {
   CHAT_INFERENCE_PARAM_FIELDS,
-  CHAT_INFERENCE_PARAM_METADATA,
+  chatParamMetadataWithMaxTokens,
   DEFAULT_CHAT_INFERENCE_PARAMS,
+  mergeChatParams,
 } from '@studio/components/chat/params';
 import {
   routeSettingText,
@@ -44,6 +45,8 @@ import {
 import { getVirtualModelDetailRoute } from '@studio/routes/utils';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { Link } from 'react-router';
+
+const PARAM_METADATA = chatParamMetadataWithMaxTokens(1024);
 
 const ROLE_BADGE: Record<RouteRole, { label: string; color: 'purple' | 'green' | 'gray' }> = {
   capable: { label: 'Capable', color: 'purple' },
@@ -117,7 +120,7 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
   const { virtualModel } = route;
   const [inferenceParams, setInferenceParams] = useState<InferenceParams>({
     ...DEFAULT_CHAT_INFERENCE_PARAMS,
-    max_tokens: 1024,
+    max_tokens: PARAM_METADATA.max_tokens.default,
   });
   // Kept per VirtualModel, so switching routes and back keeps what was already observed.
   const [responsesByModel, setResponsesByModel] = useState<Record<string, RoutedResponse[]>>({});
@@ -176,9 +179,11 @@ export const RoutingTestPanel: FC<RoutingTestPanelProps> = ({ workspace, route }
           </Flex>
           <ParamsDropdown
             inferenceParams={inferenceParams}
-            onInferenceParamsChange={setInferenceParams}
+            onInferenceParamsChange={(next) =>
+              setInferenceParams((prev) => mergeChatParams(prev, next))
+            }
             fields={CHAT_INFERENCE_PARAM_FIELDS}
-            fieldMetadata={CHAT_INFERENCE_PARAM_METADATA}
+            fieldMetadata={PARAM_METADATA}
           />
         </Flex>
 
