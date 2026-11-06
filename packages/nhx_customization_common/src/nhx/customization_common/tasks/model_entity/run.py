@@ -29,7 +29,7 @@ from nemo_helix_plugin.jobs.client import JobsClient
 from nemo_helix_plugin.models.client import ModelsClient
 from nemo_helix_plugin.models.types import (
     ContainerExecutorConfig,
-    CreateModelAdapterRequest,
+    CreateAdapterRequest,
     CreateModelDeploymentConfigRequest,
     CreateModelDeploymentRequest,
     CreateModelEntityRequest,
@@ -250,13 +250,20 @@ class ModelEntityRunner:
         base_me: ModelEntity,
         fileset_ref: str,
     ) -> tuple[dict, ModelEntity]:
-        """Create or update a LoRA adapter on ``base_me``. Returns (result, base_me)."""
+        """Create or update a LoRA adapter for ``base_me``. Returns (result, base_me).
+
+        The adapter is registered in the configured output workspace, which is where the
+        job's FileSet lives and where callers look it up. The base model can be in any
+        workspace, so it is passed as a qualified ``workspace/name`` reference rather than
+        by nesting the adapter under the base model's workspace.
+        """
         assert config.peft is not None
+        adapter_workspace = config.workspace
+        base_model_ref = f"{base_me.workspace}/{base_me.name}"
         try:
-            output_me = self.models.create_model_adapter(
-                model_name=base_me.name,
-                workspace=base_me.workspace,
-                body=CreateModelAdapterRequest(
+            output_me = self.models.create_adapter(
+                workspace=adapter_workspace,
+                body=CreateAdapterRequest(
                     name=config.name,
                     description=config.description,
                     fileset=fileset_ref,
@@ -266,19 +273,19 @@ class ModelEntityRunner:
                         rank=config.peft.rank,
                     ),
                     enabled=True,
+                    model=base_model_ref,
                 ),
             ).data()
             return output_me.model_dump(), base_me
         except ConflictError:
             logger.warning(
-                f"Adapter {base_me.workspace}/{config.name} already exists for model "
-                f"{base_me.workspace}/{base_me.name}, updating with new fileset"
+                f"Adapter {adapter_workspace}/{config.name} already exists for model "
+                f"{base_model_ref}, updating with new fileset"
             )
             try:
-                output_me = self.models.update_model_adapter(
-                    adapter=config.name,
-                    model_name=base_me.name,
-                    workspace=base_me.workspace,
+                output_me = self.models.update_adapter(
+                    name=config.name,
+                    workspace=adapter_workspace,
                     body=UpdateAdapterRequest(
                         fileset=fileset_ref,
                         description=config.description,
@@ -286,15 +293,14 @@ class ModelEntityRunner:
                     ),
                 ).data()
                 logger.info(
-                    f"Successfully updated adapter: {base_me.workspace}/{config.name} "
-                    f"for base model {base_me.workspace}/{base_me.name}"
+                    f"Successfully updated adapter: {adapter_workspace}/{config.name} for base model {base_model_ref}"
                 )
                 return output_me.model_dump(), base_me
             except TRANSIENT_RETRYABLE_EXCEPTIONS:
                 raise
             except Exception as update_error:
                 logger.exception(
-                    f"Failed to update existing adapter, {base_me.workspace}/{config.name}: {update_error}"
+                    f"Failed to update existing adapter, {adapter_workspace}/{config.name}: {update_error}"
                 )
                 raise ModelEntityCreationError(
                     f"Adapter '{config.name}' already exists but update failed: {update_error}"
